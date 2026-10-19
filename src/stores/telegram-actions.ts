@@ -4,6 +4,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
+import {conversationScope} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
 import {evaluate,recordEffect} from '../security/store.js';
 import type {Effect} from '../security/contract.js';
@@ -94,13 +95,19 @@ export class TelegramActionRepository {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
     const turn=await this.turns.binding(principal),binding=await this.guards.state(),source=await this.prepared.root(principal,binding),input=object(value);
     if(Object.keys(input).some(key=>!['destination','text'].includes(key)))throw new HttpError(400,'invalid_action');
-    let channel:string|undefined;
+    let channel:string|undefined,member=false;
     if(source.store==='archive') {
       const original=await this.access.archive.verify(source),intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
       if(original.origin!=='live'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'external_effect_requires_live_turn');
       channel=original.channel;
+      // Only a person allowed to talk to Nocheh in that group may post there without the owner.
+      if(channel==='telegram') {
+        const event=(await this.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
+        const sender=event?conversationScope(this.access.policy(),JSON.parse(event.payload.toString()),original.scope):null;
+        member=!!sender&&!sender.owner;
+      }
     }
-    return this.propose(principal,turn,binding,source,input,channel);
+    return this.propose(principal,turn,binding,source,input,channel,member);
   }
   /** Only a trusted completion path can stage delivery from a closed scheduled
    * run. This creates an exact proposal; it never reopens the runtime capability. */
@@ -126,8 +133,13 @@ export class TelegramActionRepository {
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
     return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text});
   }
+  private sameGroup(principal:Reader,turn:{owner?:boolean;job?:string|null},destination:string,member:boolean) {
+    if(!member||turn.owner||turn.job||!principal.scope||!principal.space||principal.purpose&&principal.purpose!=='assistant')return false;
+    // With separate topic memory a topic is its own audience; otherwise the whole group is.
+    return this.access.policy().topic_memory==='topic'?destination===principal.space:destination.split('/topic/')[0]===principal.scope;
+  }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
-    source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string){
+    source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string,member=false){
     const requested=string(input.destination,64),destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:requested,text=string(input.text,3500);
     if(!validDestination(destination)||!text.trim())throw new HttpError(400,'invalid_action');
     const id=digest(canonical([protocol,source,binding,destination,text]));
@@ -147,7 +159,11 @@ export class TelegramActionRepository {
       const effect=this.effect(row);let decision=await evaluate(db,effect);
       // The owner freedom setting lets the owner's own live private request
       // approve itself. Deny rules are evaluated first and still block it.
-      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?await ownerAutonomyGrant(db,principal,turn):null;
+      // A person allowed to talk to Nocheh in a group can have it post in that
+      // same group: the group's memory is all such a turn can read, so the post
+      // reveals nothing a reply there could not. Deny rules still apply first.
+      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
+        (this.sameGroup(principal,turn,destination,member)?'same_group_request':await ownerAutonomyGrant(db,principal,turn)):null;
       if(autonomy)decision=await evaluate(db,effect,autonomy);
       await recordEffect(db,effect,'proposed',decision,source);
       if(autonomy&&decision.outcome==='allow') {
@@ -156,7 +172,9 @@ export class TelegramActionRepository {
         await db.query(`INSERT INTO telegram_action_decisions(operation_id,request_hash,action_id,decision,revision,source_reference)
           VALUES($1,$2,$3,'approve',$4,$5) ON CONFLICT DO NOTHING`,['owner-autonomy:'+id,hash,id,revision,source]);
         await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
-        await db.query('COMMIT');return {id,state:'approved',fingerprint,message:'Approved by your own request under the owner freedom setting; sending now.'};
+        await db.query('COMMIT');return {id,state:'approved',fingerprint,message:autonomy==='same_group_request'?
+          'Approved: you were asked here for a message to this same group, so it is being posted now. Do not repeat or announce it; return [NO_REPLY] unless something else needs an answer.':
+          'Approved by your own request under the owner freedom setting; sending now.'};
       }
       await recordEffect(db,effect,decision.outcome==='deny'?'blocked':'awaiting_approval',decision,source);
       await db.query('COMMIT');return {id,state:row.state,fingerprint,message:'Owner approval is required for this exact message and destination.'};
