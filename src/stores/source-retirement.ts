@@ -43,6 +43,15 @@ export class SourceRetirementRepository {
     return (await this.archive.pool.query(`SELECT o.event_id FROM source_observations o
       JOIN source_revisions r ON r.id=o.revision_id WHERE r.object_id=$1`,[id])).rows.map(row=>row.event_id as string);
   }
+  /** Every captured revision of an incoming Telegram message, oldest first; empty for any other event. */
+  async revisions(eventId:string):Promise<string[]> {
+    return (await this.archive.pool.query(`WITH target AS (SELECT r.object_id FROM events e
+        JOIN source_observations o ON o.event_id=e.id JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
+        WHERE e.id=$1 AND e.channel='telegram' AND e.kind='telegram_update' AND s.platform='telegram' AND s.kind='message')
+      SELECT o.event_id FROM target JOIN source_revisions r ON r.object_id=target.object_id JOIN source_observations o ON o.revision_id=r.id
+        JOIN events e ON e.id=o.event_id WHERE e.kind='telegram_update'
+      ORDER BY CASE WHEN e.revision ~ '^[0-9]{1,18}$' THEN e.revision::numeric END NULLS LAST,e.received_at,e.id`,[eventId])).rows.map(row=>row.event_id as string);
+  }
   async retiredEvents(eventIds:string[]):Promise<Set<string>> {
     if(!eventIds.length)return new Set();
     const identities=(await this.archive.pool.query(`SELECT o.event_id,r.object_id FROM source_observations o

@@ -364,6 +364,26 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const renewed=await services.memory.queueSource(after);assert.equal(renewed.length,1);
     assert.notEqual(renewed[0]!.workspace,workspace,'new messages go to the new workspace');assert.equal((await services.memory.status()).workspace?.id,renewed[0]!.workspace);
     for(const receipt of renewed[0]!.receipts)assert.equal(await services.memory.syncReceipt(receipt,authority),true);
+    // Honcho cannot change a message, so an edit replaces the sessions that held the earlier text and only the latest text stays.
+    const editedText='A corrected message after the fresh start.';
+    const edited=(await services.capture.capture({...event,key:key+':after-edit',source_id:key+':after',revision:'2',text:editedText,
+      payload:{edited_message:{...(event.payload.message as Record<string,unknown>),message_id:3,edit_date:2,text:editedText}}})).source.reference;
+    await services.guards.prepare(edited,'fixture',services.detect);
+    const earlierSessions=(await stores.control.query('SELECT DISTINCT session_id FROM memory_ingestion_receipts WHERE id=ANY($1::text[])',[renewed[0]!.receipts])).rows.map(row=>row.session_id);
+    const revised=await services.memory.queueSource(edited);assert.equal(revised.length,1);
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND retired_at IS NULL",[after.id])).rows[0].count,0,
+      'the earlier revision leaves every session that held it');
+    const revisedRows=(await stores.control.query('SELECT session_id,prepared_id FROM memory_ingestion_receipts WHERE id=ANY($1::text[])',[revised[0]!.receipts])).rows;
+    assert.ok(revisedRows.every(row=>!earlierSessions.includes(row.session_id)),'the edit is written to a new session revision');
+    assert.ok((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[revisedRows[0]!.prepared_id])).rows[0].content.toString().includes(editedText));
+    for(const session of earlierSessions) {
+      assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id=$1",['delete:'+session])).rows[0].count,1);
+      assert.equal(await services.memory.deleteSession(session,authority),true);
+    }
+    assert.deepEqual(await services.memory.queueSource(after),[],'a superseded revision is never written again');
+    assert.equal(await services.memory.ingested(after.id),false);assert.equal(await services.memory.ingested(edited.id),true);
+    assert.deepEqual(await services.memory.queueSource(edited),revised,'queuing the latest revision again reuses its receipts');
+    for(const receipt of revised[0]!.receipts)assert.equal(await services.memory.syncReceipt(receipt,authority),true);
     status=await services.memory.status();await services.memory.connection(owner,{attached:false,include_history:false,catch_up:false,expected_revision:status.connection.revision,operation_id:key+':detach'});
     const beforeDetached=calls.length;assert.equal(await services.memory.reconcileReceipt(rebuilt[0]!.receipts[0]!),false);assert.equal(calls.length,beforeDetached);
   } finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await services.guards.setMode('off');await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
