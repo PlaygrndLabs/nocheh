@@ -10,11 +10,14 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  * owner never changed follows the code's default.
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
-  'guard.secret_check','sharing.group_filter','learning.interpret'] as const;
+  'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}']};
+
+/** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
+export const notAllowedReply='Sorry, I only work with people the owner has allowed in this group.';
 
 export const learningPrompt=(
   "Interpret permitted conversation evidence silently. "+
@@ -77,7 +80,8 @@ const carried=new Set<RuntimeOperation>(['run.start','memory.review','guard.dete
 export function withPrompts(call:RuntimeCall,control:Pick<pg.Pool,'query'>):RuntimeCall {
   return async(operation,input,timeout)=>{
     if(!carried.has(operation))return call(operation,input,timeout);
-    const {'learning.interpret':_learning,...prompts}=await ownerPrompts(control);
+    // Nocheh uses these texts itself; the runtime never receives them.
+    const {'learning.interpret':_learning,'telegram.not_allowed':_refusal,...prompts}=await ownerPrompts(control);
     return call(operation,{...input,prompts},timeout);
   };
 }
@@ -88,7 +92,8 @@ export class PromptRepository {
     admin(principal);
     const row=(await this.control.query('SELECT texts,revision FROM owner_prompts WHERE singleton')).rows[0];
     const reported=object((await this.runtime('prompts.defaults',{})).defaults);
-    const defaults=Object.fromEntries(promptKeys.map(key=>[key,key==='learning.interpret'?learningPrompt:reported[key]]));
+    const own:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply};
+    const defaults=Object.fromEntries(promptKeys.map(key=>[key,own[key]??reported[key]]));
     if(Object.values(defaults).some(text=>typeof text!=='string'))throw new HttpError(502,'runtime_prompts_unavailable');
     return {revision:String(row?.revision??0),defaults,texts:await ownerPrompts(this.control),limit:PROMPT_LIMIT,placeholders:promptPlaceholders};
   }

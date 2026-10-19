@@ -128,8 +128,10 @@ def register(ctx):
          {'id':{'type':'string'}},['id'],read_tool),
         ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence.',
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
-        ('nocheh_action_request','Propose an external Telegram message. Nothing is sent until the owner reviews and approves the exact action in their private DM.',
+        ('nocheh_action_request','Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',
          {'destination':{'type':'string','description':'Use current for this Telegram conversation including its topic, a numeric Telegram chat ID, or CHAT_ID/topic/THREAD_ID. The server resolves current from the authenticated source turn.'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
+        ('nocheh_telegram_destinations','In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner's approval.',
+         {},[],destinations_tool),
     ):
         ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
@@ -232,6 +234,11 @@ def controlled_status(args,**kwargs):
 def action_tool(args,**kwargs):
     try:return json.dumps(request('/v1/action-requests',{'destination':args['destination'],'text':args['text']}),ensure_ascii=False)
     except Exception:return json.dumps({'error':'action_request_unavailable'})
+
+
+def destinations_tool(args,**kwargs):
+    try:return json.dumps(request('/v1/telegram/destinations'),ensure_ascii=False)
+    except Exception:return json.dumps({'error':'destinations_unavailable','note':'Available only in a group conversation.'})
 
 
 def recall_tool(args, **kwargs):

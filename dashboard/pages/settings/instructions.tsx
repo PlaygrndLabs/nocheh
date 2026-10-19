@@ -56,6 +56,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Decides what private knowledge may be shared with a group. Your privacy rules from Settings are added after it.',
   },
   {
+    key: 'telegram.not_allowed',
+    title: 'Reply to people who aren’t allowed',
+    hint: 'Sent in a group, as a reply, when someone you haven’t allowed asks Nocheh something there. No model is used.',
+  },
+  {
     key: 'guard.secret_check',
     title: 'Secret check',
     hint: 'Finds passwords and keys before anything is stored. Keep its JSON reply format, or the check fails and messages wait.',
