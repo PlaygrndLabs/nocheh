@@ -293,6 +293,9 @@ class Ledger:
             'estimated_embedding_cost_usd':round(tokens*report['pricing_usd_per_million_embedding_tokens']/1_000_000,8)}
 
 
+OUTPUT_BOUND = 8192
+
+
 def validate(route, payload, embedding=None):
     embedding=embedding or embeddings({})
     if not isinstance(payload, dict):
@@ -318,9 +321,10 @@ def validate(route, payload, embedding=None):
     elif route == '/v1/chat/completions':
         if payload.get('model') != REASONING_MODEL: raise Rejected('reasoning_model_denied')
         if not isinstance(payload.get('messages'),list): raise Rejected('messages_required')
+        # Covers Honcho's own output caps (long session summaries ask for 6000).
         for field in ('max_tokens','max_completion_tokens'):
-            if field in payload and (type(payload[field]) is not int or not 0 < payload[field] <= 4096): raise Rejected('output_bound_exceeded')
-        if not any(k in payload for k in ('max_tokens','max_completion_tokens')): payload['max_completion_tokens']=4096
+            if field in payload and (type(payload[field]) is not int or not 0 < payload[field] <= OUTPUT_BOUND): raise Rejected('output_bound_exceeded')
+        if not any(k in payload for k in ('max_tokens','max_completion_tokens')): payload['max_completion_tokens']=OUTPUT_BOUND
     else: raise Rejected('route_denied')
     return payload
 

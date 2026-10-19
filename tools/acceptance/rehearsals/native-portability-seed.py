@@ -20,11 +20,12 @@ async def main():
         db.add(models.MessageEmbedding(content=message.content,embedding=vector,message_id=message.public_id,
             workspace_name='fixture',session_name='conversation',peer_name='owner'));await db.flush()
         db.add(models.Collection(observer='owner',observed='owner',workspace_name='fixture'));await db.flush()
-        parent=models.Document(content='Contextual native meaning',embedding=vector,source_ids=[message.public_id],
-            observer='owner',observed='owner',workspace_name='fixture',session_name='conversation')
+        # Honcho fills each parent link's workspace from workspace_name, so it is passed before source_ids.
+        parent=models.Document(content='Contextual native meaning',embedding=vector,workspace_name='fixture',source_ids=[message.public_id],
+            observer='owner',observed='owner',session_name='conversation')
         db.add(parent);await db.flush()
-        db.add(models.Document(content='Retired native interpretation',embedding=vector,source_ids=[parent.id],
-            observer='owner',observed='owner',workspace_name='fixture',session_name='conversation',deleted_at=datetime.datetime(2026,9,1,tzinfo=datetime.timezone.utc)))
+        db.add(models.Document(content='Retired native interpretation',embedding=vector,workspace_name='fixture',source_ids=[parent.id],
+            observer='owner',observed='owner',session_name='conversation',deleted_at=datetime.datetime(2026,9,1,tzinfo=datetime.timezone.utc)))
         await db.execute(models.session_peers_table.insert().values(workspace_name='fixture',session_name='conversation',peer_name='owner'))
         await db.commit()
     print(json.dumps({'seeded':True,'embedding_dimensions':1536,'provider_calls':0}))

@@ -384,6 +384,23 @@ messages on either side link to Honcho conclusions at the usual rate, so no
 re-learn is needed. Re-learning or replacing the owner's live memory waits for
 the owner's word.
 
+Upgrades (October 19): the npm packages are on their latest releases
+(TypeScript 7, React 19.3, esbuild 0.28, Inngest SDK 4.25), and the base images
+are on the newest builds of their current major lines. Honcho is pinned to the
+v3.3.0 release with `honcho-ai` 2.6.0 and `honcho-cli` 0.2.0. Honcho now keeps
+conclusion parent links in its `document_sources` table, so the provenance and
+session-descendant reads, and the portable memory export, use that table. The
+provider gateway allows Honcho's 6,000-token long summaries. Checked on a local
+PostgreSQL 16 with pgvector: the pinned Honcho upgrades its schema, drains the
+old links, and keeps descendants, ancestry and the export round trip
+([plugin checks](services/honcho/test_provenance.py),
+[gateway checks](services/honcho/test_meter.py)). Held back: PostgreSQL 18 and
+Node 26, which need a dump or a runtime move; the Inngest server (1.46 renames
+the UI bundles the workflow inspector patches); and Hermes 0.22.2, which needs
+Python 3.14 and a new hand-off of Telegram updates, because its update
+admission marks Nocheh's committed updates as already seen.
+Pending: a rebuild on the owner's installation and a live reply check.
+
 </current>
 
 <verification>

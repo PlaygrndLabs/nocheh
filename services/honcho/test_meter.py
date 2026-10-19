@@ -312,6 +312,10 @@ class BudgetTests(unittest.TestCase):
     def test_route_model_bounds(self):
         for route,payload in [('/v1/responses',{}),('/v1/embeddings',{'model':'expensive','input':'x'}),('/v1/embeddings',{'model':'text-embedding-3-small','input':'x'*131073}),('/v1/chat/completions',{'model':'other','messages':[]})]:
             with self.assertRaises(Rejected): validate(route,payload)
+        # Honcho's long session summary asks for 6000 output tokens; it must pass, larger asks must not.
+        summary={'model':REASONING_MODEL,'messages':[],'max_tokens':6000}
+        self.assertEqual(validate('/v1/chat/completions',dict(summary))['max_tokens'],6000)
+        with self.assertRaises(Rejected): validate('/v1/chat/completions',{**summary,'max_tokens':8193})
 
     def test_memory_provider_from_settings_must_use_https(self):
         with tempfile.TemporaryDirectory() as root:
