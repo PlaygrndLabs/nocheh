@@ -90,8 +90,11 @@ class TaskToolTests(unittest.TestCase):
             archive_tools.tasks_tool({'action':'list','state':'done'})
             request.assert_called_once_with('/v1/owner/tasks?state=done')
             request.reset_mock()
-            archive_tools.tasks_tool({'action':'add','title':'Call the bank','due_on':'2030-01-04'})
-            request.assert_called_once_with('/v1/owner/tasks',{'title':'Call the bank','due_on':'2030-01-04'})
+            archive_tools.tasks_tool({'action':'add','title':'Call the bank','due_on':'2030-01-04','scope':'personal','domain':'Money'})
+            request.assert_called_once_with('/v1/owner/tasks',{'title':'Call the bank','due_on':'2030-01-04','scope':'personal','domain':'Money'})
+            request.reset_mock()
+            archive_tools.tasks_tool({'action':'list','scope':identity,'domain':'Launch'})
+            request.assert_called_once_with('/v1/owner/tasks?scope='+identity+'&domain=Launch')
             request.reset_mock()
             archive_tools.tasks_tool({'action':'update','id':identity,'expected_revision':2,'state':'done'})
             request.assert_called_once_with('/v1/owner/tasks/'+identity,{'expected_revision':2,'state':'done'})
@@ -99,6 +102,6 @@ class TaskToolTests(unittest.TestCase):
             self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'update','id':'../tasks','state':'done'}))['error'],'invalid_task_id')
             self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'delete'}))['error'],'invalid_task_action')
             request.assert_not_called()
-        for status,code in ((409,'task_changed_list_again'),(403,'owner_private_conversation_only'),(500,'tasks_unavailable')):
+        for status,code in ((409,'task_changed_list_again'),(403,'not_available_in_this_chat'),(500,'tasks_unavailable')):
             with patch.object(archive_tools,'request',side_effect=HTTPError('http://archive',status,'x',{},io.BytesIO(b'{}'))):
                 self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'list'}))['error'],code)

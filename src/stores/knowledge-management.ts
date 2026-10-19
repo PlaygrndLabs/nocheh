@@ -100,6 +100,17 @@ export class KnowledgeManagementRepository {
   return {turn,source,binding:await this.s.guards.state()};
  }
 
+ /** A current live turn in a group or topic, not a job or review run; the space is the turn's own. */
+ async liveGroupTurn(principal:Reader) {
+  if(principal.admin||principal.scope===null||(principal.purpose??'assistant')!=='assistant')throw new HttpError(403,'group_turn_required');
+  const turn=await this.s.turns.binding(principal);
+  if(turn.owner||turn.job||turn.reference?.store!=='archive')throw new HttpError(403,'group_turn_required');
+  const source=await this.s.access.archive.verify(turn.reference);
+  const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.reference.id])).rows[0];
+  if(source.origin!=='live'||source.kind!=='telegram_update'||intake?.transport!=='capture'||intake?.state!=='ready')throw new HttpError(403,'group_turn_required');
+  return {turn,source};
+ }
+
  async inspect(principal:Reader,input:unknown={}) {
   if(!principal.admin)await this.ownerTurn(principal);
   const b=exact(input,['space','q','after','entity_id','fact_id','entities_after','delegations_after','sharing_after','grants_after','claims_after']);
