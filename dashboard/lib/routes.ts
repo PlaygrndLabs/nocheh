@@ -3,7 +3,17 @@
  * messages, bookmarks) use older page names; they open the page and tab that
  * now hold that content, keeping their other details.
  */
-export const pageIds = ['home', 'inbox', 'chats', 'messages', 'memory', 'usage', 'system', 'settings'] as const;
+export const pageIds = [
+  'home',
+  'inbox',
+  'tasks',
+  'chats',
+  'messages',
+  'memory',
+  'usage',
+  'system',
+  'settings',
+] as const;
 export type PageId = (typeof pageIds)[number];
 
 const aliases: Record<string, {page: PageId; view?: string}> = {
