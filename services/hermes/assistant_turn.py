@@ -28,6 +28,16 @@ class UnexpectedProfileTool(RuntimeError):
         self.names=sorted(name for name in names if isinstance(name,str) and re.fullmatch(r'[A-Za-z0-9_]{1,64}',name))[:16]
 
 
+
+def bind_profile_home(profile):
+    """Make Hermes read SOUL.md and skills/ from the turn profile.
+
+    Without a bound home Hermes takes the session database's folder as the
+    agent home, and Nocheh keeps that database in ``native-state/``.
+    """
+    from hermes_constants import set_hermes_home_override
+    set_hermes_home_override(profile)
+
 def verify_profile_tools(names):
     unexpected=set(names)-ALLOWED_TOOLS
     if unexpected:raise UnexpectedProfileTool(unexpected)
@@ -152,6 +162,7 @@ def run(body, emit=None):
         from .security_transport import install_isolated_route
         install_isolated_route(credentials,body['model'],body.get('model_context_length'))
     profile=Path(os.environ['HERMES_HOME'])
+    bind_profile_home(profile)
     from .profile_config import preferences, read
     prefs=body.get('preferences') or preferences(read(profile/'config.yaml'))
     from .archive_tools import bind_process_preferences
@@ -168,6 +179,9 @@ def run(body, emit=None):
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
+    if not review:
+        from .persona import refresh_prompt
+        refresh_prompt(profile,database,session_id)
     history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
     record('history_prepare',phase);phase=perf_counter()
     from . import memory_evidence
