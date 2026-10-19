@@ -55,7 +55,7 @@ x-service: &service
 
 x-honcho-runtime: &honcho-runtime
   logging: *logging
-  image: nocheh-honcho:be543555
+  image: nocheh-honcho:608aec8a
   build:
     context: ./data/compat/upstreams/honcho
     dockerfile: ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/honcho.Dockerfile
@@ -311,7 +311,7 @@ services:
       retries: 15
   honcho-cli:
     logging: *logging
-    image: nocheh-honcho-cli:0.1.4
+    image: nocheh-honcho-cli:0.2.0
     build: {context: ./services/honcho/cli, dockerfile: Dockerfile}
     profiles: [honcho-tools]
     read_only: true
