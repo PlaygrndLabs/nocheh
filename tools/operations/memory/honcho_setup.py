@@ -95,7 +95,7 @@ def sources():
         actual=subprocess.check_output(['git','-C',str(path),'rev-parse','HEAD'],text=True).strip()
         if actual!=pin['revision']:
             # A new pin moves an untouched source checkout; local edits are never discarded.
-            if subprocess.check_output(['git','-C',str(path),'status','--porcelain'],text=True).strip():
+            if subprocess.check_output(['git','-C',str(path),'status','--porcelain','--untracked-files=no'],text=True).strip():
                 raise SystemExit(f'{name}: source checkout has local changes and differs from the Honcho lock')
             subprocess.run(['git','-C',str(path),'fetch','--quiet','origin',pin['revision']],check=True)
             subprocess.run(['git','-C',str(path),'checkout','--quiet','--detach',pin['revision']],check=True)

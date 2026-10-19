@@ -27,7 +27,11 @@ def checkout(name, spec):
     if (destination/".git").is_dir():
         actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=destination, text=True).strip()
         if actual != spec["revision"]:
-            raise SystemExit(f"{name}: existing checkout differs from lock; use a separate clean workspace")
+            # A new pin moves an untouched checkout; local edits are never discarded.
+            if subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=destination, text=True).strip():
+                raise SystemExit(f"{name}: existing checkout has local changes and differs from lock; use a separate clean workspace")
+            run("git", "fetch", "--depth", "1", "origin", spec["revision"], cwd=destination)
+            run("git", "checkout", "--detach", spec["revision"], cwd=destination)
         run("git", "diff", "--exit-code", "HEAD", cwd=destination)
     elif (not (destination/".nocheh-source-revision").is_file()
           or (destination/".nocheh-source-revision").read_text().strip() != spec["revision"]):

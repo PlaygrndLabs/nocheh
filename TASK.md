@@ -384,22 +384,35 @@ messages on either side link to Honcho conclusions at the usual rate, so no
 re-learn is needed. Re-learning or replacing the owner's live memory waits for
 the owner's word.
 
-Upgrades (October 19): the npm packages are on their latest releases
-(TypeScript 7, React 19.3, esbuild 0.28, Inngest SDK 4.25), and the base images
-are on the newest builds of their current major lines. Honcho is pinned to the
-v3.3.0 release with `honcho-ai` 2.6.0 and `honcho-cli` 0.2.0. Honcho now keeps
-conclusion parent links in its `document_sources` table, so the provenance and
-session-descendant reads, and the portable memory export, use that table. The
-provider gateway allows Honcho's 6,000-token long summaries. Checked on a local
-PostgreSQL 16 with pgvector: the pinned Honcho upgrades its schema, drains the
-old links, and keeps descendants, ancestry and the export round trip
+Upgrades (October 19): every dependency is on its latest release. The npm
+packages include TypeScript 7, React 19.3, esbuild 0.28 and Inngest SDK 4.25;
+the services run Node 26.12, PostgreSQL 18.6 with pgvector 0.8.7, Redis 8.8.3,
+Docker CLI 29.9 and the Inngest server 1.46, on Debian trixie images. Every
+PostgreSQL service sets PGDATA to its mounted data directory, because the 18+
+images default elsewhere; a PostgreSQL 17 volume does not start on 18, so the
+installation starts with fresh databases, as the owner accepted. Honcho is
+pinned to the v3.3.0 release with `honcho-ai` 2.6.0 and `honcho-cli` 0.2.0.
+Honcho keeps conclusion parent links in its `document_sources` table, so the
+provenance and session-descendant reads, and the portable memory export, use
+that table, and the provider gateway allows Honcho's 6,000-token long summaries
 ([plugin checks](services/honcho/test_provenance.py),
-[gateway checks](services/honcho/test_meter.py)). Held back: PostgreSQL 18 and
-Node 26, which need a dump or a runtime move; the Inngest server (1.46 renames
-the UI bundles the workflow inspector patches); and Hermes 0.22.2, which needs
-Python 3.14 and a new hand-off of Telegram updates, because its update
-admission marks Nocheh's committed updates as already seen.
-Pending: a rebuild on the owner's installation and a live reply check.
+[gateway checks](services/honcho/test_meter.py)). The Inngest inspection
+rewrite finds the 1.46 viewers and GraphQL client by pattern
+([inspection checks](test/workflow-inspection.test.ts)). Hermes is pinned to
+v0.22.2 on Python 3.14.8 and uv 0.13.2. Its Telegram update admission records
+the polled update when Nocheh's committed-only gate accepts it, so committed
+turns now enter PTB's own dispatch beneath that admission, and Nocheh's dispatch
+receipts stay the exactly-once authority
+([gateway check](services/hermes/test_gateway.py)). The native skill curator is
+off for managed profiles, because roles and skills are set only by the owner
+([profile check](services/hermes/test_profile_config.py)). The TUI and dashboard
+patches are re-anchored, moved Hermes symbols are followed, and Hermes' direct
+`state.db` opens map to the profile's native state. A new pin moves an untouched
+Hermes or Honcho source checkout. Checked here: the Node suite on Node 26 with
+PostgreSQL 18 (190 pass, 77 skipped), Honcho v3.3.0 migrations, provenance and
+export on PostgreSQL with pgvector, and the Inngest 1.46 inspection pages in
+Chromium. Pending: the Hermes image build and Hermes Python tests on the owner's
+machine, a fresh-database rebuild there, and a live reply check.
 
 </current>
 
