@@ -232,6 +232,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/internal/action':
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             return ASSISTANT.action(body)
+        if self.path == '/internal/telegram/approval':
+            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
+            return ASSISTANT.approval(body)
         if self.path == '/internal/dispatch':
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             return ASSISTANT.call(body)

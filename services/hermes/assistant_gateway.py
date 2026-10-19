@@ -441,6 +441,72 @@ class AssistantGateway:
         if self.loop is None:raise RuntimeError('telegram_not_ready')
         return asyncio.run_coroutine_threadsafe(self.send_action(body),self.loop).result(timeout=55)
 
+    def approval(self,body):
+        if self.loop is None:raise RuntimeError('telegram_not_ready')
+        return asyncio.run_coroutine_threadsafe(self.send_approval(body),self.loop).result(timeout=55)
+
+    async def send_approval(self,body):
+        """Approve and Reject buttons on an exact pending action, in the owner's
+        private chat or an allowed group.
+
+        Pressing one is captured like any update; storage verifies that the
+        owner pressed it and decides. These calls only show the card and the
+        decision on it.
+        """
+        import re
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        chat,topic=str(body.get('chat_id','')),body.get('topic')
+        if not re.fullmatch(r'-?[1-9]\d{0,18}',chat) or chat not in [str(self.scopes.owner or '')]+[str(group) for group in self.scopes.groups or []]:
+            raise ValueError('approval_chat_not_allowed')
+        if topic is not None and (chat==str(self.scopes.owner) or not isinstance(topic,str) or not re.fullmatch(r'[1-9]\d{0,15}',topic)):raise ValueError('invalid_approval')
+        text=body.get('text')
+        if not isinstance(text,str) or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_approval')
+        if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
+        bot=self.adapter._bot
+        if body.get('kind')=='card':
+            if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_approval')
+            buttons=[]
+            for label,data in body.get('buttons') or []:
+                if not isinstance(label,str) or not 0<len(label)<=40 or not isinstance(data,str) or not re.fullmatch(r'n[ad][a-f0-9]{56}',data):raise ValueError('invalid_approval')
+                buttons.append(InlineKeyboardButton(label,callback_data=data))
+            if len(buttons)!=2:raise ValueError('invalid_approval')
+            name='approval-'+body['id']
+            async with self.action_lock:
+                receipt=self.receipts/(name+'.result')
+                if receipt.exists():return json.loads(receipt.read_bytes())
+                if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
+                await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
+                token=DISPATCH_KEY.set('approval:'+body['id'])
+                check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
+                try:
+                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup([buttons]))
+                    result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
+                except Exception:result={'state':'ambiguous'}
+                finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
+                await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
+                return result
+        if body.get('kind')=='settle':
+            if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_approval')
+            receipt=self.receipts/('approval-'+body['id']+'.result')
+            card=json.loads(receipt.read_bytes()) if receipt.exists() else {}
+            # Only a card this runtime sent, in the chat it was sent to, is edited.
+            if card.get('state')!='done' or card.get('chat_id')!=chat:return {'state':'done','edited':False}
+            token=DISPATCH_KEY.set('approval-settle:'+body['id'])
+            # The decided card keeps its text with the outcome and loses its buttons.
+            # Telegram refuses a repeated identical edit, which changes nothing.
+            try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),reply_markup=None))}
+            except Exception:return {'state':'done','edited':False}
+            finally:DISPATCH_KEY.reset(token)
+        if body.get('kind')=='answer':
+            query=body.get('callback_query_id')
+            if not isinstance(query,str) or not 0<len(query)<=64 or len(text)>200:raise ValueError('invalid_approval')
+            token=DISPATCH_KEY.set('approval-answer:'+query)
+            # Stops the button's spinner; an expired or repeated answer is refused and changes nothing.
+            try:return {'state':'done','answered':bool(await bot.answer_callback_query(query,text=text))}
+            except Exception:return {'state':'done','answered':False}
+            finally:DISPATCH_KEY.reset(token)
+        raise ValueError('invalid_approval')
+
     def stop(self):
         self.stopping=True
         if self.loop and self.adapter:

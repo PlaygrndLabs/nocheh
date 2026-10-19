@@ -91,10 +91,10 @@ export async function controlReply(pool:pg.Pool,policy:AssistantPolicy,eventId:s
       const tool=await controlledAction(pool,owner,command[2]);
       if(command[1]==='action') {
         const detail=canonical(tool.arguments);
-        if(detail.length>2200)return `${tool.kind} · ${tool.state}\nArguments are too long to review in Telegram. Open Nocheh Activity to review this action in full.\nID: ${tool.id}`;
+        if(detail.length>2200)return `${tool.kind} · ${tool.state}\nArguments are too long to review in Telegram. Open the dashboard Inbox to review this action in full.\nID: ${tool.id}`;
         return `${tool.kind} · ${tool.state}\nProfile: ${tool.profile}\nExact arguments:\n${detail}\n\nApprove: /approve ${tool.id}\nReject: /deny ${tool.id}`;
       }
-      if(command[1]==='approve'&&canonical(tool.arguments).length>2200)return 'Review and approve this large action in Nocheh Activity.';
+      if(command[1]==='approve'&&canonical(tool.arguments).length>2200)return 'Review and approve this large action in the dashboard Inbox.';
       const decided=await decideControlled(pool,owner,{id:tool.id,fingerprint:tool.fingerprint,decision:command[1]},eventId);
       return `Action ${tool.id} ${decided.state}.`;
     }catch(error){if(error instanceof HttpError)return error.code==='action_not_found'?'Action not found.':error.code.replaceAll('_',' ');throw error;}

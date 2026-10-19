@@ -25,6 +25,7 @@ Message edits in Honcho memory: [0154](0154-message-edits-replace-honcho-writes.
 Albums answered once: [0155](0155-albums-answered-once.md).
 Desktop exports sharing proven Telegram identities: [0156](0156-desktop-exports-share-proven-telegram-identities.md).
 Group turns seeing recent unaddressed messages: [0157](0157-group-turns-see-recent-unaddressed-messages.md).
+Approve and Reject buttons in Telegram: [0158](0158-telegram-approval-buttons.md).
 Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
