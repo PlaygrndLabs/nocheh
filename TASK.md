@@ -230,9 +230,10 @@ reply ignored the role and never used the skill, because Hermes looked for
 `SOUL.md` and `skills/` beside the session database in `native-state/` and
 reused each continuing session's first system prompt. Turns now bind the
 profile as the Hermes home and rebuild a session's prompt once after its role
-or skills change ([checks](services/hermes/test_persona.py)). Pending: repeating
-the live group check after that fix reaches the owner's installation; carrying
-roles and skills across an original-only reset.
+or skills change ([checks](services/hermes/test_persona.py)); the repeated live
+group check passed the same day
+([register](docs/mvp-acceptance-status.md)). Pending: carrying roles and skills
+across an original-only reset.
 
 Built-in instructions (October 17, owner: "every hard coded text should
 editable form dashboard"): the reply rules, remembered-facts and limited-memory
