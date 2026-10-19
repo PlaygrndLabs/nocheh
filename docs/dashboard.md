@@ -2,7 +2,7 @@
 
 # Owner dashboard and CLI
 
-Start the archive with `./bin/nocheh up`. With pinned Node 24 and Python 3 available
+Start the archive with `./bin/nocheh up`. With pinned Node 26 and Python 3 available
 locally, install the repository's locked development dependencies using `npm ci`,
 then run:
 
