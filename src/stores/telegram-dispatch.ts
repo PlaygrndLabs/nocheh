@@ -237,6 +237,37 @@ export class TelegramDispatchRepository {
     return count;
   }
   /**
+   * Group messages since this chat's last turn that did not address Nocheh. They
+   * never reach Hermes on their own, so a reply would not know what was just said.
+   * Each is the guarded copy this conversation may read, labeled with its speaker,
+   * and cites its source so retiring it withholds the turn that carried it.
+   */
+  private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string}[]> {
+    const own=(await this.archive.pool.query('SELECT scope,received_at FROM events WHERE id=$1',[source.id])).rows[0];
+    if(!own)return [];
+    const rows=(await this.archive.pool.query(`SELECT id,payload FROM events WHERE scope=$1 AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
+      AND received_at<=$3 AND received_at>$3::timestamptz-interval '12 hours' AND convert_from(payload,'UTF8')::jsonb ? 'message'
+      ORDER BY received_at DESC,id DESC LIMIT 100`,[own.scope,source.id,own.received_at])).rows;
+    if(!rows.length)return [];
+    const states=new Map((await this.control.query('SELECT event_id,state,error_code FROM dispatches WHERE event_id=ANY($1::text[])',
+      [rows.map(row=>row.id)])).rows.map(row=>[row.event_id as string,row]));
+    const recent:{id:string;speaker:string;text:string}[]=[];
+    for(const row of rows) {
+      // Members who may not talk to Nocheh are still part of the conversation. Album parts went with
+      // their album's turn; any other outcome is the last turn, already in Hermes' history.
+      const state=states.get(row.id);
+      if(!state||state.state==='suppressed'&&state.error_code==='album_member')continue;
+      if(state.state!=='suppressed'||!['not_addressed','conversation_not_selected'].includes(state.error_code))break;
+      try {
+        if(await this.access.space((await this.archive.captured(row.id)).reference)!==space)continue;
+        const guarded=await this.sources.read(principal,row.id),text=typeof guarded.event.text==='string'&&guarded.event.text?guarded.event.text.slice(0,1000):'[A message without text]';
+        const speaker=speakerLine(JSON.parse(row.payload.toString()),guarded.event.payload);if(speaker)recent.push({id:row.id,speaker,text});
+      } catch {continue;}
+      if(recent.length===20)break;
+    }
+    return recent.reverse();
+  }
+  /**
    * Telegram sends an album as one message per photo or file. It is answered
    * once: its first part in update order runs one turn with every part's text
    * and files, and the other parts close without a reply of their own.
@@ -306,12 +337,12 @@ export class TelegramDispatchRepository {
       const other=groupAddressing(JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString()),botId);
       if(addressing&&other)addressing={direct:addressing.direct||other.direct,handles:[...new Set([...addressing.handles,...other.handles])].sort().slice(0,20)};
     }
-    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload);
+    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
     // An album's caption usually sits on one part; the turn reads every part's text in order.
     const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(parts.length?{album_events:parts}:{})};
-    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker});await this.current(input);
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
+    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,recent_group:recent});await this.current(input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});

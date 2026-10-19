@@ -17,6 +17,7 @@ import {
   fullTime,
   importStatus,
   isResume,
+  matchingGroup,
   problemText,
   type ImportJob,
 } from '../../lib/messages-format';
@@ -371,6 +372,14 @@ function ImportReview({job}: {job: ImportJob}) {
                     {chat.messages.toLocaleString()} messages
                     {dateSpan(chat.first_at, chat.last_at) ? ` · ${dateSpan(chat.first_at, chat.last_at)}` : ''}
                   </span>
+                  {(() => {
+                    const match = matchingGroup(chat, groups);
+                    return editable && match && chosenMapping[chat.id] !== match ? (
+                      <span className="block text-xs text-warn">
+                        This is {chatName(match)}. Share it with that chat so messages already saved aren’t kept twice.
+                      </span>
+                    ) : null;
+                  })()}
                 </label>
                 <Select
                   id={`map-${chat.id}`}

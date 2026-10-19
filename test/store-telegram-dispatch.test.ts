@@ -358,6 +358,48 @@ test('an album gets one turn with every part, answered on its first part',
   }finally{await archiveAdmin.end();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
+test('a group turn sees the unaddressed group messages since the last turn, never retired ones',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-recent-')),base=Date.now(),group='-'+base,token=digest('recent:'+base);
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let serial=base;
+  // Like Hermes, a group message that does not name Nocheh is suppressed without a turn.
+  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    assert.equal(operation,'run.start');
+    if(!String(input.text).startsWith('Nocheh'))return {state:'suppressed',error_code:'not_addressed'};
+    started.push(input);return {state:'done',stage:'delivery'};
+  };
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');}});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  const say=async(text:string,from:any={id:123,is_bot:false,first_name:'Owner'})=>{
+    const update=++serial,message={message_id:update,date:1700000000+update-base,chat:{id:Number(group),type:'supergroup'},from,text};
+    const id=(await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
+      source_id:String(update),revision:'1',occurred_at:null,text,payload:{update_id:update,message}})).source.reference.id;
+    assert.equal((await services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'))).state,'completed');
+    await services.telegram.run(id,await authority('telegram'));return id;
+  };
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    await say('Nocheh, hello');await say('Before the last turn');
+    await say('Nocheh, are you there?');
+    const lunch=await say('Anyone up for lunch tomorrow?');
+    await say('Count me in',{id:987654321,is_bot:false,first_name:'Sara',username:'sara_k'});
+    const retired=await say('Something I take back');
+    await services.retirements.set({admin:true,scope:null},retired,{retired:true,expected_revision:0,operation_id:'recent:'+base});
+    await say('Nocheh, what did I just ask the group?');
+    assert.equal(started.length,3);
+    assert.equal(started[1].recent_group?.length,1,'the turn sees what was said since the previous turn');
+    const recent=started[2].recent_group;
+    assert.deepEqual(recent.map((item:any)=>item.text),['Anyone up for lunch tomorrow?','Count me in']);
+    assert.equal(recent[0].id,lunch);assert.match(recent[1].speaker,/^\[Group message from Sara \(@sara_k\), sent /);
+    assert.ok(!JSON.stringify(recent).includes('987654321'),'no Telegram ID reaches the turn');
+    await say('Nocheh, and now?');assert.equal(started[3].recent_group,undefined,'messages already carried by a turn are not repeated');
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
 test('a later message is told about an earlier voice note still waiting for transcription',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};

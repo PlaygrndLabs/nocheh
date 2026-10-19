@@ -334,6 +334,11 @@ function MessageItem({row, chat, onOpen}: {row: MessageRow; chat: string; onOpen
             </Badge>
           )}
           {row.retired && <Badge>Hidden from assistant</Badge>}
+          {row.live_copy && (
+            <Badge title="This imported message was also saved from the live chat, so the assistant uses that copy.">
+              Also saved live
+            </Badge>
+          )}
           {!row.retired && row.agent_copy?.state === 'pending' && (
             <Badge tone="warn" title="The assistant can’t use this message until its copy is ready.">
               Assistant copy not ready
