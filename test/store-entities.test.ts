@@ -91,6 +91,13 @@ test('people and projects keep stable identity, attributed evidence, connected r
     const sam=await entities.ensureParticipant(samSource),samAgain=await entities.ensureParticipant(samSource),otherAlex=await entities.ensureParticipant(otherAlexSource);
     assert.ok(sam&&otherAlex);assert.equal(sam!.name,'Alex');assert.equal(otherAlex!.name,'Alex');
     assert.equal(sam!.id,samAgain!.id);assert.notEqual(sam!.id,otherAlex!.id,'same display name never merges exact platform identities');
+    const react=async(label:string,user:Record<string,unknown>)=>(await archive.capture({version:1,key:`entities:${stamp}:${label}`,origin:'live',kind:'telegram_update',
+      bot_id:'fixture',scope:atlasGroup,source_id:label,revision:'1',occurred_at:null,text:'',payload:{update_id:Number(stamp.slice(-8))+900+Number(label.replace(/\D/g,'')),
+        message_reaction:{chat:{id:Number(atlasGroup),type:'supergroup'},message_id:1,date:2,user,old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}}})).source.reference;
+    assert.equal((await entities.ensureParticipant(await react('r1',{id:userBase+1,is_bot:false})))!.name,'Alex','an update without a name keeps the known one');
+    assert.equal((await entities.ensureParticipant(await react('r2',{id:userBase+1,is_bot:false,first_name:'Alex',last_name:'Reed'})))!.name,'Alex Reed',
+      'a reaction names its actor');
+    assert.equal((await entities.ensureParticipant(await react('r3',{id:userBase+1,is_bot:false,first_name:'Alex'})))!.name,'Alex');
     const ambiguous=await entities.connected(owner,'What did Alex promise?');assert.ok((ambiguous.ambiguities[0]?.entity_ids.length??0)>=2,'owner-private natural-language questions retain same-name ambiguity');
 
     const context=await entities.context(samSource,[beacon],'Beacon needs Alex to deliver Friday.');

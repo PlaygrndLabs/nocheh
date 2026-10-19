@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, canonical, digest, immutable_file, captured_adapter_class
-from .scopes import Scopes, verify_capability
+from .scopes import Scopes, topic_id, verify_capability
 from . import group_trigger
 
 TURN = contextvars.ContextVar('nocheh_committed_turn',default=None)
@@ -72,7 +72,9 @@ def delivery_failure(requests):
     if requests and all(entry['state'] == 'rejected' for entry in requests):
         # Telegram answered every attempt with a definite error, so nothing was
         # delivered. A rate limit stays retryable; other errors are terminal.
-        if all(entry['status'] == 429 for entry in requests):
+        # The last answer decides: a native fallback after a formatting
+        # rejection that is then rate limited still deserves a retry.
+        if requests[-1]['status'] == 429:
             return {**NOT_TRANSMITTED, 'error_stage': 'telegram_rate_limited'}
         return {'state': 'suppressed', 'error_code': 'telegram_rejected'}
     return None
@@ -106,7 +108,8 @@ def prepare_profile(root,scope,model):
 
 async def native_turn(root,scope,body,model,credentials,cancelled=None):
     profile=await asyncio.to_thread(prepare_profile,root,scope,model)
-    thread=str(body['payload']['message'].get('message_thread_id','main'))
+    topic=topic_id(body['payload']['message'])
+    thread='main' if topic is None else str(topic)
     logical=digest(scope.chat_id+':'+thread)
     cursor=profile/('active-'+logical+'.json')
     session_id=json.loads(cursor.read_text())['session_id'] if cursor.exists() else 'nocheh-'+logical
@@ -371,14 +374,21 @@ class AssistantGateway:
             elif (failure:=delivery_failure(turn.get('send_requests'))) is not None:
                 result={'state':'cancelled'} if failure['state']=='failed' and cancelled and cancelled.is_set() else failure
             else:result={'state':'ambiguous','error_code':'delivery_unconfirmed'}
-        except Exception:
+        except Exception as error:
+            import traceback
+            from .subscription import ProviderNotConfigured
             # Before native delivery starts, another attempt cannot
             # duplicate a Telegram effect. Once sending has started, only
             # reconciliation is safe because the remote outcome is unknown,
             # unless the outbound boundary admitted no message request.
             failure=delivery_failure(turn.get('send_requests')) if turn.get('delivery_started') else None
             result=failure if failure is not None else {'state':'ambiguous','error_code':'dispatch_interrupted'} if turn.get('delivery_started') else \
-                {'state':'failed','error_code':'assistant_runtime_unavailable'}
+                {'state':'failed','error_code':'provider_not_configured' if isinstance(error,ProviderNotConfigured) else 'assistant_runtime_unavailable'}
+            # The bounded Python type and function, never exception text, so the cause can be diagnosed.
+            if result.get('error_code') in ('assistant_runtime_unavailable','dispatch_interrupted') and 'error_type' not in result:
+                frames=traceback.extract_tb(error.__traceback__)
+                for key,value in (('error_type',type(error).__name__),('error_stage',frames[-1].name if frames else None)):
+                    if isinstance(value,str) and re.fullmatch(r'[A-Za-z_]{1,64}',value) and key not in result:result[key]=value
         finally:TURN.reset(token);DISPATCH_KEY.reset(dispatch)
         from .timing import safe
         timings=safe((turn.get('agent_result') or {}).get('timings'))

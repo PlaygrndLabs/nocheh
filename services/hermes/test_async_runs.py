@@ -9,7 +9,7 @@ from .capture import canonical,immutable_file
 
 
 class AsyncRunTests(unittest.TestCase):
-    def body(self):return {'channel':'telegram','event_id':'a'*64,'attempt':1,'text':'private transcript canary','archive_credential':'private credential canary'}
+    def body(self,attempt=1):return {'channel':'telegram','event_id':'a'*64,'attempt':attempt,'text':'private transcript canary','archive_credential':'private credential canary'}
     def wait(self,runs,body):
         for _ in range(100):
             state=runs.resume(body)
@@ -90,6 +90,17 @@ class AsyncRunTests(unittest.TestCase):
             self.assertNotIn('private',runs._path(identity(body),'.result').read_text())
             recovered=AsyncRuns(folder,lambda *args:self.fail('completed failure restarted'),lambda body:None)
             self.assertEqual(recovered.resume(body),result)
+
+    def test_unexplained_runtime_failure_keeps_bounded_cause_and_turn_refusals_keep_their_code(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'assistant_runtime_unavailable',
+                'error_type':'TimeoutError','error_stage':'collect','text':'private answer'},lambda body:None)
+            body=self.body();runs.start(body);result=self.wait(runs,body)
+            self.assertEqual((result['error_code'],result['error_type'],result['error_stage']),('assistant_runtime_unavailable','TimeoutError','collect'))
+            runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'assistant_runtime_unavailable','error_type':'private text here'},lambda body:None)
+            body=self.body(2);runs.start(body);self.assertNotIn('error_type',self.wait(runs,body))
+            runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'unexpected_profile_tool'},lambda body:None)
+            body=self.body(3);runs.start(body);self.assertEqual(self.wait(runs,body)['error_code'],'unexpected_profile_tool')
 
     def test_exception_content_is_removed_from_durable_results(self):
         with tempfile.TemporaryDirectory() as folder:

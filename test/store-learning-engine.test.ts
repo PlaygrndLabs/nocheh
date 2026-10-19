@@ -50,7 +50,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const reaction=(await archive.capture(event('reaction',{update_id:30,message_reaction:{chat:{id:group},message_id:1,date:1700000010,user:{id:7},old_reaction:[],new_reaction:[{type:'emoji',emoji:'✅'}]}}))).source.reference;
     await guards.prepare(reaction,'fixture',detect);
     await assert.rejects(contexts.prepare(reaction,await guards.state()),{code:'learning_context_pending'});
-    const parent=(await archive.capture(event('parent',{update_id:10,message:{message_id:1,chat:{id:group,type:'supergroup'},message_thread_id:17,
+    const parent=(await archive.capture(event('parent',{update_id:10,message:{message_id:1,chat:{id:group,type:'supergroup'},message_thread_id:17,is_topic_message:true,
       from:{id:7},text:'Review this packet. fixture-secret',reply_to_message:{message_id:999,text:'nested-unverified-target'}}}))).source.reference;
     await guards.prepare(parent,'fixture',detect);
     const prepared=await contexts.prepare(reaction,await guards.state());
@@ -125,7 +125,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.equal(calls,2);
     // A convention's generated wording is guidance, not independent new evidence.
     const conventionText='In this conversation a green mark means ready for review.';
-    const convention=(await archive.capture(event('convention',{update_id:40,message:{message_id:4,chat:{id:group,type:'supergroup'},message_thread_id:17,
+    const convention=(await archive.capture(event('convention',{update_id:40,message:{message_id:4,chat:{id:group,type:'supergroup'},message_thread_id:17,is_topic_message:true,
       from:{id:7},text:conventionText}}))).source.reference;
     await guards.prepare(convention,'fixture',detect);
     const ruleDependencies=(await contexts.prepare(convention,await guards.state())).dependencies;

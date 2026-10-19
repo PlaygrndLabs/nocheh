@@ -188,7 +188,11 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
       await send({name:'nocheh/workflow.requested',id:row.id,data:{workflow_id:row.workflow_id,dispatch:row.dispatch,family:row.family}});
       await pool.query(`UPDATE workflow_outbox SET published_at=now(),first_published_at=coalesce(first_published_at,now()),lease_token=NULL,lease_until=NULL,error_code=NULL,failures=0,next_attempt=now() WHERE id=$1 AND lease_token=$2`,[row.id,token]);
       published++;
-    }catch {
+    }catch(error) {
+      // Publishing stops while this fails, so say why once per outage, without event data.
+      const failures=Number((await pool.query('SELECT failures FROM workflow_outbox WHERE id=$1',[row.id])).rows[0]?.failures??0);
+      if(failures===0)console.warn(JSON.stringify({event:'workflow_publication_failed',family:row.family,kind:error instanceof Error?error.name:'unknown',
+        status:(error as {status?:unknown})?.status??null}));
       // A lost acknowledgment republishes exactly this ID. Permanent execution
       // exclusion is the registry's responsibility, including after 24 hours.
       // Successful receipt probes are attempts, not transport failures: they

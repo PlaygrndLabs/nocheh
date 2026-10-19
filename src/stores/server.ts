@@ -344,9 +344,15 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,{records,next});
       }
       if(path==='/v1/status') {
-        const [guard,archive,services]=await Promise.all([s.guards.state(),s.sources.status(principal),
-          s.stores.control.query('SELECT service,seen_at FROM service_heartbeats ORDER BY service')]);
-        return json(res,200,{service:config.service,storage_layout:'original-only-v1',guard,guard_mode:guard.mode,archive,
+        const [guard,archive,services,spool,dispatches]=await Promise.all([s.guards.state(),s.sources.status(principal),
+          s.stores.control.query('SELECT service,seen_at FROM service_heartbeats ORDER BY service'),
+          // Health shows incoming updates that could not be saved and the latest replies' states.
+          s.stores.control.query('SELECT attempts,error_code,seen_at FROM spool_failures ORDER BY seen_at DESC LIMIT 100'),
+          s.stores.control.query('SELECT event_id,state,attempts,error_code,updated_at FROM dispatches ORDER BY created_at DESC LIMIT 50')]);
+        const received=new Map((await s.stores.archive.query('SELECT id,received_at FROM events WHERE id=ANY($1::text[])',
+          [dispatches.rows.map(row=>row.event_id)])).rows.map(row=>[row.id,row.received_at]));
+        return json(res,200,{service:config.service,storage_layout:'original-only-v1',guard,guard_mode:guard.mode,
+          archive:{...archive,spool_failures:spool.rows,workflows:dispatches.rows.map(row=>({...row,received_at:received.get(row.event_id)??null}))},
           services:services.rows,workers:status()});
       }
     }
