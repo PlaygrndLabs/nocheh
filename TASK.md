@@ -389,6 +389,17 @@ not yet run on the owner's installation:
   unavailable, the automatic second attempt delivered exactly one reply about
   44 seconds after capture, and every service was healthy afterwards. A restart
   during the model call itself was not separately repeated.
+- Owner task list (October 19): the owner asked for a Telegram mini app to
+  manage Nocheh, Nocheh's own task manager in it, and Notion through MCP as an
+  optional extra. Step 1 is in source: a Tasks page in the dashboard and a
+  `nocheh_tasks` assistant tool for the owner's private chat over one list in
+  the control store ([decision](docs/adr/0160-owner-task-list.md),
+  [check](test/store-tasks.test.ts), [broker check](test/knowledge-broker.test.ts),
+  [tool check](services/hermes/test_knowledge_tools.py),
+  [browser check](test/dashboard-pages.browser.mjs)). Next: the mini app on the
+  owner's own domain through a Cloudflare tunnel from the
+  local stack, then the optional Notion connector. Live check pending: ask
+  Nocheh in the private chat to add, list and finish a task.
 Pending: a live album, an edit, a small group-export import, and release
 tests 4 and 5 on the owner's installation.
 

@@ -17,6 +17,7 @@ const origin = `http://127.0.0.1:${port}`;
 const pages = [
   ['home', 'Home'],
   ['inbox', 'Inbox'],
+  ['tasks', 'Tasks'],
   ['chats', 'Chats'],
   ['messages', 'Messages'],
   ['memory', 'Memory'],
@@ -28,6 +29,7 @@ const pages = [
 const routes = [
   ...pages,
   ...['allowed', 'history'].map(view => ['inbox?view=' + view, 'Inbox']),
+  ...['done', 'dropped'].map(view => ['tasks?view=' + view, 'Tasks']),
   ['chats?view=rules', 'Chats'],
   ['chats?chat=-10042', 'Chats'],
   ['chats?chat=-10042%2Ftopic%2F7', 'Chats'],
@@ -346,6 +348,35 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   assert.equal(await page.locator('#reply-model').evaluate(element => element.tagName), 'SELECT');
   await mainModel.selectOption({label: 'Type another name…'});
   assert.equal(await page.locator('#main-model').evaluate(element => element.tagName), 'INPUT');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a task is added, edited, finished and reopened from the Tasks page', async () => {
+  const {page, problems} = await open('tasks');
+  const title = 'Renew the passport ' + Date.now();
+  await page.getByLabel('New task').fill(title);
+  await page.locator('#task-due').fill('2030-01-04');
+  await page.getByRole('button', {name: 'Add'}).click();
+  const row = page.getByRole('listitem').filter({hasText: title});
+  await row.getByText(/Due /).waitFor();
+  await row.getByRole('button', {name: `Edit “${title}”`}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Notes').fill('Bring two photos');
+  await dialog.getByLabel('Due').fill('');
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await dialog.waitFor({state: 'detached'});
+  await row.getByText('Bring two photos').waitFor();
+  assert.equal(await row.getByText(/Due /).count(), 0, 'clearing the due date removes it');
+  await row.getByRole('checkbox', {name: `Mark “${title}” done`}).click();
+  await page.getByRole('status').filter({hasText: 'Task done.'}).waitFor();
+  await row.waitFor({state: 'detached'});
+  await page.getByRole('tab', {name: /Done/}).click();
+  const done = page.getByRole('listitem').filter({hasText: title});
+  await done.getByRole('checkbox', {name: `Reopen “${title}”`}).click();
+  await done.waitFor({state: 'detached'});
+  await page.getByRole('tab', {name: /Open/}).click();
+  await page.getByRole('listitem').filter({hasText: title}).waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });

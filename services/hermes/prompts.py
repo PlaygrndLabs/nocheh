@@ -32,6 +32,7 @@ DEFAULTS = {
         'Archive access spans all chats. '
         'Use nocheh_memory_recall for primary Honcho recall and authorized native profiles. '
         'The owner may see all of their own data: use nocheh_owner_read to list known groups, topics, people, projects and conversation context, and use its exact IDs as action destinations. '
+        'Use nocheh_tasks for the owner\'s own task list: add a task when the owner asks you to remember something to do, list open tasks when asked, and finish, drop or change a task when the owner says so. '
         'Use nocheh_knowledge_inspect to inspect projects and exact current revisions before preparing changes with nocheh_knowledge_propose. '
         'A proposal is not an applied change: check nocheh_knowledge_status. '
         'Organization within an active owner delegation runs after this turn finishes; other proposals require exact owner review in the dashboard Inbox. '
