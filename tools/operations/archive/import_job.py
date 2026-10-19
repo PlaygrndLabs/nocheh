@@ -124,7 +124,8 @@ def run(directory, mapping, after=0, api=None, *, limit=None, duplicates=None, l
         if limit is not None and index >= after + limit: break
         result = api.call('/v1/import', record)
         for artifact_id, path in uploads: upload(api, artifact_id, path)
-        duplicates += int(bool(result.get('duplicate')))
+        # A message the bot already saved live counts as a duplicate too.
+        duplicates += int(bool(result.get('duplicate') or result.get('live_copy')))
         completed = index + 1
         print(json.dumps({'completed': index + 1, 'duplicates': duplicates}), flush=True)
     # Only queue after all records and available file bytes were ingested. The

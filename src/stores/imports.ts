@@ -26,7 +26,8 @@ export class ImportRepository {
       const saved=(await this.control.query('SELECT source_reference FROM import_sources WHERE job_id=$1 AND event_id=$2',[job.id,result.id])).rows[0];
       if(canonical(saved.source_reference)!==canonical(result.reference))throw new HttpError(409,'import_source_conflict');
     }
-    return result;
+    // The export repeats a message the bot already saved live: kept as evidence, counted as a duplicate.
+    return (await this.access.retirements?.liveCopies([result.id]))?.has(result.id)?{...result,live_copy:true}:result;
   }
   async upload(principal:Reader,id:string,input:unknown,job?:any){
     admin(principal);
