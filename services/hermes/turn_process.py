@@ -3,6 +3,7 @@ import asyncio
 import fcntl
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -53,6 +54,20 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             await asyncio.to_thread((profile/'.foreground').touch)
 
 
+def recent_group(value):
+    """The recent unaddressed group messages block, or '' when the input is absent or malformed."""
+    if not isinstance(value,list) or not 0<len(value)<=20:return ''
+    lines=['[Recent messages in this group that were not addressed to you, oldest first]']
+    for item in value:
+        speaker=item.get('speaker') if isinstance(item,dict) else None
+        if (not isinstance(speaker,str) or not speaker.startswith('[Group message from ') or not speaker.endswith(']')
+                or len(speaker)>200 or '\n' in speaker or not isinstance(item.get('text'),str) or len(item['text'])>1000
+                or not isinstance(item.get('id'),str) or not re.fullmatch(r'[a-f0-9]{64}',item['id'])):return ''
+        lines.append(speaker+' (source nocheh:event:'+item['id']+')\n'+item['text'])
+    lines.append('[End of recent messages]')
+    return '\n\n'.join(lines)
+
+
 async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled):
     if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
     text = body.get('text') or ''
@@ -70,6 +85,10 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
         # Who spoke and when stays out of the memory query; the model and native history see it.
         text = speaker + '\n' + text
+    recent=recent_group(body.get('recent_group'))
+    if recent:
+        # Group messages since the last turn that did not address Nocheh never reached Hermes on their own.
+        text = recent + '\n\n' + text
     waiting=body.get('untranscribed_voice')
     if type(waiting) is int and 0<waiting<=20:
         # Voice notes are archived without transcription; their content never reaches the model.
