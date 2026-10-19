@@ -33,7 +33,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                                                            edit_message_text=edit_message_text,answer_callback_query=answer_callback_query))
         return value
 
-    async def test_cards_go_only_to_the_owner_and_are_sent_once(self):
+    async def test_cards_go_to_the_owner_or_an_allowed_group_and_are_sent_once(self):
         with tempfile.TemporaryDirectory() as folder:
             sent=[];edits=[];answers=[];gateway=self.gateway(Path(folder),sent,edits,answers)
             data=lambda choice:'n'+choice+'a'*56
@@ -43,11 +43,14 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await gateway.send_approval(card),{'state':'done','chat_id':'123','message_id':'41'})
             self.assertEqual(len(sent),1,'one card per action, even when offered again')
             self.assertEqual(sent[0][:3],(123,None,'Send this message to your private chat?\n\nHello'))
-            for bad in [{**card,'id':'b'*64,'chat_id':'-20'},{**card,'id':'b'*64,'chat_id':'999'},
+            group={**card,'id':'e'*64,'chat_id':'-20','topic':'17'}
+            self.assertEqual(await gateway.send_approval(group),{'state':'done','chat_id':'-20','message_id':'42'})
+            self.assertEqual(sent[1][:3],(-20,17,card['text']),'a requester-reviewed card goes to its own group and topic')
+            for bad in [{**card,'id':'b'*64,'chat_id':'-30'},{**card,'id':'b'*64,'chat_id':'999'},{**card,'id':'b'*64,'topic':'17'},{**group,'id':'b'*64,'topic':'x'},
                         {**card,'id':'b'*64,'buttons':[['Approve','something else'],['Reject',data('d')]]},{**card,'id':'b'*64,'buttons':card['buttons'][:1]},
                         {**card,'id':'b'*64,'text':''},{**card,'id':'b'*64,'text':'x'*4097}]:
                 with self.assertRaises(ValueError):await gateway.send_approval(bad)
-            self.assertEqual(len(sent),1,'a card for a group or another chat, or with other buttons, is never sent')
+            self.assertEqual(len(sent),2,'a card for another group or chat, or with other buttons, is never sent')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'a'*64,'chat_id':'123','text':'Done'}),{'state':'done','edited':True})
             self.assertEqual(edits,[(123,41,'Done',None)],'the decided card loses its buttons')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'c'*64,'chat_id':'123','text':'Done'}),{'state':'done','edited':False},

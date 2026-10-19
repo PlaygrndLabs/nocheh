@@ -47,8 +47,10 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
     assert.deepEqual(rule,{rule:'owner_autonomy:'+enabled.revision,origin:'grant'},'the decision records the setting revision that authorized it');
     assert.equal((await s.guards.state()).epoch,epoch,'changing the setting and approving a request revoke no context');
 
-    const fromGroup=await s.telegramActions.request(await actor((await capture(group,123,'Owner in a group')).id,group,group),{destination:'123',text:'Group waits'});
-    assert.equal(await state(fromGroup.id),'proposed','a group request for another chat still waits even when the owner authored it');
+    const fromGroup=await s.telegramActions.request(await actor((await capture(group,123,'Owner in a group')).id,group,group),{destination:'123',text:'To my private chat'});
+    assert.equal(await state(fromGroup.id),'approved','the owner\'s own request from a group for their private chat needs no approval');
+    const memberToOwner=await s.telegramActions.request(await actor((await capture(group,456,'Member in a group')).id,group,group),{destination:'123',text:'Member waits'});
+    assert.equal(await state(memberToOwner.id),'proposed','anyone else\'s request for the owner\'s private chat waits');
     const sameGroup=await s.telegramActions.request(await actor((await capture(group,123,'Owner posts here')).id,group,group),{destination:'current',text:'Posted here'});
     assert.equal(await state(sameGroup.id),'approved','a post in the same group needs no approval');
     const tool=await s.controlledActions.propose(await actor((await capture('123',123,'Run a tool')).id,null,'123'),{kind:'shell',arguments:{command:'printf ok'}});
