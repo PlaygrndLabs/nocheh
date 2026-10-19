@@ -162,3 +162,27 @@ def materialize(root, profile, chat):
         fcntl.flock(lock, fcntl.LOCK_EX)
         if (profile / 'SOUL.md').is_file() and (profile / 'skills').is_dir() and read(profile) == value: return
         _install(profile, value['role'], value['skills'])
+
+
+def refresh_prompt(profile, database, session_id):
+    """Rebuild a continuing session's system prompt after its role or skills changed.
+
+    Hermes reuses a session's stored system prompt (and tool order) on later
+    turns, so a role or skill saved after the session began would otherwise
+    never reach it. The revision that last built the prompt is kept beside the
+    session database, which stays writable in isolated turns.
+    """
+    current = revision(read(profile))
+    marker = Path(database.db_path).parent / 'persona-prompt.json'
+    try:
+        previous = json.loads(marker.read_text())
+    except (OSError, ValueError):
+        previous = {}
+    if previous == {'session': session_id, 'revision': current}:
+        return False
+    changed = database.get_session(session_id) is not None
+    if changed:
+        database.update_system_prompt(session_id, None)
+        database.update_session_tool_names(session_id, None)
+    _write(marker, json.dumps({'session': session_id, 'revision': current}))
+    return changed
