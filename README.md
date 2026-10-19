@@ -1,12 +1,12 @@
-# Nocheh: a personal AI brain that runs on your own computer
+# Nocheh: a personal AI brain you talk to on Telegram
 
-**Talk to it in Telegram. It remembers, and everything it knows stays yours.** Nocheh saves every message in an archive you own, learns what matters from your conversations, and answers with what it remembers, in your private chat and in the groups you pick.
+**It remembers what you tell it, and everything it knows stays yours.** Nocheh saves every message in an archive you own, learns what matters from your conversations, and answers with what it remembers, in your private chat and in the groups you pick.
 
 ## Why Nocheh
 
 Chat assistants either forget what you told them last week or keep it in someone else's cloud. Your conversations are the most useful record you have, and they end up scattered, locked in, or gone.
 
-Nocheh turns your Telegram into a memory you own. The originals stay on your machine, the AI parts can be swapped, and you decide what it may use, what it may share, and what it may do.
+Nocheh turns your Telegram into a memory you own. The originals stay in an archive you control, the AI parts can be swapped, and you decide what it may use, what it may share, and what it may do.
 
 ## What Nocheh does for you
 
@@ -63,7 +63,7 @@ The dashboard has Home, Inbox (approvals), Chats, Messages, Memory, Usage, Syste
 ## How it works
 
 ```
-Telegram ──► Hermes ──► nocheh-app ──► archive (PostgreSQL, on your machine)
+Telegram ──► Hermes ──► nocheh-app ──► archive (PostgreSQL)
                             │
                             ▼
                      Inngest workflow ──► secret check ──► Honcho memory
@@ -78,7 +78,7 @@ Hermes receives a message and hands it to Nocheh, which saves it before anything
 
 ## Under the hood
 
-Nocheh is TypeScript services, a React dashboard and a thin Python plugin for Hermes, all in one local Docker Compose project.
+Nocheh is TypeScript services, a React dashboard and a thin Python plugin for Hermes, all in one Docker Compose project.
 
 - **Three databases.** `nocheh_archive` keeps original messages and files and is never rewritten. `nocheh_derived` keeps masked copies and everything generated. `nocheh_control` keeps settings, access rules, approvals and jobs. Hermes, Honcho and Inngest keep their own stores.
 - **Capture first.** Incoming Telegram updates land in a durable spool before they are acknowledged, then commit once. Restarts, retries and database outages don't drop or duplicate messages.
@@ -92,7 +92,7 @@ Service map: [docs/services.md](docs/services.md).
 
 ## Good to know
 
-- Nocheh runs on your computer and answers only while it and Docker are running. Telegram holds new messages for up to 24 hours, so short breaks lose nothing.
+- Nocheh answers only while its services are running. Telegram holds new messages for up to 24 hours, so short breaks lose nothing.
 - Dependable answers come before speed. A reply usually takes around half a minute.
 - Voice notes are saved but not transcribed.
 - No local models. You pay your model provider for replies and learning, plus OpenAI embeddings for memory search.
