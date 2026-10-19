@@ -215,7 +215,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       const connection=(await control.query('SELECT attached,verified FROM memory_engine_connection WHERE singleton')).rows[0];
       if(!connection.attached||!connection.verified)return waiting('sync','prerequisite',60000);
       if(job==='refresh')return validate(authority);
-      const match=/^(source|ingest|projection|receipt|reconcile|generation|context|delete|retire):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');
+      const match=/^(source|ingest|projection|receipt|reconcile|generation|context|delete|retire|relearn):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');
       const kind=match[1],id=match[2]!;
       if(kind==='source'||kind==='ingest')return fenced('honcho',authority,async()=>{
         const ready=await sourceReady(id);if('state' in ready)return ready;
@@ -235,6 +235,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(kind==='context')return fenced('honcho',authority,async()=>{await s.memory.prefetch(id);return observation('completed','sync');});
       if(kind==='delete')return await s.memory.deleteSession(id,authority)?observation('completed','sync'):waiting('sync','prerequisite',1000);
       if(kind==='retire')return await s.memory.retireWorkspace(id,authority)?observation('completed','sync'):waiting('sync','prerequisite',1000);
+      // The owner asked to learn this session again; a session already rebuilt since then has nothing left to do.
+      if(kind==='relearn')return fenced('honcho',authority,async()=>{await s.memory.relearnSession(id);return observation('completed','sync');});
       const load=async()=>{const row=(await control.query('SELECT state,attempts,next_attempt,retired_at FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
         if(!row)throw new HttpError(404,'honcho_receipt_missing');return row;};
       let row=await load();if(row.state==='done')return observation('completed','sync',row.attempts);

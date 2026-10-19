@@ -13,6 +13,9 @@ export function errorWords(error: unknown): string {
   const known: Record<string, string> = {
     honcho_live_acceptance_pending: 'Long-term memory hasn’t passed its checks yet, so it can’t be connected.',
     honcho_budget_requires_accepted_memory: 'Connect long-term memory first, then change the limit.',
+    honcho_memory_detached: 'Connect long-term memory first.',
+    memory_workspace_missing: 'Long-term memory hasn’t learned anything yet.',
+    invalid_memory_scope: 'Choose at least one chat, or every chat.',
     active_project_required: 'Choose a project that isn’t archived.',
     memory_fact_not_found: 'This fact was retired or removed.',
     entity_rename_invalid: 'Only active people can be renamed.',

@@ -301,9 +301,22 @@ synthetic PostgreSQL, not yet run on the owner's installation:
   messages and reply states; message times no longer show "Invalid Date"; the
   history retention setting reaches the app.
 - Found but not fixed, for owner decision: Honcho messages missed during the
-  gateway-block days were never re-derived; files over 20 MB hold a reply;
+  gateway-block days were never re-derived (retrying failed learning below
+  covers this); files over 20 MB hold a reply;
   group turns lack the speaker's name and time; edited messages repeat in Honcho
   memory; albums are separate turns.
+
+Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
+and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
+re-learn every chat or chosen chats from their saved messages, or replace the
+workspace with a new one that learns the archive again or starts empty, each
+after an estimate ([decision](docs/adr/0153-owner-reruns-and-replaces-honcho-memory.md),
+[checks](test/store-memory-rebuild.test.ts),
+[plugin checks](services/honcho/test_provenance.py),
+[browser check](test/dashboard-pages.browser.mjs)). Pending: a live retry of the
+October 13–18 failed learning on the owner's installation (a pull is enough;
+development reloads the Honcho plugin from source); re-learning or replacing
+the owner's live memory waits for the owner's word.
 
 </current>
 

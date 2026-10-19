@@ -271,6 +271,37 @@ test('a built-in instruction is replaced, checked and reset to the built-in text
   await page.close();
 });
 
+test('long-term memory is re-run or replaced only after the owner sees what it would send', async () => {
+  const {page, problems} = await open('memory?view=longterm');
+  const card = page.locator('section').filter({has: page.getByRole('heading', {name: 'Re-run or replace'})});
+  await card.getByText('3 learning tasks failed.').waitFor();
+  await card.getByRole('button', {name: 'Retry failed learning'}).click();
+  await page.getByRole('status').filter({hasText: 'Running 3 learning tasks again.'}).waitFor();
+  await card.getByText('Nothing has failed.').waitFor();
+  assert.equal(await card.getByRole('button', {name: 'Retry failed learning'}).isDisabled(), true);
+
+  await card.getByText('180 saved messages from 5 conversations will be sent again.').waitFor();
+  await card.getByRole('radio', {name: 'Chosen chats'}).click();
+  assert.equal(await card.getByRole('button', {name: 'Re-learn'}).isDisabled(), true, 'a chat must be chosen first');
+  await card.getByRole('searchbox', {name: 'Chats to re-learn'}).fill('-10042');
+  await card.getByRole('listbox', {name: 'Chats to re-learn'}).getByRole('option').first().click();
+  await card.getByText('12 saved messages from 1 conversation will be sent again.').waitFor();
+  await card.getByRole('button', {name: 'Re-learn'}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByText(/learns again from 12 saved messages/).waitFor();
+  await dialog.getByRole('button', {name: 'Re-learn'}).click();
+  await page.getByRole('status').filter({hasText: 'Re-learning 12 saved messages.'}).waitFor();
+
+  await card.getByText('Up to 212 saved messages you allowed it to learn will be sent again.').waitFor();
+  const replace = card.getByRole('button', {name: 'Replace long-term memory'});
+  assert.equal(await replace.isDisabled(), true, 'replacing waits for the typed confirmation');
+  await card.getByLabel('Type “replace” to confirm').fill('replace');
+  await replace.click();
+  await page.getByRole('status').filter({hasText: 'It is learning your saved messages again.'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('discard drops unsaved edits', async () => {
   const {page, problems} = await open('settings?view=telegram');
   const before = await page.locator('#telegram-names').inputValue();

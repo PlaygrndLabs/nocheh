@@ -70,6 +70,15 @@ reply.
   earlier Nocheh workspace from Honcho with its Nocheh records. Original
   messages stay in the archive. `status` shows deletion progress under
   `workspace_deletions`.
+  `fresh-start --from-archive` instead learns every saved message you allowed
+  again in the new workspace.
+- `./bin/nocheh memory honcho retry-failed` reruns Honcho learning that ended in
+  an error, such as during a provider outage, without resending messages.
+- `./bin/nocheh memory honcho relearn [--chat ID ...]` re-learns every chat, or
+  the chosen chats and their topics, from their saved messages: their Honcho
+  sessions and what Honcho derived from them are replaced. Retired messages are
+  left out. `estimate [--chat ID ...]` shows what each option would send first.
+  Dashboard → Memory → Long-term memory has the same controls.
 - `./bin/nocheh backup` preserves originals, guarded histories, native state,
   consent, receipts and a spending-ledger snapshot. Restores start inactive and
   detached on a separate memory network. Never replace a newer spending ledger
