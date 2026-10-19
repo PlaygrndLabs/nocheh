@@ -8,7 +8,8 @@ allowed member, "allowed memeber can approav we use approve to just let sender
 can see what will be send cuz memory of both gp are private", and that only
 the owner or an allowed member can use Nocheh at all. For another topic of the
 same group with separate topic memory, the owner said it "should behavie like
-like GP level". Supersedes the owner
+like GP level". During the live check the owner asked "Im owner why still
+need approve when I ask nocheh to send my self pv msg from gp". Supersedes the owner
 reviewing such messages from ADR-0159.
 </status>
 
@@ -28,6 +29,9 @@ where that person can see it.
   memory, gets its Approve and Reject card in the group and topic where it was
   asked, without the "Asked in" line. Only that person or the owner can decide
   it; anyone else's press is answered and decides nothing.
+- A message the owner asks for in a live group turn, for the owner's own
+  private chat, is approved by the request: that chat already sees all of the
+  owner's memory.
 - The owner's own requests from a group for another group, requests for a
   group where the person asking is not allowed, and every other pending action
   keep their card in the owner's private chat.

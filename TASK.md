@@ -382,7 +382,8 @@ not yet run on the owner's installation:
   their own message to another group where they are also allowed, or to
   another topic when topics keep separate memory: the card
   appears under the request in the group, and only that member or the owner
-  can press it ([decision](docs/adr/0161-requesters-review-their-own-cross-group-messages.md),
+  can press it. The owner's own request from a group for their private chat
+  needs no approval ([decision](docs/adr/0161-requesters-review-their-own-cross-group-messages.md),
   [check](test/store-approval-buttons.test.ts)). Open question to the owner: whether memory should
   stay per group, shared between groups only through owner sharing rules (the
   recommendation), or be shared across all groups or projects of one person.
