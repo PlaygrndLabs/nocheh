@@ -317,9 +317,7 @@ synthetic PostgreSQL, not yet run on the owner's installation:
   inherit the replied-to message's files; Health shows unsaved incoming
   messages and reply states; message times no longer show "Invalid Date"; the
   history retention setting reaches the app.
-- Found but not fixed, for owner decision: Honcho messages missed during the
-  gateway-block days were never re-derived (retrying failed learning below
-  covers this); files over 20 MB hold a reply;
+- Found but not fixed, for owner decision: files over 20 MB hold a reply;
   group turns lack the speaker's name and time; edited messages repeat in Honcho
   memory; albums are separate turns.
 
@@ -330,10 +328,13 @@ workspace with a new one that learns the archive again or starts empty, each
 after an estimate ([decision](docs/adr/0153-owner-reruns-and-replaces-honcho-memory.md),
 [checks](test/store-memory-rebuild.test.ts),
 [plugin checks](services/honcho/test_provenance.py),
-[browser check](test/dashboard-pages.browser.mjs)). Pending: a live retry of the
-October 13–18 failed learning on the owner's installation (a pull is enough;
-development reloads the Honcho plugin from source); re-learning or replacing
-the owner's live memory waits for the owner's word.
+[browser check](test/dashboard-pages.browser.mjs)). On the owner's installation
+the live retry re-ran the 2 failed learning tasks and Honcho memory returned to
+ready with none failed or waiting. Read-only counts found no gap left: there was
+no incoming traffic from October 13 12:18Z to October 18 11:06Z, and the
+messages on either side link to Honcho conclusions at the usual rate, so no
+re-learn is needed. Re-learning or replacing the owner's live memory waits for
+the owner's word.
 
 </current>
 
