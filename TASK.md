@@ -356,7 +356,7 @@ not yet run on the owner's installation:
   question once, in about 23 seconds.
 - Release test 2 (October 19): Nocheh drafted the requested group message and
   waited for approval, but told the owner to approve it in an old dashboard
-  name. The owner asked for a button under the message, in private chats and
+  name. Approved in the Inbox, it was delivered once about 2 seconds later. The owner asked for a button under the message, in private chats and
   groups. A pending action now gets Approve and Reject buttons in its own group
   or topic, or in the owner's private chat; only the owner's press decides and
   the card then shows the outcome. Stale "Nocheh Activity" and "Activity
