@@ -132,6 +132,7 @@ export function replyStatus(row: MessageRow): Status | null {
       return {label: 'Archived without transcription', tone: 'neutral', note: 'Original audio is kept'};
     if (row.assistant_error === 'not_addressed') return {label: 'Not addressed to the assistant', tone: 'neutral'};
     if (row.assistant_error === 'album_member') return {label: 'Answered with its album', tone: 'neutral'};
+    if (row.assistant_error === 'approval_button') return {label: 'Approve or Reject button pressed', tone: 'neutral'};
     return {label: 'No reply needed', tone: 'neutral'};
   }
   const states: Record<string, Status> = {

@@ -63,7 +63,7 @@ replace('  const { profile: scopedProfile } = useProfileScope();', '''  const { 
 replace('      <PluginSlot name="chat:top" />', '''      <PluginSlot name="chat:top" />
       <div className="border border-border rounded px-3 py-2 text-xs" role="status">
         Context: {nochehContext}. Select a profile to change context. Originals are archived before execution.
-        Shell, public-page inspection and HTTPS MCP requests appear in Nocheh Activity for approval. Scheduled runs are being integrated.
+        Shell, public-page inspection and HTTPS MCP requests appear in the Nocheh dashboard Inbox for approval. Scheduled runs are being integrated.
       </div>''')
 path.write_text(source)
 path = root / 'web/src/lib/api.ts'
@@ -94,7 +94,7 @@ replace('''      await api.updateCronJob(
 replace('''      <PluginSlot name="cron:top" />''', '''      <PluginSlot name="cron:top" />
       <div className="border border-border rounded px-3 py-2 text-sm">
         Prompt schedules run in the selected profile, with a fresh session for each fire.
-        Local results appear in Nocheh Activity. Telegram results require review before sending.
+        Local results appear in the Nocheh dashboard Inbox. Telegram results require review before sending.
         Missed runs are skipped; Catch up once runs one missed occurrence. Pause stops future starts; Cancel run stops active work.
         <a className="underline ml-2" href="/#inbox">Open run evidence and approvals</a>
       </div>''')

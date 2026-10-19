@@ -68,7 +68,7 @@ export async function proposeControlled(pool:pg.Pool,principal:Reader,value:unkn
   const decision=await evaluate(pool,proposal,current.state==='approved'?'exact_owner_approval':grant?.id);
   await recordEffect(pool,proposal,'proposed',decision,principal.turnEvent);
   await recordEffect(pool,proposal,decision.outcome==='deny'?'blocked':decision.outcome==='allow'?'allowed':'awaiting_approval',decision,principal.turnEvent,grant?.id);
-  return {id,state:(await controlledAction(pool,principal,id)).state,message:'Review the exact operation in Nocheh Activity or /action '+id+'. Execution waits for owner approval or a matching bounded permission.'};
+  return {id,state:(await controlledAction(pool,principal,id)).state,message:'Review the exact operation in the dashboard Inbox or /action '+id+'. Execution waits for owner approval or a matching bounded permission.'};
 }
 export async function controlledAction(pool:pg.Pool,principal:Reader,id:unknown) {
   await assertAudience(pool,principal);

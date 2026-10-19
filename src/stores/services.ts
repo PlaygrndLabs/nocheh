@@ -88,7 +88,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
-  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions);
+  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime);
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
