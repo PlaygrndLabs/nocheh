@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import {canonical, digest, type Envelope} from './archive.js';
 import {HttpError, object, string} from './http.js';
+import {telegramTopicId} from './spaces.js';
 
 /** External identity belongs to the source, never to an importer or local audience. */
 export interface SourceIdentity {
@@ -138,7 +139,7 @@ export function legacySource(value:Envelope):SourceDescriptor {
       external_id:desktop&&chatAuthor?canonical([external(senderChat.type)??'unknown',author]):author}});
     const reply=external(record(message.reply_to_message).message_id)??external(message.reply_to_message_id);
     if(reply)relations.push({kind:'reply_to',target:{...source,external_id:reply}});
-    const thread=external(message.message_thread_id);
+    const thread=external(desktop?message.message_thread_id:telegramTopicId(message));
     if(thread)relations.push({kind:'in_thread',target:{...source,kind:'thread',external_id:thread}});
     return {...fallback,adapter:desktop?'telegram.desktop':'telegram.bot-api',object:source,
       operation:body.edited_message||body.edited_channel_post?'update':'snapshot',relations};

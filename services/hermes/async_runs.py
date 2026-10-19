@@ -11,7 +11,9 @@ from .capture import canonical,immutable_file
 CLOSED={'done','failed','ambiguous','suppressed','cancelled'}
 STAGES={'admission','assistant','delivery'}
 CODES={'model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-       'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed'}
+       'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed',
+       # A turn's own refusals keep their cause; otherwise a permanent fault reads as a bare failure.
+       'unexpected_profile_tool','required_guard_unavailable','profile_scope_denied','invalid_process_scope_binding','unsupported_memory_compaction_revision','provider_not_configured'}
 
 
 def identity(body):
@@ -52,6 +54,11 @@ class AsyncRuns:
         if state not in CLOSED:state='ambiguous'
         receipt={'state':state}
         if result.get('error_code') in CODES:receipt['error_code']=result['error_code']
+        # Like the synchronous receipt: an unexplained runtime failure keeps its
+        # bounded Python type/function identifiers, never exception text.
+        for key in ('error_type','error_stage') if receipt.get('error_code')=='assistant_runtime_unavailable' else ():
+            value=result.get(key)
+            if isinstance(value,str) and re.fullmatch(r'[A-Za-z_]{1,64}',value):receipt[key]=value
         from .timing import safe
         # Durations only: no content, identifiers or exception text.
         timings=safe(result.get('timings'))

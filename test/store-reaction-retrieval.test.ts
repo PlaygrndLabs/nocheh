@@ -26,7 +26,7 @@ test('archive reads link current captured reactions while preserving removal, gu
   const actor=async(topic=17)=>{const b=await s.guards.state();return {admin:false,scope:group,space:group+'/topic/'+topic,generation:b.generation,guard_epoch:b.epoch};};
   try{
     await s.guards.reconcile();await s.guards.setMode('on');
-    const message={message_id:1,date:1700000000,chat:{id:Number(group),type:'supergroup'},message_thread_id:17,from:{id:7},text:'Review the packet.'};
+    const message={message_id:1,date:1700000000,chat:{id:Number(group),type:'supergroup'},message_thread_id:17,is_topic_message:true,from:{id:7},text:'Review the packet.'};
     const target=await capture('target',{update_id:1,message});
     const base={chat:message.chat,message_id:1,date:1700000010,user:{id:7}};
     const added=await capture('added',{update_id:2,message_reaction:{...base,old_reaction:[],new_reaction:[{type:'emoji',emoji:'✅'}]}});

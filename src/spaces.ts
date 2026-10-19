@@ -14,6 +14,16 @@ CREATE INDEX IF NOT EXISTS memory_shares_destination ON memory_shares(destinatio
 export type SpaceMode = 'isolated' | 'approved' | 'filtered';
 export interface SpacePreferences {mode:SpaceMode; sources:string[]; privacy_instructions:string}
 export const defaults:SpacePreferences = {mode:'approved', sources:[], privacy_instructions:'Do not disclose personal relationships, health, finances, identity details, credentials, private plans, or information about other people. Release only relevant non-personal knowledge. When uncertain, omit it.'};
+/**
+ * The forum topic a Telegram message belongs to. Bot API also sets message_thread_id on a reply
+ * chain in an ordinary supergroup (the chain's first message); that is not a topic, and Telegram
+ * rejects it as a delivery destination. Same rule as the Hermes adapter's routable thread id.
+ */
+export function telegramTopicId(message:Record<string,any>):unknown {
+  const chat=message.chat&&typeof message.chat==='object'?message.chat:{},raw=message.message_thread_id;
+  if(raw===undefined||raw===null)return undefined;
+  return (chat.type==='group'||chat.type==='supergroup')&&chat.is_forum===true||message.is_topic_message===true?raw:undefined;
+}
 export function spaceId(scope:string, topic?:unknown):string {
   if (topic===undefined || topic===null) return scope;
   if (!/^-?\d+$/.test(scope) || !Number.isSafeInteger(topic) || Number(topic)<=0) throw new HttpError(400,'invalid_topic');
@@ -29,7 +39,7 @@ export function eventSpace(scope:string, payload:unknown, channel='telegram'):st
   }
   if(channel!=='telegram')return scope;
   const body=object(payload), message=body.message ?? body.edited_message ?? body.channel_post ?? body.edited_channel_post;
-  return message ? spaceId(scope,object(message).message_thread_id) : scope;
+  return message ? spaceId(scope,telegramTopicId(object(message))) : scope;
 }
 
 export async function backfillSpaces(db:pg.PoolClient) {

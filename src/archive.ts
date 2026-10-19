@@ -96,6 +96,8 @@ export function envelope(value: unknown): Envelope {
   if (v.wire_base64 !== undefined && !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(string(v.wire_base64, 16000000))) throw new HttpError(400,'invalid_wire');
   return v as unknown as Envelope;
 }
+/** Another message quoted inside an update: its files belong to that message, not to this one. */
+const nestedMessages = new Set(['reply_to_message','external_reply','pinned_message']);
 export function attachmentRefs(payload: Record<string, unknown>): {kind:string; ref:string; metadata:Record<string,unknown>}[] {
   const refs = new Map<string, {kind:string; ref:string; metadata:Record<string,unknown>}>();
   function visit(value: unknown, kind: string, depth: number): void {
@@ -103,7 +105,7 @@ export function attachmentRefs(payload: Record<string, unknown>): {kind:string; 
     if (Array.isArray(value)) { for (const v of value) visit(v, kind, depth+1); return; }
     const item = value as Record<string,unknown>;
     if (typeof item.file_id === 'string') refs.set(item.file_id, {kind, ref:item.file_id, metadata:item});
-    for (const [key,v] of Object.entries(item)) visit(v, key, depth+1);
+    for (const [key,v] of Object.entries(item)) if (!nestedMessages.has(key)) visit(v, key, depth+1);
   }
   visit(payload, 'file', 0); return [...refs.values()];
 }
