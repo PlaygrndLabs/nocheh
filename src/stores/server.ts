@@ -122,6 +122,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
     if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
+    // The owner's task list: each call proves a current live owner-private turn.
+    if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,{state:url.searchParams.get('state')??'',after:url.searchParams.get('after')??'',limit:url.searchParams.get('limit')}));
+    if(req.method==='POST'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatCreate(principal,await readJson(req,64*1024)));
+    const chatTask=path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})$/);
+    if(req.method==='POST'&&chatTask)return json(res,200,await s.tasks.chatUpdate(principal,chatTask[1]!,await readJson(req,64*1024)));
     // The owner may read all of their own data from a live owner-private turn.
     // Fixed read views map onto existing owner handlers; no mutation is reachable.
     const ownerView=path.match(/^\/v1\/owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)$/);
@@ -233,6 +238,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
       return json(res,200,value);
     };
+    if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
     if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
     if(req.method==='POST'&&['/v1/tools/claim','/v1/tools/start','/v1/tools/finish'].includes(path)) {

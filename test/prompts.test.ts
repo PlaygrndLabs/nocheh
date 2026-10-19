@@ -15,7 +15,7 @@ test('owner instruction texts need content, a known name and the values Nocheh f
 
 test('runtime calls that run an instruction text carry only the owner’s valid replacements',async()=>{
   const control={query:async()=>({rows:[{texts:{'reply.owner':'Mine','reply.group':' ','bogus':'Ignored',
-    'learning.interpret':'Stays in Nocheh {trigger_id} {citable_ids}'}}]})} as any;
+    'learning.interpret':'Stays in Nocheh {trigger_id} {citable_ids}','telegram.not_allowed':'Also stays in Nocheh'}}]})} as any;
   const seen:[string,Record<string,unknown>][]=[];
   const call=withPrompts(async(operation,input)=>{seen.push([operation,input]);return {};},control);
   await call('run.start',{event_id:'e'});await call('guard.detect',{text:'t'});await call('status',{});
