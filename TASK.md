@@ -373,14 +373,16 @@ not yet run on the owner's installation:
   not allowed get a fixed reply, and that a message from one group to another
   is shown and approved because it is made from the first group's memory. A
   same-group post by the owner or a permitted participant now needs no
-  approval, a post to another group waits for the owner, a group turn can list
-  the groups where the person asking is allowed, every card goes to the
-  owner's private
-  chat, and an unallowed member who addresses Nocheh gets one editable reply
+  approval, a group turn can list the groups where the person asking is
+  allowed, cards go to the owner's private chat, and an unallowed member who addresses Nocheh gets one editable reply
   without a turn ([decision](docs/adr/0159-group-members-post-freely-and-approvals-go-private.md),
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)). Not yet run on the
-  owner's installation. Open question to the owner: whether memory should
+  owner's installation. The owner then decided that an allowed member reviews
+  their own message to another group where they are also allowed: the card
+  appears under the request in the group, and only that member or the owner
+  can press it ([decision](docs/adr/0161-requesters-review-their-own-cross-group-messages.md),
+  [check](test/store-approval-buttons.test.ts)). Open question to the owner: whether memory should
   stay per group, shared between groups only through owner sharing rules (the
   recommendation), or be shared across all groups or projects of one person.
 - Release test 3 (October 19) passed on the owner's installation: Hermes

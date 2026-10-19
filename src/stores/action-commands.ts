@@ -17,7 +17,9 @@ const reviewLimit=2200;
 
 /** Administrative commands use original owner-DM evidence, never editable text.
  * Approve and Reject buttons on an exact pending action go to the owner's
- * private chat; only the owner's own press decides it. */
+ * private chat, where only the owner's press decides it. A message from one
+ * group to another that its requester reviews gets its card in the group where
+ * it was asked, where that person or the owner decides it. */
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
     readonly call?:RuntimeCall){}
@@ -36,10 +38,16 @@ export class ActionCommandRepository {
     const title=(await this.access.stores.control.query("SELECT title FROM telegram_chat_observations WHERE chat_id=$1 AND state='available'",[chat])).rows[0]?.title;
     return typeof title==='string'&&title.trim()?`"${title.trim().slice(0,100)}"`:'a Telegram group';
   }
-  /** The exact content an owner decides on, or null when it is too long to review in Telegram.
-   * Cards always go to the owner's private chat. */
-  private async card(kind:ActionKind,id:string,source:any):Promise<{text:string;fingerprint:string;state:string}|null> {
-    const owner={admin:true,scope:null},from=await this.origin(source),asked=from?`Asked in ${await this.title(from)}.\n`:'';
+  /** Where an action's card goes: the requester's own chat and topic, or the owner's private chat. */
+  private async place(kind:ActionKind,id:string):Promise<{chat:string;topic?:string;reviewer?:string}|null> {
+    const reviewer=kind==='telegram'?await this.telegram.reviewer(id):null,owner=this.access.policy().owner_id;
+    if(!reviewer)return owner?{chat:owner}:null;
+    const [chat,topic]=reviewer.space.split('/topic/');
+    return {chat:chat!,...(topic?{topic}:{}),reviewer:reviewer.user};
+  }
+  /** The exact content to decide on, or null when it is too long to review in Telegram. */
+  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;fingerprint:string;state:string}|null> {
+    const owner={admin:true,scope:null},from=reviewed?null:await this.origin(source),asked=from?`Asked in ${await this.title(from)}.\n`:'';
     if(kind==='telegram') {
       const action=await this.telegram.inspect(owner,id),destination=String(action.arguments.destination);
       const topic=destination.includes('/topic/')?' (a topic)':'';
@@ -57,8 +65,8 @@ export class ActionCommandRepository {
     if(['failed','ambiguous'].includes(state))return 'Approved. See the dashboard Inbox for the result.';
     return kind==='telegram'?'Approved. Sending now.':'Approved.';
   }
-  /** Offer buttons on a new pending action in the owner's private chat; best
-   * effort, the Inbox always remains. */
+  /** Offer buttons on a new pending action to whoever reviews it; best
+   * effort, the owner's Inbox always remains. */
   async offer<T extends Record<string,any>>(kind:ActionKind,result:T):Promise<T> {
     const owner=this.access.policy().owner_id;
     if(result?.state!=='proposed'||typeof result.id!=='string'||!this.call||!owner)return result;
@@ -69,24 +77,25 @@ export class ActionCommandRepository {
       // blocks it anyway, and a standing permission runs it without a decision.
       const effect:Effect=kind==='telegram'?{id:row.id,kind:'telegram.send',scope:row.scope,profile:row.profile,fingerprint:row.fingerprint}:this.tools.effect(row);
       if((await evaluate(control,effect)).outcome!=='ask'||kind==='controlled'&&(await this.tools.grants(row)).length)return result;
-      const card=await this.card(kind,result.id,row.source_reference);
-      if(!card||card.state!=='proposed')return result;
-      const sent=await this.approval({kind:'card',chat_id:owner,id:result.id,text:card.text,
+      const place=await this.place(kind,result.id),card=place?await this.card(kind,result.id,row.source_reference,!!place.reviewer):null;
+      if(!place||!card||card.state!=='proposed')return result;
+      const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),id:result.id,text:card.text,
         buttons:[['Approve','na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],['Reject','nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
       if(sent?.state!=='done')return result;
-      return {...result,message:await this.origin(row.source_reference)?
+      return {...result,message:place.reviewer?
+        'This exact message for the other group was posted here with Approve and Reject buttons for the person who asked; nothing is sent until they press Approve. Say only, briefly, that they can check and approve it; do not repeat the draft.':
+        await this.origin(row.source_reference)?
         'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner; do not show the draft or details.':
         'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
   /** Show the decision on a card and remove its buttons; best effort. */
   async settle(kind:ActionKind,id:string) {
-    const owner=this.access.policy().owner_id;if(!owner)return;
     try {
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
-      const card=row?await this.card(kind,id,row.source_reference):null,outcome=card?this.outcome(kind,card.state):null;
-      if(card&&outcome)await this.approval({kind:'settle',chat_id:owner,id,text:`${card.text}\n\n${outcome}`});
+      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state):null;
+      if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`});
     }catch(error){if(!(error instanceof HttpError))throw error;}
   }
   /** A button press: true when it was an approval button, whatever its outcome. */
@@ -98,10 +107,13 @@ export class ActionCommandRepository {
     if(!data||typeof query.id!=='string')return false;
     const chat=String(query.message?.chat?.id??''),policy=this.access.policy();
     const answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text},10000);
-    if(!policy.owner_id||String(query.from?.id)!==policy.owner_id){await answer('Only the owner can approve or reject this.');return true;}
     const found=(await this.access.stores.control.query(`SELECT 'telegram' AS kind,id,fingerprint FROM telegram_action_requests WHERE left(id,40)=$1
       UNION ALL SELECT 'controlled',id,fingerprint FROM controlled_actions WHERE left(id,40)=$1`,[data[2]])).rows;
-    const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null;
+    const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
+    const reviewer=action?.kind==='telegram'?(await this.telegram.reviewer(action.id))?.user:undefined;
+    // The owner decides any card; the person who asked decides only their own card in their group.
+    if(!policy.owner_id||presser!==policy.owner_id&&!(reviewer&&presser===reviewer&&chat===(await this.place('telegram',action.id))?.chat)){
+      await answer(reviewer?'Only the person who asked or the owner can approve or reject this.':'Only the owner can approve or reject this.');return true;}
     if(!action){await answer('This request changed or no longer exists. Review it in the dashboard Inbox.');return true;}
     const kind=action.kind as ActionKind,decision=data[1]==='a'?'approve':'deny',owner={admin:true,scope:null};
     const body={id:action.id,fingerprint:action.fingerprint,decision,operation_id:'telegram-button:'+source.id};

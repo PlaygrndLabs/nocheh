@@ -145,6 +145,17 @@ export class TelegramActionRepository {
     // With separate topic memory a topic is its own audience; otherwise the whole group is.
     return this.access.policy().topic_memory==='topic'?destination===principal.space:destination.split('/topic/')[0]===principal.scope;
   }
+  /** A message from one group to another is reviewed by the person who asked
+   * when they are allowed in both groups: the approval only lets them see what
+   * will be sent. The owner reviews everything else, including their own requests. */
+  async reviewer(id:string):Promise<{user:string;space:string}|null> {
+    const row=(await this.stores.control.query('SELECT source_reference,space_id,destination FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
+    const source=row?.source_reference;if(source?.store!=='archive'||!row.space_id)return null;
+    const original=await this.access.archive.verify(source);if(original.origin!=='live'||original.channel!=='telegram')return null;
+    const user=await this.requester(source.id,original.scope),target=String(row.destination).split('/topic/')[0]!;
+    if(!user||user===this.access.policy().owner_id||target===original.scope||!this.allowedGroups(user).includes(target))return null;
+    return {user,space:row.space_id};
+  }
   /** The groups where a live group turn's writer is allowed, with their known names, for exact destinations. */
   async destinations(principal:Reader) {
     if(principal.admin||!principal.scope||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'group_turn_required');
