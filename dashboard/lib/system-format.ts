@@ -92,6 +92,8 @@ const serviceNames: Record<string, [string, string]> = {
   'honcho-postgres': ['Long-term memory database', 'Stores memories and search data'],
   'honcho-redis': ['Long-term memory cache', 'Speeds up memory lookups'],
   'honcho-provider-gateway': ['Long-term memory model access', 'Calls models for memory and tracks spending'],
+  'nocheh-miniapp': ['Telegram mini app', 'Home, Inbox and Tasks for you inside Telegram'],
+  'nocheh-tunnel': ['Mini app tunnel', 'Connects only the mini app to its public address'],
   'pgweb-archive': ['Archive viewer', 'Optional read-only look at the archive database'],
   'honcho-cli': ['Memory inspector', 'Optional one-off memory inspection'],
 };

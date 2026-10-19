@@ -3,6 +3,7 @@ import json
 import subprocess
 import time
 from pathlib import Path
+from tools.operations.installation import mini_app
 
 # name, tool, purpose, location, lifecycle/profile
 CATALOG=(
@@ -20,6 +21,8 @@ CATALOG=(
  ('honcho-postgres','PostgreSQL + pgvector','Memory, vectors and derivation jobs','docker','honcho'),
  ('honcho-redis','Redis','Honcho memory cache','docker','honcho'),
  ('honcho-provider-gateway','Honcho / Nocheh','Controlled provider access and embedding spending records','docker','honcho'),
+ ('nocheh-miniapp','Nocheh','Telegram mini app: Home, Inbox and Tasks for the owner in Telegram','docker','miniapp'),
+ ('nocheh-tunnel','Cloudflare Tunnel','Connects only the mini app to its public address','docker','miniapp'),
  ('pgweb-archive','pgweb','Optional read-only archive inspection','docker','optional'),
  ('honcho-cli','Honcho CLI','Optional one-shot memory inspection','docker','optional'),
 )
@@ -34,7 +37,8 @@ def containers(command,env):
 def describe(rows,config,host=None):
     observed={row['service']:row for row in rows};host=host or {};result=[]
     for name,tool,purpose,location,lifecycle in CATALOG:
-        expected='optional-stopped' if lifecycle=='optional' or lifecycle=='honcho' and config.get('NOCHEH_HONCHO_ENABLED')!='true' else 'completed' if lifecycle=='completed' else 'running'
+        off=lifecycle=='optional' or lifecycle=='honcho' and config.get('NOCHEH_HONCHO_ENABLED')!='true' or lifecycle=='miniapp' and not mini_app.enabled(config)
+        expected='optional-stopped' if off else 'completed' if lifecycle=='completed' else 'running'
         row=host.get(name,{}) if location=='host' else observed.pop(name,{})
         actual=row.get('state','stopped');health=row.get('health')
         if actual=='running':state='unhealthy' if health in ('unhealthy','starting') else 'running'

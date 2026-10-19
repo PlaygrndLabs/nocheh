@@ -226,7 +226,7 @@ def main():
         from tools.operations.installation.database_viewer import start
         return start(STATE, command, ROOT)
     if args.command in ('down', 'status', 'logs'):
-        command += ['--profile', 'tools','--profile','honcho','--profile','honcho-tools']
+        command += ['--profile', 'tools','--profile','honcho','--profile','honcho-tools','--profile','miniapp']
     if args.command=='status':
         sys.path.insert(0,str(ROOT))
         from tools.operations.installation.services import containers,describe,host_status

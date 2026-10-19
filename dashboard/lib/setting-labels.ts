@@ -8,6 +8,8 @@ export const settingLabels: Record<string, string> = {
   TELEGRAM_GROUP_REPLIES: 'When Nocheh answers in groups',
   TELEGRAM_BOT_NAMES: 'Names that call Nocheh',
   TELEGRAM_TOPIC_MEMORY: 'Topic memory',
+  NOCHEH_MINI_APP_URL: 'Mini app address',
+  CLOUDFLARE_TUNNEL_TOKEN: 'Mini app tunnel token',
   NOCHEH_PROVIDER: 'Default provider',
   NOCHEH_MODEL: 'Default model',
   NOCHEH_REPLY_PROVIDER: 'Replies provider',
