@@ -43,14 +43,29 @@ export class SourceRetirementRepository {
     return (await this.archive.pool.query(`SELECT o.event_id FROM source_observations o
       JOIN source_revisions r ON r.id=o.revision_id WHERE r.object_id=$1`,[id])).rows.map(row=>row.event_id as string);
   }
-  /** Every captured revision of an incoming Telegram message, oldest first; empty for any other event. */
+  /**
+   * Every captured revision of an incoming Telegram message, oldest first; empty for any other event.
+   * Exported copies come first, newest edit last, so a live observation of the same message always wins.
+   */
   async revisions(eventId:string):Promise<string[]> {
     return (await this.archive.pool.query(`WITH target AS (SELECT r.object_id FROM events e
         JOIN source_observations o ON o.event_id=e.id JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
-        WHERE e.id=$1 AND e.channel='telegram' AND e.kind='telegram_update' AND s.platform='telegram' AND s.kind='message')
+        WHERE e.id=$1 AND e.channel='telegram' AND (e.kind='telegram_update' OR e.kind LIKE 'telegram\\_desktop\\_%') AND s.platform='telegram' AND s.kind='message')
       SELECT o.event_id FROM target JOIN source_revisions r ON r.object_id=target.object_id JOIN source_observations o ON o.revision_id=r.id
-        JOIN events e ON e.id=o.event_id WHERE e.kind='telegram_update'
-      ORDER BY CASE WHEN e.revision ~ '^[0-9]{1,18}$' THEN e.revision::numeric END NULLS LAST,e.received_at,e.id`,[eventId])).rows.map(row=>row.event_id as string);
+        JOIN events e ON e.id=o.event_id,LATERAL (SELECT CASE WHEN e.kind='telegram_update' THEN NULL
+          ELSE convert_from(e.payload,'UTF8')::jsonb->'message'->>'edited_unixtime' END AS edited) desktop
+        WHERE e.channel='telegram' AND (e.kind='telegram_update' OR e.kind LIKE 'telegram\\_desktop\\_%')
+      ORDER BY e.kind='telegram_update',CASE WHEN e.kind='telegram_update' AND e.revision ~ '^[0-9]{1,18}$' THEN e.revision::numeric END NULLS LAST,
+        CASE WHEN desktop.edited ~ '^[0-9]{1,18}$' THEN desktop.edited::numeric END NULLS FIRST,e.received_at,e.id`,[eventId])).rows.map(row=>row.event_id as string);
+  }
+  /** Imported copies of messages the bot also captured live; the live copy stands for them. */
+  async liveCopies(eventIds:string[]):Promise<Set<string>> {
+    if(!eventIds.length)return new Set();
+    return new Set((await this.archive.pool.query(`SELECT DISTINCT o.event_id FROM source_observations o
+      JOIN events e ON e.id=o.event_id JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
+      WHERE o.event_id=ANY($1::text[]) AND e.origin='import' AND s.platform='telegram' AND s.kind='message' AND EXISTS (SELECT 1 FROM source_revisions lr
+        JOIN source_observations lo ON lo.revision_id=lr.id JOIN events le ON le.id=lo.event_id
+        WHERE lr.object_id=r.object_id AND le.kind='telegram_update' AND le.origin='live')`,[eventIds])).rows.map(row=>row.event_id as string));
   }
   async retiredEvents(eventIds:string[]):Promise<Set<string>> {
     if(!eventIds.length)return new Set();

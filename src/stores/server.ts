@@ -331,10 +331,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const reviews=await actionReviews(s.stores.control,candidates.filter(row=>row.kind==='telegram_update').map(row=>row.id),'separated');
         const matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters,reviews.get(row.id)?.state));
         const page=matched.slice(0,50);
-        const retiredEvents=await s.retirements.retiredEvents(page.map(row=>row.id));
+        const retiredEvents=await s.retirements.retiredEvents(page.map(row=>row.id)),liveCopies=await s.retirements.liveCopies(page.map(row=>row.id));
         const [replyPreviews,transcriptPreviews,copies]=await Promise.all([
           archiveReplyPreviews(s.stores.archive,s.stores.control,page),archiveTranscriptPreviews(s.stores.derived,page),agentCopies(s.stores.derived,page.map(row=>row.id))]);
         const records=page.map(({payload,artifact_kinds,original_text,...row})=>{const original=JSON.parse(payload.toString());return {...row,...stateById.get(row.id),retired:retiredEvents.has(row.id),
+          ...(liveCopies.has(row.id)?{live_copy:true}:{}),
           sender:messageSender(row.kind,original),agent_copy:copies.get(row.id),
           ...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
           text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,original,artifact_kinds??[]),
