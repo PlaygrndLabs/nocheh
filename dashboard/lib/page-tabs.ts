@@ -6,6 +6,7 @@ import {href, type PageId} from './routes';
 
 export const pageTabs = {
   inbox: {waiting: 'Waiting', allowed: 'Allowed actions', history: 'History'},
+  tasks: {open: 'Open', done: 'Done', dropped: 'Dropped'},
   chats: {chats: 'Chats', rules: 'Sharing'},
   messages: {messages: 'Messages', import: 'Import'},
   memory: {

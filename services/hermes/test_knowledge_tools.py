@@ -70,12 +70,35 @@ class KnowledgeToolsTests(unittest.TestCase):
                      '/v1/projects/'+identity+'/context','/v1/organization/delegations',
                      '/v1/organization/delegations/'+identity+'/resume','/v1/knowledge/proposals',
                      '/v1/knowledge/proposals/'+identity+'/decide','/v1/knowledge/proposals/'+identity+'/undo',
-                     '/v1/prompts','/v1/entities/claims/'+identity+'/history?before=3'):
+                     '/v1/prompts','/v1/entities/claims/'+identity+'/history?before=3',
+                     '/v1/tasks?state=done','/v1/tasks/'+identity):
             self.assertTrue(allowed_path(path),path)
         for path in ('/v1/decisions/unknown/'+identity,'/v1/knowledge/proposals/'+identity+'/execute',
                      '/v1/knowledge/proposals/'+identity+'/../secrets','/v1/organization/activate',
-                     '/v1/conversations/refresh','/v1/security/transport'):
+                     '/v1/conversations/refresh','/v1/security/transport','/v1/tasks/'+identity+'/delete'):
             self.assertFalse(allowed_path(path),path)
 
 
 if __name__=='__main__':unittest.main()
+
+
+class TaskToolTests(unittest.TestCase):
+    def test_task_tool_uses_only_owner_task_routes_and_explains_failures(self):
+        identity='a'*64
+        self.assertIn('nocheh_tasks',ALLOWED_TOOLS)
+        with patch.object(archive_tools,'request',return_value={'tasks':[]}) as request:
+            archive_tools.tasks_tool({'action':'list','state':'done'})
+            request.assert_called_once_with('/v1/owner/tasks?state=done')
+            request.reset_mock()
+            archive_tools.tasks_tool({'action':'add','title':'Call the bank','due_on':'2030-01-04'})
+            request.assert_called_once_with('/v1/owner/tasks',{'title':'Call the bank','due_on':'2030-01-04'})
+            request.reset_mock()
+            archive_tools.tasks_tool({'action':'update','id':identity,'expected_revision':2,'state':'done'})
+            request.assert_called_once_with('/v1/owner/tasks/'+identity,{'expected_revision':2,'state':'done'})
+            request.reset_mock()
+            self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'update','id':'../tasks','state':'done'}))['error'],'invalid_task_id')
+            self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'delete'}))['error'],'invalid_task_action')
+            request.assert_not_called()
+        for status,code in ((409,'task_changed_list_again'),(403,'owner_private_conversation_only'),(500,'tasks_unavailable')):
+            with patch.object(archive_tools,'request',side_effect=HTTPError('http://archive',status,'x',{},io.BytesIO(b'{}'))):
+                self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'list'}))['error'],code)

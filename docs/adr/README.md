@@ -27,6 +27,7 @@ Desktop exports sharing proven Telegram identities: [0156](0156-desktop-exports-
 Group turns seeing recent unaddressed messages: [0157](0157-group-turns-see-recent-unaddressed-messages.md).
 Approve and Reject buttons in Telegram: [0158](0158-telegram-approval-buttons.md).
 Group posts without approval, private approval cards and refusals: [0159](0159-group-members-post-freely-and-approvals-go-private.md).
+The owner's own task list: [0160](0160-owner-task-list.md).
 Requesters reviewing their own cross-group messages: [0161](0161-requesters-review-their-own-cross-group-messages.md).
 Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).

@@ -48,3 +48,29 @@ test('knowledge broker exposes only typed routes and preserves the scoped creden
     assert.equal(scopedRoute('POST','/v1/knowledge/proposals/'+proposal+'/decide'),false);
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
+
+test('task routes reach storage only from the owner private turn and never expose the dashboard task routes',async()=>{
+  const secret='synthetic-test-secret',source='a'.repeat(64),task='c'.repeat(64),effects:string[]=[],calls:string[]=[];
+  const pool={query:async(sql:string,values?:unknown[])=>{
+    if(sql.includes('INSERT INTO security_events')&&values?.[1]==='allowed')effects.push(String(values[2]));
+    return {rows:sql.includes('SELECT p.revision')?[{revision:1,document:{version:1,rules:[]}}]:[],rowCount:1};}} as unknown as pg.Pool;
+  const binding=async(principal:Reader):Promise<TurnBinding>=>({event_id:principal.turnEvent!,scope:principal.scope??'42',profile:'synthetic',logical_profile:'synthetic',owner:principal.scope===null,guard_epoch:1});
+  const server=brokerServer({pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),
+    storage:{binding,assertAudience:async()=>{},turnFile:async()=>{throw Error();}},
+    fetch:async url=>{calls.push(new URL(String(url)).pathname);return Response.json({tasks:[]});}});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+    const address=server.address();assert.ok(address&&typeof address!=='string');const base='http://127.0.0.1:'+address.port;
+    const credential=(scope:string|null)=>turnToken(secret,scope,Date.now()+600000,source,{space:scope??'42',revision:1,guard_epoch:1,purpose:'assistant'});
+    const request=(path:string,body:unknown|undefined,key=credential(null))=>fetch(base+path,{method:body===undefined?'GET':'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
+    assert.equal((await request('/v1/owner/tasks?state=open',undefined)).status,200);
+    assert.equal((await request('/v1/owner/tasks',{title:'Synthetic task'})).status,200);
+    assert.equal((await request('/v1/owner/tasks/'+task,{expected_revision:1,state:'done'})).status,200);
+    assert.deepEqual(calls,['/v1/owner/tasks','/v1/owner/tasks','/v1/owner/tasks/'+task]);
+    assert.deepEqual(effects,['memory.read','memory.write','memory.write'],'changing a task is recorded as a memory write');
+    for(const [path,body] of [['/v1/owner/tasks',undefined],['/v1/owner/tasks',{title:'Group task'}]] as const)assert.equal((await request(path,body,credential('-10'))).status,403);
+    for(const path of ['/v1/tasks','/v1/tasks/'+task])assert.equal((await request(path,{operation_id:'x',title:'Dashboard only'})).status,403);
+    assert.equal(calls.length,3,'groups and dashboard task routes never reach storage');
+    assert.equal(scopedRoute('POST','/v1/owner/tasks/'+task+'/delete'),false);
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});

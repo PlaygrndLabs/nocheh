@@ -4,6 +4,7 @@ import base64
 import json
 import math
 import os
+import re
 import time
 import urllib.request
 
@@ -154,6 +155,16 @@ def register(ctx):
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'view':{'type':'string','enum':list(OWNER_VIEWS)},'space':{'type':'string'},'q':{'type':'string'},'after':{'type':'string'}},
             'required':['view'],'additionalProperties':False}},handler=owner_read)
+    name='nocheh_tasks';description=('The owner\'s own task list, kept by Nocheh. Use it when the owner asks you to remember something to do, '
+        'to list what is open or finished, or to finish, drop, reopen, rename or reschedule a task. action=list reads tasks (state open by default; '
+        'done, dropped or all). action=add needs title, optionally notes and due_on (a calendar day, YYYY-MM-DD; null clears it). action=update needs '
+        'id and the expected_revision from the latest list, plus the fields to change; state done finishes a task. Available only in the owner private conversation.')
+    ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
+        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
+            'action':{'type':'string','enum':['list','add','update']},'state':{'type':'string','enum':['open','done','dropped','all']},
+            'id':{'type':'string'},'expected_revision':{'type':'integer','minimum':1},'title':{'type':'string','maxLength':300},
+            'notes':{'type':'string','maxLength':4000},'due_on':{'type':['string','null']},'after':{'type':'string'}},
+            'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_action_status';description='Read a proposed controlled action and its separate execution result in your authorized scope.'
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'required':['id'],'additionalProperties':False}},handler=controlled_status)
@@ -172,6 +183,30 @@ def owner_read(args,**kwargs):
         # Bound tool context; the dashboard keeps the complete owner views.
         return value if len(value)<=24000 else json.dumps({'view':view,'excerpt':value[:22000],'truncated':True},ensure_ascii=False)
     except Exception:return json.dumps({'error':'owner_read_unavailable','note':'Available only in the owner private conversation.'})
+
+
+def tasks_tool(args,**kwargs):
+    from urllib.error import HTTPError
+    from urllib.parse import urlencode
+    try:
+        action=args.get('action')
+        if action=='list':
+            query={key:str(args[key]) for key in ('state','after') if args.get(key)}
+            return json.dumps(request('/v1/owner/tasks'+('?'+urlencode(query) if query else '')),ensure_ascii=False)
+        if action=='add':
+            body={key:args[key] for key in ('title','notes','due_on') if key in args}
+            return json.dumps(request('/v1/owner/tasks',body),ensure_ascii=False)
+        if action=='update':
+            task=str(args.get('id',''))
+            if not re.fullmatch(r'[a-f0-9]{64}',task):return json.dumps({'error':'invalid_task_id'})
+            body={key:args[key] for key in ('expected_revision','title','notes','due_on','state') if key in args}
+            return json.dumps(request('/v1/owner/tasks/'+task,body),ensure_ascii=False)
+        return json.dumps({'error':'invalid_task_action'})
+    except HTTPError as error:
+        # The broker keeps storage error text private; the status still tells the next step.
+        return json.dumps({'error':{400:'invalid_task_request',403:'owner_private_conversation_only',404:'task_not_found',
+            409:'task_changed_list_again'}.get(error.code,'tasks_unavailable')})
+    except Exception:return json.dumps({'error':'tasks_unavailable'})
 
 
 def controlled_tool(kind,args):
