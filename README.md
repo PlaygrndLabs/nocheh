@@ -26,7 +26,7 @@ Nocheh turns that around. The source data is yours and portable, memory is built
 
 ## Quick start
 
-You need Docker with Compose, Node 24 and Python 3, a model provider key, and an OpenAI API key for memory search. To talk to Nocheh through Telegram, you also need a bot token from [BotFather](https://t.me/BotFather).
+You need Docker with Compose, Node 26 and Python 3, a model provider key, and an OpenAI API key for memory search. To talk to Nocheh through Telegram, you also need a bot token from [BotFather](https://t.me/BotFather).
 
 1. Install and create your local settings. `init` writes an ignored `.env` with generated internal passwords:
 

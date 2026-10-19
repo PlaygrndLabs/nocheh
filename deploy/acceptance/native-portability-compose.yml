@@ -3,10 +3,11 @@
 name: ${NOCHEH_NATIVE_FIXTURE_PROJECT:?Explicit native fixture project required}
 services:
   honcho-postgres:
-    image: pgvector/pgvector:0.8.7-pg17-bookworm@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0
     mem_limit: 512m
     command: [postgres, -c, shared_buffers=32MB, -c, max_connections=32, -c, cluster_name=nocheh-native-portable-fixture]
     environment:
+      PGDATA: /var/lib/postgresql/data
       POSTGRES_DB: honcho_experiment
       POSTGRES_USER: experiment
       POSTGRES_PASSWORD: synthetic-native-portable-not-a-real-credential
