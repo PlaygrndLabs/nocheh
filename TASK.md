@@ -282,6 +282,18 @@ keeps the time it was learned ([native memory](src/stores/native-memory.ts),
 [check](test/store-native-memory.test.ts)). Messages written earlier keep their
 write time until their session is rebuilt.
 
+Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
+and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
+re-learn every chat or chosen chats from their saved messages, or replace the
+workspace with a new one that learns the archive again or starts empty, each
+after an estimate ([decision](docs/adr/0153-owner-reruns-and-replaces-honcho-memory.md),
+[checks](test/store-memory-rebuild.test.ts),
+[plugin checks](services/honcho/test_provenance.py),
+[browser check](test/dashboard-pages.browser.mjs)). Pending: a live retry of the
+October 13–18 failed learning on the owner's installation (a pull is enough;
+development reloads the Honcho plugin from source); re-learning or replacing
+the owner's live memory waits for the owner's word.
+
 </current>
 
 <verification>

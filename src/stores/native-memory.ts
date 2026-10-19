@@ -5,7 +5,7 @@ import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inspectRequest} from '../guard.js';
 import type {HonchoCall} from '../honcho.js';
-import {parentSpace,recallCondition} from '../spaces.js';
+import {parentSpace,recallCondition,validateSpace} from '../spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
@@ -240,6 +240,9 @@ export class NativeMemoryRepository {
   /** New work in a session marks the workspace as building until Honcho finishes it. */
   private async changed(db:pg.PoolClient,workspace:string,key:string) {
     await db.query('UPDATE memory_sessions SET work_revision=work_revision+1,updated_at=now() WHERE workspace=$1 AND key=$2',[workspace,key]);
+    await this.building(db,workspace);
+  }
+  private async building(db:pg.PoolClient,workspace:string) {
     const changed=(await db.query("UPDATE memory_generations SET state='building',work_revision=work_revision+1 WHERE id=$1 AND state<>'retired' RETURNING work_revision",[workspace])).rows[0];
     if(!changed)throw new HttpError(409,'memory_context_retired');
     await requestWorkflow(db,'honcho','generation:'+workspace,changed.work_revision);
@@ -432,18 +435,23 @@ export class NativeMemoryRepository {
   }
   /**
    * Fresh start: the installation moves to a new, empty Honcho workspace that learns from messages received from now on,
-   * and every earlier Nocheh workspace in Honcho is deleted with its Nocheh records. Original messages stay in the archive.
+   * or, from the archive, from every saved message again. Every earlier Nocheh workspace in Honcho is deleted with its
+   * Nocheh records. Original messages stay in the archive.
    */
   async freshStart(principal:Reader,input:unknown) {
     admin(principal);const body=object(input);
-    if(Object.keys(body).some(k=>!['expected_revision','operation_id'].includes(k))||!Number.isSafeInteger(body.expected_revision))
+    if(Object.keys(body).some(k=>!['expected_revision','operation_id','from_archive'].includes(k))||!Number.isSafeInteger(body.expected_revision)||
+      body.from_archive!==undefined&&typeof body.from_archive!=='boolean')
       throw new HttpError(400,'invalid_memory_fresh_start');
+    // From the archive, the new workspace learns every saved message the owner allows again: the refresh this command
+    // requests pages the archive, and a retired or withdrawn message is refused as it is for any new write.
+    const history=body.from_archive===true;
     // Only workspaces Nocheh recorded as its own memory generations are deleted; anything else in Honcho is left alone.
     await new OwnerCommands(this.control).run(principal,string(body.operation_id,200),body,async db=>{
       const row=(await db.query('SELECT * FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
       if(row.revision!==body.expected_revision)throw new HttpError(409,'memory_connection_conflict');
-      await db.query(`UPDATE memory_engine_connection SET workspace_revision=workspace_revision+1,attached_at=now(),include_history=false,
-        revision=revision+1 WHERE singleton`);
+      await db.query(`UPDATE memory_engine_connection SET workspace_revision=workspace_revision+1,attached_at=now(),include_history=$1,
+        revision=revision+1 WHERE singleton`,[history]);
       await db.query("UPDATE memory_generations SET state='retired' WHERE state<>'retired'");
       for(const {id} of (await db.query('SELECT id FROM memory_generations')).rows) {
         await db.query('INSERT INTO memory_workspace_deletions(workspace) VALUES($1) ON CONFLICT DO NOTHING',[id]);
@@ -452,6 +460,74 @@ export class NativeMemoryRepository {
       return {revision:row.revision+1};
     });
     return this.status();
+  }
+  private async attachedWorkspace() {
+    const connection=(await this.control.query('SELECT attached,verified FROM memory_engine_connection WHERE singleton')).rows[0];
+    if(!connection.attached||!connection.verified)throw new HttpError(409,'honcho_memory_detached');
+    const workspace=await this.workspace(await this.guards.state());if(!workspace)throw new HttpError(409,'memory_workspace_missing');
+    await this.current(workspace.id);return workspace.id as string;
+  }
+  /** Chosen chats as Honcho audiences: the owner's private chat is the owner audience, and a group includes its topics. */
+  private chosen(spaces:unknown):string[]|null {
+    if(spaces===null||spaces===undefined)return null;
+    if(!Array.isArray(spaces)||spaces.length<1||spaces.length>100)throw new HttpError(400,'invalid_memory_scope');
+    const owner=this.owner;return [...new Set(spaces.map(space=>{const value=validateSpace(space);return value===owner?'owner':value;}))];
+  }
+  private async scope(workspace:string,audiences:string[]|null) {
+    return (await this.control.query(`SELECT count(DISTINCT s.session_id) FILTER (WHERE s.kind='conversation')::int AS conversations,
+      count(DISTINCT s.session_id)::int AS sessions,count(DISTINCT r.source_reference->>'id') FILTER (WHERE r.projection_reference IS NULL)::int AS messages,
+      count(DISTINCT r.projection_reference->>'id')::int AS interpretations,coalesce(array_agg(DISTINCT s.session_id),'{}') AS ids
+      FROM memory_sessions s LEFT JOIN memory_ingestion_receipts r ON r.session_id=s.session_id AND r.retired_at IS NULL
+      WHERE s.workspace=$1 AND ($2::text[] IS NULL OR s.audience=ANY($2::text[]) OR split_part(s.audience,'/topic/',1)=ANY($2::text[]))`,
+      [workspace,audiences])).rows[0] as {conversations:number;sessions:number;messages:number;interpretations:number;ids:string[]};
+  }
+  /** What each way of re-running Honcho memory would do, so the owner can weigh its cost first. */
+  async rebuildEstimate(principal:Reader,spaces:string[]) {
+    admin(principal);
+    const audiences=this.chosen(spaces.length?spaces:null),workspace=await this.workspace(await this.guards.state());
+    const policy=this.contexts.access.policy(),chats=[policy.owner_id,...policy.group_ids].filter((value):value is string=>!!value);
+    const saved=(await this.contexts.access.stores.archive.query(`SELECT count(*)::int AS count FROM events WHERE origin='live' AND scope=ANY($1::text[])
+      AND kind=ANY('{telegram_update,telegram_delivered_message,browser_input,browser_delivered_message}'::text[])`,[chats])).rows[0].count as number;
+    let failed:number|null=null;
+    if(workspace)try {
+      const found=await this.call('/v3/workspaces/'+workspace.id+'/nocheh/failed-learning');
+      if(Number.isSafeInteger(found?.failed)&&found.failed>=0)failed=found.failed;
+    } catch {}
+    const {ids:_ids,...relearn}=workspace?await this.scope(workspace.id,audiences):{ids:[],conversations:0,sessions:0,messages:0,interpretations:0};
+    return {workspace:workspace?.id??null,failed_learning:failed,relearn,replace:{saved_messages:saved}};
+  }
+  /** Ask Honcho to run again the learning that ended in a terminal error, such as a provider outage.
+   * Its saved messages are learned from where they are; nothing is resent. */
+  async retryFailedLearning(principal:Reader) {
+    admin(principal);const workspace=await this.attachedWorkspace();
+    const result=await this.call('/v3/workspaces/'+workspace+'/nocheh/failed-learning/retry',{});
+    if(!Number.isSafeInteger(result?.retried)||result.retried<0)throw new HttpError(502,'invalid_honcho_retry');
+    if(result.retried) {
+      const db=await this.control.connect();
+      try{await db.query('BEGIN');await this.building(db,workspace);await db.query('COMMIT');}
+      catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    }
+    return {retried:result.retried as number,status:await this.status()};
+  }
+  /** Re-learn chosen chats, or every chat: each of their Honcho sessions is replaced by a new one holding the
+   * still-valid saved messages, and the old session leaves Honcho with every conclusion derived from it. */
+  async relearn(principal:Reader,input:unknown) {
+    admin(principal);const body=object(input);
+    if(Object.keys(body).some(k=>!['spaces','operation_id'].includes(k)))throw new HttpError(400,'invalid_memory_scope');
+    const audiences=this.chosen(body.spaces),workspace=await this.attachedWorkspace(),{ids,...scope}=await this.scope(workspace,audiences);
+    const db=await this.control.connect();
+    try {
+      await db.query('BEGIN');
+      // A rebuilt session gets a new id, so asking twice before it runs re-learns it once.
+      for(const session of ids)await requestWorkflow(db,'honcho','relearn:'+session);
+      await db.query('COMMIT');
+    } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    return scope;
+  }
+  async relearnSession(sessionId:string):Promise<boolean> {
+    const session=(await this.control.query('SELECT workspace,key FROM memory_sessions WHERE session_id=$1',[sessionId])).rows[0];
+    if(!session)return false;
+    await this.current(session.workspace);await this.rebuild(session.workspace,session.key);return true;
   }
   /** Remove one earlier workspace from Honcho: its sessions first, as Honcho requires, then the workspace and Nocheh's records of it. */
   async retireWorkspace(id:string,authority:ExecutionAuthority):Promise<boolean> {

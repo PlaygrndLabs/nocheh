@@ -10,7 +10,9 @@ from tools.operations.archive.archive import API
 def main(arguments):
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest='action',required=True)
-    honcho=commands.add_parser('honcho');honcho.add_argument('mode',choices=('status','attach','detach','fresh-start'),default='status',nargs='?');honcho.add_argument('--include-history',action='store_true');honcho.add_argument('--catch-up',action='store_true')
+    honcho=commands.add_parser('honcho');honcho.add_argument('mode',choices=('status','attach','detach','fresh-start','estimate','retry-failed','relearn'),default='status',nargs='?');honcho.add_argument('--include-history',action='store_true');honcho.add_argument('--catch-up',action='store_true')
+    honcho.add_argument('--from-archive',action='store_true',help='fresh-start: learn every saved message again instead of starting empty')
+    honcho.add_argument('--chat',action='append',default=[],help='estimate/relearn: a chat or topic ID; repeat for more; omit for every chat')
     spaces=commands.add_parser('spaces');spaces.add_argument('--after',default='')
     for name in ('policy','shares','preview'):
         command=commands.add_parser(name);command.add_argument('--space',required=True)
@@ -33,7 +35,10 @@ def main(arguments):
         if args.mode=='status':result=api.call(prefix+'honcho')
         elif args.mode=='fresh-start':
             status=api.call(prefix+'honcho')
-            result=api.call(prefix+'honcho/fresh-start',{'expected_revision':status['connection']['revision'],'operation_id':str(uuid.uuid4())})
+            result=api.call(prefix+'honcho/fresh-start',{'expected_revision':status['connection']['revision'],'operation_id':str(uuid.uuid4()),'from_archive':args.from_archive})
+        elif args.mode=='estimate':result=api.call(prefix+'honcho/rebuild?'+urlencode([('space',chat) for chat in args.chat]))
+        elif args.mode=='retry-failed':result=api.call(prefix+'honcho/retry-failed',{})
+        elif args.mode=='relearn':result=api.call(prefix+'honcho/rebuild',{'spaces':args.chat} if args.chat else {})
         else:
             status=api.call(prefix+'honcho')
             result=api.call(prefix+'honcho',{'attached':args.mode=='attach','include_history':args.include_history,

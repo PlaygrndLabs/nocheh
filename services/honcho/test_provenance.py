@@ -1,5 +1,5 @@
 import unittest
-from .provenance import DESCENDANTS_SQL, ancestry, failed_queue_items, session_descendants
+from .provenance import DESCENDANTS_SQL, ancestry, failed_learning_count, failed_queue_items, retry_failed_learning, session_descendants
 
 
 class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
@@ -18,6 +18,27 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('processed AND error IS NOT NULL',sql)
         db.failed=False
         self.assertFalse(await failed_queue_items('owned-workspace',db))
+
+    async def test_failed_learning_is_counted_and_returned_to_the_queue_only_for_its_workspace(self):
+        class Result:
+            rowcount=3
+            def scalar_one(self): return 3
+        class Database:
+            def __init__(self): self.calls=[];self.commits=0
+            async def execute(self, statement, values):
+                self.calls.append((' '.join(str(statement).split()),values));return Result()
+            async def commit(self): self.commits+=1
+        db=Database()
+        self.assertEqual(await failed_learning_count('owned-workspace',db),3)
+        self.assertEqual(await retry_failed_learning('owned-workspace',db),3)
+        self.assertEqual(db.commits,1)
+        for sql,values in db.calls:
+            self.assertEqual(values,{'workspace':'owned-workspace'})
+            self.assertIn('workspace_name=:workspace',sql)
+            self.assertIn("task_type IN ('representation','summary','dream') AND processed AND error IS NOT NULL",sql)
+        retry=db.calls[-1][0]
+        self.assertTrue(retry.startswith('UPDATE queue SET processed=false, error=NULL'),'a retried task is unprocessed again, with no error kept')
+        self.assertNotIn('messages',retry,'retrying never changes or resends a saved message')
 
     async def test_ancestry_follows_parents_deduplicates_cycles_and_reports_missing_evidence(self):
         a, b, c = 'a'*21, 'b'*21, 'c'*21
