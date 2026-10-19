@@ -53,7 +53,8 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(general.state,'approved','the whole group is one audience by default');assert.match(general.message,/Confirm in one short sentence/);
     topicMemory='topic';
     const shut=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Another topic'}));
-    assert.equal(shut.state,'proposed','with separate topic memory another topic needs the owner');assert.equal(last('card').chat_id,'123');
+    assert.equal(shut.state,'proposed','with separate topic memory another topic is reviewed like another group');
+    assert.deepEqual([last('card').chat_id,last('card').topic],[group,'17'],'by the person who asked, under their request');
     topicMemory='group';
     const across=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:other+'/topic/4',text:'For the other group'}));
     assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for a review');

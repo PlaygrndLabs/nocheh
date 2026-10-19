@@ -379,7 +379,8 @@ not yet run on the owner's installation:
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)). Not yet run on the
   owner's installation. The owner then decided that an allowed member reviews
-  their own message to another group where they are also allowed: the card
+  their own message to another group where they are also allowed, or to
+  another topic when topics keep separate memory: the card
   appears under the request in the group, and only that member or the owner
   can press it ([decision](docs/adr/0161-requesters-review-their-own-cross-group-messages.md),
   [check](test/store-approval-buttons.test.ts)). Open question to the owner: whether memory should
