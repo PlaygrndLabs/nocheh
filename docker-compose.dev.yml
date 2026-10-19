@@ -100,6 +100,18 @@ services:
     depends_on:
       nocheh-app: {condition: service_healthy}
 
+  nocheh-miniapp:
+    # The security image is the runtime image; the mini app runs the watched build.
+    image: ${NOCHEH_DEV_PROJECT:?}:security
+    build: !reset null
+    restart: "no"
+    command: [node, --watch, dist/src/mini-app.js]
+    volumes:
+      - dev_dist:/app/dist:ro
+      - dev_web_dist:/app/dashboard/dist:ro
+  nocheh-tunnel:
+    restart: "no"
+
   hermes:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
     build: !reset null

@@ -90,6 +90,35 @@ are tracked by target and actor; anonymous counts are separate. Changes and
 removals invalidate stale inferred meaning without sending a new reply to an old
 message. If no update is delivered, Nocheh cannot infer a reaction change.
 
+## Mini app
+
+The mini app shows Home, Inbox and Tasks inside Telegram. It opens from the
+button next to the message box in the owner's private chat with Nocheh. Only
+the owner's Telegram account gets in: every request carries the launch data
+Telegram signs, and the mini app checks that signature with Telegram's public
+key and the bot's public ID. Settings and System stay on the dashboard.
+
+The mini app runs as its own small service with no credentials. A Cloudflare
+tunnel connects it, and nothing else, to an https address on the owner's own
+domain; the tunnel only opens an outgoing connection, so no port is opened on
+the computer.
+
+To turn it on:
+
+1. In Cloudflare, open Zero Trust, then Networks, then Tunnels, and create a
+   tunnel of type Cloudflared. Copy its token; skip the install step.
+2. Add a public hostname to the tunnel, for example `nocheh` on your domain,
+   with service type HTTP and URL `nocheh-miniapp:8788`.
+3. In the dashboard, open Settings, then Telegram. Under Mini app, enter the
+   address (such as `https://nocheh.example.com`) and paste the tunnel token.
+   Save, then Apply.
+
+Apply starts the mini app and the tunnel and puts the mini app on the menu
+button of the owner's private chat. Clearing both fields and applying stops
+them and puts the usual menu button back. An installation that is not run with
+`make dev` builds the mini app image once with `./bin/nocheh build` after Save and before the
+first Apply.
+
 ## External action approval
 
 The assistant may propose an external Telegram message. It cannot approve one.
