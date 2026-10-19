@@ -8,7 +8,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
-import {dispatchPayload,groupAddressing} from '../src/stores/telegram-dispatch.js';
+import {dispatchPayload,groupAddressing,speakerLine} from '../src/stores/telegram-dispatch.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
@@ -23,6 +23,14 @@ test('guarded representations cannot change Telegram routing or embed unobserved
   assert.equal(selected.update_id,1);assert.equal(selected.message.message_id,2);assert.equal(selected.message.chat.id,-4);
   assert.equal(selected.message.from.id,5);assert.equal(selected.message.from.first_name,'Prepared name');assert.equal(selected.message.message_thread_id,6);
   assert.equal(selected.message.text,'Prepared text');assert.equal(selected.message.reply_to_message,undefined);
+});
+
+test('a group turn names its guarded speaker and send time, never a Telegram ID',()=>{
+  const original={update_id:1,message:{message_id:2,date:1700000000,chat:{id:-4,type:'supergroup'},from:{id:5,is_bot:false,first_name:'Original',username:'original_name'}}};
+  assert.equal(speakerLine(original,{message:{from:{id:5,first_name:'Sara',last_name:'K',username:'sara_k'}}}),'[Group message from Sara K (@sara_k), sent 2023-11-14 22:13 UTC]');
+  assert.equal(speakerLine(original,{message:{from:{id:5}}}),'[Group message from Participant, sent 2023-11-14 22:13 UTC]','a removed name is never replaced by the original or the ID');
+  assert.equal(speakerLine({message:{}},{message:{from:{first_name:'A]\n[B',username:'not a handle'}}}),'[Group message from A B]');
+  assert.ok(!speakerLine(original,{message:{from:{id:5,first_name:'Sara'}}})!.includes('5,'));
 });
 
 test('group addressing facts come from the captured reply target and mention entities',()=>{
@@ -119,6 +127,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal(sent.text,'Owner prepared text');assert.equal(sent.payload.message.chat.id,Number(group));assert.equal(sent.payload.message.from.id,9);
     assert.equal(sent.payload.message.message_thread_id,undefined);assert.equal(sent.attempt,1);assert.ok(!JSON.stringify(sent).includes('fixture-secret'));
     assert.deepEqual(sent.group_addressing,{direct:false,handles:[]},'an unaddressed group message says so to the runtime');
+    assert.equal(sent.speaker,'[Group message from Prepared participant, sent 2023-11-14 22:13 UTC]','the speaker comes from the guarded representation');
     await due(first.reference.id);assert.equal((await advance(first.reference.id)).state,'completed');assert.equal(calls.at(-1)!.operation,'run.resume');
     const callCount=calls.length;assert.equal((await advance(first.reference.id)).state,'completed');assert.equal(calls.length,callCount);
     const stored=(await stores.control.query('SELECT * FROM dispatches WHERE event_id=$1',[first.reference.id])).rows[0];

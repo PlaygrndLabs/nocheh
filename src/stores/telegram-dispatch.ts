@@ -73,6 +73,20 @@ export function dispatchPayload(original:any,representation:any,text:string|null
 }
 
 /**
+ * Who sent a group message and when, as one line for the model. Names come
+ * from the guarded representation, the time from the captured original, and
+ * no numeric Telegram ID is ever included.
+ */
+export function speakerLine(original:any,representation:any):string|null {
+  const sender=representation?.message?.from??{},date=original?.message?.date;
+  const part=(value:unknown)=>typeof value==='string'?value.replace(/[\[\]\p{Cc}]+/gu,' ').trim():'';
+  const name=[part(sender.first_name),part(sender.last_name)].filter(Boolean).join(' ').slice(0,64).trim()||'Participant';
+  const username=typeof sender.username==='string'&&/^[A-Za-z0-9_]{1,32}$/.test(sender.username)?' (@'+sender.username+')':'';
+  const sent=Number.isSafeInteger(date)&&date>0?', sent '+new Date(date*1000).toISOString().slice(0,16).replace('T',' ')+' UTC':'';
+  return '[Group message from '+name+username+sent+']';
+}
+
+/**
  * What in a captured group message can address the bot: a reply to one of its
  * messages or a tap on its name, and the @usernames the message names. The
  * routed message keeps neither, so the runtime receives these facts and
@@ -251,10 +265,11 @@ export class TelegramDispatchRepository {
     const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
     const addressing=groupAddressing(payload,/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'');
+    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload);
     const text=selected.event.text??null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge.size?{files_too_large:tooLarge.size}:{}),...(addressing?{group_addressing:addressing}:{})};
-    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control});await this.current(input);
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge.size?{files_too_large:tooLarge.size}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{})};
+    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker});await this.current(input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
