@@ -271,6 +271,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(req.method==='POST')return json(res,200,await s.memory.connection(principal,await readJson(req)));
     }
     if(path==='/v1/memory/honcho/fresh-start'&&req.method==='POST')return json(res,200,await s.memory.freshStart(principal,await readJson(req)));
+    if(path==='/v1/memory/honcho/rebuild') {
+      admin(principal);
+      if(req.method==='GET')return json(res,200,await s.memory.rebuildEstimate(principal,url.searchParams.getAll('space')));
+      if(req.method==='POST')return json(res,200,await s.memory.relearn(principal,await readJson(req)));
+    }
+    if(path==='/v1/memory/honcho/retry-failed'&&req.method==='POST')return json(res,200,await s.memory.retryFailedLearning(principal));
     if(path==='/v1/memory/honcho/verify'&&req.method==='POST'){admin(principal);return json(res,200,await s.memory.acceptVerification(principal,await readJson(req)));}
     if(path==='/v1/memory/honcho/acceptance-session'&&req.method==='POST')return json(res,200,await s.memory.issueAcceptance(principal));
     const acceptanceSession=path.match(/^\/v1\/memory\/honcho\/acceptance-session\/([a-f0-9]{64})$/);

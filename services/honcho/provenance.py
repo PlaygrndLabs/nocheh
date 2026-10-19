@@ -1,4 +1,4 @@
-"""Bounded, read-only ancestry from the pinned Honcho store; never a reasoning call."""
+"""Bounded ancestry and queue checks on the pinned Honcho store; never a reasoning call."""
 from collections import deque
 import re
 
@@ -18,6 +18,30 @@ async def failed_queue_items(workspace_id, db, since=None):
         AND task_type IN ('representation','summary','dream')
         AND processed AND error IS NOT NULL''' + (' AND created_at > :since' if since is not None else '') + ')'), values)
     return bool(result.scalar_one())
+
+
+FAILED_LEARNING = '''workspace_name=:workspace AND task_type IN ('representation','summary','dream')
+    AND processed AND error IS NOT NULL'''
+
+
+async def failed_learning_count(workspace_id, db):
+    """How many of the workspace's derivation tasks ended with a terminal error, without their payloads or errors."""
+    from sqlalchemy import text
+    result = await db.execute(text('SELECT count(*) FROM queue WHERE ' + FAILED_LEARNING), {'workspace': workspace_id})
+    return int(result.scalar_one())
+
+
+async def retry_failed_learning(workspace_id, db):
+    """Return the workspace's failed derivation tasks to Honcho's own queue, as if never attempted.
+
+    Honcho marks a terminal failure processed with its error and never retries it, so learning lost to
+    a provider outage stays lost. Clearing both lets the deriver run the task again on its saved messages;
+    nothing is resent and no message is changed."""
+    from sqlalchemy import text
+    result = await db.execute(text('''UPDATE queue SET processed=false, error=NULL, payload=payload - '_retry_attempts'::text
+        WHERE ''' + FAILED_LEARNING), {'workspace': workspace_id})
+    await db.commit()
+    return int(result.rowcount)
 
 
 async def ancestry(roots, load_documents, load_messages, max_nodes=128, max_depth=8, max_messages=256):
@@ -126,7 +150,7 @@ def install(app):
     from fastapi import APIRouter, Body, Depends, HTTPException
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession
-    from src.dependencies import read_db
+    from src.dependencies import db as write_db, read_db
     from src.security import require_auth
 
     router = APIRouter(prefix='/v3/workspaces/{workspace_id}/nocheh', dependencies=[Depends(require_auth(workspace_name='workspace_id'))])
@@ -138,6 +162,14 @@ def install(app):
         except ValueError: raise HTTPException(status_code=400, detail='invalid_since') from None
         if after is not None and after.tzinfo is None: raise HTTPException(status_code=400, detail='invalid_since')
         return {'failed_items': await failed_queue_items(workspace_id, db, after)}
+
+    @router.get('/failed-learning')
+    async def failed_learning(workspace_id: str, db: AsyncSession = read_db):
+        return {'failed': await failed_learning_count(workspace_id, db)}
+
+    @router.post('/failed-learning/retry')
+    async def retry_learning(workspace_id: str, db: AsyncSession = write_db):
+        return {'retried': await retry_failed_learning(workspace_id, db)}
 
     @router.post('/provenance')
     async def read(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):

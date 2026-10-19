@@ -132,6 +132,7 @@ const delegationView=(d:any)=>({...d,baseline_suspended:undefined,suspended_scop
 const pastProposals:any[]=[{id:hx('d6'),kind:'organization',state:'applied',revision:2,created_at:minutesAgo(4000),source_scope:conversation,proposal:{kind:'organization',reason:'Put the travel group in the Aurora field guide project.'}}];
 const honchoBudget:any={limit_cents:500,max_limit_cents:1500,revision:3,mode:'monthly',limit_usd:5,counted_toward_cap_usd:1.27,remaining_usd:3.73,estimated_embedding_cost_usd:0.94,embedding_tokens:47000,embedding_requests:312,embedding_reported_requests:310,embedding_unreported_requests:2,embedding_hold_usd:0.01,released_error_holds_usd:0,legacy_error_exposure_unverified_usd:0,reasoning_requests:184,reasoning_request_limit:2000,reasoning_remaining_requests:1816,window_started_at:new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString()};
 let memoryRevision=4,memoryIncludeHistory=true;
+let failedLearning=3;
 const fixtureProject=(pid?:string)=>memoryProjects.find(p=>p.id===pid)??memoryMapNodes[1].detail.project;
 function effectiveProject(space:string){const parent=space.includes('/topic/')?space.split('/topic/')[0]:null,own=assignments.find(a=>a.space_id===space)??null,inherited=!own||own.mode==='inherit',chosen=inherited?assignments.find(a=>a.space_id===parent):own;
  return {space,own_assignment:own,assignment:chosen??null,project:chosen?.project_id?fixtureProject(chosen.project_id):null,inherited:!!chosen&&inherited};}
@@ -359,6 +360,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));
   if(route==='/prompts')return json(res,200,prompts);
   if(route==='/memory/honcho')return json(res,200,{connection:{attached:memoryAttached,verified:true,revision:memoryRevision,include_history:memoryIncludeHistory},workspace:{id:'synthetic-workspace',state:'building',last_ready_at:minutesAgo(30),error_code:null},limited_memory:!memoryAttached,syncing:true,generations:[{id:'fixture',state:'ready',mode:'on'}],receipts:[{state:'done',count:176},{state:'pending',count:4}]});
+  if(route==='/memory/honcho/rebuild'){const chosen=url.searchParams.getAll('space').length;
+    return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
   if(route==='/runtime')return json(res,200,{status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'run.start':true,'memory.recall':true,'lifecycle':false}});
   if(route==='/graph'){
@@ -426,6 +429,9 @@ const server=createServer((req,res)=>{void(async()=>{
  if(req.method==='POST'){
   const body=await readJson(req) as any;
   if(/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await controlWorkflow(pool,route.split('/')[2]!,route.split('/')[3]!,body));
+  if(route==='/memory/honcho/retry-failed'){const retried=failedLearning;failedLearning=0;return json(res,200,{retried});}
+  if(route==='/memory/honcho/rebuild'){return json(res,200,body.spaces?{conversations:body.spaces.length,sessions:2,messages:12*body.spaces.length,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4});}
+  if(route==='/memory/honcho/fresh-start'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryIncludeHistory=body.from_archive===true;memoryRevision++;return json(res,200,{ok:true});}
   if(route==='/memory/honcho'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryAttached=body.attached;memoryIncludeHistory=body.include_history;memoryRevision++;return json(res,200,{ok:true});}
   const learnedCorrect=route.match(/^\/learned\/([a-f0-9]{64})\/correct$/);
   if(learnedCorrect){const entry=learned.find(e=>e.id===learnedCorrect[1]);if(!entry)throw new HttpError(404,'learned_memory_not_found');if(entry.active_revision!==body.expected_revision)throw new HttpError(409,'learned_revision_conflict');
