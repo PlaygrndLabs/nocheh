@@ -26,7 +26,7 @@ Nocheh turns that around. The source data is yours and portable, memory is built
 
 ## Quick start
 
-You need Docker with Compose, Node 24 and Python 3, a model provider key, a Telegram bot token from [BotFather](https://t.me/BotFather) for the Telegram adapter, and an OpenAI API key for memory search.
+You need Docker with Compose, Node 24 and Python 3, a model provider key, and an OpenAI API key for memory search. To talk to Nocheh through Telegram, you also need a bot token from [BotFather](https://t.me/BotFather).
 
 1. Install and create your local settings. `init` writes an ignored `.env` with generated internal passwords:
 
@@ -43,12 +43,21 @@ You need Docker with Compose, Node 24 and Python 3, a model provider key, a Tele
 
 3. Open the dashboard at <http://127.0.0.1:8783/>.
 4. In **Settings › Models**, add a provider and choose the default model. Until then, replies and memory wait.
-5. In **Settings › Telegram**, turn Telegram on and paste the bot token and your numeric Telegram user ID. To find the ID, message your bot and run `./bin/nocheh discover-telegram` while Telegram is still off.
-6. Message your bot. To use a group, add the bot there, then pick the group and who may talk to Nocheh in **Chats**.
+5. Connect a chat adapter. For Telegram, open **Settings › Telegram**, turn it on, and paste the bot token and your numeric Telegram user ID. To find the ID, message your bot and run `./bin/nocheh discover-telegram` while Telegram is still off.
+6. Say hello in your private chat. To bring Nocheh into a group, add it there, then pick the group and who may talk to it in **Chats**.
 
 Full setup: [Telegram](docs/telegram.md), [model providers](docs/provider.md) and [operations](docs/deploy.md).
 
-## Day to day
+## Use it
+
+- **Ask what you know.** "What did Sara say about the launch?" or "What's still open on the website project?" Nocheh answers from your archive and memory, within what that chat is allowed to see.
+- **Let it follow along.** In groups it listens quietly, learns who is doing what and keeps track of tasks, even when nobody asks it anything.
+- **Ask it to act.** "Tell the design group the meeting moved to 4" becomes a proposal you approve before anything is sent.
+- **Bring in your history.** Import old chats and choose whether Nocheh may learn from them.
+- **Look inside its head.** The dashboard shows what it knows and why: **Memory** for people, projects, facts and notes, **Messages** for every original, **Inbox** for what waits on you, **Chats** for who can see what, **Usage** for cost and speed, **System** for health and backups, and **Settings** for models, adapters and every instruction.
+- **Correct it.** Fix a fact, rename a person, retire a message or undo an organization change. Nocheh rebuilds the affected memory from what remains.
+
+## Run it
 
 ```bash
 make dev-status          # is the stack running?
@@ -61,23 +70,21 @@ make dev-build           # rebuild after dependency or Dockerfile changes
 ./bin/nocheh down        # stop everything; your data stays
 ```
 
-The dashboard has Home, Inbox (approvals), Chats, Messages, Memory, Usage, System (health, backups, databases) and Settings. Hermes' own dashboard opens from the sidebar.
-
 ## How it works
 
-```
-Telegram (via Hermes) ──► nocheh-app ──► archive (PostgreSQL)
-                              │
-                              ▼
-                       Inngest workflow ──► secret check ──► Honcho memory
-                              │
-                              ▼
-              Hermes turn in an isolated container ──► reply in Telegram
-                              │
-                              └─► security broker ──► your model provider
-```
+Every message goes through four steps. Capture keeps working even when everything else is down, and the rest runs as durable [Inngest](https://www.inngest.com) workflows with retries and history:
 
-The chat adapter (Telegram today, through Hermes) hands each message to Nocheh, which saves it before anything else. A durable Inngest workflow prepares the masked copy, recalls what Honcho and the chat's notes know, and runs the reply as an isolated Hermes turn. Model calls leave only through the security broker, so agents never hold your keys.
+1. **Capture.** An adapter (Telegram today, through Hermes) hands each message to Nocheh, which saves the original before anything else and prepares a masked copy.
+2. **Learn.** In the background, Honcho learns about people and projects, and Nocheh learns conventions and the state of tasks, whether or not a reply is needed.
+3. **Reason.** When Nocheh is addressed, an isolated Hermes turn answers with what that chat may recall. Model calls leave only through the security broker, so agents never hold your keys.
+4. **Act.** Anything beyond a reply waits for your approval, and every step is recorded.
+
+```
+adapter ──► capture ──► secret check ──► learn ──► recall ──► Hermes turn ──► reply or proposal
+               │                           │                       │
+               ▼                           ▼                       ▼
+            archive                  Honcho memory          security broker ──► your model provider
+```
 
 ## Under the hood
 
@@ -96,7 +103,7 @@ Service map: [docs/services.md](docs/services.md).
 
 ## Good to know
 
-- Nocheh answers only while its services are running. Telegram holds new messages for up to 24 hours, so short breaks lose nothing.
+- Nocheh answers only while its services are running. Telegram holds new messages for up to 24 hours, so short breaks lose nothing there.
 - Dependable answers come before speed. A reply usually takes around half a minute.
 - Voice notes are saved but not transcribed.
 - No local models. You pay your model provider for replies and learning, plus OpenAI embeddings for memory search.
