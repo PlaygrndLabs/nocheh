@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,3 +65,55 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(load(state)['NOCHEH_EMBEDDING_MODEL'], 'text-embedding-3-large')
             save(state, {'NOCHEH_MODEL': 'claude-opus-5-5'}, saved['revision'])
             self.assertEqual(load(state)['NOCHEH_MODEL'], 'claude-opus-5-5')
+
+
+class MiniAppSettingsTests(unittest.TestCase):
+    def telegram(self, state, **extra):
+        values = load(state)
+        values.update(TELEGRAM_ENABLED='true', TELEGRAM_BOT_TOKEN='5550001:' + 'A' * 35, TELEGRAM_OWNER_ID='4242', **extra)
+        write_env(env_path(state), values)
+        return view(state)['revision']
+
+    def test_the_mini_app_needs_an_https_address_and_its_tunnel_token(self):
+        from tools.operations.installation.configuration import compose_environment
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state); revision = self.telegram(state)
+            self.assertNotIn('miniapp', compose_environment(state)['COMPOSE_PROFILES'].split(','))
+            for changes in ({'NOCHEH_MINI_APP_URL': 'http://nocheh.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64},
+                            {'NOCHEH_MINI_APP_URL': 'https://nocheh.example.com/dashboard', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64},
+                            {'NOCHEH_MINI_APP_URL': 'https://user@nocheh.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64},
+                            {'NOCHEH_MINI_APP_URL': 'https://nocheh.example.com'},
+                            {'NOCHEH_MINI_APP_URL': 'https://nocheh.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'bad token'}):
+                with self.assertRaises(ValueError): save(state, changes, revision)
+            result = save(state, {'NOCHEH_MINI_APP_URL': 'https://nocheh.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64}, revision)
+            # The tunnel token is never shown back.
+            self.assertNotIn('e' * 64, str(result))
+            environment = compose_environment(state)
+            self.assertIn('miniapp', environment['COMPOSE_PROFILES'].split(','))
+            self.assertEqual(environment['TELEGRAM_BOT_ID'], '5550001')
+
+    def test_apply_starts_the_mini_app_and_puts_it_on_the_owners_menu_button(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state); revision = self.telegram(state, TELEGRAM_BOT_NAMES='Nocheh,نوچه')
+            calls = []
+            def bot(token, method, **params): calls.append((method, params)); return True
+            with patch('tools.operations.installation.settings.subprocess.run') as run, \
+                    patch('tools.operations.installation.settings.refresh_honcho', return_value='unchanged'), \
+                    patch('tools.operations.installation.settings.telegram_api', side_effect=bot):
+                run.return_value.returncode = 0
+                # Never turned on: no Telegram call at all.
+                self.assertEqual(apply(state)['mini_app'], 'off')
+                self.assertEqual(calls, [])
+                save(state, {'NOCHEH_MINI_APP_URL': 'https://nocheh.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64}, view(state)['revision'])
+                self.assertEqual(apply(state)['mini_app'], 'shown')
+                up = run.call_args_list[-1].args[0]
+                self.assertEqual(up[-2:], ['nocheh-miniapp', 'nocheh-tunnel'])
+                self.assertEqual(calls[-1][0], 'setChatMenuButton')
+                self.assertEqual(calls[-1][1]['chat_id'], '4242')
+                self.assertEqual(json.loads(calls[-1][1]['menu_button']),
+                                 {'type': 'web_app', 'text': 'Nocheh', 'web_app': {'url': 'https://nocheh.example.com/'}})
+                save(state, {'NOCHEH_MINI_APP_URL': '', 'CLOUDFLARE_TUNNEL_TOKEN': ''}, view(state)['revision'])
+                self.assertEqual(apply(state)['mini_app'], 'removed')
+                # Turning it off stops the mini app and closes its tunnel.
+                self.assertEqual(run.call_args_list[-1].args[0][-5:], ['rm', '-s', '-f', 'nocheh-miniapp', 'nocheh-tunnel'])
+                self.assertEqual(json.loads(calls[-1][1]['menu_button']), {'type': 'default'})

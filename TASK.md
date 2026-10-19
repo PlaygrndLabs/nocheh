@@ -406,10 +406,15 @@ not yet run on the owner's installation:
   the control store ([decision](docs/adr/0160-owner-task-list.md),
   [check](test/store-tasks.test.ts), [broker check](test/knowledge-broker.test.ts),
   [tool check](services/hermes/test_knowledge_tools.py),
-  [browser check](test/dashboard-pages.browser.mjs)). Next: the mini app on the
-  owner's own domain through a Cloudflare tunnel from the
-  local stack, then the optional Notion connector. Live check pending: ask
+  [browser check](test/dashboard-pages.browser.mjs)). Live check pending: ask
   Nocheh in the private chat to add, list and finish a task.
+- Telegram mini app (October 19): Home, Inbox and Tasks in Telegram through a
+  credential-free mini app service and a Cloudflare tunnel, turned on in
+  Settings › Telegram ([decision](docs/adr/0162-telegram-mini-app.md),
+  [setup](docs/telegram.md#mini-app), [check](test/mini-app.test.ts),
+  [settings check](services/hermes/test_settings.py)). Pending: a live open
+  from the owner's phone; the owner tests it on the MVP installation, not the
+  local one. Next: the optional Notion connector.
 Pending: a live album, an edit, a small group-export import, and release
 tests 4 and 5 on the owner's installation.
 

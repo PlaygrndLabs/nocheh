@@ -29,6 +29,7 @@ Approve and Reject buttons in Telegram: [0158](0158-telegram-approval-buttons.md
 Group posts without approval, private approval cards and refusals: [0159](0159-group-members-post-freely-and-approvals-go-private.md).
 The owner's own task list: [0160](0160-owner-task-list.md).
 Requesters reviewing their own cross-group messages: [0161](0161-requesters-review-their-own-cross-group-messages.md).
+The Telegram mini app: [0162](0162-telegram-mini-app.md).
 Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).

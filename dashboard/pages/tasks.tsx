@@ -37,7 +37,7 @@ function today(): string {
 }
 
 /** A calendar day such as "Fri 4 Jan", with the year only when it isn't this year. */
-function day(value: string): string {
+export function day(value: string): string {
   const date = new Date(value + 'T12:00:00');
   return date.toLocaleDateString(undefined, {
     weekday: 'short',
