@@ -66,6 +66,10 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # Retrieval uses the conversation content. The per-execution source hash
     # belongs in agent provenance, not in the semantic memory query/cache key.
     memory_query=text[:2000]
+    speaker=body.get('speaker')
+    if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
+        # Who spoke and when stays out of the memory query; the model and native history see it.
+        text = speaker + '\n' + text
     waiting=body.get('untranscribed_voice')
     if type(waiting) is int and 0<waiting<=20:
         # Voice notes are archived without transcription; their content never reaches the model.
