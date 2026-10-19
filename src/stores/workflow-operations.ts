@@ -146,7 +146,12 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     telegram:(id,authority)=>s.telegram.run(id,authority),
     browser:(id,authority)=>s.browser.run(id,authority),
     schedules:(id,authority)=>s.scheduled.operation(id,authority),
-    actions:(id,authority)=>s.telegramActions.run(id,authority),
+    actions:async(id,authority)=>{
+      const result=await s.telegramActions.run(id,authority);
+      // The approval card, if any, then says the message was sent.
+      if(result.state==='completed')await s.actionCommands.settle('telegram',id).catch(()=>{});
+      return result;
+    },
     preparation:async(job,authority)=>{
       const match=/^reprocess:([a-f0-9]{64})$/.exec(job);
       if(match) {

@@ -365,9 +365,11 @@ not yet run on the owner's installation:
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)).
   Card and button texts are fixed in code, like the Telegram command replies;
-  making them editable from the dashboard is open.
-Pending: release test 2 with a button press, a live album, an edit, a small
-group-export import, and release tests 3 to 5 on the owner's installation.
+  making them editable from the dashboard is open. On the owner's
+  installation a button press in the group approved and delivered the post
+  once. The card now also says when the message was sent.
+Pending: a live album, an edit, a small group-export import, and release
+tests 3 to 5 on the owner's installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,

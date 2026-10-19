@@ -8,6 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 
 test('Approve and Reject buttons decide only for the owner, in the request\'s group or the owner\'s private chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -19,6 +20,7 @@ test('Approve and Reject buttons decide only for the owner, in the request\'s gr
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
+      if(operation==='action.execute')return {state:'done'};
       assert.equal(operation,'telegram.approval');cards.push(input);
       return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};
     },honcho:async()=>{throw Error('no memory provider');}});
@@ -67,9 +69,12 @@ test('Approve and Reject buttons decide only for the owner, in the request\'s gr
     const epoch=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
     await s.preparation.run(pressed.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     assert.equal((await s.telegram.run(pressed.id,await epoch('telegram'))).state,'skipped');
+    // Once the approved message is sent, the card says so.
+    assert.equal((await storageWorkflowOperations(s,async()=>({})).actions!(here.id,await epoch('actions'))).state,'completed');
+    assert.equal(last('settle').text,card.text+'\n\nApproved and sent.');
     assert.deepEqual((await stores.control.query('SELECT state,error_code FROM dispatches WHERE event_id=$1',[pressed.id])).rows[0],{state:'suppressed',error_code:'approval_button'});
     assert.equal(await s.actionCommands.callback(await press('reject-late','nd'+here.id.slice(0,40)+here.fingerprint.slice(0,16))),true);
-    assert.match(last('answer').text,/already decided/);assert.equal((await s.telegramActions.inspect(owner,here.id)).state,'approved');
+    assert.match(last('answer').text,/already decided/);assert.equal((await s.telegramActions.inspect(owner,here.id)).state,'done');
     assert.equal(await s.actionCommands.callback(await press('reject','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16))),true);
     assert.equal((await s.telegramActions.inspect(owner,elsewhere.id)).state,'rejected');
     assert.equal(last('settle').text,'Send this message to your private chat?\n\nExact private message\n\nRejected. Nothing was sent.');
