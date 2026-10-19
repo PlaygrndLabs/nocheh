@@ -224,10 +224,15 @@ read them and cannot write them, and topics use their group's
 [browser checks](test/dashboard-pages.browser.mjs)). The storage service had no
 `/v1/manage/hermes` route, so per-chat assistant limits, Memory › Assistant notes
 and the CLI's profile commands could not reach Hermes; the route now serves them
-too. Pending: a live check on the owner's installation that a group answers in
-its role and uses a skill; the owner's answer on whether projects should have a
-role and skills too (left out because projects are not Hermes profiles);
-carrying roles and skills across an original-only reset.
+too. Projects have no role and skills of their own for now (owner, October 17:
+"follow your recommend"). The first live group check (October 19) failed: the
+reply ignored the role and never used the skill, because Hermes looked for
+`SOUL.md` and `skills/` beside the session database in `native-state/` and
+reused each continuing session's first system prompt. Turns now bind the
+profile as the Hermes home and rebuild a session's prompt once after its role
+or skills change ([checks](services/hermes/test_persona.py)). Pending: repeating
+the live group check after that fix reaches the owner's installation; carrying
+roles and skills across an original-only reset.
 
 Built-in instructions (October 17, owner: "every hard coded text should
 editable form dashboard"): the reply rules, remembered-facts and limited-memory

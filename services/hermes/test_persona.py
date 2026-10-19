@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from . import persona
 from .scopes import Scopes
 
@@ -84,34 +85,68 @@ class PersonaTests(unittest.TestCase):
 
 class PersonaTurnTests(unittest.TestCase):
     def test_turn_prompt_uses_the_chats_role_and_lists_its_skills_without_skill_writing(self):
-        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        from contextvars import copy_context
+        from hermes_state import SessionDB
         from run_agent import AIAgent
         from agent.system_prompt import build_system_prompt
         from tools.skills_tool import skill_view
-        from .assistant_turn import OWNER_SET_TOOLS
+        from .assistant_turn import OWNER_SET_TOOLS, bind_profile_home
+        from .isolated_profile import database_path
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             chat = persona.chat_path(root, '-20')
             persona.save(chat, 'You are the family cooking helper.', [COOKING], persona.view(chat)['revision'])
             turn = root / 'profiles' / Scopes.profile('-20:policy:2'); turn.mkdir(parents=True)
             persona.materialize(root, turn, '-20')
-            token = set_hermes_home_override(str(turn))
-            try:
+            (turn / 'native-state').mkdir()
+
+            def build(bind):
+                # A live turn keeps its session database in native-state/, as assistant_turn does.
+                if bind: bind_profile_home(turn)
                 agent = AIAgent(provider='openai', api_mode='chat_completions', model='synthetic', api_key='synthetic',
                                 base_url='http://127.0.0.1:9/v1', enabled_toolsets=['skills'], fallback_model=None,
+                                session_db=SessionDB(database_path(turn)), session_id='s',
                                 platform='telegram', chat_id='-20', user_id='5', chat_type='group',
                                 skip_context_files=True, load_soul_identity=True, skip_background_review=True,
                                 quiet_mode=True, save_trajectories=False)
                 agent.tools = [t for t in agent.tools if t['function']['name'] not in OWNER_SET_TOOLS]
                 agent.valid_tool_names = set(agent.valid_tool_names) - OWNER_SET_TOOLS
-                prompt = build_system_prompt(agent)
-                self.assertTrue(prompt.startswith('You are the family cooking helper.'))
-                self.assertIn('- weekly-menu: ' + COOKING['description'], prompt)
-                self.assertEqual(agent.valid_tool_names, {'skills_list', 'skill_view'})
-                self.assertIn(COOKING['body'], skill_view('weekly-menu'))
-            finally:
-                reset_hermes_home_override(token)
+                return agent, build_system_prompt(agent), skill_view('weekly-menu') if bind else None
 
+            with patch.dict('os.environ', {'HERMES_HOME': str(turn)}):
+                _, unbound, _ = copy_context().run(build, False)
+                agent, prompt, viewed = copy_context().run(build, True)
+            self.assertFalse(unbound.startswith('You are the family cooking helper.'),
+                             'without a bound home Hermes looks beside the session database')
+            self.assertTrue(prompt.startswith('You are the family cooking helper.'))
+            self.assertIn('- weekly-menu: ' + COOKING['description'], prompt)
+            self.assertEqual(agent.valid_tool_names, {'skills_list', 'skill_view'})
+            self.assertIn(COOKING['body'], viewed)
+
+    def test_a_continuing_session_rebuilds_its_prompt_after_the_role_or_skills_change(self):
+        from hermes_state import SessionDB
+        from .isolated_profile import database_path
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            chat = persona.chat_path(root, '-20')
+            turn = root / 'profiles' / Scopes.profile('-20:policy:2'); turn.mkdir(parents=True)
+            (turn / 'native-state').mkdir()
+            persona.materialize(root, turn, '-20')
+            database = SessionDB(database_path(turn))
+            database.create_session('s', source='telegram')
+            database.update_system_prompt('s', 'Prompt built before any role')
+            database.update_session_tool_names('s', ['memory'])
+            stored = lambda: (database.get_session('s').get('system_prompt'), database.get_session('s').get('tool_names'))
+            self.assertTrue(persona.refresh_prompt(turn, database, 's'), 'a session never checked is rebuilt once')
+            self.assertEqual(stored(), (None, None))
+            database.update_system_prompt('s', 'Prompt with the current role')
+            self.assertFalse(persona.refresh_prompt(turn, database, 's'))
+            self.assertEqual(stored()[0], 'Prompt with the current role')
+            persona.save(chat, 'Group role', [COOKING], persona.view(chat)['revision'])
+            persona.materialize(root, turn, '-20')
+            self.assertTrue(persona.refresh_prompt(turn, database, 's'))
+            self.assertEqual(stored()[0], None)
+            self.assertFalse(persona.refresh_prompt(turn, database, 'new-session'), 'a new session builds its own prompt')
 
 if __name__ == '__main__':
     unittest.main()
