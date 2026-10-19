@@ -370,13 +370,18 @@ not yet run on the owner's installation:
   once. The card now also says when the message was sent.
 - After that test the owner asked that allowed people post freely in their own
   group, that approval talk happen in the private chat, and that people who are
-  not allowed get a fixed reply. A same-group post by the owner or a permitted
-  participant now needs no approval, every card goes to the owner's private
+  not allowed get a fixed reply, then that a user with access to several groups
+  can have Nocheh post from one to another without approval. A post by the
+  owner or a permitted participant to any group where that person is allowed
+  now needs no approval, a group turn can list those groups by name, every
+  card goes to the owner's private
   chat, and an unallowed member who addresses Nocheh gets one editable reply
   without a turn ([decision](docs/adr/0159-group-members-post-freely-and-approvals-go-private.md),
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)). Not yet run on the
-  owner's installation.
+  owner's installation. Open question to the owner: whether memory should
+  stay per group, shared between groups only through owner sharing rules (the
+  recommendation), or be shared across all groups or projects of one person.
 - Release test 3 (October 19) passed on the owner's installation: Hermes
   restarted about 2 seconds into a private turn, after the input check and
   Honcho recall and before the model call. The first attempt failed as
