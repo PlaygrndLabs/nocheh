@@ -304,6 +304,60 @@ test('conversation messages start in Telegram update order while an earlier mess
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
+test('an album gets one turn with every part, answered on its first part',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-album-')),base=Date.now(),group='-'+base,token=digest('album:'+base);
+  // Fixture-only clock and order adjustments; the archive role itself cannot change originals.
+  const archiveAdmin=new pg.Pool({...config,database:'nocheh_archive'});
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let serial=base;
+  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'delivery'};
+  };
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');}});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  const capture=async(extra:any)=>{
+    const update=++serial,message:any={message_id:update,date:1700000000,chat:{id:Number(group),type:'supergroup'},from:{id:123,is_bot:false,first_name:'Owner'},...extra};
+    return (await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
+      source_id:String(update),revision:'1',occurred_at:null,text:extra.caption??null,payload:{update_id:update,message}})).source.reference.id;
+  };
+  const part=(name:string,extra:any={})=>capture({media_group_id:'album-'+base,document:{file_id:name+base,file_unique_id:name+base,file_name:name+'.txt'},...extra});
+  const prepare=async(id:string)=>{
+    for(const row of (await stores.archive.query('SELECT id FROM artifacts WHERE event_id=$1',[id])).rows)
+      await services.attachments.commit(row.id,Buffer.from('Text of '+row.id.slice(0,8)));
+    return services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'));
+  };
+  const run=async(id:string)=>services.telegram.run(id,await authority('telegram'));
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const second=await part('second'),first=await part('first',{caption:'Nocheh, what do these say?'}),third=await part('third');
+    // Telegram order decides the first part, not capture order.
+    await archiveAdmin.query("UPDATE events SET payload=convert_to(jsonb_set(convert_from(payload,'UTF8')::jsonb,'{update_id}',to_jsonb($2::bigint))::text,'UTF8') WHERE id=$1",[second,serial+1]);
+    for(const id of [first,second,third])assert.equal((await prepare(id)).state,'completed');
+    assert.equal((await run(first)).state,'waiting','a part that just arrived may still have siblings on the way');
+    await archiveAdmin.query("UPDATE events SET received_at=received_at-interval '5 seconds' WHERE id=ANY($1::text[])",[[first,second,third]]);
+    assert.equal((await run(third)).state,'skipped');
+    assert.deepEqual((await stores.control.query('SELECT state,error_code FROM dispatches WHERE event_id=$1',[third])).rows[0],{state:'suppressed',error_code:'album_member'});
+    assert.equal((await run(first)).state,'completed');assert.equal((await run(second)).state,'skipped');
+    assert.equal(started.length,1,'the album gets one reply');
+    const input=started[0];
+    assert.equal(input.event_id,first);assert.equal(input.text,'Nocheh, what do these say?');
+    assert.equal(input.files.length,3,'the turn carries every part\'s file');
+    assert.ok(input.files.every((file:any)=>file.text?.startsWith('Text of ')));
+    assert.deepEqual(input.album_events,[third,second]);
+    const binding=await services.guards.state();
+    const principal={admin:false,scope:group,space:group,turnEvent:first,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const sibling=(await stores.archive.query('SELECT file_hash FROM artifacts WHERE event_id=$1',[second])).rows[0].file_hash;
+    assert.ok(await services.turns.turnFile(principal,sibling),'the album turn may show another part\'s file');
+    const lone=await capture({text:'Not an album'});await prepare(lone);
+    await archiveAdmin.query("UPDATE events SET received_at=received_at-interval '5 seconds' WHERE id=$1",[lone]);
+    assert.equal((await run(lone)).state,'completed');assert.equal(started.at(-1).files.length,0);assert.equal(started.at(-1).album_events,undefined);
+  }finally{await archiveAdmin.end();await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
 test('a later message is told about an earlier voice note still waiting for transcription',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};

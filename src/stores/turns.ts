@@ -8,6 +8,7 @@ import type {OperationReference} from './operations.js';
 import type {SourceAccessRepository} from './access.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {GuardBinding} from './guards.js';
+import {albumMembers} from './albums.js';
 import {defaultLogicalProfile,runtimeProfile} from './runtime-profile.js';
 
 export const runtimeTurnSchema=`
@@ -96,8 +97,10 @@ export class RuntimeTurnRepository implements BrokerStorage {
   }
   async turnFile(principal:Reader,hash:string):Promise<string> {
     await this.binding(principal);
-    const artifact=(await this.access.stores.archive.query('SELECT id FROM artifacts WHERE event_id=$1 AND file_hash=$2 ORDER BY id LIMIT 1',
-      [principal.turnEvent,hash])).rows[0];
+    // An album's turn runs on its first part and may show the files of every part.
+    const events=[principal.turnEvent!,...(await albumMembers(this.access.stores.archive,principal.turnEvent!)).map(member=>member.id)];
+    const artifact=(await this.access.stores.archive.query('SELECT id FROM artifacts WHERE event_id=ANY($1::text[]) AND file_hash=$2 ORDER BY id LIMIT 1',
+      [events,hash])).rows[0];
     if(!artifact)throw new HttpError(404,'turn_file_not_found');
     await this.assertAudience(principal);return artifact.id;
   }

@@ -1,3 +1,4 @@
+import {albumMembers,albumSettleMs} from './albums.js';
 import {blockingPublications} from './publications.js';
 import type pg from 'pg';
 import type {Reader} from '../access.js';
@@ -235,7 +236,34 @@ export class TelegramDispatchRepository {
     }
     return count;
   }
-  private async build(source:SourceReference,attempt:number):Promise<{reference:DerivativeReference;input:Input}|Observation> {
+  /**
+   * Telegram sends an album as one message per photo or file. It is answered
+   * once: its first part in update order runs one turn with every part's text
+   * and files, and the other parts close without a reply of their own.
+   */
+  private async album(id:string):Promise<{state:'wait'}|{state:'member'}|{state:'leader';others:string[]}|null> {
+    const members=await albumMembers(this.archive.pool,id);
+    if(!members.length)return null;
+    if(members.some(member=>member.age_ms<albumSettleMs))return {state:'wait'};
+    if(members.length<2)return null;
+    if(members[0]!.id!==id)return {state:'member'};
+    return {state:'leader',others:members.slice(1).map(member=>member.id)};
+  }
+  /** Album parts that can join the turn: ready, not retired, and in the same conversation. */
+  private async albumParts(source:SourceReference,space:string,others:string[]):Promise<string[]|null> {
+    const retired=await this.access.retirements?.retiredEvents(others),parts:string[]=[];
+    const created=(await this.control.query('SELECT created_at FROM dispatches WHERE event_id=$1',[source.id])).rows[0]?.created_at;
+    const patient=!!created&&Date.now()-created.getTime()<conversationOrderWaitMs;
+    for(const id of others) {
+      if(retired?.has(id)||await this.access.space((await this.archive.captured(id)).reference)!==space)continue;
+      const status=await this.preparation.status(id);
+      if(status.state==='completed')parts.push(id);
+      // A slow part holds the album's reply for a bounded time, then the reply goes without it.
+      else if(patient&&status.state!=='failed')return null;
+    }
+    return parts;
+  }
+  private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
     if(!scope)return observation('skipped','admission');
@@ -243,32 +271,46 @@ export class TelegramDispatchRepository {
     const ready=await this.preparation.status(source.id);if(ready.state!=='completed')return ['retryable_failed','failed'].includes(ready.state)?ready:
       observation('waiting',ready.stage,0,ready.next_attempt,ready.waiting_reason);
     if(await this.heldByEarlier(source,space))return observation('waiting','admission',0,Date.now()+2000,'prerequisite');
+    const parts=others.length?await this.albumParts(source,space,others):[];
+    if(!parts)return observation('waiting','admission',0,Date.now()+1000,'prerequisite');
     const binding=await this.guards.state(),principal:Reader={admin:false,scope:scope.owner?null:scope.chat_id,space,turnEvent:source.id,
       generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
     await this.turns.binding(principal);
     const selected=await this.sources.read(principal,source.id),transcripts:string[]=[],files:any[]=[],parents:DerivativeReference[]=[];
-    for(const result of selected.derived) {
-      const row=(await this.derived.pool.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[result.id])).rows[0];
-      parents.push({store:'derived',kind:'artifact',id:result.id,input_hash:row.content_hash});
-      if(result.kind==='transcript')transcripts.push(Buffer.from(result.content_base64,'base64').toString());
-    }
-    const manifests=(await this.archive.pool.query('SELECT id,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[source.id])).rows;
-    const tooLarge=await this.preparation.attachments.tooLarge(source.id);
-    for(const file of selected.artifacts) {
-      if(tooLarge.has(file.id))continue;
-      const hash=manifests.find(m=>m.id===file.id)?.file_hash;if(!hash)throw new HttpError(409,'source_file_pending');
-      const extracted=selected.derived.find(d=>d.artifact_id===file.id&&d.kind==='extracted_text');
-      files.push({id:file.id,name:typeof file.metadata?.file_name==='string'?file.metadata.file_name:'Attachment',sha256:hash,
-        kind:binding.mode==='off'&&file.kind==='photo'?'image':'file',text:extracted?Buffer.from(extracted.content_base64,'base64').toString():null});
+    const album:[string,typeof selected][]=[[source.id,selected]];
+    for(const id of parts)album.push([id,await this.sources.read(principal,id)]);
+    let tooLarge=0;
+    for(const [id,part] of album) {
+      for(const result of part.derived) {
+        const row=(await this.derived.pool.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[result.id])).rows[0];
+        parents.push({store:'derived',kind:'artifact',id:result.id,input_hash:row.content_hash});
+        if(result.kind==='transcript')transcripts.push(Buffer.from(result.content_base64,'base64').toString());
+      }
+      const manifests=(await this.archive.pool.query('SELECT id,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[id])).rows;
+      const large=await this.preparation.attachments.tooLarge(id);tooLarge+=large.size;
+      for(const file of part.artifacts) {
+        if(large.has(file.id))continue;
+        const hash=manifests.find(m=>m.id===file.id)?.file_hash;if(!hash)throw new HttpError(409,'source_file_pending');
+        const extracted=part.derived.find(d=>d.artifact_id===file.id&&d.kind==='extracted_text');
+        files.push({id:file.id,name:typeof file.metadata?.file_name==='string'?file.metadata.file_name:'Attachment',sha256:hash,
+          kind:binding.mode==='off'&&file.kind==='photo'?'image':'file',text:extracted?Buffer.from(extracted.content_base64,'base64').toString():null});
+      }
     }
     // Command authority comes from the original owner DM, never a guarded edit.
     const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
-    const addressing=groupAddressing(payload,/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'');
+    const botId=/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'';
+    let addressing=groupAddressing(payload,botId);
+    for(const id of parts) {
+      // Any part of an album that addresses the bot addresses the album.
+      const other=groupAddressing(JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString()),botId);
+      if(addressing&&other)addressing={direct:addressing.direct||other.direct,handles:[...new Set([...addressing.handles,...other.handles])].sort().slice(0,20)};
+    }
     const speaker=scope.owner?null:speakerLine(payload,selected.event.payload);
-    const text=selected.event.text??null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
+    // An album's caption usually sits on one part; the turn reads every part's text in order.
+    const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge.size?{files_too_large:tooLarge.size}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{})};
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(parts.length?{album_events:parts}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker});await this.current(input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
@@ -383,7 +425,14 @@ export class TelegramDispatchRepository {
         // same identity, after current binding checks. Running work is observed.
       } else {
         if(!this.access.policy().enabled)return observation('waiting','admission',0,Date.now()+60000,'owner_paused');
-        const attempt=row.attempts+1,built=await this.build(captured.reference,attempt);
+        const album=await this.album(id);
+        if(album?.state==='wait')return observation('waiting','admission',0,Date.now()+1000,'prerequisite');
+        if(album?.state==='member') {
+          await db.query(`UPDATE dispatches SET state='suppressed',error_code='album_member',revision=revision+1,updated_at=now()
+            WHERE event_id=$1 AND state IN ('pending','failed')`,[id]);
+          return this.observation(await this.row(id));
+        }
+        const attempt=row.attempts+1,built=await this.build(captured.reference,attempt,album?.state==='leader'?album.others:[]);
         if('state' in built) {
           if(built.state==='skipped')await db.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[id]);
           // Speech without usable text is a terminal preparation outcome. The
