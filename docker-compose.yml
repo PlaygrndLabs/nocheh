@@ -466,6 +466,60 @@ services:
     depends_on:
       nocheh-db: {condition: service_healthy}
 
+  # The Telegram mini app: the only part of Nocheh its tunnel can reach. It
+  # holds no credentials and forwards a fixed set of owner routes to the
+  # dashboard after checking Telegram's signature on each request.
+  nocheh-miniapp:
+    logging: *logging
+    image: nocheh-miniapp:local
+    build:
+      context: .
+      target: mini-app
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    profiles: [miniapp]
+    command: [node, dist/src/mini-app.js]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [default, miniapp]
+    environment:
+      TELEGRAM_BOT_ID: ${TELEGRAM_BOT_ID:-}
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+      NOCHEH_DASHBOARD_HOST: nocheh-dashboard
+      NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
+      NOCHEH_MINI_APP_PORT: '8788'
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      nocheh-dashboard: {condition: service_started}
+
+  # Cloudflare's tunnel connector: an outbound connection only, no open port.
+  # Its public hostname points to http://nocheh-miniapp:8788.
+  nocheh-tunnel:
+    logging: *logging
+    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    profiles: [miniapp]
+    command: [tunnel, --no-autoupdate, run]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [miniapp]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      nocheh-miniapp: {condition: service_healthy}
+
   hermes:
     logging: *logging
     image: nocheh-hermes:local
@@ -548,6 +602,8 @@ networks:
   memory:
     name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
     internal: true
+  # Shared only by the mini app and its tunnel, so the tunnel reaches nothing else.
+  miniapp: {}
 
 secrets:
   honcho_database_password:

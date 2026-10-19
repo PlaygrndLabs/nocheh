@@ -13,6 +13,8 @@ export const telegramKeys = [
   'TELEGRAM_GROUP_IDS',
   'TELEGRAM_GROUP_ACCESS',
   'TELEGRAM_TOPIC_MEMORY',
+  'NOCHEH_MINI_APP_URL',
+  'CLOUDFLARE_TUNNEL_TOKEN',
 ];
 
 /** Marks a control whose value differs from the saved one. */
@@ -31,6 +33,8 @@ export function TelegramSettings() {
   const known = (identities.data?.groups ?? []).flatMap((g: any) => g.users ?? []).find((u: any) => u.id === owner);
   const enabled = s.value('TELEGRAM_ENABLED') === 'true';
   const token = s.field('TELEGRAM_BOT_TOKEN');
+  const tunnel = s.field('CLOUDFLARE_TUNNEL_TOKEN');
+  const miniApp = s.value('NOCHEH_MINI_APP_URL');
   const groups = s
     .value('TELEGRAM_GROUP_IDS')
     .split(',')
@@ -217,6 +221,63 @@ export function TelegramSettings() {
                 ]}
               />
             </div>
+          </SettingRow>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Mini app"
+          description="Home, Inbox and Tasks on your phone, from the button next to the message box in your private chat with Nocheh. Only your Telegram account can open it; Settings and System stay here."
+          className="pb-3"
+        />
+        <div className="border-t border-line">
+          <SettingRow
+            title={
+              <>
+                Address
+                <Unsaved show={s.changed('NOCHEH_MINI_APP_URL')} />
+              </>
+            }
+            description={
+              miniApp
+                ? 'The public address your Cloudflare tunnel sends to the mini app.'
+                : 'Leave empty to keep the mini app off.'
+            }
+            htmlFor="mini-app-url"
+          >
+            <Input
+              id="mini-app-url"
+              inputMode="url"
+              value={miniApp}
+              placeholder="https://nocheh.example.com"
+              disabled={s.busy}
+              onChange={e => s.set('NOCHEH_MINI_APP_URL', e.target.value.trim())}
+            />
+          </SettingRow>
+          <SettingRow
+            title={
+              <>
+                Tunnel token
+                <Unsaved show={s.changed('CLOUDFLARE_TUNNEL_TOKEN')} />
+              </>
+            }
+            description={
+              tunnel?.configured
+                ? 'A token is saved. Paste a new one only to replace it.'
+                : 'From Cloudflare Zero Trust, Networks, Tunnels, for the tunnel that points to the mini app.'
+            }
+            htmlFor="mini-app-tunnel"
+          >
+            <Input
+              id="mini-app-tunnel"
+              type="password"
+              autoComplete="off"
+              value={s.value('CLOUDFLARE_TUNNEL_TOKEN')}
+              placeholder={tunnel?.configured ? '****' : 'Paste the tunnel token'}
+              disabled={s.busy}
+              onChange={e => s.set('CLOUDFLARE_TUNNEL_TOKEN', e.target.value.trim())}
+            />
           </SettingRow>
         </div>
       </Card>

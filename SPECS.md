@@ -328,6 +328,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Nocheh has its own local task manager. Tasks are Nocheh's own data, kept with the owner's other data rather than in an outside service. The owner adds, lists, finishes, drops, reopens and edits tasks from the dashboard and by telling Nocheh in the owner's private chat; both edit the same list. A task has a title, optional notes and an optional due day.
 - Only the owner reaches the task list. A group conversation, including one where the owner writes, never reads or changes it.
 - Nocheh has a Telegram mini app for managing Nocheh from Telegram. The task manager is in this mini app too. The mini app is another front end on the same owner API as the dashboard, not a separate admin system, and the dashboard remains. Only the owner's Telegram account can open it.
+- The mini app opens from the menu button of the owner's private chat with Nocheh and shows Home, Inbox (with its approvals) and Tasks. Settings and System stay on the dashboard. The mini app is reached at an https address on the owner's own domain; the rest of the dashboard is never reachable from outside the owner's computer.
 - Notion through MCP is an additional and optional option for tasks, off by default. Nocheh's own task manager is the main task list.
 
 </area>
