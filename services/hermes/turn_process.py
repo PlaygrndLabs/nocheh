@@ -72,6 +72,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         text += ('\n\n[Earlier in this chat, ' + ('a voice note was' if waiting==1 else str(waiting)+' voice notes were') +
                  ' received and archived. Transcription is not available, so that content is not available to you.'
                  ' Do not say that no voice note was received or found.]')
+    too_large=body.get('files_too_large')
+    if type(too_large) is int and 0<too_large<=100:
+        # Telegram does not let a bot download a file over 20 MB; only its reference is archived.
+        text += ('\n\n[' + ('One attached file is' if too_large==1 else str(too_large)+' attached files are') +
+                 ' over the 20 MB limit for bot downloads, so only a reference is archived and the content is not available to you.]')
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
     transport = credentials.runtime()
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),

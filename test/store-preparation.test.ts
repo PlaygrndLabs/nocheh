@@ -91,6 +91,20 @@ test('preparation keeps manifests immutable and download state in control, with 
     const job=(await stores.control.query('SELECT attempts,next_attempt FROM attachment_retrievals WHERE artifact_id=$1',[retry.artifact_ids[0]])).rows[0];
     await preparation.run(retry.reference.id,async()=>{throw Error('backoff must prevent this read');},'fixture',async()=>[],authority);
     assert.equal((await stores.control.query('SELECT attempts FROM attachment_retrievals WHERE artifact_id=$1',[retry.artifact_ids[0]])).rows[0].attempts,job.attempts);
+
+    // Telegram never lets a bot download a file over 20 MB, so it settles as a reference and never holds the reply.
+    const big=(await capture.capture(event(':big',{document:{file_id:'big',file_size:20*1024*1024+1,file_name:'big.zip'}}))).source;
+    assert.equal((await preparation.run(big.reference.id,async()=>{throw Error('an oversized file must not be fetched');},'fixture',async()=>[],authority)).state,'completed');
+    assert.deepEqual((await stores.control.query('SELECT state,error_code,attempts FROM attachment_retrievals WHERE artifact_id=$1',[big.artifact_ids[0]])).rows[0],
+      {state:'done',error_code:'attachment_too_large',attempts:0});
+    assert.deepEqual([...await attachments.tooLarge(big.reference.id)],[big.artifact_ids[0]]);
+    const refused=(await capture.capture(event(':refused',{document:{file_id:'refused'}}))).source;
+    let refusals=0;
+    const refuse=async()=>{refusals++;throw new HttpError(413,'attachment_too_large');};
+    assert.equal((await preparation.run(refused.reference.id,refuse,'fixture',async()=>[],authority)).state,'completed');
+    assert.equal((await preparation.run(refused.reference.id,refuse,'fixture',async()=>[],authority)).state,'completed');
+    assert.equal(refusals,1,'a refused download is never retried');
+    assert.deepEqual([...await attachments.tooLarge(retry.reference.id)],[],'an ordinary failure still retries');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

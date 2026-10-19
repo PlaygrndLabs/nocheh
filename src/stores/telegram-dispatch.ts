@@ -239,7 +239,9 @@ export class TelegramDispatchRepository {
       if(result.kind==='transcript')transcripts.push(Buffer.from(result.content_base64,'base64').toString());
     }
     const manifests=(await this.archive.pool.query('SELECT id,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[source.id])).rows;
+    const tooLarge=await this.preparation.attachments.tooLarge(source.id);
     for(const file of selected.artifacts) {
+      if(tooLarge.has(file.id))continue;
       const hash=manifests.find(m=>m.id===file.id)?.file_hash;if(!hash)throw new HttpError(409,'source_file_pending');
       const extracted=selected.derived.find(d=>d.artifact_id===file.id&&d.kind==='extracted_text');
       files.push({id:file.id,name:typeof file.metadata?.file_name==='string'?file.metadata.file_name:'Attachment',sha256:hash,
@@ -251,7 +253,7 @@ export class TelegramDispatchRepository {
     const addressing=groupAddressing(payload,/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'');
     const text=selected.event.text??null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(addressing?{group_addressing:addressing}:{})};
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge.size?{files_too_large:tooLarge.size}:{}),...(addressing?{group_addressing:addressing}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control});await this.current(input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
