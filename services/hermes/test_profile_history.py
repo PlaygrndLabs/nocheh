@@ -46,6 +46,7 @@ class ProfileHistoryTests(unittest.TestCase):
 
     def replay(self,profile,session='nocheh-chat'):
         from .isolated_profile import database_path
+        if not database_path(profile).exists():return []
         db=self.SessionDB(database_path(profile),read_only=True)
         try:return db.get_messages_as_conversation(session) if db.get_session(session) else []
         finally:db.close()
