@@ -509,7 +509,7 @@ services:
   # Its public hostname points to http://nocheh-miniapp:8788.
   nocheh-tunnel:
     logging: *logging
-    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    image: cloudflare/cloudflared:2026.10.2@sha256:0e56c13c7058fcef9c4f0e7d83372f82330548dbf8f8b366f3d8b506526d93b2
     profiles: [miniapp]
     command: [tunnel, --no-autoupdate, run]
     restart: unless-stopped
