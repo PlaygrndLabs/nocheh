@@ -10,7 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from tools.operations.installation import configuration
+from tools.operations.installation import configuration, mini_app
 from tools.operations.provider import routes as provider_routes
 
 PROJECT = 'nocheh'
@@ -130,13 +130,14 @@ def docker_env(root, values):
     env.update(values)
     # Settings › Models: the resolved provider and model of replies and secret checks.
     env.update(provider_routes.environment(values))
+    env.update(mini_app.environment(values))
     env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_DEV_PROJECT=DEV_IMAGES,
                NOCHEH_DEV_SOURCE_ROOT=str(ROOT), NOCHEH_INSTALLATION_ROOT=str(root),
                NOCHEH_STATE_DIR=str(root / 'data/local'),
                NOCHEH_DEV_HERMES_BASE=DEV_IMAGES + ':hermes-base',
                NOCHEH_DEV_HONCHO_IMAGE=DEV_IMAGES + ':honcho',
                NOCHEH_NATIVE_ADMIN_PORT=str(int(values['NOCHEH_PORT']) + 5),
-               COMPOSE_PROFILES='honcho',
+               COMPOSE_PROFILES='honcho,miniapp' if mini_app.enabled(values) else 'honcho',
                COMPOSE_PROGRESS='plain',
                NOCHEH_AGENT_NETWORK=PROJECT + '-agent',
                NOCHEH_MEMORY_NETWORK=PROJECT + '-memory')
@@ -181,7 +182,7 @@ def inspect_project(root, env):
         labels = container['Config']['Labels'] or {}
         service = labels.get('com.docker.compose.service') or ''
         if (labels.get('com.docker.compose.project.working_dir') != str(root)
-                or service not in SERVICES
+                or service not in SERVICES + mini_app.SERVICES
                 and not service.startswith('nocheh-reset-')
                 and service != 'pgweb-archive'):
             raise ValueError('Operating Compose project belongs to another checkout or service')
@@ -302,6 +303,7 @@ def main(action, rest):
     print('Live development: http://127.0.0.1:8783/', flush=True)
     print(f'Source checkout: {ROOT}\nOperating state: {root / "data/local"}', flush=True)
     try:
-        return subprocess.call(cmd + ['up', build_flag, *SERVICES], cwd=root, env=env)
+        services = SERVICES + (mini_app.SERVICES if mini_app.enabled(values) else ())
+        return subprocess.call(cmd + ['up', build_flag, *services], cwd=root, env=env)
     except KeyboardInterrupt:
         return 130

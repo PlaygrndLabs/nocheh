@@ -364,8 +364,9 @@ not yet run on the owner's installation:
   ([decision](docs/adr/0158-telegram-approval-buttons.md),
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)).
-  Card and button texts are fixed in code, like the Telegram command replies;
-  making them editable from the dashboard is open. On the owner's
+  Card layout, button labels, outcomes and notices are now owner-editable
+  templates in Settings › Instructions; the Telegram command replies are
+  still fixed in code. On the owner's
   installation a button press in the group approved and delivered the post
   once. The card now also says when the message was sent.
 - After that test the owner asked that allowed people post freely in their own
@@ -373,14 +374,23 @@ not yet run on the owner's installation:
   not allowed get a fixed reply, and that a message from one group to another
   is shown and approved because it is made from the first group's memory. A
   same-group post by the owner or a permitted participant now needs no
-  approval, a post to another group waits for the owner, a group turn can list
-  the groups where the person asking is allowed, every card goes to the
-  owner's private
-  chat, and an unallowed member who addresses Nocheh gets one editable reply
+  approval, a group turn can list the groups where the person asking is
+  allowed, cards go to the owner's private chat, and an unallowed member who addresses Nocheh gets one editable reply
   without a turn ([decision](docs/adr/0159-group-members-post-freely-and-approvals-go-private.md),
   [check](test/store-approval-buttons.test.ts),
   [Hermes check](services/hermes/test_approval_cards.py)). Not yet run on the
-  owner's installation. Open question to the owner: whether memory should
+  owner's installation. Live check on the owner's installation (October 19,
+  with this change and the quote fix): a same-group post went out once with no
+  card and no other reply; a request in the group for the owner's private chat
+  put one card in the private chat and one short note in the group, and the
+  owner's button press delivered the message once about 4 seconds later, with
+  the card showing the outcome. The owner then decided that an allowed member reviews
+  their own message to another group where they are also allowed, or to
+  another topic when topics keep separate memory: the card
+  appears under the request in the group, and only that member or the owner
+  can press it. The owner's own request from a group for their private chat
+  needs no approval ([decision](docs/adr/0161-requesters-review-their-own-cross-group-messages.md),
+  [check](test/store-approval-buttons.test.ts)). Open question to the owner: whether memory should
   stay per group, shared between groups only through owner sharing rules (the
   recommendation), or be shared across all groups or projects of one person.
 - Release test 3 (October 19) passed on the owner's installation: Hermes
@@ -396,12 +406,40 @@ not yet run on the owner's installation:
   the control store ([decision](docs/adr/0160-owner-task-list.md),
   [check](test/store-tasks.test.ts), [broker check](test/knowledge-broker.test.ts),
   [tool check](services/hermes/test_knowledge_tools.py),
-  [browser check](test/dashboard-pages.browser.mjs)). Next: the mini app on the
-  owner's own domain through a Cloudflare tunnel from the
-  local stack, then the optional Notion connector. Live check pending: ask
+  [browser check](test/dashboard-pages.browser.mjs)). Live check pending: ask
   Nocheh in the private chat to add, list and finish a task.
-Pending: a live album, an edit, a small group-export import, and release
-tests 4 and 5 on the owner's installation.
+- Telegram mini app (October 19): Home, Inbox and Tasks in Telegram through a
+  credential-free mini app service and a Cloudflare tunnel, turned on in
+  Settings › Telegram ([decision](docs/adr/0162-telegram-mini-app.md),
+  [setup](docs/telegram.md#mini-app), [check](test/mini-app.test.ts),
+  [settings check](services/hermes/test_settings.py)). Pending: a live open
+  from the owner's phone; the owner tests it on the MVP installation, not the
+  local one. Next: the optional Notion connector.
+- Release test 4 (October 20) passed on the owner's installation. A private
+  message stating a synthetic locker code got one reply. Hiding it and
+  Nocheh's reply made a later question answer once without the code; the code
+  appeared in no replayed history, tool result or Honcho output. After Undo on
+  the message alone, the code returned from the restored message through
+  archive search and Honcho, while the still-hidden reply was used nowhere.
+  The memory lookups after the hide and the Undo took 52 and 32 seconds:
+  sequential Honcho reasoning rounds, each passing the input check, and a
+  re-prepared guard cache after the epoch change.
+- The same check found that each guard epoch gives a chat a new Hermes profile
+  with an empty conversation, so Nocheh forgot the ongoing chat seven times in
+  two days, four after automatic learning. In source on a branch: a new
+  epoch's profile is seeded once with the chat's recent messages and delivered
+  answers, and retirements apply before its first turn
+  ([decision](docs/adr/0163-chat-conversation-carries-into-new-guard-epochs.md),
+  [check](services/hermes/test_profile_history.py)); the owner chose to fix it
+  before the MVP. Earlier-epoch profiles are not yet pruned.
+- Release test 5 (October 20) passed on the owner's installation: a group
+  member who had never posted added, changed and removed a reaction on an
+  older message. Each update was captured once and in order, the current state
+  ended empty, Nocheh sent nothing and no errors were logged. Each update
+  advanced the guard epoch, so busy reactions start new per-epoch Hermes
+  profiles, which are not pruned.
+Pending: a live album, an edit and a small group-export import on the owner's
+installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,

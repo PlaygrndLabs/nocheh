@@ -2,6 +2,8 @@
 declare global {
   interface Window {
     __NOCHEH_CSRF__?: string;
+    /** The Telegram Mini App's signed launch data; the mini app server checks it on every call. */
+    __NOCHEH_TELEGRAM__?: string;
   }
 }
 
@@ -17,6 +19,7 @@ export async function authedFetch(path: string, options: RequestInit = {}): Prom
     headers: {
       ...(options.headers as Record<string, string> | undefined),
       'X-Nocheh-CSRF': window.__NOCHEH_CSRF__ ?? '',
+      ...(window.__NOCHEH_TELEGRAM__ ? {'X-Telegram-Init-Data': window.__NOCHEH_TELEGRAM__} : {}),
     },
   });
 }

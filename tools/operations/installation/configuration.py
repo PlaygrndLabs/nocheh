@@ -7,6 +7,7 @@ import secrets
 from pathlib import Path
 from tools.operations.provider.embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
 from tools.operations.provider import routes as provider_routes
+from tools.operations.installation import mini_app
 
 ROOT = REPO_ROOT
 INSTALLATION_ROOT = Path(os.environ.get('NOCHEH_INSTALLATION_ROOT', ROOT)).resolve()
@@ -24,6 +25,7 @@ DEFAULTS = {
     'NOCHEH_LOG_MAX_SIZE': '10m', 'NOCHEH_LOG_MAX_FILES': '3',
     'NOCHEH_PARALLEL_REPLIES': '3', 'NOCHEH_PARALLEL_RUNS': '4', 'NOCHEH_PARALLEL_GUARD_CHECKS': '3',
     'NOCHEH_HONCHO_ENABLED': 'true',
+    'NOCHEH_MINI_APP_URL': '', 'CLOUDFLARE_TUNNEL_TOKEN': '',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
     **provider_routes.DEFAULTS,
@@ -191,6 +193,7 @@ def validate(values):
     names=[name.strip() for name in str(values.get('TELEGRAM_BOT_NAMES','')).split(',') if name.strip()]
     if len(names)>10 or any(len(name)>32 for name in names):raise ValueError('TELEGRAM_BOT_NAMES must be up to 10 comma-separated names of up to 32 characters')
     if values['TELEGRAM_ENABLED'] == 'true' and (not owner or not values['TELEGRAM_BOT_TOKEN']): raise ValueError('Enabling Telegram requires TELEGRAM_OWNER_ID and TELEGRAM_BOT_TOKEN')
+    mini_app.validate(values)
     if values['NOCHEH_GUARD_MODE'] not in ('off', 'on'): raise ValueError('NOCHEH_GUARD_MODE must be off or on')
     if not values['NOCHEH_MODEL'].strip(): raise ValueError('NOCHEH_MODEL is required')
     provider_routes.validate(values)
@@ -237,8 +240,11 @@ def compose_environment(state):
     result['NOCHEH_INSTALLATION_ROOT'] = str(INSTALLATION_ROOT)
     result['NOCHEH_DASHBOARD_PORT'] = load(state).get('NOCHEH_DASHBOARD_PORT') or str(int(result['NOCHEH_PORT'])+3 if int(result['NOCHEH_PORT'])<=65532 else int(result['NOCHEH_PORT'])-3)
     # Profiles are explicit per installation; a stale shell cannot activate workflows.
-    profiles=[v for v in result.get('COMPOSE_PROFILES','').split(',') if v and v not in ('workflows','honcho','honcho-tools')]
+    profiles=[v for v in result.get('COMPOSE_PROFILES','').split(',') if v and v not in ('workflows','honcho','honcho-tools','miniapp')]
     if result.get('NOCHEH_HONCHO_ENABLED')=='true' and not (Path(state)/'spool/.restore-inactive').exists():profiles.append('honcho')
+    # The Telegram mini app and its tunnel run only once both are set up.
+    if mini_app.enabled(load(state)):profiles.append('miniapp')
+    result.update(mini_app.environment(result))
     result['NOCHEH_HONCHO_STATE_DIR']=load(state).get('NOCHEH_HONCHO_STATE_DIR') or str(Path(state).resolve()/'honcho')
     result['COMPOSE_PROFILES']=','.join(profiles)
     result.update(provider_routes.environment({**DEFAULTS,**load(state)}))

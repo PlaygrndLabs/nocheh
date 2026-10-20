@@ -103,6 +103,10 @@ def prepare_profile(root,scope,model):
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
+    if scope.guard_epoch and scope.purpose!='filter':
+        # A new guard epoch starts a new profile; the chat keeps its conversation.
+        from .profile_history import carry
+        carry(profile)
     return profile
 
 
@@ -451,17 +455,18 @@ class AssistantGateway:
         return asyncio.run_coroutine_threadsafe(self.send_approval(body),self.loop).result(timeout=55)
 
     async def send_approval(self,body):
-        """Approve and Reject buttons on an exact pending action, only in the
-        owner's private chat.
+        """Approve and Reject buttons on an exact pending action, in the owner's
+        private chat or, for a message its requester reviews, in an allowed
+        group and topic where it was asked.
 
-        Pressing one is captured like any update; storage verifies that the
-        owner pressed it and decides. These calls only show the card and the
-        decision on it.
+        Pressing one is captured like any update; storage verifies who pressed
+        it and decides. These calls only show the card and the decision on it.
         """
         import re
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        chat=str(body.get('chat_id',''))
-        if not self.scopes.owner or chat!=str(self.scopes.owner) or not re.fullmatch(r'[1-9]\d{0,18}',chat):raise ValueError('approval_owner_only')
+        chat,topic=str(body.get('chat_id','')),str(body.get('topic') or '')
+        owner=bool(self.scopes.owner) and chat==str(self.scopes.owner) and re.fullmatch(r'[1-9]\d{0,18}',chat)
+        if not owner and chat not in (self.scopes.groups or []) or topic and (owner or not re.fullmatch(r'[1-9]\d{0,15}',topic)):raise ValueError('approval_chat_not_allowed')
         text=body.get('text')
         if not isinstance(text,str) or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_approval')
         if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
@@ -480,9 +485,9 @@ class AssistantGateway:
                 if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
                 await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
                 token=DISPATCH_KEY.set('approval:'+body['id'])
-                check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True))
+                check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
                 try:
-                    sent=await bot.send_message(int(chat),text,reply_markup=InlineKeyboardMarkup([buttons]))
+                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup([buttons]))
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
                 except Exception:result={'state':'ambiguous'}
                 finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)

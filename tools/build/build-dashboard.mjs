@@ -6,6 +6,7 @@ if (process.env.NOCHEH_DEV_BUILD !== '1') await rm('dashboard/dist',{recursive:t
 await mkdir('dashboard/dist',{recursive:true});
 execFileSync(process.execPath,['node_modules/typescript/bin/tsc','-p','tsconfig.dashboard.json'],{stdio:'inherit'});
 execFileSync(process.execPath,['node_modules/@tailwindcss/cli/dist/index.mjs','-i','dashboard/tailwind.css','-o','dashboard/dist/tailwind.css','--minify'],{stdio:'inherit'});
-await build({entryPoints:{app:'dashboard/app.tsx'},tsconfig:'tsconfig.dashboard.json',outdir:'dashboard/dist',chunkNames:'chunks/[name]-[hash]',splitting:true,bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,legalComments:'eof'});
+await build({entryPoints:{app:'dashboard/app.tsx',mini:'dashboard/mini.tsx'},tsconfig:'tsconfig.dashboard.json',outdir:'dashboard/dist',chunkNames:'chunks/[name]-[hash]',splitting:true,bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true,legalComments:'eof'});
 await copyFile('dashboard/dist/tailwind.css','dashboard/dist/style.css');
 await copyFile('dashboard/index.html','dashboard/dist/index.html');
+await copyFile('dashboard/mini.html','dashboard/dist/mini.html');
