@@ -1,8 +1,9 @@
 # ADR-0163: A chat's conversation carries into each new guard epoch
 
 <status>
-Proposed on 2026-10-20 after the owner's release test 4 (hide a message, then
-Undo). The live check showed that each guard epoch gives a chat a new Hermes
+Accepted on 2026-10-20, when the owner chose "Fix it now" for "Keep Nocheh's
+chat history when its memory updates?" after release test 4 (hide a message,
+then Undo). The live check showed that each guard epoch gives a chat a new Hermes
 profile with an empty session database, so Nocheh forgot the ongoing
 conversation seven times in two days, four of them after automatic learning.
 </status>
