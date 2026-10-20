@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS development
+FROM node:26.12.0-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS development
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ARG LOCAL_UID=1000
@@ -20,7 +20,7 @@ FROM development AS build
 USER root
 RUN npm prune --omit=dev
 
-FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
+FROM node:26.12.0-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS runtime
 WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
@@ -36,22 +36,24 @@ CMD ["node", "dist/src/mini-app.js"]
 # The database service already holds the installation administrator credential.
 # Run store provisioning there before declaring PostgreSQL healthy, so application
 # processes retain only their restricted per-store credentials.
-FROM postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0 AS store-postgres
+FROM postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336 AS store-postgres
 WORKDIR /app
 COPY --from=runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=runtime /app/node_modules ./node_modules
 COPY --from=runtime /app/dist ./dist
 COPY deploy/store-postgres-entrypoint.sh /usr/local/bin/store-postgres-entrypoint
 RUN chmod 0755 /usr/local/bin/store-postgres-entrypoint
+# The 18+ images default to /var/lib/postgresql/18/docker; Nocheh's volume mounts the data directory itself.
+ENV PGDATA=/var/lib/postgresql/data
 ENTRYPOINT ["store-postgres-entrypoint"]
 CMD ["postgres"]
 
-FROM docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS docker-cli
+FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad1025f261a1b621800 AS docker-cli
 
 # Trusted installation administration; agent images never inherit this target.
 # Install management tools before copying application output so source edits do
 # not repeat apt-get on every watched dashboard rebuild.
-FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS management-base
+FROM node:26.12.0-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS management-base
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-yaml git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins

@@ -131,7 +131,7 @@ PostgreSQL derivation queue stay with their respective tools.
 - Optional pgweb: <http://localhost:8782/>, after `./bin/nocheh db`.
 
 React, React DOM, Three.js, GraphQL, pg, TypeScript and esbuild are libraries or
-build tools, not additional production services. The management image contains Node 24.x, Python, and pinned Docker CLI tools.
+build tools, not additional production services. The management image contains Node 26.x, Python, and pinned Docker CLI tools.
 It mounts installation paths at the same absolute locations for maintenance and
 approved tool bind mounts. Docker-socket access for these two trusted services is explicitly owner-authorized.
 

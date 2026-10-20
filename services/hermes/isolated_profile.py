@@ -15,26 +15,41 @@ def database_path(profile):
         raise ValueError('session_path_denied')
     return target
 
+def native_path(path):
+    """A profile's ``state.db`` as the durable database it names."""
+    path=Path(path)
+    return database_path(path.parent) if path.name=='state.db' and path.parent.name!='native-state' else path
+
+
 def install_database_paths():
-    """Native APIs that open the default DB must see the same migrated history."""
+    """Native APIs that open a profile DB must see the same migrated history."""
     import hermes_state
+    import hermes_state_registry
     original=hermes_state._default_db_path
     if getattr(original,'_nocheh_data_path',False):return lambda:None
     def current():
-        path=Path(original())
-        return database_path(path.parent) if path.name=='state.db' and path.parent.name!='native-state' else path
+        return native_path(original())
     current._nocheh_data_path=True
     hermes_state._default_db_path=current
+    originals=[(hermes_state,'_default_db_path',original)]
+    # Native modules also open ``<home>/state.db`` by explicit path (goal
+    # migration during compaction, dashboard routes). The shared registry
+    # keys handles by path, so map before it to keep one writer per database.
+    acquire=hermes_state_registry.acquire;initialize=hermes_state.SessionDB.__init__
+    def mapped_acquire(db_path=None):
+        return acquire(None if db_path is None else native_path(db_path))
+    def mapped_initialize(self,db_path=None,read_only=False):
+        return initialize(self,None if db_path is None else native_path(db_path),read_only)
+    originals+=[(hermes_state_registry,'acquire',acquire),(hermes_state.SessionDB,'__init__',initialize)]
+    hermes_state_registry.acquire=mapped_acquire;hermes_state.SessionDB.__init__=mapped_initialize
     # The pinned process registry opens its delegation ledger during import,
     # using sqlite3 directly. Keep that ledger in the same durable database.
     from tools import async_delegation
     from gateway import delivery_ledger
-    originals=[(hermes_state,'_default_db_path',original)]
     for module in (async_delegation,delivery_ledger):
         prior=module._db_path;originals.append((module,'_db_path',prior))
         def mapped(fn=prior):
-            path=Path(fn())
-            return database_path(path.parent) if path.name=='state.db' and path.parent.name!='native-state' else path
+            return native_path(fn())
         module._db_path=mapped
     def restore():
         for module,name,prior in reversed(originals):setattr(module,name,prior)

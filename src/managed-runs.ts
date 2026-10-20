@@ -133,7 +133,7 @@ export async function finishRun(pool:pg.Pool,input:unknown) {
   const body=object(input),event=string(body.event_id,64),actor=identifier(body.actor),state=string(body.state,32);
   if(!['done','failed','cancelled','interrupted'].includes(state))throw new HttpError(400,'invalid_run_state');
   const text=string(body.text??'',1000000),session=identifier(body.session),code=body.error_code?identifier(body.error_code):null;
-  const content=Buffer.from(text),provenance={runtime:'hermes',version:'7166071fcaadb36df26f6d753dda97da6b5d699e',session_id:session,state};
+  const content=Buffer.from(text),provenance={runtime:'hermes',version:'d923a5eb487a17c0a68801bba9ef0f56c81040a8',session_id:session,state};
   const client=await pool.connect();
   try {
     await client.query('BEGIN');

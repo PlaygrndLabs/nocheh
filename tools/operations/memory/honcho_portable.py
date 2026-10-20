@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from tools.operations.archive.archive import file_digest
 
-TABLES=('workspaces','peers','sessions','messages','message_embeddings','collections','documents','session_peers')
+TABLES=('workspaces','peers','sessions','messages','message_embeddings','collections','documents','document_sources','session_peers')
 IDENTIFIER=re.compile(r'[a-z_][a-z0-9_]{0,62}')
 SNAPSHOT=re.compile(r'[A-Fa-f0-9]+-[A-Fa-f0-9]+-[0-9]+')
 

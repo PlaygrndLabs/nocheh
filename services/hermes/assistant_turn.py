@@ -70,16 +70,15 @@ RETIRED_CONTENT_UNAVAILABLE="I can't access the retired message's content, so I 
 
 
 def restrict_session_search():
+    # Native reads stay in the caller's own store; only a named profile opens another.
     from tools import session_search_tool as search
     original_resolve=search._resolve_profile_db
-    original_locate=search._locate_session_db
     def current_only(profile):
         if profile is not None and str(profile).strip():raise ValueError('profile_scope_denied')
         return None
     search._resolve_profile_db=current_only
-    search._locate_session_db=lambda *args,**kwargs:(None,None)
     def restore():
-        search._resolve_profile_db=original_resolve;search._locate_session_db=original_locate
+        search._resolve_profile_db=original_resolve
     return restore
 
 

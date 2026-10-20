@@ -48,9 +48,9 @@ def main():
     writers=('hermes','nocheh-executor','hermes-agent-sb','nocheh-app','nocheh-security',
              'nocheh-dashboard','honcho-deriver')
     services={'nocheh-db': {
-        'image':'postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0',
+        'image':'postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336',
         'restart':'unless-stopped', 'command':['postgres','-c','cluster_name=nocheh-reset-quiescence-fixture'],
-        'environment':{'POSTGRES_DB':'nocheh','POSTGRES_USER':'nocheh','POSTGRES_PASSWORD':'synthetic-shutdown-not-a-real-credential'},
+        'environment':{'PGDATA':'/var/lib/postgresql/data','POSTGRES_DB':'nocheh','POSTGRES_USER':'nocheh','POSTGRES_PASSWORD':'synthetic-shutdown-not-a-real-credential'},
         'volumes':['postgres_data:/var/lib/postgresql/data'],
         'healthcheck':{'test':['CMD','pg_isready','-U','nocheh','-d','nocheh'],'interval':'1s','timeout':'2s','retries':30}}}
     for service in writers:

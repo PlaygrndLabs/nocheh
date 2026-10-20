@@ -1,4 +1,4 @@
-"""Exact pinned-source patches: per-form revision and scoped native file requests."""
+"""Exact pinned-source patches: per-form revision, scoped native requests and the /hermes/ base."""
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])
@@ -40,11 +40,32 @@ source = 'import {receiveBrowserDelivery, resumeBrowserDeliveries} from "@/lib/n
 source = 'import {BrowserRecovery} from "@/components/NochehBrowserRecovery";\n' + source
 replace('''      <Card className="flex items-center justify-between gap-2 px-3 py-2">''', '''      <BrowserRecovery key={profile || ""} profile={profile || ""} />
       <Card className="flex items-center justify-between gap-2 px-3 py-2">''')
-replace('''  const [state, setState] = useState<ConnectionState>("idle");''', '''  useEffect(() => resumeBrowserDeliveries(api.acknowledgeBrowserDelivery), []);
-  const [state, setState] = useState<ConnectionState>("idle");''')
-replace('''        const { type, payload } = frame.params;''', '''        const { type, payload } = frame.params;
-        if (type === "message.complete") void receiveBrowserDelivery(payload, api.acknowledgeBrowserDelivery).catch(() => {});''')
-replace('const url = await buildWsUrl("/api/events", { channel });', 'const url = await buildWsUrl("/api/events", { channel, profile: profile || "" });')
+replace('''  const [state, setState] = useState<ConnectionState>('idle')''', '''  useEffect(() => resumeBrowserDeliveries(api.acknowledgeBrowserDelivery), [])
+  const [state, setState] = useState<ConnectionState>('idle')''')
+replace('''    const offNewSession = feed.on('dashboard.new_session_requested', () => {''', '''    const offNochehDelivery = feed.on('message.complete', ev => {
+      void receiveBrowserDelivery(ev.payload, api.acknowledgeBrowserDelivery).catch(() => {})
+    })
+    const offNewSession = feed.on('dashboard.new_session_requested', () => {''')
+replace('''      offNewSession()
+      feed.close()''', '''      offNewSession()
+      offNochehDelivery()
+      feed.close()''')
+replace('        await feed.connect(channel)', '        await feed.connect(channel, profile || "")')
+path.write_text(source)
+path = root / 'web/src/lib/eventsFeedClient.ts'
+source = path.read_text()
+replace('  async connect(channel: string): Promise<void> {', '  async connect(channel: string, profile = ""): Promise<void> {')
+replace("    const url = await withTimeout(buildWsUrl('/api/events', { channel }), EVENTS_CONNECT_TIMEOUT_MS)",
+        "    const url = await withTimeout(buildWsUrl('/api/events', { channel, profile }), EVENTS_CONNECT_TIMEOUT_MS)")
+path.write_text(source)
+# The proxy serves the dashboard under /hermes/. The native index.html rewrite
+# does not cover Vite's absolute preload URLs for lazily loaded chunks.
+path = root / 'web/vite.config.ts'
+source = path.read_text()
+replace('''export default defineConfig({
+  plugins: [''', '''export default defineConfig({
+  base: "/hermes/",
+  plugins: [''')
 path.write_text(source)
 path = root / 'web/src/pages/ChatPage.tsx'
 source = path.read_text()

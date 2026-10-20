@@ -52,7 +52,7 @@ try:
         assert query(target,'SELECT count(*) FROM workspaces')=='0'
         query(target,"INSERT INTO queue VALUES('pending fixture')");must_fail(directory);query(target,'DELETE FROM queue')
         query(target,'ALTER TABLE peers ADD COLUMN unexpected text');must_fail(directory);query(target,'ALTER TABLE peers DROP COLUMN unexpected')
-        assert restored.restore_inactive(directory)['restored_tables']==8
+        assert restored.restore_inactive(directory)['restored_tables']==9
         assert restored.restore_inactive(directory)['automatic_activation'] is False
         assert query(target,'SELECT content FROM peers')=='Exact native fact'
         assert query(target,"INSERT INTO messages(content) VALUES('new fixture') RETURNING id")=='2'

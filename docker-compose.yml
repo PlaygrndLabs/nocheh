@@ -55,7 +55,7 @@ x-service: &service
 
 x-honcho-runtime: &honcho-runtime
   logging: *logging
-  image: nocheh-honcho:be543555
+  image: nocheh-honcho:608aec8a
   build:
     context: ./data/compat/upstreams/honcho
     dockerfile: ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/honcho.Dockerfile
@@ -235,8 +235,10 @@ services:
     logging: *logging
     profiles: [honcho]
     restart: unless-stopped
-    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0
     environment:
+      # The 18+ images default to /var/lib/postgresql/18/docker; this volume mounts the data directory itself.
+      PGDATA: /var/lib/postgresql/data
       POSTGRES_DB: honcho_experiment
       POSTGRES_USER: experiment
       POSTGRES_PASSWORD_FILE: /run/secrets/honcho_database_password
@@ -252,7 +254,7 @@ services:
     volumes: [honcho_redis:/data]
     profiles: [honcho]
     restart: unless-stopped
-    image: redis:8.2@sha256:7d1e4ce8b9395088377ab382d1f6cfdbd13b3690795198a0399ab8d683064d6d
+    image: redis:8.8.3-trixie@sha256:eb1aa641bc5380ed14442398e45a5a51aeaaac919fab811e4f134eb77c71dd2d
     networks: [honcho-isolated]
     healthcheck:
       test: [CMD, redis-cli, ping]
@@ -294,7 +296,7 @@ services:
     environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MEMORY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}"}
     profiles: [honcho]
     restart: unless-stopped
-    image: python:3.11.16-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84
+    image: python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
     command: [python, /nocheh/meter.py]
     env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/meter.env", required: false}]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -311,7 +313,7 @@ services:
       retries: 15
   honcho-cli:
     logging: *logging
-    image: nocheh-honcho-cli:0.1.4
+    image: nocheh-honcho-cli:0.2.0
     build: {context: ./services/honcho/cli, dockerfile: Dockerfile}
     profiles: [honcho-tools]
     read_only: true
@@ -368,7 +370,7 @@ services:
       retries: 12
   pgweb-archive:
     logging: *logging
-    image: sosedoff/pgweb:0.16.2@sha256:8f1ed22e10c9da0912169b98b62ddc54930dc39a5ae07b0f1354d2a93d44c6ed
+    image: sosedoff/pgweb:0.17.0@sha256:a5256d416e2e8b92d69a4459058e3eca33a9f075d8325491644411d0bc3bd70b
     profiles: [tools]
     restart: unless-stopped
     command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
@@ -415,7 +417,7 @@ services:
 
   inngest-redis:
     logging: *logging
-    image: redis:7.4.11-bookworm@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7
+    image: redis:8.8.3-trixie@sha256:eb1aa641bc5380ed14442398e45a5a51aeaaac919fab811e4f134eb77c71dd2d
     restart: unless-stopped
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]
@@ -429,7 +431,7 @@ services:
 
   inngest-server:
     logging: *logging
-    image: inngest/inngest:v1.44.0@sha256:d5365a31f8bf504dc2d54ddd114fcdc1a0413f8b57a450365c095ab6234ad8c2
+    image: inngest/inngest:v1.46.0@sha256:9c4a2413bdbfa31a94ff54c32ae2dcc6613dbee84bc76db6cf6644d19e357e3e
     restart: unless-stopped
     command: [inngest, start]
     environment:
@@ -507,7 +509,7 @@ services:
   # Its public hostname points to http://nocheh-miniapp:8788.
   nocheh-tunnel:
     logging: *logging
-    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    image: cloudflare/cloudflared:2026.10.2@sha256:0e56c13c7058fcef9c4f0e7d83372f82330548dbf8f8b366f3d8b506526d93b2
     profiles: [miniapp]
     command: [tunnel, --no-autoupdate, run]
     restart: unless-stopped
