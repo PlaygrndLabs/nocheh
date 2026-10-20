@@ -415,8 +415,25 @@ not yet run on the owner's installation:
   [settings check](services/hermes/test_settings.py)). Pending: a live open
   from the owner's phone; the owner tests it on the MVP installation, not the
   local one. Next: the optional Notion connector.
+- Release test 4 (October 20) passed on the owner's installation. A private
+  message stating a synthetic locker code got one reply. Hiding it and
+  Nocheh's reply made a later question answer once without the code; the code
+  appeared in no replayed history, tool result or Honcho output. After Undo on
+  the message alone, the code returned from the restored message through
+  archive search and Honcho, while the still-hidden reply was used nowhere.
+  The memory lookups after the hide and the Undo took 52 and 32 seconds:
+  sequential Honcho reasoning rounds, each passing the input check, and a
+  re-prepared guard cache after the epoch change.
+- The same check found that each guard epoch gives a chat a new Hermes profile
+  with an empty conversation, so Nocheh forgot the ongoing chat seven times in
+  two days, four after automatic learning. In source on a branch: a new
+  epoch's profile is seeded once with the chat's recent messages and delivered
+  answers, and retirements apply before its first turn
+  ([decision](docs/adr/0163-chat-conversation-carries-into-new-guard-epochs.md),
+  [check](services/hermes/test_profile_history.py)). Waiting for the owner's
+  choice; earlier-epoch profiles are not yet pruned.
 Pending: a live album, an edit, a small group-export import, and release
-tests 4 and 5 on the owner's installation.
+test 5 on the owner's installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
