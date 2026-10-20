@@ -5,7 +5,19 @@
  */
 import * as React from 'react';
 import {useState} from 'react';
-import {Check, Folder, ListChecks, MessageCircle, Pencil, Plus, RotateCcw, Tag, X} from 'lucide-react';
+import {
+  Check,
+  Folder,
+  LayoutGrid,
+  List,
+  ListChecks,
+  MessageCircle,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Tag,
+  X,
+} from 'lucide-react';
 import {useParam, useView} from '../lib/navigation';
 import {setParams} from '../lib/routes';
 import {pageTabs, tabIds} from '../lib/page-tabs';
@@ -22,6 +34,7 @@ import {
   LoadingRows,
   Notice,
   Pager,
+  Segmented,
   Select,
   Textarea,
 } from '../ui/core';
@@ -110,6 +123,28 @@ function Chips({
   );
 }
 
+type Layout = 'list' | 'cards';
+const LAYOUT_KEY = 'nocheh.tasks-layout';
+/** List or cards, remembered on this device. */
+function useLayout(): [Layout, (layout: Layout) => void] {
+  const [layout, setLayout] = useState<Layout>(() => {
+    try {
+      return localStorage.getItem(LAYOUT_KEY) === 'cards' ? 'cards' : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  return [
+    layout,
+    next => {
+      setLayout(next);
+      try {
+        localStorage.setItem(LAYOUT_KEY, next);
+      } catch {}
+    },
+  ];
+}
+
 export default function Tasks() {
   const [view, setView] = useView(views);
   const [page, setPage] = useState(0);
@@ -124,6 +159,7 @@ export default function Tasks() {
   const scopes = list.data?.scopes ?? [];
   const domains = list.data?.domains ?? [];
   const [editing, setEditing] = useState<Task | null>(null);
+  const [layout, setLayout] = useLayout();
   const changeView = (next: TaskState) => {
     setPage(0);
     setView(next);
@@ -147,31 +183,57 @@ export default function Tasks() {
       }
     >
       <div className="space-y-2">
-        <Chips
-          label="List"
-          value={scope}
-          onChange={value => choose({list: value === 'all' ? null : value, domain: null})}
-          options={[
-            {value: 'all', label: 'All lists'},
-            ...scopes.map(row => ({
-              value: row.id,
-              label: (
-                <>
-                  {row.id === 'personal' ? null : <Folder className="size-3.5" aria-hidden />}
-                  {scopeName(row)}
-                  {!!row.open && <span className="text-xs text-muted">{row.open}</span>}
-                </>
-              ),
-            })),
-          ]}
-        />
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <Chips
+            label="List"
+            value={scope}
+            onChange={value => choose({list: value === 'all' ? null : value, domain: null})}
+            options={[
+              {value: 'all', label: 'All'},
+              ...scopes.map(row => ({
+                value: row.id,
+                label: (
+                  <>
+                    {row.id === 'personal' ? null : <Folder className="size-3.5" aria-hidden />}
+                    {scopeName(row)}
+                    {!!row.open && <span className="text-xs text-muted">{row.open}</span>}
+                  </>
+                ),
+              })),
+            ]}
+          />
+          <Segmented
+            label="Show tasks as"
+            size="sm"
+            value={layout}
+            onChange={setLayout}
+            options={[
+              {
+                value: 'list',
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <List className="size-3.5" aria-hidden /> List
+                  </span>
+                ),
+              },
+              {
+                value: 'cards',
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <LayoutGrid className="size-3.5" aria-hidden /> Cards
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </div>
         {!!domains.length && (
           <Chips
             label="Domain"
             value={domain ?? '*'}
             onChange={value => choose({domain: value === '*' ? null : value})}
             options={[
-              {value: '*', label: 'Every domain'},
+              {value: '*', label: 'All'},
               ...domains.map(row => ({
                 value: row.name,
                 label: (
@@ -195,36 +257,52 @@ export default function Tasks() {
         />
       )}
       {list.error && <LoadError what="tasks" onRetry={() => void refreshResources()} />}
-      <Card>
-        {!list.data && !list.error ? (
+      {!list.data && !list.error ? (
+        <Card>
           <div className="p-5">
             <LoadingRows rows={4} />
           </div>
-        ) : list.data?.tasks.length ? (
-          <ul className="divide-y divide-line">
-            {list.data.tasks.map(task => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                list={
-                  scope === 'all' ? scopeName(scopes.find(row => row.id === (task.project_id ?? 'personal'))) : null
-                }
-                onEdit={() => setEditing(task)}
-              />
-            ))}
-          </ul>
-        ) : (
-          list.data && (
+        </Card>
+      ) : list.data?.tasks.length ? (
+        (() => {
+          const rows = list.data.tasks.map(task => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              card={layout === 'cards'}
+              list={scope === 'all' ? scopeName(scopes.find(row => row.id === (task.project_id ?? 'personal'))) : null}
+              onEdit={() => setEditing(task)}
+            />
+          ));
+          const pager = <Pager page={page} hasNext={!!list.data.next} onPage={setPage} />;
+          return layout === 'cards' ? (
+            <div>
+              <ul aria-label="Tasks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {rows}
+              </ul>
+              {pager}
+            </div>
+          ) : (
+            <Card>
+              <ul aria-label="Tasks" className="divide-y divide-line">
+                {rows}
+              </ul>
+              {pager}
+            </Card>
+          );
+        })()
+      ) : (
+        list.data && (
+          <Card>
             <Empty
               icon={ListChecks}
               title={view === 'open' ? 'Nothing to do' : `No ${pageTabs.tasks[view].toLowerCase()} tasks`}
             >
               {view === 'open' && 'Add a task above, or ask Nocheh in your private chat to remember something for you.'}
             </Empty>
-          )
-        )}
-        <Pager page={page} hasNext={!!list.data?.next} onPage={setPage} />
-      </Card>
+          </Card>
+        )
+      )}
       {editing && (
         <EditTask
           key={editing.id}
@@ -358,7 +436,7 @@ function AddTask({
   );
 }
 
-function TaskRow({task, list, onEdit}: {task: Task; list: string | null; onEdit: () => void}) {
+function TaskRow({task, list, card, onEdit}: {task: Task; list: string | null; card: boolean; onEdit: () => void}) {
   const command = useCommand();
   const feedback = useFeedback();
   const open = task.state === 'open';
@@ -369,7 +447,12 @@ function TaskRow({task, list, onEdit}: {task: Task; list: string | null; onEdit:
       feedback.toast(state === 'done' ? 'Task done.' : state === 'dropped' ? 'Task dropped.' : 'Task reopened.');
   };
   return (
-    <li className="flex items-start gap-3 px-5 py-3">
+    <li
+      className={cn(
+        'flex items-start gap-3',
+        card ? 'rounded-xl border border-line bg-surface px-4 py-3 shadow-sm' : 'px-5 py-3',
+      )}
+    >
       <button
         type="button"
         role="checkbox"

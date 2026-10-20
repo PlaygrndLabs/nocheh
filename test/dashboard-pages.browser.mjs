@@ -397,11 +397,20 @@ test('personal tasks and each project keep separate lists, with domains to narro
   await page.getByText('Book a dentist checkup').waitFor();
   // A project task stays out of the personal list.
   await page.getByText(title).waitFor({state: 'detached'});
-  await lists.getByRole('radio', {name: 'All lists'}).click();
+  await lists.getByRole('radio', {name: 'All', exact: true}).click();
   await page.getByRole('radiogroup', {name: 'Domain'}).getByRole('radio', {name: 'Health'}).click();
   await page.getByText('Book a dentist checkup').waitFor();
   // A domain narrows the list.
   await page.getByText('Send the garden supplier the measurements').waitFor({state: 'detached'});
+  // Cards show the same tasks, and the choice is remembered.
+  await page.getByRole('radiogroup', {name: 'Show tasks as'}).getByRole('radio', {name: 'Cards'}).click();
+  await page.getByRole('list', {name: 'Tasks'}).getByText('Book a dentist checkup').waitFor();
+  await page.reload();
+  await page
+    .getByRole('radiogroup', {name: 'Show tasks as'})
+    .getByRole('radio', {name: 'Cards', checked: true})
+    .waitFor();
+  await page.evaluate(() => localStorage.removeItem('nocheh.tasks-layout'));
   assert.deepEqual(problems, []);
   await page.close();
 });
