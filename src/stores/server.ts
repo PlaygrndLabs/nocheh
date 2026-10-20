@@ -31,6 +31,7 @@ import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {storageGuardService} from './guard-service.js';
+import {taskQuery} from './tasks.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -123,8 +124,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
     if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
     // Task lists: the owner's private chat reaches every list, a project's chat only its own.
-    if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,{state:url.searchParams.get('state')??'',scope:url.searchParams.get('scope')??'',
-      ...(url.searchParams.has('domain')?{domain:url.searchParams.get('domain')!}:{}),after:url.searchParams.get('after')??'',limit:url.searchParams.get('limit')}));
+    if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,taskQuery(url.searchParams)));
     if(req.method==='POST'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatCreate(principal,await readJson(req,64*1024)));
     const chatTask=path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})$/);
     if(req.method==='POST'&&chatTask)return json(res,200,await s.tasks.chatUpdate(principal,chatTask[1]!,await readJson(req,64*1024)));

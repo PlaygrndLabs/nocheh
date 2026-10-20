@@ -38,10 +38,11 @@ export function verifyLaunch(raw:string,check:LaunchCheck):{user_id:string;auth_
 
 /**
  * The owner routes the mini app may reach: home status, the Inbox and its
- * decisions, and tasks. Of settings only the owner's own Telegram ID is read.
+ * decisions, and tasks with the chats and people they point to. Of settings
+ * only the owner's own Telegram ID is read.
  */
 const routes:[string,RegExp][]=[
-  ['GET',/^\/(?:status|settings|decisions|tools\/actions|tasks|memory-access\/requests|conversations)$/],
+  ['GET',/^\/(?:status|settings|decisions|tools\/actions|tasks|memory-access\/requests|conversations|entities)$/],
   ['GET',/^\/decisions\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64}$/],
   ['GET',/^\/(?:tools\/actions|knowledge\/proposals)\/[a-f0-9]{64}$/],
   ['POST',/^\/tasks(?:\/[a-f0-9]{64})?$/],

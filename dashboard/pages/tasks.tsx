@@ -1,7 +1,8 @@
 /**
  * Tasks: the owner's to-do lists, kept in Nocheh. Personal tasks are one list
- * and each project has its own; a domain labels a task within its list. Tasks
- * can be added here or by telling Nocheh in chat; both edit the same lists.
+ * and each project has its own; within a list a task can carry tags and point
+ * to a group and to people. Tasks can be added here or by telling Nocheh in
+ * chat; both edit the same lists.
  */
 import * as React from 'react';
 import {useState} from 'react';
@@ -16,8 +17,11 @@ import {
   Plus,
   RotateCcw,
   Tag,
+  User,
+  Users,
   X,
 } from 'lucide-react';
+import {chatName, type Directory} from '../lib/chats-model';
 import {useParam, useView} from '../lib/navigation';
 import {setParams} from '../lib/routes';
 import {pageTabs, tabIds} from '../lib/page-tabs';
@@ -40,6 +44,7 @@ import {
 } from '../ui/core';
 import {Dialog, useFeedback} from '../ui/overlay';
 import {Page, Tabs} from '../ui/page';
+import {ChatPicker} from './chats/chat-picker';
 import {useCommand, when} from './memory/shared';
 
 type TaskState = 'open' | 'done' | 'dropped';
@@ -50,7 +55,9 @@ export type Task = {
   state: TaskState;
   due_on: string | null;
   project_id: string | null;
-  domain: string;
+  group_id: string | null;
+  tags: string[];
+  people: {id: string; name: string}[];
   origin: 'dashboard' | 'chat';
   revision: number;
   created_at: string;
@@ -63,7 +70,7 @@ type TaskPage = {
   next: string | null;
   counts: Record<TaskState, number>;
   scopes: Scope[];
-  domains: {name: string; open: number}[];
+  tags: {name: string; open: number}[];
 };
 const scopeName = (scope: Scope | undefined) =>
   !scope ? 'Personal' : scope.id === 'personal' ? 'Personal' : scope.name || 'Project';
@@ -88,7 +95,7 @@ export function day(value: string): string {
   });
 }
 
-/** Small toggle buttons for choosing one list or domain. */
+/** Small toggle buttons for choosing one list or tag. */
 function Chips({
   label,
   value,
@@ -149,15 +156,21 @@ export default function Tasks() {
   const [view, setView] = useView(views);
   const [page, setPage] = useState(0);
   const scope = useParam('list') || 'all';
-  const domain = useParam('domain');
+  const tag = useParam('tag');
   const path =
     `/tasks?state=${view}&scope=${encodeURIComponent(scope)}&limit=${PAGE}` +
-    (domain !== null ? `&domain=${encodeURIComponent(domain)}` : '') +
+    (tag ? `&tag=${encodeURIComponent(tag)}` : '') +
     (page ? `&after=${page * PAGE}` : '');
   const list = useResource<TaskPage>(path);
+  const chats = useResource<Directory>('/conversations?limit=100', 60000);
   const counts = list.data?.counts;
   const scopes = list.data?.scopes ?? [];
-  const domains = list.data?.domains ?? [];
+  const tags = list.data?.tags ?? [];
+  const groupName = (space: string) => {
+    const chat = chats.data?.items.find(row => row.space_id === space);
+    if (!chat) return space.includes('/topic/') ? 'A topic' : 'A group';
+    return chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
+  };
   const [editing, setEditing] = useState<Task | null>(null);
   const [layout, setLayout] = useLayout();
   const changeView = (next: TaskState) => {
@@ -187,7 +200,7 @@ export default function Tasks() {
           <Chips
             label="List"
             value={scope}
-            onChange={value => choose({list: value === 'all' ? null : value, domain: null})}
+            onChange={value => choose({list: value === 'all' ? null : value, tag: null})}
             options={[
               {value: 'all', label: 'All'},
               ...scopes.map(row => ({
@@ -227,14 +240,14 @@ export default function Tasks() {
             ]}
           />
         </div>
-        {!!domains.length && (
+        {!!tags.length && (
           <Chips
-            label="Domain"
-            value={domain ?? '*'}
-            onChange={value => choose({domain: value === '*' ? null : value})}
+            label="Tag"
+            value={tag ?? '*'}
+            onChange={value => choose({tag: value === '*' ? null : value})}
             options={[
               {value: '*', label: 'All'},
-              ...domains.map(row => ({
+              ...tags.map(row => ({
                 value: row.name,
                 label: (
                   <>
@@ -252,8 +265,8 @@ export default function Tasks() {
           key={scope}
           scopes={scopes}
           scope={scope === 'all' ? 'personal' : scope}
-          domains={domains.map(row => row.name)}
-          domain={domain ?? ''}
+          tags={tags.map(row => row.name)}
+          tag={tag}
         />
       )}
       {list.error && <LoadError what="tasks" onRetry={() => void refreshResources()} />}
@@ -271,6 +284,7 @@ export default function Tasks() {
               task={task}
               card={layout === 'cards'}
               list={scope === 'all' ? scopeName(scopes.find(row => row.id === (task.project_id ?? 'personal'))) : null}
+              group={task.group_id ? groupName(task.group_id) : null}
               onEdit={() => setEditing(task)}
             />
           ));
@@ -308,7 +322,7 @@ export default function Tasks() {
           key={editing.id}
           task={editing}
           scopes={projects.length ? scopes : []}
-          domains={domains.map(row => row.name)}
+          tags={tags.map(row => row.name)}
           onClose={() => setEditing(null)}
         />
       )}
@@ -316,83 +330,189 @@ export default function Tasks() {
   );
 }
 
-/** The list and domain fields, shared by adding and editing. */
-function ListFields({
+/** The list a task belongs to: personal, or one project's own list. */
+function ListField({
   id,
   scopes,
   scope,
   onScope,
-  domains,
-  domain,
-  onDomain,
 }: {
   id: string;
   scopes: Scope[];
   scope: string;
   onScope: (value: string) => void;
-  domains: string[];
-  domain: string;
-  onDomain: (value: string) => void;
 }) {
+  if (!scopes.some(row => row.id !== 'personal')) return null;
   return (
-    <>
-      {scopes.some(row => row.id !== 'personal') && (
-        <Field label="List" htmlFor={id + '-list'} className="w-44">
-          <Select id={id + '-list'} value={scope} onChange={event => onScope(event.target.value)}>
-            {scopes.map(row => (
-              <option key={row.id} value={row.id}>
-                {scopeName(row)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      )}
-      <Field label="Domain" htmlFor={id + '-domain'} className="w-40">
-        <Input
-          id={id + '-domain'}
-          value={domain}
-          maxLength={40}
-          list={id + '-domains'}
-          placeholder="Optional"
-          onChange={event => onDomain(event.target.value)}
-        />
-      </Field>
-      <datalist id={id + '-domains'}>
-        {domains.map(name => (
-          <option key={name} value={name} />
+    <Field label="List" htmlFor={id + '-list'} className="w-44">
+      <Select id={id + '-list'} value={scope} onChange={event => onScope(event.target.value)}>
+        {scopes.map(row => (
+          <option key={row.id} value={row.id}>
+            {scopeName(row)}
+          </option>
         ))}
+      </Select>
+    </Field>
+  );
+}
+
+const sameTag = (a: string, b: string) => a.toLocaleLowerCase() === b.toLocaleLowerCase();
+/** Text typed into the tag box that isn't added yet still counts. */
+const withPending = (tags: string[], pending: string) => {
+  const text = pending.trim().replace(/\s+/g, ' ').slice(0, 40);
+  return text && !tags.some(tag => sameTag(tag, text)) ? [...tags, text] : tags;
+};
+
+/** Tags like a multi-select column: type one and press Enter, or pick one already in use. */
+function TagsField({
+  id,
+  tags,
+  onTags,
+  pending,
+  onPending,
+  known,
+  className,
+}: {
+  id: string;
+  tags: string[];
+  onTags: (tags: string[]) => void;
+  pending: string;
+  onPending: (text: string) => void;
+  known: string[];
+  className?: string;
+}) {
+  const add = () => {
+    onTags(withPending(tags, pending).slice(0, 20));
+    onPending('');
+  };
+  return (
+    <Field label="Tags" htmlFor={id + '-tags'} className={className}>
+      <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-line bg-surface px-1.5 py-1 focus-within:border-accent">
+        {tags.map(tag => (
+          <span
+            key={tag}
+            className="inline-flex items-center gap-0.5 rounded-md bg-subtle py-0.5 pr-0.5 pl-2 text-xs"
+            dir="auto"
+          >
+            {tag}
+            <button
+              type="button"
+              aria-label={'Remove tag ' + tag}
+              className="rounded p-0.5 text-muted hover:bg-line hover:text-fg"
+              onClick={() => onTags(tags.filter(item => item !== tag))}
+            >
+              <X className="size-3" aria-hidden />
+            </button>
+          </span>
+        ))}
+        <input
+          id={id + '-tags'}
+          value={pending}
+          maxLength={40}
+          list={id + '-known-tags'}
+          placeholder={tags.length ? '' : 'Optional'}
+          className="h-7 min-w-20 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-muted"
+          onChange={event => onPending(event.target.value.replace(',', ''))}
+          onKeyDown={event => {
+            if (event.key === 'Enter' || event.key === ',') {
+              if (!pending.trim()) return;
+              event.preventDefault();
+              add();
+            } else if (event.key === 'Backspace' && !pending && tags.length) onTags(tags.slice(0, -1));
+          }}
+        />
+      </div>
+      <datalist id={id + '-known-tags'}>
+        {known
+          .filter(name => !tags.some(tag => sameTag(tag, name)))
+          .map(name => (
+            <option key={name} value={name} />
+          ))}
       </datalist>
-    </>
+    </Field>
+  );
+}
+
+type Person = {id: string; name: string};
+/** People Nocheh knows, from Memory › People. */
+function PeopleField({people, onPeople}: {people: Person[]; onPeople: (people: Person[]) => void}) {
+  const known = useResource<{entities: Person[]}>('/entities?kind=person&q=&after=&state=active', 60000);
+  const others = (known.data?.entities ?? []).filter(person => !people.some(chosen => chosen.id === person.id));
+  return (
+    <Field label="People" htmlFor="edit-task-people" hint="People from Memory › People.">
+      <div className="space-y-2">
+        {!!people.length && (
+          <ul className="flex flex-wrap gap-1.5" aria-label="Chosen people">
+            {people.map(person => (
+              <li
+                key={person.id}
+                className="inline-flex items-center gap-1 rounded-full border border-line bg-subtle py-0.5 pr-1 pl-2.5 text-xs"
+              >
+                <span dir="auto">{person.name}</span>
+                <button
+                  type="button"
+                  aria-label={'Remove ' + person.name}
+                  className="rounded-full p-0.5 text-muted hover:bg-line hover:text-fg"
+                  onClick={() => onPeople(people.filter(item => item.id !== person.id))}
+                >
+                  <X className="size-3.5" aria-hidden />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Select
+          id="edit-task-people"
+          value=""
+          disabled={!others.length}
+          onChange={event => {
+            const person = others.find(row => row.id === event.target.value);
+            if (person) onPeople([...people, {id: person.id, name: person.name}]);
+          }}
+        >
+          <option value="">{known.data && !others.length ? 'No more people to add' : 'Add a person…'}</option>
+          {others.map(person => (
+            <option key={person.id} value={person.id}>
+              {person.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+    </Field>
   );
 }
 
 function AddTask({
   scopes,
   scope: initialScope,
-  domains,
-  domain: initialDomain,
+  tags: known,
+  tag,
 }: {
   scopes: Scope[];
   scope: string;
-  domains: string[];
-  domain: string;
+  tags: string[];
+  tag: string | null;
 }) {
   const command = useCommand();
   const [title, setTitle] = useState('');
   const [due, setDue] = useState('');
   const [scope, setScope] = useState(initialScope);
-  const [domain, setDomain] = useState(initialDomain);
+  const [tags, setTags] = useState<string[]>(tag ? [tag] : []);
+  const [pending, setPending] = useState('');
   const add = async () => {
     if (!title.trim()) return;
+    const chosen = withPending(tags, pending);
     const created = await command.run('/tasks', {
       title,
       scope,
-      ...(domain.trim() ? {domain} : {}),
+      ...(chosen.length ? {tags: chosen} : {}),
       ...(due ? {due_on: due} : {}),
     });
     if (created) {
       setTitle('');
       setDue('');
+      setPending('');
+      setTags(tag ? [tag] : []);
     }
   };
   return (
@@ -412,14 +532,15 @@ function AddTask({
           onChange={event => setTitle(event.target.value)}
         />
       </Field>
-      <ListFields
+      <ListField id="task" scopes={scopes} scope={scope} onScope={setScope} />
+      <TagsField
         id="task"
-        scopes={scopes}
-        scope={scope}
-        onScope={setScope}
-        domains={domains}
-        domain={domain}
-        onDomain={setDomain}
+        tags={tags}
+        onTags={setTags}
+        pending={pending}
+        onPending={setPending}
+        known={known}
+        className="w-64"
       />
       <Field label="Due" htmlFor="task-due" className="w-40">
         <Input id="task-due" type="date" value={due} onChange={event => setDue(event.target.value)} />
@@ -436,7 +557,19 @@ function AddTask({
   );
 }
 
-function TaskRow({task, list, card, onEdit}: {task: Task; list: string | null; card: boolean; onEdit: () => void}) {
+function TaskRow({
+  task,
+  list,
+  group,
+  card,
+  onEdit,
+}: {
+  task: Task;
+  list: string | null;
+  group: string | null;
+  card: boolean;
+  onEdit: () => void;
+}) {
   const command = useCommand();
   const feedback = useFeedback();
   const open = task.state === 'open';
@@ -482,11 +615,25 @@ function TaskRow({task, list, card, onEdit}: {task: Task; list: string | null; c
               <Folder className="size-3" aria-hidden /> {list}
             </span>
           )}
-          {task.domain && (
-            <span className="inline-flex items-center gap-1">
-              <Tag className="size-3" aria-hidden /> {task.domain}
+          {group && (
+            <span className="inline-flex items-center gap-1" dir="auto">
+              <Users className="size-3" aria-hidden /> {group}
             </span>
           )}
+          {!!task.people.length && (
+            <span className="inline-flex items-center gap-1" dir="auto">
+              <User className="size-3" aria-hidden /> {task.people.map(person => person.name).join(', ')}
+            </span>
+          )}
+          {task.tags.map(tag => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 rounded-md bg-subtle px-1.5 py-0.5 text-fg"
+              dir="auto"
+            >
+              <Tag className="size-3 text-muted" aria-hidden /> {tag}
+            </span>
+          ))}
           {task.done_at && (
             <span>
               {task.state === 'done' ? 'Done' : 'Dropped'} {when(task.done_at)}
@@ -531,12 +678,12 @@ function TaskRow({task, list, card, onEdit}: {task: Task; list: string | null; c
 function EditTask({
   task,
   scopes,
-  domains,
+  tags: known,
   onClose,
 }: {
   task: Task;
   scopes: Scope[];
-  domains: string[];
+  tags: string[];
   onClose: () => void;
 }) {
   const command = useCommand();
@@ -544,13 +691,28 @@ function EditTask({
   const [notes, setNotes] = useState(task.notes);
   const [due, setDue] = useState(task.due_on ?? '');
   const [scope, setScope] = useState(task.project_id ?? 'personal');
-  const [domain, setDomain] = useState(task.domain);
+  const [tags, setTags] = useState(task.tags);
+  const [pending, setPending] = useState('');
+  const [group, setGroup] = useState(task.group_id);
+  const [people, setPeople] = useState(task.people);
+  const chosenTags = withPending(tags, pending);
+  const samePeople =
+    people
+      .map(person => person.id)
+      .sort()
+      .join() ===
+    task.people
+      .map(person => person.id)
+      .sort()
+      .join();
   const changed =
     title !== task.title ||
     notes !== task.notes ||
     due !== (task.due_on ?? '') ||
     scope !== (task.project_id ?? 'personal') ||
-    domain.trim() !== task.domain;
+    chosenTags.join('\n') !== task.tags.join('\n') ||
+    group !== task.group_id ||
+    !samePeople;
   const save = async () => {
     const saved = await command.run('/tasks/' + task.id, {
       expected_revision: task.revision,
@@ -558,7 +720,9 @@ function EditTask({
       notes,
       due_on: due || null,
       ...(scope !== (task.project_id ?? 'personal') ? {scope} : {}),
-      domain,
+      tags: chosenTags,
+      ...(group !== task.group_id ? {group} : {}),
+      ...(samePeople ? {} : {people: people.map(person => person.id)}),
     });
     if (saved) onClose();
   };
@@ -593,20 +757,21 @@ function EditTask({
             onChange={event => setNotes(event.target.value)}
           />
         </Field>
-        <Field label="Due" htmlFor="edit-task-due" hint="Leave empty for no due date.">
-          <Input id="edit-task-due" type="date" value={due} onChange={event => setDue(event.target.value)} />
-        </Field>
         <div className="flex flex-wrap gap-4">
-          <ListFields
-            id="edit-task"
-            scopes={scopes}
-            scope={scope}
-            onScope={setScope}
-            domains={domains}
-            domain={domain}
-            onDomain={setDomain}
-          />
+          <Field label="Due" htmlFor="edit-task-due" hint="Leave empty for no due date." className="w-44">
+            <Input id="edit-task-due" type="date" value={due} onChange={event => setDue(event.target.value)} />
+          </Field>
+          <ListField id="edit-task" scopes={scopes} scope={scope} onScope={setScope} />
         </div>
+        <TagsField id="edit-task" tags={tags} onTags={setTags} pending={pending} onPending={setPending} known={known} />
+        <ChatPicker
+          label="Group"
+          value={group ? [group] : []}
+          onChange={ids => setGroup(ids.at(-1) ?? null)}
+          groupsOnly
+          hint="The group, or a topic in it, this task belongs to."
+        />
+        <PeopleField people={people} onPeople={setPeople} />
         {command.error && <Notice tone="bad">{command.error}</Notice>}
       </div>
     </Dialog>

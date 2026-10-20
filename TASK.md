@@ -415,9 +415,10 @@ not yet run on the owner's installation:
   [settings check](services/hermes/test_settings.py)). Pending: a live open
   from the owner's phone; the owner tests it on the MVP installation, not the
   local one. Next: the optional Notion connector.
-- Task scopes and domains (October 19): personal tasks and each project's own
-  list, with a domain label; a project's chat reaches only its own list
-  ([decision](docs/adr/0163-task-scopes-and-domains.md),
+- Task lists, links and tags (October 19–20): personal tasks and each
+  project's own list; a task can point to a group and people and has a list
+  of tags; a project's chat reaches only its own list
+  ([decision](docs/adr/0163-task-lists-links-and-tags.md),
   [check](test/store-tasks.test.ts), [browser check](test/dashboard-pages.browser.mjs)).
   Live check pending: ask Nocheh in a project's group to add a task, and see it
   only in that project's list.
