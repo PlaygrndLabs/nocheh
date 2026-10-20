@@ -432,8 +432,14 @@ not yet run on the owner's installation:
   ([decision](docs/adr/0163-chat-conversation-carries-into-new-guard-epochs.md),
   [check](services/hermes/test_profile_history.py)); the owner chose to fix it
   before the MVP. Earlier-epoch profiles are not yet pruned.
-Pending: a live album, an edit, a small group-export import, and release
-test 5 on the owner's installation.
+- Release test 5 (October 20) passed on the owner's installation: a group
+  member who had never posted added, changed and removed a reaction on an
+  older message. Each update was captured once and in order, the current state
+  ended empty, Nocheh sent nothing and no errors were logged. Each update
+  advanced the guard epoch, so busy reactions start new per-epoch Hermes
+  profiles, which are not pruned.
+Pending: a live album, an edit and a small group-export import on the owner's
+installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
