@@ -5,6 +5,7 @@ import {limit} from '../retrieval.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {StorageServices} from './services.js';
 import {portableDerivativeTypes} from './derivative-portability.js';
+import {taskQuery} from './tasks.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
@@ -22,7 +23,7 @@ export class OwnerStorageApi {
     if(path==='/v1/telegram/topics')return method==='GET'?s.telegramTopics.list(principal):s.telegramTopics.change(principal,input);
     if(path==='/v1/telegram/chats/refresh'){if(method!=='POST')throw new HttpError(405,'method_not_allowed');return s.telegramChats.refresh(principal);}
     if(path==='/v1/owner-autonomy')return method==='GET'?s.ownerAutonomy.get(principal):s.ownerAutonomy.save(principal,input);
-    if(path==='/v1/tasks')return method==='GET'?s.tasks.list(principal,{state:q.get('state')??'',after:q.get('after')??'',limit:q.get('limit')}):s.tasks.create(principal,input);
+    if(path==='/v1/tasks')return method==='GET'?s.tasks.list(principal,taskQuery(q)):s.tasks.create(principal,input);
     const task=path.match(/^\/v1\/tasks\/([a-f0-9]{64})$/);
     if(task&&method==='POST')return s.tasks.update(principal,task[1]!,input);
     if(path==='/v1/prompts')return method==='GET'?s.prompts.get(principal):s.prompts.save(principal,input);
