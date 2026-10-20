@@ -195,8 +195,9 @@ export default function Tasks() {
         />
       }
     >
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-start justify-between gap-2">
+      {/* Filters first; on a phone the layout switch goes below them, not between them. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-2">
           <Chips
             label="List"
             value={scope}
@@ -215,6 +216,27 @@ export default function Tasks() {
               })),
             ]}
           />
+          {!!tags.length && (
+            <Chips
+              label="Tag"
+              value={tag ?? '*'}
+              onChange={value => choose({tag: value === '*' ? null : value})}
+              options={[
+                {value: '*', label: 'All'},
+                ...tags.map(row => ({
+                  value: row.name,
+                  label: (
+                    <>
+                      <Tag className="size-3.5" aria-hidden />
+                      {row.name}
+                    </>
+                  ),
+                })),
+              ]}
+            />
+          )}
+        </div>
+        <div className="shrink-0">
           <Segmented
             label="Show tasks as"
             size="sm"
@@ -240,25 +262,6 @@ export default function Tasks() {
             ]}
           />
         </div>
-        {!!tags.length && (
-          <Chips
-            label="Tag"
-            value={tag ?? '*'}
-            onChange={value => choose({tag: value === '*' ? null : value})}
-            options={[
-              {value: '*', label: 'All'},
-              ...tags.map(row => ({
-                value: row.name,
-                label: (
-                  <>
-                    <Tag className="size-3.5" aria-hidden />
-                    {row.name}
-                  </>
-                ),
-              })),
-            ]}
-          />
-        )}
       </div>
       {view === 'open' && (
         <AddTask
@@ -386,42 +389,44 @@ function TagsField({
     onPending('');
   };
   return (
-    <Field label="Tags" htmlFor={id + '-tags'} className={className}>
-      <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-line bg-surface px-1.5 py-1 focus-within:border-accent">
-        {tags.map(tag => (
-          <span
-            key={tag}
-            className="inline-flex items-center gap-0.5 rounded-md bg-subtle py-0.5 pr-0.5 pl-2 text-xs"
-            dir="auto"
-          >
-            {tag}
-            <button
-              type="button"
-              aria-label={'Remove tag ' + tag}
-              className="rounded p-0.5 text-muted hover:bg-line hover:text-fg"
-              onClick={() => onTags(tags.filter(item => item !== tag))}
+    <>
+      <Field label="Tags" htmlFor={id + '-tags'} className={className}>
+        <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-line bg-surface px-1.5 py-0.5 focus-within:border-accent">
+          {tags.map(tag => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-0.5 rounded-md bg-subtle py-0.5 pr-0.5 pl-2 text-xs"
+              dir="auto"
             >
-              <X className="size-3" aria-hidden />
-            </button>
-          </span>
-        ))}
-        <input
-          id={id + '-tags'}
-          value={pending}
-          maxLength={40}
-          list={id + '-known-tags'}
-          placeholder={tags.length ? '' : 'Optional'}
-          className="h-7 min-w-20 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-muted"
-          onChange={event => onPending(event.target.value.replace(',', ''))}
-          onKeyDown={event => {
-            if (event.key === 'Enter' || event.key === ',') {
-              if (!pending.trim()) return;
-              event.preventDefault();
-              add();
-            } else if (event.key === 'Backspace' && !pending && tags.length) onTags(tags.slice(0, -1));
-          }}
-        />
-      </div>
+              {tag}
+              <button
+                type="button"
+                aria-label={'Remove tag ' + tag}
+                className="rounded p-0.5 text-muted hover:bg-line hover:text-fg"
+                onClick={() => onTags(tags.filter(item => item !== tag))}
+              >
+                <X className="size-3" aria-hidden />
+              </button>
+            </span>
+          ))}
+          <input
+            id={id + '-tags'}
+            value={pending}
+            maxLength={40}
+            list={id + '-known-tags'}
+            placeholder={tags.length ? '' : 'Optional'}
+            className="h-7 min-w-20 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-muted"
+            onChange={event => onPending(event.target.value.replace(',', ''))}
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ',') {
+                if (!pending.trim()) return;
+                event.preventDefault();
+                add();
+              } else if (event.key === 'Backspace' && !pending && tags.length) onTags(tags.slice(0, -1));
+            }}
+          />
+        </div>
+      </Field>
       <datalist id={id + '-known-tags'}>
         {known
           .filter(name => !tags.some(tag => sameTag(tag, name)))
@@ -429,7 +434,7 @@ function TagsField({
             <option key={name} value={name} />
           ))}
       </datalist>
-    </Field>
+    </>
   );
 }
 
