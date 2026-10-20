@@ -69,26 +69,36 @@ test('the owner keeps task lists from the dashboard and their private chat; an u
     assert.equal(first.next,'1');assert.equal((await s.tasks.list(owner,{state:'all',limit:'1',after:first.next!})).tasks.length,1);
     await assert.rejects(s.tasks.list(owner,{state:'later'}),{code:'invalid_task_state'});
 
-    // Personal tasks and each project's tasks are separate lists; a domain labels a task within its list.
+    // Personal tasks and each project's tasks are separate lists; tags, a group and people label a task within its list.
     await stores.control.query('DELETE FROM owner_tasks');
     const launch=digest(key+':launch'),house=digest(key+':house'),retired=digest(key+':retired');
     for(const [id,name,state] of [[launch,'Launch','active'],[house,'House','active'],[retired,'Retired','archived']])
       await stores.control.query('INSERT INTO projects(id,name,state,revision) VALUES($1,$2,$3,1)',[id,name,state]);
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[group,launch]);
-    const health=await s.tasks.create(owner,{operation_id:key+':health',title:'Book a checkup',domain:'  Health  '});
-    assert.equal(health.domain,'Health');assert.equal(health.project_id,null);
-    const site=await s.tasks.create(owner,{operation_id:key+':site',title:'Publish the site',scope:launch,domain:'Web'});
+    const sara=digest(key+':sara'),omid=digest(key+':omid'),gone=digest(key+':gone');
+    for(const [id,name,state] of [[sara,'Sara','active'],[omid,'Omid','active'],[gone,'Gone','rejected']])
+      await stores.control.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person',$2,$3)",[id,name,state]);
+    const health=await s.tasks.create(owner,{operation_id:key+':health',title:'Book a checkup',tags:['  Health  ','health','Family']});
+    assert.deepEqual(health.tags,['Health','Family'],'a tag is kept once whatever its case');assert.equal(health.project_id,null);
+    const site=await s.tasks.create(owner,{operation_id:key+':site',title:'Publish the site',scope:launch,tags:['Web'],group:group+'/topic/7',people:[sara,omid]});
+    assert.equal(site.group_id,group+'/topic/7');assert.deepEqual(site.people,[{id:omid,name:'Omid'},{id:sara,name:'Sara'}]);
+    await assert.rejects(s.tasks.create(owner,{operation_id:key+':ghost',title:'Ghost',people:[gone]}),{code:'task_person_not_found'},'only known, active people are linked');
+    await assert.rejects(s.tasks.create(owner,{operation_id:key+':tags',title:'Tags',tags:'Health'}),{code:'invalid_task_tags'});
+    await assert.rejects(s.tasks.create(owner,{operation_id:key+':long',title:'Long',tags:['x'.repeat(41)]}),{code:'invalid_task_tag'});
+    await assert.rejects(s.tasks.create(owner,{operation_id:key+':topic',title:'Topic',group:group+'/topic/x'}),{code:'invalid_space'});
     const roof=await s.tasks.chatCreate(chat,{title:'Fix the roof',scope:house});
     assert.equal(roof.project_id,house,'the owner\'s private chat reaches every list');
     await assert.rejects(s.tasks.create(owner,{operation_id:key+':old',title:'Old',scope:retired}),{code:'task_project_archived'});
     await assert.rejects(s.tasks.create(owner,{operation_id:key+':none',title:'None',scope:digest('none')}),{code:'task_project_not_found'});
     await assert.rejects(s.tasks.create(owner,{operation_id:key+':bad',title:'Bad',scope:'house'}),{code:'invalid_task_scope'});
     const listed=await s.tasks.list(owner,{scope:'personal'});
-    assert.deepEqual(listed.tasks.map((task:any)=>task.id),[health.id]);assert.deepEqual(listed.domains,[{name:'Health',open:1}]);
+    assert.deepEqual(listed.tasks.map((task:any)=>task.id),[health.id]);assert.deepEqual(listed.tags,[{name:'Family',open:1},{name:'Health',open:1}]);
     // The shared fixture may hold other tests' projects; only this test's are compared.
     assert.deepEqual(listed.scopes.filter((row:any)=>['personal',house,launch,retired].includes(row.id)).map((row:any)=>[row.id,row.name,row.open]),[['personal',null,1],[house,'House',1],[launch,'Launch',1]],'archived projects with no tasks are not offered');
     assert.deepEqual((await s.tasks.list(owner,{scope:launch})).tasks.map((task:any)=>task.id),[site.id]);
-    assert.deepEqual((await s.tasks.list(owner,{domain:'Health'})).tasks.map((task:any)=>task.id),[health.id]);
+    assert.deepEqual((await s.tasks.list(owner,{tag:'HEALTH'})).tasks.map((task:any)=>task.id),[health.id]);
+    assert.deepEqual((await s.tasks.list(owner,{group})).tasks.map((task:any)=>task.id),[site.id],'a group finds the tasks of its topics too');
+    assert.deepEqual((await s.tasks.list(owner,{person:sara})).tasks.map((task:any)=>task.id),[site.id]);
     assert.equal((await s.tasks.list(owner)).tasks.length,3,'all lists together by default');
 
     // A chat that belongs to a project reaches that project's own list and nothing else.
@@ -96,15 +106,17 @@ test('the owner keeps task lists from the dashboard and their private chat; an u
     const seen=await s.tasks.chatList(member);
     assert.deepEqual(seen.tasks.map((task:any)=>task.id),[site.id]);
     assert.deepEqual(seen.scopes.map((row:any)=>row.id),[launch],'no other list or project is named');
-    assert.deepEqual(seen.domains,[{name:'Web',open:1}]);
+    assert.deepEqual(seen.tags,[{name:'Web',open:1}]);
     await assert.rejects(s.tasks.chatList(member,{scope:'personal'}),{code:'task_scope_denied'});
     const post=await s.tasks.chatCreate(member,{title:'Write the launch post'});
-    assert.equal(post.project_id,launch,'a task added in a project chat joins that project');
+    assert.equal(post.project_id,launch,'a task added in a project chat joins that project');assert.equal(post.group_id,group,'and points to the group it was asked in');
     await assert.rejects(s.tasks.chatCreate(member,{title:'Sneak',scope:house}),{code:'task_scope_denied'});
     await assert.rejects(s.tasks.chatUpdate(member,health.id,{expected_revision:health.revision,state:'done'}),{status:404},'a personal task is not found from a project chat');
     await assert.rejects(s.tasks.chatUpdate(member,site.id,{expected_revision:site.revision,scope:house}),{code:'task_scope_denied'});
     assert.equal((await s.tasks.chatUpdate(member,site.id,{expected_revision:site.revision,state:'done'})).state,'done');
-    const moved=await s.tasks.update(owner,roof.id,{operation_id:key+':move',expected_revision:roof.revision,scope:'personal',domain:'Home'});
-    assert.deepEqual([moved.project_id,moved.domain],[null,'Home'],'the owner moves a task between lists');
+    const moved=await s.tasks.update(owner,roof.id,{operation_id:key+':move',expected_revision:roof.revision,scope:'personal',tags:['Home'],people:[sara]});
+    assert.deepEqual([moved.project_id,moved.tags,moved.people],[null,['Home'],[{id:sara,name:'Sara'}]],'the owner moves a task between lists');
+    const cleared=await s.tasks.update(owner,site.id,{operation_id:key+':clear',expected_revision:site.revision+1,group:null,people:[],tags:[]});
+    assert.deepEqual([cleared.group_id,cleared.people,cleared.tags],[null,[],[]],'links and tags can be cleared');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

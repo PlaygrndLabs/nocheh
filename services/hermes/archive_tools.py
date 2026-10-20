@@ -155,20 +155,24 @@ def register(ctx):
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'view':{'type':'string','enum':list(OWNER_VIEWS)},'space':{'type':'string'},'q':{'type':'string'},'after':{'type':'string'}},
             'required':['view'],'additionalProperties':False}},handler=owner_read)
-    name='nocheh_tasks';description=('Task lists kept by Nocheh. Each task has a scope: personal (the owner\'s own life and personal tasks) or one '
-        'project, whose tasks form that project\'s own private list; and an optional domain, a short label such as Health or Money. Use it when '
-        'someone asks you to remember something to do, to list what is open or finished, or to finish, drop, reopen, rename, reschedule or move a task. '
-        'action=list reads tasks (state open by default; done, dropped or all; scope all by default, or personal, or a project id; optional domain) '
-        'and returns the lists (scopes) and domains in use. action=add needs title, optionally notes, due_on (a calendar day, YYYY-MM-DD; null clears it), '
-        'scope and domain; a task the owner does not tie to a project is personal. action=update needs id and the expected_revision from the latest list, '
-        'plus the fields to change; state done finishes a task. In the owner private conversation every list is available; in a chat that belongs to '
-        'a project only that project\'s list is, and nothing else; elsewhere none.')
+    name='nocheh_tasks';description=('Task lists kept by Nocheh, like a small table. Each task has a scope: personal (the owner\'s own life and personal tasks) or one '
+        'project, whose tasks form that project\'s own private list; optional tags, such as Health or Money; an optional group (a group or topic ID) '
+        'and optional people (IDs of people Nocheh knows). Use it when someone asks you to remember something to do, to list what is open or finished, '
+        'or to finish, drop, reopen, rename, reschedule, tag or move a task. action=list reads tasks (state open by default; done, dropped or all; '
+        'scope all by default, or personal, or a project id; optionally one tag, group or person) and returns the lists (scopes) and tags in use. '
+        'action=add needs title, optionally notes, due_on (a calendar day, YYYY-MM-DD; null clears it), scope, tags, group and people; a task the owner '
+        'does not tie to a project is personal, and a task added in a group points to that group. action=update needs id and the expected_revision '
+        'from the latest list, plus the fields to change; tags and people replace the whole list, group null clears it, state done finishes a task. '
+        'In the owner private conversation every list is available; in a chat that belongs to a project only that project\'s list is, and nothing else; '
+        'elsewhere none.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'action':{'type':'string','enum':['list','add','update']},'state':{'type':'string','enum':['open','done','dropped','all']},
             'id':{'type':'string'},'expected_revision':{'type':'integer','minimum':1},'title':{'type':'string','maxLength':300},
             'notes':{'type':'string','maxLength':4000},'due_on':{'type':['string','null']},'scope':{'type':'string'},
-            'domain':{'type':'string','maxLength':40},'after':{'type':'string'}},
+            'tags':{'type':'array','items':{'type':'string','maxLength':40},'maxItems':20},'group':{'type':['string','null']},
+            'people':{'type':'array','items':{'type':'string'},'maxItems':20},'tag':{'type':'string','maxLength':40},'person':{'type':'string'},
+            'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_action_status';description='Read a proposed controlled action and its separate execution result in your authorized scope.'
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
@@ -196,15 +200,15 @@ def tasks_tool(args,**kwargs):
     try:
         action=args.get('action')
         if action=='list':
-            query={key:str(args[key]) for key in ('state','scope','domain','after') if args.get(key)}
+            query={key:str(args[key]) for key in ('state','scope','tag','group','person','after') if args.get(key)}
             return json.dumps(request('/v1/owner/tasks'+('?'+urlencode(query) if query else '')),ensure_ascii=False)
         if action=='add':
-            body={key:args[key] for key in ('title','notes','due_on','scope','domain') if key in args}
+            body={key:args[key] for key in ('title','notes','due_on','scope','tags','group','people') if key in args}
             return json.dumps(request('/v1/owner/tasks',body),ensure_ascii=False)
         if action=='update':
             task=str(args.get('id',''))
             if not re.fullmatch(r'[a-f0-9]{64}',task):return json.dumps({'error':'invalid_task_id'})
-            body={key:args[key] for key in ('expected_revision','title','notes','due_on','state','scope','domain') if key in args}
+            body={key:args[key] for key in ('expected_revision','title','notes','due_on','state','scope','tags','group','people') if key in args}
             return json.dumps(request('/v1/owner/tasks/'+task,body),ensure_ascii=False)
         return json.dumps({'error':'invalid_task_action'})
     except HTTPError as error:

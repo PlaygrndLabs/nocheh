@@ -1,8 +1,8 @@
-/** Choose one or more chats by name, or type an exact chat or topic ID. */
+/** Choose one or more chats by name, or type an exact chat or topic ID; optionally groups and topics only. */
 import {useDeferredValue, useId, useState} from 'react';
 import {Check, X} from 'lucide-react';
 import {useResource} from '../../lib/resource';
-import {chatFromId, chatName, isSpaceId, kindLabel, type Chat, type Directory} from '../../lib/chats-model';
+import {chatFromId, chatName, inferKind, isSpaceId, kindLabel, type Chat, type Directory} from '../../lib/chats-model';
 import {cn} from '../../lib/utils';
 import {Input} from '../../ui/core';
 
@@ -15,6 +15,7 @@ export function ChatPicker({
   disabled,
   hint,
   owner,
+  groupsOnly,
 }: {
   label: string;
   value: string[];
@@ -24,6 +25,7 @@ export function ChatPicker({
   disabled?: boolean;
   hint?: string;
   owner?: string;
+  groupsOnly?: boolean;
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
@@ -32,7 +34,9 @@ export function ChatPicker({
     '/conversations?limit=100' + (deferred ? '&q=' + encodeURIComponent(deferred) : ''),
   );
   const all = useResource<Directory>('/conversations?limit=100');
-  const rows = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id));
+  const rows = (resource.data?.items ?? []).filter(
+    row => !exclude.includes(row.space_id) && (!groupsOnly || row.kind !== 'private'),
+  );
   const find = (space: string): Chat =>
     rows.find(row => row.space_id === space) ??
     all.data?.items.find(row => row.space_id === space) ??
@@ -43,7 +47,11 @@ export function ChatPicker({
     if (value.includes(space)) onChange(value.filter(item => item !== space));
     else onChange(multiple ? [...value, space] : [space]);
   };
-  const exact = isSpaceId(deferred) && !rows.some(row => row.space_id === deferred) && !value.includes(deferred);
+  const exact =
+    isSpaceId(deferred) &&
+    (!groupsOnly || inferKind(deferred) !== 'private') &&
+    !rows.some(row => row.space_id === deferred) &&
+    !value.includes(deferred);
 
   return (
     <div className="space-y-2">
