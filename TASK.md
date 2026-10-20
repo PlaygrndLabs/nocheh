@@ -430,8 +430,8 @@ not yet run on the owner's installation:
   epoch's profile is seeded once with the chat's recent messages and delivered
   answers, and retirements apply before its first turn
   ([decision](docs/adr/0163-chat-conversation-carries-into-new-guard-epochs.md),
-  [check](services/hermes/test_profile_history.py)). Waiting for the owner's
-  choice; earlier-epoch profiles are not yet pruned.
+  [check](services/hermes/test_profile_history.py)); the owner chose to fix it
+  before the MVP. Earlier-epoch profiles are not yet pruned.
 Pending: a live album, an edit, a small group-export import, and release
 test 5 on the owner's installation.
 
