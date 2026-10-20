@@ -418,12 +418,35 @@ not yet run on the owner's installation:
 - Task lists, links and tags (October 19–20): personal tasks and each
   project's own list; a task can point to a group and people and has a list
   of tags; a project's chat reaches only its own list
-  ([decision](docs/adr/0163-task-lists-links-and-tags.md),
+  ([decision](docs/adr/0164-task-lists-links-and-tags.md),
   [check](test/store-tasks.test.ts), [browser check](test/dashboard-pages.browser.mjs)).
   Live check pending: ask Nocheh in a project's group to add a task, and see it
   only in that project's list.
-Pending: a live album, an edit, a small group-export import, and release
-tests 4 and 5 on the owner's installation.
+- Release test 4 (October 20) passed on the owner's installation. A private
+  message stating a synthetic locker code got one reply. Hiding it and
+  Nocheh's reply made a later question answer once without the code; the code
+  appeared in no replayed history, tool result or Honcho output. After Undo on
+  the message alone, the code returned from the restored message through
+  archive search and Honcho, while the still-hidden reply was used nowhere.
+  The memory lookups after the hide and the Undo took 52 and 32 seconds:
+  sequential Honcho reasoning rounds, each passing the input check, and a
+  re-prepared guard cache after the epoch change.
+- The same check found that each guard epoch gives a chat a new Hermes profile
+  with an empty conversation, so Nocheh forgot the ongoing chat seven times in
+  two days, four after automatic learning. In source on a branch: a new
+  epoch's profile is seeded once with the chat's recent messages and delivered
+  answers, and retirements apply before its first turn
+  ([decision](docs/adr/0163-chat-conversation-carries-into-new-guard-epochs.md),
+  [check](services/hermes/test_profile_history.py)); the owner chose to fix it
+  before the MVP. Earlier-epoch profiles are not yet pruned.
+- Release test 5 (October 20) passed on the owner's installation: a group
+  member who had never posted added, changed and removed a reaction on an
+  older message. Each update was captured once and in order, the current state
+  ended empty, Nocheh sent nothing and no errors were logged. Each update
+  advanced the guard epoch, so busy reactions start new per-epoch Hermes
+  profiles, which are not pruned.
+Pending: a live album, an edit and a small group-export import on the owner's
+installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
 and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,

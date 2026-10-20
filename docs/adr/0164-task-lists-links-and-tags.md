@@ -1,4 +1,4 @@
-# ADR-0163: Task lists, links and tags
+# ADR-0164: Task lists, links and tags
 
 <status>
 Accepted on 2026-10-19. The owner asked that tasks be flagged by scope and
