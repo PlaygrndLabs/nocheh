@@ -103,6 +103,10 @@ def prepare_profile(root,scope,model):
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
+    if scope.guard_epoch and scope.purpose!='filter':
+        # A new guard epoch starts a new profile; the chat keeps its conversation.
+        from .profile_history import carry
+        carry(profile)
     return profile
 
 
