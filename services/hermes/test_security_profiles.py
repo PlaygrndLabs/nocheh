@@ -55,4 +55,24 @@ db=SessionDB();db.close()
             self.assertTrue((root/'native-state'/'state.db').is_file())
             self.assertFalse((root/'state.db').exists())
 
+    def test_explicit_profile_database_opens_use_the_durable_history(self):
+        # Native goal migration and dashboard routes name <home>/state.db directly.
+        import os,subprocess,sys
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'native-state').mkdir()
+            code='''import sys
+from pathlib import Path
+from services.hermes.isolated_profile import install_database_paths
+install_database_paths()
+from hermes_state import SessionDB
+from hermes_state_registry import acquire,release_or_close
+home=Path(sys.argv[1])
+shared=acquire(home/'state.db');release_or_close(shared)
+db=SessionDB(home/'state.db');db.close()
+'''
+            result=subprocess.run([sys.executable,'-c',code,folder],env={**os.environ,'HERMES_HOME':folder},capture_output=True,timeout=30)
+            self.assertEqual(result.returncode,0,result.stderr[-500:])
+            self.assertTrue((root/'native-state'/'state.db').is_file())
+            self.assertFalse((root/'state.db').exists(),'a stray legacy database would make the layout ambiguous')
+
 if __name__=='__main__':unittest.main()

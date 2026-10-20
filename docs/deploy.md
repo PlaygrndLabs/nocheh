@@ -36,7 +36,7 @@ from that installation. Record the revision and evidence in `TASK.md`; service
 health does not complete live release gates. See [ADR-0067](adr/0067-exact-revision-app-rollout.md).
 
 See [service names, responsibilities, dashboards and workflow](services.md).
-Host services require Node 24.x; set `NOCHEH_NODE` when selecting a non-default executable.
+Host services require Node 26.x; set `NOCHEH_NODE` when selecting a non-default executable.
 
 ## Start and develop
 
@@ -268,7 +268,7 @@ release. Git integration has its own verification gates.
 
 ## Later VPS deployment
 
-Use the same Compose files and scripts on a Linux host with Docker, Python 3 and Node 24.x.
+Use the same Compose files and scripts on a Linux host with Docker, Python 3 and Node 26.x.
 Transfer owned data using backup/restore, assign the proper host UID/GID, and run
 container acceptance there before enabling the bot. Keep the API on loopback unless
 an authenticated transport is intentionally configured. VPS provisioning and its

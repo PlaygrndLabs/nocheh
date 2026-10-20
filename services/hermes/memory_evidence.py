@@ -44,7 +44,7 @@ def install(recalled=None):
     def budget(agent,messages,system_prompt):
         # Provider usage anchors already include injected evidence. Initial/fallback
         # estimates must count the complete evidence before deciding to compact.
-        from agent.model_metadata import anchored_context_tokens
+        from agent.usage_anchor import anchored_context_tokens
         if anchored_context_tokens(messages,getattr(agent,'_usage_anchor',None)) is not None:
             return original_budget(agent,messages,system_prompt)
         return original_budget(agent,inject({'messages':messages})['messages'],system_prompt)

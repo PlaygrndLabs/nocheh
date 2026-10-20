@@ -13,9 +13,9 @@ def patch(relative, replacements):
 patch('ui-tui/src/gatewayClient.ts', [
     ("    const cwd = process.env.HERMES_CWD || root", "    const cwd = root // mandatory bootstrap cannot be shadowed by workspace files"),
     ("spawn(python, ['-m', 'tui_gateway.entry']", "spawn(python, ['-m', 'services.hermes.browser_gateway']"),
-    ('  request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {', '''  private nochehInputs: Array<{text: string; event_id: string; session_id: unknown}> = []
+    ('  request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {', '''  private nochehInputs: Array<{text: string; event_id: string; session_id: unknown}> = []
 
-  async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  async request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
     if (method === 'nocheh.input') {
       const result = await this.nochehNativeRequest<{event_id: string}>(method, {
         ...params, id: params.id || globalThis.crypto.randomUUID(), submission: 'composer'
@@ -34,14 +34,14 @@ patch('ui-tui/src/gatewayClient.ts', [
         input = {text: String(params.text || ''), event_id: result.event_id, session_id: params.session_id}
         this.nochehInputs.push(input)
       }
-      const result = await this.nochehNativeRequest<T>(method, {...params, nocheh_event_id: input.event_id})
+      const result = await this.nochehNativeRequest<T>(method, {...params, nocheh_event_id: input.event_id}, timeoutMs)
       this.nochehInputs = this.nochehInputs.filter(item => item !== input)
       return result
     }
-    return this.nochehNativeRequest<T>(method, params)
+    return this.nochehNativeRequest<T>(method, params, timeoutMs)
   }
 
-  private nochehNativeRequest<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {'''),
+  private nochehNativeRequest<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {'''),
 ])
 patch('ui-tui/src/app/useSubmission.ts', [
     ('  const dispatchSubmission = useCallback(\n    (full: string) => {', '  const dispatchSubmission = useCallback(\n    async (full: string) => {'),
@@ -54,9 +54,6 @@ patch('ui-tui/src/app/useSubmission.ts', [
       }
 '''),
     ('      if (shouldInterpolateSubmission(full)) {', '      if (false && shouldInterpolateSubmission(full)) {'),
-])
-patch('ui-tui/src/app/useSessionLifecycle.ts', [
-    ('      writeActiveSessionFile(r.session_id)', '      writeActiveSessionFile(r.stored_session_id || r.session_id)'),
 ])
 patch('ui-tui/src/lib/externalCli.ts', [
     ('''export const launchHermesCommand = (args: string[]): Promise<LaunchResult> =>

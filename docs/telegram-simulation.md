@@ -163,7 +163,7 @@ the message is accepted but the bot observes only a gateway failure.
 Directive-driven tool use tests pipeline, isolation and effects, not model
 judgement.
 
-Compile the current worktree with Node 24 before running its tests. Storage
+Compile the current worktree with Node 26 before running its tests. Storage
 tests share installation singletons such as guard state and audience policy,
 so run them with `python3 -m tools.development.store_tests --project
 nocheh-stores-<name> --image <development-target image>`: it resets the

@@ -93,6 +93,13 @@ def sources():
             subprocess.run(['git','clone','--no-checkout',pin['repository'],str(path)],check=True)
             subprocess.run(['git','-C',str(path),'checkout','--detach',pin['revision']],check=True)
         actual=subprocess.check_output(['git','-C',str(path),'rev-parse','HEAD'],text=True).strip()
+        if actual!=pin['revision']:
+            # A new pin moves an untouched source checkout; local edits are never discarded.
+            if subprocess.check_output(['git','-C',str(path),'status','--porcelain','--untracked-files=no'],text=True).strip():
+                raise SystemExit(f'{name}: source checkout has local changes and differs from the Honcho lock')
+            subprocess.run(['git','-C',str(path),'fetch','--quiet','origin',pin['revision']],check=True)
+            subprocess.run(['git','-C',str(path),'checkout','--quiet','--detach',pin['revision']],check=True)
+            actual=subprocess.check_output(['git','-C',str(path),'rev-parse','HEAD'],text=True).strip()
         if actual!=pin['revision']: raise SystemExit(f'{name}: source revision differs from the Honcho lock')
     # Honcho must tokenize with its network disabled. Populate verified public
     # tokenizer assets during the build, before any runtime credentials exist.

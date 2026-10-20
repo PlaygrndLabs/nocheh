@@ -11,15 +11,13 @@ from .isolated_profile import prepare,database_path,DATA_DIRS,DATA_FILES
 class SecurityTests(unittest.TestCase):
     def test_managed_startup_never_installs_optional_provider_dependencies(self):
         from .assistant_turn import sealed_dependencies
-        from tools import lazy_deps
+        from pm.install import lazy_installs_allowed
         with patch.dict(os.environ,{'HERMES_LAZY_INSTALL_TARGET':'/tmp/untrusted-target'}), \
-             patch.object(lazy_deps,'feature_missing',return_value=('boto3',)), \
-             patch.object(lazy_deps,'_venv_pip_install') as installer, \
-             patch('hermes_cli.config.get_managed_system',return_value=''):
+             patch('hermes_cli.config.load_config_readonly',return_value={'security':{'allow_lazy_installs':True}}):
             sealed_dependencies()
-            with self.assertRaises(lazy_deps.FeatureUnavailable):
-                lazy_deps.ensure('provider.bedrock',prompt=False)
-            installer.assert_not_called()
+            self.assertNotIn('HERMES_LAZY_INSTALL_TARGET',os.environ)
+            # The process switch wins over a profile that would otherwise allow installs.
+            self.assertFalse(lazy_installs_allowed())
 
     def test_no_ambient_authority_in_container(self):
         spec=container_spec('nocheh-'+'a'*24,'/owned/profiles','sha256:'+'b'*64,'nocheh-agent',1000,1000)

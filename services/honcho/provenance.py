@@ -121,13 +121,14 @@ DESCENDANTS_SQL = '''WITH RECURSIVE seed AS (
 ), tree(id, depth) AS (
     SELECT d.id, 1 FROM documents d
     WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session
-    AND ((jsonb_typeof(d.source_ids)='array' AND EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(d.source_ids) parent(value) JOIN seed ON seed.id=parent.value))
+    AND (EXISTS (SELECT 1 FROM document_sources s JOIN seed ON seed.id=s.source_id WHERE s.derived_id=d.id)
         OR (jsonb_typeof(d.internal_metadata->'message_ids')='array' AND EXISTS (
             SELECT 1 FROM jsonb_array_elements(d.internal_metadata->'message_ids') link(value)
             JOIN messages_seed m ON jsonb_typeof(link.value)='number' AND m.id=(link.value)::text::bigint)))
     UNION
-    SELECT d.id, tree.depth+1 FROM documents d JOIN tree ON jsonb_typeof(d.source_ids)='array' AND d.source_ids ? tree.id
+    SELECT d.id, tree.depth+1 FROM tree
+    JOIN document_sources s ON s.source_id=tree.id AND s.workspace_name=:workspace
+    JOIN documents d ON d.id=s.derived_id
     WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session AND tree.depth<8
 )
 SELECT DISTINCT id FROM tree ORDER BY id LIMIT :limit'''
@@ -175,12 +176,14 @@ def install(app):
     async def read(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):
         async def documents(ids):
             # Scope every ancestor independently. Return neither conclusion text nor vectors.
-            result = await db.execute(text('''SELECT id, deleted_at IS NOT NULL AS deleted,
-                jsonb_path_query_array(source_ids, '$[0 to 127]') AS source_ids,
-                jsonb_path_query_array(internal_metadata->'message_ids', '$[0 to 255]') AS message_ids,
-                CASE WHEN jsonb_typeof(source_ids)='array' THEN jsonb_array_length(source_ids)>128 ELSE false END AS parents_truncated,
-                CASE WHEN jsonb_typeof(internal_metadata->'message_ids')='array' THEN jsonb_array_length(internal_metadata->'message_ids')>256 ELSE false END AS messages_truncated
-                FROM documents WHERE workspace_name=:workspace AND id=ANY(:ids) LIMIT 128'''),
+            # Parent links live in Honcho's document_sources table, in their derivation order.
+            result = await db.execute(text('''SELECT d.id, d.deleted_at IS NOT NULL AS deleted,
+                COALESCE((SELECT jsonb_agg(p.source_id ORDER BY p.position) FROM (SELECT source_id, position FROM document_sources
+                    WHERE derived_id=d.id ORDER BY position LIMIT 128) p), '[]'::jsonb) AS source_ids,
+                jsonb_path_query_array(d.internal_metadata->'message_ids', '$[0 to 255]') AS message_ids,
+                EXISTS (SELECT 1 FROM document_sources WHERE derived_id=d.id OFFSET 128) AS parents_truncated,
+                CASE WHEN jsonb_typeof(d.internal_metadata->'message_ids')='array' THEN jsonb_array_length(d.internal_metadata->'message_ids')>256 ELSE false END AS messages_truncated
+                FROM documents d WHERE d.workspace_name=:workspace AND d.id=ANY(:ids) LIMIT 128'''),
                 {'workspace': workspace_id, 'ids': ids})
             return [dict(row) for row in result.mappings()]
 
