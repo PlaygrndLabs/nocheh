@@ -96,7 +96,13 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
-  const tasks=new TaskRepository(stores.control,principal=>knowledge.ownerTurn(principal));
+  // The owner's private chat reaches every list; a project's chat only that project's own list.
+  const tasks=new TaskRepository(stores.control,async principal=>{
+    if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null};
+    const {turn,source}=await knowledge.liveGroupTurn(principal),project=(await projects.effective(turn.scope)).project;
+    if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
+    return {source,project:project.id,group:turn.scope};
+  });
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   return {ownerAutonomy,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),

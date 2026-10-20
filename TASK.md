@@ -415,6 +415,13 @@ not yet run on the owner's installation:
   [settings check](services/hermes/test_settings.py)). Pending: a live open
   from the owner's phone; the owner tests it on the MVP installation, not the
   local one. Next: the optional Notion connector.
+- Task lists, links and tags (October 19–20): personal tasks and each
+  project's own list; a task can point to a group and people and has a list
+  of tags; a project's chat reaches only its own list
+  ([decision](docs/adr/0164-task-lists-links-and-tags.md),
+  [check](test/store-tasks.test.ts), [browser check](test/dashboard-pages.browser.mjs)).
+  Live check pending: ask Nocheh in a project's group to add a task, and see it
+  only in that project's list.
 - Release test 4 (October 20) passed on the owner's installation. A private
   message stating a synthetic locker code got one reply. Hiding it and
   Nocheh's reply made a later question answer once without the code; the code
