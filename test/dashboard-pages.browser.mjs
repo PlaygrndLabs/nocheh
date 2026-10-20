@@ -381,6 +381,54 @@ test('a task is added, edited, finished and reopened from the Tasks page', async
   await page.close();
 });
 
+test('personal tasks and each project keep separate lists, with tags, a group and people on a task', async () => {
+  const {page, problems} = await open('tasks');
+  const lists = page.getByRole('radiogroup', {name: 'List'});
+  await lists.getByRole('radio', {name: /Garden redesign/}).click();
+  await page.getByText('Send the garden supplier the measurements').waitFor();
+  // A project list shows only its own tasks.
+  await page.getByText('Book a dentist checkup').waitFor({state: 'detached'});
+  const title = 'Order the planters ' + Date.now();
+  await page.getByLabel('New task').fill(title);
+  await page.locator('#task-tags').fill('Suppliers');
+  await page.locator('#task-tags').press('Enter');
+  await page.locator('#task-tags').fill('Urgent');
+  await page.getByRole('button', {name: 'Add'}).click();
+  const added = page.getByRole('listitem').filter({hasText: title});
+  await added.getByText('Urgent').waitFor();
+  // A task points to a group and to people from its edit dialog.
+  await added.getByRole('button', {name: `Edit “${title}”`}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('option', {name: /Aurora planning\s*Group/}).click();
+  await dialog.getByLabel('People').selectOption({label: 'Devon'});
+  await dialog.getByRole('button', {name: 'Remove tag Urgent'}).click();
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await dialog.waitFor({state: 'detached'});
+  await added.getByText('Aurora planning').waitFor();
+  await added.getByText('Devon').waitFor();
+  await added.getByText('Urgent').waitFor({state: 'detached'});
+  await lists.getByRole('radio', {name: /Personal/}).click();
+  await page.getByText('Book a dentist checkup').waitFor();
+  // A project task stays out of the personal list.
+  await page.getByText(title).waitFor({state: 'detached'});
+  await lists.getByRole('radio', {name: 'All', exact: true}).click();
+  await page.getByRole('radiogroup', {name: 'Tag'}).getByRole('radio', {name: 'Health'}).click();
+  await page.getByText('Book a dentist checkup').waitFor();
+  // A tag narrows the list.
+  await page.getByText('Send the garden supplier the measurements').waitFor({state: 'detached'});
+  // Cards show the same tasks, and the choice is remembered.
+  await page.getByRole('radiogroup', {name: 'Show tasks as'}).getByRole('radio', {name: 'Cards'}).click();
+  await page.getByRole('list', {name: 'Tasks'}).getByText('Book a dentist checkup').waitFor();
+  await page.reload();
+  await page
+    .getByRole('radiogroup', {name: 'Show tasks as'})
+    .getByRole('radio', {name: 'Cards', checked: true})
+    .waitFor();
+  await page.evaluate(() => localStorage.removeItem('nocheh.tasks-layout'));
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('usage shows calls, tokens and cost, and never prices an unknown cost as free', async () => {
   const {page, problems} = await open('usage');
   await page.getByRole('table', {name: 'Usage by part'}).waitFor();
