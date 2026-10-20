@@ -28,6 +28,11 @@ COPY --from=build --chown=node:node /app/dist ./dist
 USER node
 CMD ["node", "dist/src/main.js"]
 
+# The Telegram mini app: its server and the built pages, nothing else.
+FROM runtime AS mini-app
+COPY --from=development --chown=node:node /app/dashboard/dist ./dashboard/dist
+CMD ["node", "dist/src/mini-app.js"]
+
 # The database service already holds the installation administrator credential.
 # Run store provisioning there before declaring PostgreSQL healthy, so application
 # processes retain only their restricted per-store credentials.

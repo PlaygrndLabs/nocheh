@@ -10,10 +10,11 @@ try:
 except ImportError:
     from tools.operations.installation.configuration import load, validate, write_env, env_path, DEFAULTS
 
+from tools.operations.installation import mini_app
 WORKFLOW_INTERNAL={'INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'}
 STORE_INTERNAL={'NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD'}
 from tools.operations.provider import routes as provider_routes
-SECRETS = {'TELEGRAM_BOT_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN'} | provider_routes.KEY_SETTINGS | WORKFLOW_INTERNAL | STORE_INTERNAL
+SECRETS = {'TELEGRAM_BOT_TOKEN', 'CLOUDFLARE_TUNNEL_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN'} | provider_routes.KEY_SETTINGS | WORKFLOW_INTERNAL | STORE_INTERNAL
 # Providers, keys and the provider and model of each part are chosen in
 # Settings › Models; Apply also refreshes Honcho when its routes change.
 MODEL_SETTINGS = {'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_PROVIDER', 'NOCHEH_EMBEDDING_MODEL'} | set(provider_routes.DEFAULTS)
@@ -111,14 +112,22 @@ def apply(state):
     with (directory / 'settings.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         values = load(state); validate(values)
-        command = compose(state) + ['up', '-d', '--no-build', '--wait', '--wait-timeout', '180',
-                                    'nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb']
+        previous = directory / 'previous.env'
+        before = {**DEFAULTS, **read_env(previous)} if previous.exists() else values
         def run():
-            return subprocess.run(command, env=environment(state), stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL, timeout=420).returncode == 0
+            current = load(state)
+            services = ['nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb']
+            if mini_app.enabled(current): services += list(mini_app.SERVICES)
+            ok = subprocess.run(compose(state) + ['up', '-d', '--no-build', '--wait', '--wait-timeout', '180', *services],
+                                env=environment(state), stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=420).returncode == 0
+            if ok and not mini_app.enabled(current):
+                # Turning the mini app off also closes its tunnel.
+                ok = subprocess.run(compose(state) + ['rm', '-s', '-f', *mini_app.SERVICES], env=environment(state),
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120).returncode == 0
+            return ok
         try: ok = run()
         except subprocess.TimeoutExpired: ok = False
-        previous = directory / 'previous.env'
         if not ok:
             rolled_back = False
             if previous.exists():
@@ -127,11 +136,17 @@ def apply(state):
                 except subprocess.TimeoutExpired: pass
             return {'status': 'apply_failed', 'rolled_back': rolled_back}
         honcho = refresh_honcho(state, values)
+        menu = mini_app.menu_button(values, telegram_api, shown_before=mini_app.enabled(before))
         temporary = directory / 'applied.tmp'
         temporary.write_text(json.dumps({'revision': revision(values)})); temporary.chmod(0o600)
         temporary.replace(directory / 'applied.json')
         previous.unlink(missing_ok=True)
-    return {'status': 'applied', 'honcho': honcho, **view(state)}
+    return {'status': 'applied', 'honcho': honcho, 'mini_app': menu, **view(state)}
+
+
+def telegram_api(token, method, **params):
+    from tools.operations.archive.telegram_directory import _bot_api
+    return _bot_api(token, method, **params)
 
 
 def refresh_honcho(state, values):
