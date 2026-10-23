@@ -315,8 +315,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             handled=[]
             async def message(event):
                 handled.append(event.text)
-                TURN.get()['agent_result']={'state':'done','text':'Synthetic reply','session_id':'fixture'}
-                return 'Synthetic reply'
+                # Each run answers differently: the outbound journal replays an
+                # identical reply to the same update instead of sending it again.
+                reply='Synthetic reply '+str(len(handled))
+                TURN.get()['agent_result']={'state':'done','text':reply,'session_id':'fixture'}
+                return reply
             async def native():
                 adapter=committed_adapter_class()(PlatformConfig(enabled=True,token='123456:synthetic',typing_indicator=False))
                 request=BotFixtureRequest();instrument_request(request,adapter.capture)
@@ -351,7 +354,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await gateway.dispatch(envelope(1)),{'state':'done'})
                 self.assertEqual(len(request.sent),1,'the dispatch receipt, not native admission, prevents a repeat')
                 self.assertEqual(await gateway.dispatch(envelope(2)),{'state':'done'})
-                self.assertEqual(len(handled),2,'a new attempt of the same update is not mistaken for a redelivery')
+                self.assertEqual((len(handled),len(request.sent)),(2,2),'a new attempt of the same update is not mistaken for a redelivery')
                 await adapter._update_receipt_flush
                 self.assertTrue((root/'home'/'telegram_update_receipts_123456.json').is_file())
                 # A restarted gateway loads the persisted native receipts.
