@@ -62,33 +62,34 @@ def prepare_source_mounts():
         path.mkdir(exist_ok=True)
 
 
-def prepare_runtime_images(env):
+def prepare_runtime_images(env, root):
     """Reuse only revision-checked, credential-free pinned image contents."""
     locks = json.loads((ROOT / 'deploy/upstreams.lock.json').read_text())
-    sources = (
-        ('nocheh-hermes:local', locks['hermes']['revision'], DEV_IMAGES + ':hermes-base'),
-    )
-    for source, revision, destination in sources:
-        def image_revision(tag):
-            result = subprocess.run(['docker', 'image', 'inspect', '--format',
-                                     '{{ index .Config.Labels "org.opencontainers.image.revision" }}', tag],
-                                    cwd=ROOT, env=env, capture_output=True, text=True)
-            return result.stdout.strip() if result.returncode == 0 else None
-        saved = image_revision(destination)
-        if saved == revision:
-            continue
-        if saved is not None:
-            raise ValueError(f'Development image {destination} has the wrong pinned revision')
-        if image_revision(source) != revision:
-            raise ValueError(f'Pinned runtime image {source} is unavailable or has the wrong revision; build the pinned local runtime images before starting the full development stack')
+    hermes_revision = locks['hermes']['revision']
+    honcho_source = 'nocheh-honcho:' + json.loads((ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+
+    def image_revision(tag):
+        result = subprocess.run(['docker', 'image', 'inspect', '--format',
+                                 '{{ index .Config.Labels "org.opencontainers.image.revision" }}', tag],
+                                cwd=ROOT, env=env, capture_output=True, text=True)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def pinned_images_ready():
+        return image_revision('nocheh-hermes:local') == hermes_revision and image_revision(honcho_source) is not None
+
+    if not pinned_images_ready():
+        # A moved pin needs the installation's own images first; this builds images only.
+        print('Building the pinned Hermes and Honcho images for the new pins', flush=True)
+        subprocess.run([str(root / 'bin/nocheh'), 'build'], cwd=root, check=True)
+        if image_revision('nocheh-hermes:local') != hermes_revision:
+            raise ValueError('Pinned runtime image nocheh-hermes:local is unavailable or has the wrong revision after ./bin/nocheh build')
+        if image_revision(honcho_source) is None:
+            raise ValueError(f'Pinned Honcho image {honcho_source} is unavailable after ./bin/nocheh build')
+    # Development tags always follow the pinned images, so a moved pin replaces an older tag.
+    for source, destination in (('nocheh-hermes:local', DEV_IMAGES + ':hermes-base'),
+                                (honcho_source, DEV_IMAGES + ':honcho')):
         subprocess.run(['docker', 'tag', source, destination], cwd=ROOT, env=env,
                        check=True, capture_output=True)
-    honcho_source = 'nocheh-honcho:' + json.loads((ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
-    if subprocess.run(['docker', 'image', 'inspect', honcho_source], cwd=ROOT, env=env,
-                      capture_output=True).returncode:
-        raise ValueError(f'Pinned Honcho image {honcho_source} is unavailable')
-    subprocess.run(['docker', 'tag', honcho_source, DEV_IMAGES + ':honcho'], cwd=ROOT, env=env,
-                   check=True, capture_output=True)
 
 
 def operating_root():
@@ -295,7 +296,7 @@ def main(action, rest):
     assert_operating_volumes(env)
     assert_compose_mounts(cmd, env)
     prepare_source_mounts()
-    prepare_runtime_images(env)
+    prepare_runtime_images(env, root)
     released = release_idle_fixture_networks(env)
     if released:
         print(f'Released {len(released)} networks of stopped rehearsal fixtures', flush=True)
