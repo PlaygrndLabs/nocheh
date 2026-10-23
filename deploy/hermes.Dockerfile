@@ -19,15 +19,17 @@ ENV LD_LIBRARY_PATH=/opt/sqlite/lib PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ARG HERMES_REVISION=d923a5eb487a17c0a68801bba9ef0f56c81040a8
 ARG HERMES_VERSION=0.22.2
 COPY --from=hermes_source . /opt/hermes
+COPY deploy/hermes-plugin-requirements.txt /tmp/hermes-plugin-requirements.txt
 # The pinned upstream supports only Python 3.14; keep the interpreter explicit
 # because newer uv releases default to a later Python. The upstream stamp
 # writer records the pinned release, so native version surfaces report it and
 # treat updates as externally managed.
 RUN test "$(cat /opt/hermes/.nocheh-source-revision)" = "$HERMES_REVISION" && cd /opt/hermes && \
     uv sync --frozen --no-dev --no-install-project --extra messaging --python /usr/local/bin/python && \
+    uv pip install --python /opt/venv/bin/python --require-hashes --no-deps -r /tmp/hermes-plugin-requirements.txt && \
     python scripts/write_install_stamp.py --output /opt/hermes/install-stamp.json --commit "$HERMES_REVISION" \
       --base-version "$HERMES_VERSION" --distance 0 --source docker --distribution docker --update-mechanism external && \
-    rm -rf /opt/hermes/.git /opt/hermes/.nocheh-source-revision /root/.cache/uv
+    rm -rf /opt/hermes/.git /opt/hermes/.nocheh-source-revision /root/.cache/uv /tmp/hermes-plugin-requirements.txt
 LABEL org.opencontainers.image.revision=${HERMES_REVISION}
 RUN python -c "import sqlite3, sys; assert sys.version_info[:2] == (3, 14); assert sqlite3.sqlite_version_info >= (3,51,3)"
 ARG LOCAL_UID=1000
@@ -37,6 +39,8 @@ WORKDIR /workspace
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} services ./services
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} deploy/upstreams.lock.json ./deploy/upstreams.lock.json
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} tools ./tools
+# Every third-party library the plugin imports must exist in the pinned environment.
+RUN python -c "import yaml, telegram, httpx, openai, starlette, uvicorn, PIL"
 USER nocheh
 CMD ["python", "-m", "services.hermes.runtime"]
 
