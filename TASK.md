@@ -2,6 +2,13 @@
 
 <current>
 
+Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
+chose to drop the live safety check): with the Honcho service enabled, the store
+attaches Honcho memory once at startup without a live acceptance report and
+without earlier history. An owner's later attach or detach stands. After the
+fresh-database rebuild on the development machine this replaces the manual attach, which the
+missing live acceptance report had blocked.
+
 Last reconciled 2026-10-09. [SPECS.md](SPECS.md) defines the product;
 [AGENTS.md](AGENTS.md) defines working instructions. [Task history](docs/task-history.md)
 retains completed increments and earlier observations. The
