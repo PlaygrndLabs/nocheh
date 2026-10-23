@@ -184,11 +184,49 @@ class LiveDevTests(unittest.TestCase):
         self.assertEqual(probes.count(8783), 3)
         self.assertEqual(sleep.call_count, 2)
 
-    def test_rejects_unpinned_runtime_base(self):
-        result = type('Result', (), {'returncode': 0, 'stdout': 'wrong-revision\n'})()
-        with patch.object(live_dev.subprocess, 'run', return_value=result):
-            with self.assertRaisesRegex(ValueError, 'wrong pinned revision'):
-                live_dev.prepare_runtime_images({'PATH': '/usr/bin'})
+    def runtime_images(self, revisions):
+        """Fake Docker with image revisions keyed by tag; a build moves them to the pins."""
+        pins = json.loads((live_dev.ROOT / 'deploy/upstreams.lock.json').read_text())['hermes']['revision']
+        calls = []
+        def run(arguments, **_):
+            calls.append(arguments)
+            if arguments[-1] == 'build':
+                revisions.update(revisions.pop('after_build', {}))
+                return type('Result', (), {'returncode': 0, 'stdout': ''})()
+            if arguments[:3] == ['docker', 'image', 'inspect']:
+                tag = arguments[-1]
+                found = tag in revisions
+                return type('Result', (), {'returncode': 0 if found else 1, 'stdout': (revisions.get(tag) or '') + '\n'})()
+            return type('Result', (), {'returncode': 0, 'stdout': ''})()
+        return pins, calls, run
+
+    def test_moved_pin_builds_pinned_images_and_replaces_development_tags(self):
+        honcho = 'nocheh-honcho:' + json.loads((live_dev.ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+        revisions = {'nocheh-hermes:local': 'old-revision', live_dev.DEV_IMAGES + ':hermes-base': 'old-revision'}
+        pins, calls, run = self.runtime_images(revisions)
+        revisions['after_build'] = {'nocheh-hermes:local': pins, honcho: ''}
+        with patch.object(live_dev.subprocess, 'run', side_effect=run):
+            live_dev.prepare_runtime_images({'PATH': '/usr/bin'}, Path('/synthetic/operating'))
+        self.assertIn(['/synthetic/operating/bin/nocheh', 'build'], calls)
+        self.assertIn(['docker', 'tag', 'nocheh-hermes:local', live_dev.DEV_IMAGES + ':hermes-base'], calls)
+        self.assertIn(['docker', 'tag', honcho, live_dev.DEV_IMAGES + ':honcho'], calls)
+
+    def test_current_pinned_images_start_without_building(self):
+        honcho = 'nocheh-honcho:' + json.loads((live_dev.ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+        revisions = {}
+        pins, calls, run = self.runtime_images(revisions)
+        revisions.update({'nocheh-hermes:local': pins, honcho: ''})
+        with patch.object(live_dev.subprocess, 'run', side_effect=run):
+            live_dev.prepare_runtime_images({'PATH': '/usr/bin'}, Path('/synthetic/operating'))
+        self.assertNotIn(['/synthetic/operating/bin/nocheh', 'build'], calls)
+
+    def test_rejects_a_runtime_base_still_unpinned_after_building(self):
+        revisions = {'nocheh-hermes:local': 'wrong-revision', 'after_build': {}}
+        _, calls, run = self.runtime_images(revisions)
+        with patch.object(live_dev.subprocess, 'run', side_effect=run):
+            with self.assertRaisesRegex(ValueError, 'wrong revision after ./bin/nocheh build'):
+                live_dev.prepare_runtime_images({'PATH': '/usr/bin'}, Path('/synthetic/operating'))
+        self.assertFalse(any(arguments[:2] == ['docker', 'tag'] for arguments in calls))
 
     def test_existing_images_start_without_rebuild(self):
         present = type('Result', (), {'returncode': 0})()
