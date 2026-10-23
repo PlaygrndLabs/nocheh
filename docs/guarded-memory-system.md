@@ -140,11 +140,12 @@ configuring the dedicated embedding key and a model provider, start with:
 ./bin/nocheh up
 ```
 
-Run the [Honcho acceptance procedure](guarded-memory-plan.md) before attaching
-memory. The production acceptance evidence for the active installation is in
-[TASK.md](../TASK.md). Starting containers, configuring a paid key, or passing a
-synthetic fixture does not mark the memory connection verified. Attachment remains
-an explicit owner operation. The optional Hermes-versus-Honcho comparison harness
+Honcho memory is on by default: when the Honcho service is enabled
+(`NOCHEH_HONCHO_ENABLED=true`), the store attaches it once at startup without
+ingesting earlier history. It does not wait for the
+[Honcho acceptance procedure](guarded-memory-plan.md); that procedure remains
+available as an optional live check and does not gate attachment. Once the owner
+attaches or detaches memory, the startup default no longer changes it. The optional Hermes-versus-Honcho comparison harness
 has been retired; it was not a production acceptance gate.
 
 The total pilot cap stays at $5. After the pilot, `./bin/nocheh honcho monthly`

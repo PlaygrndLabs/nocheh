@@ -59,7 +59,7 @@ export class NativeMemoryRepository {
       FROM memory_workspace_deletions GROUP BY state ORDER BY state`)).rows;
     return {connection,workspace:workspace?{id:workspace.id,state:workspace.state,last_ready_at:workspace.last_ready_at,error_code:workspace.error_code}:null,
       sessions,receipts,deletions,workspace_deletions:retired,guard:binding,primary:'honcho',native_notes:['MEMORY.md','USER.md'],syncing:workspace?.state==='building',
-      limited_memory:!connection.attached||!connection.verified||!workspace||!workspace.last_ready_at&&workspace.state!=='ready'};
+      limited_memory:!connection.attached||!workspace||!workspace.last_ready_at&&workspace.state!=='ready'};
   }
   /** A short-lived synthetic workspace for live provider acceptance before memory attachment. */
   async issueAcceptance(principal:Reader) {
@@ -108,12 +108,28 @@ export class NativeMemoryRepository {
     await new OwnerCommands(this.control).run(principal,string(body.operation_id,200),body,async db=>{
       const row=(await db.query('SELECT * FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
       if(row.revision!==body.expected_revision)throw new HttpError(409,'memory_connection_conflict');
-      if(body.attached&&!row.verified)throw new HttpError(409,'honcho_live_acceptance_pending');
       await db.query(`UPDATE memory_engine_connection SET attached=$1,include_history=$2,revision=revision+1,
         attached_at=CASE WHEN $1 AND NOT attached AND NOT $3 THEN now() ELSE coalesce(attached_at,now()) END WHERE singleton`,
         [body.attached,body.include_history,body.catch_up]);
       return {revision:row.revision+1};
     });return this.status();
+  }
+  /** Honcho memory is on by default: an installation with Honcho enabled attaches it once,
+   * unless the owner has already attached or detached it. Earlier history is not ingested. */
+  async attachByDefault() {
+    const row=(await this.control.query('SELECT attached,revision FROM memory_engine_connection WHERE singleton')).rows[0];
+    if(row.attached||row.revision!==0)return this.status();
+    try {
+      await new OwnerCommands(this.control).run({admin:true,scope:null},'memory-default-attach:'+randomUUID(),{attached:true},async db=>{
+        const current=(await db.query('SELECT attached,revision FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
+        // Another writer got there first; roll back so nothing else changes.
+        if(current.attached||current.revision!==0)throw new HttpError(409,'memory_connection_conflict');
+        await db.query(`UPDATE memory_engine_connection SET attached=true,include_history=false,revision=revision+1,
+          attached_at=coalesce(attached_at,now()) WHERE singleton`);
+        return {revision:1};
+      });
+    } catch(error) {if(!(error instanceof HttpError&&error.code==='memory_connection_conflict'))throw error;}
+    return this.status();
   }
   async acceptVerification(principal:Reader,input:unknown) {
     admin(principal);const report=object(input),checks=object(report.checks),ledger=object(report.ledger);
@@ -249,7 +265,7 @@ export class NativeMemoryRepository {
   }
   async queueSource(source:SourceReference) {
     const connection=(await this.control.query('SELECT * FROM memory_engine_connection WHERE singleton')).rows[0];
-    if(!connection.attached||!connection.verified)return [];
+    if(!connection.attached)return [];
     const binding=await this.guards.state();
     const row=(await this.contexts.access.stores.archive.query('SELECT received_at,kind FROM events WHERE id=$1',[source.id])).rows[0];
     if(!row)throw new HttpError(404,'source_not_found');
@@ -366,8 +382,8 @@ export class NativeMemoryRepository {
     return found[0].id;
   }
   async reconcileReceipt(id:string):Promise<boolean> {
-    const connection=(await this.control.query('SELECT attached,verified FROM memory_engine_connection WHERE singleton')).rows[0];
-    if(!connection.attached||!connection.verified)return false;
+    const connection=(await this.control.query('SELECT attached FROM memory_engine_connection WHERE singleton')).rows[0];
+    if(!connection.attached)return false;
     const row=await this.receipt(id);if(row.state==='done')return true;if(row.state!=='uncertain')return false;
     // Reconciliation reads only its exact receipt and never writes, even for a replaced session.
     let result:any;
@@ -499,8 +515,8 @@ export class NativeMemoryRepository {
     return this.status();
   }
   private async attachedWorkspace() {
-    const connection=(await this.control.query('SELECT attached,verified FROM memory_engine_connection WHERE singleton')).rows[0];
-    if(!connection.attached||!connection.verified)throw new HttpError(409,'honcho_memory_detached');
+    const connection=(await this.control.query('SELECT attached FROM memory_engine_connection WHERE singleton')).rows[0];
+    if(!connection.attached)throw new HttpError(409,'honcho_memory_detached');
     const workspace=await this.workspace(await this.guards.state());if(!workspace)throw new HttpError(409,'memory_workspace_missing');
     await this.current(workspace.id);return workspace.id as string;
   }

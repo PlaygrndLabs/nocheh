@@ -31,6 +31,7 @@ export function settings() {
     dataDir: process.env.NOCHEH_DATA_DIR ?? '/data',
     hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
     honchoUrl:process.env.HONCHO_URL??'http://honcho-api:8000',
+    honchoEnabled:process.env.NOCHEH_HONCHO_ENABLED==='true',
     memoryToken:process.env.NOCHEH_MEMORY_TOKEN??'',
     guardMode: mode as 'off' | 'on',
     detectorVersion:`${DETECTOR_VERSION}:${process.env.NOCHEH_GUARD_ROUTE_MODEL || process.env.NOCHEH_MODEL || 'claude-sonnet-5-5'}`,

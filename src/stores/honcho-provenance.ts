@@ -17,7 +17,7 @@ export class HonchoProvenanceRepository {
     if(typeof audience!=='string'||!audience||audience.length>256)throw new HttpError(400,'invalid_memory_audience');
     const found=(await this.stores.control.query(`SELECT 1 FROM memory_generations g CROSS JOIN memory_engine_connection c
       WHERE g.id=$1 AND g.installation_generation=$2 AND g.state<>'retired'
-      AND c.singleton AND c.attached AND c.verified`,[workspace,binding.generation])).rowCount;
+      AND c.singleton AND c.attached`,[workspace,binding.generation])).rowCount;
     if(!found)throw new HttpError(409,'memory_context_retired');
   }
   /** Sessions an audience may read: its own sessions with completed writes, newest first.

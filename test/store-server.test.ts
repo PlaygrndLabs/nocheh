@@ -39,7 +39,7 @@ test('separated application captures through control outages, exposes owner repo
   };
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,honcho:async()=>{throw Error('no native provider calls');}});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
-    hermesUrl:'http://fixture',honchoUrl:'http://fixture',memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
+    hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await mkdir(join(root,'workflows'),{recursive:true});await writeFile(join(root,'workflows/inactive'),'fixture: no Inngest connection');
   await services.guards.reconcile();await services.guards.setMode('on');
   const worker=startStorageCapture(services,settings,25),server=storageServer(services,settings,runtime,worker.status);

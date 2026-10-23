@@ -232,7 +232,7 @@ export class OwnerSupervisionRepository {
     const factRevisions=new Map(facts.map(row=>[row.id,row.active_revision]));
     // One Honcho workspace serves every audience; a conversation reads only its own sessions unless it is the owner's.
     const sessions=memory.sessions.filter(item=>owner||item.audience===space),connection=memory.connection,workspace=memory.workspace;
-    const attached=connection?.attached===true&&connection?.verified===true;
+    const attached=connection?.attached===true;
     const ready=attached&&!!workspace&&(workspace.state==='ready'||!!workspace.last_ready_at)&&(owner||sessions.length>0);
     const syncing=attached&&sessions.some(item=>item.pending>0);
     const sharingReleases=[];

@@ -30,6 +30,7 @@ x-service: &service
     NOCHEH_DATA_DIR: /data
     HERMES_URL: http://hermes:8781
     HONCHO_URL: http://honcho-memory:8000
+    NOCHEH_HONCHO_ENABLED: ${NOCHEH_HONCHO_ENABLED:-false}
     # The reply model: the security broker admits only this model and provider address.
     NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
     NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-}
