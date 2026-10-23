@@ -490,8 +490,15 @@ patches are re-anchored, moved Hermes symbols are followed, and Hermes' direct
 Hermes or Honcho source checkout. Checked here: the Node suite on Node 26 with
 PostgreSQL 18 (190 pass, 77 skipped), Honcho v3.3.0 migrations, provenance and
 export on PostgreSQL with pgvector, and the Inngest 1.46 inspection pages in
-Chromium. Pending: the Hermes image build and Hermes Python tests on the owner's
-machine, a fresh-database rebuild there, and a live reply check.
+Chromium. On the owner's machine (October 23) the fresh-database rebuild runs on
+PostgreSQL 18.6 and Honcho 3.3.0 with all services healthy and one poller. The
+store image installs libatomic for Node 26, the Hermes image installs PyYAML,
+which Hermes 0.22 no longer ships, and both builds check for them. `make dev`
+builds the pinned images when a pin moves. Hermes 0.22's own SOUL.md seeding and
+config backups are off, because Nocheh owns each profile's role and config.
+Hermes Python tests in the new image: 505 run, one pre-existing failure
+(`test_telegram_http_fixture`). Pending: a live reply check, and attaching
+Honcho memory on the fresh databases.
 
 </current>
 
