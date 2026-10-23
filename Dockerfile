@@ -37,8 +37,11 @@ CMD ["node", "dist/src/mini-app.js"]
 # Run store provisioning there before declaring PostgreSQL healthy, so application
 # processes retain only their restricted per-store credentials.
 FROM postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336 AS store-postgres
+# Node 26 links libatomic, which the PostgreSQL image does not ship.
+RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=runtime /usr/local/bin/node /usr/local/bin/node
+RUN node --version
 COPY --from=runtime /app/node_modules ./node_modules
 COPY --from=runtime /app/dist ./dist
 COPY deploy/store-postgres-entrypoint.sh /usr/local/bin/store-postgres-entrypoint
