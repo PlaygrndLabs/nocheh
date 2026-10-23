@@ -20,6 +20,8 @@ const capture=startStorageCapture(services,config),workflows=startStorageWorkflo
 const transport=process.env.INNGEST_SIGNING_KEY?hostTransport(process.env.INNGEST_SIGNING_KEY,undefined,undefined,()=>!restoredInactive(config.dataDir)):undefined;
 const server=storageServer(services,config,call,()=>({...capture.status(),workflows:workflows.state()}),transport,adapter.capabilities);
 transport?.attach(server);
+// Honcho memory is on by default once its service is enabled; an owner's own attach or detach stands.
+if(config.honchoEnabled)void services.memory.attachByDefault().catch(error=>console.warn(JSON.stringify({event:'memory_default_attach_failed',code:error?.code??'unknown'})));
 server.listen(config.port,config.host,()=>console.log(JSON.stringify({event:'ready',service:config.service,storage_layout:'original-only-v1',port:(server.address() as {port:number}).port})));
 let stopping=false;
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{
