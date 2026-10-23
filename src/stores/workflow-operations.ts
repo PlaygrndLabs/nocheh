@@ -202,7 +202,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         // Started/uncertain reviews must still reconcile their existing effect.
         await s.guards.assertCurrent(row.binding);
         const initial=(await control.query(`SELECT 1 FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
-          JOIN memory_engine_connection c ON c.singleton AND c.attached AND c.verified
+          JOIN memory_engine_connection c ON c.singleton AND c.attached
           WHERE g.installation_generation=$1 AND g.state<>'retired' AND r.retired_at IS NULL
           AND r.state='pending' AND r.attempts=0 AND r.error_code IS NULL AND r.next_attempt<=now() LIMIT 1`,
           [row.binding.generation])).rowCount;
@@ -217,8 +217,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         row.state==='ambiguous'?'reconcile':'review',row.attempts,Math.max(Date.now()+1000,row.next_attempt.getTime()),row.state==='done'?null:'receipt_pending');
     },
     honcho:async(job,authority)=>{
-      const connection=(await control.query('SELECT attached,verified FROM memory_engine_connection WHERE singleton')).rows[0];
-      if(!connection.attached||!connection.verified)return waiting('sync','prerequisite',60000);
+      const connection=(await control.query('SELECT attached FROM memory_engine_connection WHERE singleton')).rows[0];
+      if(!connection.attached)return waiting('sync','prerequisite',60000);
       if(job==='refresh')return validate(authority);
       const match=/^(source|ingest|projection|receipt|reconcile|generation|context|delete|retire|relearn):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');
       const kind=match[1],id=match[2]!;

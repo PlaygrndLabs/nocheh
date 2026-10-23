@@ -194,11 +194,14 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     await services.guards.setMode('off');await services.guards.setMode('on');
     assert.equal(await services.memory.acceptanceRequest(synthetic),false,'a changed guard binding retires acceptance');
     const connect={attached:true,include_history:false,catch_up:false,expected_revision:status.connection.revision,operation_id:key+':attach'};
-    await assert.rejects(services.memory.connection(owner,connect),{code:'honcho_live_acceptance_pending'});
     await assert.rejects(services.memory.acceptVerification(owner,{format:'not-a-live-report',checks:{},ledger:{}}),{code:'honcho_live_acceptance_pending'});
-    // Synthetic fixture authority only; this does not create a live acceptance report.
-    await stores.control.query('UPDATE memory_engine_connection SET verified=true WHERE singleton');
-    status=await services.memory.connection(owner,connect);assert.equal(status.connection.attached,true);
+    // Honcho memory is on by default: it attaches once without a live acceptance report.
+    status=await services.memory.attachByDefault();assert.equal(status.connection.attached,true);assert.equal(status.connection.revision,1);
+    assert.equal((await stores.control.query('SELECT verified FROM memory_engine_connection WHERE singleton')).rows[0].verified,false);
+    status=await services.memory.connection(owner,{attached:false,include_history:false,catch_up:false,expected_revision:1,operation_id:key+':default-detach'});
+    assert.equal(status.connection.attached,false);
+    status=await services.memory.attachByDefault();assert.equal(status.connection.attached,false,'the owner\'s detach stands');
+    status=await services.memory.connection(owner,{...connect,expected_revision:status.connection.revision});assert.equal(status.connection.attached,true);
     await assert.rejects(services.memory.issueAcceptance(owner),{code:'honcho_acceptance_requires_detached_memory'});
     const project=await services.projects.save(owner,{name:'Atlas',description:'Connected memory fixture',state:'active',expected_revision:0,operation_id:key+':project'});
     await services.projects.assign(owner,{space_id:group,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':project-assignment'});
