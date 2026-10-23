@@ -51,6 +51,17 @@ def install_database_paths():
         def mapped(fn=prior):
             return native_path(fn())
         module._db_path=mapped
+    # Nocheh owns each profile's SOUL.md (the owner-set role, empty when unset)
+    # and writes config.yaml itself. Hermes would otherwise seed its own
+    # identity as a role and copy config.yaml into backups/ whenever a profile
+    # is merely read, for example by the dashboard's inspection routes.
+    from hermes_cli import config as hermes_config, config_backups
+    seed,backup=hermes_config._ensure_default_soul_md,config_backups.backup_config
+    def no_seed(home):return None
+    def backup_without_good(config_path,reason,**kwargs):
+        return None if reason=='good' else backup(config_path,reason,**kwargs)
+    originals+=[(hermes_config,'_ensure_default_soul_md',seed),(config_backups,'backup_config',backup)]
+    hermes_config._ensure_default_soul_md=no_seed;config_backups.backup_config=backup_without_good
     def restore():
         for module,name,prior in reversed(originals):setattr(module,name,prior)
     return restore
