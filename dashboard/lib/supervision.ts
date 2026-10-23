@@ -48,7 +48,6 @@ export function memoryAvailability(
 ) {
   if (failed || !memory) return {state: 'unknown', label: 'Availability unobserved'};
   if (!memory.connection?.attached) return {state: 'disabled', label: 'Long-term memory detached'};
-  if (!memory.connection.verified) return {state: 'unverified', label: 'Memory compatibility unverified'};
   if (memory.limited_memory !== false) return {state: 'limited', label: 'Limited memory'};
   return {state: 'ready', label: 'Current memory available'};
 }

@@ -66,12 +66,14 @@ const usd = (value: number) =>
 export function LongTerm() {
   const memory = useResource<MemoryStatus>('/memory/honcho', 10000);
   const service = useResource<ServiceStatus>('/honcho/status', 30000);
-  const ready = !!memory.data?.connection.attached && !!memory.data.connection.verified;
+  const attached = !!memory.data?.connection.attached;
+  // Spending limit changes still follow the server's accepted-memory rule.
+  const budgetEditable = attached && !!memory.data?.connection.verified;
   return (
     <>
       <StatusCard memory={memory} service={service} />
-      <BudgetCard editable={ready} />
-      {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={ready} />}
+      <BudgetCard editable={budgetEditable} />
+      {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={attached} />}
       <Browse running={!!service.data?.running} workspace={memory.data?.workspace?.id ?? ''} />
     </>
   );
@@ -129,7 +131,7 @@ function StatusCard({
       </Card>
     );
 
-  const {attached, verified} = data.connection;
+  const {attached} = data.connection;
   const receipts = data.receipts ?? [];
   const total = receipts.reduce((sum, row) => sum + row.count, 0);
   const done = receipts.filter(row => row.state === 'done').reduce((sum, row) => sum + row.count, 0);
@@ -138,9 +140,7 @@ function StatusCard({
 
   const connected: [Tone, string, string] = !attached
     ? ['neutral', 'Not connected', 'Nocheh uses its notes and message search instead.']
-    : verified
-      ? ['good', 'Connected', 'Learns from chats you allowed.']
-      : ['warn', 'Waiting for checks', 'It hasn’t passed its live checks yet.'];
+    : ['good', 'Connected', 'Learns from chats you allowed.'];
   const fresh: [Tone, string, ReactNode] = !attached
     ? ['neutral', 'Paused', 'Nothing is sent while disconnected.']
     : failed > 0 || data.workspace?.error_code
@@ -248,12 +248,9 @@ function StatusCard({
                 Disconnect
               </Button>
             ) : (
-              <Button variant="primary" busy={command.busy} disabled={!verified} onClick={() => void change(true)}>
+              <Button variant="primary" busy={command.busy} onClick={() => void change(true)}>
                 Connect long-term memory
               </Button>
-            )}
-            {!attached && !verified && (
-              <p className="text-[13px] text-muted">It can be connected once its live checks have passed.</p>
             )}
           </div>
         </div>

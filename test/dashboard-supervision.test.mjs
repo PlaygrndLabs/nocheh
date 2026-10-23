@@ -17,7 +17,7 @@ test('unavailable memory observations and service attachment never claim usable 
  assert.equal(memoryAvailability(null).state,'unknown');
  assert.equal(memoryAvailability({connection:{attached:true,verified:true},limited_memory:false},true).state,'unknown');
  assert.equal(memoryAvailability({connection:{attached:false,verified:true},limited_memory:false}).state,'disabled');
- assert.equal(memoryAvailability({connection:{attached:true,verified:false},limited_memory:false}).state,'unverified');
+ assert.equal(memoryAvailability({connection:{attached:true,verified:false},limited_memory:false}).state,'ready','attached memory needs no live acceptance');
  assert.equal(memoryAvailability({connection:{attached:true,verified:true}}).state,'limited');
  assert.equal(memoryAvailability({connection:{attached:true,verified:true},limited_memory:true}).state,'limited');
  assert.equal(memoryAvailability({connection:{attached:true,verified:true},limited_memory:false}).state,'ready');
