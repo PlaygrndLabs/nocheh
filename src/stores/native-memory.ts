@@ -839,6 +839,18 @@ export class NativeMemoryRepository {
     await this.guards.assertCurrent(binding);
     return sources;
   }
+  /** Honcho lists the conclusions it read while answering. Their archived messages let the agent check a claim
+   * against the original; a conclusion that was read is not proof the answer relied on it. */
+  private async evidence(workspace:string,audience:string,responses:any[],binding:GuardBinding):Promise<{references:SourceReference[];limitations:string[]}> {
+    const ids=[...new Set(responses.flatMap(response=>Array.isArray(response?.evidence?.conclusions)?response.evidence.conclusions.map((item:any)=>item?.id):[]))]
+      .filter((value):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value));
+    if(!ids.length)return {references:[],limitations:['no_conclusion_evidence']};
+    const limitations=ids.length>32?['evidence_conclusion_limit']:[];
+    try {
+      const read=await this.provenance.read(workspace,audience,ids.slice(0,32),binding);
+      return {references:read.evidence,limitations:['evidence_lists_conclusions_read_not_relied_on',...read.limitations,...limitations]};
+    } catch {return {references:[],limitations:['evidence_unavailable',...limitations]};}
+  }
   async recall(principal:Reader,query:string) {
     string(query,2000);
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);if(!workspace)return limited;
@@ -863,18 +875,22 @@ export class NativeMemoryRepository {
       // Each peer is asked side by side, so recall waits for the slowest Honcho answer rather than their sum.
       const asked=sessions?.length===0?[]:connected.items.slice(0,4);
       if(asked.length)await this.current(id);
-      for(const [index,response] of (await Promise.all(asked.map(item=>this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',
-        {query:question,reasoning_level:'low',stream:false,...(sessions?{filters:{session_id:sessions}}:{})})))).entries())
+      const responses=await Promise.all(asked.map(item=>this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',
+        {query:question,reasoning_level:'low',stream:false,include_evidence:true,...(sessions?{filters:{session_id:sessions}}:{})})));
+      for(const [index,response] of responses.entries())
         answers.push(`[related through ${asked[index]!.path}]\n${string(response.content,20000)}`);
       if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing}:
         {...limited,note:'No authorized person or project memory matched this request.'};
+      const evidence=await this.evidence(id,audience,responses,current.binding);
+      const limitations=['reasoning_response_has_no_exact_conclusion_citations',...evidence.limitations];
       const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(string(answers.join('\n\n'),20000)),
-        producer:'honcho',producer_version:protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4)},provenance:{partial:connected.partial,limitations:['reasoning_response_has_no_exact_conclusion_citations']}});
+        producer:'honcho',producer_version:protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4)},
+        provenance:{partial:connected.partial,evidence:evidence.references,limitations}});
       await this.current(id);await this.guards.prepareContext(output,protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
       await this.current(id);await this.prepared.audience.assert(principal);await this.prepared.allow(principal,value);
       return {sources:[...corrections,{source:'nocheh:honcho:'+id,kind:'memory_inference',text:value.text,exact_citations:false,
-        limitations:['reasoning_response_has_no_exact_conclusion_citations']}],partial:connected.partial,
+        evidence_sources:evidence.references.map(reference=>'nocheh:event:'+reference.id),limitations}],partial:connected.partial,
         limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing};
     } catch(error){await this.prepared.audience.assert(principal);return corrections.length?{...limited,sources:corrections}:limited;}
   }

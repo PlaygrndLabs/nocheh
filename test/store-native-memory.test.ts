@@ -96,6 +96,44 @@ test('recall asks every connected peer side by side, keeps each inside the group
   assert.equal(result.sources.at(-1).text,recorded);
 });
 
+test('recall asks Honcho for evidence and points the agent at the archived messages behind the conclusions it read',async()=>{
+  const workspace=digest('evidence-workspace'),root={store:'archive',kind:'event',id:digest('evidence-root'),revision:'1',input_hash:digest('evidence-root-hash')};
+  const sessions=[digest('evidence-session')],first='A'.repeat(21),second='B'.repeat(21);
+  const archived={store:'archive',kind:'event',id:digest('evidence-message'),revision:'1',input_hash:digest('evidence-message-hash')};
+  const bodies:any[]=[],reads:any[]=[],outputs:any[]=[];let recorded='',failRead=false;
+  const contexts={access:{stores:{control:{query:async()=>{throw Error('unexpected_control_query');}}},policy:()=>({owner_id:'123'}),
+    recall:(principal:Reader)=>({space:principal.space,group:'-100'})},
+    guards:{prepareContext:async()=>null,read:async()=>({value:{text:recorded}})}};
+  const derived={record:async(input:any)=>{if(input.kind==='memory_result'){recorded=input.content.toString();outputs.push(input);}
+    return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
+  const binding={generation:'fixture',epoch:1,mode:'on'};
+  const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
+  const provenance={sessions:async()=>sessions,read:async(id:string,audience:string,ids:string[],current:unknown)=>{
+    reads.push({id,audience,ids,current});if(failRead)throw Error('provenance_down');
+    return {conclusions:ids.map(item=>({id:item,parents:[],deleted:false})),evidence:[archived],limitations:['ancestry_is_not_an_exact_citation'],exact_citations:false};}};
+  const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,async(path:string,body:any)=>{
+    bodies.push(body);const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;
+    return {content:'Answer from '+peer,evidence:{conclusions:peer==='person_a'?[{id:first},{id:second},{id:'not-a-conclusion'}]:[{id:first}],messages:[],tool_calls:[]}};
+  },async()=>[]);
+  Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
+    current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
+    connectedPeers:async()=>({items:['person_a','person_b'].map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
+  const reader={admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader;
+  const result=await memory.recall(reader,'Who planned the trip?') as any;
+  assert.ok(bodies.every(body=>body.include_evidence===true),'every peer answer carries Honcho\'s evidence');
+  assert.deepEqual(reads,[{id:workspace,audience:'-100',ids:[first,second],current:binding}],'conclusions are read once, deduplicated, within the audience');
+  const source=result.sources.at(-1);
+  assert.deepEqual(source.evidence_sources,['nocheh:event:'+archived.id]);
+  assert.equal(source.exact_citations,false,'what Honcho read is not what the answer relied on');
+  assert.ok(source.limitations.includes('evidence_lists_conclusions_read_not_relied_on'));
+  assert.deepEqual(outputs[0].provenance.evidence,[archived],'the recorded answer keeps its archive evidence');
+  failRead=true;
+  const fallback=await memory.recall(reader,'Who planned the trip?') as any;
+  assert.equal(fallback.sources.at(-1).text,recorded,'an evidence failure still returns the answer');
+  assert.deepEqual(fallback.sources.at(-1).evidence_sources,[]);
+  assert.ok(fallback.sources.at(-1).limitations.includes('evidence_unavailable'));
+});
+
 test('terminal Honcho derivation errors cannot mark a generation ready',async()=>{
   const id=digest('failed-derivation'),updates:{sql:string;values:unknown[]}[]=[];
   let failed=true,valid=true;
