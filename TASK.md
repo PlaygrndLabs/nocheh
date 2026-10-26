@@ -506,6 +506,10 @@ not yet run on the owner's installation:
   epoch changed; those results now carry across epochs
   ([decision](docs/adr/0170-secret-check-results-survive-guard-epochs.md),
   [check](test/store-prepared-context.test.ts)).
+  The recorded guard refusals were Hermes asking the provider for its model
+  list twice per turn, and two DNS-over-HTTPS lookups at startup. A bare model
+  list now passes; the lookups stay refused
+  ([decision](docs/adr/0172-provider-model-lists-pass-the-guard.md)).
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 
