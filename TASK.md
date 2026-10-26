@@ -466,6 +466,14 @@ not yet run on the owner's installation:
   waiting. A chat's later turns can now read and list its own requests, and a
   finished request is asked again as a new one
   ([decision](docs/adr/0166-a-chat-follows-its-own-message-requests.md)).
+  Test 2 then passed: one card, Approve, one group post, and the card showed
+  it was sent. Test 3 passed: the restart cut the first turn, its retry
+  answered once, and each of three messages got exactly one reply. Two of those
+  replies brought up the earlier post unasked and called it unconfirmed after a
+  60-second lookup whose content check failed on a provider error, so the list
+  of a chat's requests no longer carries their text, and Nocheh looks requests
+  up only when asked and calls a failed lookup unknown. The third message waited
+  184 seconds in the reply queue after the restart; not yet explained.
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 
