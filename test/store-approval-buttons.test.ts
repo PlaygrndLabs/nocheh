@@ -17,9 +17,9 @@ test('allowed members post freely in their own group; everything else waits for 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-approval-buttons-')),key='approval-buttons:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],refusals:Record<string,any>[]=[];let updates=0;
-  const other=group+'1',closed=group+'2';
+  const other=group+'1',closed=group+'2',forum='-100'+Date.now();
   let topicMemory:'group'|'topic'='group';
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other,closed],
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other,closed,forum],
     group_access:{[group]:{granted:['9'],denied:[]},[other]:{granted:['9'],denied:[]},[closed]:{granted:[],denied:['9']}},topic_memory:topicMemory});
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
@@ -60,8 +60,11 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for a review');
     // The person who asked, allowed in both groups, reviews it under their request in their own group and topic.
     const reviewCard=last('card');
-    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text],[group,'17','📨 Send to a Telegram group (a topic)\n\nFor the other group'],'no "Asked in" line on a card in the chat where it was asked');
-    assert.match(across.message,/posted here with Approve and Reject buttons for the person who asked/);
+    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text,reviewCard.links],[group,'17','📨 Send to a Telegram group › a topic\n\nFor the other group',[]],
+      'no "Asked in" line on a card in the chat where it was asked');
+    // The card is the answer: it replies to the request, and Nocheh adds nothing of its own.
+    assert.equal(reviewCard.reply_to,String((await stores.archive.query('SELECT payload FROM events WHERE id=$1',[topic.id])).rows[0].payload.toString().match(/"message_id":(\d+)/)[1]));
+    assert.match(across.message,/posted here as the reply to it[^]*return \[NO_REPLY\]/);
     const reviewApprove='na'+across.id.slice(0,40)+across.fingerprint.slice(0,16);
     assert.equal(await s.actionCommands.callback(await press('other-member',reviewApprove,8)),true);
     assert.equal(last('answer').text,'Only the person who asked or the owner can approve or reject this.');
@@ -81,7 +84,7 @@ test('allowed members post freely in their own group; everything else waits for 
       [{destination:group,name:null,current:true},{destination:other,name:'Design team',current:false}],'only the groups where the person asking is allowed');
     await assert.rejects(s.telegramActions.destinations(owner),{status:403});
     const ownerTurn=await message('owner-in-group',{},123);
-    assert.equal((await s.telegramActions.destinations(await actor(ownerTurn.id,group))).groups.length,3,'the owner is allowed in every group');
+    assert.equal((await s.telegramActions.destinations(await actor(ownerTurn.id,group))).groups.length,4,'the owner is allowed in every group');
     // A message for another chat waits for the owner, with the card in the owner's private chat only.
     const plain=await message('plain');
     const elsewhere=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(plain.id,group),{destination:'123',text:'Exact private message'}));
@@ -91,6 +94,24 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.deepEqual(card.buttons,[['✅ Approve','na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)],['❌ Reject','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)]]);
     assert.ok(card.buttons.every((pair:string[])=>Buffer.byteLength(pair[1]!)<=64));
     assert.match(elsewhere.message,/say only, briefly, that you asked the owner; do not show the draft/);
+    assert.equal(card.reply_to,undefined,'a card in another chat replies to nothing');
+    // The owner's own request in the private chat: one card, the reply to it, naming the group and topic with their Telegram links.
+    await capture('forum-topic',{message:{message_id:7,message_thread_id:7,date:1700000000,chat:{id:Number(forum),type:'supergroup',title:'Plans team',is_forum:true},
+      from:{id:123},forum_topic_created:{name:'Launch',icon_color:1}}},forum);
+    await capture('forum-latest',{message:{message_id:30,date:1700000000,chat:{id:Number(forum),type:'supergroup',title:'Plans team',is_forum:true},from:{id:123},text:'Hi'}},forum);
+    const ask=await capture('owner-private',{message:{message_id:12,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Post in Launch'}},'123');
+    const toTopic=await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(ask.id,'123'),scope:null},{destination:forum+'/topic/7',text:'Hello forum'}));
+    const internal=forum.slice(4);
+    assert.deepEqual([last('card').chat_id,last('card').reply_to,last('card').text,last('card').links],['123','12','📨 Send to “Plans team” › Launch\n\nHello forum',
+      [{offset:11,length:12,url:`https://t.me/c/${internal}/30`},{offset:26,length:6,url:`https://t.me/c/${internal}/7`}]]);
+    assert.match(toTopic.message,/return \[NO_REPLY\]/);
+    await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(ask.id,'123'),scope:null},{destination:forum,text:'Hello General'}));
+    assert.equal(last('card').text,'📨 Send to “Plans team” › General\n\nHello General','a message to a forum without a topic goes to General');
+    await stores.control.query("UPDATE owner_prompts SET texts='{\"telegram.approval_texts\":\"topic: in {topic}\"}'::jsonb WHERE singleton");
+    await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(ask.id,'123'),scope:null},{destination:forum+'/topic/9',text:'Hello unknown'}));
+    assert.deepEqual([last('card').text,last('card').links.at(-1)],['📨 Send to “Plans team” in a topic\n\nHello unknown',{offset:27,length:7,url:`https://t.me/c/${internal}/9`}],
+      'the owner\'s wording; a topic with no known name is still linked');
+    await stores.control.query("UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton");
     const approve='na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16);
     assert.equal(await s.actionCommands.callback(await press('stranger',approve,9)),true);
     assert.equal(last('answer').text,'Only the owner can approve or reject this.');
