@@ -50,19 +50,21 @@ export const learningPrompt=(
   "Return empty arrays when unsupported.");
 
 /** Approval cards in Telegram. A line whose value is missing, such as where it
- * was asked, is left out. The exact message or arguments are always shown. */
+ * was asked, is left out. The exact message or arguments are always shown. A
+ * group's or topic's name links to it in Telegram where Telegram has a link. */
 export const approvalCard='📨 Send to {destination}\n💬 Asked in {origin}\n\n{text}';
 export const approvalAction='⚙️ Run {kind}\n💬 Asked in {origin}\n\n{arguments}';
 /** One "name: text" line for each button, outcome and notice on an approval card. */
 export const approvalTexts=[
-  'approve: ✅ Approve','reject: ❌ Reject','private_chat: your private chat','unnamed_group: a Telegram group','topic: (a topic)',
+  'approve: ✅ Approve','reject: ❌ Reject','private_chat: your private chat','unnamed_group: a Telegram group',
+  'topic: › {topic}','unnamed_topic: a topic','general_topic: General',
   'sent: ✅ Approved and sent.','sending: ⏳ Approved. Sending now.','done: ✅ Approved and done.','approved: ✅ Approved.',
   'failed: ⚠️ Approved, but it did not finish. See the dashboard Inbox.',
   'rejected: ❌ Rejected. Nothing was sent.','rejected_action: ❌ Rejected. Nothing ran.','cancelled: 🚫 Cancelled. Nothing was sent.',
   'only_owner: Only the owner can approve or reject this.','only_requester: Only the person who asked or the owner can approve or reject this.',
   'changed: This request changed or no longer exists. Review it in the dashboard Inbox.',
   'decided: This request was already decided or can no longer change. Review it in the dashboard Inbox.'].join('\n');
-export type ApprovalText='approve'|'reject'|'private_chat'|'unnamed_group'|'topic'|'sent'|'sending'|'done'|'approved'|'failed'|'rejected'|'rejected_action'|'cancelled'|
+export type ApprovalText='approve'|'reject'|'private_chat'|'unnamed_group'|'topic'|'unnamed_topic'|'general_topic'|'sent'|'sending'|'done'|'approved'|'failed'|'rejected'|'rejected_action'|'cancelled'|
   'only_owner'|'only_requester'|'changed'|'decided';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {

@@ -80,6 +80,22 @@ def delivery_failure(requests):
     return None
 
 
+def approval_links(links,length):
+    """Text links on an approval card: a group's, topic's or message's t.me address over its name."""
+    import re
+    if links is None:return None
+    from telegram import MessageEntity
+    if not isinstance(links,list) or len(links)>4:raise ValueError('invalid_approval')
+    entities=[]
+    for link in links:
+        offset,size,url=(link.get(key) if isinstance(link,dict) else None for key in ('offset','length','url'))
+        if (type(offset) is not int or type(size) is not int or not 0<=offset<offset+size<=length or not isinstance(url,str)
+                or not re.fullmatch(r'https://t\.me/(?:c/[1-9]\d{0,15}|[A-Za-z][A-Za-z0-9_]{3,31})(?:/[1-9]\d{0,15}){0,2}',url)):
+            raise ValueError('invalid_approval')
+        entities.append(MessageEntity(MessageEntity.TEXT_LINK,offset,size,url=url))
+    return entities or None
+
+
 def prepare_profile(root,scope,model):
     profile=Path(root)/'profiles'/scope.profile
     profile.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -469,6 +485,9 @@ class AssistantGateway:
         if not owner and chat not in (self.scopes.groups or []) or topic and (owner or not re.fullmatch(r'[1-9]\d{0,15}',topic)):raise ValueError('approval_chat_not_allowed')
         text=body.get('text')
         if not isinstance(text,str) or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_approval')
+        entities=approval_links(body.get('links'),len(text.encode('utf-16-le'))//2)
+        reply=str(body.get('reply_to') or '')
+        if reply and not re.fullmatch(r'[1-9]\d{0,15}',reply):raise ValueError('invalid_approval')
         if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
         bot=self.adapter._bot
         if body.get('kind')=='card':
@@ -487,7 +506,10 @@ class AssistantGateway:
                 token=DISPATCH_KEY.set('approval:'+body['id'])
                 check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
                 try:
-                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup([buttons]))
+                    # In the chat where it was asked, the card is the reply to the request.
+                    # Links are entities over plain text, so no default formatting applies.
+                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup([buttons]),
+                                                entities=entities,parse_mode=None,reply_to_message_id=int(reply) if reply else None,allow_sending_without_reply=True)
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
                 except Exception:result={'state':'ambiguous'}
                 finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
@@ -502,7 +524,7 @@ class AssistantGateway:
             token=DISPATCH_KEY.set('approval-settle:'+body['id'])
             # The decided card keeps its text with the outcome and loses its buttons.
             # Telegram refuses a repeated identical edit, which changes nothing.
-            try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),reply_markup=None))}
+            try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),entities=entities,parse_mode=None,reply_markup=None))}
             except Exception:return {'state':'done','edited':False}
             finally:DISPATCH_KEY.reset(token)
         if body.get('kind')=='answer':
