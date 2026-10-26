@@ -279,9 +279,10 @@ export class TelegramActionRepository {
   /** This chat's most recent message requests and their states, for a later turn that no longer holds their IDs. */
   async recent(principal:Reader) {
     const turn=await this.turns.binding(principal);
-    const rows=(await this.stores.control.query('SELECT id FROM telegram_action_requests WHERE space_id=$1 AND profile=$2 ORDER BY created_at DESC,id DESC LIMIT 10',
-      [principal.space,turn.logical_profile])).rows;
-    return Promise.all(rows.map(row=>this.inspect(principal,row.id)));
+    // States and destinations only, so a quick look needs no content check; a request's text is read by its ID.
+    const rows=(await this.stores.control.query(`SELECT id,destination,state,error_code,created_at FROM telegram_action_requests
+      WHERE space_id=$1 AND profile=$2 ORDER BY created_at DESC,id DESC LIMIT 10`,[principal.space,turn.logical_profile])).rows;
+    return rows.map(row=>({id:row.id,destination:row.destination,state:row.state,error_code:row.error_code,created_at:row.created_at.toISOString()}));
   }
   async list(principal:Reader) {
     admin(principal);const rows=(await this.stores.control.query('SELECT id FROM telegram_action_requests ORDER BY created_at DESC,id DESC LIMIT 100')).rows;

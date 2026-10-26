@@ -108,7 +108,8 @@ test('allowed members post freely in their own group; everything else waits for 
     // A later turn in the same chat can follow the request without its ID; another chat cannot read it.
     const later={...await actor((await capture('owner-later',{message:{message_id:13,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Did it go out?'}},'123')).id,'123'),scope:null};
     const recent=await s.telegramActions.recent(later);
-    assert.deepEqual([recent[0]!.id,recent[0]!.state,recent[0]!.arguments.text],[toTopic.id,'proposed','Hello forum']);
+    assert.deepEqual([recent[0]!.id,recent[0]!.state,recent[0]!.destination],[toTopic.id,'proposed',forum+'/topic/7']);
+    assert.ok(recent.every(item=>!('arguments' in item)),'the list has no message text; a request is read by its ID');
     assert.equal((await s.telegramActions.inspect(later,toTopic.id)).state,'proposed');
     await assert.rejects(s.telegramActions.inspect(await actor(plain.id,group),toTopic.id),{status:404});
     assert.ok((await s.telegramActions.recent(await actor(plain.id,group))).every(item=>item.id!==toTopic.id));
