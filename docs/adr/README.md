@@ -23,7 +23,7 @@ Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), impl
 Re-running or replacing Honcho memory: [0153](0153-owner-reruns-and-replaces-honcho-memory.md).
 Message edits in Honcho memory: [0154](0154-message-edits-replace-honcho-writes.md).
 Albums answered once: [0155](0155-albums-answered-once.md).
-Desktop exports sharing proven Telegram identities: [0156](0156-desktop-exports-share-proven-telegram-identities.md).
+Desktop exports sharing proven Telegram identities: [0156](0156-desktop-exports-share-proven-telegram-identities.md). Desktop forum exports keeping their topics: [0171](0171-desktop-forum-messages-keep-their-topics.md).
 Group turns seeing recent unaddressed messages: [0157](0157-group-turns-see-recent-unaddressed-messages.md).
 Approve and Reject buttons in Telegram: [0158](0158-telegram-approval-buttons.md).
 Group posts without approval, private approval cards and refusals: [0159](0159-group-members-post-freely-and-approvals-go-private.md).
@@ -39,7 +39,7 @@ Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
 Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md); secret-check results carried across guard epochs: [0170](0170-secret-check-results-survive-guard-epochs.md).
-Provider model lists passing the privacy guard: [0171](0171-provider-model-lists-pass-the-guard.md).
+Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
 superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md);
 reply runs not refused for worker capacity: [0169](0169-reply-runs-are-not-refused-for-worker-capacity.md).

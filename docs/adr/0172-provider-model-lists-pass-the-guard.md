@@ -1,4 +1,4 @@
-# ADR-0171: A provider's bare model list passes the privacy guard
+# ADR-0172: A provider's bare model list passes the privacy guard
 
 <status>
 Accepted on 2026-10-26, when the owner said "yes for all" to fixing the

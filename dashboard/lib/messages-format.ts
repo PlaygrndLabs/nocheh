@@ -282,6 +282,7 @@ export type ImportJob = {
       name: string;
       messages: number;
       type?: string;
+      topics?: number;
       first_at?: string | null;
       last_at?: string | null;
     }[];

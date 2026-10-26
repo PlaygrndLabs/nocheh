@@ -352,6 +352,10 @@ not yet run on the owner's installation:
   and Honcho memory; a newer export replaces an older one
   ([decision](docs/adr/0156-desktop-exports-share-proven-telegram-identities.md),
   [check](test/store-desktop-import-identity.test.ts)).
+- A forum export mapped to its live group keeps its topics: the importer
+  follows reply links to each topic's creation message
+  ([decision](docs/adr/0171-desktop-forum-messages-keep-their-topics.md),
+  [check](test/store-desktop-import-identity.test.ts)).
 - Release test 1 (October 19) passed its addressing part on the owner's
   installation: an unaddressed group message stayed quiet and a Reply was
   answered in about 24 seconds. Its recall part failed: the answer could not
@@ -505,7 +509,7 @@ not yet run on the owner's installation:
   The recorded guard refusals were Hermes asking the provider for its model
   list twice per turn, and two DNS-over-HTTPS lookups at startup. A bare model
   list now passes; the lookups stay refused
-  ([decision](docs/adr/0171-provider-model-lists-pass-the-guard.md)).
+  ([decision](docs/adr/0172-provider-model-lists-pass-the-guard.md)).
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 
