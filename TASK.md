@@ -497,6 +497,11 @@ not yet run on the owner's installation:
   the pipeline worker's four request slots were full during background work
   after a memory change, then retrying it with backoff; the worker now accepts
   eight ([decision](docs/adr/0169-reply-runs-are-not-refused-for-worker-capacity.md)).
+  The 50-second memory recall after the test 4 hide was Honcho's three
+  reasoning rounds plus secret checks of text already checked before the
+  epoch changed; those results now carry across epochs
+  ([decision](docs/adr/0170-secret-check-results-survive-guard-epochs.md),
+  [check](test/store-prepared-context.test.ts)).
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 
