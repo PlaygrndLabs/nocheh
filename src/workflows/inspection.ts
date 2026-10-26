@@ -70,19 +70,23 @@ function exportLocalCode(value:string,binding:string){
   return localCodeImport+value.slice(0,block.index)+localCode+'export{'+entries.join(',')+'};';
 }
 
+const pinnedModules:Record<string,string>={index:'/assets/index-DGHUbgzG.js',_dashboard:'/assets/_dashboard-COvmTQM3.js',InvokeButton:'/assets/InvokeButton-BKoaQS3v.js',DragDivider:'/assets/DragDivider-j4FQFcES.js'};
 export function rewriteInspection(path:string,type:string,body:Buffer):Buffer{
   if(path==='/assets/fonts-DQTamI_N.css')return Buffer.from('body{font-family:system-ui,sans-serif}');
   if(!/html|javascript|css/.test(type))return body;
+  // Another Inngest build renames these modules; patching nothing would serve a broken page.
+  const asset=/^\/assets\/(index|_dashboard|InvokeButton|DragDivider)-[\w-]+\.js$/.exec(path);
+  if(asset&&path!==pinnedModules[asset[1]!])throw new HttpError(503,'inngest_ui_version_mismatch');
   let value=body.toString().replace(/(["'`])\/assets\//g,'$1/inngest/assets/').replace(/(["'`])assets\//g,'$1inngest/assets/').replace(/(["'`])\/favicon-june-2025\.svg/g,'$1/inngest/favicon-june-2025.svg');
-  if(path==='/assets/InvokeButton-CQ4RmnsY.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)\.Wrapper=\(\{children:e\}\)=>/)[1]!);
-  if(path==='/assets/DragDivider-Bk0TnKWx.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)=\(\{header:e,tab:t,actions:n=\[\]/)[1]!);
-  if(path==='/assets/index-BtL2Q5bp.js'){
+  if(path==='/assets/InvokeButton-BKoaQS3v.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)\.Wrapper=\(\{children:e\}\)=>/)[1]!);
+  if(path==='/assets/DragDivider-j4FQFcES.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)=\(\{header:e,tab:t,actions:n=\[\]/)[1]!);
+  if(path==='/assets/index-DGHUbgzG.js'){
     once(value,/basepath:``,serializationAdapters:/);
     value=value.replace('basepath:``,serializationAdapters:','basepath:`/inngest`,serializationAdapters:');
     const client=once(value,/new ([A-Za-z_$][\w$]*)\(`\/v0\/gql`\)/);
     value=value.replace(client[0],`new ${client[1]}(\`/inngest/v0/gql\`,{headers:()=>({'X-Nocheh-CSRF':window.__NOCHEH_CSRF__})})`).replaceAll('`/dev`','`/inngest/dev`');
   }
-  if(path==='/assets/_dashboard-6d9uQ3j3.js'){
+  if(path==='/assets/_dashboard-COvmTQM3.js'){
     const link=once(value,/href:([\w$]+)\?``:([\w$]+),to:\1\?void 0:([\w$]+),preload:([\w$]+)/);
     value=value.replace(link[0],`href:${link[1]}?\`\`:${link[2]},to:${link[1]}?void 0:(${link[3]}??${link[2]}),"aria-label":e,preload:${link[4]}`);
     // Only the Workflow group applies to Nocheh: AI, Setup and Cloud sandboxes stay hidden.
