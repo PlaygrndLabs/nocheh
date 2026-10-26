@@ -442,6 +442,15 @@ not yet run on the owner's installation:
   existing tasks. Live check pending: set a reminder a few minutes ahead from
   chat and see it arrive once in the private chat. Later: calendar view and
   saved views.
+- Notion through MCP (October 26): the owner asked "how can connect Notion
+  (use MCP)?". Settings › Connections › Notion signs in through Notion (or a
+  Business MCP token), turns Notion on, and chooses which calls ask first;
+  `nocheh_notion` works only in the owner's private chat
+  ([decision](docs/adr/0171-notion-through-its-mcp-server.md),
+  [check](test/store-notion.test.ts), [sign-in check](services/hermes/test_notion_connection.py),
+  [browser check](test/dashboard-pages.browser.mjs)). Live check pending: the
+  owner connects Notion on the machine and asks Nocheh to search it, then to add a
+  page and approves the card.
 - Release test 4 (October 20) passed on the owner's installation. A private
   message stating a synthetic locker code got one reply. Hiding it and
   Nocheh's reply made a later question answer once without the code; the code
