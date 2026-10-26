@@ -93,13 +93,15 @@ function useTheme(): [Theme, () => void] {
 /** Whether Nocheh's services answer, shown at the foot of the navigation. */
 function HealthLink({onNavigate, collapsed}: {onNavigate?: () => void; collapsed?: boolean}) {
   const {data, error} = useResource<any>('/monitoring', 15000);
-  const services: any[] = data?.containers ?? data?.services ?? [];
+  // The container list reads {unavailable: true} when Docker cannot be asked; never let that break every page.
+  const listed = data?.containers ?? data?.services;
+  const services: any[] = Array.isArray(listed) ? listed : [];
   const unhealthy = services.filter(
     row => row.expected_state === 'running' && !['running', 'healthy'].includes(String(row.state)),
   ).length;
   let tone: Tone = 'neutral';
   let text = 'Checking…';
-  if (error) [tone, text] = ['warn', 'Status unavailable'];
+  if (error || (listed && !Array.isArray(listed))) [tone, text] = ['warn', 'Status unavailable'];
   else if (data?.application?.ok === false) [tone, text] = ['bad', 'Nocheh is down'];
   else if (unhealthy)
     [tone, text] = ['warn', unhealthy === 1 ? '1 service needs a look' : `${unhealthy} services need a look`];
