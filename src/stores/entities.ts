@@ -15,6 +15,8 @@ export type RelationshipKind='contextual'|'participates'|'responsible'|'depends_
 const relationshipKinds=['contextual','participates','responsible','depends_on','associated'];
 export interface MemoryEntity {id:string;kind:EntityKind;name:string;state:'active'|'merged'|'rejected';project_id:string|null;merged_into:string|null;revision:number}
 export interface EntityContext {speaker:MemoryEntity|null;project:MemoryEntity|null;mentioned_projects:MemoryEntity[];mentioned_people:MemoryEntity[];session_id:string}
+/** People already known to a learning turn: the owner, and everyone else who wrote its evidence. */
+export interface KnownPeople {owner:MemoryEntity|null;participants:MemoryEntity[]}
 export interface EntityClaimInput {
  subject_id:string;predicate:string;content:string;object_entity_id?:string;relationship_kind?:RelationshipKind;
  attribution:'direct'|'reported'|'inferred';speaker_entity_id?:string;uncertainty:'uncertain'|'supported'|'explicit';evidence:SourceReference[];
@@ -42,6 +44,15 @@ const participantName=(payload:unknown,fallback:string):string=>{
     return name.slice(0,200)||fallback;
   } catch{return fallback;}
 };
+
+const isBot=(payload:unknown):boolean=>{
+  try {
+    const value=JSON.parse(Buffer.isBuffer(payload)?payload.toString():String(payload)),message=value.message??value.edited_message??value.channel_post??value.edited_channel_post??value;
+    return (message?.from??value.message_reaction?.user)?.is_bot===true;
+  } catch{return false;}
+};
+/** A suggested name compared with a known person's: case, an @ and a trailing "(username)" never make someone new. */
+const personKey=(name:string)=>name.replace(/\([^)]*\)\s*$/,'').replace(/^@/,'').trim().toLocaleLowerCase();
 
 export const honchoPeerId=(entity:Pick<MemoryEntity,'kind'|'id'>):string=>`${entity.kind}_${entity.id}`;
 export const evidencePeerId=(source:SourceReference):string=>`evidence_${digest(canonical(['nocheh-connected-evidence-v1',source.id])).slice(0,48)}`;
@@ -83,8 +94,10 @@ export class EntityRepository {
     const found=(await this.stores.archive.query(`SELECT o.id,o.platform,o.namespace,o.kind,o.external_id,e.payload FROM source_relations r
       JOIN source_objects o ON o.id=r.target_id JOIN events e ON e.id=r.event_id
       WHERE r.event_id=$1 AND r.kind='authored_by' ORDER BY o.id LIMIT 2`,[source.id])).rows;
-    if(found.length!==1)return null;
-    const identity=found[0],id=digest(canonical([protocol,'person',identity.id])),binding=digest(canonical([protocol,'source-binding',identity.id]));
+    return found.length===1?this.ensureIdentity(found[0]):null;
+  }
+  private async ensureIdentity(identity:{id:string;platform:string;kind:string;external_id:string;payload:unknown}):Promise<MemoryEntity|null> {
+    const id=digest(canonical([protocol,'person',identity.id])),binding=digest(canonical([protocol,'source-binding',identity.id]));
     const linked=(await this.stores.control.query('SELECT entity_id,state FROM memory_entity_bindings WHERE id=$1',[binding])).rows[0];
     const known=participantName(identity.payload,''),name=known||`${identity.platform} ${identity.kind} ${identity.external_id}`;
     // Only an untouched exact platform identity follows platform display names, and only to a name
@@ -98,6 +111,26 @@ export class EntityRepository {
     const current=(await this.stores.control.query(`SELECT e.* FROM memory_entity_bindings b JOIN memory_entities e ON e.id=b.entity_id
       WHERE b.id=$1 AND b.state IN ('exact','confirmed') AND e.state='active'`,[binding])).rows[0];
     return current??null;
+  }
+  /** The owner's own Telegram account and the other authors of the evidence are known people,
+   * so learning links them by ID instead of asking the owner to remember them again. */
+  async knownPeople(references:SourceReference[],speaker:MemoryEntity|null):Promise<KnownPeople> {
+    const ownerId=this.access.policy().owner_id;
+    const owned=ownerId?(await this.stores.archive.query(`SELECT o.id,o.platform,o.namespace,o.kind,o.external_id,e.payload FROM source_objects o
+      JOIN source_relations r ON r.target_id=o.id AND r.kind='authored_by' JOIN events e ON e.id=r.event_id
+      WHERE o.platform='telegram' AND o.namespace='bot-api' AND o.kind='actor' AND o.external_id=$1 ORDER BY e.capture_sequence DESC LIMIT 1`,[ownerId])).rows[0]:undefined;
+    const owner=owned?await this.ensureIdentity(owned):null;
+    // A message an assistant wrote names the bot, which is not a person to remember.
+    const authors=(await this.stores.archive.query(`SELECT DISTINCT ON (o.id) o.id,o.platform,o.namespace,o.kind,o.external_id,e.payload FROM source_relations r
+      JOIN source_objects o ON o.id=r.target_id JOIN events e ON e.id=r.event_id
+      WHERE r.event_id=ANY($1::text[]) AND r.kind='authored_by' AND o.kind='actor' ORDER BY o.id,e.capture_sequence DESC LIMIT 31`,[references.map(ref=>ref.id)])).rows;
+    const participants:MemoryEntity[]=[],seen=new Set([owner?.id,speaker?.id]);
+    for(const identity of authors.slice(0,30)) {
+      if(isBot(identity.payload))continue;
+      const entity=await this.ensureIdentity(identity);
+      if(entity&&!seen.has(entity.id)){seen.add(entity.id);participants.push(entity);}
+    }
+    return {owner,participants};
   }
   async context(source:SourceReference,knownProjects:Project[],text=''):Promise<EntityContext> {
     const speaker=await this.ensureParticipant(source),space=await this.access.space(source),effective=space?await this.projects.effective(space):null;
@@ -119,7 +152,9 @@ export class EntityRepository {
   }
   async suggest(kind:'person'|'project'|'binding',name:string,source:SourceReference,reason:string,candidate?:string) {
     const clean=string(name,200).trim();if(!clean)throw new HttpError(400,'invalid_entity_name');
-    const id=digest(canonical([protocol,'suggestion',kind,clean.toLocaleLowerCase(),source,candidate??null]));
+    // One question per name: later evidence for the same suggestion, pending or already
+    // decided, never adds another card. The first evidence stays as its example.
+    const id=digest(canonical([protocol,'suggestion',kind,clean.toLocaleLowerCase(),candidate??null]));
     await this.stores.control.query(`INSERT INTO memory_entity_suggestions(id,kind,name,candidate_entity_id,source_reference,reason)
       VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`,[id,kind,clean,candidate??null,source,reason]);
     return (await this.stores.control.query('SELECT * FROM memory_entity_suggestions WHERE id=$1',[id])).rows[0];
@@ -236,7 +271,10 @@ export class EntityRepository {
     } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   async publishDiscoveries(context:PreparedLearningContext,input:unknown,operation:string) {
-    const value=object(input),known=[context.entities.speaker,context.entities.project,...context.entities.mentioned_projects,...context.entities.mentioned_people].filter((item):item is MemoryEntity=>!!item);
+    // Contexts saved before known people were added carry neither field.
+    const value=object(input),known=[context.entities.speaker,context.entities.project,...context.entities.mentioned_projects,...context.entities.mentioned_people,
+      context.entities.owner,...(context.entities.participants??[])].filter((item):item is MemoryEntity=>!!item);
+    const knownPeople=new Set(known.filter(item=>item.kind==='person').map(item=>personKey(item.name)));
     const knownIds=new Set(known.map(item=>item.id)),evidence=new Map(context.evidence.map(item=>[item.reference.id,item.reference])),published=[],suggestions=[],rejected:LearningRejection[]=[];
     // One invalid model item is dropped and recorded; valid items from the same result are kept.
     const checked=<T>(section:LearningRejection['section'],check:()=>T):T|undefined=>{
@@ -253,6 +291,7 @@ export class EntityRepository {
         const candidate=typeof row.candidate_id==='string'&&/^[a-f0-9]{64}$/.test(row.candidate_id)?row.candidate_id:undefined;
         if(candidate&&!knownIds.has(candidate))throw new HttpError(422,'entity_candidate_unavailable');
         const name=string(row.name,200).trim();if(!name)throw new HttpError(422,'invalid_entity_name');
+        if(row.kind==='person'&&knownPeople.has(personKey(name)))throw new HttpError(422,'entity_already_known');
         return {kind:row.kind as 'person'|'project'|'binding',name,source:references[0]!,reason:string(row.reason,1000),candidate};
       });
       if(suggestion)suggestions.push(await this.suggest(suggestion.kind,suggestion.name,suggestion.source,suggestion.reason,suggestion.candidate));

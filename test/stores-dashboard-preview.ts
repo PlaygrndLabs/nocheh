@@ -47,7 +47,8 @@ if(!(await stores.derived.query('SELECT 1 FROM derivative_selections WHERE event
 const project=await services.projects.save(owner,{name:'Observatory',description:'Instrument inspections and field observations across the team.',state:'active',expected_revision:0,operation_id:'ui-project'});
 const beacon=await services.projects.save(owner,{name:'Beacon',description:'A connected project mentioned by the observatory team.',state:'active',expected_revision:0,operation_id:'ui-project-beacon'});
 await services.projects.assign(owner,{space_id:'-10042',mode:'assigned',project_id:project.id,expected_revision:0,operation_id:'ui-project-assignment'});
-const entityContext=await services.entities.context(originals[4]!.reference,[beacon],'Beacon is blocked while Alex checks the telescope.');
+const entityLocal=await services.entities.context(originals[4]!.reference,[beacon],'Beacon is blocked while Alex checks the telescope.');
+const entityContext={...entityLocal,...await services.entities.knownPeople([originals[4]!.reference],entityLocal.speaker)};
 const entityBinding=await services.guards.state();
 await services.entities.publishDiscoveries({source:originals[4]!.reference,source_object:'ui-fixture',space:'-10042',binding:entityBinding,
  evidence:[{reference:originals[4]!.reference,text:'Beacon is blocked while Alex checks the telescope.',space:'-10042'}],dependencies:[],observations:[],
