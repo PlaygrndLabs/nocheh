@@ -63,6 +63,13 @@ test('imported copies of live messages are marked and lose to the live copy; new
     assert.deepEqual([...await s.retirements.liveCopies([copy.id,seen.id])],[copy.id]);
     const hits=await s.sources.search(owner,'seen live');
     assert.equal(hits.find(hit=>hit.id===copy.id)?.live_copy,true);assert.equal(hits.find(hit=>hit.id===seen.id)?.live_copy,undefined);
+    // The bot's own reply, repeated by the export, is also already saved live.
+    const sent=(await s.capture.capture({version:1,key:'desktop-identity:delivered:'+group,origin:'live',kind:'telegram_delivered_message',bot_id:'fixture',
+      scope:group,source_id:'8',revision:'8',occurred_at:null,text:'bot reply',
+      payload:{message:{message_id:8,date:1700000001,chat:{id:Number(group),type:'supergroup'},from:{id:9,is_bot:true,first_name:'Bot'},text:'bot reply'}}})).source.reference;
+    const echo=await record(desktop(group,chat,{id:8,from:'Bot',from_id:'user9',text:'bot reply'}));
+    assert.equal(echo.live_copy,true,'an exported copy of the bot reply counts as already kept');
+    assert.deepEqual(await s.retirements.revisions(echo.id),[echo.id,sent.id],'the sent reply, not the export, is what memory keeps');
     const people=await stores.archive.query("SELECT DISTINCT target_id FROM source_relations WHERE kind='authored_by' AND event_id=ANY($1::text[])",[[copy.id,seen.id]]);
     assert.equal(people.rowCount,1,'the export and the live chat share one person');
     // A newer export of an edited message replaces the older export, whatever order they arrive in.
