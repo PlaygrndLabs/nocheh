@@ -39,6 +39,31 @@ class PromptTests(unittest.TestCase):
             with self.assertRaises(DetectorContractError):
                 detect_literals('Password: kite', credentials, 'model', mine)
 
+    def test_secret_check_retries_once_when_a_waking_provider_refuses(self):
+        credentials = SubscriptionCredentials('synthetic-token')
+        class Waking(Exception):
+            status_code = 503
+        class Refused(Exception):
+            status_code = 401
+        with patch('services.hermes.subscription.RETRY_SECONDS', 0), \
+                patch('services.hermes.usage.record') as record:
+            with patch('services.hermes.subscription._call_subscription', side_effect=[Waking(), reply({'literals': ['kite']})]) as call:
+                self.assertEqual(detect_literals('Password: kite', credentials, 'model'), ['kite'])
+            self.assertEqual(call.call_count, 2)
+            self.assertEqual([entry.args[3] for entry in record.call_args_list], [True, False], 'each attempt is counted')
+            with patch('services.hermes.subscription._call_subscription', side_effect=[Waking(), Waking(), reply({'literals': []})]) as call:
+                with self.assertRaises(Waking):
+                    detect_literals('Password: kite', credentials, 'model')
+            self.assertEqual(call.call_count, 2, 'a provider still failing goes back to the workflow')
+            with patch('services.hermes.subscription._call_subscription', side_effect=[Refused(), reply({'literals': []})]) as call:
+                with self.assertRaises(Refused):
+                    detect_literals('Password: kite', credentials, 'model')
+            self.assertEqual(call.call_count, 1, 'a refused key is not retried')
+            with patch('services.hermes.subscription._call_subscription', side_effect=[reply({'literals': ['absent']}), reply({'literals': []})]) as call:
+                with self.assertRaises(DetectorContractError):
+                    detect_literals('Password: kite', credentials, 'model')
+            self.assertEqual(call.call_count, 1, 'a bad answer is not retried')
+
     def test_group_filter_uses_the_owner_text_and_still_adds_privacy_rules(self):
         restore = install(Boundary('on', transform=lambda url, payload: payload))
         try:

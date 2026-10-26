@@ -2,11 +2,14 @@
 
 from dataclasses import dataclass, field
 import os
+import time
 
 # The security broker relays every isolated model call to the configured reply provider.
 BROKER_URL = "http://nocheh-security:8786/v1"
 # Installation rehearsals serve models from this local fixture; nothing else may use http.
 FIXTURE_URL = "http://model-fixture:8317/v1"
+# Wait before the secret check's one retry after a provider server error.
+RETRY_SECONDS = 2
 
 
 class DetectorContractError(ValueError):
@@ -119,17 +122,25 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str,
     from services.hermes.prompts import text as prompt
     from services.hermes.request_boundary import trusted_detector
     from services.hermes.usage import record, response_usage
-    response, failed = None, True
-    try:
-        with trusted_detector(credentials.base_url):
-            response = _call_subscription(credentials, model, [
-                {"role": "system", "content": prompt(prompts, "guard.secret_check")},
-                {"role": "user", "content": text},
-            ])
-        candidates = detector_reply(response.choices[0].message.content, text)
-        failed = False
-        return candidates
-    finally:
-        # Nocheh's usage tracker: the provider's reported tokens, priced by Hermes.
-        record('guard', response_usage(response, model, credentials.base_url) if response is not None else {'calls': 1},
-               model, failed)
+    # A provider waking from idle can refuse its first request with a server error. The check
+    # changes nothing, so one quick retry spares the turn the workflow's 30-second retry wait.
+    for attempt in (1, 2):
+        response, failed = None, True
+        try:
+            with trusted_detector(credentials.base_url):
+                response = _call_subscription(credentials, model, [
+                    {"role": "system", "content": prompt(prompts, "guard.secret_check")},
+                    {"role": "user", "content": text},
+                ])
+            candidates = detector_reply(response.choices[0].message.content, text)
+            failed = False
+            return candidates
+        except Exception as error:
+            status = getattr(error, "status_code", None)
+            if attempt == 2 or not isinstance(status, int) or status < 500:
+                raise
+        finally:
+            # Nocheh's usage tracker: the provider's reported tokens, priced by Hermes.
+            record('guard', response_usage(response, model, credentials.base_url) if response is not None else {'calls': 1},
+                   model, failed)
+        time.sleep(RETRY_SECONDS)
