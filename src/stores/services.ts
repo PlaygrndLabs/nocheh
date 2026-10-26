@@ -1,5 +1,5 @@
 import {OwnerAutonomyRepository} from './owner-autonomy.js';
-import {TaskRepository} from './tasks.js';
+import {TaskRepository,type TaskActor} from './tasks.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
@@ -97,12 +97,20 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's private chat reaches every list; a project's chat only that project's own list.
+  // Who wrote the message a group turn answers: the owner, or a person allowed there, by their Telegram name.
+  const sender=async(event:string):Promise<TaskActor>=>{
+    const row=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
+    let from:any=null;try{const payload=JSON.parse(row.payload.toString());from=(payload.message??payload.edited_message)?.from;}catch{}
+    if(from&&String(from.id)===options.policy().owner_id)return {kind:'owner'};
+    const name=[from?.first_name,from?.last_name].filter(part=>typeof part==='string').join(' ').replace(/\s+/g,' ').trim().slice(0,100);
+    return name?{kind:'member',name}:{kind:'member'};
+  };
   const tasks=new TaskRepository(stores.control,async principal=>{
-    if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null};
+    if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null,actor:{kind:'owner'}};
     const {turn,source}=await knowledge.liveGroupTurn(principal),project=(await projects.effective(turn.scope)).project;
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
-    return {source,project:project.id,group:turn.scope};
-  });
+    return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
+  },{call:options.runtime,owner:()=>options.policy().owner_id});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   return {ownerAutonomy,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
