@@ -80,12 +80,12 @@ def main():
         'NOCHEH_CONTROL_PASSWORD': store_passwords['control'],
         'INNGEST_POSTGRES_PASSWORD': INNGEST_PASSWORD}
     compose = {'name': project, 'services': {
-        'nocheh-db': {'image': 'postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336',
+        'nocheh-db': {'image': 'postgres:18.6-trixie@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6',
             'command': ['postgres', '-c', 'cluster_name=nocheh-reset-fresh-fixture'],
             'environment': {'PGDATA':'/var/lib/postgresql/data', 'POSTGRES_USER': 'nocheh', 'POSTGRES_DB': 'nocheh', 'POSTGRES_PASSWORD': POSTGRES_PASSWORD},
             'volumes': ['nocheh_database:/var/lib/postgresql/data'],
             'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -U nocheh -d nocheh'], 'interval': '1s', 'retries': 30}},
-        'inngest-redis': {'image': 'redis:8.8.3-trixie@sha256:eb1aa641bc5380ed14442398e45a5a51aeaaac919fab811e4f134eb77c71dd2d',
+        'inngest-redis': {'image': 'redis:8.10.2-trixie@sha256:97ec88159e6d7cfb5ddef9015386087d58a912de80112f06ebdfa78fa5989901',
             'volumes': [str(state / 'workflows/redis') + ':/data'],
             'command': ['redis-server', '--appendonly', 'yes', '--appendfsync', 'always', '--save', ''],
             'healthcheck': {'test': ['CMD', 'redis-cli', 'ping'], 'interval': '1s', 'retries': 30}},
@@ -97,7 +97,7 @@ def main():
             'healthcheck': {'test': ['CMD-SHELL', 'pg_isready -U experiment -d honcho_experiment'],
                             'interval': '1s', 'retries': 30}},
         'honcho-redis': {'profiles': ['honcho'],
-            'image': 'redis:8.8.3-trixie@sha256:eb1aa641bc5380ed14442398e45a5a51aeaaac919fab811e4f134eb77c71dd2d',
+            'image': 'redis:8.10.2-trixie@sha256:97ec88159e6d7cfb5ddef9015386087d58a912de80112f06ebdfa78fa5989901',
             'volumes': ['honcho_redis:/data'],
             'healthcheck': {'test': ['CMD', 'redis-cli', 'ping'], 'interval': '1s', 'retries': 30}},
         'bootstrap': {'image': args.services_image, 'entrypoint': ['node', '--input-type=module', '-e', BOOTSTRAP],
