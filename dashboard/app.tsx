@@ -63,6 +63,9 @@ function canonicalPage(): PageId {
   if (hash) history.replaceState(null, '', hash);
   return page;
 }
+// Notion's sign-in returns to `/?connect=notion…`; Settings › Connections finishes it.
+if (new URLSearchParams(location.search).get('connect') === 'notion')
+  history.replaceState(null, '', location.pathname + location.search + '#settings?view=connections');
 canonicalPage();
 addEventListener('hashchange', canonicalPage);
 
