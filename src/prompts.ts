@@ -36,6 +36,9 @@ export const learningPrompt=(
   "Learned rule IDs are guidance, not original evidence_ids; use them only for conflicts. "+
   "Entity suggestions use kind (person, project, binding), name, optional candidate_id, reason, and evidence_ids. "+
   "Only suggest an entity when no confirmed ID is supplied. "+
+  "entities.owner is the owner: the person in the owner's private chat whom replies call you. entities.speaker and entities.participants wrote the observations. "+
+  "These people already have IDs: use those IDs and never suggest them as new people, under any name or username. "+
+  "The owner reads each suggestion reason on a card: write it as one short, plain sentence saying who or what this is and why it is worth remembering, with no IDs, usernames or technical words. "+
   "Do not duplicate a project from organization.creates in entity_suggestions; ambiguous project or identity suggestions remain separate for exact owner review. "+
   "Entity claims use subject_id, predicate, content, optional object_entity_id together with its relationship_kind (contextual, participates, responsible, depends_on, associated; omit relationship_kind when there is no object_entity_id), attribution (direct, reported, inferred), optional speaker_entity_id, uncertainty, and evidence_ids. "+
   "An unambiguous reference to a confirmed project makes that project the subject for that statement even when the conversation has another default project; it does not reassign the conversation. "+
