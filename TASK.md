@@ -504,8 +504,21 @@ which Hermes 0.22 no longer ships, and both builds check for them. `make dev`
 builds the pinned images when a pin moves. Hermes 0.22's own SOUL.md seeding and
 config backups are off, because Nocheh owns each profile's role and config.
 Hermes Python tests in the new image: 505 run, one pre-existing failure
-(`test_telegram_http_fixture`). Pending: a live reply check, and attaching
-Honcho memory on the fresh databases.
+(`test_telegram_http_fixture`). A live reply and attaching Honcho memory on the
+fresh databases passed on October 23.
+
+Upgrades (October 26): Hermes v0.22.5, Honcho v3.4.1 (built with uv 0.13.5 as
+its lockfile requires, `honcho-ai` 2.7.0 and `honcho-cli` 0.2.1), Inngest server
+1.49 with SDK 4.26, Node 26.12.1, Python 3.14.9, uv 0.13.5, Redis 8.10.2,
+cloudflared 2026.10.3 and Docker CLI 29.9.2. PostgreSQL stays on 18.6, because
+19 is still a release candidate and pgvector has no build for it; Python stays
+on 3.14, because Hermes does not support 3.15. The Hermes v0.22.5 browser TUI
+only attaches to a gateway over WebSocket, so a small bridge
+([bridge](services/hermes/browser_bridge.py),
+[checks](services/hermes/test_browser_bridge.py)) serves Nocheh's browser
+gateway on a loopback socket, and the dashboard plugin allowance follows its
+new home in Hermes. Honcho 3.4.0 adds a database migration that Honcho runs
+itself at startup.
 
 </current>
 

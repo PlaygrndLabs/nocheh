@@ -20,7 +20,7 @@ def status():
     ledger=STATE/'ledger/budget.sqlite'
     result = {
         'running': False,
-        'cli_version': '0.2.0',
+        'cli_version': '0.2.1',
         'api_budget_usd': Ledger(ledger).report()['limit_usd'] if ledger.is_file() else 5,
         'embedding_credential': bool(
             (STATE / 'temporary_embedding_key').exists()

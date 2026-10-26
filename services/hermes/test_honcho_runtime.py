@@ -73,7 +73,7 @@ class HonchoRuntimeTests(unittest.TestCase):
             self.assertEqual(set(services['honcho-postgres']['networks']),{'honcho-isolated'})
             self.assertNotIn('ports',services['honcho-api'])
             self.assertIn('honcho-memory',services['honcho-api']['networks']['memory']['aliases'])
-            self.assertEqual(services['honcho-api']['image'],'nocheh-honcho:608aec8a')
+            self.assertEqual(services['honcho-api']['image'],'nocheh-honcho:a92650bc')
             self.assertIn('/nocheh/meter.py',services['honcho-provider-gateway']['command'])
             self.assertTrue(any(mount['source'].endswith('/services/honcho/meter.py')
                                 for mount in services['honcho-provider-gateway']['volumes']))

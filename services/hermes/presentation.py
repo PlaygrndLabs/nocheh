@@ -29,4 +29,4 @@ def install(home):
     def enabled():
         values=read(config).get('plugins',{})
         return set(values.get('enabled',[])),set(values.get('disabled',[]))
-    dashboard_ui._plugin_enable_sets=enabled
+    web_server_dashboard._plugin_enable_sets_here=enabled
