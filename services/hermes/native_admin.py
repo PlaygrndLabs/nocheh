@@ -441,7 +441,6 @@ class Administration:
 def create_app(root, model, policy, token, browser_enabled=False, revision_reader=None, presentation_home=None, profile_catalog=None):
     from hermes_cli import web_server as native
     from hermes_cli import web_server_sessions as sessions
-    from hermes_cli.web_routers import sessions as router
     from hermes_state import SessionDB
     from hermes_cli import web_server_profiles, web_server_cron
     app = Administration(native.app, root, model, policy, token, browser_enabled, revision_reader, profile_catalog)
@@ -449,8 +448,7 @@ def create_app(root, model, policy, token, browser_enabled=False, revision_reade
     install(presentation_home or Path(root)/'dashboard-presentation')
     web_server_profiles._resolve_profile_dir = lambda name: app.profile(name)[1]
     web_server_cron._cron_profile_home = lambda profile: app.profile(profile)
-    # Inspection must never create/migrate/auto-archive native state.
-    router._maybe_auto_archive_for_profile = lambda *_: None
+    # Inspection must never create/migrate native state.
     from .isolated_profile import database_path
     sessions._open_session_db_for_profile = lambda profile, read_only: SessionDB(database_path(app.profile(profile)[1]), read_only=read_only)
     @contextlib.asynccontextmanager
