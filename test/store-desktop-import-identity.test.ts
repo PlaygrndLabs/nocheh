@@ -33,6 +33,17 @@ test('a Desktop export observes the live message and person only where Telegram 
   assert.equal(author(desktop('-1001234567890',supergroup,{...message,from_id:'user7x'}))?.namespace,'desktop','an unknown sender form is not guessed');
 });
 
+test('a Desktop forum message joins the live topic the importer found for it',()=>{
+  const supergroup={id:1234567890,type:'private_supergroup'},message={id:5,from:'Example',from_id:'user7',text:'hello',reply_to_message_id:3};
+  const inTopic=(scope:string)=>{const value=desktop(scope,supergroup,message);(value.payload as any).topic_id=3;return observedSource(value);};
+  const bot=live('-1001234567890',5,9,'hello');
+  (bot.payload as any).message={...(bot.payload as any).message,chat:{id:-1001234567890,type:'supergroup',is_forum:true},message_thread_id:3,is_topic_message:true};
+  const thread=(value:ReturnType<typeof observedSource>)=>value.relations.find(relation=>relation.kind==='in_thread')?.target;
+  assert.deepEqual(thread(inTopic('-1001234567890')),thread(observedSource(bot)));
+  assert.equal(thread(inTopic('desktop:private_supergroup:1234567890')),undefined,'an unmapped export has no live topic');
+  assert.equal(thread(observedSource(desktop('-1001234567890',supergroup,message))),undefined,'General and unlinked messages have none');
+});
+
 test('imported copies of live messages are marked and lose to the live copy; newer exports replace older ones',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},check=new pg.Pool(config);

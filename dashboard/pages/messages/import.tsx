@@ -370,6 +370,7 @@ function ImportReview({job}: {job: ImportJob}) {
                   </span>
                   <span className="text-xs text-muted">
                     {chat.messages.toLocaleString()} messages
+                    {chat.topics ? ` · ${chat.topics.toLocaleString()} ${chat.topics === 1 ? 'topic' : 'topics'}` : ''}
                     {dateSpan(chat.first_at, chat.last_at) ? ` · ${dateSpan(chat.first_at, chat.last_at)}` : ''}
                   </span>
                   {(() => {

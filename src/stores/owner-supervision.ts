@@ -95,7 +95,8 @@ export class OwnerSupervisionRepository {
         ORDER BY space_id,capture_sequence DESC,id DESC)
       SELECT DISTINCT ON (s.space_id) s.space_id,s.message->'chat' AS chat,t.topic_name,s.received_at AS observed_at,st.closed
         FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id LEFT JOIN states st ON st.space_id=s.space_id
-        ORDER BY s.space_id,(s.message->'chat' ? 'title') DESC,s.capture_sequence DESC,s.id DESC`),
+        -- An update with no chat object (a reaction, a member change) must not hide the title.
+        ORDER BY s.space_id,coalesce(s.message->'chat' ? 'title',false) DESC,s.capture_sequence DESC,s.id DESC`),
       this.stores.control.query(`SELECT space_id FROM project_assignments
         UNION SELECT destination FROM sharing_rules UNION SELECT jsonb_array_elements_text(sources) FROM sharing_rules
         UNION SELECT jsonb_array_elements_text(scopes) FROM organization_delegations

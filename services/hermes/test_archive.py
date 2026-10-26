@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from tools.operations.archive.archive import desktop_records, media_path, message_text
+from tools.operations.archive.archive import desktop_records, desktop_topics, media_path, message_text
 from . import archive_tools
 
 
@@ -99,6 +99,26 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(records[1][0]['event']['payload']['message']['action'],'join_group')
             self.assertEqual(records[2][0]['artifacts'][0]['state'],'failed')
             self.assertEqual(list(desktop_records(document,root))[0][0]['event']['scope'],'desktop:private_supergroup:100')
+
+    def test_forum_topics_follow_reply_chains_to_their_topic_created_message(self):
+        messages=[
+            {'id':1,'type':'service','action':'migrate_from_group'},
+            {'id':3,'type':'service','action':'topic_created','title':'tests'},
+            {'id':4,'type':'message','text':'in tests','reply_to_message_id':3},
+            {'id':5,'type':'message','text':'General has no reply link'},
+            {'id':6,'type':'message','text':'reply in General','reply_to_message_id':5},
+            {'id':7,'type':'message','text':'reply in tests','reply_to_message_id':4},
+            {'id':8,'type':'message','text':'target outside the export','reply_to_message_id':2},
+            {'id':9,'type':'message','text':'loop','reply_to_message_id':10},
+            {'id':10,'type':'message','text':'loop','reply_to_message_id':9},
+            {'id':11,'type':'message','text':'odd link','reply_to_message_id':[3]},
+        ]
+        self.assertEqual(desktop_topics(messages),{3:3,4:3,7:3})
+        self.assertEqual(desktop_topics([m for m in messages if m['id']!=3]),{},'no topics without a topic_created message')
+        document={'id':100,'type':'private_supergroup','name':'Forum','messages':messages}
+        records=[record['event'] for record,_ in desktop_records(document,Path('.'),scope='-100100')]
+        self.assertEqual([event['payload'].get('topic_id') for event in records],[None,3,3,None,None,3,None,None,None,None])
+        self.assertEqual(records[2]['payload']['message'],messages[2],'the exported message itself is unchanged')
 
     def test_import_media_cannot_escape_export_directory_through_paths_or_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:

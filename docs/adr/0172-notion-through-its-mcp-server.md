@@ -1,4 +1,4 @@
-# ADR-0171: Notion through its MCP server
+# ADR-0172: Notion through its MCP server
 
 <status>
 Accepted on 2026-10-26. The owner asked "how can connect Notion (use MCP)?",
