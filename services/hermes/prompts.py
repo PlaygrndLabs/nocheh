@@ -26,7 +26,8 @@ DEFAULTS = {
         'External actions follow the owner approval setting: each tool result says whether an action is approved or waiting for the owner. '
         'Controlled tools create proposals for an independent executor. '
         'An action ID is not evidence of execution. '
-        'Check nocheh_action_status for a completed result. When a tool result says Approve and Reject buttons were sent, the owner can decide with them in Telegram; any pending request can also be reviewed in the dashboard Inbox.'),
+        'Check nocheh_action_status for a completed result; without an id it lists this chat\'s recent requests and their states. When a tool result says Approve and Reject buttons were sent, the owner can decide with them in Telegram; any pending request can also be reviewed in the dashboard Inbox. '
+        'A rejected, cancelled or failed request is finished: when asked again, make a new request. Never say a request is waiting, approved or sent unless a tool result in this turn shows it.'),
     'reply.owner': (
         'This is the owner private conversation. '
         'Archive access spans all chats. '

@@ -105,6 +105,13 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.deepEqual([last('card').chat_id,last('card').reply_to,last('card').text,last('card').links],['123','12','📨 Send to “Plans team” › Launch\n\nHello forum',
       [{offset:11,length:12,url:`https://t.me/c/${internal}/30`},{offset:26,length:6,url:`https://t.me/c/${internal}/7`}]]);
     assert.match(toTopic.message,/return \[NO_REPLY\]/);
+    // A later turn in the same chat can follow the request without its ID; another chat cannot read it.
+    const later={...await actor((await capture('owner-later',{message:{message_id:13,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Did it go out?'}},'123')).id,'123'),scope:null};
+    const recent=await s.telegramActions.recent(later);
+    assert.deepEqual([recent[0]!.id,recent[0]!.state,recent[0]!.arguments.text],[toTopic.id,'proposed','Hello forum']);
+    assert.equal((await s.telegramActions.inspect(later,toTopic.id)).state,'proposed');
+    await assert.rejects(s.telegramActions.inspect(await actor(plain.id,group),toTopic.id),{status:404});
+    assert.ok((await s.telegramActions.recent(await actor(plain.id,group))).every(item=>item.id!==toTopic.id));
     await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(ask.id,'123'),scope:null},{destination:forum,text:'Hello General'}));
     assert.equal(last('card').text,'📨 Send to “Plans team” › General\n\nHello General','a message to a forum without a topic goes to General');
     await stores.control.query("UPDATE owner_prompts SET texts='{\"telegram.approval_texts\":\"topic: in {topic}\"}'::jsonb WHERE singleton");
