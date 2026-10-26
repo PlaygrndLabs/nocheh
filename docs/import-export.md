@@ -43,6 +43,9 @@ and records that topic beside the exported message; an export mapped to its own
 live supergroup then files the message under that live topic. Messages in
 General, or whose reply chain leaves the export, stay at group level.
 
+A mapped export is read and learned in the chat it was mapped to, like a live
+message there; learning still needs the owner's explicit choice on the import.
+
 Unmapped Desktop chats use `desktop:TYPE:ID` scopes, available only to owner-wide
 retrieval. Map a single export explicitly with `--scope`, or use `--scope-map`
 with a JSON object mapping exported chat IDs to actual Telegram chat IDs. This
