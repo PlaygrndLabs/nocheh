@@ -163,8 +163,12 @@ class NativeAdminTests(unittest.TestCase):
         self.client.get('/api/sessions', headers=self.headers)
         self.client.get('/api/config', headers=self.headers)
         self.assertEqual(fingerprint(), before)
+        # Hermes fences every session edit by the row's revision and a reusable request id.
+        snapshot = self.client.get('/api/sessions/owner-session/mutation-snapshot', headers=self.headers)
+        self.assertEqual(snapshot.status_code, 200, snapshot.text)
         renamed = self.client.patch('/api/sessions/owner-session', headers=self.headers,
-            json={'title':'New title', 'profile':self.owner.name})
+            json={'title':'New title', 'profile':self.owner.name, 'request_id':'synthetic-rename',
+                  'expected_revision':snapshot.json()['runtime_revision']})
         self.assertEqual(renamed.status_code, 200, renamed.text)
         absent = self.client.delete('/api/sessions/owner-session?profile='+self.group.name, headers=self.headers)
         self.assertTrue(absent.json()['already_absent'])
