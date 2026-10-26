@@ -477,7 +477,8 @@ Docker CLI 29.9 and the Inngest server 1.46, on Debian trixie images. Every
 PostgreSQL service sets PGDATA to its mounted data directory, because the 18+
 images default elsewhere; a PostgreSQL 17 volume does not start on 18, so the
 installation starts with fresh databases, as the owner accepted. Honcho is
-pinned to the v3.3.0 release with `honcho-ai` 2.6.0 and `honcho-cli` 0.2.0.
+pinned to the v3.4.1 release, built with uv 0.13.5 as its lockfile requires,
+with `honcho-ai` 2.7.0 and `honcho-cli` 0.2.1.
 Honcho keeps conclusion parent links in its `document_sources` table, so the
 provenance and session-descendant reads, and the portable memory export, use
 that table, and the provider gateway allows Honcho's 6,000-token long summaries
