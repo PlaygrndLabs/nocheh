@@ -12,6 +12,14 @@ test('space identity uses explicit topics and rejects ambiguous policy values',(
   // A reply chain in an ordinary supergroup carries its first message as message_thread_id; it is not a topic.
   assert.equal(eventSpace('-20',{message:{chat:{id:-20,type:'supergroup'},message_thread_id:42,reply_to_message:{message_id:42}}}),'-20');
   assert.equal(eventSpace('-20',{message:{chat:{id:-20,type:'supergroup',is_forum:true},message_thread_id:42}}),'-20/topic/42');
+  // A Desktop export carries the importer's topic only for its own live supergroup.
+  const forum={chat:{id:1234567890,type:'private_supergroup'},message:{id:7,reply_to_message_id:3},topic_id:3};
+  assert.equal(eventSpace('-1001234567890',forum),'-1001234567890/topic/3');
+  assert.equal(eventSpace('desktop:private_supergroup:1234567890',forum),'desktop:private_supergroup:1234567890');
+  assert.equal(eventSpace('-1009999999999',forum),'-1009999999999');
+  assert.equal(eventSpace('42',forum),'42','an export added to the private chat has no topics');
+  assert.equal(eventSpace('-1001234567890',{...forum,chat:{id:1234567890,type:'supergroup'}}),'-1001234567890','a Bot API chat type is not an export');
+  assert.equal(eventSpace('-1001234567890',{...forum,topic_id:'3'}),'-1001234567890');
   assert.equal(eventSpace('-20',{space:'-20/topic/42'},'browser'),'-20/topic/42');
   assert.throws(()=>eventSpace('-20',{space:'-30/topic/42'},'browser'),{code:'source_space_mismatch'});
   assert.throws(()=>eventSpace('-20',{message:{message_thread_id:-1,is_topic_message:true}}),{code:'invalid_topic'});

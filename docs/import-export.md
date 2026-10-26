@@ -37,6 +37,12 @@ Text entities are concatenated without normalization. Supplied photos, files and
 thumbnails are copied with their bytes unchanged. Excluded/missing files remain
 visible failures; absolute paths, traversal and escaping symlinks are rejected.
 
+Desktop exports carry no topic field. For a forum supergroup, the importer
+follows each message's reply links back to its topic's `topic_created` message
+and records that topic beside the exported message; an export mapped to its own
+live supergroup then files the message under that live topic. Messages in
+General, or whose reply chain leaves the export, stay at group level.
+
 Unmapped Desktop chats use `desktop:TYPE:ID` scopes, available only to owner-wide
 retrieval. Map a single export explicitly with `--scope`, or use `--scope-map`
 with a JSON object mapping exported chat IDs to actual Telegram chat IDs. This

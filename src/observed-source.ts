@@ -1,5 +1,5 @@
 import {canonical,digest,type Envelope} from './archive.js';
-import {telegramTopicId} from './spaces.js';
+import {desktopChannelTypes,desktopTopicId,telegramTopicId} from './spaces.js';
 import {legacySource,sourceDescriptor,type SourceDescriptor,type SourceIdentity,type SourceRelation} from './source-model.js';
 
 const record=(v:unknown):Record<string,any>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,any>:{};
@@ -37,8 +37,6 @@ export function telegramMessageAudience(message:Record<string,any>,chatId:string
   return {chat_id:chatId,topic_state:'unknown'};
 }
 
-// Telegram Desktop names a supergroup or channel by its bare id; the Bot API prefixes it with -100.
-const desktopChannels=new Set(['private_supergroup','public_supergroup','private_channel','public_channel']);
 const desktopActor=(value:unknown):SourceIdentity|undefined=>{
   const match=/^(user|channel)([1-9][0-9]{0,15})$/.exec(external(value)??'');
   return !match?undefined:match[1]==='user'?{platform:'telegram',namespace:'bot-api',kind:'actor',external_id:match[2]!}:conversation('-100'+match[2]);
@@ -53,7 +51,7 @@ const desktopActor=(value:unknown):SourceIdentity|undefined=>{
 function desktopSource(value:Envelope,base:SourceDescriptor):SourceDescriptor {
   if(base.adapter!=='telegram.desktop')return base;
   const body=record(value.payload),chat=record(body.chat),id=external(chat.id),type=external(chat.type);
-  const live=id&&type&&desktopChannels.has(type)&&/^[1-9][0-9]{0,15}$/.test(id)&&value.scope==='-100'+id?'-100'+id:undefined;
+  const live=id&&type&&desktopChannelTypes.has(type)&&/^[1-9][0-9]{0,15}$/.test(id)&&value.scope==='-100'+id?'-100'+id:undefined;
   const relations=base.relations.map(relation=>{
     if(relation.kind==='authored_by'){const target=desktopActor(record(body.message).from_id);return target?{...relation,target}:relation;}
     if(!live)return relation;
@@ -61,6 +59,9 @@ function desktopSource(value:Envelope,base:SourceDescriptor):SourceDescriptor {
     if(relation.kind==='reply_to'||relation.kind==='in_thread')return {...relation,target:{...messageIdentity(live,relation.target.external_id),kind:relation.target.kind}};
     return relation;
   });
+  const topic=live?desktopTopicId(value.scope,body):undefined;
+  if(topic!==undefined&&!relations.some(relation=>relation.kind==='in_thread'))
+    relations.push({kind:'in_thread',target:{...messageIdentity(live!,String(topic)),kind:'thread'}});
   const descriptor:SourceDescriptor={...base,adapter_version:'2',object:live?messageIdentity(live,base.object.external_id):base.object,relations};
   try{return sourceDescriptor(descriptor);}catch{return base;}
 }
