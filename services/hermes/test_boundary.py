@@ -105,12 +105,25 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         before=len(FAILURE_DETAILS)
         with httpx.Client(transport=httpx.MockTransport(lambda request:httpx.Response(200,json={}))) as client:
             with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models?key=planted-SECRET&page=2')
-            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models')
+            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/files')
         details=list(FAILURE_DETAILS)[before:]
         self.assertEqual([(d['code'],d['method'],d['host'],d['path'],d['query_keys']) for d in details],
                          [('uninspectable_model_query','GET','provider.example','/v1/models',['key','page']),
-                          ('uninspectable_model_request','GET','provider.example','/v1/models',[])])
+                          ('uninspectable_model_request','GET','provider.example','/v1/files',[])])
         self.assertNotIn('planted-SECRET',json.dumps(details))
+
+    def test_a_bare_model_list_passes_without_content(self):
+        sent=[]
+        self.setup_boundary(lambda url,payload:(_ for _ in ()).throw(AssertionError('a model list has nothing to guard')))
+        def answer(request):
+            sent.append((request.method,request.url.path));return httpx.Response(200,json={'data':[]})
+        with httpx.Client(transport=httpx.MockTransport(answer)) as client:
+            client.get('https://provider.example/v1/models');client.get('https://provider.example/models/')
+            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models/claude-x')
+            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models?q=raw')
+            with self.assertRaises(GuardUnavailable):client.request('GET','https://provider.example/v1/models',content=b'raw')
+            with self.assertRaises(GuardUnavailable):client.post('https://provider.example/v1/models',content=b'raw')
+        self.assertEqual(sent,[('GET','/v1/models'),('GET','/models/')])
 
 
 if __name__=='__main__':unittest.main()
