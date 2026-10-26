@@ -23,7 +23,7 @@ Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), impl
 Re-running or replacing Honcho memory: [0153](0153-owner-reruns-and-replaces-honcho-memory.md).
 Message edits in Honcho memory: [0154](0154-message-edits-replace-honcho-writes.md).
 Albums answered once: [0155](0155-albums-answered-once.md).
-Desktop exports sharing proven Telegram identities: [0156](0156-desktop-exports-share-proven-telegram-identities.md).
+Desktop exports sharing proven Telegram identities: [0156](0156-desktop-exports-share-proven-telegram-identities.md). Desktop forum exports keeping their topics: [0171](0171-desktop-forum-messages-keep-their-topics.md).
 Group turns seeing recent unaddressed messages: [0157](0157-group-turns-see-recent-unaddressed-messages.md).
 Approve and Reject buttons in Telegram: [0158](0158-telegram-approval-buttons.md).
 Group posts without approval, private approval cards and refusals: [0159](0159-group-members-post-freely-and-approvals-go-private.md).
