@@ -572,6 +572,36 @@ class AssistantGateway:
             await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
             return result
 
+    def notice(self,body):
+        if self.loop is None:raise RuntimeError('telegram_not_ready')
+        return asyncio.run_coroutine_threadsafe(self.send_notice(body),self.loop).result(timeout=55)
+
+    async def send_notice(self,body):
+        """A task reminder in the owner's private chat. No model runs; the text is
+        the owner's reminder template filled in by storage, sent at most once."""
+        import re
+        chat=str(body.get('chat_id') or '')
+        if not re.fullmatch('[a-f0-9]{64}',body.get('id','')) or not self.scopes.owner or chat!=str(self.scopes.owner) or not re.fullmatch(r'[1-9]\d{0,18}',chat):
+            raise ValueError('notice_chat_not_allowed')
+        text=body.get('text')
+        if not isinstance(text,str) or not text.strip() or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_notice')
+        if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
+        name='notice-'+body['id']
+        async with self.action_lock:
+            receipt=self.receipts/(name+'.result')
+            if receipt.exists():return json.loads(receipt.read_bytes())
+            if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'notice_id':body['id']}))
+            token=DISPATCH_KEY.set('notice:'+body['id'])
+            check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True))
+            try:
+                await self.adapter._bot.send_message(int(chat),text,parse_mode=None)
+                result={'state':'done'}
+            except Exception:result={'state':'ambiguous'}
+            finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
+            return result
+
     def stop(self):
         self.stopping=True
         if self.loop and self.adapter:

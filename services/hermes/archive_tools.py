@@ -155,23 +155,40 @@ def register(ctx):
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'view':{'type':'string','enum':list(OWNER_VIEWS)},'space':{'type':'string'},'q':{'type':'string'},'after':{'type':'string'}},
             'required':['view'],'additionalProperties':False}},handler=owner_read)
-    name='nocheh_tasks';description=('Task lists kept by Nocheh, like a small table. Each task has a scope: personal (the owner\'s own life and personal tasks) or one '
-        'project, whose tasks form that project\'s own private list; optional tags, such as Health or Money; an optional group (a group or topic ID) '
-        'and optional people (IDs of people Nocheh knows). Use it when someone asks you to remember something to do, to list what is open or finished, '
-        'or to finish, drop, reopen, rename, reschedule, tag or move a task. action=list reads tasks (state open by default; done, dropped or all; '
-        'scope all by default, or personal, or a project id; optionally one tag, group or person) and returns the lists (scopes) and tags in use. '
-        'action=add needs title, optionally notes, due_on (a calendar day, YYYY-MM-DD; null clears it), scope, tags, group and people; a task the owner '
-        'does not tie to a project is personal, and a task added in a group points to that group. action=update needs id and the expected_revision '
-        'from the latest list, plus the fields to change; tags and people replace the whole list, group null clears it, state done finishes a task. '
+    name='nocheh_tasks';description=('Task lists kept by Nocheh, like a Notion table. Each task has a scope: personal (the owner\'s own life and personal tasks) or one '
+        'project, whose tasks form that project\'s own private list. A task has a status (names from settings.statuses in a list result, such as To do, '
+        'In progress, Waiting, Done or Dropped), a priority (0 none to 4 urgent, or its name from settings.priorities), optional start_on and due_on calendar days '
+        '(YYYY-MM-DD) with optional start_time and due_time (HH:MM in settings.time_zone), tags such as Health or Money, a group (a group or topic ID), '
+        'assignees (who does it) and people (who it is about), both IDs of people Nocheh knows, the owner\'s own columns (properties, by column name or id from '
+        'settings.properties), notes, a parent task (a subtask), tasks it is blocked_by, related tasks, links (attachments of kind link with a url), '
+        'reminders and a repeat. Use it when someone asks you to remember something to do, to list what is open, due today or coming up, or to finish, drop, '
+        'reopen, rename, reschedule, tag, assign, move, comment on, archive or delete a task. '
+        'action=list reads tasks (state open by default; done, dropped or all; when today or upcoming; scope all, personal or a project id; optionally one tag, '
+        'group, person, status, priority, parent id or top, q to search words, sort due, priority, manual, created or updated) and returns the lists (scopes), '
+        'tags in use, settings and today. action=get reads one task with its subtasks, links, comments and history. action=add needs title and takes the fields '
+        'above; a task the owner does not tie to a project is personal, a subtask joins its parent\'s list, and a task added in a group points to that group. '
+        'action=update needs id and the expected_revision from the latest list or get, plus the fields to change; lists such as tags, people, assignees, '
+        'blocked_by, related, attachments and reminders replace the whole list, null clears a field, state done finishes a task (a repeating task then makes '
+        'its next one), archived true archives it and trashed true moves it to the trash. action=comment adds text as a comment. '
+        'reminders are times like 2030-01-04T09:00 in settings.time_zone and are sent to the owner\'s private chat; repeat is '
+        '{"every":1,"unit":"day|week|month|year","weekdays":[1,4],"from":"due|done"} (weekdays only with week, 0 is Sunday) or null. '
         'In the owner private conversation every list is available; in a chat that belongs to a project only that project\'s list is, and nothing else; '
         'elsewhere none.')
+    day={'type':['string','null']};ids={'type':'array','items':{'type':'string'},'maxItems':20}
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
-            'action':{'type':'string','enum':['list','add','update']},'state':{'type':'string','enum':['open','done','dropped','all']},
+            'action':{'type':'string','enum':['list','get','add','update','comment']},'state':{'type':'string','enum':['open','done','dropped','all']},
+            'when':{'type':'string','enum':['today','upcoming']},'sort':{'type':'string','enum':['due','priority','manual','created','updated']},
             'id':{'type':'string'},'expected_revision':{'type':'integer','minimum':1},'title':{'type':'string','maxLength':300},
-            'notes':{'type':'string','maxLength':4000},'due_on':{'type':['string','null']},'scope':{'type':'string'},
+            'notes':{'type':'string','maxLength':20000},'status':{'type':'string'},'priority':{'type':['integer','string']},
+            'start_on':day,'start_time':day,'due_on':day,'due_time':day,'scope':{'type':'string'},
             'tags':{'type':'array','items':{'type':'string','maxLength':40},'maxItems':20},'group':{'type':['string','null']},
-            'people':{'type':'array','items':{'type':'string'},'maxItems':20},'tag':{'type':'string','maxLength':40},'person':{'type':'string'},
+            'people':ids,'assignees':ids,'blocked_by':ids,'related':ids,'parent':{'type':['string','null']},
+            'properties':{'type':'object'},'repeat':{'type':['object','null']},
+            'reminders':{'type':'array','items':{'type':'string'},'maxItems':10},
+            'attachments':{'type':'array','items':{'type':'object'},'maxItems':20},
+            'archived':{'type':'boolean'},'trashed':{'type':'boolean'},'text':{'type':'string','maxLength':4000},
+            'tag':{'type':'string','maxLength':40},'person':{'type':'string'},'q':{'type':'string','maxLength':200},
             'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
@@ -195,22 +212,34 @@ def owner_read(args,**kwargs):
     except Exception:return json.dumps({'error':'owner_read_unavailable','note':'Available only in the owner private conversation.'})
 
 
+TASK_FIELDS=('title','notes','status','state','priority','start_on','start_time','due_on','due_time','repeat','parent','scope','group','people','assignees','tags',
+    'properties','reminders','blocked_by','related','attachments')
+
+
 def tasks_tool(args,**kwargs):
     from urllib.error import HTTPError
     from urllib.parse import urlencode
     try:
         action=args.get('action')
         if action=='list':
-            query={key:str(args[key]) for key in ('state','scope','tag','group','person','after') if args.get(key)}
-            return json.dumps(request('/v1/owner/tasks'+('?'+urlencode(query) if query else '')),ensure_ascii=False)
+            query={key:str(args[key]) for key in ('state','when','scope','tag','group','person','status','priority','parent','q','sort','after') if args.get(key) not in (None,'')}
+            value=json.dumps(request('/v1/owner/tasks'+('?'+urlencode(query) if query else '')),ensure_ascii=False)
+            # Bound tool context; the dashboard keeps the complete lists.
+            return value if len(value)<=24000 else json.dumps({'excerpt':value[:22000],'truncated':True,'note':'Narrow the list with filters or after.'},ensure_ascii=False)
         if action=='add':
-            body={key:args[key] for key in ('title','notes','due_on','scope','tags','group','people') if key in args}
+            body={key:args[key] for key in TASK_FIELDS if key in args}
             return json.dumps(request('/v1/owner/tasks',body),ensure_ascii=False)
+        task=str(args.get('id',''))
+        if action in ('get','update','comment') and not re.fullmatch(r'[a-f0-9]{64}',task):return json.dumps({'error':'invalid_task_id'})
+        if action=='get':
+            value=json.dumps(request('/v1/owner/tasks/'+task),ensure_ascii=False)
+            return value if len(value)<=24000 else json.dumps({'excerpt':value[:22000],'truncated':True},ensure_ascii=False)
         if action=='update':
-            task=str(args.get('id',''))
-            if not re.fullmatch(r'[a-f0-9]{64}',task):return json.dumps({'error':'invalid_task_id'})
-            body={key:args[key] for key in ('expected_revision','title','notes','due_on','state','scope','tags','group','people') if key in args}
+            body={key:args[key] for key in ('expected_revision',*TASK_FIELDS,'archived','trashed') if key in args}
             return json.dumps(request('/v1/owner/tasks/'+task,body),ensure_ascii=False)
+        if action=='comment':
+            value=json.dumps(request('/v1/owner/tasks/'+task+'/comments',{'text':args.get('text','')}),ensure_ascii=False)
+            return value if len(value)<=24000 else json.dumps({'id':task,'commented':True},ensure_ascii=False)
         return json.dumps({'error':'invalid_task_action'})
     except HTTPError as error:
         # The broker keeps storage error text private; the status still tells the next step.
