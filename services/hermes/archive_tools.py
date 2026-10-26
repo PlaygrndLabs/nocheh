@@ -175,7 +175,7 @@ def register(ctx):
             'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
-        'Without an id it lists this chat\'s recent Telegram message requests with their states.')
+        'Without an id it lists this chat\'s recent Telegram message requests with their destinations and states; read one by its id for its text.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'additionalProperties':False}},handler=controlled_status)
 
@@ -235,7 +235,7 @@ def controlled_status(args,**kwargs):
         id=args.get('id') or ''
         if not id:
             # This chat's recent message requests, for a later turn that no longer holds their IDs.
-            keys=('id','state','arguments','error_code','created_at')
+            keys=('id','destination','state','error_code','created_at')
             return json.dumps({'requests':[{key:item.get(key) for key in keys} for item in request('/v1/tools/actions').get('telegram',[])]},ensure_ascii=False)[:24000]
         if not re.fullmatch(r'[a-f0-9]{64}',id):raise ValueError('invalid_action')
         value=request('/v1/tools/actions/'+id)
