@@ -36,19 +36,36 @@ export class NativeReviewRepository {
   }
   async queue(source:SourceReference):Promise<string[]> {
     const binding=await this.contexts.guards.state();
-    // Each source is reviewed once per installation generation. A later authorization epoch reviews
-    // only sources whose review never started; repeating a started one repeats its model calls.
-    const reviewed=(await this.control.query(`SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3
-      AND (state<>'pending' OR paused OR attempts>0 OR binding=$2::jsonb) ORDER BY created_at,id`,[source.id,JSON.stringify(binding),binding.generation])).rows;
-    if(reviewed.length)return reviewed.map(row=>String(row.id));
-    const context=await this.contexts.prepare(source,binding),actor=this.actor(source,binding);
+    // Each source is reviewed once per installation generation; repeating a started review repeats its model calls.
+    // A review that never started can't run under an older authorization epoch, so it is renewed under the current one.
+    const jobs=(await this.control.query(`SELECT id,input_reference,(state='pending' AND NOT paused AND attempts=0 AND binding<>$2::jsonb) AS stale
+      FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3 ORDER BY created_at,id`,[source.id,JSON.stringify(binding),binding.generation])).rows;
+    const reviewed=jobs.filter(row=>!row.stale),stale=new Map<string,{id:string}>();
+    for(const row of jobs)if(row.stale&&!stale.has(row.input_reference.input_hash))stale.set(row.input_reference.input_hash,row);
+    const ids:string[]=[];
+    const retire=async()=>{await this.control.query(`DELETE FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3
+      AND state='pending' AND NOT paused AND attempts=0 AND binding<>$2::jsonb AND NOT (id=ANY($4::text[]))`,[source.id,JSON.stringify(binding),binding.generation,ids]);};
+    if(reviewed.length){await retire();return reviewed.map(row=>String(row.id));}
+    let context;
+    try{context=await this.contexts.prepare(source,binding);}
+    catch(error){if(error instanceof HttpError&&error.code==='learning_consent_required')await retire();throw error;}
+    const actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
     const text=canonical({space:context.space,observations:context.observations,rules:context.rules,limitations:context.limitations});
     if(text.length>200000)throw new HttpError(413,'native_review_input_limit');
-    const characters=Array.from(text),ids:string[]=[];
+    const characters=Array.from(text);
     for(let offset=0;offset<characters.length;offset+=8000) {
       const content=`Source nocheh:event:${source.id}; conversation ${context.space}; fragment ${offset/8000+1}. Speakers are not necessarily the owner.\n`+characters.slice(offset,offset+8000).join('');
       const document={text:content,evidence:context.evidence.map(e=>e.reference),dependencies:context.dependencies};
+      // The same prepared input keeps its identity and its place in the queue; only changed input becomes a new review.
+      const hash=digest(canonical(document)),same=stale.get(hash);
+      if(same) {
+        stale.delete(hash);
+        await this.prepared.allow(actor,{text:content});await this.turns.binding(actor);
+        await this.control.query(`UPDATE native_review_jobs SET binding=$2,revision=revision+1,updated_at=now()
+          WHERE id=$1 AND state='pending' AND NOT paused AND attempts=0`,[same.id,binding]);
+        ids.push(same.id);continue;
+      }
       const id=digest(canonical([protocol,binding,source,document]));
       const input=await this.derived.record({operation_id:'native-review-input:'+id,source,kind:'runtime_context',content:Buffer.from(canonical(document)),
         producer:'nocheh',producer_version:protocol,configuration:{binding,purpose:'memory-review'},provenance:{evidence:document.evidence}});
@@ -61,6 +78,7 @@ export class NativeReviewRepository {
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
       ids.push(id);
     }
+    await retire();
     return ids;
   }
   async inspect(id:string) {

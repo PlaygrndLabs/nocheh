@@ -1215,6 +1215,16 @@ with doubling gaps before its workflow closes as uncertain
 [checks](test/store-native-review.test.ts)). Pending: the owner-Mac simulator
 rerun that confirms no model calls after the scenarios end.
 
+Hermes native memory reviews during the history import (October 26): learning
+the 105 imported messages advanced the epoch every few minutes, and each epoch
+closed every waiting review and queued a new copy at the back, leaving the old
+row pending; 140 reviews became over 400 rows draining one or two a minute.
+A waiting review now keeps its identity and place when its input is unchanged,
+old copies are deleted, and waiting reviews don't ask Hermes while another one
+runs ([decision](docs/adr/0173-waiting-native-reviews-keep-their-place.md),
+[checks](test/store-native-review.test.ts)). Pending: confirming the queue
+drains on the owner's installation.
+
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
 tested wrapper after 81 seconds of WAL replay, and the existing Inngest server
