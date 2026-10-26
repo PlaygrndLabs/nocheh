@@ -71,11 +71,13 @@ class KnowledgeToolsTests(unittest.TestCase):
                      '/v1/organization/delegations/'+identity+'/resume','/v1/knowledge/proposals',
                      '/v1/knowledge/proposals/'+identity+'/decide','/v1/knowledge/proposals/'+identity+'/undo',
                      '/v1/prompts','/v1/entities/claims/'+identity+'/history?before=3',
-                     '/v1/tasks?state=done','/v1/tasks/'+identity):
+                     '/v1/tasks?state=done','/v1/tasks/'+identity,'/v1/tasks/settings','/v1/tasks/archive-finished',
+                     '/v1/tasks/'+identity+'/comments','/v1/tasks/'+identity+'/delete'):
             self.assertTrue(allowed_path(path),path)
         for path in ('/v1/decisions/unknown/'+identity,'/v1/knowledge/proposals/'+identity+'/execute',
                      '/v1/knowledge/proposals/'+identity+'/../secrets','/v1/organization/activate',
-                     '/v1/conversations/refresh','/v1/security/transport','/v1/tasks/'+identity+'/delete'):
+                     '/v1/conversations/refresh','/v1/security/transport','/v1/tasks/'+identity+'/purge',
+                     '/v1/tasks/settings/'+identity):
             self.assertFalse(allowed_path(path),path)
 
 
@@ -98,6 +100,20 @@ class TaskToolTests(unittest.TestCase):
             request.reset_mock()
             archive_tools.tasks_tool({'action':'update','id':identity,'expected_revision':2,'state':'done'})
             request.assert_called_once_with('/v1/owner/tasks/'+identity,{'expected_revision':2,'state':'done'})
+            request.reset_mock()
+            archive_tools.tasks_tool({'action':'list','when':'today','sort':'priority'})
+            request.assert_called_once_with('/v1/owner/tasks?when=today&sort=priority')
+            request.reset_mock()
+            archive_tools.tasks_tool({'action':'get','id':identity})
+            request.assert_called_once_with('/v1/owner/tasks/'+identity)
+            request.reset_mock()
+            archive_tools.tasks_tool({'action':'comment','id':identity,'text':'Waiting on Sara'})
+            request.assert_called_once_with('/v1/owner/tasks/'+identity+'/comments',{'text':'Waiting on Sara'})
+            request.reset_mock()
+            archive_tools.tasks_tool({'action':'update','id':identity,'expected_revision':3,'status':'Waiting','priority':'High','reminders':['2030-01-04T09:00'],
+                'repeat':{'every':1,'unit':'week'},'assignees':[identity],'trashed':True,'external':{'notion':'x'}})
+            request.assert_called_once_with('/v1/owner/tasks/'+identity,{'expected_revision':3,'status':'Waiting','priority':'High','repeat':{'every':1,'unit':'week'},
+                'assignees':[identity],'reminders':['2030-01-04T09:00'],'trashed':True})
             request.reset_mock()
             self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'update','id':'../tasks','state':'done'}))['error'],'invalid_task_id')
             self.assertEqual(json.loads(archive_tools.tasks_tool({'action':'delete'}))['error'],'invalid_task_action')

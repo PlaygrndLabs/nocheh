@@ -29,7 +29,7 @@ const pages = [
 const routes = [
   ...pages,
   ...['allowed', 'history'].map(view => ['inbox?view=' + view, 'Inbox']),
-  ...['done', 'dropped'].map(view => ['tasks?view=' + view, 'Tasks']),
+  ...['today', 'upcoming', 'board', 'done', 'dropped', 'archive', 'trash'].map(view => ['tasks?view=' + view, 'Tasks']),
   ['chats?view=rules', 'Chats'],
   ['chats?chat=-10042', 'Chats'],
   ['chats?chat=-10042%2Ftopic%2F7', 'Chats'],
@@ -37,7 +37,7 @@ const routes = [
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm'].map(view => ['memory?view=' + view, 'Memory']),
   ...['work', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'advanced'].map(view => [
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'advanced'].map(view => [
     'settings?view=' + view,
     'Settings',
   ]),
@@ -127,7 +127,7 @@ test('the sidebar lists the open page’s tabs and opens any page’s tab direct
   const settingsTabs = nav.getByRole('list', {name: 'Settings tabs'});
   assert.deepEqual(
     (await settingsTabs.getByRole('link').allTextContents()).map(text => text.trim()),
-    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Advanced'],
+    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Advanced'],
   );
   assert.equal(await settingsTabs.getByRole('link', {name: 'Models'}).getAttribute('aria-current'), 'true');
   assert.equal(await nav.getByRole('list', {name: 'Memory tabs'}).count(), 0);
@@ -362,11 +362,33 @@ test('a task is added, edited, finished and reopened from the Tasks page', async
   await row.getByText(/Due /).waitFor();
   await row.getByRole('button', {name: `Edit “${title}”`}).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Notes').fill('Bring two photos');
-  await dialog.getByLabel('Due').fill('');
+  // Save and Discard sit at the top, and stay off until something changes.
+  await dialog.getByRole('button', {name: 'Save'}).waitFor();
+  assert.equal(await dialog.getByRole('button', {name: 'Save'}).isDisabled(), true);
+  await dialog.locator('#task-panel-notes').fill('Bring **two** photos');
+  await dialog.locator('#task-panel-priority').selectOption({label: 'High'});
+  await dialog.locator('#task-panel-due').fill('');
   await dialog.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Task saved.'}).waitFor();
+  // Notes read as Markdown in the preview.
+  await dialog.getByRole('radiogroup', {name: 'Notes view'}).getByRole('radio', {name: 'Preview'}).click();
+  await dialog.locator('strong', {hasText: 'two'}).waitFor();
+  // A subtask and a comment, both kept in the history.
+  await dialog.getByLabel('New subtask').fill('Find the old passport');
+  await dialog.getByLabel('New subtask').press('Enter');
+  await dialog.getByRole('list', {name: 'Subtasks'}).getByText('Find the old passport').waitFor();
+  await dialog.getByLabel('New comment').fill('Office opens at nine');
+  await dialog.getByRole('button', {name: 'Comment'}).click();
+  await dialog.getByRole('list', {name: 'Comments'}).getByText('Office opens at nine').waitFor();
+  await dialog
+    .getByRole('list', {name: 'History'})
+    .getByText(/Priority/)
+    .waitFor();
+  await dialog.getByRole('button', {name: 'Close'}).click();
   await dialog.waitFor({state: 'detached'});
   await row.getByText('Bring two photos').waitFor();
+  await row.getByText('High').waitFor();
+  await row.getByText('0/1').waitFor();
   assert.equal(await row.getByText(/Due /).count(), 0, 'clearing the due date removes it');
   await row.getByRole('checkbox', {name: `Mark “${title}” done`}).click();
   await page.getByRole('status').filter({hasText: 'Task done.'}).waitFor();
@@ -375,8 +397,39 @@ test('a task is added, edited, finished and reopened from the Tasks page', async
   const done = page.getByRole('listitem').filter({hasText: title});
   await done.getByRole('checkbox', {name: `Reopen “${title}”`}).click();
   await done.waitFor({state: 'detached'});
-  await page.getByRole('tab', {name: /Open/}).click();
+  await page.getByRole('tab', {name: /^Open/}).click();
   await page.getByRole('listitem').filter({hasText: title}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('today, upcoming and the board show tasks by date and status', async () => {
+  const {page, problems} = await open('tasks?view=today');
+  await page.getByRole('listitem').filter({hasText: 'Pay the rent'}).waitFor();
+  await page.getByText('Book a dentist checkup').waitFor({state: 'detached'});
+  await page.getByRole('tab', {name: /Upcoming/}).click();
+  await page.getByText('Book the Iceland flights').waitFor();
+  await page.getByRole('tab', {name: /Board/}).click();
+  const board = page.getByLabel('Board');
+  await board.getByRole('list', {name: 'In progress tasks'}).getByText('Draft the launch announcement').waitFor();
+  await board.getByRole('list', {name: 'Waiting tasks'}).getByText('Check the booking page works').waitFor();
+  await board.getByLabel('Status of “Book a dentist checkup”').selectOption({label: 'In progress'});
+  await page.getByRole('status').filter({hasText: 'Moved to In progress.'}).waitFor();
+  await board.getByRole('list', {name: 'In progress tasks'}).getByText('Book a dentist checkup').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('task statuses, priorities and columns are edited in Settings', async () => {
+  const {page, problems} = await open('settings?view=tasks');
+  const statuses = page.getByRole('list', {name: 'Statuses'});
+  await statuses.getByLabel('Status name 3').fill('On hold');
+  await page.getByLabel('Priority name Level 4').fill('Now');
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.goto(origin + '/#tasks?view=board');
+  await page.getByLabel('Board').getByRole('list', {name: 'On hold tasks'}).waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -400,9 +453,11 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await added.getByRole('button', {name: `Edit “${title}”`}).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('option', {name: /Aurora planning\s*Group/}).click();
-  await dialog.getByLabel('People').selectOption({label: 'Devon'});
+  await dialog.locator('#task-panel-people').selectOption({label: 'Devon'});
   await dialog.getByRole('button', {name: 'Remove tag Urgent'}).click();
   await dialog.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Task saved.'}).waitFor();
+  await dialog.getByRole('button', {name: 'Close'}).click();
   await dialog.waitFor({state: 'detached'});
   await added.getByText('Aurora planning').waitFor();
   await added.getByText('Devon').waitFor();

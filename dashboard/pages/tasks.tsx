@@ -1,134 +1,55 @@
 /**
  * Tasks: the owner's to-do lists, kept in Nocheh. Personal tasks are one list
- * and each project has its own; within a list a task can carry tags and point
- * to a group and to people. Tasks can be added here or by telling Nocheh in
- * chat; both edit the same lists.
+ * and each project has its own. Tasks have statuses, priority, dates, repeats,
+ * reminders, subtasks, links, the owner's own columns and comments, and show as
+ * a list, cards, a board, or what is due today and coming up. Tasks can be added
+ * here or by telling Nocheh in chat; both edit the same lists.
  */
 import * as React from 'react';
-import {useState} from 'react';
-import {
-  Check,
-  Folder,
-  LayoutGrid,
-  List,
-  ListChecks,
-  MessageCircle,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Tag,
-  User,
-  Users,
-  X,
-} from 'lucide-react';
+import {useDeferredValue, useState} from 'react';
+import {Archive, Folder, LayoutGrid, List, ListChecks, Plus, Search, Tag} from 'lucide-react';
 import {chatName, type Directory} from '../lib/chats-model';
 import {useParam, useView} from '../lib/navigation';
 import {setParams} from '../lib/routes';
 import {pageTabs, tabIds} from '../lib/page-tabs';
 import {refreshResources, useResource} from '../lib/resource';
-import {cn} from '../lib/utils';
-import {
-  Badge,
-  Button,
-  Card,
-  Empty,
-  Field,
-  Input,
-  LoadError,
-  LoadingRows,
-  Notice,
-  Pager,
-  Segmented,
-  Select,
-  Textarea,
-} from '../ui/core';
-import {Dialog, useFeedback} from '../ui/overlay';
+import {Button, Card, Empty, Field, Input, LoadError, LoadingRows, Notice, Pager, Segmented, Select} from '../ui/core';
+import {useFeedback} from '../ui/overlay';
 import {Page, Tabs} from '../ui/page';
-import {ChatPicker} from './chats/chat-picker';
-import {useCommand, when} from './memory/shared';
+import {useCommand} from './memory/shared';
+import {Board} from './tasks/board';
+import {TaskDrawer} from './tasks/drawer';
+import {Chips, ListField, TagsField, withPending} from './tasks/fields';
+import {addDays, day, scopeName, type Scope, type Task, type TaskPage, type TaskSettings} from './tasks/model';
+import {TaskRow} from './tasks/row';
 
-type TaskState = 'open' | 'done' | 'dropped';
-export type Task = {
-  id: string;
-  title: string;
-  notes: string;
-  state: TaskState;
-  due_on: string | null;
-  project_id: string | null;
-  group_id: string | null;
-  tags: string[];
-  people: {id: string; name: string}[];
-  origin: 'dashboard' | 'chat';
-  revision: number;
-  created_at: string;
-  done_at: string | null;
-};
-/** A list: 'personal', or a project's own list. */
-type Scope = {id: string; name: string | null; open: number};
-type TaskPage = {
-  tasks: Task[];
-  next: string | null;
-  counts: Record<TaskState, number>;
-  scopes: Scope[];
-  tags: {name: string; open: number}[];
-};
-const scopeName = (scope: Scope | undefined) =>
-  !scope ? 'Personal' : scope.id === 'personal' ? 'Personal' : scope.name || 'Project';
+export {day, type Task};
 
 const views = tabIds('tasks');
+type View = (typeof views)[number];
 const PAGE = 100;
 
-/** Today as the owner's own calendar day, YYYY-MM-DD. */
-function today(): string {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
-
-/** A calendar day such as "Fri 4 Jan", with the year only when it isn't this year. */
-export function day(value: string): string {
-  const date = new Date(value + 'T12:00:00');
-  return date.toLocaleDateString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    ...(date.getFullYear() === new Date().getFullYear() ? {} : {year: 'numeric'}),
-  });
-}
-
-/** Small toggle buttons for choosing one list or tag. */
-function Chips({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: {value: string; label: React.ReactNode}[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1.5">
-      {options.map(option => (
-        <button
-          key={option.value}
-          type="button"
-          role="radio"
-          aria-checked={value === option.value}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            'inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors',
-            value === option.value
-              ? 'border-accent bg-accent-soft font-medium text-accent-text'
-              : 'border-line text-muted hover:border-line-strong hover:text-fg',
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
+/** What each tab asks the owner API for. */
+const queries: Record<View, string> = {
+  open: 'state=open&parent=top',
+  today: 'state=open&when=today',
+  upcoming: 'state=open&when=upcoming',
+  board: 'state=all&parent=top&sort=manual',
+  done: 'state=done&parent=top',
+  dropped: 'state=dropped&parent=top',
+  archive: 'state=all&in=archive',
+  trash: 'state=all&in=trash',
+};
+const empty: Record<View, string> = {
+  open: 'Nothing to do',
+  today: 'Nothing due today',
+  upcoming: 'Nothing coming up in the next two weeks',
+  board: 'Nothing on the board',
+  done: 'No done tasks',
+  dropped: 'No dropped tasks',
+  archive: 'Nothing archived',
+  trash: 'The trash is empty',
+};
 
 type Layout = 'list' | 'cards';
 const LAYOUT_KEY = 'nocheh.tasks-layout';
@@ -152,28 +73,37 @@ function useLayout(): [Layout, (layout: Layout) => void] {
   ];
 }
 
+/** The day a task shows under in Upcoming: the first of its start and due days still ahead. */
+const upcomingDay = (task: Task, today: string) =>
+  [task.start_on, task.due_on].filter((value): value is string => !!value && value > today).sort()[0] ?? today;
+
 export default function Tasks() {
   const [view, setView] = useView(views);
   const [page, setPage] = useState(0);
   const scope = useParam('list') || 'all';
   const tag = useParam('tag');
+  const open = useParam('task');
+  const [search, setSearch] = useState('');
+  const query = useDeferredValue(search.trim());
   const path =
-    `/tasks?state=${view}&scope=${encodeURIComponent(scope)}&limit=${PAGE}` +
+    `/tasks?${queries[view]}&scope=${encodeURIComponent(scope)}&limit=${view === 'board' ? 200 : PAGE}` +
     (tag ? `&tag=${encodeURIComponent(tag)}` : '') +
+    (query ? `&q=${encodeURIComponent(query)}` : '') +
     (page ? `&after=${page * PAGE}` : '');
   const list = useResource<TaskPage>(path);
   const chats = useResource<Directory>('/conversations?limit=100', 60000);
   const counts = list.data?.counts;
   const scopes = list.data?.scopes ?? [];
   const tags = list.data?.tags ?? [];
+  const settings = list.data?.settings;
+  const today = list.data?.today;
   const groupName = (space: string) => {
     const chat = chats.data?.items.find(row => row.space_id === space);
     if (!chat) return space.includes('/topic/') ? 'A topic' : 'A group';
     return chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
   };
-  const [editing, setEditing] = useState<Task | null>(null);
   const [layout, setLayout] = useLayout();
-  const changeView = (next: TaskState) => {
+  const changeView = (next: View) => {
     setPage(0);
     setView(next);
   };
@@ -181,17 +111,133 @@ export default function Tasks() {
     setPage(0);
     setParams(patch, true);
   };
-  const projects = scopes.filter(row => row.id !== 'personal');
+  const describe = (task: Task) => ({
+    list: scope === 'all' ? scopeName(scopes.find(row => row.id === (task.project_id ?? 'personal'))) : null,
+    group: task.group_id ? groupName(task.group_id) : null,
+  });
+  const openTask = (id: string | null) => setParams({task: id});
+  const listed = view === 'board' ? [] : (list.data?.tasks ?? []);
+  const rows = (tasks: Task[]) =>
+    tasks.map(task => (
+      <TaskRow
+        key={task.id}
+        task={task}
+        card={layout === 'cards'}
+        settings={settings}
+        {...describe(task)}
+        onOpen={() => openTask(task.id)}
+      />
+    ));
+  const group = (title: string, tasks: Task[]) =>
+    !!tasks.length && (
+      <section key={title} className="space-y-2" aria-label={title}>
+        <h2 className="text-[13px] font-semibold text-muted">{title}</h2>
+        {layout === 'cards' ? (
+          <ul aria-label="Tasks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {rows(tasks)}
+          </ul>
+        ) : (
+          <Card>
+            <ul aria-label="Tasks" className="divide-y divide-line">
+              {rows(tasks)}
+            </ul>
+          </Card>
+        )}
+      </section>
+    );
+  let body: React.ReactNode;
+  if (!list.data)
+    body = !list.error && (
+      <Card>
+        <div className="p-5">
+          <LoadingRows rows={4} />
+        </div>
+      </Card>
+    );
+  else if (view === 'board')
+    body = list.data.tasks.some(task => task.state !== 'dropped') ? (
+      <Board
+        tasks={list.data.tasks.filter(task => task.state !== 'dropped')}
+        settings={list.data.settings}
+        describe={describe}
+        onOpen={task => openTask(task.id)}
+      />
+    ) : (
+      <Card>
+        <Empty icon={ListChecks} title={empty.board}>
+          Add a task above; drag cards between columns to change their status.
+        </Empty>
+      </Card>
+    );
+  else if (!listed.length)
+    body = (
+      <Card>
+        <Empty icon={ListChecks} title={query ? 'No tasks match' : empty[view]}>
+          {view === 'open' &&
+            !query &&
+            'Add a task above, or ask Nocheh in your private chat to remember something for you.'}
+          {view === 'trash' && 'Tasks in the trash can be restored, or deleted for good.'}
+        </Empty>
+      </Card>
+    );
+  else if (view === 'today' && today)
+    body = (
+      <>
+        {group(
+          'Overdue',
+          listed.filter(task => (task.due_on ?? today) < today),
+        )}
+        {group(
+          'Today · ' + day(today),
+          listed.filter(task => (task.due_on ?? today) >= today),
+        )}
+      </>
+    );
+  else if (view === 'upcoming' && today) {
+    const days = [...new Set(listed.map(task => upcomingDay(task, today)))].sort();
+    body = (
+      <>
+        {days.map(date =>
+          group(
+            date === addDays(today, 1) ? 'Tomorrow · ' + day(date) : day(date),
+            listed.filter(task => upcomingDay(task, today) === date),
+          ),
+        )}
+      </>
+    );
+  } else
+    body = (
+      <div>
+        {layout === 'cards' ? (
+          <ul aria-label="Tasks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {rows(listed)}
+          </ul>
+        ) : (
+          <Card>
+            <ul aria-label="Tasks" className="divide-y divide-line">
+              {rows(listed)}
+            </ul>
+            <Pager page={page} hasNext={!!list.data.next} onPage={setPage} />
+          </Card>
+        )}
+        {layout === 'cards' && <Pager page={page} hasNext={!!list.data.next} onPage={setPage} />}
+      </div>
+    );
   return (
     <Page
       title="Tasks"
       description="Your personal tasks and each project's own list. Add tasks here, or just tell Nocheh in chat."
+      actions={(view === 'done' || view === 'dropped') && !!listed.length && <ArchiveFinished scope={scope} />}
       tabs={
         <Tabs
           label="Tasks"
           value={view}
           onChange={changeView}
-          tabs={views.map(id => ({id, label: pageTabs.tasks[id], count: counts?.[id] ?? null}))}
+          tabs={views.map(id => ({
+            id,
+            label: pageTabs.tasks[id],
+            count: id === 'board' ? null : (counts?.[id] ?? null),
+          }))}
         />
       }
     >
@@ -236,254 +282,92 @@ export default function Tasks() {
             />
           )}
         </div>
-        <div className="shrink-0">
-          <Segmented
-            label="Show tasks as"
-            size="sm"
-            value={layout}
-            onChange={setLayout}
-            options={[
-              {
-                value: 'list',
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    <List className="size-3.5" aria-hidden /> List
-                  </span>
-                ),
-              },
-              {
-                value: 'cards',
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    <LayoutGrid className="size-3.5" aria-hidden /> Cards
-                  </span>
-                ),
-              },
-            ]}
-          />
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-2 left-2.5 size-4 text-muted" aria-hidden />
+            <Input
+              type="search"
+              aria-label="Search tasks"
+              placeholder="Search"
+              value={search}
+              className="h-8 w-44 pl-8 text-[13px]"
+              onChange={event => {
+                setPage(0);
+                setSearch(event.target.value);
+              }}
+            />
+          </div>
+          {view !== 'board' && (
+            <Segmented
+              label="Show tasks as"
+              size="sm"
+              value={layout}
+              onChange={setLayout}
+              options={[
+                {
+                  value: 'list',
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      <List className="size-3.5" aria-hidden /> List
+                    </span>
+                  ),
+                },
+                {
+                  value: 'cards',
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      <LayoutGrid className="size-3.5" aria-hidden /> Cards
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          )}
         </div>
       </div>
-      {view === 'open' && (
+      {['open', 'today', 'upcoming', 'board'].includes(view) && (
         <AddTask
-          key={scope}
+          key={scope + view}
           scopes={scopes}
           scope={scope === 'all' ? 'personal' : scope}
           tags={tags.map(row => row.name)}
           tag={tag}
+          settings={settings}
+          due={view === 'today' && today ? today : view === 'upcoming' && today ? addDays(today, 1) : ''}
         />
       )}
       {list.error && <LoadError what="tasks" onRetry={() => void refreshResources()} />}
-      {!list.data && !list.error ? (
-        <Card>
-          <div className="p-5">
-            <LoadingRows rows={4} />
-          </div>
-        </Card>
-      ) : list.data?.tasks.length ? (
-        (() => {
-          const rows = list.data.tasks.map(task => (
-            <TaskRow
-              key={task.id}
-              task={task}
-              card={layout === 'cards'}
-              list={scope === 'all' ? scopeName(scopes.find(row => row.id === (task.project_id ?? 'personal'))) : null}
-              group={task.group_id ? groupName(task.group_id) : null}
-              onEdit={() => setEditing(task)}
-            />
-          ));
-          const pager = <Pager page={page} hasNext={!!list.data.next} onPage={setPage} />;
-          return layout === 'cards' ? (
-            <div>
-              <ul aria-label="Tasks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {rows}
-              </ul>
-              {pager}
-            </div>
-          ) : (
-            <Card>
-              <ul aria-label="Tasks" className="divide-y divide-line">
-                {rows}
-              </ul>
-              {pager}
-            </Card>
-          );
-        })()
-      ) : (
-        list.data && (
-          <Card>
-            <Empty
-              icon={ListChecks}
-              title={view === 'open' ? 'Nothing to do' : `No ${pageTabs.tasks[view].toLowerCase()} tasks`}
-            >
-              {view === 'open' && 'Add a task above, or ask Nocheh in your private chat to remember something for you.'}
-            </Empty>
-          </Card>
-        )
-      )}
-      {editing && (
-        <EditTask
-          key={editing.id}
-          task={editing}
-          scopes={projects.length ? scopes : []}
+      {body}
+      {open && /^[a-f0-9]{64}$/.test(open) && (
+        <TaskDrawer
+          key={open}
+          id={open}
+          scopes={scopes}
           tags={tags.map(row => row.name)}
-          onClose={() => setEditing(null)}
+          settings={settings}
+          groupName={groupName}
+          onOpen={id => setParams({task: id})}
+          onClose={() => setParams({task: null})}
         />
       )}
     </Page>
   );
 }
 
-/** The list a task belongs to: personal, or one project's own list. */
-function ListField({
-  id,
-  scopes,
-  scope,
-  onScope,
-}: {
-  id: string;
-  scopes: Scope[];
-  scope: string;
-  onScope: (value: string) => void;
-}) {
-  if (!scopes.some(row => row.id !== 'personal')) return null;
+function ArchiveFinished({scope}: {scope: string}) {
+  const command = useCommand();
+  const feedback = useFeedback();
   return (
-    <Field label="List" htmlFor={id + '-list'} className="w-44">
-      <Select id={id + '-list'} value={scope} onChange={event => onScope(event.target.value)}>
-        {scopes.map(row => (
-          <option key={row.id} value={row.id}>
-            {scopeName(row)}
-          </option>
-        ))}
-      </Select>
-    </Field>
-  );
-}
-
-const sameTag = (a: string, b: string) => a.toLocaleLowerCase() === b.toLocaleLowerCase();
-/** Text typed into the tag box that isn't added yet still counts. */
-const withPending = (tags: string[], pending: string) => {
-  const text = pending.trim().replace(/\s+/g, ' ').slice(0, 40);
-  return text && !tags.some(tag => sameTag(tag, text)) ? [...tags, text] : tags;
-};
-
-/** Tags like a multi-select column: type one and press Enter, or pick one already in use. */
-function TagsField({
-  id,
-  tags,
-  onTags,
-  pending,
-  onPending,
-  known,
-  className,
-}: {
-  id: string;
-  tags: string[];
-  onTags: (tags: string[]) => void;
-  pending: string;
-  onPending: (text: string) => void;
-  known: string[];
-  className?: string;
-}) {
-  const add = () => {
-    onTags(withPending(tags, pending).slice(0, 20));
-    onPending('');
-  };
-  return (
-    <>
-      <Field label="Tags" htmlFor={id + '-tags'} className={className}>
-        <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-line bg-surface px-1.5 py-0.5 focus-within:border-accent">
-          {tags.map(tag => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-0.5 rounded-md bg-subtle py-0.5 pr-0.5 pl-2 text-xs"
-              dir="auto"
-            >
-              {tag}
-              <button
-                type="button"
-                aria-label={'Remove tag ' + tag}
-                className="rounded p-0.5 text-muted hover:bg-line hover:text-fg"
-                onClick={() => onTags(tags.filter(item => item !== tag))}
-              >
-                <X className="size-3" aria-hidden />
-              </button>
-            </span>
-          ))}
-          <input
-            id={id + '-tags'}
-            value={pending}
-            maxLength={40}
-            list={id + '-known-tags'}
-            placeholder={tags.length ? '' : 'Optional'}
-            className="h-7 min-w-20 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-muted"
-            onChange={event => onPending(event.target.value.replace(',', ''))}
-            onKeyDown={event => {
-              if (event.key === 'Enter' || event.key === ',') {
-                if (!pending.trim()) return;
-                event.preventDefault();
-                add();
-              } else if (event.key === 'Backspace' && !pending && tags.length) onTags(tags.slice(0, -1));
-            }}
-          />
-        </div>
-      </Field>
-      <datalist id={id + '-known-tags'}>
-        {known
-          .filter(name => !tags.some(tag => sameTag(tag, name)))
-          .map(name => (
-            <option key={name} value={name} />
-          ))}
-      </datalist>
-    </>
-  );
-}
-
-type Person = {id: string; name: string};
-/** People Nocheh knows, from Memory › People. */
-function PeopleField({people, onPeople}: {people: Person[]; onPeople: (people: Person[]) => void}) {
-  const known = useResource<{entities: Person[]}>('/entities?kind=person&q=&after=&state=active', 60000);
-  const others = (known.data?.entities ?? []).filter(person => !people.some(chosen => chosen.id === person.id));
-  return (
-    <Field label="People" htmlFor="edit-task-people" hint="People from Memory › People.">
-      <div className="space-y-2">
-        {!!people.length && (
-          <ul className="flex flex-wrap gap-1.5" aria-label="Chosen people">
-            {people.map(person => (
-              <li
-                key={person.id}
-                className="inline-flex items-center gap-1 rounded-full border border-line bg-subtle py-0.5 pr-1 pl-2.5 text-xs"
-              >
-                <span dir="auto">{person.name}</span>
-                <button
-                  type="button"
-                  aria-label={'Remove ' + person.name}
-                  className="rounded-full p-0.5 text-muted hover:bg-line hover:text-fg"
-                  onClick={() => onPeople(people.filter(item => item.id !== person.id))}
-                >
-                  <X className="size-3.5" aria-hidden />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <Select
-          id="edit-task-people"
-          value=""
-          disabled={!others.length}
-          onChange={event => {
-            const person = others.find(row => row.id === event.target.value);
-            if (person) onPeople([...people, {id: person.id, name: person.name}]);
-          }}
-        >
-          <option value="">{known.data && !others.length ? 'No more people to add' : 'Add a person…'}</option>
-          {others.map(person => (
-            <option key={person.id} value={person.id}>
-              {person.name}
-            </option>
-          ))}
-        </Select>
-      </div>
-    </Field>
+    <Button
+      size="sm"
+      busy={command.busy}
+      onClick={async () => {
+        const result = await command.run<{archived: number}>('/tasks/archive-finished', {scope});
+        if (result) feedback.toast(result.archived === 1 ? '1 task archived.' : `${result.archived} tasks archived.`);
+      }}
+    >
+      <Archive aria-hidden /> Archive finished
+    </Button>
   );
 }
 
@@ -492,15 +376,20 @@ function AddTask({
   scope: initialScope,
   tags: known,
   tag,
+  settings,
+  due: initialDue,
 }: {
   scopes: Scope[];
   scope: string;
   tags: string[];
   tag: string | null;
+  settings: TaskSettings | undefined;
+  due: string;
 }) {
   const command = useCommand();
   const [title, setTitle] = useState('');
-  const [due, setDue] = useState('');
+  const [due, setDue] = useState(initialDue);
+  const [priority, setPriority] = useState(0);
   const [scope, setScope] = useState(initialScope);
   const [tags, setTags] = useState<string[]>(tag ? [tag] : []);
   const [pending, setPending] = useState('');
@@ -512,10 +401,12 @@ function AddTask({
       scope,
       ...(chosen.length ? {tags: chosen} : {}),
       ...(due ? {due_on: due} : {}),
+      ...(priority ? {priority} : {}),
     });
     if (created) {
       setTitle('');
-      setDue('');
+      setDue(initialDue);
+      setPriority(0);
       setPending('');
       setTags(tag ? [tag] : []);
     }
@@ -535,6 +426,7 @@ function AddTask({
           maxLength={300}
           placeholder="What needs doing?"
           onChange={event => setTitle(event.target.value)}
+          dir="auto"
         />
       </Field>
       <ListField id="task" scopes={scopes} scope={scope} onScope={setScope} />
@@ -547,6 +439,21 @@ function AddTask({
         known={known}
         className="w-64"
       />
+      {settings && (
+        <Field label="Priority" htmlFor="task-priority" className="w-36">
+          <Select
+            id="task-priority"
+            value={String(priority)}
+            onChange={event => setPriority(Number(event.target.value))}
+          >
+            {settings.priorities.map(item => (
+              <option key={item.level} value={item.level}>
+                {item.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
       <Field label="Due" htmlFor="task-due" className="w-40">
         <Input id="task-due" type="date" value={due} onChange={event => setDue(event.target.value)} />
       </Field>
@@ -559,226 +466,5 @@ function AddTask({
         </Notice>
       )}
     </form>
-  );
-}
-
-function TaskRow({
-  task,
-  list,
-  group,
-  card,
-  onEdit,
-}: {
-  task: Task;
-  list: string | null;
-  group: string | null;
-  card: boolean;
-  onEdit: () => void;
-}) {
-  const command = useCommand();
-  const feedback = useFeedback();
-  const open = task.state === 'open';
-  const overdue = open && !!task.due_on && task.due_on < today();
-  const setState = async (state: TaskState) => {
-    const changed = await command.run('/tasks/' + task.id, {expected_revision: task.revision, state});
-    if (changed)
-      feedback.toast(state === 'done' ? 'Task done.' : state === 'dropped' ? 'Task dropped.' : 'Task reopened.');
-  };
-  return (
-    <li
-      className={cn(
-        'flex items-start gap-3',
-        card ? 'rounded-xl border border-line bg-surface px-4 py-3 shadow-sm' : 'px-5 py-3',
-      )}
-    >
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={task.state === 'done'}
-        aria-label={open ? `Mark “${task.title}” done` : `Reopen “${task.title}”`}
-        disabled={command.busy}
-        onClick={() => void setState(open ? 'done' : 'open')}
-        className={cn(
-          'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border border-line-strong transition-colors hover:border-accent disabled:opacity-50',
-          task.state === 'done' && 'border-accent bg-accent text-on-accent',
-        )}
-      >
-        {task.state === 'done' && <Check className="size-3.5" aria-hidden />}
-      </button>
-      <div className="min-w-0 flex-1">
-        <p className={cn('text-sm break-words', !open && 'text-muted line-through')}>{task.title}</p>
-        {task.notes && <p className="mt-0.5 text-[13px] break-words whitespace-pre-line text-muted">{task.notes}</p>}
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-          {task.due_on && open && (
-            <Badge tone={overdue ? 'bad' : task.due_on === today() ? 'warn' : 'neutral'}>
-              {overdue ? 'Overdue · ' : task.due_on === today() ? 'Today · ' : 'Due '}
-              {day(task.due_on)}
-            </Badge>
-          )}
-          {list && (
-            <span className="inline-flex items-center gap-1">
-              <Folder className="size-3" aria-hidden /> {list}
-            </span>
-          )}
-          {group && (
-            <span className="inline-flex items-center gap-1" dir="auto">
-              <Users className="size-3" aria-hidden /> {group}
-            </span>
-          )}
-          {!!task.people.length && (
-            <span className="inline-flex items-center gap-1" dir="auto">
-              <User className="size-3" aria-hidden /> {task.people.map(person => person.name).join(', ')}
-            </span>
-          )}
-          {task.tags.map(tag => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-1 rounded-md bg-subtle px-1.5 py-0.5 text-fg"
-              dir="auto"
-            >
-              <Tag className="size-3 text-muted" aria-hidden /> {tag}
-            </span>
-          ))}
-          {task.done_at && (
-            <span>
-              {task.state === 'done' ? 'Done' : 'Dropped'} {when(task.done_at)}
-            </span>
-          )}
-          {task.origin === 'chat' && (
-            <span className="inline-flex items-center gap-1">
-              <MessageCircle className="size-3" aria-hidden /> Added in chat
-            </span>
-          )}
-        </div>
-        {command.error && <p className="mt-1 text-xs text-bad">{command.error}</p>}
-      </div>
-      <div className="flex shrink-0 gap-1">
-        {open && (
-          <Button variant="ghost" size="icon-sm" aria-label={`Edit “${task.title}”`} onClick={onEdit}>
-            <Pencil aria-hidden />
-          </Button>
-        )}
-        {open ? (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Drop “${task.title}”`}
-            disabled={command.busy}
-            onClick={() => void setState('dropped')}
-          >
-            <X aria-hidden />
-          </Button>
-        ) : (
-          task.state === 'dropped' && (
-            <Button size="sm" disabled={command.busy} onClick={() => void setState('open')}>
-              <RotateCcw aria-hidden /> Restore
-            </Button>
-          )
-        )}
-      </div>
-    </li>
-  );
-}
-
-function EditTask({
-  task,
-  scopes,
-  tags: known,
-  onClose,
-}: {
-  task: Task;
-  scopes: Scope[];
-  tags: string[];
-  onClose: () => void;
-}) {
-  const command = useCommand();
-  const [title, setTitle] = useState(task.title);
-  const [notes, setNotes] = useState(task.notes);
-  const [due, setDue] = useState(task.due_on ?? '');
-  const [scope, setScope] = useState(task.project_id ?? 'personal');
-  const [tags, setTags] = useState(task.tags);
-  const [pending, setPending] = useState('');
-  const [group, setGroup] = useState(task.group_id);
-  const [people, setPeople] = useState(task.people);
-  const chosenTags = withPending(tags, pending);
-  const samePeople =
-    people
-      .map(person => person.id)
-      .sort()
-      .join() ===
-    task.people
-      .map(person => person.id)
-      .sort()
-      .join();
-  const changed =
-    title !== task.title ||
-    notes !== task.notes ||
-    due !== (task.due_on ?? '') ||
-    scope !== (task.project_id ?? 'personal') ||
-    chosenTags.join('\n') !== task.tags.join('\n') ||
-    group !== task.group_id ||
-    !samePeople;
-  const save = async () => {
-    const saved = await command.run('/tasks/' + task.id, {
-      expected_revision: task.revision,
-      title,
-      notes,
-      due_on: due || null,
-      ...(scope !== (task.project_id ?? 'personal') ? {scope} : {}),
-      tags: chosenTags,
-      ...(group !== task.group_id ? {group} : {}),
-      ...(samePeople ? {} : {people: people.map(person => person.id)}),
-    });
-    if (saved) onClose();
-  };
-  return (
-    <Dialog
-      open
-      onOpenChange={open => !open && onClose()}
-      title="Edit task"
-      footer={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            busy={command.busy}
-            disabled={!changed || !title.trim()}
-            onClick={() => void save()}
-          >
-            Save
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <Field label="Task" htmlFor="edit-task-title">
-          <Input id="edit-task-title" value={title} maxLength={300} onChange={event => setTitle(event.target.value)} />
-        </Field>
-        <Field label="Notes" htmlFor="edit-task-notes">
-          <Textarea
-            id="edit-task-notes"
-            value={notes}
-            maxLength={4000}
-            onChange={event => setNotes(event.target.value)}
-          />
-        </Field>
-        <div className="flex flex-wrap gap-4">
-          <Field label="Due" htmlFor="edit-task-due" hint="Leave empty for no due date." className="w-44">
-            <Input id="edit-task-due" type="date" value={due} onChange={event => setDue(event.target.value)} />
-          </Field>
-          <ListField id="edit-task" scopes={scopes} scope={scope} onScope={setScope} />
-        </div>
-        <TagsField id="edit-task" tags={tags} onTags={setTags} pending={pending} onPending={setPending} known={known} />
-        <ChatPicker
-          label="Group"
-          value={group ? [group] : []}
-          onChange={ids => setGroup(ids.at(-1) ?? null)}
-          groupsOnly
-          hint="The group, or a topic in it, this task belongs to."
-        />
-        <PeopleField people={people} onPeople={setPeople} />
-        {command.error && <Notice tone="bad">{command.error}</Notice>}
-      </div>
-    </Dialog>
   );
 }

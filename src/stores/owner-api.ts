@@ -9,7 +9,7 @@ import {taskQuery} from './tasks.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:owner-autonomy|tasks(?:\/[a-f0-9]{64})?|prompts|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/(?:correct|history)|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:owner-autonomy|tasks(?:\/(?:settings|archive-finished)|\/[a-f0-9]{64}(?:\/(?:comments|delete))?)?|prompts|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/(?:correct|history)|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -24,8 +24,11 @@ export class OwnerStorageApi {
     if(path==='/v1/telegram/chats/refresh'){if(method!=='POST')throw new HttpError(405,'method_not_allowed');return s.telegramChats.refresh(principal);}
     if(path==='/v1/owner-autonomy')return method==='GET'?s.ownerAutonomy.get(principal):s.ownerAutonomy.save(principal,input);
     if(path==='/v1/tasks')return method==='GET'?s.tasks.list(principal,taskQuery(q)):s.tasks.create(principal,input);
-    const task=path.match(/^\/v1\/tasks\/([a-f0-9]{64})$/);
-    if(task&&method==='POST')return s.tasks.update(principal,task[1]!,input);
+    if(path==='/v1/tasks/settings')return method==='GET'?s.tasks.settings(principal):s.tasks.saveSettings(principal,input);
+    if(path==='/v1/tasks/archive-finished'&&method==='POST')return s.tasks.archiveFinished(principal,input);
+    const task=path.match(/^\/v1\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
+    if(task&&!task[2])return method==='GET'?s.tasks.get(principal,task[1]!):s.tasks.update(principal,task[1]!,input);
+    if(task&&method==='POST')return task[2]==='comments'?s.tasks.comment(principal,task[1]!,input):s.tasks.remove(principal,task[1]!);
     if(path==='/v1/prompts')return method==='GET'?s.prompts.get(principal):s.prompts.save(principal,input);
     if(path==='/v1/conversations'&&method==='GET')return s.supervision.conversations(principal,{q:q.get('q')??'',after:q.get('after')??'',limit:limit(q.get('limit'),50,100)});
     if(path==='/v1/conversations/context'&&method==='GET')return s.supervision.context(principal,q.get('space')??'');
