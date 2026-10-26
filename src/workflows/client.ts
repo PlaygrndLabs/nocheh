@@ -35,6 +35,10 @@ export function workflowClient(app:WorkflowApp,config=workflowConfig()):Inngest 
     logger:quietLogger,internalLogger:quietLogger,fetch:transport,middleware:[WorkflowBoundary]});
 }
 
+/** Step requests the pipeline worker accepts at once. Domain work is bounded separately (two operations and one
+ * waiting callback), so the rest only answer "waiting" quickly; with too few, Inngest refuses a new reply's run
+ * while background work after a memory change fills the worker, and retries it minutes later. */
+export const pipelineWorkerConcurrency=8;
 export async function connectWorkflows(app:WorkflowApp,client:Inngest,functions:InngestFunction.Like[],
   config=workflowConfig(),max=4):Promise<WorkerConnection> {
   try {

@@ -42,7 +42,7 @@ export function boundStorageOperations(operations:Partial<Record<WorkflowFamily,
     // This is a bounded handoff within an already admitted Inngest step, not
     // another retry loop. No database connection is borrowed while waiting.
     // One pending callback plus at most two operations leaves a worker slot
-    // free under the pipeline's four-worker concurrency limit.
+    // free under the pipeline's worker concurrency limit.
     return new Promise<Observation>((resolve,reject)=>{
       const entry={start:()=>{clearTimeout(timeout);void run().then(resolve,reject);}};
       const timeout=setTimeout(()=>{
