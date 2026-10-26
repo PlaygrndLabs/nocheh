@@ -138,10 +138,12 @@ export class PreparedContextRepository {
       }
       const missing=inputs.filter(input=>input.literals===undefined);
       if(missing.length) {
-        // Detector output depends only on the text, detector version and guard
-        // binding, so identical text another audience already checked reuses that
-        // result. Prepared values and guarded copies stay per audience.
-        const shared=new Map(missing.map(input=>[input,'context-detection-text:'+digest(canonical([binding,this.detectorVersion,input.output.input_hash]))]));
+        // Detector output depends only on the text and detector, so identical text
+        // already checked for another audience or an earlier guard epoch of this
+        // installation and mode reuses that result. Prepared values and guarded
+        // copies stay per audience and epoch.
+        const detector={generation:binding.generation,mode:binding.mode};
+        const shared=new Map(missing.map(input=>[input,'context-detection-text:'+digest(canonical([detector,this.detectorVersion,input.output.input_hash]))]));
         const known=(await this.derived.pool.query(`SELECT operation_id,content,content_hash,input_hash,producer_version,imported
           FROM derived_artifacts WHERE operation_id=ANY($1::text[]) AND kind='guard_result'`,[[...shared.values()]])).rows;
         for(const input of missing) {
@@ -164,7 +166,7 @@ export class PreparedContextRepository {
         for(const input of unknown)
           await this.derived.record({operation_id:shared.get(input)!,source:root,parents:[input.output],kind:'guard_result',
             content:Buffer.from(canonical(input.literals)),producer:'nocheh-context-detector',producer_version:this.detectorVersion,
-            configuration:{binding},provenance:{purpose:'shared-detection'}})
+            configuration:{detector},provenance:{purpose:'shared-detection'}})
             .catch(error=>{if(!(error instanceof HttpError&&error.code==='derivative_identity_conflict'))throw error;});
       }
       // Independent guarded copies keep their exact publication/checkpoint
