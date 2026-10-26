@@ -13,6 +13,7 @@ except ImportError:
     fake=types.ModuleType('telegram')
     fake.InlineKeyboardButton=lambda text,callback_data:(text,callback_data)
     fake.InlineKeyboardMarkup=lambda rows:rows
+    fake.MessageEntity=type('MessageEntity',(),{'TEXT_LINK':'text_link','__init__':lambda self,type,offset,length,url=None:self.__dict__.update(type=type,offset=offset,length=length,url=url)})
     sys.modules['telegram']=fake
 
 from .assistant_gateway import AssistantGateway
@@ -21,11 +22,12 @@ from .capture import OUTBOUND_CHECK
 
 class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
     def gateway(self,root,sent,edits=None,answers=None,groups=('-20',),access=None):
-        async def send_message(chat,text,message_thread_id=None,reply_markup=None,reply_to_message_id=None,allow_sending_without_reply=None):
+        async def send_message(chat,text,message_thread_id=None,reply_markup=None,reply_to_message_id=None,allow_sending_without_reply=None,entities=None,parse_mode=None):
             # The bound outbound check admits only this exact chat and topic.
             OUTBOUND_CHECK.get()('sendMessage',{'chat_id':chat,'text':text,**({'message_thread_id':message_thread_id} if message_thread_id else {})})
-            sent.append((chat,message_thread_id,text,reply_markup,reply_to_message_id));return SimpleNamespace(message_id=40+len(sent))
-        async def edit_message_text(text,chat_id,message_id,reply_markup=None):edits.append((chat_id,message_id,text,reply_markup));return True
+            sent.append((chat,message_thread_id,text,reply_markup,reply_to_message_id,links(entities)));return SimpleNamespace(message_id=40+len(sent))
+        async def edit_message_text(text,chat_id,message_id,reply_markup=None,entities=None,parse_mode=None):edits.append((chat_id,message_id,text,reply_markup,links(entities)));return True
+        links=lambda entities:[(entity.type,entity.offset,entity.length,entity.url) for entity in entities or []]
         async def answer_callback_query(query,text=None):answers.append((query,text));return True
         value=AssistantGateway(root,root/'spool',SimpleNamespace(enabled=True,owner='123',groups=list(groups),group_access=access or {}),'123456:synthetic','synthetic',lambda:None)
         value.status='connected';value.action_lock=asyncio.Lock();value.group_replies='all';value.group_names=['Nocheh']
@@ -43,16 +45,22 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await gateway.send_approval(card),{'state':'done','chat_id':'123','message_id':'41'})
             self.assertEqual(len(sent),1,'one card per action, even when offered again')
             self.assertEqual(sent[0][:3],(123,None,'Send this message to your private chat?\n\nHello'))
-            group={**card,'id':'e'*64,'chat_id':'-20','topic':'17'}
+            group={**card,'id':'e'*64,'chat_id':'-20','topic':'17','reply_to':'5','text':'📨 Send to “Team” › Plans\n\nHello',
+                   'links':[{'offset':11,'length':6,'url':'https://t.me/c/20/9'},{'offset':20,'length':5,'url':'https://t.me/c/20/17'}]}
             self.assertEqual(await gateway.send_approval(group),{'state':'done','chat_id':'-20','message_id':'42'})
-            self.assertEqual(sent[1][:3],(-20,17,card['text']),'a requester-reviewed card goes to its own group and topic')
-            for bad in [{**card,'id':'b'*64,'chat_id':'-30'},{**card,'id':'b'*64,'chat_id':'999'},{**card,'id':'b'*64,'topic':'17'},{**group,'id':'b'*64,'topic':'x'},
+            self.assertEqual(sent[1],(-20,17,group['text'],sent[1][3],5,[('text_link',11,6,'https://t.me/c/20/9'),('text_link',20,5,'https://t.me/c/20/17')]),
+                             'a requester-reviewed card goes to its own group and topic, as the reply to the request, with its names linked')
+            link=lambda **change:{**card,'id':'b'*64,'links':[{'offset':0,'length':4,'url':'https://t.me/nocheh_team',**change}]}
+            for bad in [link(url='https://example.com/x'),link(url='tg://resolve?domain=x'),link(offset=-1),link(length=0),link(length=99),link(offset='0'),
+                        {**card,'id':'b'*64,'links':'x'},{**card,'id':'b'*64,'reply_to':'x'},{**card,'id':'b'*64,'chat_id':'-30'},{**card,'id':'b'*64,'chat_id':'999'},{**card,'id':'b'*64,'topic':'17'},{**group,'id':'b'*64,'topic':'x'},
                         {**card,'id':'b'*64,'buttons':[['Approve','something else'],['Reject',data('d')]]},{**card,'id':'b'*64,'buttons':card['buttons'][:1]},
                         {**card,'id':'b'*64,'text':''},{**card,'id':'b'*64,'text':'x'*4097}]:
                 with self.assertRaises(ValueError):await gateway.send_approval(bad)
             self.assertEqual(len(sent),2,'a card for another group or chat, or with other buttons, is never sent')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'a'*64,'chat_id':'123','text':'Done'}),{'state':'done','edited':True})
-            self.assertEqual(edits,[(123,41,'Done',None)],'the decided card loses its buttons')
+            self.assertEqual(edits,[(123,41,'Done',None,[])],'the decided card loses its buttons')
+            self.assertEqual(await gateway.send_approval({'kind':'settle','id':'e'*64,'chat_id':'-20','text':group['text']+'\n\nSent.','links':group['links']}),{'state':'done','edited':True})
+            self.assertEqual(edits[-1][4],sent[1][5],'and keeps its links')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'c'*64,'chat_id':'123','text':'Done'}),{'state':'done','edited':False},
                              'only a card this runtime sent is edited')
             self.assertEqual(await gateway.send_approval({'kind':'answer','chat_id':'123','callback_query_id':'q1','text':'Approved.'}),{'state':'done','answered':True})
@@ -67,7 +75,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                  'group_addressing':{'direct':False,'handles':[]},'reply':'Sorry, only allowed people.'}
             self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
             self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
-            self.assertEqual(sent,[(-20,17,'Sorry, only allowed people.',None,5)],'one fixed reply to that message, in its topic')
+            self.assertEqual(sent,[(-20,17,'Sorry, only allowed people.',None,5,[])],'one fixed reply to that message, in its topic')
             self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'text':'what is the plan?'}),{'state':'skipped'},
                              'a member who does not address Nocheh is not answered, whatever the reply setting')
             self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'7'}),{'state':'skipped'},'an allowed member is never refused')

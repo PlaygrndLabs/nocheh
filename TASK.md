@@ -452,6 +452,15 @@ not yet run on the owner's installation:
   ended empty, Nocheh sent nothing and no errors were logged. Each update
   advanced the guard epoch, so busy reactions start new per-epoch Hermes
   profiles, which are not pruned.
+- Release tests rerun on the upgraded installation (October 26): test 1
+  passed; a privacy check's provider error delayed the first answer by one
+  30-second retry. In test 2 the card and its Reject button worked, but Nocheh
+  also answered separately and the card said only "a Telegram group". The card
+  is now the reply to the request and the whole answer, and it names and links
+  the group and topic
+  ([decision](docs/adr/0165-approval-card-is-the-answer-and-links-its-place.md),
+  [checks](test/store-approval-buttons.test.ts),
+  [runtime checks](services/hermes/test_approval_cards.py)).
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 

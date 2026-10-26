@@ -15,6 +15,32 @@ type ActionKind='telegram'|'controlled';
 // of the action ID and of the fingerprint of its exact content.
 const buttonData=/^n([ad])([a-f0-9]{40})([a-f0-9]{16})$/;
 const reviewLimit=2200;
+// While a card is filled, \u0001N\u0002label\u0003 marks a label linked to the Nth
+// address. These control characters are removed from every other text first.
+const controls=/[\u0001-\u0003]/g,marked=/\u0001(\d+)\u0002([^\u0001-\u0003]*)\u0003/g;
+const clean=(value:unknown,length=100)=>typeof value==='string'&&value.replace(controls,'').trim()?value.replace(controls,'').replace(/\s+/g,' ').trim().slice(0,length):null;
+type Link={offset:number;length:number;url:string};
+type Mark=(label:string,url:string|null)=>string;
+
+/** Plain card text with Telegram text links; offsets count UTF-16 units, as Telegram's do. */
+function linked(text:string,urls:string[]):{text:string;links:Link[]} {
+  let plain='',last=0;const links:Link[]=[];
+  for(const match of text.matchAll(marked)) {
+    plain+=text.slice(last,match.index);
+    if(match[2])links.push({offset:plain.length,length:match[2].length,url:urls[Number(match[1])]!});
+    plain+=match[2];last=match.index+match[0].length;
+  }
+  return {text:plain+text.slice(last),links};
+}
+
+/** A t.me address of a group, topic or message, or null where Telegram has none, such as a basic group. */
+export function telegramLink(chat:string,username:string|null,path:(string|null|undefined)[]):string|null {
+  const parts=path.filter((part):part is string=>!!part&&/^[1-9][0-9]{0,15}$/.test(part));
+  if(username&&/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username))return ['https://t.me/'+username,...parts].join('/');
+  // A private supergroup's address works only for its members and needs a topic or message.
+  const internal=chat.match(/^-100([1-9][0-9]{0,15})$/)?.[1];
+  return internal&&parts.length?['https://t.me/c/'+internal,...parts].join('/'):null;
+}
 
 /** Administrative commands use original owner-DM evidence, never editable text.
  * Approve and Reject buttons on an exact pending action go to the owner's
@@ -28,11 +54,15 @@ export class ActionCommandRepository {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
   }
-  /** The group a request came from, or null for the owner's private chat and background work. */
-  private async origin(source:any):Promise<string|null> {
+  /** Where a live request was asked: its chat, topic and message. Null for background work. */
+  private async asked(source:any):Promise<{chat:string;topic?:string;message?:string}|null> {
     if(source?.store!=='archive')return null;
     const original=await this.access.archive.verify(source);
-    return original.scope===this.access.policy().owner_id?null:original.scope;
+    if(original.origin!=='live'||original.channel!=='telegram')return null;
+    const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
+    let message:any=null;try{const payload=JSON.parse(row.payload.toString());message=payload.message??payload.edited_message;}catch{}
+    const id=String(message?.message_id??''),topic=message?.is_topic_message===true?String(message.message_thread_id??''):'';
+    return {chat:String(original.scope),...(/^[1-9][0-9]{0,15}$/.test(topic)?{topic}:{}),...(/^[1-9][0-9]{0,15}$/.test(id)?{message:id}:{})};
   }
   /** The owner's card templates and texts from Settings › Instructions, or the defaults. */
   private async texts() {
@@ -40,10 +70,45 @@ export class ActionCommandRepository {
     return {card:prompts['telegram.approval_card']??approvalCard,action:prompts['telegram.approval_action']??approvalAction,
       line:approvalLines(prompts['telegram.approval_texts'])};
   }
-  private async title(chat:string,line:Record<ApprovalText,string>) {
+  /** A group's name, public username, topic flag and latest message, from its captured messages or else the owner's last refresh. */
+  private async chat(chat:string) {
+    const facts={title:null as string|null,username:null as string|null,forum:null as boolean|null,message:null as string|null};
+    const rows=(await this.access.stores.archive.query(`SELECT payload FROM events WHERE scope=$1 AND channel='telegram'
+      AND kind IN ('telegram_update','telegram_delivered_message') ORDER BY received_at DESC LIMIT 50`,[chat])).rows;
+    for(const row of rows) {
+      let message:any;try{const payload=JSON.parse(row.payload.toString());message=payload.message??payload.edited_message??payload;}catch{continue;}
+      if(String(message?.chat?.id)!==chat)continue;
+      facts.title??=clean(message.chat.title);facts.username??=clean(message.chat.username,32);
+      if(typeof message.chat.is_forum==='boolean')facts.forum??=message.chat.is_forum;
+      if(/^[1-9][0-9]{0,15}$/.test(String(message.message_id)))facts.message??=String(message.message_id);
+    }
+    const seen=(await this.access.stores.control.query("SELECT title,username,is_forum FROM telegram_chat_observations WHERE chat_id=$1 AND state='available'",[chat])).rows[0];
+    facts.title??=clean(seen?.title);facts.username??=clean(seen?.username,32);if(typeof seen?.is_forum==='boolean')facts.forum??=seen.is_forum;
+    return facts;
+  }
+  /** A topic's name from its creation or latest edit, or the name the owner gave it. */
+  private async topicName(chat:string,topic:string):Promise<string|null> {
+    const named=(await this.access.stores.archive.query(`SELECT name FROM (
+        SELECT received_at,m ? 'forum_topic_edited' AS edited,coalesce(m#>>'{forum_topic_edited,name}',m#>>'{forum_topic_created,name}',
+          CASE WHEN m#>>'{reply_to_message,message_id}'=$2 THEN m#>>'{reply_to_message,forum_topic_created,name}' END) AS name
+        FROM (SELECT received_at,coalesce(p->'message',p->'edited_message',p) AS m FROM (
+          SELECT received_at,convert_from(payload,'UTF8')::jsonb AS p FROM events WHERE scope=$1 AND channel='telegram'
+            AND kind IN ('telegram_update','telegram_delivered_message') AND pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb')) e) messages
+        WHERE m->>'message_thread_id'=$2) topics WHERE name IS NOT NULL ORDER BY edited DESC,received_at DESC LIMIT 1`,[chat,topic])).rows[0]?.name;
+    if(clean(named))return clean(named);
+    const added=(await this.access.stores.control.query('SELECT name FROM telegram_topic_registrations WHERE chat_id=$1 AND topic_id=$2',[chat,Number(topic)])).rows[0]?.name;
+    return clean(added);
+  }
+  /** A chat's name, linked to a message in it, and to a topic and its name when there is one. */
+  private async where(chat:string,line:Record<ApprovalText,string>,mark:Mark,at:{topic?:string|undefined;message?:string|undefined;showTopic?:boolean}={}) {
     if(chat===this.access.policy().owner_id)return line.private_chat;
-    const title=(await this.access.stores.control.query("SELECT title FROM telegram_chat_observations WHERE chat_id=$1 AND state='available'",[chat])).rows[0]?.title;
-    return typeof title==='string'&&title.trim()?`“${title.trim().slice(0,100)}”`:line.unnamed_group;
+    const facts=await this.chat(chat),name=facts.title?`“${facts.title}”`:line.unnamed_group;
+    const group=mark(name,telegramLink(chat,facts.username,at.message?[at.topic,at.message]:[facts.message??at.topic]));
+    if(!at.showTopic)return group;
+    const topic=at.topic?await this.topicName(chat,at.topic)??line.unnamed_topic:facts.forum?line.general_topic:null;
+    if(!topic)return group;
+    const label=mark(topic,at.topic?telegramLink(chat,facts.username,[at.topic]):null);
+    return group+' '+(line.topic.includes('{topic}')?line.topic.replace('{topic}',()=>label):line.topic);
   }
   /** Where an action's card goes: the requester's own chat and topic, or the owner's private chat. */
   private async place(kind:ActionKind,id:string):Promise<{chat:string;topic?:string;reviewer?:string}|null> {
@@ -53,16 +118,23 @@ export class ActionCommandRepository {
     return {chat:chat!,...(topic?{topic}:{}),reviewer:reviewer.user};
   }
   /** The exact content to decide on, or null when it is too long to review in Telegram. */
-  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;fingerprint:string;state:string;line:Record<ApprovalText,string>}|null> {
-    const owner={admin:true,scope:null},texts=await this.texts(),from=reviewed?null:await this.origin(source),origin=from?await this.title(from,texts.line):null;
+  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;links:Link[];fingerprint:string;state:string;line:Record<ApprovalText,string>}|null> {
+    const owner={admin:true,scope:null},texts=await this.texts(),urls:string[]=[];
+    const line=Object.fromEntries(Object.entries(texts.line).map(([key,value])=>[key,value.replace(controls,'')])) as Record<ApprovalText,string>;
+    const mark:Mark=(label,url)=>url?`\u0001${urls.push(url)-1}\u0002${label}\u0003`:label;
+    // The card under a request in its own chat does not say where it was asked.
+    const asked=reviewed?null:await this.asked(source);
+    const origin=asked&&asked.chat!==this.access.policy().owner_id?await this.where(asked.chat,line,mark,{topic:asked.topic,message:asked.message}):null;
     if(kind==='telegram') {
-      const action=await this.telegram.inspect(owner,id),destination=String(action.arguments.destination);
-      const place=await this.title(destination.split('/topic/')[0]!,texts.line)+(destination.includes('/topic/')?' '+texts.line.topic:'');
-      return {text:fillTemplate(texts.card,{destination:place,origin,text:String(action.arguments.text)}),fingerprint:action.fingerprint,state:action.state,line:texts.line};
+      const action=await this.telegram.inspect(owner,id),[chat,topic]=String(action.arguments.destination).split('/topic/');
+      const place=await this.where(chat!,line,mark,{topic,showTopic:true});
+      const filled=fillTemplate(texts.card.replace(controls,''),{destination:place,origin,text:String(action.arguments.text).replace(controls,'')});
+      return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,line};
     }
     const action=await this.tools.inspect(owner,id),args=canonical(action.arguments);
     if(args.length>reviewLimit)return null;
-    return {text:fillTemplate(texts.action,{kind:action.kind,origin,arguments:args}),fingerprint:action.fingerprint,state:action.state,line:texts.line};
+    const filled=fillTemplate(texts.action.replace(controls,''),{kind:action.kind,origin,arguments:args.replace(controls,'')});
+    return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,line};
   }
   private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>) {
     if(state==='proposed')return null;
@@ -86,12 +158,18 @@ export class ActionCommandRepository {
       if((await evaluate(control,effect)).outcome!=='ask'||kind==='controlled'&&(await this.tools.grants(row)).length)return result;
       const place=await this.place(kind,result.id),card=place?await this.card(kind,result.id,row.source_reference,!!place.reviewer):null;
       if(!place||!card||card.state!=='proposed')return result;
-      const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),id:result.id,text:card.text,
+      // In the chat and topic where it was asked, the card answers the request itself.
+      const asked=await this.asked(row.source_reference);
+      const here=asked&&asked.chat===place.chat&&(asked.topic??'')===(place.topic??'')?asked.message??null:null;
+      const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),...(here?{reply_to:here}:{}),id:result.id,
+        text:card.text,links:card.links,
         buttons:[[card.line.approve.slice(0,40),'na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],[card.line.reject.slice(0,40),'nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
       if(sent?.state!=='done')return result;
-      return {...result,message:place.reviewer?
+      return {...result,message:here?
+        'A card with Approve and Reject buttons for this exact request was posted here as the reply to it. It names where the message goes and shows it exactly, so it is the whole answer: do not repeat or announce it; return [NO_REPLY] unless something else needs an answer.':
+        place.reviewer?
         'This exact message for the other group was posted here with Approve and Reject buttons for the person who asked; nothing is sent until they press Approve. Say only, briefly, that they can check and approve it; do not repeat the draft.':
-        await this.origin(row.source_reference)?
+        asked&&asked.chat!==owner?
         'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner; do not show the draft or details.':
         'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
@@ -102,7 +180,7 @@ export class ActionCommandRepository {
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
       const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line):null;
-      if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`});
+      if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:card.links});
     }catch(error){if(!(error instanceof HttpError))throw error;}
   }
   /** A button press: true when it was an approval button, whatever its outcome. */
