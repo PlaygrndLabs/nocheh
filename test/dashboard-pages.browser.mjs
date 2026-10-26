@@ -37,7 +37,7 @@ const routes = [
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm'].map(view => ['memory?view=' + view, 'Memory']),
   ...['work', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'advanced'].map(view => [
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'advanced'].map(view => [
     'settings?view=' + view,
     'Settings',
   ]),
@@ -127,7 +127,7 @@ test('the sidebar lists the open page’s tabs and opens any page’s tab direct
   const settingsTabs = nav.getByRole('list', {name: 'Settings tabs'});
   assert.deepEqual(
     (await settingsTabs.getByRole('link').allTextContents()).map(text => text.trim()),
-    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Advanced'],
+    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Connections', 'Advanced'],
   );
   assert.equal(await settingsTabs.getByRole('link', {name: 'Models'}).getAttribute('aria-current'), 'true');
   assert.equal(await nav.getByRole('list', {name: 'Memory tabs'}).count(), 0);
@@ -430,6 +430,39 @@ test('task statuses, priorities and columns are edited in Settings', async () =>
   await bar.getByText('No unsaved changes').waitFor();
   await page.goto(origin + '/#tasks?view=board');
   await page.getByLabel('Board').getByRole('list', {name: 'On hold tasks'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Notion is connected through its sign-in, turned on with an approval choice, and disconnected', async () => {
+  const {page, problems} = await open('settings?view=connections');
+  const card = page.getByRole('region', {name: 'Notion'});
+  await card.getByText('Not connected').waitFor();
+  assert.equal(await card.getByRole('switch', {name: 'Use Notion'}).isDisabled(), true);
+  // Notion's sign-in returns to the dashboard, which finishes it and cleans the address.
+  await card.getByRole('button', {name: 'Connect Notion'}).click();
+  await page.getByRole('status').filter({hasText: 'Notion is connected.'}).waitFor();
+  await card.getByText('Connected to Synthetic workspace').waitFor();
+  assert.equal(new URL(page.url()).search, '');
+  assert.match(page.url(), /#settings\?view=connections$/);
+  await card.getByRole('switch', {name: 'Use Notion'}).click();
+  await card.getByLabel('Ask me first').selectOption({label: 'Everything asks me'});
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.reload();
+  await card.getByRole('switch', {name: 'Use Notion', checked: true}).waitFor();
+  assert.equal(await card.getByLabel('Ask me first').inputValue(), 'everything');
+  await card.getByRole('button', {name: 'Disconnect'}).click();
+  await page.getByRole('dialog', {name: 'Disconnect Notion?'}).getByRole('button', {name: 'Disconnect'}).click();
+  await card.getByText('Not connected').waitFor();
+  await card.getByRole('switch', {name: 'Use Notion', checked: false}).waitFor();
+  // A wrong Business-plan token is refused in plain words.
+  await card.getByText('Paste an MCP token instead').click();
+  await card.getByLabel('Notion MCP token').fill('wrong-token');
+  await card.getByRole('button', {name: 'Save token'}).click();
+  await card.getByText('Notion refused that token.', {exact: false}).waitFor();
+  problems.splice(0, problems.length, ...problems.filter(problem => !/400/.test(problem)));
   assert.deepEqual(problems, []);
   await page.close();
 });
