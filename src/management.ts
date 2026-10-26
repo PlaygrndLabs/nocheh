@@ -263,6 +263,10 @@ export async function startManagement() {
         const body=req.method==='POST'?object(await readJson(req)):{};
         return json(res,200,await python({operation:'policy.manage',request:{...body,profile:url.searchParams.get('profile'),job:url.searchParams.get('job')},write:req.method==='POST'}));
       }
+      // The owner's Notion sign-in. Tokens travel only in POST bodies and never come back.
+      if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
+      const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
+      if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
       if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
       // POST so a key being typed travels in the body, never in a URL or access log.
       if (req.method === 'POST' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', request: object(await readJson(req))}));

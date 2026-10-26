@@ -9,6 +9,7 @@ import {initialize} from '../src/database.js';
 import {DashboardSessions} from '../src/dashboard-auth.js';
 import {HttpError,json,readJson} from '../src/http.js';
 import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
+import {NotionRepository,notionSchema} from '../src/stores/notion.js';
 import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
@@ -17,7 +18,7 @@ if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_
 const pool=new pg.Pool(),sessions=new DashboardSessions(),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
 await initialize(pool);
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
-await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);
+await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);
 // Two synthetic projects, each with its own list beside the personal one.
 const garden='9'.repeat(64),studio='8'.repeat(64);
 for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
@@ -25,6 +26,9 @@ for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
 // The same synthetic people as the Memory page's, so tasks can point to them.
 for(const [id,name] of [['1'.repeat(64),'Mira Chen'],['d1'.repeat(32),'Devon']])
   await pool.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person',$2,'active') ON CONFLICT(id) DO NOTHING",[id,name]);
+const notion=new NotionRepository(pool);
+// Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
+let notionSignIn:{connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean}={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};
 const tasks=new TaskRepository(pool,async()=>{throw new HttpError(403,'owner_private_turn_required');}),taskOwner={admin:true,scope:null};
 await tasks.create(taskOwner,{operation_id:'preview-1',title:'Book the Iceland flights',notes:'Window seats if possible.',group:'-10042/topic/7',tags:['Travel'],due_on:new Date(Date.now()+3*864e5).toISOString().slice(0,10)});
 await tasks.create(taskOwner,{operation_id:'preview-2',title:'Send the garden supplier the measurements',scope:garden,tags:['Suppliers'],people:['1'.repeat(64)]});
@@ -434,6 +438,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/entities/suggestions')return json(res,200,{suggestions:entitySuggestion.status==='pending'?[entitySuggestion]:[],next:null});
   const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);
   if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
+  if(route==='/notion')return json(res,200,await notion.get(taskOwner));
+  if(route==='/connections/notion')return json(res,200,notionSignIn);
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
   const taskRead=route.match(/^\/tasks\/([a-f0-9]{64})$/);
@@ -476,6 +482,14 @@ const server=createServer((req,res)=>{void(async()=>{
    factGrants.push(grant);return json(res,200,{id:grant.id,state:'active',revision:1});}
   const factRevoke=route.match(/^\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/),ownGrant=factRevoke&&factGrants.find(g=>g.id===factRevoke[1]);
   if(ownGrant){if(ownGrant.revision!==body.expected_revision||ownGrant.state!=='active')throw new HttpError(409,'memory_fact_grant_changed');ownGrant.state='revoked';ownGrant.revision++;return json(res,200,{id:ownGrant.id,state:'revoked',revision:ownGrant.revision});}
+  if(route==='/notion')return json(res,200,await notion.save(taskOwner,body));
+  if(route==='/connections/notion/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/?connect=notion')throw new HttpError(400,'invalid_notion_redirect');
+    return json(res,200,{url:body.redirect+'&code=fixture-code&state=fixture-state'});}
+  if(route==='/connections/notion/finish'){if(body.state!=='fixture-state')throw new HttpError(400,'notion_sign_in_expired');
+    notionSignIn={connected:true,method:'oauth',workspace:'Synthetic workspace',connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
+  if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
+    notionSignIn={connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
+  if(route==='/connections/notion/disconnect'){notionSignIn={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};return json(res,200,notionSignIn);}
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
   if(route==='/tasks/archive-finished')return json(res,200,await tasks.archiveFinished(taskOwner,body));
