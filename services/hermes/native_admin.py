@@ -408,7 +408,7 @@ class Administration:
                     import urllib.request
                     with urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=3) as response: live = json.load(response)
                     running = live.get('telegram') == 'connected'
-                    result = {'version': '0.22.2', 'release_date': '', 'active_sessions': 0,
+                    result = {'version': '0.22.5', 'release_date': '', 'active_sessions': 0,
                               'config_version': 1, 'latest_config_version': 1, 'config_path': str(home / 'config.yaml'),
                               'env_path': 'Managed by Nocheh', 'hermes_home': str(home),
                               'gateway_running': running, 'gateway_state': 'running' if running else 'stopped',
