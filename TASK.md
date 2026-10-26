@@ -355,7 +355,10 @@ not yet run on the owner's installation:
 - A forum export mapped to its live group keeps its topics: the importer
   follows reply links to each topic's creation message
   ([decision](docs/adr/0171-desktop-forum-messages-keep-their-topics.md),
-  [check](test/store-desktop-import-identity.test.ts)).
+  [check](test/store-desktop-import-identity.test.ts)). A mapped export now has
+  its chat's audience, so imports with learning approved are learned (before,
+  they waited forever), and an exported copy of the bot's own reply counts as
+  already kept ([check](test/store-desktop-import-identity.test.ts)).
 - Release test 1 (October 19) passed its addressing part on the owner's
   installation: an unaddressed group message stayed quiet and a Reply was
   answered in about 24 seconds. Its recall part failed: the answer could not
