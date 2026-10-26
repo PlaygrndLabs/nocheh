@@ -99,5 +99,18 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(GuardUnavailable):Boundary().prepare(httpx.Request('POST','https://untrusted.example/responses?prompt=raw',json=payload))
         with self.assertRaises(GuardUnavailable):Boundary().prepare(httpx.Request('POST','https://untrusted.example/responses',content=b'raw audio'))
 
+    def test_refusals_record_where_they_went_without_values(self):
+        from .request_boundary import FAILURE_DETAILS
+        self.setup_boundary(lambda url,payload:payload)
+        before=len(FAILURE_DETAILS)
+        with httpx.Client(transport=httpx.MockTransport(lambda request:httpx.Response(200,json={}))) as client:
+            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models?key=planted-SECRET&page=2')
+            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models')
+        details=list(FAILURE_DETAILS)[before:]
+        self.assertEqual([(d['code'],d['method'],d['host'],d['path'],d['query_keys']) for d in details],
+                         [('uninspectable_model_query','GET','provider.example','/v1/models',['key','page']),
+                          ('uninspectable_model_request','GET','provider.example','/v1/models',[])])
+        self.assertNotIn('planted-SECRET',json.dumps(details))
+
 
 if __name__=='__main__':unittest.main()
