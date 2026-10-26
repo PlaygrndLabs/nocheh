@@ -267,13 +267,21 @@ export class TelegramActionRepository {
   async inspect(principal:Reader,id:string) {
     const row=await this.row(id);
     if(!principal.admin) {
-      await this.turns.binding(principal);
-      if(principal.turnEvent!==row.source_reference.id||principal.space!==row.space_id)throw new HttpError(404,'action_not_found');
+      // Any later turn of the same chat and profile can follow its own requests, as with controlled actions.
+      const turn=await this.turns.binding(principal);
+      if(principal.space!==row.space_id||turn.logical_profile!==row.profile)throw new HttpError(404,'action_not_found');
     }
     const text=await this.text(row,!principal.admin),result=row.result_reference?(await this.stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[row.result_reference.id])).rows[0]:null;
     if(!principal.admin){await this.prepared.allow(principal,{text});await this.turns.assertAudience(principal);}
     return {id:row.id,event_id:row.source_reference.id,scope:row.scope,profile:row.profile,kind:'telegram_message',arguments:{destination:row.destination,text},
       fingerprint:row.fingerprint,state:row.state,revision:row.revision,error_code:row.error_code,created_at:row.created_at,result:result?JSON.parse(result.content.toString()):null};
+  }
+  /** This chat's most recent message requests and their states, for a later turn that no longer holds their IDs. */
+  async recent(principal:Reader) {
+    const turn=await this.turns.binding(principal);
+    const rows=(await this.stores.control.query('SELECT id FROM telegram_action_requests WHERE space_id=$1 AND profile=$2 ORDER BY created_at DESC,id DESC LIMIT 10',
+      [principal.space,turn.logical_profile])).rows;
+    return Promise.all(rows.map(row=>this.inspect(principal,row.id)));
   }
   async list(principal:Reader) {
     admin(principal);const rows=(await this.stores.control.query('SELECT id FROM telegram_action_requests ORDER BY created_at DESC,id DESC LIMIT 100')).rows;

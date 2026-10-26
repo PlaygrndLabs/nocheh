@@ -460,7 +460,12 @@ not yet run on the owner's installation:
   the group and topic
   ([decision](docs/adr/0165-approval-card-is-the-answer-and-links-its-place.md),
   [checks](test/store-approval-buttons.test.ts),
-  [runtime checks](services/hermes/test_approval_cards.py)).
+  [runtime checks](services/hermes/test_approval_cards.py)). Asking again
+  after the rejection got no new card: the lookup of the earlier request was
+  refused because it came from a later turn, and Nocheh said it was still
+  waiting. A chat's later turns can now read and list its own requests, and a
+  finished request is asked again as a new one
+  ([decision](docs/adr/0166-a-chat-follows-its-own-message-requests.md)).
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 
