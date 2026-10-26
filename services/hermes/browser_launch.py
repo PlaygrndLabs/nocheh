@@ -49,4 +49,5 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
         query=parse_qs(parsed.query);query['profile']=[bound.logical_profile or name]
         env['HERMES_TUI_SIDECAR_URL']=parsed._replace(query=urlencode(query,doseq=True)).geturl()
     if active_session_file: env['HERMES_TUI_ACTIVE_SESSION_FILE']=active_session_file
-    return ['/usr/local/bin/node','/opt/hermes/ui-tui/dist/entry.js'],str(workspace),env
+    # -P: the workspace cwd never joins sys.path. The bridge runs the TUI and its gateway.
+    return ['/opt/venv/bin/python','-P','-m','services.hermes.browser_bridge'],str(workspace),env

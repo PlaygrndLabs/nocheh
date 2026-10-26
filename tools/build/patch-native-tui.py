@@ -1,4 +1,6 @@
-"""Pinned TUI changes: managed Python entry, capture before interpretation, stable IDs."""
+"""Pinned TUI changes: capture before interpretation, stable IDs, no external processes.
+
+The managed gateway entry lives in services/hermes/browser_bridge.py (the TUI attaches over WebSocket)."""
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])
@@ -11,8 +13,6 @@ def patch(relative, replacements):
     path.write_text(source)
 
 patch('ui-tui/src/gatewayClient.ts', [
-    ("    const cwd = process.env.HERMES_CWD || root", "    const cwd = root // mandatory bootstrap cannot be shadowed by workspace files"),
-    ("spawn(python, ['-m', 'tui_gateway.entry']", "spawn(python, ['-m', 'services.hermes.browser_gateway']"),
     ('  request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {', '''  private nochehInputs: Array<{text: string; event_id: string; session_id: unknown}> = []
 
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
@@ -44,7 +44,7 @@ patch('ui-tui/src/gatewayClient.ts', [
   private nochehNativeRequest<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {'''),
 ])
 patch('ui-tui/src/app/useSubmission.ts', [
-    ('  const dispatchSubmission = useCallback(\n    (full: string) => {', '  const dispatchSubmission = useCallback(\n    async (full: string) => {'),
+    ('  const dispatchSubmission = useCallback(\n    (input: string | QueueItem) => {', '  const dispatchSubmission = useCallback(\n    async (input: string | QueueItem) => {'),
     ('      const toHistory = submission.text\n', '''      const toHistory = submission.text
       try {
         await gw.request('nocheh.input', {session_id: getUiState().sid, text: submission.text, display: full})
