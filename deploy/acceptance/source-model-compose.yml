@@ -2,7 +2,7 @@
 name: ${NOCHEH_SOURCE_FIXTURE_PROJECT:?Explicit fixture project required}
 services:
   nocheh-db:
-    image: postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    image: postgres:18.6-trixie@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
     mem_limit: 512m
     command: [postgres, -c, shared_buffers=32MB, -c, max_connections=64]
     environment:

@@ -40,6 +40,6 @@ test('pinned Inngest UI history is readable through the inspection boundary; nat
       const denied=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'mutation { cancelRun(runID:"01KTEST") {id} }'})});assert.equal(denied.status,403);
     }
     assert.equal((await fetch(base+'/runs',{headers:{origin:'http://untrusted'}})).status,403);
-    const info=await(await fetch(base+'/dev')).json();assert.deepEqual(info,{version:'1.46.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}});
+    const info=await(await fetch(base+'/dev')).json();assert.deepEqual(info,{version:'1.49.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}});
   }finally{await new Promise<void>(r=>server.close(()=>r()));}
 });

@@ -2,7 +2,7 @@
 name: ${NOCHEH_FIXTURE_PROJECT:?Explicit fixture project required}
 services:
   nocheh-db:
-    image: postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    image: postgres:18.6-trixie@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
     restart: unless-stopped
     environment:
       PGDATA: /var/lib/postgresql/data
@@ -35,7 +35,7 @@ services:
     depends_on:
       nocheh-db: {condition: service_healthy}
   inngest-redis:
-    image: redis:8.8.3-trixie@sha256:eb1aa641bc5380ed14442398e45a5a51aeaaac919fab811e4f134eb77c71dd2d
+    image: redis:8.10.2-trixie@sha256:97ec88159e6d7cfb5ddef9015386087d58a912de80112f06ebdfa78fa5989901
     restart: unless-stopped
     command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]
     volumes: [redis_data:/data]
@@ -45,7 +45,7 @@ services:
       timeout: 3s
       retries: 30
   inngest-server:
-    image: inngest/inngest:v1.46.0@sha256:9c4a2413bdbfa31a94ff54c32ae2dcc6613dbee84bc76db6cf6644d19e357e3e
+    image: inngest/inngest:v1.49.0@sha256:ad551e89e493e34db74d155be37dc5549930fcb6eb8382e502c17da9762821c7
     restart: unless-stopped
     command: [inngest, start]
     environment:
