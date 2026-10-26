@@ -170,10 +170,13 @@ class NativeAdminTests(unittest.TestCase):
             json={'title':'New title', 'profile':self.owner.name, 'request_id':'synthetic-rename',
                   'expected_revision':snapshot.json()['runtime_revision']})
         self.assertEqual(renamed.status_code, 200, renamed.text)
-        absent = self.client.delete('/api/sessions/owner-session?profile='+self.group.name, headers=self.headers)
-        self.assertTrue(absent.json()['already_absent'])
+        # An absent row has revision zero; deleting it is an idempotent success.
+        absent = self.client.delete('/api/sessions/owner-session?request_id=synthetic-absent&expected_revision=0&profile='+self.group.name, headers=self.headers)
+        self.assertTrue(absent.json()['already_absent'], absent.text)
         self.assertEqual(self.client.get('/api/sessions/owner-session/messages', headers=self.headers).status_code,200)
-        self.assertEqual(self.client.delete('/api/sessions/owner-session', headers=self.headers).status_code,200)
+        revision = self.client.get('/api/sessions/owner-session/mutation-snapshot', headers=self.headers).json()['runtime_revision']
+        deleted = self.client.delete(f'/api/sessions/owner-session?request_id=synthetic-delete&expected_revision={revision}', headers=self.headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
 
     def test_files_stay_in_selected_workspace_and_reads_do_not_create_it(self):
         workspace = self.owner / 'workspace'
