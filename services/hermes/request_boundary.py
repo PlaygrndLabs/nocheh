@@ -18,7 +18,22 @@ from urllib.parse import urlsplit
 DETECTOR_CALL = contextvars.ContextVar('nocheh_trusted_detector', default=None)
 MAX_BODY = 1024*1024
 FAILURES = deque(maxlen=30)
+# Where each refusal went, for diagnosis: method, host, path and query parameter
+# names only. Never bodies, query values, headers or credentials.
+FAILURE_DETAILS = deque(maxlen=30)
 COUNTS = Counter()
+
+
+def refused(request, error):
+    import time
+    FAILURES.append(str(error))
+    try:
+        url=urlsplit(str(request.url))
+        names=sorted({part.split('=',1)[0][:40] for part in url.query.split('&') if part})[:10]
+        FAILURE_DETAILS.append({'code':str(error),'method':request.method,'host':url.hostname,'path':url.path[:200],
+                                'query_keys':names,'at':round(time.time(),3)})
+    except Exception:
+        FAILURE_DETAILS.append({'code':str(error)})
 
 
 class GuardUnavailable(RuntimeError):
@@ -166,7 +181,7 @@ def install(boundary=None):
                 request.read()
             prepared=boundary.prepare(request)
         except GuardUnavailable as error:
-            FAILURES.append(str(error));raise
+            refused(request,error);raise
         COUNTS['sent']+=1
         return original_sync(client,prepared)
     async def async_send(client,request):
@@ -178,7 +193,7 @@ def install(boundary=None):
                 await request.aread()
             guarded=await asyncio.to_thread(boundary.prepare,request)
         except GuardUnavailable as error:
-            FAILURES.append(str(error));raise
+            refused(request,error);raise
         COUNTS['sent']+=1
         return await original_async(client,guarded)
     sync_send._nocheh_boundary=True

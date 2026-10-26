@@ -487,6 +487,12 @@ not yet run on the owner's installation:
   of a chat's requests no longer carries their text, and Nocheh looks requests
   up only when asked and calls a failed lookup unknown. The third message waited
   184 seconds in the reply queue after the restart; not yet explained.
+  Test 4 also showed the previous epoch's profile still holding the hidden
+  reply, so superseded profiles are now removed once idle and carried over
+  ([decision](docs/adr/0168-superseded-epoch-profiles-are-removed.md),
+  [checks](services/hermes/test_profile_history.py)). Hermes background
+  requests refused by the privacy guard are now recorded with their method,
+  host, path and query names, without values, to find and fix their source.
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 

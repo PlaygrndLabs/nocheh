@@ -107,6 +107,34 @@ class ProfileHistoryTests(unittest.TestCase):
         latest=self.profile(8)
         self.assertEqual(self.replay(latest)[-1]['content'].split('\n')[0],'What about Sunday?')
 
+    def test_idle_earlier_profiles_of_the_same_chat_are_removed_once_carried(self):
+        import fcntl
+        import time
+        from .profile_history import IDLE_SECONDS, prune
+        old=self.profile(5);self.converse(old)
+        others=[self.profile(5,chat='-100'),self.profile(5,generation=OTHER_GENERATION),self.profile(5,purpose='filter')]
+        new=self.profile(6)
+        newer=self.profile(7)
+        self.assertTrue(old.exists(),'a profile that may still finish a turn stays while it is recent')
+        later=time.time()+IDLE_SECONDS+60
+        with (old/'.memory.lock').open('a') as busy:
+            fcntl.flock(busy,fcntl.LOCK_EX)
+            self.assertEqual(prune(new,now=later),[],'a profile in use is left alone')
+        self.assertEqual(prune(new,now=later),[old.name])
+        self.assertFalse(old.exists())
+        self.assertTrue(all(path.exists() for path in [*others,new,newer]),'other chats, installations, filtering and newer epochs stay')
+        self.assertEqual(len(self.replay(new)),4,'the carried conversation is unaffected')
+
+    def test_a_conversation_that_failed_to_carry_is_kept(self):
+        import time
+        from .profile_history import CARRIED, IDLE_SECONDS, prune
+        old=self.profile(5);self.converse(old)
+        new=self.profile(6)
+        (new/CARRIED).write_text(json.dumps({'from':old.name,'messages':0,'error':'OperationalError'}))
+        for name in [path.name for path in new.glob('active-*.json')]:(new/name).unlink()
+        self.assertEqual(prune(new,now=time.time()+IDLE_SECONDS+60),[])
+        self.assertTrue(old.exists())
+
 
 if __name__=='__main__':
     unittest.main()
