@@ -65,6 +65,7 @@ export function Drawer({
   description,
   children,
   footer,
+  actions,
   wide,
 }: {
   open: boolean;
@@ -73,6 +74,8 @@ export function Drawer({
   description?: React.ReactNode;
   children?: React.ReactNode;
   footer?: React.ReactNode;
+  /** Buttons at the top, beside Close, such as Save and Discard for an edit. */
+  actions?: React.ReactNode;
   wide?: boolean;
 }) {
   return (
@@ -95,11 +98,14 @@ export function Drawer({
                 </DialogPrimitive.Description>
               )}
             </div>
-            <DialogPrimitive.Close asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Close">
-                <X aria-hidden />
-              </Button>
-            </DialogPrimitive.Close>
+            <div className="flex shrink-0 items-center gap-2">
+              {actions}
+              <DialogPrimitive.Close asChild>
+                <Button variant="ghost" size="icon-sm" aria-label="Close">
+                  <X aria-hidden />
+                </Button>
+              </DialogPrimitive.Close>
+            </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
           {footer && <div className="flex flex-wrap gap-2 border-t border-line px-5 py-3">{footer}</div>}

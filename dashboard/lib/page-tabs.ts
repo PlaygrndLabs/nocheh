@@ -6,7 +6,16 @@ import {href, type PageId} from './routes';
 
 export const pageTabs = {
   inbox: {waiting: 'Waiting', allowed: 'Allowed actions', history: 'History'},
-  tasks: {open: 'Open', done: 'Done', dropped: 'Dropped'},
+  tasks: {
+    open: 'Open',
+    today: 'Today',
+    upcoming: 'Upcoming',
+    board: 'Board',
+    done: 'Done',
+    dropped: 'Dropped',
+    archive: 'Archive',
+    trash: 'Trash',
+  },
   chats: {chats: 'Chats', rules: 'Sharing'},
   messages: {messages: 'Messages', import: 'Import'},
   memory: {
@@ -23,6 +32,7 @@ export const pageTabs = {
     speed: 'Speed',
     privacy: 'Privacy & data',
     assistant: 'Assistant',
+    tasks: 'Tasks',
     advanced: 'Advanced',
   },
 } as const satisfies Partial<Record<PageId, Record<string, string>>>;
