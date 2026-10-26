@@ -30,6 +30,7 @@ Group posts without approval, private approval cards and refusals: [0159](0159-g
 The owner's own task list: [0160](0160-owner-task-list.md).
 Requesters reviewing their own cross-group messages: [0161](0161-requesters-review-their-own-cross-group-messages.md).
 Approval cards as the whole answer, with linked group and topic names: [0165](0165-approval-card-is-the-answer-and-links-its-place.md).
+A chat following its own message requests across turns: [0166](0166-a-chat-follows-its-own-message-requests.md).
 The Telegram mini app: [0162](0162-telegram-mini-app.md).
 A chat's conversation carrying into new guard epochs: [0163](0163-chat-conversation-carries-into-new-guard-epochs.md).
 Task lists, links to a group and people, and tags, with project chats reaching their own list: [0164](0164-task-lists-links-and-tags.md).

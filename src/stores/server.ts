@@ -256,6 +256,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,outcome);
     }
     if(path==='/v1/tools/actions'&&req.method==='GET') {
+      if(!principal.admin)return result({telegram:await s.telegramActions.recent(principal)},true);
       admin(principal);return json(res,200,{...await s.controlledActions.list(principal),telegram:await s.telegramActions.list(principal)});
     }
     if(path==='/v1/tools/telegram-decision'&&req.method==='POST') {
