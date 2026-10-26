@@ -416,7 +416,7 @@ class Administration:
                               'gateway_health_url': None, 'gateway_updated_at': None, 'can_update_hermes': False,
                               'nocheh_runtime': live}
                 elif method == 'GET' and (path in ('/api/config/schema', '/api/config/defaults') or
-                      re.fullmatch(r'/api/sessions(?:/[^/]+(?:/(?:messages|export|latest-descendant))?)?', path)):
+                      re.fullmatch(r'/api/sessions(?:/[^/]+(?:/(?:messages|export|latest-descendant|mutation-snapshot))?)?', path)):
                     from .isolated_profile import database_path
                     if path.startswith('/api/sessions') and not database_path(home).exists():
                         if path == '/api/sessions':

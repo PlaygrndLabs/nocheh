@@ -14,12 +14,13 @@ test('Inngest inspection parses queries and denies mutation, subscription, hidde
   assert.throws(()=>inspectionQuery({query:'{apps{id}}',extensions:{persistedQuery:'ignored'}}));
   for(const [path,method] of [['/e/key','POST'],['/invoke/test','POST'],['/v0/connect/start','POST'],['/v0/gql?query=x','GET'],['//outside.example','GET'],['/assets/../e/key','GET'],['/assets/%2e%2e/e/key','GET'],['/debugger/function','GET'],['/apps','DELETE']])assert.throws(()=>inspectionPath(path!,method!));
   assert.equal(inspectionPath('/run?runID=01KTEST','GET').kind,'page');
-  const js=rewriteInspection('/assets/index-BtL2Q5bp.js','text/javascript',Buffer.from('const a="assets/foo.js"; e.update({basepath:``,serializationAdapters:t});new Rb(`/v0/gql`)')).toString();
+  const js=rewriteInspection('/assets/index-DGHUbgzG.js','text/javascript',Buffer.from('const a="assets/foo.js"; e.update({basepath:``,serializationAdapters:t});new Rb(`/v0/gql`)')).toString();
   assert.match(js,/inngest\/assets/);assert.match(js,/basepath:`\/inngest`/);assert.match(js,/new Rb\(`\/inngest\/v0\/gql`,\{headers:/);
-  assert.throws(()=>rewriteInspection('/assets/index-BtL2Q5bp.js','text/javascript',Buffer.from('different upstream')),/inngest_ui_version_mismatch/);
-  const viewer=rewriteInspection('/assets/DragDivider-Bk0TnKWx.js','text/javascript',Buffer.from('import{n as e}from"./jsx-runtime-D4MLZeW6.js";var fi=({header:e,tab:t,actions:n=[]})=>null,pi=1;export{fi as n,pi as t};')).toString();
+  assert.throws(()=>rewriteInspection('/assets/index-DGHUbgzG.js','text/javascript',Buffer.from('different upstream')),/inngest_ui_version_mismatch/);
+  assert.throws(()=>rewriteInspection('/assets/index-BtL2Q5bp.js','text/javascript',Buffer.from('e.update({basepath:``,serializationAdapters:t});new Rb(`/v0/gql`)')),/inngest_ui_version_mismatch/);
+  const viewer=rewriteInspection('/assets/DragDivider-j4FQFcES.js','text/javascript',Buffer.from('import{n as e}from"./jsx-runtime-D4MLZeW6.js";var fi=({header:e,tab:t,actions:n=[]})=>null,pi=1;export{fi as n,pi as t};')).toString();
   assert.match(viewer,/export\{__NochehCode as n,pi as t\};$/);assert.match(viewer,/^import\{t as __nochehJsx\}from"\.\/jsx-runtime-D4MLZeW6\.js";/);
-  const menu=rewriteInspection('/assets/_dashboard-6d9uQ3j3.js','text/javascript',Buffer.from('l,{href:u?``:r,to:u?void 0:o,preload:c};V={items:[{label:`Runs`,href:`/runs`,Icon:R},{label:`Sandboxes`,href:`/sandboxes`,Icon:z}]};[P,{group:V,collapsed:e,first:!0}),(P,{group:H,collapsed:e}),(P,{group:U,collapsed:e})]')).toString();
+  const menu=rewriteInspection('/assets/_dashboard-COvmTQM3.js','text/javascript',Buffer.from('l,{href:u?``:r,to:u?void 0:o,preload:c};V={items:[{label:`Runs`,href:`/runs`,Icon:R},{label:`Sandboxes`,href:`/sandboxes`,Icon:z}]};[P,{group:V,collapsed:e,first:!0}),(P,{group:H,collapsed:e}),(P,{group:U,collapsed:e})]')).toString();
   assert.match(menu,/to:u\?void 0:\(o\?\?r\),"aria-label":e/);assert.ok(!menu.includes('Sandboxes'));assert.equal(menu.split('{group:{items:[]},collapsed:e}').length,3);
 });
 
@@ -28,11 +29,11 @@ test('pinned Inngest UI history is readable through the inspection boundary; nat
   server.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${(server.address() as any).port}/v1/workflows/inspection`;
   try{
     const page=await fetch(base+'/runs');assert.equal(page.status,200);const html=await page.text();
-    assert.match(html,/nocheh-inspection-banner/);assert.match(html,/\/inngest\/assets\/index-BtL2Q5bp.js/);
+    assert.match(html,/nocheh-inspection-banner/);assert.match(html,/\/inngest\/assets\/index-DGHUbgzG.js/);
     assert.ok(!html.includes(process.env.INNGEST_SIGNING_KEY!));assert.match(page.headers.get('content-security-policy')!,/connect-src 'self'/);
-    const script=await fetch(base+'/assets/index-BtL2Q5bp.js');assert.equal(script.status,200);assert.match(await script.text(),/basepath:`\/inngest`/);
-    const viewer=await fetch(base+'/assets/InvokeButton-CQ4RmnsY.js');assert.equal(viewer.status,200);assert.match(await viewer.text(),/Execution data/);
-    const traceViewer=await fetch(base+'/assets/DragDivider-Bk0TnKWx.js');assert.equal(traceViewer.status,200);assert.match(await traceViewer.text(),/__NochehCode as n,/);
+    const script=await fetch(base+'/assets/index-DGHUbgzG.js');assert.equal(script.status,200);assert.match(await script.text(),/basepath:`\/inngest`/);
+    const viewer=await fetch(base+'/assets/InvokeButton-BKoaQS3v.js');assert.equal(viewer.status,200);assert.match(await viewer.text(),/Execution data/);
+    const traceViewer=await fetch(base+'/assets/DragDivider-j4FQFcES.js');assert.equal(traceViewer.status,200);assert.match(await traceViewer.text(),/__NochehCode as n,/);
     const fonts=await fetch(base+'/assets/fonts-DQTamI_N.css');assert.ok(!(await fonts.text()).includes('https:'));
     const read=await fetch(base+'/v0/gql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:'{ apps { id name } }'})});
     assert.equal(read.status,200);assert.ok(Array.isArray((await read.json() as any).data.apps));
