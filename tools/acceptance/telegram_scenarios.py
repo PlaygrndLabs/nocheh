@@ -21,6 +21,8 @@ from tools.acceptance.telegram_rehearsal import archived_delivery, validate_fixt
 
 OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, -10099, 777
 MENTION = '@synthetic_fixture_bot'
+# The fixed, editable reply for people the owner has not allowed (src/prompts.ts).
+NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this group.'
 CANARY = 'fixture-secret-ORCHID-2718'
 PRIVATE_FACT = 'رنگ مورد علاقه‌ی خواهرم فیروزه‌ای است PRIVFACT91'
 
@@ -194,8 +196,20 @@ class Scenarios:
         return [row for row in self.f.sent()[before:] if row['message']['chat']['id'] == chat
                 and row['message'].get('message_thread_id') == topic]
 
-    def turn(self, update, chat, topic=None, expect_reply=True, attempts=1):
-        """Inject one update and verify its single causal reply or its silence."""
+    @staticmethod
+    def is_card(row):
+        """An approval card: sent with Approve and Reject buttons (settling it later removes them)."""
+        markup = row['parameters'].get('reply_markup') or '{}'
+        return bool((json.loads(markup) if isinstance(markup, str) else markup).get('inline_keyboard'))
+
+    def cards_since(self, before, chat):
+        return [row for row in self.f.sent()[before:] if self.is_card(row) and row['message']['chat']['id'] == chat]
+
+    def turn(self, update, chat, topic=None, expect_reply=True, attempts=1, posted=None):
+        """Inject one update and verify its single causal reply or its silence.
+
+        Approval cards and a post the turn made right away (`posted`, exact
+        text) are not the turn's reply; scenarios check those themselves."""
         before = len(self.f.sent())
         self.f.inject(update)
         event_id = self.captured(update)
@@ -208,7 +222,7 @@ class Scenarios:
         self.gate('dispatch_done', row['state'] == 'done', state=row['state'], error=row['error'], attempts=row['attempts'])
         if attempts is not None:
             self.gate('dispatch_attempts', row['attempts'] == attempts, attempts=row['attempts'])
-        new = self.replies(before, chat, topic)
+        new = [row for row in self.replies(before, chat, topic) if not self.is_card(row) and row['message'].get('text') != posted]
         self.gate('one_reply_in_exact_conversation', len(new) == 1, count=len(new))
         reply = json.loads(new[0]['parameters'].get('reply_parameters', '{}') or '{}')
         self.gate('reply_targets_source', reply.get('message_id') == update['message']['message_id'])
@@ -435,6 +449,7 @@ class Scenarios:
         _, text = self.turn(self.f.message(OWNER, 'این پیام را به تاپیک تیم بفرست [[action:'+str(GROUP)+'/topic/'+str(topic)+'|'+wording+']]'), OWNER)
         created = [row for row in self.proposals() if row['id'] not in known]
         self.gate('one_proposal_created', len(created) == 1, count=len(created))
+        self.gate('one_card_in_owner_chat', len(self.cards_since(before, OWNER)) == 1, count=len(self.cards_since(before, OWNER)))
         proposal = created[0]
         self.gate('proposal_exact', proposal['state'] == 'proposed' and proposal['arguments'] == {'destination': str(GROUP)+'/topic/'+str(topic), 'text': wording},
                   arguments=proposal['arguments'])
@@ -467,17 +482,19 @@ class Scenarios:
         self.gate('denied_action_sends_nothing', not self.replies(before, GROUP, topic))
 
     def group_current_action(self):
-        topic = 18
+        # The owner's post into the same group topic needs no approval (ADR-0165).
+        topic, wording = 18, 'یادآوری گروهی'
         known = {row['id'] for row in self.proposals()}
         before = len(self.f.sent())
-        self.turn(self.f.message(GROUP, 'اینجا بفرست [[action:current|یادآوری گروهی]]', topic=topic), GROUP, topic)
+        self.turn(self.f.message(GROUP, 'اینجا بفرست [[action:current|'+wording+']]', topic=topic), GROUP, topic, posted=wording)
         created = [row for row in self.proposals() if row['id'] not in known]
-        self.gate('group_proposal_created', len(created) == 1)
+        self.gate('group_action_created', len(created) == 1)
         self.gate('current_means_source_topic', created[0]['arguments']['destination'] == str(GROUP)+'/topic/'+str(topic),
                   destination=created[0]['arguments']['destination'])
+        self.wait('posted_right_away', lambda: [row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording], 180)
         time.sleep(5)
-        self.gate('group_proposal_waits_for_owner', len(self.replies(before, GROUP, topic)) == 1)
-        self.f.app('/v1/tools/telegram-decision', {'id': created[0]['id'], 'fingerprint': created[0]['fingerprint'], 'decision': 'deny'})
+        self.gate('posted_once_without_card', len([row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording]) == 1
+                  and not self.cards_since(before, OWNER) and not self.cards_since(before, GROUP))
 
     def schedule_fires_and_waits_for_review(self):
         # An owner-private schedule fires on its own cadence, runs once, and its
@@ -497,11 +514,12 @@ class Scenarios:
         self.gate('result_addressed_to_owner_chat', proposal['state'] == 'proposed' and proposal['arguments']['destination'] == str(OWNER),
                   state=proposal['state'], destination=proposal['arguments']['destination'])
         time.sleep(5)
-        self.gate('nothing_sent_before_review', not self.replies(before, OWNER))
+        self.gate('only_a_card_before_review', all(self.is_card(row) for row in self.replies(before, OWNER))
+                  and len(self.cards_since(before, OWNER)) == 1, count=len(self.replies(before, OWNER)))
         self.f.app('/v1/tools/telegram-decision', {'id': proposal['id'], 'fingerprint': proposal['fingerprint'], 'decision': 'approve',
                                                    'operation_id': 'scenario-schedule-'+proposal['id'][:16]})
         self.wait('result_delivered', lambda: next(row for row in self.proposals() if row['id'] == proposal['id'])['state'] in ('done', 'ambiguous'), 240)
-        new = self.replies(before, OWNER)
+        new = [row for row in self.replies(before, OWNER) if not self.is_card(row)]
         self.gate('delivered_once_with_exact_text', len(new) == 1 and new[0]['message']['text'] == proposal['arguments']['text'], count=len(new))
         time.sleep(75)
         runs = self.f.query('nocheh_control', "SELECT count(*) FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"'")
@@ -512,8 +530,21 @@ class Scenarios:
 
     # Audience policy ----------------------------------------------------------
 
+    def not_allowed_reply(self, update, topic):
+        """Someone not allowed addresses Nocheh: no model turn, one fixed reply under their message."""
+        before = len(self.f.sent())
+        self.f.inject(update)
+        row = self.finished(self.captured(update))
+        self.gate('no_model_turn', row['state'] in ('suppressed', 'cancelled'), state=row['state'], error=row['error'])
+        new = self.wait('fixed_reply', lambda: self.replies(before, GROUP, topic), 120)
+        time.sleep(3)
+        new = self.replies(before, GROUP, topic)
+        target = json.loads(new[0]['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
+        self.gate('one_fixed_reply_to_the_message', len(new) == 1 and new[0]['message']['text'] == NOT_ALLOWED
+                  and target == update['message']['message_id'], count=len(new), text=new[0]['message']['text'])
+
     def participant_not_permitted(self):
-        self.turn(self.f.message(GROUP, 'سلام ربات', sender=PARTICIPANT, topic=16), GROUP, 16, expect_reply=False)
+        self.not_allowed_reply(self.f.message(GROUP, 'سلام ربات', sender=PARTICIPANT, topic=16), 16)
 
     def unselected_group(self):
         self.turn(self.f.message(UNSELECTED_GROUP, 'سلام'), UNSELECTED_GROUP, expect_reply=False)
@@ -639,6 +670,9 @@ class Scenarios:
         self.wait('queue_acknowledged', lambda: not [u for u in self.f.telegram()['updates'] if u['update_id'] <= after['update_id']], 120)
         row = self.finished(self.captured(after))
         self.gate('later_message_answered', row['state'] == 'done' and len(self.replies(before, OWNER)) == 1, state=row['state'])
+        broken_row = self.finished(self.captured(broken))
+        self.current['broken_original'] = {'state': broken_row['state'], 'error': broken_row['error'], 'replies': len(self.replies(before, GROUP, 32))}
+        self.gate('broken_original_answered_at_most_once', len(self.replies(before, GROUP, 32)) <= 1)
         health = self.f.http('/health', service='hermes', port=8781)
         self.gate('unparseable_update_visible', (health.get('telegram_details') or {}).get('unparseable_updates', 0) >= 1, health=health.get('telegram_details'))
 
@@ -668,11 +702,8 @@ class Scenarios:
             self.gate('owner_request_approved_by_setting', len(created) == 1 and created[0]['state'] in ('approved', 'running', 'done'), state=created[0]['state'])
             self.wait('sent_without_decision', lambda: [row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording], 180)
             self.gate('sent_once', len([row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording]) == 1)
-            known = {row['id'] for row in self.proposals()}
-            self.turn(self.f.message(GROUP, 'اینجا بفرست [[action:current|درخواست گروهی]]', topic=18), GROUP, 18)
-            group = [row for row in self.proposals() if row['id'] not in known]
-            self.gate('group_request_still_waits', len(group) == 1 and group[0]['state'] == 'proposed')
-            self.f.app('/v1/tools/telegram-decision', {'id': group[0]['id'], 'fingerprint': group[0]['fingerprint'], 'decision': 'deny'})
+            self.gate('no_card_with_setting_on', not self.cards_since(before, OWNER))
+            # Group-to-group cards with this setting off are product_scenarios.owner_from_group_to_other_group.
         finally:
             self.f.app('/v1/owner-autonomy', {'mode': 'approval_required', 'expected_revision': enabled['revision'],
                                               'operation_id': 'scenario-freedom-reset-'+str(self.f.ids())})
@@ -720,7 +751,7 @@ class Scenarios:
         self.current['recreated'] = names
         self.turn(self.f.message(GROUP, 'سلام، اجازه دارم؟', sender=PARTICIPANT, topic=22), GROUP, 22)
         apply({str(GROUP): {'granted': [], 'denied': [str(PARTICIPANT)]}})
-        self.turn(self.f.message(GROUP, 'هنوز اجازه دارم؟', sender=PARTICIPANT, topic=22), GROUP, 22, expect_reply=False)
+        self.not_allowed_reply(self.f.message(GROUP, 'هنوز اجازه دارم؟', sender=PARTICIPANT, topic=22), 22)
 
     # Operations -------------------------------------------------------------------
 
@@ -796,14 +827,8 @@ ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--directory', type=Path, required=True)
-    parser.add_argument('--only', nargs='*', choices=ORDER)
-    args = parser.parse_args()
-    directory = args.directory.resolve()
-    if not directory.is_relative_to(ROOT/'data/acceptance/results'):
-        raise ValueError('owned_fixture_directory_required')
+def run(directory, names, scenarios_class=Scenarios):
+    """Run the named scenarios on a prepared fixture and save one report."""
     fixture = Fixture(directory)
     if fixture.query('nocheh_control', "SELECT current_setting('cluster_name')") != 'nocheh-installation-fixture':
         raise ValueError('synthetic_cluster_required')
@@ -814,9 +839,9 @@ def main():
     initial = fixture.telegram()
     if initial['faults']:
         raise ValueError('previous_fixture_faults_pending')
-    scenarios = Scenarios(fixture, report)
+    scenarios = scenarios_class(fixture, report)
     scenarios.state = {}
-    for name in args.only or ORDER:
+    for name in names:
         scenarios.execute(name, getattr(scenarios, name))
     final = fixture.telegram()
     project_networks = {value['name'] for value in fixture.manifest['networks'].values()}
@@ -850,6 +875,18 @@ def main():
     (report/'result.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False)+'\n')
     print(json.dumps({'passed': summary['passed'], 'failed': [row['scenario'] for row in scenarios.results if not row['passed']],
                       'unknown_methods': summary['unknown_methods'], 'report': str(report/'result.json')}, ensure_ascii=False), flush=True)
+    return summary, report
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--only', nargs='*', choices=ORDER)
+    args = parser.parse_args()
+    directory = args.directory.resolve()
+    if not directory.is_relative_to(ROOT/'data/acceptance/results'):
+        raise ValueError('owned_fixture_directory_required')
+    run(directory, args.only or ORDER)
 
 
 if __name__ == '__main__':

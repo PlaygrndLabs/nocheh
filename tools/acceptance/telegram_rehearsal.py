@@ -7,6 +7,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -104,6 +105,9 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
             (report_directory/'compose.before.json').write_text(json.dumps(manifest))
             provider=manifest['services']['model-fixture'];native=manifest['services']['hermes']
             provider['environment']['NOCHEH_TELEGRAM_FIXTURE_STATE']='/fixture-state/telegram.json'
+            # The fake Telegram keeps its state in a folder only this host user
+            # can open; on Linux root without capabilities cannot read it.
+            provider['user']=str(os.getuid())+':'+str(os.getgid())
             state=directory/'state/telegram';state.mkdir(exist_ok=True,mode=0o700)
             def mount(service,source,target,readonly=True):
                 service['volumes']=[value for value in service['volumes'] if value.get('target')!=target]
