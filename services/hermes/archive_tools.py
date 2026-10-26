@@ -174,9 +174,10 @@ def register(ctx):
             'people':{'type':'array','items':{'type':'string'},'maxItems':20},'tag':{'type':'string','maxLength':40},'person':{'type':'string'},
             'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
-    name='nocheh_action_status';description='Read a proposed controlled action and its separate execution result in your authorized scope.'
+    name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
+        'Without an id it lists this chat\'s recent Telegram message requests with their states.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
-        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'required':['id'],'additionalProperties':False}},handler=controlled_status)
+        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'additionalProperties':False}},handler=controlled_status)
 
 
 OWNER_VIEWS=('conversations','conversation-context','telegram-identities','people','projects','project-assignments','memory-map')
@@ -231,7 +232,11 @@ def controlled_tool(kind,args):
 def controlled_status(args,**kwargs):
     import re
     try:
-        id=args.get('id','')
+        id=args.get('id') or ''
+        if not id:
+            # This chat's recent message requests, for a later turn that no longer holds their IDs.
+            keys=('id','state','arguments','error_code','created_at')
+            return json.dumps({'requests':[{key:item.get(key) for key in keys} for item in request('/v1/tools/actions').get('telegram',[])]},ensure_ascii=False)[:24000]
         if not re.fullmatch(r'[a-f0-9]{64}',id):raise ValueError('invalid_action')
         value=request('/v1/tools/actions/'+id)
         # Bound tool context; complete bytes remain in the archive and owner UI.
