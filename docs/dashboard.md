@@ -152,7 +152,7 @@ truncation. A note's presence does not establish source provenance.
 
 Honcho lifecycle (`init`, `up`, `down`, `status`, `login`) targets the installation
 Compose project. Initialize its pinned source before starting Honcho. Inspection uses official
-`honcho-cli==0.2.0` / `honcho-ai==2.6.0`, pinned dependencies and an internal-only
+`honcho-cli==0.2.1` / `honcho-ai==2.7.0`, pinned dependencies and an internal-only
 Compose runner with a fresh CLI config directory. Ambient Honcho accounts are
 ignored. A narrow transport changes SDK get-or-create lookups into exact-ID list
 queries and rejects writes, model-backed search/chat and unexpected endpoints.

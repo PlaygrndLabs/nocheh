@@ -43,7 +43,7 @@ def main():
     args = parser.parse_args(); directory = args.directory.resolve(); directory.mkdir(mode=0o700)
     project = 'nocheh-reset-configuration-' + uuid.uuid4().hex[:12]
     compose = {'name': project, 'services': {
-        'nocheh-db': {'image': 'postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336',
+        'nocheh-db': {'image': 'postgres:18.6-trixie@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6',
             'command': ['postgres', '-c', 'cluster_name=nocheh-reset-configuration-fixture'],
             'environment': {'PGDATA':'/var/lib/postgresql/data', 'POSTGRES_USER': 'nocheh', 'POSTGRES_DB': 'nocheh', 'POSTGRES_PASSWORD': 'synthetic-reset-configuration-only'},
             'volumes': ['fixture:/var/lib/postgresql/data'],

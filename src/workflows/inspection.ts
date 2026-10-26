@@ -104,7 +104,7 @@ export async function proxyInngestInspection(req:IncomingMessage,res:ServerRespo
   if(req.headers.origin||req.headers.cookie)throw new HttpError(403,'inspection_backend_only');
   if(!/^[a-f0-9]{64}$/.test(key))throw new HttpError(503,'workflows_unavailable');
   const query=selected.kind==='query'?inspectionQuery(await readJson(req,128*1024)):undefined;
-  if(selected.kind==='info'){res.writeHead(200,{...inspectionHeaders,'content-type':'application/json'});res.end(JSON.stringify({version:'1.46.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}}));return;}
+  if(selected.kind==='info'){res.writeHead(200,{...inspectionHeaders,'content-type':'application/json'});res.end(JSON.stringify({version:'1.49.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}}));return;}
   const authorization='Bearer '+createHash('sha256').update(Buffer.from(key,'hex')).digest('hex');
   let response:Response;try{response=await fetch(new URL(selected.path,upstream),{method:req.method??'GET',headers:{authorization,'content-type':'application/json','accept-encoding':'identity'},...(query?{body:JSON.stringify(query)}:{}),redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new HttpError(503,'workflows_unavailable');}
   if(!response.ok){await response.body?.cancel();throw new HttpError(502,'inspection_unavailable');}

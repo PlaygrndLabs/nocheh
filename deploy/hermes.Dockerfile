@@ -1,5 +1,5 @@
-FROM ghcr.io/astral-sh/uv:0.13.2@sha256:b9fddcde095a7aeafd499024adb8927df6619c7c5672f5ff7126474715f62ba4 AS uv
-FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS sqlite
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+FROM python:3.14.9-slim-trixie@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS sqlite
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl ca-certificates && rm -rf /var/lib/apt/lists/*
 # Match the pinned upstream's SQLite WAL-corruption fix.
 RUN curl -fSL --retry 3 https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz -o /tmp/sqlite.tar.gz && \
@@ -8,7 +8,7 @@ RUN curl -fSL --retry 3 https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz -
     CFLAGS='-O2 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_RTREE -DSQLITE_THREADSAFE=1' \
     ./configure --prefix=/opt/sqlite --disable-static && make -j2 && make install
 
-FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS native-runtime
+FROM python:3.14.9-slim-trixie@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS native-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg ca-certificates libatomic1 && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=sqlite /opt/sqlite/lib /opt/sqlite/lib
@@ -16,8 +16,8 @@ ENV LD_LIBRARY_PATH=/opt/sqlite/lib PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
     UV_PROJECT_ENVIRONMENT=/opt/venv UV_PYTHON_DOWNLOADS=never \
     PYTHONPATH=/opt/hermes:/workspace PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
     HERMES_HOME=/workspace/data/local/hermes
-ARG HERMES_REVISION=d923a5eb487a17c0a68801bba9ef0f56c81040a8
-ARG HERMES_VERSION=0.22.2
+ARG HERMES_REVISION=bf0203a794a07aac3ff764972ab9087baa4e4f4e
+ARG HERMES_VERSION=0.22.5
 COPY --from=hermes_source . /opt/hermes
 COPY deploy/hermes-plugin-requirements.txt /tmp/hermes-plugin-requirements.txt
 # The pinned upstream supports only Python 3.14; keep the interpreter explicit
@@ -45,7 +45,7 @@ USER nocheh
 CMD ["python", "-m", "services.hermes.runtime"]
 
 
-FROM node:26.12.0-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS tui-assets
+FROM node:26.12.1-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS tui-assets
 WORKDIR /opt/hermes
 COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.json ./
 COPY --from=native-runtime /opt/hermes/ui-tui ./ui-tui
@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.npm \
       --fetch-retries=5 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=20000 --fetch-timeout=120000 && \
     npm run build --workspace ui-tui && test -f /opt/hermes/ui-tui/dist/entry.js
 
-FROM node:26.12.0-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS dashboard-assets
+FROM node:26.12.1-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS dashboard-assets
 WORKDIR /opt/hermes
 COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.json ./
 COPY --from=native-runtime /opt/hermes/web ./web
