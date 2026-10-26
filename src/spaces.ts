@@ -39,7 +39,18 @@ export function eventSpace(scope:string, payload:unknown, channel='telegram'):st
   }
   if(channel!=='telegram')return scope;
   const body=object(payload), message=body.message ?? body.edited_message ?? body.channel_post ?? body.edited_channel_post;
+  const desktop=desktopTopicId(scope,body);
+  if(desktop!==undefined)return spaceId(scope,desktop);
   return message ? spaceId(scope,telegramTopicId(object(message))) : scope;
+}
+// Telegram Desktop names a supergroup or channel by its bare id; the Bot API prefixes it with -100.
+export const desktopChannelTypes=new Set(['private_supergroup','public_supergroup','private_channel','public_channel']);
+/** The forum topic the importer worked out for a Desktop export message, only once the export is
+ * mapped to its own live supergroup, where topic ids are the live ones. */
+export function desktopTopicId(scope:string,body:Record<string,any>):number|undefined {
+  const chat=body.chat&&typeof body.chat==='object'?body.chat:{},topic=body.topic_id;
+  if(!desktopChannelTypes.has(chat.type)||!/^[1-9][0-9]{0,15}$/.test(String(chat.id))||scope!=='-100'+chat.id)return undefined;
+  return Number.isSafeInteger(topic)&&topic>0?topic:undefined;
 }
 
 export async function backfillSpaces(db:pg.PoolClient) {

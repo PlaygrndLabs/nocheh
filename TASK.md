@@ -352,6 +352,10 @@ not yet run on the owner's installation:
   and Honcho memory; a newer export replaces an older one
   ([decision](docs/adr/0156-desktop-exports-share-proven-telegram-identities.md),
   [check](test/store-desktop-import-identity.test.ts)).
+- A forum export mapped to its live group keeps its topics: the importer
+  follows reply links to each topic's creation message
+  ([decision](docs/adr/0171-desktop-forum-messages-keep-their-topics.md),
+  [check](test/store-desktop-import-identity.test.ts)).
 - Release test 1 (October 19) passed its addressing part on the owner's
   installation: an unaddressed group message stayed quiet and a Reply was
   answered in about 24 seconds. Its recall part failed: the answer could not
@@ -446,7 +450,7 @@ not yet run on the owner's installation:
   (use MCP)?". Settings › Connections › Notion signs in through Notion (or a
   Business MCP token), turns Notion on, and chooses which calls ask first;
   `nocheh_notion` works only in the owner's private chat
-  ([decision](docs/adr/0171-notion-through-its-mcp-server.md),
+  ([decision](docs/adr/0172-notion-through-its-mcp-server.md),
   [check](test/store-notion.test.ts), [sign-in check](services/hermes/test_notion_connection.py),
   [browser check](test/dashboard-pages.browser.mjs)). Live check pending: the
   owner connects Notion on the machine and asks Nocheh to search it, then to add a
