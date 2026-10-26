@@ -67,6 +67,23 @@ def media_path(root,relative):
     return path
 
 
+def desktop_topics(messages):
+    """Forum topic of each message. Telegram Desktop exports no topic field, but a topic's id is
+    its topic_created service message, and every message in a topic replies to that message or to
+    another message of the topic. General and messages whose chain leaves the export have none."""
+    by_id={m['id']:m for m in messages if isinstance(m,dict) and type(m.get('id')) is int}
+    roots={i for i,m in by_id.items() if i>0 and m.get('type')=='service' and m.get('action')=='topic_created'}
+    topics={i:i for i in roots}
+    if not roots: return topics
+    for start in by_id:
+        path=[];current=start
+        while type(current) is int and current not in topics and current in by_id and current not in path:
+            path.append(current);current=by_id[current].get('reply_to_message_id')
+        topic=topics.get(current) if type(current) is int else None
+        for item in path: topics[item]=topic
+    return {i:t for i,t in topics.items() if t is not None}
+
+
 def desktop_records(document,root,scope=None,scope_map=None):
     chats=document.get('chats',{}).get('list') if isinstance(document.get('chats'),dict) else None
     if chats is None: chats=[document]
@@ -76,6 +93,7 @@ def desktop_records(document,root,scope=None,scope_map=None):
         chat_id=str(chat['id']); chat_type=str(chat.get('type','unknown'))
         mapped=scope or (scope_map or {}).get(chat_id) or f'desktop:{chat_type}:{chat_id}'
         metadata={k:v for k,v in chat.items() if k!='messages'}
+        topics=desktop_topics(chat['messages'])
         for message in chat['messages']:
             revision=digest(canonical(message))
             key=f"telegram-desktop:{chat_type}:{chat_id}:{message['id']}:{revision}"
@@ -84,6 +102,7 @@ def desktop_records(document,root,scope=None,scope_map=None):
                    'kind':'telegram_desktop_'+str(message.get('type','message')),'source_id':str(message['id']),
                    'revision':revision,'occurred_at':str(message.get('date_unixtime',message.get('date'))) if message.get('date') else None,
                    'text':message_text(message.get('text')),'payload':{'chat':metadata,'message':message}}
+            if type(message['id']) is int and message['id'] in topics: event['payload']['topic_id']=topics[message['id']]
             artifacts=[]; uploads=[]
             for field in ('photo','file','thumbnail'):
                 relative=message.get(field)
