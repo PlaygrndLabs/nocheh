@@ -76,6 +76,7 @@ def inspect(directory, mapping=None):
         first, last = date_range(chat['messages'])
         summaries.append({'id': str(chat['id']), 'name': str(chat.get('name', 'Untitled chat')),
                           'messages': len(chat['messages']), 'type': str(chat.get('type', 'unknown')),
+                          'topics': sum(isinstance(m, dict) and m.get('action') == 'topic_created' for m in chat['messages']),
                           'scope': (mapping or {}).get(str(chat['id']), f"desktop:{chat.get('type', 'unknown')}:{chat['id']}"),
                           'first_at': first, 'last_at': last})
     starts = [chat['first_at'] for chat in summaries if chat['first_at']]
