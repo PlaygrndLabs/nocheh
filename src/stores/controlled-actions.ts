@@ -1,5 +1,6 @@
 import {blockingPublications} from './publications.js';
 import {ownerAutonomyGrant} from './owner-autonomy.js';
+import {notionAuthority} from './notion.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -55,6 +56,7 @@ export class ControlledActionRepository {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
     const body=exact(value,['kind','arguments']),raw=actionArguments(body.kind,body.arguments),turn=await this.turns.binding(principal),binding=await this.guards.state();
     const source=await this.prepared.root(principal,binding);
+    if('connection' in raw)await notionAuthority(this.control,principal,turn,raw,false);
     if(source.store==='archive') {
       const original=await this.access.archive.verify(source),intake=(await this.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
       if(original.origin!=='live'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'external_effect_requires_live_turn');
@@ -75,14 +77,19 @@ export class ControlledActionRepository {
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
       // The owner freedom setting lets the owner's own live private request
       // approve itself. Deny rules are evaluated first and still block it.
-      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?await ownerAutonomyGrant(db,principal,turn):null;
+      // Notion is used only from the owner's private chat while it is on; the
+      // owner's Notion setting can let reads, or every call, run without a card.
+      // It replaces the owner freedom setting for Notion calls.
+      const connected='connection' in args,notion=connected?await notionAuthority(db,principal,turn,args,source.store==='archive'):null;
+      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?connected?notion:await ownerAutonomyGrant(db,principal,turn):null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')
         await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source]);
       await recordEffect(db,this.effect(row),'proposed',decision,source);
       await recordEffect(db,this.effect(row),decision.outcome==='deny'?'blocked':decision.outcome==='allow'?'allowed':'awaiting_approval',decision,source,grant?.id);
       await requestWorkflow(db,'tools',id);await db.query('COMMIT');
-      if(autonomy&&decision.outcome==='allow')return {id,state:'approved',fingerprint,message:'Approved by your own request under the owner freedom setting; it will run now.'};
+      if(autonomy&&decision.outcome==='allow')return {id,state:'approved',fingerprint,message:autonomy===notion?'Allowed by the owner\'s Notion setting; it will run now.':
+        'Approved by your own request under the owner freedom setting; it will run now.'};
       return {id,state:row.state,fingerprint,message:'Review the exact operation. Execution requires owner approval or a current bounded permission.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }

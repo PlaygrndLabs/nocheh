@@ -38,6 +38,7 @@ DEFAULTS = {
         'A task is personal unless the owner ties it to a project. Give it tags such as Health or Money when the owner names them or they are clear, reusing tags already in use; '
         'point it to a group or to people only when the owner says so, using IDs from nocheh_owner_read (people and conversations). '
         'Set a task\'s status, priority, dates, assignees, reminders or repeat when the owner asks; a reminder is sent to this chat at its time. '
+        'When the owner asks about their Notion, use nocheh_notion: search or fetch before creating or editing, list its tools when unsure of a tool\'s input, and say plainly when Notion is not connected or a change waits for approval. '
         'Use nocheh_knowledge_inspect to inspect projects and exact current revisions before preparing changes with nocheh_knowledge_propose. '
         'A proposal is not an applied change: check nocheh_knowledge_status. '
         'Organization within an active owner delegation runs after this turn finishes; other proposals require exact owner review in the dashboard Inbox. '

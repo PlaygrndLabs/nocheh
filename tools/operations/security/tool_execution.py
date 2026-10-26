@@ -43,6 +43,7 @@ def https_request(address,body=None,headers=None):
         if encoded is not None:request_headers['Content-Type']='application/json'
         connection.request('GET' if encoded is None else 'POST',(url.path or '/')+('?' +url.query if url.query else ''),body=encoded,headers=request_headers)
         response=connection.getresponse()
+        if response.status==401:raise RuntimeError('remote_unauthorized')
         if not 200<=response.status<300:raise RuntimeError('remote_response_rejected')
         if response.getheader('Content-Encoding','identity')!='identity':raise RuntimeError('encoded_response_denied')
         content=response.read(2*1024*1024+1)
@@ -51,19 +52,43 @@ def https_request(address,body=None,headers=None):
     finally:connection.close()
 
 
-def mcp_call(args,request=https_request):
-    # Explicitly implement the stable 2025-11-25 JSON response transport. No SSE,
-    # server-initiated capabilities, credentials or automatic retries are inherited.
+def events(data):
+    """JSON-RPC messages of a streamed (text/event-stream) MCP response."""
+    for block in data.decode('utf-8',errors='replace').replace('\r\n','\n').split('\n\n'):
+        payload='\n'.join(line[5:].lstrip(' ') for line in block.split('\n') if line.startswith('data:'))
+        if payload:
+            try:yield json.loads(payload)
+            except ValueError:raise RuntimeError('mcp_response_rejected') from None
+
+
+def mcp_call(args,request=https_request,state=None):
+    # Explicitly implement the stable 2025-11-25 transport. No server-initiated
+    # capabilities, ambient credentials or automatic retries are inherited. A
+    # connected service adds only the owner's own sign-in for that service.
+    url,auth,versions=args.get('url'),{},('2025-11-25',)
+    if args.get('connection')=='notion':
+        from tools.operations.connections import notion
+        url,versions=notion.MCP_URL,notion.VERSIONS
+        auth={'Authorization':'Bearer '+notion.bearer(state)}
     def rpc(body,headers=None):
-        data,received=request(args['url'],body,headers or {'Accept':'application/json, text/event-stream'})
+        data,received=request(url,body,{'Accept':'application/json, text/event-stream',**auth,**(headers or {})})
         if not data:return None,received
-        if 'application/json' not in received.get('content-type',''):raise RuntimeError('mcp_json_transport_required')
-        response=json.loads(data)
+        kind=received.get('content-type','')
+        if 'text/event-stream' in kind and auth:
+            # Notion may stream its answer; only the reply to this request is read.
+            response=next((item for item in events(data) if isinstance(item,dict) and 'id' in item and item.get('id')==body.get('id')),None)
+            if response is None:raise RuntimeError('mcp_response_rejected')
+        elif 'application/json' in kind:response=json.loads(data)
+        else:raise RuntimeError('mcp_json_transport_required')
         if not isinstance(response,dict) or response.get('jsonrpc')!='2.0' or 'method' in response or response.get('id')!=body.get('id') or 'error' in response:raise RuntimeError('mcp_response_rejected')
         return response.get('result'),received
-    init,received=rpc({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'nocheh','version':'0.2'}}})
-    if not isinstance(init,dict) or init.get('protocolVersion')!='2025-11-25':raise RuntimeError('mcp_protocol_unsupported')
-    headers={'MCP-Protocol-Version':'2025-11-25','Accept':'application/json, text/event-stream'}
+    try:init,received=rpc({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':versions[0],'capabilities':{},'clientInfo':{'name':'nocheh','version':'0.2'}}})
+    except RuntimeError as error:
+        # A refused sign-in on the first request means nothing reached the tool.
+        if auth and str(error)=='remote_unauthorized':raise ValueError('notion_reconnect_needed') from None
+        raise
+    if not isinstance(init,dict) or init.get('protocolVersion') not in versions:raise RuntimeError('mcp_protocol_unsupported')
+    headers={'MCP-Protocol-Version':init['protocolVersion'],'Accept':'application/json, text/event-stream'}
     session=received.get('mcp-session-id')
     if session:
         if not re.fullmatch(r'[\x21-\x7e]{1,256}',session):raise RuntimeError('mcp_session_invalid')
@@ -71,7 +96,7 @@ def mcp_call(args,request=https_request):
     rpc({'jsonrpc':'2.0','method':'notifications/initialized'},headers)
     operation={'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}} if args.get('operation')=='list' else {'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':args['tool'],'arguments':args['input']}}
     result,_=rpc(operation,headers)
-    return {'response':result,'protocol':'2025-11-25'}
+    return {'response':result,'protocol':init['protocolVersion']}
 
 
 def workspace(state,profile):
@@ -96,7 +121,12 @@ def sandbox_command(state,action,name):
 
 def execute(state,action,request=https_request,run=subprocess.run,container_name=None):
     args=action['arguments']
-    if action['kind']=='mcp':return mcp_call(args,request)
+    if action['kind']=='mcp':
+        try:return mcp_call(args,request,state)
+        except ValueError as error:
+            # The Notion sign-in is missing or must be renewed: nothing was sent.
+            if str(error) in ('notion_not_connected','notion_reconnect_needed','notion_unavailable'):return {'exit_code':1,'error':str(error)}
+            raise
     body={'kind':action['kind'],'arguments':args}
     if action['kind']=='browser':
         data,headers=request(args['url'])

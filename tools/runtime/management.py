@@ -150,6 +150,15 @@ def dispatch(body):
             return provider_models(state, request.get('provider'), request.get('url'), request.get('key'))
         if operation == 'settings.save': return save(state, body['changes'], body['revision'])
         if operation == 'settings.apply': return apply(state)
+    if operation.startswith('notion.'):
+        # The owner's Notion sign-in; no answer ever carries a token.
+        from tools.operations.connections import notion
+        request = body.get('request') or {}
+        if operation == 'notion.status': return notion.status(state)
+        if operation == 'notion.start': return notion.start(state, request.get('redirect'))
+        if operation == 'notion.finish': return notion.finish(state, request.get('code'), request.get('state'))
+        if operation == 'notion.token': return notion.save_token(state, request.get('token'))
+        if operation == 'notion.disconnect': return notion.disconnect(state)
     if operation == 'telegram.directory':
         from tools.operations.archive.telegram_directory import directory
         return directory(state)
