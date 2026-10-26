@@ -245,8 +245,9 @@ class Handler(BaseHTTPRequestHandler):
             if ASSISTANT is None:raise RuntimeError('assistant_not_started')
             return ASSISTANT.call(body)
         if self.path == '/internal/status':
-            from services.hermes.request_boundary import FAILURES, COUNTS
-            return {'guard_failures':list(FAILURES),'model_boundary':dict(COUNTS),'chat':dict(CHAT_STATUS),'errors':list(ERRORS)}
+            from services.hermes.request_boundary import FAILURES, FAILURE_DETAILS, COUNTS
+            return {'guard_failures':list(FAILURES),'guard_failure_details':list(FAILURE_DETAILS),'model_boundary':dict(COUNTS),
+                    'chat':dict(CHAT_STATUS),'errors':list(ERRORS)}
         if self.path == '/internal/file':
             from telegram import Bot
             bot_token = environment_secret('TELEGRAM_BOT_TOKEN', required=False)
