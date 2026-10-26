@@ -126,8 +126,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // Task lists: the owner's private chat reaches every list, a project's chat only its own.
     if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,taskQuery(url.searchParams)));
     if(req.method==='POST'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatCreate(principal,await readJson(req,64*1024)));
-    const chatTask=path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})$/);
-    if(req.method==='POST'&&chatTask)return json(res,200,await s.tasks.chatUpdate(principal,chatTask[1]!,await readJson(req,64*1024)));
+    const chatTask=path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})(\/comments)?$/);
+    if(req.method==='GET'&&chatTask&&!chatTask[2])return json(res,200,await s.tasks.chatGet(principal,chatTask[1]!));
+    if(req.method==='POST'&&chatTask)return json(res,200,await (chatTask[2]?s.tasks.chatComment:s.tasks.chatUpdate).call(s.tasks,principal,chatTask[1]!,await readJson(req,64*1024)));
     // The owner may read all of their own data from a live owner-private turn.
     // Fixed read views map onto existing owner handlers; no mutation is reachable.
     const ownerView=path.match(/^\/v1\/owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)$/);

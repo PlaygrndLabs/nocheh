@@ -10,8 +10,8 @@ import {restoredInactive,storageHeartbeat} from './lifecycle.js';
 import type {StorageServices} from './services.js';
 
 export function startStorageCapture(s:StorageServices,config:Settings,interval=1000) {
-  const status:Record<string,string>={capture:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting'};
-  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,timingsExpired=0;
+  const status:Record<string,string>={capture:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting'};
+  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,timingsExpired=0,remindersChecked=0;
   const jobs:Record<string,()=>Promise<unknown>>={
     capture:()=>drainSourceSpool(s.capture,config.dataDir),
     reconciliation:()=>s.capture.reconcile(),
@@ -27,6 +27,8 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     heartbeat:()=>storageHeartbeat(s.stores,config.service),
     // Stage timings are diagnostics with the same bounded retention as workflow history.
     timings:async()=>{if(Date.now()-timingsExpired<3600000)return;await expireStageTimings(s.stores.control);timingsExpired=Date.now();},
+    // Task reminders that are due go to the owner's private chat; a full batch is followed by the next one at once.
+    reminders:async()=>{if(Date.now()-remindersChecked<15000)return;if(await s.tasks.remind()<20)remindersChecked=Date.now();},
   };
   const stop=startLoops(Object.fromEntries(Object.entries(jobs).map(([stage,run])=>[stage,async()=>{
     if(restoredInactive(config.dataDir)){status[stage]='inactive';return;}

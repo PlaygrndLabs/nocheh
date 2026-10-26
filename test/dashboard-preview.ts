@@ -17,7 +17,7 @@ if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_
 const pool=new pg.Pool(),sessions=new DashboardSessions(),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
 await initialize(pool);
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
-await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_tasks');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);
+await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);
 // Two synthetic projects, each with its own list beside the personal one.
 const garden='9'.repeat(64),studio='8'.repeat(64);
 for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
@@ -29,7 +29,12 @@ const tasks=new TaskRepository(pool,async()=>{throw new HttpError(403,'owner_pri
 await tasks.create(taskOwner,{operation_id:'preview-1',title:'Book the Iceland flights',notes:'Window seats if possible.',group:'-10042/topic/7',tags:['Travel'],due_on:new Date(Date.now()+3*864e5).toISOString().slice(0,10)});
 await tasks.create(taskOwner,{operation_id:'preview-2',title:'Send the garden supplier the measurements',scope:garden,tags:['Suppliers'],people:['1'.repeat(64)]});
 await tasks.create(taskOwner,{operation_id:'preview-3',title:'Book a dentist checkup',tags:['Health','Family']});
-await tasks.create(taskOwner,{operation_id:'preview-4',title:'Draft the launch announcement',scope:studio,tags:['Marketing'],group:'-10042',people:['1'.repeat(64),'d1'.repeat(32)]});
+const announcement=await tasks.create(taskOwner,{operation_id:'preview-4',title:'Draft the launch announcement',scope:studio,tags:['Marketing'],group:'-10042',people:['1'.repeat(64),'d1'.repeat(32)],
+  status:'doing',priority:3,assignees:['d1'.repeat(32)],notes:'**Tone:** warm and short.\n\n- Mention the new studio\n- Link the booking page',due_on:new Date(Date.now()+864e5).toISOString().slice(0,10),due_time:'10:00'});
+await tasks.create(taskOwner,{operation_id:'preview-5',title:'Pick the photos',parent:announcement.id});
+await tasks.create(taskOwner,{operation_id:'preview-6',title:'Check the booking page works',scope:studio,status:'waiting',blocked_by:[announcement.id]});
+await tasks.create(taskOwner,{operation_id:'preview-7',title:'Pay the rent',tags:['Money'],priority:2,repeat:{every:1,unit:'month'},due_on:new Date().toISOString().slice(0,10)});
+await tasks.comment(taskOwner,announcement.id,{operation_id:'preview-comment',text:'Devon sends the photos on Friday.'});
 const client=await pool.connect();try{
  for(let i=0;i<90;i++){
   const family=(['browser','imports','tools','telegram','honcho','memory_review','preparation'] as const)[i%7]!;
@@ -430,6 +435,9 @@ const server=createServer((req,res)=>{void(async()=>{
   const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);
   if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
+  if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
+  const taskRead=route.match(/^\/tasks\/([a-f0-9]{64})$/);
+  if(taskRead)return json(res,200,await tasks.get(taskOwner,taskRead[1]!));
   if(route==='/projects')return json(res,200,{projects:memoryProjects,next:null});
   if(route==='/projects/assignments')return json(res,200,{assignments,next:null});
   const projectContext=route.match(/^\/projects\/([a-f0-9]{64})\/context$/);
@@ -469,8 +477,11 @@ const server=createServer((req,res)=>{void(async()=>{
   const factRevoke=route.match(/^\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/),ownGrant=factRevoke&&factGrants.find(g=>g.id===factRevoke[1]);
   if(ownGrant){if(ownGrant.revision!==body.expected_revision||ownGrant.state!=='active')throw new HttpError(409,'memory_fact_grant_changed');ownGrant.state='revoked';ownGrant.revision++;return json(res,200,{id:ownGrant.id,state:'revoked',revision:ownGrant.revision});}
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
-  const taskChange=route.match(/^\/tasks\/([a-f0-9]{64})$/);
-  if(taskChange)return json(res,200,await tasks.update(taskOwner,taskChange[1]!,body));
+  if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
+  if(route==='/tasks/archive-finished')return json(res,200,await tasks.archiveFinished(taskOwner,body));
+  const taskChange=route.match(/^\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
+  if(taskChange)return json(res,200,await (taskChange[2]==='comments'?tasks.comment(taskOwner,taskChange[1]!,body):taskChange[2]==='delete'?tasks.remove(taskOwner,taskChange[1]!)
+    :tasks.update(taskOwner,taskChange[1]!,body)));
   if(route==='/projects'){const prior=body.id?memoryProjects.find(p=>p.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'project_revision_conflict');
    if(!String(body.name??'').trim()||!['active','archived'].includes(body.state))throw new HttpError(400,'invalid_project');
    const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2)};Object.assign(saved,{name:String(body.name).trim(),description:String(body.description??''),state:body.state,revision:(prior?.revision??0)+1});if(!prior)memoryProjects.push(saved);return json(res,200,saved);}
