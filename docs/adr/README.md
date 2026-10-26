@@ -40,7 +40,8 @@ Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instru
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
 Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
-superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md).
+superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md);
+reply runs not refused for worker capacity: [0169](0169-reply-runs-are-not-refused-for-worker-capacity.md).
 Primary ingestion before new native notes:
 [0088](0088-primary-ingestion-before-native-note-review.md).
 Reply admission and Honcho derivation: [0080](0080-reply-admission-and-honcho-derivation.md).
