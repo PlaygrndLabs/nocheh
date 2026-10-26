@@ -76,6 +76,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'One “name: text” line each for the buttons, the result added to a decided card, and the short notices after a press. A line you remove keeps its default.',
   },
   {
+    key: 'tasks.reminder',
+    title: 'Task reminder',
+    hint: 'Sent to your private chat when a task reminder is due. {title} is the task, {due} its due day, {list} its project and {notes} its notes. A line whose value is missing is left out.',
+  },
+  {
     key: 'guard.secret_check',
     title: 'Secret check',
     hint: 'Finds passwords and keys before anything is stored. Keep its JSON reply format, or the check fails and messages wait.',
