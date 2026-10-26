@@ -493,6 +493,10 @@ not yet run on the owner's installation:
   [checks](services/hermes/test_profile_history.py)). Hermes background
   requests refused by the privacy guard are now recorded with their method,
   host, path and query names, without values, to find and fix their source.
+  The 184-second wait in test 3 was Inngest refusing the reply's run because
+  the pipeline worker's four request slots were full during background work
+  after a memory change, then retrying it with backoff; the worker now accepts
+  eight ([decision](docs/adr/0169-reply-runs-are-not-refused-for-worker-capacity.md)).
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 

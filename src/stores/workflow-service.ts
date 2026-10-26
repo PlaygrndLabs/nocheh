@@ -2,7 +2,7 @@ import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import type {Settings} from '../config.js';
 import type {RuntimeCall} from '../runtime.js';
-import {connectWorkflows,workflowClient} from '../workflows/client.js';
+import {connectWorkflows,pipelineWorkerConcurrency,workflowClient} from '../workflows/client.js';
 import {workflowFunctions} from '../workflows/engine.js';
 import {observation,type WorkflowOperation} from '../workflows/pipeline.js';
 import {registerWorker,type WorkflowFamily} from '../workflows/store.js';
@@ -22,7 +22,8 @@ export function startStorageWorkflows(s:StorageServices,config:Settings,call:Run
   };
   const service=superviseConnection(async()=>{
     const client=workflowClient('pipeline');
-    return connectWorkflows('pipeline',client,workflowFunctions(client,s.stores.control,operations,backgroundFamilies(Object.keys(operations) as WorkflowFamily[])));
+    return connectWorkflows('pipeline',client,workflowFunctions(client,s.stores.control,operations,backgroundFamilies(Object.keys(operations) as WorkflowFamily[])),
+      undefined,pipelineWorkerConcurrency);
   },async()=>{
     await registerWorker(s.stores.control,'pipeline',Object.keys(operations) as WorkflowFamily[]);
     await storageHeartbeat(s.stores,'workflow-pipeline');
