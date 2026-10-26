@@ -429,6 +429,19 @@ not yet run on the owner's installation:
   [check](test/store-tasks.test.ts), [browser check](test/dashboard-pages.browser.mjs)).
   Live check pending: ask Nocheh in a project's group to add a task, and see it
   only in that project's list.
+- Tasks like a Notion table (October 26): the owner asked for a task
+  structure that covers all the domains of Notion and other task managers so
+  it does not change later, and chose everything plus a board and Today.
+  Statuses, priority, start and due times, repeats, Telegram reminders,
+  subtasks, dependencies, assignees, manual order, custom columns, comments,
+  history, attachments, Markdown notes, archive and trash, and outside IDs;
+  Today, Upcoming and Board views; Settings › Tasks
+  ([decision](docs/adr/0167-tasks-like-a-notion-table.md),
+  [check](test/store-tasks.test.ts), [browser check](test/dashboard-pages.browser.mjs),
+  [tool check](services/hermes/test_knowledge_tools.py)). The first start drops
+  existing tasks. Live check pending: set a reminder a few minutes ahead from
+  chat and see it arrive once in the private chat. Later: calendar view and
+  saved views.
 - Release test 4 (October 20) passed on the owner's installation. A private
   message stating a synthetic locker code got one reply. Hiding it and
   Nocheh's reply made a later question answer once without the code; the code
