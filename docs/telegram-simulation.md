@@ -157,7 +157,10 @@ the current user turn of a request that offers Nocheh tools: `[[search:q]]`,
 answer from its actual result; `[[context:marker]]` reports whether a marker
 appears anywhere in the request except the current turn; `[[long:n]]`,
 `[[silent]]` and `[[empty-once:key]]` produce long, `[NO_REPLY]` and one blank
-answer. Other model traffic keeps the deterministic behaviour above. The mock's
+answer. `[[turn:marker]]` reports whether a marker appears in the current turn
+(unaddressed group messages travel there), `[[tool:nocheh_x {json}]]` calls any
+Nocheh tool with those arguments and `[[after:silent]]` makes the answer after a
+tool call `[NO_REPLY]`. Other model traffic keeps the deterministic behaviour above. The mock's
 `sendMessage` fault may set `parameters: {"deliver": true}` with a 5xx code:
 the message is accepted but the bot observes only a gateway failure.
 Directive-driven tool use tests pipeline, isolation and effects, not model
@@ -178,6 +181,48 @@ increments under the shared Git lock without activating the operating services.
 Carry unrelated evidence forward with its original revision and limitations.
 
 </execution>
+
+<full_tester>
+
+The [full tester](../tools/acceptance/full_test.py) runs every step above as one
+command that needs nothing from the owner:
+`python3 -m tools.acceptance.full_test [--keep] [--only <scenario>...]`. It
+starts a new synthetic installation with a localhost dashboard relay, connects
+the fake Telegram, runs the scenario list above and then the
+[product scenarios](../tools/acceptance/product_scenarios.py), opens every
+dashboard page in a browser and writes `report.md` and `result.json` with
+plain-English check names under `data/acceptance/results/full-<time>/`. It
+removes the fixture afterwards unless `--keep` is given; `--directory` reuses a
+kept fixture and `--skip-existing` runs only the product scenarios. The owner
+allowed it to run beside the live installation (2026-10-26): it never reads the
+live state, credentials or volumes and never stops the live stack.
+
+The fake Telegram plays every person. It stores inline keyboards, edits cards
+with `editMessageText`, and answers `answerCallbackQuery` only for button
+presses the tester injected, so approval cards are pressed like a phone would.
+Product scenarios cover allowed members, addressing by name, unaddressed
+messages shown once to the next reply, the fixed reply for people not allowed,
+approval cards with Approve and Reject in private chat, same-group posts,
+member cards in their own group, owner review when the member is not allowed
+in the destination, owner group-to-own-private-chat, group-to-group cards,
+hide and unhide carrying the conversation, reactions keeping the group name,
+learning reaching Honcho, Inbox person cards (one per new name, none for the
+owner), a Telegram Desktop export with a topic, a file and learning, tasks
+from chat with a reminder, status and board, tasks staying out of unrelated
+groups, and defaults (history kept forever, Notion off). Dashboard calls sign
+in through the preview relay like the browser
+([client](../tools/acceptance/owner_dashboard.py)). The
+[page check](../tools/acceptance/dashboard_pages.mjs) runs in the
+[tester browser image](../deploy/acceptance/browser.Dockerfile) on the fixture
+network and fails a page on a missing heading, an uncaught error, a console
+error, an owner API answer of 500 or more, or an error alert.
+
+Build the browser image once with `docker build -t nocheh-tester-browser:local
+-f deploy/acceptance/browser.Dockerfile deploy/acceptance`. Scripted answers
+test Nocheh's wiring and rules, not model judgement; Telegram's official test
+environment is a later step.
+
+</full_tester>
 
 <real_model_evaluation>
 
