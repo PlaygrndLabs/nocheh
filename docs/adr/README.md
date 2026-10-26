@@ -32,6 +32,7 @@ Requesters reviewing their own cross-group messages: [0161](0161-requesters-revi
 Approval cards as the whole answer, with linked group and topic names: [0165](0165-approval-card-is-the-answer-and-links-its-place.md).
 A chat following its own message requests across turns: [0166](0166-a-chat-follows-its-own-message-requests.md).
 Tasks like a Notion table, with statuses, priority, dates, repeats, reminders, subtasks, columns, history, a board and Today: [0167](0167-tasks-like-a-notion-table.md).
+Notion through its MCP server, used only from the owner's private chat: [0171](0171-notion-through-its-mcp-server.md).
 The Telegram mini app: [0162](0162-telegram-mini-app.md).
 A chat's conversation carrying into new guard epochs: [0163](0163-chat-conversation-carries-into-new-guard-epochs.md), with superseded profiles removed once idle in [0168](0168-superseded-epoch-profiles-are-removed.md).
 Task lists, links to a group and people, and tags, with project chats reaching their own list: [0164](0164-task-lists-links-and-tags.md).

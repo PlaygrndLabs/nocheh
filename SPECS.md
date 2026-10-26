@@ -335,6 +335,7 @@ acceptance evidence, and proposals live in [TASK.md](TASK.md).
 - Nocheh has a Telegram mini app for managing Nocheh from Telegram. The task manager is in this mini app too. The mini app is another front end on the same owner API as the dashboard, not a separate admin system, and the dashboard remains. Only the owner's Telegram account can open it.
 - The mini app opens from the menu button of the owner's private chat with Nocheh and shows Home, Inbox (with its approvals) and Tasks. Settings and System stay on the dashboard. The mini app is reached at an https address on the owner's own domain; the rest of the dashboard is never reachable from outside the owner's computer.
 - Notion through MCP is an additional and optional option for tasks, off by default. Nocheh's own task manager is the main task list.
+- The owner connects Notion from the dashboard by signing in to Notion (or, on a Business plan, pasting a Notion MCP token), then turns it on. Nocheh uses Notion only from the owner's private chat, never from groups. The owner chooses which Notion calls ask for approval first: reads run and changes ask (the default), everything asks, or nothing asks. Disconnecting makes Nocheh forget the sign-in.
 
 </area>
 
