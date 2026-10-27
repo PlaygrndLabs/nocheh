@@ -594,6 +594,16 @@ itself at startup.
 
 <verification>
 
+- Settings apply followed to its end (2026-10-27, revision 5f1010e,
+  [ADR-0178](docs/adr/0178-settings-apply-is-followed-to-its-end.md)): the
+  full tester on the development machine, beside the live stack, passed the new
+  `settings_apply_is_followed_to_the_end` scenario (a reload mid-apply sees
+  it, the apply completes with its steps, settings in use afterwards), the
+  lingering-turn check and every dashboard page. The browser test passes
+  20/20, including a slow apply with a reload and an apply the dashboard
+  lost. The fixture's apply recreates no container, so the slow path is
+  covered by the browser test; 9b8d61a only lengthens the restart timeout.
+
 - Full end-to-end tester (2026-10-27, revision c650887, cloud synthetic
   installation): `python3 -m tools.acceptance.full_test` passes all 59 checks
   in one fresh run: the 38 earlier simulator scenarios, 19 product scenarios
