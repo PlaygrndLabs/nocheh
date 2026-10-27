@@ -19,6 +19,11 @@ had the same fate after the query trimming changed.
 
 <decision>
 
+- A queued job that has not started when an epoch changes keeps its id,
+  workflow and place in the queue: when its turn comes, its inputs are
+  prepared again under the current binding and, if they are unchanged apart
+  from the binding and rule wording, the job is rebound and runs, as ADR-0173
+  does for native reviews. Changed inputs close the workflow as superseded.
 - After each epoch, the archive sweep's per-source `memory_review` step also
   looks at the source's newest interpretation job for each memory audience of
   the current installation generation. When that job is bound to an earlier
@@ -35,8 +40,9 @@ had the same fate after the query trimming changed.
 </decision>
 
 <consequences>
-- A message's learning is no longer lost to an epoch change; it runs at most
-  once more per epoch it is stopped by.
+- A message's learning is no longer lost to an epoch change, and a busy
+  learning run that advances the epoch no longer cuts the rest of the queue
+  short.
 - A job stopped after Honcho answered asks Honcho again, since its saved answer
   belongs to an earlier binding.
 - Stopped learning leaves one job per message and audience instead of one per
