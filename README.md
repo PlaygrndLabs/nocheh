@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/nocheh-logo-dark.svg" />
+    <img src="docs/assets/logo/nocheh-logo-light.svg" alt="Nocheh" width="220" />
+  </picture>
+</p>
+
 # Nocheh: a personal AI brain that you own
 
 **Your data, your memory and the reasoning over them, owned by you.** Nocheh keeps what you and the people around you say in an archive you own, turns it into memory, and reasons over it to answer, organize and act for you. Chat apps, the agent runtime and the memory engine are replaceable parts around it.
