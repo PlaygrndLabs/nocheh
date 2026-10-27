@@ -25,7 +25,9 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context)(?::([^\]]*))?\]\]')
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn)(?::([^\]]*))?\]\]')
+    # Any Nocheh tool with exact JSON arguments: [[tool:nocheh_tasks {"action":"list"}]].
+    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+)\s+(\{.*?\})\]\]', re.S)
     TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
              'owner': 'nocheh_owner_read'}
 
@@ -53,21 +55,33 @@ class ScriptedBrain:
             return None
         current = self.text(messages[users[-1]].content)
         match = self.DIRECTIVE.search(current)
-        if not match:
+        tool = self.TOOL.search(current)
+        if not match and not tool:
             return None
         if self.canary in '\n'.join(self.text(message.content) for message in body.messages):
             self.counts['raw_canary_outside_detector'] += 1
             return {'error': 'unguarded_fixture_canary'}
-        kind, argument = match[1], (match[2] or '').strip()
         self.counts['chat'] += 1
         later = messages[users[-1] + 1:]
+        # [[after:silent]] makes the answer after a tool result [NO_REPLY], as
+        # Nocheh asks once an approval card already answers the request.
+        silent_after = '[[after:silent]]' in current
+        if tool:
+            name, results = tool[1], [message for message in later if message.role == 'tool']
+            if results:
+                result = self.text(results[-1].content)
+                self.record(directive='tool', argument=tool[2], phase='final', tool=name, result=result[:20000])
+                return {'content': '[NO_REPLY]' if silent_after else '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
+            self.record(directive='tool', argument=tool[2], phase='call', tool=name)
+            return {'tool': name, 'arguments': json.loads(tool[2])}
+        kind, argument = match[1], (match[2] or '').strip()
         if kind in self.TOOLS:
             results = [message for message in later if message.role == 'tool']
             if results:
                 name = self.TOOLS[kind]
                 result = self.text(results[-1].content)
                 self.record(directive=kind, argument=argument, phase='final', tool=name, result=result[:20000])
-                return {'content': '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
+                return {'content': '[NO_REPLY]' if silent_after else '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
             if kind == 'search':
                 arguments = {'mode': 'text', 'query': argument, 'limit': 5}
             elif kind == 'recall':
@@ -94,6 +108,11 @@ class ScriptedBrain:
                 words.append('بخش' + str(index))
             self.record(directive=kind, argument=argument, phase='final', words=index)
             return {'content': ' '.join(words)}
+        if kind == 'turn':
+            # Whether the marker reaches the model in the current turn itself, outside this directive.
+            present = bool(argument) and argument in current.replace(match[0], '')
+            self.record(directive=kind, argument=argument, phase='final', present=present)
+            return {'content': '[brain] turn ' + argument + (' present' if present else ' absent')}
         if kind == 'context':
             earlier = '\n'.join(self.text(message.content) for index, message in enumerate(body.messages)
                                 if message is not messages[users[-1]])
@@ -172,6 +191,13 @@ def provider():
                 if not isinstance(context, dict) or 'observations' not in context or 'space' not in context:
                     continue
                 observation = context['observations'][0]
+                if 'PERSONMARK' in (observation['value'].get('text') or ''):
+                    # A real model may suggest the owner by name; Nocheh must drop
+                    # that and keep one card per new name.
+                    source = observation['source']['id']
+                    return json.dumps({'interpretations': [], 'entity_claims': [], 'entity_suggestions': [
+                        {'kind': 'person', 'name': 'Shirin', 'reason': 'A friend the owner talked with.', 'evidence_ids': [source]},
+                        {'kind': 'person', 'name': 'Synthetic 123', 'reason': 'The person who wrote this.', 'evidence_ids': [source]}]})
                 quote = 'In this chat, the telescope mark means reviewed.'
                 if quote in (observation['value'].get('text') or ''):
                     source = observation['source']['id']
