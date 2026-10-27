@@ -399,6 +399,36 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   await page.close();
 });
 
+test('the memory search model can be changed after confirming a memory rebuild', async () => {
+  const {page, problems} = await open('settings?view=models');
+  const model = page.locator('#embedding-model');
+  await model.locator('option', {hasText: 'text-embedding-3-large'}).waitFor({state: 'attached'});
+  assert.equal(await model.locator('option[disabled]').count(), 0);
+  await model.selectOption('text-embedding-3-large');
+  await page.getByText(/Saving rebuilds long-term memory with text-embedding-3-large/).waitFor();
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  // Cancelling the confirmation saves nothing.
+  await bar.getByRole('button', {name: 'Save'}).click();
+  let dialog = page.getByRole('dialog', {name: 'Switch memory search to text-embedding-3-large?'});
+  await dialog.getByText(/learns again from your saved messages/).waitFor();
+  await dialog.getByRole('button', {name: 'Cancel'}).click();
+  await dialog.waitFor({state: 'detached'});
+  await bar.getByText('1 unsaved change').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  dialog = page.getByRole('dialog', {name: 'Switch memory search to text-embedding-3-large?'});
+  await dialog.getByRole('button', {name: 'Switch and rebuild'}).click();
+  await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor();
+  await bar.getByText('No unsaved changes').waitFor();
+  // Back to the model memory is stored with needs no rebuild and no question.
+  await model.selectOption('text-embedding-3-small');
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Saved and applied.'}).nth(0).waitFor();
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.equal(await page.getByRole('dialog').count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a task is added, edited, finished and reopened from the Tasks page', async () => {
   const {page, problems} = await open('tasks');
   const title = 'Renew the passport ' + Date.now();

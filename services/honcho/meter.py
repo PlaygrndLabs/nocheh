@@ -135,6 +135,11 @@ class Ledger:
         else:
             db.execute('UPDATE calls SET settlement_version=1 WHERE id=?',(call,))
 
+    def switch_embedding(self, embedding):
+        """After a confirmed memory rebuild Honcho embeds with another model; spending records stay."""
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO embedding_route VALUES(1,?,?,?)',(embedding.provider,embedding.model,embedding.dimensions))
+
     def enable_monthly(self):
         # An explicit post-pilot cutover, persisted once; restart cannot reset it.
         with self.connect() as db:
