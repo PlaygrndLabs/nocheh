@@ -334,7 +334,9 @@ def meter():
     token = Path('/state/internal_token').read_text().strip()
     service = Egress(Ledger('/ledger/budget.sqlite'), token, 'synthetic-no-provider',
         prepare=ArchivePreparation('http://nocheh-app:8780', token),
-        embedding=replace(embeddings({}), url=FIXTURE + '/embeddings'),
+        # The memory search model follows the environment, as meter.env sets it in production.
+        embedding=replace(embeddings({'NOCHEH_EMBEDDING_MODEL': os.environ.get('NOCHEH_EMBEDDING_MODEL') or 'text-embedding-3-small'}),
+                          url=FIXTURE + '/embeddings'),
         reasoning_key='synthetic-fixture-model-key')
     # The meter admits only HTTPS reasoning addresses; this fixture process
     # alone points it at the local model fixture.

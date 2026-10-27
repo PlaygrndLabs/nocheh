@@ -25,6 +25,7 @@ Honcho retrying a memory preparation outage: [0174](0174-memory-preparation-outa
 Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), implemented by
 [0115](0115-honcho-session-revisions.md).
 Re-running or replacing Honcho memory: [0153](0153-owner-reruns-and-replaces-honcho-memory.md).
+Changing the memory search model rebuilds Honcho memory: [0178](0178-memory-search-model-change-rebuilds-memory.md).
 Message edits in Honcho memory: [0154](0154-message-edits-replace-honcho-writes.md).
 Albums answered once: [0155](0155-albums-answered-once.md).
 Desktop exports sharing proven Telegram identities: [0156](0156-desktop-exports-share-proven-telegram-identities.md). Desktop forum exports keeping their topics: [0171](0171-desktop-forum-messages-keep-their-topics.md).

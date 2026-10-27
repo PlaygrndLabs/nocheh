@@ -621,6 +621,8 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
   const mainListing = useProviderModels(providers.find(p => p.id === main));
   const embeddingProvider = settings.value('NOCHEH_EMBEDDING_PROVIDER') || 'openai';
   const locked = data.models?.embedding_locked;
+  const embeddingModel = settings.value('NOCHEH_EMBEDDING_MODEL');
+  const rebuilding = data.models?.embedding_rebuild;
   const providerOptions = (blank: string) => (
     <>
       <option value="">{blank}</option>
@@ -702,19 +704,23 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             label="Model"
             htmlFor="embedding-model"
             hint={
-              locked
-                ? `Memory already uses ${locked}. Changing it needs a memory rebuild.`
-                : 'Can be changed until memory stores its first search data.'
+              !locked
+                ? 'Memory has no search data yet, so changing it needs nothing else.'
+                : rebuilding && rebuilding === settings.saved('NOCHEH_EMBEDDING_MODEL') && embeddingModel === rebuilding
+                  ? `Saved. Long-term memory is rebuilt with ${rebuilding} when this applies.`
+                  : embeddingModel !== locked
+                    ? `Memory is stored with ${locked}. Saving rebuilds long-term memory with ${embeddingModel} from your saved messages.`
+                    : `Memory is stored with ${locked}. Choosing another model rebuilds long-term memory.`
             }
           >
             <Select
               id="embedding-model"
-              value={settings.value('NOCHEH_EMBEDDING_MODEL')}
+              value={embeddingModel}
               disabled={busy}
               onChange={e => settings.set('NOCHEH_EMBEDDING_MODEL', e.target.value)}
             >
-              {(data.models?.embedding ?? [settings.value('NOCHEH_EMBEDDING_MODEL')]).map(model => (
-                <option key={model} value={model} disabled={!!locked && model !== locked}>
+              {(data.models?.embedding ?? [embeddingModel]).map(model => (
+                <option key={model} value={model}>
                   {model}
                 </option>
               ))}
