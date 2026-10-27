@@ -19,7 +19,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
-import {notAllowedReply,ownerPrompts} from '../prompts.js';
+import {notAllowedPrivateReply,notAllowedReply,ownerPrompts} from '../prompts.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -258,7 +258,7 @@ export class TelegramDispatchRepository {
       // their album's turn; any other outcome is the last turn, already in Hermes' history.
       const state=states.get(row.id);
       if(!state||state.state==='suppressed'&&state.error_code==='album_member')continue;
-      if(state.state!=='suppressed'||!['not_addressed','conversation_not_selected'].includes(state.error_code))break;
+      if(state.state!=='suppressed'||!['not_addressed','not_allowed','conversation_not_selected'].includes(state.error_code))break;
       try {
         if(await this.access.space((await this.archive.captured(row.id)).reference)!==space)continue;
         const guarded=await this.sources.read(principal,row.id),text=typeof guarded.event.text==='string'&&guarded.event.text?guarded.event.text.slice(0,1000):'[A message without text]';
@@ -296,22 +296,36 @@ export class TelegramDispatchRepository {
     return parts;
   }
   /** Someone not allowed to use Nocheh in an allowed group gets the owner's fixed
-   * reply, without a model, when they address it; anyone else stays quiet. */
+   * reply, without a model, when they address it; anyone but the owner who writes
+   * privately gets the owner's private fixed reply, at most once a day. Anyone
+   * else stays quiet. */
   private async refuse(id:string,key:string,chat:string,payload:any) {
-    const policy=this.access.policy(),message=payload?.message,sender=message?.from;
-    if(!policy.enabled||!message||!['group','supergroup'].includes(message.chat?.type)||!policy.group_ids.includes(chat)||
-      !sender?.id||sender.is_bot===true||String(sender.id)===policy.owner_id)return;
+    const policy=this.access.policy(),message=payload?.message,sender=message?.from,personal=message?.chat?.type==='private';
+    if(!policy.enabled||!message||!sender?.id||sender.is_bot===true||String(sender.id)===policy.owner_id)return;
+    if(personal?String(sender.id)!==chat:!['group','supergroup'].includes(message.chat?.type)||!policy.group_ids.includes(chat))return;
+    const texts=await ownerPrompts(this.control),common={event_id:id,chat_id:chat,message_id:String(message.message_id),user_id:String(sender.id)};
+    if(personal) {
+      try{await this.call('telegram.refusal',{...common,private:true,reply:texts['telegram.not_allowed_private']??notAllowedPrivateReply},15000);}
+      catch{/* Best effort: the message stays archived either way. */}
+      return;
+    }
     const botId=/^telegram:(\d+):update:/.exec(key)?.[1]??'',addressing=groupAddressing(payload,botId);
-    const text=(await ownerPrompts(this.control))['telegram.not_allowed']??notAllowedReply;
-    try{await this.call('telegram.refusal',{event_id:id,chat_id:chat,message_id:String(message.message_id),
+    try{await this.call('telegram.refusal',{...common,
       ...(message.is_topic_message===true&&Number.isSafeInteger(message.message_thread_id)?{topic:String(message.message_thread_id)}:{}),
-      user_id:String(sender.id),group_addressing:addressing,text:typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null,reply:text},15000);}
+      group_addressing:addressing,text:typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null,
+      reply:texts['telegram.not_allowed']??notAllowedReply},15000);}
     catch{/* Best effort: the message stays archived either way. */}
   }
   private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
-    if(!scope){await this.refuse(source.id,original.source_key,original.scope,payload);return observation('skipped','admission');}
+    if(!scope) {
+      await this.refuse(source.id,original.source_key,original.scope,payload);
+      // Someone's own message that Nocheh may not answer them, as opposed to an
+      // edit, a reaction, a bot, or the owner writing in a chat they didn't select.
+      const sender=payload?.message?.from,refused=!!sender?.id&&sender.is_bot!==true&&String(sender.id)!==this.access.policy().owner_id;
+      return observation('skipped','admission',0,Date.now(),refused?'not_allowed':null);
+    }
     const space=await this.access.space(source);if(!space)return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
     const ready=await this.preparation.status(source.id);if(ready.state!=='completed')return ['retryable_failed','failed'].includes(ready.state)?ready:
       observation('waiting',ready.stage,0,ready.next_attempt,ready.waiting_reason);
@@ -485,7 +499,8 @@ export class TelegramDispatchRepository {
         }
         const attempt=row.attempts+1,built=await this.build(captured.reference,attempt,album?.state==='leader'?album.others:[]);
         if('state' in built) {
-          if(built.state==='skipped')await db.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[id]);
+          if(built.state==='skipped')await db.query("UPDATE dispatches SET state='suppressed',error_code=$2,updated_at=now() WHERE event_id=$1",
+            [id,built.waiting_reason==='not_allowed'?'not_allowed':'conversation_not_selected']);
           // Speech without usable text is a terminal preparation outcome. The
           // original stays archived; no reply is sent as if it were transcribed.
           if(built.state==='failed'&&built.stage==='transcription') {

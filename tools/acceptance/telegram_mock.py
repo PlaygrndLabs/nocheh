@@ -283,8 +283,18 @@ class TelegramMock:
             # ChatFullInfo requires these fields; they carry no fixture meaning.
             result={'accent_color_id':0,'max_reaction_count':11,**{key:value for key,value in chat.items() if key in ('id','type','title','username','is_forum')}}
         elif method=='sendChatAction':result=True
-        elif method in ('setMyCommands','setChatMenuButton'):result=True
-        elif method=='getMyCommands':result=[]
+        elif method=='setChatMenuButton':result=True
+        elif method in ('setMyCommands','deleteMyCommands','getMyCommands'):
+            # https://core.telegram.org/bots/api#setmycommands: one list per scope
+            # and language; an absent scope is the default scope.
+            scope=data.get('scope') or {'type':'default'};scope=json.loads(scope) if isinstance(scope,str) else scope
+            key=json.dumps([scope,data.get('language_code') or ''],sort_keys=True);menus=self.state.setdefault('commands',{})
+            if method=='setMyCommands':
+                commands=data.get('commands');commands=json.loads(commands) if isinstance(commands,str) else commands
+                if not isinstance(commands,list):return self.error(400,'Bad Request: invalid commands')
+                menus[key]=commands;result=True
+            elif method=='deleteMyCommands':menus.pop(key,None);result=True
+            else:result=menus.get(key,[])
         elif method=='getFile':
             file=self.state['files'].get(data.get('file_id'))
             if file is None:return self.error(400,'Bad Request: invalid file_id')

@@ -302,6 +302,19 @@ def captured_adapter_class():
         async def _start_webhook_mode(self, *args, **kwargs):
             raise RuntimeError('Nocheh durable capture currently requires native long polling')
 
+        async def _register_command_menu(self):
+            # Nocheh runs no native command: a slash command is ordinary text for
+            # the owner, and nobody else may use the bot. The native menu would
+            # list commands to everyone, so clear it in every scope it fills.
+            from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
+            if not self._bot:
+                return
+            for scope in (BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats):
+                try:
+                    await self._bot.delete_my_commands(scope=scope())
+                except Exception:
+                    pass  # Best effort: the next connect tries again.
+
         async def _build_ptb_requests(self):
             request, updates = await super()._build_ptb_requests()
             return instrument_request(request, self.capture), updates

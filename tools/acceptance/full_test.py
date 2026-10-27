@@ -60,6 +60,7 @@ TITLES = {
     'group_members': 'Set up allowed members', 'group_name_addresses': 'Groups: calling Nocheh by name',
     'unaddressed_messages_reach_next_reply': 'Groups: unaddressed messages inform the next reply',
     'not_allowed_person_gets_fixed_reply': 'People not allowed get the fixed reply',
+    'menu_shown_to_nobody': 'Nobody sees a command menu', 'stranger_in_private_gets_one_reply': 'A stranger in private: one fixed reply, nothing else',
     'owner_private_card_and_approve': 'Approval card in private chat, Approve button',
     'owner_private_card_reject': 'Approval card, Reject button', 'same_group_post_goes_right_away': 'Post in your own group needs no approval',
     'member_cross_group_card_in_origin': 'Member reviews their own message to another group',

@@ -1,6 +1,6 @@
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
-import type {AssistantPolicy} from '../assistant-policy.js';
+import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
 import {graphChatType,graphGroupLabel} from '../graph-labels.js';
 import {HttpError} from '../http.js';
 import {parentSpace,validateSpace} from '../spaces.js';
@@ -136,10 +136,24 @@ export class OwnerSupervisionRepository {
     return [...items.values()].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0);
   }
 
-  async conversations(principal:Reader,input:PageInput={}) {
+  /**
+   * Live chats with someone Nocheh doesn't serve that nothing of the owner's brought in: no import,
+   * project, sharing rule or setting. Their names are written by strangers, so the owner's own turns
+   * never see them listed; the dashboard still does.
+   */
+  async outsiders(policy:AssistantPolicy):Promise<Set<string>> {
+    const rows=(await this.stores.archive.query(`SELECT scope FROM events WHERE channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
+      AND scope ~ '^-?[1-9][0-9]{0,18}$' GROUP BY scope HAVING bool_and(origin='live')`)).rows;
+    const configured=new Set((await this.directory()).filter(item=>item.configured).map(item=>item.space_id));
+    return new Set(rows.map(row=>String(row.scope)).filter(scope=>!configured.has(scope)&&
+      outsideChat(policy,{origin:'live',channel:'telegram',kind:'telegram_update',scope})));
+  }
+
+  async conversations(principal:Reader,input:PageInput={},hidden=new Set<string>()) {
     admin(principal);const limit=pageLimit(input.limit),after=input.after??'',q=input.q??'';
     if(after)validateSpace(after);if(typeof q!=='string'||q.length>200)throw new HttpError(400,'invalid_conversation_query');
-    const query=q.toLocaleLowerCase(),all=(await this.directory()).filter(item=>!query||[item.space_id,item.name,item.parent_name].some(value=>value?.toLocaleLowerCase().includes(query)));
+    const query=q.toLocaleLowerCase(),all=(await this.directory()).filter(item=>!hidden.has(item.parent_space??item.space_id)&&
+      (!query||[item.space_id,item.name,item.parent_name].some(value=>value?.toLocaleLowerCase().includes(query))));
     const remaining=all.filter(item=>item.space_id>after),items=remaining.slice(0,limit);
     return {items,total:all.length,next_cursor:remaining.length>limit?items.at(-1)!.space_id:null,observed_at:new Date().toISOString(),state:'current' as const};
   }
