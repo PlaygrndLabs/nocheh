@@ -26,6 +26,9 @@ had the same fate after the query trimming changed.
   result, its learning is requested again under the current binding.
 - The request reuses a finished job with the same inputs, as before, so
   nothing finished is learned twice.
+- The source's never-started jobs (pending, no attempts) bound to an earlier
+  epoch are then deleted, since they can never run; their workflows close as
+  superseded. Jobs that already asked Honcho are kept.
 - Running and publishing jobs, current jobs, finished jobs, retired memory
   generations, withdrawn consent and unusable saved results are left alone.
 
@@ -36,6 +39,9 @@ had the same fate after the query trimming changed.
   once more per epoch it is stopped by.
 - A job stopped after Honcho answered asks Honcho again, since its saved answer
   belongs to an earlier binding.
+- Stopped learning leaves one job per message and audience instead of one per
+  epoch, and a renewed job can be the message's first learning, which is the
+  one that may suggest organization changes.
 - A query still too large after trimming is prepared again on later epochs
   without a model call.
 </consequences>
