@@ -29,7 +29,7 @@ test('closing workflow reasons pass the workflow data boundary',()=>{
   assert.throws(()=>safeMetadata(observation('failed','review',1,Date.now(),'unlisted_reason')));
 });
 
-test('a learning query fits Honcho\'s limit by trimming other evidence, then rules, then the trigger\'s payload',()=>{
+test('a learning query fits Honcho\'s limit by trimming other evidence, then rules, then the trigger\'s payload, then leaving out other evidence',()=>{
   const observation=(id:string,size:number)=>({source:{id,revision:1},value:{text:'Synthetic note '+id,payload:{padding:'p'.repeat(size)}},derivatives:[]});
   const rule=(index:number)=>({scope:'conversation',kind:'meaning',subject:'s'+index,conflict:false,text:'r'.repeat(400),selected:['v'+index],superseded:[]});
   const context=(trigger:number,other:number,rules:number)=>({source:{id:'trigger',revision:1},space:'synthetic',projects:[],entities:{} as any,limitations:[],
@@ -47,5 +47,15 @@ test('a learning query fits Honcho\'s limit by trimming other evidence, then rul
   const bare=parse(learningQuery('Instruction',context(12000,0,1)));
   assert.equal(bare.observations[0].value.payload,undefined);assert.equal(bare.observations[0].value.text,'Synthetic note trigger');
   assert.deepEqual(bare.rules,[]);assert.deepEqual(bare.limitations,['other_evidence_text_only','rules_omitted','trigger_text_only']);
+  // Many related messages that don't fit even as text are left out from the end; the instruction cites only those shown.
+  const crowded={...context(12000,0,1),observations:[observation('trigger',12000),...Array.from({length:30},(_,index)=>
+    ({source:{id:'other'+index,revision:1},value:{text:'t'.repeat(500)},derivatives:[]}))]};
+  let cited:string[]=[];
+  const omitted=learningQuery(ids=>{cited=ids;return 'Instruction '+ids.join(',');},crowded);
+  assert.ok(Array.from(omitted).length<=10000);
+  const kept=parse(omitted).observations.map((item:{source:{id:string}})=>item.source.id);
+  assert.ok(kept.length>1&&kept.length<31);assert.equal(kept[0],'trigger');assert.deepEqual(kept,crowded.observations.slice(0,kept.length).map((item:any)=>item.source.id));
+  assert.deepEqual(cited,kept);
+  assert.deepEqual(parse(omitted).limitations,['other_evidence_text_only','rules_omitted','trigger_text_only','other_evidence_omitted']);
   assert.throws(()=>learningQuery('i'.repeat(10001),context(0,0,0)),{code:'learning_query_limit'});
 });

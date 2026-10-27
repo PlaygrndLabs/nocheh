@@ -29,7 +29,7 @@ test('malformed model candidate IDs remain unbound while unknown canonical IDs a
   };
   const context:any={source,evidence:[{reference:source,text:'synthetic evidence',space:'synthetic'}],
     entities:{speaker:{id:known,kind:'person',name:'Synthetic person'},project:null,mentioned_projects:[],mentioned_people:[]}};
-  const input=(candidate_id:unknown)=>({entity_suggestions:[{kind:'person',name:'Synthetic person',reason:'synthetic evidence',
+  const input=(candidate_id:unknown)=>({entity_suggestions:[{kind:'person',name:'Synthetic newcomer',reason:'synthetic evidence',
     evidence_ids:[source.id],candidate_id}],entity_claims:[]});
   await entities.publishDiscoveries(context,input('placeholder'),'suggest:invalid');
   assert.deepEqual(seen,[undefined]);
@@ -66,6 +66,21 @@ test('one invalid model entity item is dropped and recorded while valid items ar
     ...Array(2).fill({section:'entity_claims',code:'invalid_entity_relationship'})]);
 });
 
+test('the owner and other known authors are never suggested again as new people',async()=>{
+  const source={id:digest('known-source'),kind:'event',store:'archive',revision:'1',input_hash:digest('known-input')} as any;
+  const bot=digest('bot'),owner=digest('owner'),member=digest('member'),suggested:string[]=[];
+  const entities=Object.create(EntityRepository.prototype) as EntityRepository;
+  (entities as any).suggest=async(_kind:string,name:string)=>{suggested.push(name);return {name};};
+  const context:any={source,evidence:[{reference:source,text:'synthetic evidence',space:'synthetic'}],
+    entities:{speaker:{id:bot,kind:'person',name:'My Nocheh'},project:null,mentioned_projects:[],mentioned_people:[],
+      owner:{id:owner,kind:'person',name:'Alex Morgan'},participants:[{id:member,kind:'person',name:'Sara Reed'}]}};
+  const person=(name:string)=>({kind:'person',name,reason:'synthetic',evidence_ids:[source.id]});
+  const result=await entities.publishDiscoveries(context,{entity_suggestions:[person('Alex Morgan'),person('Alex Morgan (AM76)'),person('sara reed'),
+    person('Jordan'),{...person('Alex Morgan'),kind:'project'}],entity_claims:[]},'known:people');
+  assert.deepEqual(suggested,['Jordan','Alex Morgan'],'only someone new, or a project, is suggested');
+  assert.deepEqual(result.rejected,Array(3).fill({section:'entity_suggestions',code:'entity_already_known'}));
+});
+
 test('people and projects keep stable identity, attributed evidence, connected recall paths and audience privacy',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},check=new pg.Pool(config);
@@ -98,6 +113,13 @@ test('people and projects keep stable identity, attributed evidence, connected r
     assert.equal((await entities.ensureParticipant(await react('r2',{id:userBase+1,is_bot:false,first_name:'Alex',last_name:'Reed'})))!.name,'Alex Reed',
       'a reaction names its actor');
     assert.equal((await entities.ensureParticipant(await react('r3',{id:userBase+1,is_bot:false,first_name:'Alex'})))!.name,'Alex');
+    const ownerSource=await capture('3',42,'Please remember Jordan.'),self=await entities.ensureParticipant(ownerSource);
+    const people=await entities.knownPeople([samSource,otherAlexSource,ownerSource],sam);
+    assert.equal(people.owner?.id,self!.id,'the configured owner account is always a known person');
+    assert.deepEqual(people.participants.map(item=>item.id),[otherAlex!.id],'other authors are known; the speaker and owner are not repeated');
+    const first=await entities.suggest('person','Jordan',samSource,'first'),again=await entities.suggest('person','jordan',otherAlexSource,'again');
+    assert.equal(again.id,first.id,'the same name from new evidence never adds another card');
+    assert.equal(again.reason,'first');
     const ambiguous=await entities.connected(owner,'What did Alex promise?');assert.ok((ambiguous.ambiguities[0]?.entity_ids.length??0)>=2,'owner-private natural-language questions retain same-name ambiguity');
 
     const context=await entities.context(samSource,[beacon],'Beacon needs Alex to deliver Friday.');

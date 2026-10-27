@@ -355,7 +355,10 @@ not yet run on the owner's installation:
 - A forum export mapped to its live group keeps its topics: the importer
   follows reply links to each topic's creation message
   ([decision](docs/adr/0171-desktop-forum-messages-keep-their-topics.md),
-  [check](test/store-desktop-import-identity.test.ts)).
+  [check](test/store-desktop-import-identity.test.ts)). A mapped export now has
+  its chat's audience, so imports with learning approved are learned (before,
+  they waited forever), and an exported copy of the bot's own reply counts as
+  already kept ([check](test/store-desktop-import-identity.test.ts)).
 - Release test 1 (October 19) passed its addressing part on the owner's
   installation: an unaddressed group message stayed quiet and a Reply was
   answered in about 24 seconds. Its recall part failed: the answer could not
@@ -450,7 +453,7 @@ not yet run on the owner's installation:
   (use MCP)?". Settings › Connections › Notion signs in through Notion (or a
   Business MCP token), turns Notion on, and chooses which calls ask first;
   `nocheh_notion` works only in the owner's private chat
-  ([decision](docs/adr/0172-notion-through-its-mcp-server.md),
+  ([decision](docs/adr/0175-notion-through-its-mcp-server.md),
   [check](test/store-notion.test.ts), [sign-in check](services/hermes/test_notion_connection.py),
   [browser check](test/dashboard-pages.browser.mjs)). Live check pending: the
   owner connects Notion on the machine and asks Nocheh to search it, then to add a
@@ -515,6 +518,10 @@ not yet run on the owner's installation:
   epoch changed; those results now carry across epochs
   ([decision](docs/adr/0170-secret-check-results-survive-guard-epochs.md),
   [check](test/store-prepared-context.test.ts)).
+  The recorded guard refusals were Hermes asking the provider for its model
+  list twice per turn, and two DNS-over-HTTPS lookups at startup. A bare model
+  list now passes; the lookups stay refused
+  ([decision](docs/adr/0172-provider-model-lists-pass-the-guard.md)).
 Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 
@@ -586,6 +593,23 @@ itself at startup.
 </current>
 
 <verification>
+
+- Full end-to-end tester (2026-10-27, revision c650887, cloud synthetic
+  installation): `python3 -m tools.acceptance.full_test` passes all 59 checks
+  in one fresh run: the 38 earlier simulator scenarios, 19 product scenarios
+  (allowed members, addressing, unaddressed messages, the fixed reply for
+  people not allowed, approval cards pressed in private chat and groups,
+  hide and unhide, reactions keeping group names, learning reaching Honcho,
+  Inbox person cards, a Telegram Desktop import with a topic and a file,
+  tasks with reminders, defaults), the lingering-turn check and 34 dashboard
+  pages and tabs in Chromium. The owner allowed it to run beside the live
+  installation and asked that it need no action from them. It found and
+  verified a fix for every dashboard page crashing when container status is
+  unavailable. It also showed a temporary failure while Nocheh prepares text
+  for Honcho answered with HTTP 403, which Honcho never retries, so that batch
+  was not learned; [ADR-0174](docs/adr/0174-memory-preparation-outages-are-retried.md)
+  now answers 503 for it. Pending: the same run on the development machine beside the
+  live stack. [Procedure](docs/telegram-simulation.md).
 
 - Personal-use mocked-Telegram evaluation (2026-10-08, current source): every
   Node test file passes on its own fresh synthetic database (269 passes, four
@@ -1216,6 +1240,21 @@ with doubling gaps before its workflow closes as uncertain
 ([decision](docs/adr/0124-native-review-once-per-source.md),
 [checks](test/store-native-review.test.ts)). Pending: the owner-machine simulator
 rerun that confirms no model calls after the scenarios end.
+
+Hermes native memory reviews during the history import (October 26): learning
+the 105 imported messages advanced the epoch every few minutes, and each epoch
+closed every waiting review and queued a new copy at the back, leaving the old
+row pending; 140 reviews became over 400 rows draining one or two a minute.
+A waiting review now keeps its identity and place when its input is unchanged,
+old copies are deleted, and waiting reviews don't ask Hermes while another one
+runs ([decision](docs/adr/0173-waiting-native-reviews-keep-their-place.md),
+[checks](test/store-native-review.test.ts)). Eleven learning runs in the same
+import closed as `input_limit`: a topic message brings up to 30 related
+messages, which did not fit Honcho's 10,000-character query even as text. The
+query now leaves other evidence out from the end, keeping the trigger, before
+giving up, and the instruction cites only the evidence it shows
+([check](test/learning-workflow.test.ts)). Pending: confirming the queue
+drains on the owner's installation and the closed runs learn when retried.
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the

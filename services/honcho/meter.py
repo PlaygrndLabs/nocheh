@@ -36,6 +36,13 @@ class CoolingDown(Rejected):
         super().__init__('embedding_route_cooling_down')
 
 
+class PreparationUnavailable(Rejected):
+    """The archive could not prepare this request now; the same request can succeed later."""
+    seconds=15
+    def __init__(self):
+        super().__init__('memory_preparation_unavailable')
+
+
 class Ledger:
     def __init__(self, path):
         self.path = str(path)
@@ -413,12 +420,16 @@ def handler(egress):
                 if not 0 < length <= 1024*1024 or self.headers.get('Transfer-Encoding'): raise Rejected('request_bound_exceeded')
                 status,kind,body=egress.send(self.path,json.loads(self.rfile.read(length)),self.headers.get('X-Nocheh-Workspace'),
                                              self.headers.get('X-Nocheh-Priority')=='background')
-            except CoolingDown as error:
-                return self.respond(503,'application/json',b'{"error":{"message":"embedding_route_cooling_down"}}',error.seconds)
+            except (CoolingDown,PreparationUnavailable) as error:
+                return self.respond(503,'application/json',json.dumps({'error':{'message':str(error)}}).encode(),error.seconds)
             except (Rejected,ValueError) as error:
                 status,kind,body=403,'application/json',json.dumps({'error':{'message':str(error) if isinstance(error,Rejected) else 'invalid_json'}}).encode()
             self.respond(status,kind,body)
     return Handler
+
+
+# Archive refusals that describe a race with a concurrent change, not the request.
+RETRYABLE_PREPARATION=frozenset({'audience_context_changed','runtime_context_conflict'})
 
 
 class ArchivePreparation:
@@ -432,9 +443,21 @@ class ArchivePreparation:
         try:
             with self.opener.open(request,timeout=180) as response:
                 content=response.read(2*1024*1024+1)
-                if len(content)>2*1024*1024: raise ValueError()
-                return json.loads(content)['payload']
-        except Exception: raise Rejected('memory_preparation_unavailable') from None
+        except urllib.error.HTTPError as error:
+            code=error.code
+            try: reason=json.loads(error.read(4096)).get('error')
+            except Exception: reason=None
+            finally: error.close()
+            # Only the archive's own refusals are final, such as a hidden message or a
+            # request it may not prepare. Honcho drops a batch it is refused, but retries
+            # an outage, and the guard epoch moving on mid-request is retried the same way.
+            if code>=500 or isinstance(reason,str) and reason in RETRYABLE_PREPARATION: raise PreparationUnavailable() from None
+            raise Rejected('memory_preparation_refused') from None
+        except Exception: raise PreparationUnavailable() from None
+        try:
+            if len(content)>2*1024*1024: raise ValueError()
+            return json.loads(content)['payload']
+        except Exception: raise Rejected('memory_preparation_refused') from None
 
 
 if __name__=='__main__':

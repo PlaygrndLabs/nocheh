@@ -40,6 +40,16 @@ class GuardUnavailable(RuntimeError):
     pass
 
 
+def model_listing(request):
+    """A provider's model list carries no content: a GET to .../models with no query and no body.
+
+    Hermes asks for it on every turn to learn the model's context length.
+    """
+    url=urlsplit(str(request.url))
+    return (request.method=='GET' and not url.query and not request.content
+            and url.path.rstrip('/').rsplit('/',1)[-1]=='models')
+
+
 def trusted(destination, endpoints):
     target=urlsplit(destination)
     if target.username or target.password:
@@ -142,6 +152,7 @@ class Boundary:
         import httpx
         if not self.needs_guard(request): return request
         content=request.content
+        if model_listing(request): return request
         if request.url.query:
             raise GuardUnavailable('uninspectable_model_query')
         if len(content)>MAX_BODY or 'application/json' not in request.headers.get('content-type',''):

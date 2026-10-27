@@ -7,7 +7,7 @@ import {GuardRepository,type GuardBinding} from './guards.js';
 import {LearnedMemoryRepository,type PreparedDependency} from './learned.js';
 import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
-import {EntityRepository,type EntityContext} from './entities.js';
+import {EntityRepository,type EntityContext,type KnownPeople} from './entities.js';
 
 export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner'|'owner_guard';id:string;revision:number;text:string};
 export interface PreparedLearningContext {
@@ -16,7 +16,7 @@ export interface PreparedLearningContext {
   observations:{source:SourceReference;value:unknown;derivatives:{kind:string;id:string;value:unknown}[]}[];
   // Older persisted contexts predate rule_inputs; fresh preparation always supplies it.
   rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];rule_inputs?:LearningRuleInput[];projects:{id:string;name:string}[];
-  entities:EntityContext;
+  entities:EntityContext&KnownPeople;
   organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean};projects:{id:string;name:string;revision:number}[]};
   limitations:string[];
 }
@@ -82,7 +82,8 @@ export class LearningContextRepository {
       if(matches.length===1){projects.push({id:candidate.id,name:candidate.name,revision:candidate.revision});mentioned.push(candidate);}
       else limitations.push('ambiguous_project_reference');
     }
-    const entities=await this.entities.context(source,mentioned,corpus);
+    const local=await this.entities.context(source,mentioned,corpus);
+    const entities={...local,...await this.entities.knownPeople(evidence.map(item=>item.reference),local.speaker)};
     const candidates=(await this.access.stores.derived.query(`SELECT e.id,v.dependencies,g.active_revision AS rule_guard_revision,r.author AS rule_guard_author
       FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
       LEFT JOIN guard_sources g ON g.id='derived_artifacts:'||v.derived_id
