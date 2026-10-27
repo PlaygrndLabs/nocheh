@@ -551,7 +551,10 @@ const server=createServer((req,res)=>{void(async()=>{
   if(importAction){const job=jobs.find(j=>j.id===importAction[1]);if(!job)throw new HttpError(404,'job_not_found');if(importAction[2]==='start'){if(job.state!=='ready'&&(JSON.stringify(body.mapping)!==JSON.stringify(job.mapping)||body.review_approved!==job.review_approved))throw new HttpError(409,'import_configuration_conflict');job.mapping=body.mapping;job.review_approved=body.review_approved;job.state='running';}else job.state='cancelled';return json(res,200,job);}
   if(route==='/telegram/chats/refresh')return json(res,200,{chats:String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean).map(chat_id=>({chat_id,state:'available',title:'Aurora planning',is_forum:false}))});
   if(route==='/telegram/topics')return json(res,200,{ok:true});
-  if(route==='/settings'){if(body.revision!==settingsRevision)throw new HttpError(409,'configuration_conflict');settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';return json(res,200,{ok:true});}
+  if(route==='/settings'){if(body.revision!==settingsRevision)throw new HttpError(409,'configuration_conflict');
+    // Memory already holds small-model vectors here; another model needs the confirmed rebuild.
+    if(mode!=='no-provider'&&body.changes?.NOCHEH_EMBEDDING_MODEL&&body.changes.NOCHEH_EMBEDDING_MODEL!=='text-embedding-3-small'&&body.rebuild_memory!==true)throw new HttpError(400,'embedding_model_change_requires_rebuild');
+    settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';return json(res,200,{ok:true});}
   if(route==='/data/'+id+'/guarded'){if(body.expected_revision!==revision)throw new HttpError(409,'guard_revision_conflict');guarded=body.content?.text??source.event.text;revision++;return json(res,200,{ok:true});}
   if(route==='/sources/'+id+'/retirement'){
     if(body.expected_revision!==retirementRevision)throw new HttpError(409,'source_retirement_conflict');

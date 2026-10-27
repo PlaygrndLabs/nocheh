@@ -1,4 +1,4 @@
-# ADR-0180: Strangers cost nothing and reach no model
+# ADR-0182: Strangers cost nothing and reach no model
 
 <status>
 Accepted on 2026-10-27, after the owner started the bot from a second

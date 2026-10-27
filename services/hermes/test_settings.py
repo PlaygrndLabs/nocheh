@@ -68,8 +68,75 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'embedding_model_change_requires_rebuild'):
                 save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-small'}, saved['revision'])
             self.assertEqual(load(state)['NOCHEH_EMBEDDING_MODEL'], 'text-embedding-3-large')
+            self.assertIsNone(view(state)['models']['embedding_rebuild'])
             save(state, {'NOCHEH_MODEL': 'claude-opus-5-5'}, saved['revision'])
             self.assertEqual(load(state)['NOCHEH_MODEL'], 'claude-opus-5-5')
+
+    def test_a_confirmed_model_change_rebuilds_memory_on_apply(self):
+        import sqlite3
+        from services.honcho.meter import Ledger
+        from tools.operations.memory.honcho_setup import state_for
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state)
+            ledger = state_for(state) / 'ledger/budget.sqlite'; ledger.parent.mkdir(parents=True, exist_ok=True)
+            Ledger(ledger)
+            with sqlite3.connect(ledger) as db:
+                # A ledger from before the route was recorded: its vectors are small-model ones.
+                db.execute("INSERT INTO calls(route,reserved,started) VALUES('/v1/embeddings',10000,0)")
+            self.assertEqual(view(state)['models']['embedding_locked'], 'text-embedding-3-small')
+            confirmed = save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-large'}, view(state)['revision'], rebuild_memory=True)
+            self.assertEqual(confirmed['models']['embedding_rebuild'], 'text-embedding-3-large')
+            operation = json.loads((state / 'admin/memory-rebuild.json').read_text())['operation_id']
+            calls = []
+
+            class API:
+                fail = True
+                def call(self, path, body=None):
+                    calls.append((path, body))
+                    if body is not None and API.fail: raise OSError('archive unavailable')
+                    return {'connection': {'revision': 7}}
+
+            def applied(honcho='refreshed'):
+                with patch('tools.operations.installation.settings.subprocess.run') as run, \
+                        patch('tools.operations.installation.settings.refresh_honcho', return_value=honcho), \
+                        patch('tools.operations.archive.archive.API', API):
+                    run.return_value.returncode = 0
+                    return apply(state)
+
+            # Honcho didn't restart: nothing is switched, and the change waits to apply again.
+            result = applied('failed')
+            self.assertEqual(result['memory_rebuild'], 'failed'); self.assertNotEqual(result['apply_state'], 'current')
+            self.assertEqual(calls, [])
+            # The fresh start fails: Apply stays pending, and the marker keeps its operation ID.
+            result = applied()
+            self.assertEqual(result['memory_rebuild'], 'failed'); self.assertNotEqual(result['apply_state'], 'current')
+            self.assertEqual(json.loads((state / 'admin/memory-rebuild.json').read_text())['operation_id'], operation)
+            API.fail = False; calls.clear()
+            result = applied()
+            self.assertEqual((result['memory_rebuild'], result['apply_state']), ('started', 'current'))
+            self.assertEqual(calls[-1], ('/v1/memory/honcho/fresh-start', {'expected_revision': 7, 'operation_id': operation, 'from_archive': True}))
+            self.assertEqual(result['models'], {'embedding': ['text-embedding-3-large', 'text-embedding-3-small'],
+                                                'embedding_locked': 'text-embedding-3-large', 'embedding_rebuild': None})
+            # Nothing is rebuilt twice, and the spending records stay.
+            self.assertIsNone(applied()['memory_rebuild'])
+            with sqlite3.connect(ledger) as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM calls').fetchone()[0], 1)
+
+    def test_choosing_the_stored_model_again_cancels_the_rebuild(self):
+        import sqlite3
+        from services.honcho.meter import Ledger
+        from tools.operations.memory.honcho_setup import state_for
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state)
+            ledger = state_for(state) / 'ledger/budget.sqlite'; ledger.parent.mkdir(parents=True, exist_ok=True)
+            Ledger(ledger)
+            with sqlite3.connect(ledger) as db:
+                db.execute("INSERT INTO embedding_route VALUES(1,'openai','text-embedding-3-small',1536)")
+            save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-large'}, view(state)['revision'], rebuild_memory=True)
+            self.assertTrue((state / 'admin/memory-rebuild.json').exists())
+            save(state, {'NOCHEH_EMBEDDING_MODEL': 'text-embedding-3-small'}, view(state)['revision'])
+            self.assertFalse((state / 'admin/memory-rebuild.json').exists())
+            self.assertIsNone(view(state)['models']['embedding_rebuild'])
 
 
 class MiniAppSettingsTests(unittest.TestCase):

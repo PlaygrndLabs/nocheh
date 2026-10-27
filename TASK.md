@@ -216,6 +216,16 @@ People stays persistent or dated: one-time access belongs to approving a
 pending request, where it already exists. Pending: a look at the new fields on
 the running installation.
 
+Logo (October 27, owner: "I want use something like it as project logo but need
+improve it and compatible with our app design or make app design same it"): the
+owner's pixel brain is redrawn on crisp grids and shown in the dashboard
+navigation, phone header, mini app, favicon and README, and the dashboard colours
+follow it: lavender accent, navy dark mode, mint for success
+([decision](docs/adr/0180-pixel-brain-logo-and-logo-colours.md),
+[logo](dashboard/ui/logo.tsx), [assets](docs/assets/logo)). The Telegram bot
+picture (`docs/assets/logo/nocheh-avatar-512.png`) is set by the owner in
+BotFather; it is not set yet.
+
 Role and skills per chat (October 16 and 17, owner: "want to ability to set role
 or skill for projects or GPs ... for a group or user use role and skills and for
 other one use other role and skill"; "if can have role and skill for own Hermes
@@ -595,7 +605,7 @@ itself at startup.
 <verification>
 
 - Strangers kept away from models, downloads and the menu (2026-10-27,
-  [ADR-0180](docs/adr/0180-strangers-cost-nothing-and-reach-no-model.md)):
+  [ADR-0182](docs/adr/0182-strangers-cost-nothing-and-reach-no-model.md)):
   the new store test `store-strangers` and every Node test file pass on a
   fresh store cluster; the Hermes refusal tests pass. A fresh cloud run of
   the full tester passed 61 of 62; the miss was the new scenario's own search
@@ -1070,6 +1080,16 @@ checks of the drawer, retirement offers and settings panels pass. Pending
 owner rechecks: a live exact approval to a topic and quick live messages with
 a voice note. Real-model quality, live Telegram release gates and release
 remain pending. [Live summary](docs/mvp-acceptance-status.md).
+
+Memory search model change (October 27, owner: "but we should able do it"):
+Settings › Models lets the owner pick either reviewed embedding model again.
+Save asks to confirm the memory rebuild, and Apply restarts Honcho with the
+new model, moves the gateway ledger and replaces Honcho memory from the archive
+([decision](docs/adr/0181-memory-search-model-change-rebuilds-memory.md),
+[checks](services/hermes/test_settings.py),
+[tester scenario](tools/acceptance/product_scenarios.py)). The owner's
+installation still uses `text-embedding-3-small`; switching it waits for the
+owner's own choice.
 
 Providers per part (October 13, owner: use the hosted sub2api gateway instead
 of Nocheh's own provider; its wake-up time does not matter): Settings › Models

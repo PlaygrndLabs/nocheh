@@ -5,7 +5,8 @@
 import {useEffect, useRef, useState} from 'react';
 import {AlertTriangle, Loader2} from 'lucide-react';
 import {useDraftSources} from '../lib/drafts';
-import {discardSettings, saveSettings, useSettings} from '../lib/settings';
+import {apiGet} from '../lib/api';
+import {discardSettings, memoryRebuildModel, saveSettings, useSettings} from '../lib/settings';
 import {settingLabel} from '../lib/setting-labels';
 import {cn} from '../lib/utils';
 import {Button} from './core';
@@ -69,7 +70,12 @@ export function useSaveState(): SaveState {
   const busy = settings.busy || otherState.busy;
   const failed = !busy && (phase === 'failed' || !!otherState.error);
 
+  const {confirm} = useFeedback();
   const save = async () => {
+    // A new memory search model can't read the vectors of the old one: long-term memory is rebuilt.
+    const rebuildMemory = memoryRebuildModel();
+    if (rebuildMemory && !(await confirmMemoryRebuild(confirm, rebuildMemory, data?.models?.embedding_locked ?? '')))
+      return;
     setOther({busy: true, error: ''});
     for (const source of sources) {
       try {
@@ -80,7 +86,7 @@ export function useSaveState(): SaveState {
       }
     }
     setOther({busy: false, error: ''});
-    if (dirty || phase === 'failed' || pendingApply) await saveSettings();
+    if (dirty || phase === 'failed' || pendingApply) await saveSettings({rebuildMemory: !!rebuildMemory});
   };
   const discard = () => {
     sources.forEach(source => source.discard());
@@ -106,6 +112,34 @@ export function useSaveState(): SaveState {
     detail = 'Apply restarts Nocheh’s services with the saved settings.';
   }
   return {visible: !!text, busy, failed, count, names, text, detail, save, discard};
+}
+
+/** Asks before a memory search model change, with how many saved messages would be learned again. */
+async function confirmMemoryRebuild(
+  confirm: ReturnType<typeof useFeedback>['confirm'],
+  model: string,
+  current: string,
+): Promise<boolean> {
+  const estimate = await apiGet<{replace?: {saved_messages: number}}>('/memory/honcho/rebuild').catch(() => null);
+  const saved = estimate?.replace?.saved_messages;
+  return confirm({
+    title: `Switch memory search to ${model}?`,
+    body: (
+      <div className="space-y-2">
+        <p>
+          Long-term memory is stored with {current || 'the current model'}, and {model} can’t search it. Saving replaces
+          Honcho memory with a new one that learns again from your saved messages
+          {typeof saved === 'number' ? ` (up to ${saved.toLocaleString()})` : ''}.
+        </p>
+        <p>
+          Your messages in the archive stay as they are. Until the rebuild finishes, replies remember less. Learning
+          again costs money and counts toward this month’s memory limits.
+        </p>
+      </div>
+    ),
+    confirm: 'Switch and rebuild',
+    danger: true,
+  });
 }
 
 /** Always mounted: reports the outcome of a save and guards development reloads. */
