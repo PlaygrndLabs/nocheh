@@ -1253,8 +1253,12 @@ import closed as `input_limit`: a topic message brings up to 30 related
 messages, which did not fit Honcho's 10,000-character query even as text. The
 query now leaves other evidence out from the end, keeping the trigger, before
 giving up, and the instruction cites only the evidence it shows
-([check](test/learning-workflow.test.ts)). Pending: confirming the queue
-drains on the owner's installation and the closed runs learn when retried.
+([check](test/learning-workflow.test.ts)). Learning stopped by an epoch,
+including those runs, was closed and never asked again; the per-source sweep
+after each epoch now asks again
+([decision](docs/adr/0176-stopped-learning-is-asked-again.md),
+[checks](test/store-learning-engine.test.ts)). Pending: confirming the queue
+drains on the owner's installation and the stopped learning completes.
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
