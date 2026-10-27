@@ -45,7 +45,8 @@ export class SourceRetirementRepository {
   }
   /**
    * Every captured revision of an incoming Telegram message, oldest first; empty for any other event.
-   * Exported copies come first, newest edit last, so a live observation of the same message always wins.
+   * Exported copies come first, newest edit last, so a live observation of the same message always wins,
+   * including the bot's own delivered reply when an export repeats it.
    */
   async revisions(eventId:string):Promise<string[]> {
     return (await this.archive.pool.query(`WITH target AS (SELECT r.object_id FROM events e
@@ -54,18 +55,18 @@ export class SourceRetirementRepository {
       SELECT o.event_id FROM target JOIN source_revisions r ON r.object_id=target.object_id JOIN source_observations o ON o.revision_id=r.id
         JOIN events e ON e.id=o.event_id,LATERAL (SELECT CASE WHEN e.kind='telegram_update' THEN NULL
           ELSE convert_from(e.payload,'UTF8')::jsonb->'message'->>'edited_unixtime' END AS edited) desktop
-        WHERE e.channel='telegram' AND (e.kind='telegram_update' OR e.kind LIKE 'telegram\\_desktop\\_%')
-      ORDER BY e.kind='telegram_update',CASE WHEN e.kind='telegram_update' AND e.revision ~ '^[0-9]{1,18}$' THEN e.revision::numeric END NULLS LAST,
+        WHERE e.channel='telegram' AND (e.kind IN ('telegram_update','telegram_delivered_message') OR e.kind LIKE 'telegram\\_desktop\\_%')
+      ORDER BY e.kind IN ('telegram_update','telegram_delivered_message'),CASE WHEN e.kind='telegram_update' AND e.revision ~ '^[0-9]{1,18}$' THEN e.revision::numeric END NULLS LAST,
         CASE WHEN desktop.edited ~ '^[0-9]{1,18}$' THEN desktop.edited::numeric END NULLS FIRST,e.received_at,e.id`,[eventId])).rows.map(row=>row.event_id as string);
   }
-  /** Imported copies of messages the bot also captured live; the live copy stands for them. */
+  /** Imported copies of messages the bot also captured live or sent itself; the live copy stands for them. */
   async liveCopies(eventIds:string[]):Promise<Set<string>> {
     if(!eventIds.length)return new Set();
     return new Set((await this.archive.pool.query(`SELECT DISTINCT o.event_id FROM source_observations o
       JOIN events e ON e.id=o.event_id JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
       WHERE o.event_id=ANY($1::text[]) AND e.origin='import' AND s.platform='telegram' AND s.kind='message' AND EXISTS (SELECT 1 FROM source_revisions lr
         JOIN source_observations lo ON lo.revision_id=lr.id JOIN events le ON le.id=lo.event_id
-        WHERE lr.object_id=r.object_id AND le.kind='telegram_update' AND le.origin='live')`,[eventIds])).rows.map(row=>row.event_id as string));
+        WHERE lr.object_id=r.object_id AND le.kind IN ('telegram_update','telegram_delivered_message') AND le.origin='live')`,[eventIds])).rows.map(row=>row.event_id as string));
   }
   async retiredEvents(eventIds:string[]):Promise<Set<string>> {
     if(!eventIds.length)return new Set();

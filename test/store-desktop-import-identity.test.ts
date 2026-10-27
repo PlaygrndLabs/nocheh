@@ -44,6 +44,19 @@ test('a Desktop forum message joins the live topic the importer found for it',()
   assert.equal(thread(observedSource(desktop('-1001234567890',supergroup,message))),undefined,'General and unlinked messages have none');
 });
 
+test('a mapped Desktop export has the audience of the chat it was mapped to; an unmapped one has none',()=>{
+  const supergroup={id:1234567890,type:'private_supergroup'},message={id:5,from:'Example',from_id:'user7',text:'hello',reply_to_message_id:3};
+  const audience=(scope:string,chat:{id:number;type:string}=supergroup,topic?:number)=>{
+    const value=desktop(scope,chat,message);if(topic!==undefined)(value.payload as any).topic_id=topic;
+    return observedSource(value).metadata?.audience;
+  };
+  assert.deepEqual(audience('-1001234567890',supergroup,3),{chat_id:'-1001234567890',topic_state:'known',topic_id:'3'});
+  assert.deepEqual(audience('-1001234567890'),{chat_id:'-1001234567890',topic_state:'none'},'General is the group itself');
+  assert.deepEqual(audience('42',supergroup,3),{chat_id:'42',topic_state:'none'},'an export added to the private chat has no topics');
+  assert.deepEqual(audience('-1234567890',{id:1234567890,type:'private_group'}),{chat_id:'-1234567890',topic_state:'none'});
+  assert.equal(audience('desktop:private_supergroup:1234567890'),undefined);
+});
+
 test('imported copies of live messages are marked and lose to the live copy; newer exports replace older ones',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},check=new pg.Pool(config);
@@ -63,6 +76,18 @@ test('imported copies of live messages are marked and lose to the live copy; new
     assert.deepEqual([...await s.retirements.liveCopies([copy.id,seen.id])],[copy.id]);
     const hits=await s.sources.search(owner,'seen live');
     assert.equal(hits.find(hit=>hit.id===copy.id)?.live_copy,true);assert.equal(hits.find(hit=>hit.id===seen.id)?.live_copy,undefined);
+    // The bot's own reply, repeated by the export, is also already saved live.
+    const sent=(await s.capture.capture({version:1,key:'desktop-identity:delivered:'+group,origin:'live',kind:'telegram_delivered_message',bot_id:'fixture',
+      scope:group,source_id:'8',revision:'8',occurred_at:null,text:'bot reply',
+      payload:{message:{message_id:8,date:1700000001,chat:{id:Number(group),type:'supergroup'},from:{id:9,is_bot:true,first_name:'Bot'},text:'bot reply'}}})).source.reference;
+    const echo=await record(desktop(group,chat,{id:8,from:'Bot',from_id:'user9',text:'bot reply'}));
+    assert.equal(echo.live_copy,true,'an exported copy of the bot reply counts as already kept');
+    assert.deepEqual(await s.retirements.revisions(echo.id),[echo.id,sent.id],'the sent reply, not the export, is what memory keeps');
+    // Mapped imports are read and learned in their chat, under their topic when the importer found one.
+    const topical=desktop(group,chat,{id:7,from:'Example',from_id:'user7',text:'in a topic',reply_to_message_id:3});(topical.payload as any).topic_id=3;
+    assert.equal(await s.access.space((await record(topical)).reference),group+'/topic/3');
+    assert.equal(await s.access.space((await record(desktop(group,chat,{id:9,from:'Example',from_id:'user7',text:'in General'}))).reference),group);
+    assert.equal(await s.access.space((await record(desktop('desktop:public_supergroup:'+bare,chat,{id:10,from:'Example',from_id:'user7',text:'unmapped'}))).reference),null);
     const people=await stores.archive.query("SELECT DISTINCT target_id FROM source_relations WHERE kind='authored_by' AND event_id=ANY($1::text[])",[[copy.id,seen.id]]);
     assert.equal(people.rowCount,1,'the export and the live chat share one person');
     // A newer export of an edited message replaces the older export, whatever order they arrive in.

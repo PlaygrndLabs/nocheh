@@ -1,5 +1,5 @@
 import {canonical,digest,type Envelope} from './archive.js';
-import {desktopChannelTypes,desktopTopicId,telegramTopicId} from './spaces.js';
+import {desktopChannelTypes,desktopTopicId,eventSpace,parentSpace,telegramTopicId} from './spaces.js';
 import {legacySource,sourceDescriptor,type SourceDescriptor,type SourceIdentity,type SourceRelation} from './source-model.js';
 
 const record=(v:unknown):Record<string,any>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,any>:{};
@@ -62,7 +62,15 @@ function desktopSource(value:Envelope,base:SourceDescriptor):SourceDescriptor {
   const topic=live?desktopTopicId(value.scope,body):undefined;
   if(topic!==undefined&&!relations.some(relation=>relation.kind==='in_thread'))
     relations.push({kind:'in_thread',target:{...messageIdentity(live!,String(topic)),kind:'thread'}});
-  const descriptor:SourceDescriptor={...base,adapter_version:'2',object:live?messageIdentity(live,base.object.external_id):base.object,relations};
+  // The chat the owner mapped the export to is the audience it is read and learned in, like a live
+  // message there; an unmapped export belongs to no chat, so it has none and is never learned.
+  let audience:ObservedAudience|undefined;
+  if(/^-?[1-9][0-9]{0,18}$/.test(value.scope)) {
+    const space=eventSpace(value.scope,body),thread=space.includes('/topic/')?space.split('/topic/')[1]:undefined;
+    audience=thread&&parentSpace(space)===value.scope?{chat_id:value.scope,topic_state:'known',topic_id:thread}:{chat_id:value.scope,topic_state:'none'};
+  }
+  const descriptor:SourceDescriptor={...base,adapter_version:'3',object:live?messageIdentity(live,base.object.external_id):base.object,relations,
+    ...(audience?{metadata:{...base.metadata,audience}}:{})};
   try{return sourceDescriptor(descriptor);}catch{return base;}
 }
 

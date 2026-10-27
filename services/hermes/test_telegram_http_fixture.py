@@ -71,6 +71,24 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BadRequest):await self.bot.send_message(123,'x'*4097)
         self.assertEqual(len(self.mock.state['sent']),1)
 
+    async def test_approval_card_buttons_edit_and_one_answer_per_injected_press(self):
+        from telegram import InlineKeyboardButton,InlineKeyboardMarkup
+        keyboard=InlineKeyboardMarkup([[InlineKeyboardButton('✅ Approve',callback_data='na'+'1'*56),InlineKeyboardButton('❌ Reject',callback_data='nd'+'1'*56)]])
+        card=await self.bot.send_message(123,'📨 Send to the team',reply_markup=keyboard)
+        self.assertEqual(card.reply_markup.inline_keyboard[0][0].callback_data,'na'+'1'*56)
+        press={'update_id':5,'callback_query':{'id':'cb5','from':{'id':123,'is_bot':False,'first_name':'Owner'},'chat_instance':'i',
+            'data':'na'+'1'*56,'message':self.mock.state['sent'][0]['message']}}
+        self.mock.inject({'updates':[press]})
+        self.assertEqual((await self.bot.get_updates())[0].callback_query.data,'na'+'1'*56)
+        with self.assertRaises(BadRequest):await self.bot.answer_callback_query('never-pressed')
+        self.assertTrue(await self.bot.answer_callback_query('cb5'))
+        with self.assertRaises(BadRequest):await self.bot.answer_callback_query('cb5')
+        edited=await self.bot.edit_message_text('📨 Send to the team\n\n✅ Approved and sent.',chat_id=123,message_id=card.message_id)
+        self.assertIsNone(edited.reply_markup)
+        with self.assertRaises(BadRequest):await self.bot.edit_message_text('📨 Send to the team\n\n✅ Approved and sent.',chat_id=123,message_id=card.message_id)
+        saved=TelegramMock(self.path).state['sent'][0]
+        self.assertEqual((len(saved['edits']),'reply_markup' in saved['message']),(1,False))
+
     async def test_file_metadata_and_download_preserve_exact_synthetic_bytes(self):
         content=b'\x00synthetic\xff\x00';self.mock.state['files']['file-one']={'file_id':'file-one','file_unique_id':'unique-one',
             'file_path':'documents/file-one.bin','file_size':len(content),'bytes_base64':base64.b64encode(content).decode()}
@@ -121,9 +139,14 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         sent=await self.bot.send_message(123,escape_markdown(text,version=2),parse_mode='MarkdownV2')
         self.assertEqual(sent.text,text)
         self.assertNotEqual(self.mock.state['sent'][-1]['parameters']['text'],sent.text)
-        with self.assertRaises(BadRequest):await self.bot.send_message(123,'*bold*',parse_mode='MarkdownV2')
-        self.assertEqual(self.mock.state['unknown'],['sendMessage:rich_markup'])
-        self.assertEqual(len(self.mock.state['sent']),1)
+        # MarkdownV2 is parsed like Telegram: valid bold becomes an entity, an
+        # unclosed entity is refused, and any other parse mode fails the gate.
+        bold=await self.bot.send_message(123,'*bold*',parse_mode='MarkdownV2')
+        self.assertEqual((bold.text,bold.entities[0].type),('bold','bold'))
+        with self.assertRaises(BadRequest):await self.bot.send_message(123,'*bold',parse_mode='MarkdownV2')
+        with self.assertRaises(BadRequest):await self.bot.send_message(123,'<b>bold</b>',parse_mode='HTML')
+        self.assertEqual(self.mock.state['unknown'],['sendMessage:HTML'])
+        self.assertEqual(len(self.mock.state['sent']),2)
 
     async def test_unknown_method_fails_loudly_and_is_preserved_for_gate(self):
         with self.assertRaises(BadRequest):await self.bot.get_chat_administrators(123)
