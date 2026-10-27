@@ -130,6 +130,15 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                     self.assertEqual((raised.exception.code,json.load(raised.exception)),(503,{'error':'provider_not_configured'}))
             finally:server.shutdown();server.server_close();thread.join()
 
+    def test_chat_route_reaches_the_chat_function(self):
+        # A local named chat elsewhere in dispatch() once shadowed the function.
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
+            from . import runtime
+            handler=object.__new__(runtime.Handler);handler.path='/internal/chat'
+            with patch.object(runtime,'chat',return_value={'text':'synthetic reply'}) as called:
+                self.assertEqual(handler.dispatch({'text':'synthetic'}),{'text':'synthetic reply'})
+            called.assert_called_once_with('synthetic')
+
     def test_new_profile_never_transcribes_voice_notes(self):
         from . import runtime
         with tempfile.TemporaryDirectory() as folder,patch.object(runtime,'PROFILE_HOME',Path(folder)):
