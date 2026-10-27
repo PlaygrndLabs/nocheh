@@ -209,7 +209,8 @@ hide and unhide carrying the conversation, reactions keeping the group name,
 learning reaching Honcho, Inbox person cards (one per new name, none for the
 owner), a Telegram Desktop export with a topic, a file and learning, tasks
 from chat with a reminder, status and board, tasks staying out of unrelated
-groups, and defaults (history kept forever, Notion off). Dashboard calls sign
+groups, defaults (history kept forever, Notion off), and a Settings save whose
+apply a reload sees running and that ends with a result. Dashboard calls sign
 in through the preview relay like the browser
 ([client](../tools/acceptance/owner_dashboard.py)). The
 [page check](../tools/acceptance/dashboard_pages.mjs) runs in the

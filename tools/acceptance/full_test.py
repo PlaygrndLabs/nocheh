@@ -71,6 +71,7 @@ TITLES = {
     'import_with_topics_files_and_learning': 'Telegram import with topics, files and learning',
     'tasks_from_chat_with_reminder': 'Tasks from chat, reminder, status and done', 'tasks_not_in_unrelated_group': 'Tasks stay private in groups',
     'defaults_keep_history_and_notion_off': 'Defaults: history kept, Notion off',
+    'settings_apply_is_followed_to_the_end': 'Settings: Save and apply finish, and a reload keeps following',
     'no_lingering_isolated_turns': 'Nothing left running afterwards', 'dashboard_pages': 'Every dashboard page opens',
 }
 

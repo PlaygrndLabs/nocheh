@@ -31,12 +31,17 @@ class SettingsTests(unittest.TestCase):
             save(state, {'NOCHEH_GUARD_MODE': 'off'}, view(state)['revision'])
             with patch('tools.operations.installation.settings.subprocess.run') as run:
                 run.return_value.returncode = 1
-                self.assertEqual(apply(state), {'status': 'apply_failed', 'rolled_back': False})
+                steps = []
+                self.assertEqual(apply(state, steps.append), {'status': 'apply_failed', 'rolled_back': False})
+                # The dashboard shows each step while the services restart.
+                self.assertEqual(steps, ['restarting', 'rolling_back'])
             self.assertEqual(load(state), baseline)
             with patch('tools.operations.installation.settings.subprocess.run') as run, \
                     patch('tools.operations.installation.settings.refresh_honcho', return_value='refreshed') as refresh:
                 run.return_value.returncode = 0
-                result = apply(state)
+                steps = []
+                result = apply(state, steps.append)
+                self.assertEqual(steps, ['restarting', 'memory', 'telegram'])
                 self.assertEqual(result['honcho'], 'refreshed'); refresh.assert_called_once()
                 self.assertEqual(result['apply_state'], 'current')
                 self.assertFalse((state / 'admin/previous.env').exists())

@@ -24,7 +24,9 @@ const PREFIX = '/api/plugins/nocheh';
 const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
-  mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown;workflow?:'pending'|'inngest'};
+  mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown;workflow?:'pending'|'inngest';
+  /** The step a settings apply is on, so a reloaded page can still follow it. */
+  step?: string};
 
 async function atomic(path: string, value: unknown) {
   const temporary = path + '.' + randomUUID() + '.tmp';
@@ -119,6 +121,7 @@ function launch(job: Job, body: Record<string, unknown>, coordinator?:string) {
   const task = python(body, value => {
     if (typeof value.completed === 'number') job.completed = value.completed;
     if (typeof value.duplicates === 'number') job.duplicates = value.duplicates;
+    if (typeof value.step === 'string') job.step = value.step.slice(0, 40);
     const snapshot = {...job}; writes = writes.then(() => putJob(snapshot));
   }, child => active.set(job.id, child),coordinator).then(async result => {
     await writes; job.result = result;
@@ -267,7 +270,12 @@ export async function startManagement() {
       if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
-      if (req.method === 'GET' && route === '/settings') return json(res, 200, await python({operation: 'settings.view'}));
+      if (req.method === 'GET' && route === '/settings') {
+        // A running apply is named so a page opened or reloaded meanwhile follows it instead of offering Apply again.
+        const applying=[...activeJobs.values()].find(job=>job.kind==='settings.apply');
+        return json(res, 200, {...object(await python({operation: 'settings.view'})),
+          applying:applying?{id:applying.id,step:applying.step??'starting',started_at:applying.created_at}:null});
+      }
       // POST so a key being typed travels in the body, never in a URL or access log.
       if (req.method === 'POST' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', request: object(await readJson(req))}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
