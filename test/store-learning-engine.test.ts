@@ -210,6 +210,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const strandedSteps=async()=>(await stores.control.query("SELECT 1 FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+nod.id])).rowCount;
     assert.equal(await strandedSteps(),0);await requestStrandedSources(stores.control,new Date());
     assert.equal(await strandedSteps(),1,'learning stranded before a restart asks for its per-source step');
+    assert.deepEqual(await learning.renew(nod),[],'a job still queued rebinds itself');
+    await stores.control.query("UPDATE workflow_registry SET state='skipped' WHERE family='memory_review' AND job_id=$1",['interpret:'+stranded]);
     const [renewed]=await learning.renew(nod);
     assert.ok(renewed&&renewed!==stranded,'a job stopped by a newer epoch is asked again');
     assert.equal((await stores.control.query('SELECT 1 FROM interpretation_jobs WHERE id=$1',[stranded])).rowCount,0,'its never-started copy is not kept');

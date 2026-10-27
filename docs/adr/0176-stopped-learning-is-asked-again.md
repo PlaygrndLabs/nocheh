@@ -32,9 +32,10 @@ had the same fate after the query trimming changed.
   result, its learning is requested again under the current binding.
 - The request reuses a finished job with the same inputs, as before, so
   nothing finished is learned twice.
-- The source's never-started jobs (pending, no attempts) bound to an earlier
-  epoch are then deleted, since they can never run; their workflows close as
-  superseded. Jobs that already asked Honcho are kept.
+- A pending job whose workflow is still queued is left to rebind itself. The
+  source's other never-started jobs (pending, no attempts) bound to an earlier
+  epoch are then deleted, since they can never run. Jobs that already asked
+  Honcho are kept.
 - Running and publishing jobs, current jobs, finished jobs, retired memory
   generations, withdrawn consent and unusable saved results are left alone.
 

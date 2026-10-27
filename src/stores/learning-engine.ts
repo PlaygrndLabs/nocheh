@@ -18,6 +18,8 @@ const protocol='honcho-contextual-learning-v1';
 export const terminalLearningCodes=new Set(['invalid_interpretation_result','learning_query_limit']);
 /** A saved result that was unusable stays closed; a query that was too large is prepared again, as trimming can change. */
 const terminalRenewalCodes=new Set(['invalid_interpretation_result']);
+const queued=`EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='memory_review' AND w.job_id='interpret:'||j.id
+  AND w.state IN ('queued','waiting','running','retryable_failed'))`;
 /** Honcho rejects a longer reasoning query before any model call. */
 const honchoQueryLimit=10000;
 /** The learning query within Honcho's limit. Other evidence keeps only its text first, then rules
@@ -79,16 +81,18 @@ export class ContextualLearningRepository {
    * Only the newest job of each memory audience counts; a finished one, an unusable saved result or current work is left alone. */
   async renew(source:SourceReference):Promise<string[]> {
     const binding=await this.guards.state();
-    const stale=(await this.contexts.access.stores.control.query(`SELECT DISTINCT ON (j.workspace,j.audience) j.workspace,j.audience,j.state,j.error_code,j.binding=$2::jsonb AS current
+    const stale=(await this.contexts.access.stores.control.query(`SELECT DISTINCT ON (j.workspace,j.audience) j.workspace,j.audience,j.state,j.error_code,j.binding=$2::jsonb AS current,
+      ${queued} AS queued
       FROM interpretation_jobs j JOIN memory_generations g ON g.id=j.workspace AND g.installation_generation=$3 AND g.state<>'retired'
       WHERE j.source_reference->>'id'=$1 ORDER BY j.workspace,j.audience,j.created_at DESC,j.id DESC`,[source.id,JSON.stringify(binding),binding.generation])).rows
-      .filter(job=>!job.current&&(job.state==='pending'||job.state==='failed'&&!terminalRenewalCodes.has(job.error_code)));
+      // A never-started job still in the queue rebinds itself when its turn comes.
+      .filter(job=>!job.current&&(job.state==='pending'&&!job.queued||job.state==='failed'&&!terminalRenewalCodes.has(job.error_code)));
     const ids:string[]=[];
     for(const job of stale)try{ids.push(await this.request(source,job.workspace,job.audience));}
     catch(error){if(!(error instanceof HttpError&&['learning_consent_required','learning_workspace_scope_mismatch','memory_context_retired'].includes(error.code)))throw error;}
     // A never-started job of an earlier epoch can never run, so it is not kept as a second copy.
     await this.contexts.access.stores.control.query(`DELETE FROM interpretation_jobs WHERE source_reference->>'id'=$1 AND state='pending' AND attempts=0
-      AND binding<>$2::jsonb AND NOT id=ANY($3::text[])`,[source.id,JSON.stringify(binding),ids]);
+      AND binding<>$2::jsonb AND NOT id=ANY($3::text[]) AND NOT ${queued.replaceAll('j.','interpretation_jobs.')}`,[source.id,JSON.stringify(binding),ids]);
     return ids;
   }
 
