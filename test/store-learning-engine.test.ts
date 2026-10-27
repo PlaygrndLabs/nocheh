@@ -212,6 +212,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.equal(await strandedSteps(),1,'learning stranded before a restart asks for its per-source step');
     const [renewed]=await learning.renew(nod);
     assert.ok(renewed&&renewed!==stranded,'a job stopped by a newer epoch is asked again');
+    assert.equal((await stores.control.query('SELECT 1 FROM interpretation_jobs WHERE id=$1',[stranded])).rowCount,0,'its never-started copy is not kept');
+    await assert.rejects(learning.run(stranded,detect,authority),{code:'learning_job_missing'});
     assert.deepEqual(await learning.renew(nod),[]);
     await stores.control.query("UPDATE interpretation_jobs SET state='failed',error_code='learning_query_limit' WHERE id=$1",[renewed]);await bump();
     const [resized]=await learning.renew(nod);assert.ok(resized&&resized!==renewed,'a query too large for an earlier version is prepared again');

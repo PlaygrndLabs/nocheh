@@ -79,6 +79,9 @@ export class ContextualLearningRepository {
     const ids:string[]=[];
     for(const job of stale)try{ids.push(await this.request(source,job.workspace,job.audience));}
     catch(error){if(!(error instanceof HttpError&&['learning_consent_required','learning_workspace_scope_mismatch','memory_context_retired'].includes(error.code)))throw error;}
+    // A never-started job of an earlier epoch can never run, so it is not kept as a second copy.
+    await this.contexts.access.stores.control.query(`DELETE FROM interpretation_jobs WHERE source_reference->>'id'=$1 AND state='pending' AND attempts=0
+      AND binding<>$2::jsonb AND NOT id=ANY($3::text[])`,[source.id,JSON.stringify(binding),ids]);
     return ids;
   }
 
