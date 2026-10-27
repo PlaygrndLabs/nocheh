@@ -213,8 +213,8 @@ groups, and defaults (history kept forever, Notion off). Dashboard calls sign
 in through the preview relay like the browser
 ([client](../tools/acceptance/owner_dashboard.py)). The
 [page check](../tools/acceptance/dashboard_pages.mjs) runs in the
-[tester browser image](../deploy/acceptance/browser.Dockerfile) on the fixture
-network and fails a page on a missing heading, an uncaught error, a console
+[tester browser image](../deploy/acceptance/browser.Dockerfile), Playwright's
+own image and Chromium build for both architectures, on the fixture network and fails a page on a missing heading, an uncaught error, a console
 error, an owner API answer of 500 or more, or an error alert.
 
 Build the browser image once with `docker build -t nocheh-tester-browser:local
@@ -222,8 +222,8 @@ Build the browser image once with `docker build -t nocheh-tester-browser:local
 machine pass `--build`: the development stack runs its own source-watched
 images, so the installation's `:local` images can be older than the checkout.
 `--build` builds the checkout's services, management, store and Hermes images
-(and the browser image) under `:tester` tags and tests those; the live tags are
-never rebuilt. Honcho keeps the installation's pinned image. Scripted answers
+under `:tester` tags, refreshes the browser image, and tests those; the live
+tags are never rebuilt. Honcho keeps the installation's pinned image. Scripted answers
 test Nocheh's wiring and rules, not model judgement; Telegram's official test
 environment is a later step.
 
