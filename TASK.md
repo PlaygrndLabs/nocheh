@@ -1069,6 +1069,16 @@ owner rechecks: a live exact approval to a topic and quick live messages with
 a voice note. Real-model quality, live Telegram release gates and release
 remain pending. [Live summary](docs/mvp-acceptance-status.md).
 
+Memory search model change (October 27, owner: "but we should able do it"):
+Settings › Models lets the owner pick either reviewed embedding model again.
+Save asks to confirm the memory rebuild, and Apply restarts Honcho with the
+new model, moves the gateway ledger and replaces Honcho memory from the archive
+([decision](docs/adr/0181-memory-search-model-change-rebuilds-memory.md),
+[checks](services/hermes/test_settings.py),
+[tester scenario](tools/acceptance/product_scenarios.py)). The owner's
+installation still uses `text-embedding-3-small`; switching it waits for the
+owner's own choice.
+
 Providers per part (October 13, owner: use the hosted sub2api gateway instead
 of Nocheh's own provider; its wake-up time does not matter): Settings › Models
 now lists providers (OpenAI and Anthropic by API key, and custom

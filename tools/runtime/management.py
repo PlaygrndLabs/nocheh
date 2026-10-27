@@ -148,7 +148,7 @@ def dispatch(body):
         if operation == 'settings.provider_models':
             request = body.get('request') or {}
             return provider_models(state, request.get('provider'), request.get('url'), request.get('key'))
-        if operation == 'settings.save': return save(state, body['changes'], body['revision'])
+        if operation == 'settings.save': return save(state, body['changes'], body['revision'], body.get('rebuild_memory') is True)
         if operation == 'settings.apply':
             # Each step is one progress line; only the last line carries the result.
             return apply(state, lambda step: print(json.dumps({'step': step}), flush=True))

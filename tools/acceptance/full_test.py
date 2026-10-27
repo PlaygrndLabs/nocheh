@@ -72,6 +72,7 @@ TITLES = {
     'tasks_from_chat_with_reminder': 'Tasks from chat, reminder, status and done', 'tasks_not_in_unrelated_group': 'Tasks stay private in groups',
     'defaults_keep_history_and_notion_off': 'Defaults: history kept, Notion off',
     'settings_apply_is_followed_to_the_end': 'Settings: Save and apply finish, and a reload keeps following',
+    'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',
     'no_lingering_isolated_turns': 'Nothing left running afterwards', 'dashboard_pages': 'Every dashboard page opens',
 }
 
@@ -172,8 +173,9 @@ def main():
     steps, fresh = [], args.directory is None
     directory = (args.directory or ROOT/'data/acceptance/results'/('full-'+time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))).resolve()
     log = (directory.parent if fresh else directory)/(directory.name+'.log' if fresh else 'full-test.log')
-    if fresh and args.build:
+    if fresh:
         directory.parent.mkdir(parents=True, exist_ok=True)
+    if fresh and args.build:
         built, tags = build_images(log)
         steps += built
         for role, tag in tags.items():
