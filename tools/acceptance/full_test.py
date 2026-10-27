@@ -13,6 +13,12 @@ the live state, credentials or volumes.
 
     python3 -m tools.acceptance.full_test [--build] [--only NAME ...] [--keep]
 
+The images are the installation's own by default. On a development machine
+those can be older than the checkout, because the development stack runs its
+own source-watched images; --build first builds the checkout's images under
+separate `:tester` tags, so the run tests the current code and the live
+images stay as they are.
+
 Reports go to data/acceptance/results/full-<time>/report.md and result.json.
 """
 import argparse
@@ -69,6 +75,23 @@ TITLES = {
 }
 
 
+# Images --build makes from the checkout: (role, tag, docker build options). Honcho
+# stays the installation's own pinned build; Nocheh's Honcho code is mounted.
+BUILDS = [('services', 'nocheh-services:tester', ['--target', 'runtime']),
+          ('management', 'nocheh-management:tester', ['--target', 'management']),
+          ('postgres', 'nocheh-store-postgres:tester', ['--target', 'store-postgres']),
+          ('native', 'nocheh-hermes:tester', ['-f', 'deploy/hermes.Dockerfile',
+                                               '--build-context', 'hermes_source=data/compat/upstreams/hermes-agent'])]
+
+
+def build_images(log):
+    """Build the checkout's images under tester tags; the live tags are never touched."""
+    ids = ['--build-arg', 'LOCAL_UID='+str(os.getuid()), '--build-arg', 'LOCAL_GID='+str(os.getgid())]
+    steps = [step('build_'+role, ['docker', 'build', '-t', tag]+options+ids+['.'], log) for role, tag, options in BUILDS]
+    steps.append(step('build_browser', ['docker', 'build', '-t', BROWSER_IMAGE, '-f', 'deploy/acceptance/browser.Dockerfile', 'deploy/acceptance'], log))
+    return steps, {role: tag for role, tag, _ in BUILDS}
+
+
 def free_port():
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
@@ -95,7 +118,9 @@ def dashboard_pages(fixture, report):
     out = report/'dashboard'
     out.mkdir(mode=0o777, exist_ok=True)
     out.chmod(0o777)
+    # Chromium's crash reporter needs a writable home; the image is otherwise read-only.
     result = subprocess.run(['docker', 'run', '--rm', '--network', network, '--read-only', '--tmpfs', '/tmp', '--shm-size', '256m',
+                             '-e', 'HOME=/tmp', '-e', 'XDG_CONFIG_HOME=/tmp/.config', '-e', 'XDG_CACHE_HOME=/tmp/.cache',
                              '-v', str(ROOT/'tools/acceptance/dashboard_pages.mjs')+':/tester/dashboard_pages.mjs:ro', '-v', str(out)+':/out',
                              BROWSER_IMAGE, '/tester/dashboard_pages.mjs', 'nocheh-dashboard', str(port), '/out'],
                             capture_output=True, text=True)
@@ -136,6 +161,7 @@ def main():
     parser.add_argument('--skip-existing', action='store_true', help='Run only the product scenarios, not the original simulator list')
     parser.add_argument('--directory', type=Path, help='Reuse a kept fixture instead of starting a new one')
     parser.add_argument('--keep', action='store_true', help='Leave the fixture running afterwards for diagnosis')
+    parser.add_argument('--build', action='store_true', help='Build the checkout\'s images under :tester tags first and test those')
     for role, image in IMAGES.items():
         parser.add_argument('--'+role+'-image', default=image)
     args = parser.parse_args()
@@ -145,7 +171,13 @@ def main():
     steps, fresh = [], args.directory is None
     directory = (args.directory or ROOT/'data/acceptance/results'/('full-'+time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))).resolve()
     log = (directory.parent if fresh else directory)/(directory.name+'.log' if fresh else 'full-test.log')
-    if fresh:
+    if fresh and args.build:
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        built, tags = build_images(log)
+        steps += built
+        for role, tag in tags.items():
+            setattr(args, role+'_image', tag)
+    if fresh and all(row['passed'] for row in steps):
         steps.append(step('start_synthetic_nocheh', [sys.executable, 'tools/acceptance/rehearsals/installation-rehearsal.py', '--directory', str(directory),
                           '--keep', '--preview-port', str(free_port())]+[value for role in IMAGES for value in ('--'+role+'-image', getattr(args, role+'_image'))], log))
         if steps[-1]['passed']:
@@ -156,6 +188,7 @@ def main():
         scenarios = summary['scenarios']
         if not args.only or 'dashboard_pages' in args.only:
             scenarios.append(dashboard_pages(directory, directory))
+    directory.mkdir(parents=True, exist_ok=True)
     write_report(directory, steps, scenarios)
     if fresh and not args.keep and (directory/'compose.json').exists():
         project = json.loads((directory/'fixture.json').read_text())['project']
