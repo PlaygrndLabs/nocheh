@@ -1,6 +1,7 @@
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object} from '../http.js';
+import type pg from 'pg';
 import type {RuntimeCall} from '../runtime.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
@@ -24,6 +25,33 @@ CREATE INDEX IF NOT EXISTS native_review_jobs_source ON native_review_jobs((sour
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
 export const nativeReconcileLimit=8;
+
+/** Sources whose native review never started, or whose newest learning stopped, under an earlier epoch are renewed by
+ * their per-source step. That step runs after each epoch; work stranded before a restart asks for it once more here,
+ * at most once per source since `since`. */
+export async function requestStrandedSources(pool:pg.Pool,since:Date,limit=100):Promise<number> {
+  if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw new HttpError(400,'invalid_workflow_limit');
+  const db=await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const sources=(await db.query(`WITH current AS (SELECT jsonb_build_object('generation',i.generation::text,'epoch',g.epoch,'mode',g.mode) AS binding,i.generation
+        FROM guard_state g CROSS JOIN installation i WHERE g.singleton AND i.singleton),
+      learning AS (SELECT DISTINCT ON (j.workspace,j.audience,j.source_reference->>'id') j.source_reference->>'id' AS id,j.state,j.error_code,j.binding
+        FROM interpretation_jobs j JOIN memory_generations m ON m.id=j.workspace AND m.state<>'retired' JOIN current c ON m.installation_generation=c.generation
+        ORDER BY j.workspace,j.audience,j.source_reference->>'id',j.created_at DESC,j.id DESC),
+      stranded AS (
+        SELECT n.source_reference->>'id' AS id FROM native_review_jobs n,current c WHERE n.state='pending' AND NOT n.paused AND n.attempts=0
+          AND n.binding->>'generation'=c.generation::text AND n.binding<>c.binding
+        UNION SELECT l.id FROM learning l,current c WHERE l.binding<>c.binding
+          AND (l.state='pending' OR l.state='failed' AND l.error_code IS DISTINCT FROM 'invalid_interpretation_result'))
+      SELECT s.id,coalesce(max(w.generation),0)+1 AS generation FROM stranded s
+        LEFT JOIN workflow_registry w ON w.family='memory_review' AND w.job_id='source:'||s.id
+      GROUP BY s.id HAVING NOT bool_or(coalesce(w.state IN ('queued','waiting','running','retryable_failed') OR w.created_at>=$2,false))
+      ORDER BY s.id LIMIT $1`,[limit,since])).rows;
+    for(const source of sources)await requestWorkflow(db,'memory_review','source:'+source.id,Number(source.generation));
+    await db.query('COMMIT');return sources.length;
+  }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+}
 
 /** Native notes remain in Hermes. Nocheh stores prepared inputs and execution receipts separately. */
 export class NativeReviewRepository {

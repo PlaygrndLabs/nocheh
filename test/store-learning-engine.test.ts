@@ -15,6 +15,7 @@ import {SourceAccessRepository} from '../src/stores/access.js';
 import {LearningContextRepository} from '../src/stores/learning-context.js';
 import {ContextualLearningRepository,terminalLearningCodes} from '../src/stores/learning-engine.js';
 import {HonchoProvenanceRepository} from '../src/stores/honcho-provenance.js';
+import {requestStrandedSources} from '../src/stores/native-review.js';
 
 test('silent Honcho learning uses authorized relationship evidence and recovers output/activation without duplicate reasoning',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -206,6 +207,9 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.deepEqual(await learning.renew(nod),[],'current learning is left to run');
     const bump=async()=>{const before=(await guards.state()).epoch;await guards.setMode('off');await guards.setMode('on');assert.ok((await guards.state()).epoch>before);};
     await bump();
+    const strandedSteps=async()=>(await stores.control.query("SELECT 1 FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+nod.id])).rowCount;
+    assert.equal(await strandedSteps(),0);await requestStrandedSources(stores.control,new Date());
+    assert.equal(await strandedSteps(),1,'learning stranded before a restart asks for its per-source step');
     const [renewed]=await learning.renew(nod);
     assert.ok(renewed&&renewed!==stranded,'a job stopped by a newer epoch is asked again');
     assert.deepEqual(await learning.renew(nod),[]);

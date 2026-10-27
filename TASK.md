@@ -1257,8 +1257,12 @@ giving up, and the instruction cites only the evidence it shows
 including those runs, was closed and never asked again; the per-source sweep
 after each epoch now asks again
 ([decision](docs/adr/0176-stopped-learning-is-asked-again.md),
-[checks](test/store-learning-engine.test.ts)). Pending: confirming the queue
-drains on the owner's installation and the stopped learning completes.
+[checks](test/store-learning-engine.test.ts)). Work stranded before those
+fixes waited for the next epoch, so each worker start now asks once for the
+per-source step of stranded sources
+([decision](docs/adr/0177-stranded-memory-work-is-picked-up-at-start.md)).
+Pending: confirming the queue drains on the owner's installation and the
+stopped learning completes.
 
 Current isolated evaluation status: the synthetic 16-service fixture is stopped;
 the operating gateway is healthy. The operating database recovered with the
