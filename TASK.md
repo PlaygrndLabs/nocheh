@@ -585,6 +585,23 @@ itself at startup.
 
 <verification>
 
+- Full end-to-end tester (2026-10-27, revision c650887, cloud synthetic
+  installation): `python3 -m tools.acceptance.full_test` passes all 59 checks
+  in one fresh run: the 38 earlier simulator scenarios, 19 product scenarios
+  (allowed members, addressing, unaddressed messages, the fixed reply for
+  people not allowed, approval cards pressed in private chat and groups,
+  hide and unhide, reactions keeping group names, learning reaching Honcho,
+  Inbox person cards, a Telegram Desktop import with a topic and a file,
+  tasks with reminders, defaults), the lingering-turn check and 34 dashboard
+  pages and tabs in Chromium. The owner allowed it to run beside the live
+  installation and asked that it need no action from them. It found and
+  verified a fix for every dashboard page crashing when container status is
+  unavailable. It also showed a temporary failure while Nocheh prepares text
+  for Honcho answered with HTTP 403, which Honcho never retries, so that batch
+  was not learned; [ADR-0174](docs/adr/0174-memory-preparation-outages-are-retried.md)
+  now answers 503 for it. Pending: the same run on the MacBook beside the
+  live stack. [Procedure](docs/telegram-simulation.md).
+
 - Personal-use mocked-Telegram evaluation (2026-10-08, current source): every
   Node test file passes on its own fresh synthetic database (269 passes, four
   fixture-dependent skips); all 439 Hermes/Honcho and 100 tooling Python
