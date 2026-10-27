@@ -16,6 +16,8 @@ import {evidencePeerId,honchoPeerId} from './entities.js';
 const protocol='honcho-contextual-learning-v1';
 /** A saved reasoning result is never rerun, so a result that fails these checks fails identically on every retry. */
 export const terminalLearningCodes=new Set(['invalid_interpretation_result','learning_query_limit']);
+/** A saved result that was unusable stays closed; a query that was too large is prepared again, as trimming can change. */
+const terminalRenewalCodes=new Set(['invalid_interpretation_result']);
 /** Honcho rejects a longer reasoning query before any model call. */
 const honchoQueryLimit=10000;
 /** The learning query within Honcho's limit. Other evidence keeps only its text first, then rules
@@ -64,6 +66,20 @@ export class ContextualLearningRepository {
       await requestWorkflow(client,'memory_review','interpret:'+id);
       await client.query('COMMIT');return id;
     } catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }
+
+  /** A source's learning that an authorization epoch stopped before it finished is asked again under the current one.
+   * Only the newest job of each memory audience counts; a finished one, an unusable saved result or current work is left alone. */
+  async renew(source:SourceReference):Promise<string[]> {
+    const binding=await this.guards.state();
+    const stale=(await this.contexts.access.stores.control.query(`SELECT DISTINCT ON (j.workspace,j.audience) j.workspace,j.audience,j.state,j.error_code,j.binding=$2::jsonb AS current
+      FROM interpretation_jobs j JOIN memory_generations g ON g.id=j.workspace AND g.installation_generation=$3 AND g.state<>'retired'
+      WHERE j.source_reference->>'id'=$1 ORDER BY j.workspace,j.audience,j.created_at DESC,j.id DESC`,[source.id,JSON.stringify(binding),binding.generation])).rows
+      .filter(job=>!job.current&&(job.state==='pending'||job.state==='failed'&&!terminalRenewalCodes.has(job.error_code)));
+    const ids:string[]=[];
+    for(const job of stale)try{ids.push(await this.request(source,job.workspace,job.audience));}
+    catch(error){if(!(error instanceof HttpError&&['learning_consent_required','learning_workspace_scope_mismatch','memory_context_retired'].includes(error.code)))throw error;}
+    return ids;
   }
 
   /** Job completion and its follow-up request are one control-store commit. */
