@@ -45,7 +45,7 @@ const relay = net
   .listen(Number(port), '127.0.0.1');
 await new Promise(resolve => relay.on('listening', resolve));
 
-const browser = await chromium.launch({executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-crash-reporter', '--disable-crashpad-for-testing']});
+const browser = await chromium.launch({args: ['--no-sandbox', '--disable-crash-reporter', '--disable-crashpad-for-testing']});
 const results = [];
 for (const [route, title] of routes) {
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});
