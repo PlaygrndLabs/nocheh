@@ -21,9 +21,10 @@ had the same fate after the query trimming changed.
 
 - A queued job that has not started when an epoch changes keeps its id,
   workflow and place in the queue: when its turn comes, its inputs are
-  prepared again under the current binding and, if they are unchanged apart
-  from the binding and rule wording, the job is rebound and runs, as ADR-0173
-  does for native reviews. Changed inputs close the workflow as superseded.
+  prepared again under the current binding and the job is rebound to them and
+  runs, as ADR-0173 does for native reviews. Inputs often change meanwhile,
+  since earlier learning adds to them; when learning on exactly the new inputs
+  already finished, the job is deleted and its workflow reuses that result.
 - After each epoch, the archive sweep's per-source `memory_review` step also
   looks at the source's newest interpretation job for each memory audience of
   the current installation generation. When that job is bound to an earlier
