@@ -219,7 +219,19 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const [resized]=await learning.renew(nod);assert.ok(resized&&resized!==renewed,'a query too large for an earlier version is prepared again');
     assert.deepEqual(await learning.renew(thumbs),[],'finished learning is not asked again');
     assert.deepEqual(await learning.renew(wave),[],'an unusable saved result stays closed');
-    assert.equal(calls,7);
+    // A queued job that an epoch reaches before it starts keeps its id and place when its inputs are unchanged.
+    const wink=(await archive.capture(event('wink',{update_id:53,message_reaction:{chat:{id:group},message_id:1,date:1700000023,user:{id:7},
+      old_reaction:[],new_reaction:[{type:'emoji',emoji:'😉'}]}}))).source.reference;
+    await guards.prepare(wink,'fixture',detect);
+    const waiting=await learning.request(wink,retiredWorkspace,space);await bump();
+    response={interpretations:[]};await learning.run(waiting,detect,authority);assert.equal(calls,8);
+    const rebound=(await stores.control.query('SELECT state,binding FROM interpretation_jobs WHERE id=$1',[waiting])).rows[0];
+    assert.equal(rebound.state,'done');assert.deepEqual(rebound.binding,await guards.state());
+    assert.deepEqual(await learning.renew(wink),[]);
+    const changed=await learning.request(nod,retiredWorkspace,space);
+    await stores.control.query('UPDATE interpretation_jobs SET context_hash=$2 WHERE id=$1',[changed,digest('changed inputs')]);await bump();
+    await assert.rejects(learning.run(changed,detect,authority),{code:'guard_context_changed'},'changed inputs are left to the source sweep');
+    assert.equal(calls,8);
     const stale=await guards.state();
     await access.setConsent({admin:true,scope:null},parent,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
     await assert.rejects(guards.assertCurrent(stale),{code:'guard_context_changed'});
@@ -227,7 +239,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(!(await contexts.prepare(reaction,await guards.state())).evidence.some(item=>item.reference.id===parent.id),'withdrawn evidence never reaches reasoning');
     await stores.control.query("UPDATE memory_generations SET state='retired' WHERE id=$1",[workspace]);
     await assert.rejects(learning.request(reaction,workspace,space),{code:'memory_context_retired'});
-    assert.equal(calls,7);
+    assert.equal(calls,8);
   } finally {
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');await stores.close();
   }
