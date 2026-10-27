@@ -80,7 +80,8 @@ export class PreparedContextRepository {
           chunks.push({text:part.text.slice(offset,end),prepared:false});offset=end;}return chunks;
       });
       plans.set(original,parts);
-      for(const part of parts)if(!part.prepared&&part.text.trim())fresh.set(part.text,digest(canonical([scope,binding,part.text])));
+      // The detector is part of the key: a secret-check model chosen mid-epoch starts fresh copies instead of conflicting with earlier ones.
+      for(const part of parts)if(!part.prepared&&part.text.trim())fresh.set(part.text,digest(canonical([scope,binding,this.detectorVersion,part.text])));
     }
     let remaining=[...fresh.entries()];
     while(remaining.length) {
