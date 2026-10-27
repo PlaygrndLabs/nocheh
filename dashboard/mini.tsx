@@ -18,6 +18,7 @@ import {Page} from './ui/page';
 import {ActionDrawer, DecisionDrawer} from './pages/inbox/drawers';
 import {Waiting} from './pages/inbox/waiting';
 import Tasks, {day, type Task} from './pages/tasks';
+import {LogoMark} from './ui/logo';
 
 type MiniPage = 'home' | 'inbox' | 'tasks';
 const tabs: {id: MiniPage; title: string; Icon: React.ComponentType<{className?: string}>}[] = [
@@ -77,7 +78,14 @@ function MiniHome() {
   const tasks = useResource<{tasks: Task[]; counts: Record<string, number>}>('/tasks?state=open&limit=3', 30000);
   const open = tasks.data?.counts?.open ?? 0;
   return (
-    <Page title="Nocheh">
+    <Page
+      title={
+        <span className="flex items-center gap-2.5">
+          <LogoMark className="w-8" />
+          Nocheh
+        </span>
+      }
+    >
       <a href="#inbox" className="block">
         <Card>
           <CardBody className="flex items-center gap-3">
