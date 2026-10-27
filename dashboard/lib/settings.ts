@@ -22,7 +22,7 @@ export type SettingsView = {
   apply_state: 'current' | 'pending' | 'unverified';
   fields: SettingField[];
   providers?: {list: ProviderRow[]; parts: ProviderPart[]};
-  models?: {embedding: string[]; embedding_locked: string | null};
+  models?: {embedding: string[]; embedding_locked: string | null; embedding_rebuild?: string | null};
 };
 export type Phase = 'idle' | 'saving' | 'applying' | 'failed';
 type State = {
@@ -102,14 +102,28 @@ export function discardSettings() {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * The memory search model the edits switch to, when Honcho memory already holds
+ * vectors from another one: saving it rebuilds long-term memory, so it is confirmed first.
+ */
+export function memoryRebuildModel(): string | null {
+  const model = state.changes.NOCHEH_EMBEDDING_MODEL;
+  const locked = state.data?.models?.embedding_locked;
+  return model && locked && model !== locked ? model : null;
+}
+
 /** Saves every edit, then applies the saved settings to the running services. */
-export async function saveSettings(): Promise<boolean> {
+export async function saveSettings({rebuildMemory = false}: {rebuildMemory?: boolean} = {}): Promise<boolean> {
   if (state.phase === 'saving' || state.phase === 'applying' || !state.data) return false;
   const changes = state.changes;
   try {
     if (Object.keys(changes).length) {
       update({phase: 'saving', message: ''});
-      const data = await apiPost<SettingsView>('/settings', {changes, revision: state.revision ?? state.data.revision});
+      const data = await apiPost<SettingsView>('/settings', {
+        changes,
+        revision: state.revision ?? state.data.revision,
+        ...(rebuildMemory ? {rebuild_memory: true} : {}),
+      });
       update({changes: {}, revision: null});
       if (data?.fields) update({data});
       else await loadSettings();
@@ -135,6 +149,14 @@ export async function saveSettings(): Promise<boolean> {
       });
       return false;
     }
+    if (current.result?.memory_rebuild === 'failed') {
+      update({
+        phase: 'failed',
+        message:
+          'The new memory search model is in use, but rebuilding long-term memory didn’t start. Press Try again to start it.',
+      });
+      return false;
+    }
     update({phase: 'idle', message: ''});
     return true;
   } catch (error) {
@@ -152,7 +174,7 @@ export function settingsError(error: ApiError | string): string {
   if (code === 'wait_for_active_jobs' || code === 'job_busy')
     return 'Another task, such as a backup or import, is running. Save again when it finishes.';
   if (code === 'embedding_model_change_requires_rebuild')
-    return 'Memory already holds search data from the current memory search model. Rebuild memory before changing it.';
+    return 'Changing the memory search model rebuilds long-term memory. Save again and confirm the rebuild.';
   if (code === 'unsupported_setting') return 'One of these settings can’t be changed from the dashboard.';
   if (code === 'installation_maintenance') return 'Nocheh is busy with maintenance. Try again shortly.';
   if (code === 'ValueError' || code === 'operation_interrupted')

@@ -297,7 +297,7 @@ export async function startManagement() {
       if (req.method === 'POST' && route === '/settings') return exclusive('writer-start',async()=>{
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         const body = object(await readJson(req));
-        return json(res, 200, await python({operation: 'settings.save', changes: body.changes, revision: body.revision}));
+        return json(res, 200, await python({operation: 'settings.save', changes: body.changes, revision: body.revision, rebuild_memory: body.rebuild_memory===true}));
       });
       if (req.method === 'POST' && route === '/settings/apply') return exclusive('writer-start', async () => {
         if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');

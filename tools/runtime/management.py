@@ -148,7 +148,7 @@ def dispatch(body):
         if operation == 'settings.provider_models':
             request = body.get('request') or {}
             return provider_models(state, request.get('provider'), request.get('url'), request.get('key'))
-        if operation == 'settings.save': return save(state, body['changes'], body['revision'])
+        if operation == 'settings.save': return save(state, body['changes'], body['revision'], body.get('rebuild_memory') is True)
         if operation == 'settings.apply': return apply(state)
     if operation.startswith('notion.'):
         # The owner's Notion sign-in; no answer ever carries a token.

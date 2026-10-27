@@ -346,6 +346,67 @@ class ProductScenarios(Scenarios):
         self.gate('no_telegram_replies_for_history', not [row for row in self.f.sent() if 'IMPORTTOPIC' in row['message']['text']])
         self.wait('imported_messages_learned_into_honcho', lambda: self.honcho("SELECT count(*) FROM messages WHERE content LIKE '%IMPORTTOPIC1%'") not in ('', '0'), 900)
 
+    # Memory search model ----------------------------------------------------------------------------
+
+    def ledger(self, sql):
+        import sqlite3
+        path = self.f.directory/'state/honcho/ledger/budget.sqlite'
+        with sqlite3.connect('file:'+str(path)+'?mode=ro', uri=True) as db:
+            return db.execute(sql).fetchall()
+
+    def memory_search_model_change_rebuilds_memory(self):
+        dashboard = self.dashboard()
+        small, large = 'text-embedding-3-small', 'text-embedding-3-large'
+        settings = dashboard.get('/settings')
+        self.gate('memory_holds_small_model_vectors', settings['models']['embedding_locked'] == small, models=settings['models'])
+        # Without the owner's confirmation the change is refused, and nothing is saved.
+        refused = dashboard.post('/settings', {'changes': {'NOCHEH_EMBEDDING_MODEL': large}, 'revision': settings['revision']}, allow_error=True)
+        self.gate('unconfirmed_change_refused', refused['status'] >= 400 and 'embedding_model_change_requires_rebuild' in json.dumps(refused['body']),
+                  status=refused['status'])
+        saved = dashboard.post('/settings', {'changes': {'NOCHEH_EMBEDDING_MODEL': large}, 'revision': settings['revision'], 'rebuild_memory': True})
+        self.gate('confirmed_change_saved', saved['models']['embedding_rebuild'] == large, models=saved['models'])
+        before = self.f.app('/v1/memory/honcho')
+        old = (before.get('workspace') or {}).get('id')
+        self.gate('old_workspace_known', bool(old))
+        # Apply restarts Honcho and its gateway with the new model (the fixture's services are
+        # rendered, so the tester recreates them), then runs the same rebuild step Apply runs.
+        names = []
+        for name, key in (('honcho-api', 'EMBEDDING_MODEL_CONFIG__MODEL'), ('honcho-deriver', 'EMBEDDING_MODEL_CONFIG__MODEL'),
+                          ('honcho-provider-gateway', 'NOCHEH_EMBEDDING_MODEL')):
+            self.f.manifest['services'][name]['environment'][key] = large
+            names.append(name)
+        path = self.f.directory/'compose.json'
+        path.write_text(json.dumps(self.f.manifest))
+        path.chmod(0o600)
+        self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
+        switched = time.time()
+        script = ('import os;from tools.operations.installation.settings import load,rebuild_memory;'
+                  "state=os.environ['NOCHEH_STATE_DIR'];print(rebuild_memory(state,load(state),'refreshed'))")
+        result = self.f.run('exec', '-T', 'nocheh-executor', 'python3', '-c', script, capture_output=True, text=True).stdout.strip()
+        self.gate('rebuild_started', result == 'started', result=result)
+        settings = dashboard.get('/settings')
+        self.gate('memory_now_on_large_model', settings['models']['embedding_locked'] == large and not settings['models']['embedding_rebuild'],
+                  models=settings['models'])
+        after = self.f.app('/v1/memory/honcho')
+        self.gate('replaced_from_archive', after['connection']['include_history'] is True
+                  and after['connection']['workspace_revision'] == before['connection']['workspace_revision']+1, connection=after['connection'])
+        # The old workspace leaves Honcho with its small-model vectors.
+        self.wait('old_workspace_deleted', lambda: self.honcho("SELECT count(*) FROM workspaces WHERE name='"+old+"'") == '0', 900)
+        # Saved messages are learned again into the new workspace, embedded with the large model.
+        workspace = lambda: (self.f.app('/v1/memory/honcho').get('workspace') or {}).get('id')
+        self.wait('new_workspace_created', lambda: workspace() not in (None, old), 600)
+        new = workspace()
+        self.wait('archive_learned_again', lambda: self.honcho("SELECT count(*) FROM messages WHERE workspace_name='"+new+"' AND content LIKE '%IMPORTTOPIC1%'")
+                  not in ('', '0'), 900)
+        self.wait('new_vectors_stored', lambda: self.honcho("SELECT count(*) FROM message_embeddings WHERE workspace_name='"+new+"'") not in ('', '0'), 600)
+        self.wait('honcho_queue_drained', lambda: self.honcho("SELECT count(*) FROM queue WHERE NOT processed") == '0', 900)
+        embedded = self.ledger("SELECT model,sum(calls),sum(failed) FROM usage_daily WHERE route='/v1/embeddings' GROUP BY model")
+        refused_small = self.ledger("SELECT count(*) FROM calls WHERE route='/v1/embeddings' AND started>="+str(switched)+" AND status>=400")[0][0]
+        self.current['observed'] = {'embeddings_by_model': embedded, 'failed_embeddings_after_switch': refused_small}
+        self.gate('large_model_embeddings_accepted', any(model == large and calls for model, calls, _ in embedded), by_model=embedded)
+        # A message learned after the rebuild reaches the new memory without errors.
+        self.learning_reaches_honcho()
+
     # Tasks ---------------------------------------------------------------------------------------
 
     def task_tool(self, arguments, chat=OWNER, topic=None):
@@ -405,4 +466,4 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group',
-                 'defaults_keep_history_and_notion_off']
+                 'defaults_keep_history_and_notion_off', 'memory_search_model_change_rebuilds_memory']
