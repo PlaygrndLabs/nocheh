@@ -216,6 +216,16 @@ People stays persistent or dated: one-time access belongs to approving a
 pending request, where it already exists. Pending: a look at the new fields on
 the running installation.
 
+Logo (October 27, owner: "I want use something like it as project logo but need
+improve it and compatible with our app design or make app design same it"): the
+owner's pixel brain is redrawn on crisp grids and shown in the dashboard
+navigation, phone header, mini app, favicon and README, and the dashboard colours
+follow it: lavender accent, navy dark mode, mint for success
+([decision](docs/adr/0180-pixel-brain-logo-and-logo-colours.md),
+[logo](dashboard/ui/logo.tsx), [assets](docs/assets/logo)). The Telegram bot
+picture (`docs/assets/logo/nocheh-avatar-512.png`) is set by the owner in
+BotFather; it is not set yet.
+
 Role and skills per chat (October 16 and 17, owner: "want to ability to set role
 or skill for projects or GPs ... for a group or user use role and skills and for
 other one use other role and skill"; "if can have role and skill for own Hermes
@@ -593,6 +603,16 @@ itself at startup.
 </current>
 
 <verification>
+
+- Settings apply followed to its end (2026-10-27, revision 5f1010e,
+  [ADR-0178](docs/adr/0178-settings-apply-is-followed-to-its-end.md)): the
+  full tester on the MacBook, beside the live stack, passed the new
+  `settings_apply_is_followed_to_the_end` scenario (a reload mid-apply sees
+  it, the apply completes with its steps, settings in use afterwards), the
+  lingering-turn check and every dashboard page. The browser test passes
+  20/20, including a slow apply with a reload and an apply the dashboard
+  lost. The fixture's apply recreates no container, so the slow path is
+  covered by the browser test; 9b8d61a only lengthens the restart timeout.
 
 - Full end-to-end tester (2026-10-27, revision c650887, cloud synthetic
   installation): `python3 -m tools.acceptance.full_test` passes all 59 checks
@@ -1053,7 +1073,7 @@ Memory search model change (October 27, owner: "but we should able do it"):
 Settings › Models lets the owner pick either reviewed embedding model again.
 Save asks to confirm the memory rebuild, and Apply restarts Honcho with the
 new model, moves the gateway ledger and replaces Honcho memory from the archive
-([decision](docs/adr/0178-memory-search-model-change-rebuilds-memory.md),
+([decision](docs/adr/0181-memory-search-model-change-rebuilds-memory.md),
 [checks](services/hermes/test_settings.py),
 [tester scenario](tools/acceptance/product_scenarios.py)). The owner's
 installation still uses `text-embedding-3-small`; switching it waits for the

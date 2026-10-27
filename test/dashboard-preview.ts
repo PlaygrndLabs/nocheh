@@ -59,6 +59,8 @@ let modeRevision=false;
 let revision=1,guarded='A synthetic conversation about the northern lights.',settingsRevision='fixture-1';
 let retirementRevision=0,retired=false;const retirementHistory:any[]=[];
 let settingsChanges:Record<string,unknown>={};
+// The settings apply that is running in the `slow-apply` and `lost-apply` scenarios.
+let applying:any=null;
 /** Which provider and model each part uses, as owner monitoring reports it; never a key. */
 function modelRoutes() {
   const setting=(key:string)=>String(settingsChanges[key]??fields.find(f=>f.key===key)?.value??'');
@@ -358,7 +360,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(/^\/exports\/[a-f0-9-]{36}\/download$/.test(route)){res.writeHead(200,{'content-type':'application/zip','content-disposition':'attachment; filename="nocheh-archive.zip"','cache-control':'no-store'});res.end(Buffer.from([0x50,0x4b,5,6,...Array(18).fill(0)]));return;}
   if(/^\/workflows\/[a-f0-9]{64}$/.test(route))return json(res,200,await workflowDetail(pool,route.split('/')[2]!));
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'},{event_id:voiceId,state:'failed',error_code:'provider_timeout',created_at:new Date(Date.now()-86400000).toISOString(),channel:'scheduler',job_id:'morning-check',job_name:'Morning aurora check',profile,scope:'42'}]},guard_mode:'on',services:[]});
-  if(route==='/settings')return json(res,200,{revision:settingsRevision,apply_state:'current',fields:fields.map(f=>({...f,value:settingsChanges[f.key]??f.value})),
+  if(route==='/settings')return json(res,200,{revision:settingsRevision,apply_state:applying?'pending':'current',
+   applying:applying?{id:applying.id,step:applying.step,started_at:applying.created_at}:null,fields:fields.map(f=>({...f,value:settingsChanges[f.key]??f.value})),
    models:{embedding:['text-embedding-3-large','text-embedding-3-small'],embedding_locked:mode==='no-provider'?null:'text-embedding-3-small'},
    providers:{list:[{id:'openai',name:'OpenAI',kind:'openai',url:'https://api.openai.com/v1',has_key:true},{id:'anthropic',name:'Anthropic',kind:'anthropic',url:'https://api.anthropic.com/v1',has_key:false},
      ...JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).map((p:any)=>({...p,kind:'custom',has_key:true}))],
@@ -368,6 +371,8 @@ const server=createServer((req,res)=>{void(async()=>{
     {id:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
   ],truncated:false});
   if(route==='/jobs')return json(res,200,jobs);
+  const jobRead=/^\/jobs\/([a-f0-9-]{36})$/.exec(route);
+  if(jobRead){const job=jobs.find(j=>j.id===jobRead[1]);if(!job)throw new HttpError(404,'job_not_found');return json(res,200,job);}
   if(route==='/operations')return json(res,200,{backups:[{id:'synthetic-backup',created_at:'2026-09-16T12:00:00Z',files:28}]});
   if(route==='/scopes')return json(res,200,{scopes:[{scope:'42',events:180},{scope:'-10042',events:32}],next:null});
   if(route==='/data')return json(res,200,{records:[{...voice.event,id:voiceId,content_types:['voice'],ready:2,total:2},{...source.event,id,ready:1,total:1}],next:null});
@@ -535,6 +540,12 @@ const server=createServer((req,res)=>{void(async()=>{
     ?{provider:body.provider,models:body.provider==='openai'?['gpt-5.6-sol','text-embedding-3-small']:['claude-sonnet-5-5','gpt-5.6-sol']}
     :{provider:body.provider,models:[],error:'missing_key'});
   if(route==='/memory/reviews/control')return json(res,200,{ok:true});
+  // `slow-apply` restarts for a few seconds in steps like a real apply; `lost-apply` ends as a dashboard restart would leave it.
+  if(route==='/settings/apply'&&['slow-apply','lost-apply'].includes(mode)){if(applying)throw new HttpError(409,'wait_for_active_jobs');
+   const job:any={id:randomUUID(),kind:'settings.apply',state:'running',step:'restarting',created_at:new Date().toISOString()};jobs.unshift(job);applying=job;
+   if(mode==='lost-apply')setTimeout(()=>{job.state='interrupted';job.error='dashboard_restarted';applying=null;},2500);
+   else{setTimeout(()=>{job.step='memory';},5000);setTimeout(()=>{job.state='complete';job.result={status:'applied'};applying=null;},8000);}
+   return json(res,202,job);}
   if(route==='/operations'||route==='/settings/apply'){const job={id:randomUUID(),kind:route==='/operations'?'operations.'+body.action:'settings.apply',state:'complete',created_at:new Date().toISOString(),result:{status:'synthetic_only'}};jobs.unshift(job);return json(res,200,job);}
   const importAction=/^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);
   if(importAction){const job=jobs.find(j=>j.id===importAction[1]);if(!job)throw new HttpError(404,'job_not_found');if(importAction[2]==='start'){if(job.state!=='ready'&&(JSON.stringify(body.mapping)!==JSON.stringify(job.mapping)||body.review_approved!==job.review_approved))throw new HttpError(409,'import_configuration_conflict');job.mapping=body.mapping;job.review_approved=body.review_approved;job.state='running';}else job.state='cancelled';return json(res,200,job);}

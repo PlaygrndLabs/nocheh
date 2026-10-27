@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS runtime_prepared_inputs (
  id text PRIMARY KEY,audience text NOT NULL,generation uuid NOT NULL,epoch bigint NOT NULL,
  source_id text NOT NULL REFERENCES guard_sources(id)
 );
+ALTER TABLE runtime_prepared_inputs ADD COLUMN IF NOT EXISTS text_key text;
+CREATE INDEX IF NOT EXISTS runtime_inputs_text ON runtime_prepared_inputs(text_key,epoch);
 `;
 export const preparedAudience=(principal:Reader)=>canonical([principal.scope===null?'owner':principal.space??principal.scope,principal.purpose??'assistant',...(namedProfile(principal)?[namedProfile(principal)]:[])]);
 const leaves=(value:unknown):string[]=>typeof value==='string'?(value?[value]:[]):Array.isArray(value)?value.flatMap(leaves):
@@ -80,7 +82,8 @@ export class PreparedContextRepository {
           chunks.push({text:part.text.slice(offset,end),prepared:false});offset=end;}return chunks;
       });
       plans.set(original,parts);
-      for(const part of parts)if(!part.prepared&&part.text.trim())fresh.set(part.text,digest(canonical([scope,binding,part.text])));
+      // The detector is part of the key: a secret-check model chosen mid-epoch starts fresh copies instead of conflicting with earlier ones.
+      for(const part of parts)if(!part.prepared&&part.text.trim())fresh.set(part.text,digest(canonical([scope,binding,this.detectorVersion,part.text])));
     }
     let remaining=[...fresh.entries()];
     while(remaining.length) {
@@ -113,12 +116,25 @@ export class PreparedContextRepository {
   private async guard(principal:Reader,binding:GuardBinding,root:SourceReference|OperationReference,scope:string,
     owned:Map<string,{key:string}>,outputs:Map<string,string>,detect:(text:string,background?:boolean)=>Promise<unknown>) {
     const candidates=[...owned.entries()].map(([text,{key}])=>[text,key] as [string,string]),pending:[string,string][]=[];
+    // The guarded copy depends only on the text, the detector and its shared result, so the epoch is not part of this key.
+    const textKey=(text:string)=>digest(canonical([scope,binding.generation,binding.mode,this.detectorVersion,text]));
     for(let offset=0;offset<candidates.length;offset+=500) {
-      const cache=(await this.derived.pool.query('SELECT id,source_id FROM runtime_prepared_inputs WHERE id=ANY($1::text[])',
-        [candidates.slice(offset,offset+500).map(([,key])=>key)])).rows;
-      for(const [text,key] of candidates.slice(offset,offset+500)) {
-        const cached=cache.find(row=>row.id===key);if(!cached){pending.push([text,key]);continue;}
-        const saved=await this.guards.read(cached.source_id,binding);outputs.set(text,(saved.value as {text:string}).text);
+      const slice=candidates.slice(offset,offset+500);
+      const cache=(await this.derived.pool.query('SELECT id,source_id FROM runtime_prepared_inputs WHERE id=ANY($1::text[])',[slice.map(([,key])=>key)])).rows;
+      const earlier=new Map((await this.derived.pool.query(`SELECT DISTINCT ON (text_key) text_key,source_id FROM runtime_prepared_inputs
+        WHERE text_key=ANY($1::text[]) ORDER BY text_key,epoch DESC`,[slice.map(([text])=>textKey(text))])).rows.map(row=>[row.text_key as string,row.source_id as string]));
+      for(const [text,key] of slice) {
+        const cached=cache.find(row=>row.id===key);
+        if(cached){const saved=await this.guards.read(cached.source_id,binding);outputs.set(text,(saved.value as {text:string}).text);continue;}
+        // Unchanged text this audience prepared in an earlier epoch reuses that guarded copy; this epoch saves only a pointer to it.
+        const reused=earlier.get(textKey(text));
+        if(reused)try {
+          const saved=await this.guards.read(reused,binding);
+          await this.derived.pool.query(`INSERT INTO runtime_prepared_inputs(id,audience,generation,epoch,source_id,text_key)
+            VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,[key,scope,binding.generation,binding.epoch,reused,textKey(text)]);
+          outputs.set(text,(saved.value as {text:string}).text);continue;
+        }catch(error){if(!(error instanceof HttpError&&error.code==='guard_preparation_pending'))throw error;}
+        pending.push([text,key]);
       }
     }
     while(pending.length) {
@@ -181,8 +197,8 @@ export class PreparedContextRepository {
           literalSpans(text,literals);
           await this.guards.prepare(output,this.detectorVersion,async fragment=>literals!.filter(literal=>fragment.includes(literal)));
           const sourceId='derived_artifacts:'+output.id,prepared=await this.guards.read(sourceId,binding);
-          await this.derived.pool.query(`INSERT INTO runtime_prepared_inputs(id,audience,generation,epoch,source_id)
-            VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[key,scope,binding.generation,binding.epoch,sourceId]);
+          await this.derived.pool.query(`INSERT INTO runtime_prepared_inputs(id,audience,generation,epoch,source_id,text_key)
+            VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,[key,scope,binding.generation,binding.epoch,sourceId,textKey(text)]);
           outputs.set(text,(prepared.value as {text:string}).text);
         } catch(error){failed=true;throw error;}
       })));

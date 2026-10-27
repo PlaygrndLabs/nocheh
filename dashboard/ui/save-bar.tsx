@@ -24,6 +24,20 @@ type SaveState = {
   discard: () => void;
 };
 
+/** What each apply step is called while it runs. */
+const applySteps: Record<string, string> = {
+  starting: 'Applying',
+  restarting: 'Restarting services',
+  rolling_back: 'Going back to the previous settings',
+  memory: 'Refreshing memory',
+  telegram: 'Updating Telegram',
+};
+/** Minutes and seconds since `started`, like 1:05. */
+function elapsed(started: number): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 const otherState = {busy: false, error: ''};
 const otherListeners = new Set<() => void>();
 function setOther(next: typeof otherState) {
@@ -41,7 +55,13 @@ export function useSaveState(): SaveState {
     otherListeners.add(listener);
     return () => void otherListeners.delete(listener);
   }, []);
-  const {dirty, phase, message, data} = settings;
+  const {dirty, phase, message, data, progress} = settings;
+  // While applying, the elapsed time counts up so the page visibly keeps working.
+  useEffect(() => {
+    if (phase !== 'applying') return;
+    const timer = setInterval(() => rerender(n => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [phase]);
   const pendingApply = data?.apply_state === 'pending';
   const names = [
     ...new Set([...Object.keys(settings.changes).map(settingLabel), ...sources.flatMap(source => source.labels)]),
@@ -78,8 +98,9 @@ export function useSaveState(): SaveState {
   let detail = '';
   if (phase === 'saving' || otherState.busy) text = 'Saving…';
   else if (phase === 'applying') {
-    text = 'Applying…';
-    detail = 'Nocheh’s services are restarting. Replies can pause for a moment.';
+    text = `${applySteps[progress?.step ?? ''] ?? applySteps.starting}… ${elapsed(progress?.started ?? Date.now())}`;
+    detail =
+      'Nocheh’s services are restarting with the saved settings. This can take a few minutes; replies pause meanwhile.';
   } else if (failed) {
     text = 'Couldn’t save';
     detail = otherState.error || message;
