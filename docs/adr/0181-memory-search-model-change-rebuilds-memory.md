@@ -1,4 +1,4 @@
-# ADR-0178: Changing the memory search model rebuilds Honcho memory
+# ADR-0181: Changing the memory search model rebuilds Honcho memory
 
 <status>
 Accepted on 2026-10-27 for the owner's answer "but we should able do it" to

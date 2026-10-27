@@ -34,6 +34,10 @@ background slot from Honcho writes and learning.
 - A waiting review does not validate or ask Hermes while another native review
   is running and was updated in the last ten minutes; it looks again in 15
   seconds.
+- A running review is observed 5 seconds after Hermes accepts it, then at
+  doubling gaps up to a minute, instead of a fixed minute. Most reviews finish
+  within seconds, and the fixed minute held the one-at-a-time queue to about
+  one review a minute.
 
 </decision>
 

@@ -9,7 +9,7 @@
 import {test, before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {existsSync} from 'node:fs';
+import {existsSync, rmSync, writeFileSync} from 'node:fs';
 import {chromium} from 'playwright-core';
 
 const port = Number(process.env.NOCHEH_DASHBOARD_PORT || 18900 + Math.floor(Math.random() * 500));
@@ -205,6 +205,53 @@ test('a settings edit survives switching tabs and Save at the top of the page sa
   assert.equal(await page.locator('#telegram-names').inputValue(), 'Nocheh,Helper');
   assert.deepEqual(problems, []);
   await page.close();
+});
+
+test('a slow apply shows its step and time, and a reload keeps following it to the end', async () => {
+  writeFileSync('/tmp/nocheh-ui-scenario', 'slow-apply');
+  try {
+    const {page, problems} = await open('settings?view=telegram');
+    const bar = page.getByRole('region', {name: 'Save changes'});
+    await page.locator('#telegram-names').fill('Nocheh,Slow');
+    await bar.getByRole('button', {name: 'Save'}).click();
+    // The services restart for a while; the page names the step and counts the time.
+    const progress = bar.getByText(/^Restarting services… 0:0\d$/);
+    await progress.waitFor();
+    const first = await progress.textContent();
+    await page.waitForTimeout(2100);
+    assert.notEqual(await progress.textContent(), first, 'the time counts up');
+    // A reload in the middle follows the running apply instead of offering to apply again.
+    await page.reload();
+    await page.locator('main h1').first().waitFor();
+    await bar.getByText(/^(Restarting services|Refreshing memory)… 0:0\d$/).waitFor();
+    assert.equal(await bar.getByText('Saved, not in use yet').count(), 0);
+    assert.equal(await bar.getByRole('button', {name: 'Save'}).isDisabled(), true);
+    await bar.getByText(/^Refreshing memory… /).waitFor();
+    await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor({timeout: 15000});
+    await bar.getByText('No unsaved changes').waitFor();
+    assert.deepEqual(problems, []);
+    await page.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+});
+
+test('an apply the dashboard lost ends with a clear error and the Save button back', async () => {
+  writeFileSync('/tmp/nocheh-ui-scenario', 'lost-apply');
+  try {
+    const {page, problems} = await open('settings?view=telegram');
+    const bar = page.getByRole('region', {name: 'Save changes'});
+    await page.locator('#telegram-names').fill('Nocheh,Lost');
+    await bar.getByRole('button', {name: 'Save'}).click();
+    await bar.getByText(/^Restarting services… /).waitFor();
+    await bar.getByText('Couldn’t save').waitFor({timeout: 10000});
+    await page.getByRole('alert').filter({hasText: 'Couldn’t save: The dashboard restarted while applying'}).waitFor();
+    assert.equal(await bar.getByRole('button', {name: 'Try again'}).isEnabled(), true);
+    assert.deepEqual(problems, []);
+    await page.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
 });
 
 test('a group’s role and skills are edited on its chat page and saved from the top of the page', async () => {

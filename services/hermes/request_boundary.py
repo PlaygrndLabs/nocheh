@@ -9,6 +9,7 @@ import contextvars
 import inspect
 import json
 import os
+import re
 import urllib.request
 import urllib.error
 from collections import deque, Counter
@@ -41,13 +42,13 @@ class GuardUnavailable(RuntimeError):
 
 
 def model_listing(request):
-    """A provider's model list carries no content: a GET to .../models with no query and no body.
+    """A provider's model list carries no content: a GET to .../models with no body, and at most a numeric page size.
 
-    Hermes asks for it on every turn to learn the model's context length.
+    Hermes asks for it on every turn to learn the model's context length; Anthropic's list is asked with ?limit=N.
     """
     url=urlsplit(str(request.url))
-    return (request.method=='GET' and not url.query and not request.content
-            and url.path.rstrip('/').rsplit('/',1)[-1]=='models')
+    return (request.method=='GET' and (not url.query or re.fullmatch(r'limit=\d{1,4}',url.query) is not None)
+            and not request.content and url.path.rstrip('/').rsplit('/',1)[-1]=='models')
 
 
 def trusted(destination, endpoints):

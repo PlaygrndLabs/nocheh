@@ -94,13 +94,13 @@ test('native review runs once per source across authorization epochs and stops o
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-once-')),key='review-once:'+Date.now(),group='-'+Date.now();
   const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null};
-  let mode:'done'|'missing'='done',starts=0,observations=0;
+  let mode:'done'|'missing'|'running'='done',starts=0,observations=0;
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       assert.equal(operation,'memory.review');
-      if(input.observe_only){observations++;return {state:'ambiguous'};}
-      starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:'done'};
+      if(input.observe_only){observations++;return {state:mode==='running'?'running':'ambiguous'};}
+      starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:mode==='running'?'running':'done'};
     },honcho:async()=>{throw Error('no provider calls');}});
   const makeSource=async(index:number)=>{
     const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
@@ -182,5 +182,14 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal((await operations.memory_review!('source:'+stranded.id,authority)).state,'completed');
     assert.equal(canonical((await services.reviews.inspect(strandedReview!)).binding),canonical(await services.guards.state()));
     assert.equal(starts,4);
+
+    // A running review is observed soon after it starts, then at doubling gaps up to a minute.
+    mode='running';const [running]=await services.reviews.queue(await makeSource(8));
+    const runningGaps:number[]=[];
+    for(let index=0;index<6;index++) {
+      assert.equal(await services.reviews.run(running!,authority),'running');
+      const row=await services.reviews.inspect(running!);runningGaps.push(Math.round((row.next_attempt.getTime()-row.updated_at.getTime())/1000));
+    }
+    assert.deepEqual(runningGaps,[5,10,20,40,60,60]);assert.equal(starts,5);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
