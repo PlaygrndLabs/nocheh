@@ -103,7 +103,8 @@ def resolve_credentials(part: str = "reply") -> SubscriptionCredentials:
 
 
 def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list):
-    """Call the part's configured provider with retries disabled."""
+    """Call the part's configured provider with retries disabled. No tools field: Anthropic's
+    OpenAI-compatible endpoint rejects an empty tools list."""
     import httpx
     from openai import OpenAI
 
@@ -112,7 +113,7 @@ def _call_subscription(credentials: SubscriptionCredentials, model: str, message
         http_client=httpx.Client(trust_env=False), timeout=90, max_retries=0,
     ) as client:
         return client.chat.completions.create(
-            model=model, messages=messages, tools=[], timeout=90,
+            model=model, messages=messages, timeout=90,
             extra_body={"reasoning_effort": "low"},
         )
 
