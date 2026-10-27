@@ -10,6 +10,8 @@ BROKER_URL = "http://nocheh-security:8786/v1"
 FIXTURE_URL = "http://model-fixture:8317/v1"
 # Wait before the secret check's one retry after a provider server error.
 RETRY_SECONDS = 2
+# Nocheh joins the texts of one secret check with this separator.
+FRAGMENT = '\n<NOCHEH_FRAGMENT>\n'
 
 
 class DetectorContractError(ValueError):
@@ -152,7 +154,25 @@ def _call_subscription(credentials: SubscriptionCredentials, model: str, message
 
 
 def detect_literals(text: str, credentials: SubscriptionCredentials, model: str, prompts=None):
-    """Return validated literal candidates, never rewritten text."""
+    """Return validated literal candidates, never rewritten text. A provider safety filter can
+    decline a large batch of joined fragments while passing each part, so a declined batch is
+    checked again in halves; one fragment declined on its own still fails the whole check."""
+    parts = text.split(FRAGMENT)
+    try:
+        return _detect_once(text, credentials, model, prompts)
+    except DetectorContractError as error:
+        if str(error) != 'detector_refused' or len(parts) < 2:
+            error.shape.update(input_length=len(text), parts=len(parts))
+            raise
+    found = []
+    for half in (parts[:len(parts) // 2], parts[len(parts) // 2:]):
+        for literal in detect_literals(FRAGMENT.join(half), credentials, model, prompts):
+            if literal not in found:
+                found.append(literal)
+    return found
+
+
+def _detect_once(text, credentials, model, prompts):
     from services.hermes.prompts import text as prompt
     from services.hermes.request_boundary import trusted_detector
     from services.hermes.usage import record, response_usage
