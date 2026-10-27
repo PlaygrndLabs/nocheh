@@ -1,8 +1,9 @@
 /**
  * The owner's saved settings and unsaved edits, shared by every page that
  * changes a setting (Settings, Chats). Edits survive moving between pages.
- * Save writes the edits and then applies them in one step; the bottom save
- * bar shows the progress and the outcome.
+ * Save writes the edits and then applies them in one step; the save controls
+ * in the page header show the progress and the outcome. A page opened or
+ * reloaded while an apply runs follows that apply to its end.
  */
 import {useSyncExternalStore} from 'react';
 import {apiGet, apiPost, type ApiError} from './api';
@@ -23,7 +24,11 @@ export type SettingsView = {
   fields: SettingField[];
   providers?: {list: ProviderRow[]; parts: ProviderPart[]};
   models?: {embedding: string[]; embedding_locked: string | null};
+  /** The apply that is running now, if any. */
+  applying?: {id: string; step: string; started_at: string} | null;
 };
+/** What a running apply is doing: its step and when it started (ms). */
+export type ApplyProgress = {step: string; started: number};
 export type Phase = 'idle' | 'saving' | 'applying' | 'failed';
 type State = {
   data: SettingsView | null;
@@ -32,9 +37,10 @@ type State = {
   revision: string | null;
   phase: Phase;
   message: string;
+  progress: ApplyProgress | null;
 };
 
-let state: State = {data: null, error: '', changes: {}, revision: null, phase: 'idle', message: ''};
+let state: State = {data: null, error: '', changes: {}, revision: null, phase: 'idle', message: '', progress: null};
 const listeners = new Set<() => void>();
 function update(patch: Partial<State>) {
   state = {...state, ...patch};
@@ -49,7 +55,10 @@ export function loadSettings(): Promise<void> {
   const request = apiGet<SettingsView>('/settings')
     .then(
       data => {
-        if (mine === sequence) update({data, error: '', changes: rebase(state.changes, data)});
+        if (mine !== sequence) return;
+        update({data, error: '', changes: rebase(state.changes, data)});
+        // An apply started before this page loaded, or in another tab: follow it.
+        if (data.applying && state.phase !== 'saving' && state.phase !== 'applying') void resumeApply(data.applying);
       },
       error => {
         if (mine === sequence) update({error: (error as Error).message || 'unavailable'});
@@ -97,10 +106,83 @@ export function setSettings(values: Record<string, string>) {
 }
 
 export function discardSettings() {
+  if (state.phase === 'saving' || state.phase === 'applying') return;
   update({changes: {}, revision: null, phase: 'idle', message: ''});
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+type ApplyJob = {id: string; state: string; step?: string; created_at?: string; result?: any; error?: string};
+type ApplyOutcome = {job: ApplyJob; ended: 'finished' | 'too_long' | 'unreachable'};
+// The server bounds every apply step (each restart, a rollback and the memory
+// refresh), about 40 minutes at the very worst; past this the page stops waiting.
+const APPLY_LIMIT = 45 * 60_000;
+// A restart can make the dashboard miss a few answers; this long without one means it is gone.
+const UNREACHABLE_LIMIT = 2 * 60_000;
+// Applies this page already followed to their end, so a late settings answer never restarts one.
+const settled = new Set<string>();
+let following: string | null = null;
+
+/** Waits for an apply to end, reporting its step, and never longer than the limits above. */
+async function followApply(job: ApplyJob, started: number): Promise<ApplyOutcome> {
+  following = job.id;
+  let current = job;
+  let answered = Date.now();
+  try {
+    while (['running', 'queued'].includes(current.state)) {
+      update({progress: {step: current.step || 'starting', started}});
+      if (Date.now() - started > APPLY_LIMIT) return {job: current, ended: 'too_long'};
+      await sleep(1500);
+      try {
+        current = await apiGet<ApplyJob>('/jobs/' + encodeURIComponent(job.id));
+        answered = Date.now();
+      } catch (error) {
+        if ((error as ApiError).status === 404) return {job: {...current, state: 'interrupted'}, ended: 'finished'};
+        if (Date.now() - answered > UNREACHABLE_LIMIT) return {job: current, ended: 'unreachable'};
+      }
+    }
+    return {job: current, ended: 'finished'};
+  } finally {
+    following = null;
+    settled.add(job.id);
+  }
+}
+
+/** Shows how an apply ended. `sent` are the edits it saved, kept as edits again when it rolled back. */
+async function concludeApply({job, ended}: ApplyOutcome, sent: Record<string, string>): Promise<boolean> {
+  await loadSettings();
+  if (ended === 'finished' && job.state === 'complete') {
+    update({phase: 'idle', message: '', progress: null});
+    return true;
+  }
+  const rolledBack = job.result?.rolled_back;
+  // A failed apply restores the previous settings; keep the edits so they can be fixed and saved again.
+  update({
+    phase: 'failed',
+    progress: null,
+    changes: state.data ? rebase({...sent, ...state.changes}, state.data) : state.changes,
+    revision: state.data?.revision ?? null,
+    message:
+      ended === 'unreachable'
+        ? 'Nocheh stopped answering while the services restarted. Reload the page in a minute to see whether the new settings are in use.'
+        : ended === 'too_long'
+          ? 'Restarting the services is taking far longer than it should. Check System, then try again.'
+          : job.state === 'interrupted'
+            ? 'The dashboard restarted while applying, so the new settings may not be in use yet. Press Try again to apply them.'
+            : rolledBack
+              ? 'The services didn’t start with these settings, so Nocheh went back to the previous ones. Your edits are kept.'
+              : 'The new settings were saved, but restarting the services didn’t finish. Check System, then try again.',
+  });
+  return false;
+}
+
+/** Follows an apply this page didn't start, for example after a reload while it runs. */
+async function resumeApply(applying: NonNullable<SettingsView['applying']>) {
+  if (following === applying.id || settled.has(applying.id)) return;
+  const started = Date.parse(applying.started_at) || Date.now();
+  update({phase: 'applying', message: '', progress: {step: applying.step, started}});
+  await concludeApply(await followApply({id: applying.id, state: 'running', step: applying.step}, started), {});
+}
 
 /** Saves every edit, then applies the saved settings to the running services. */
 export async function saveSettings(): Promise<boolean> {
@@ -114,32 +196,23 @@ export async function saveSettings(): Promise<boolean> {
       if (data?.fields) update({data});
       else await loadSettings();
     }
-    update({phase: 'applying', message: ''});
-    const job = await apiPost<{id: string; state: string; result?: any; error?: string}>('/settings/apply', {});
-    let current = job;
-    for (let tries = 0; ['running', 'queued'].includes(current.state) && tries < 400; tries++) {
-      await sleep(1500);
-      current = await apiGet('/jobs/' + encodeURIComponent(job.id)).catch(() => current);
+    update({phase: 'applying', message: '', progress: {step: 'starting', started: Date.now()}});
+    let job: ApplyJob;
+    try {
+      job = await apiPost<ApplyJob>('/settings/apply', {});
+    } catch (error) {
+      // An apply already running, for example from another tab, already uses these saved settings.
+      if ((error as ApiError).message !== 'wait_for_active_jobs') throw error;
+      await loadSettings();
+      const running = state.data?.applying;
+      if (!running || settled.has(running.id)) throw error;
+      job = {id: running.id, state: 'running', step: running.step, created_at: running.started_at};
     }
-    await loadSettings();
-    if (current.state !== 'complete') {
-      const rolledBack = current.result?.rolled_back;
-      // A failed apply restores the previous settings; keep the edits so they can be fixed and saved again.
-      update({
-        phase: 'failed',
-        changes: state.data ? rebase(changes, state.data) : changes,
-        revision: state.data?.revision ?? null,
-        message: rolledBack
-          ? 'The services didn’t start with these settings, so Nocheh went back to the previous ones. Your edits are kept.'
-          : 'The new settings were saved, but restarting the services didn’t finish. Check System, then try again.',
-      });
-      return false;
-    }
-    update({phase: 'idle', message: ''});
-    return true;
+    const started = Date.parse(job.created_at ?? '') || Date.now();
+    return await concludeApply(await followApply(job, started), changes);
   } catch (error) {
     await loadSettings();
-    update({phase: 'failed', message: settingsError(error as ApiError)});
+    update({phase: 'failed', progress: null, message: settingsError(error as ApiError)});
     return false;
   }
 }

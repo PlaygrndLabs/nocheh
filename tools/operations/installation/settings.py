@@ -101,7 +101,9 @@ def save(state, changes, expected):
     return view(state)
 
 
-def apply(state):
+def apply(state, progress=lambda step: None):
+    """Restarts the services with the saved settings. `progress` hears each step so
+    the dashboard can say what is happening while services restart."""
     try:
         from tools.operations.installation.operations import compose, environment
         from tools.operations.installation.configuration import read_env
@@ -118,24 +120,31 @@ def apply(state):
             current = load(state)
             services = ['nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb']
             if mini_app.enabled(current): services += list(mini_app.SERVICES)
+            # Compose stops and restarts each changed service in dependency order: the
+            # app may take its whole 300 s grace to finish work in flight and Hermes its
+            # 120 s, each then waits to report healthy, and the last wait is up to 180 s.
             ok = subprocess.run(compose(state) + ['up', '-d', '--no-build', '--wait', '--wait-timeout', '180', *services],
                                 env=environment(state), stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, timeout=420).returncode == 0
+                                stderr=subprocess.DEVNULL, timeout=900).returncode == 0
             if ok and not mini_app.enabled(current):
                 # Turning the mini app off also closes its tunnel.
                 ok = subprocess.run(compose(state) + ['rm', '-s', '-f', *mini_app.SERVICES], env=environment(state),
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120).returncode == 0
             return ok
+        progress('restarting')
         try: ok = run()
         except subprocess.TimeoutExpired: ok = False
         if not ok:
             rolled_back = False
             if previous.exists():
+                progress('rolling_back')
                 write_env(env_path(state), read_env(previous))
                 try: rolled_back = run()
                 except subprocess.TimeoutExpired: pass
             return {'status': 'apply_failed', 'rolled_back': rolled_back}
+        progress('memory')
         honcho = refresh_honcho(state, values)
+        progress('telegram')
         menu = mini_app.menu_button(values, telegram_api, shown_before=mini_app.enabled(before))
         temporary = directory / 'applied.tmp'
         temporary.write_text(json.dumps({'revision': revision(values)})); temporary.chmod(0o600)
