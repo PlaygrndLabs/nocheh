@@ -1,6 +1,7 @@
 """Fixture-only HTTP Bot API subset, with real PTB parsing and durable queue state.
 
-Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage and #getfile.
+Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage, #getfile,
+#editmessagetext and #answercallbackquery.
 Unknown methods are recorded and rejected; this is not a Telegram implementation.
 """
 import asyncio
@@ -104,6 +105,9 @@ class TelegramMock:
             known[item['update_id']]=item
         if len(known)>1000:raise ValueError('fixture_queue_limit')
         self.state['updates']=sorted(known.values(),key=lambda item:item['update_id'])
+        presses=self.state.setdefault('presses',[])
+        for item in updates:
+            if isinstance(item.get('callback_query'),dict) and item not in presses:presses.append(item)
         titles=self.state.setdefault('titles',{})
         for item in updates:
             chat=(item.get('message') or item.get('edited_message') or {}).get('chat') or {}
@@ -147,6 +151,24 @@ class TelegramMock:
         if len(chats)>50:raise ValueError('fixture_control_limit')
         self.state.update(files=files,faults=faults,chats=chats);self.save()
         return {'files':len(files),'faults':len(faults),'chats':len(chats)}
+
+    @staticmethod
+    def markup(data):
+        """The inline keyboard of a send or edit: None when absent, False when malformed."""
+        markup=data.get('reply_markup')
+        if markup in (None,''):return None
+        try:markup=json.loads(markup) if isinstance(markup,str) else markup
+        except ValueError:return False
+        rows=markup.get('inline_keyboard') if isinstance(markup,dict) else None
+        if not isinstance(rows,list) or not all(isinstance(row,list) and all(isinstance(button,dict) and isinstance(button.get('text'),str)
+                and (not isinstance(button.get('callback_data'),str) or len(button['callback_data'].encode())<=64) for button in row) for row in rows):return False
+        return {'inline_keyboard':rows}
+
+    def find(self,data):
+        """The sent message a call names by chat and message ID."""
+        try:chat,number=int(data.get('chat_id')),int(data.get('message_id'))
+        except (TypeError,ValueError):return None
+        return next((row for row in self.state['sent'] if row['message']['chat']['id']==chat and row['message']['message_id']==number),None)
 
     @staticmethod
     def error(code,description,**extra):return code,{'ok':False,'error_code':code,'description':description,**extra}
@@ -198,6 +220,10 @@ class TelegramMock:
             text=data.get('text');chat=data.get('chat_id');topic=data.get('message_thread_id')
             if not isinstance(text,str) or chat is None:return self.error(400,'Bad Request: invalid message')
             entities=[]
+            if data.get('entities') and not data.get('parse_mode'):
+                # Plain text with explicit entities, as approval cards send their links.
+                entities=data['entities'];entities=json.loads(entities) if isinstance(entities,str) else entities
+                if not isinstance(entities,list):return self.error(400,'Bad Request: invalid entities')
             if data.get('parse_mode'):
                 # Telegram returns parsed Message.text and entities, not the
                 # escaped request text. Other parse modes stay unmodeled and
@@ -215,7 +241,37 @@ class TelegramMock:
                 'chat':{'id':chat,'type':'private' if chat>0 else 'supergroup',**({'title':self.state.get('titles',{}).get(str(chat))} if self.state.get('titles',{}).get(str(chat)) else {})},'text':text,
                 **({'entities':entities} if entities else {})}
             if topic is not None:result.update(message_thread_id=int(topic),is_topic_message=True)
+            markup=self.markup(data)
+            if markup is False:return self.error(400,'Bad Request: invalid reply markup')
+            if markup:result['reply_markup']=markup
             self.state['sent'].append({'parameters':data,'message':result})
+        elif method=='editMessageText':
+            # https://core.telegram.org/bots/api#editmessagetext: only a message this
+            # bot sent can be edited; an identical edit is refused like Telegram does.
+            text=data.get('text');found=self.find(data)
+            if found is None:return self.error(400,'Bad Request: message to edit not found')
+            if not isinstance(text,str) or not 1<=len(text)<=4096:return self.error(400,'Bad Request: invalid message')
+            entities=data.get('entities') or [];entities=json.loads(entities) if isinstance(entities,str) else entities
+            markup=self.markup(data)
+            if markup is False:return self.error(400,'Bad Request: invalid reply markup')
+            message=found['message']
+            if message.get('text')==text and message.get('reply_markup')==(markup or None) and message.get('entities',[])==entities:
+                return self.error(400,'Bad Request: message is not modified')
+            message.update(text=text,edit_date=int(time.time()))
+            if entities:message['entities']=entities
+            else:message.pop('entities',None)
+            if markup:message['reply_markup']=markup
+            else:message.pop('reply_markup',None)
+            found.setdefault('edits',[]).append({'parameters':data,'at':time.time()})
+            result=message
+        elif method=='answerCallbackQuery':
+            # https://core.telegram.org/bots/api#answercallbackquery: answers a press
+            # the fixture delivered; an unknown or repeated answer is refused.
+            query=str(data.get('callback_query_id') or '');answers=self.state.setdefault('answers',[])
+            pressed={str(item['callback_query']['id']) for item in self.state.setdefault('presses',[])}
+            if query not in pressed or any(row['callback_query_id']==query for row in answers):
+                return self.error(400,'Bad Request: query is too old and response timeout expired or query ID is invalid')
+            answers.append({'callback_query_id':query,'text':data.get('text'),'at':time.time()});result=True
         elif method=='getChat':
             # https://core.telegram.org/bots/api#getchat: presentation for a chat the
             # bot belongs to. The fixture answers from configured synthetic chats.

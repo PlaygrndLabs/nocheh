@@ -100,6 +100,10 @@ def main():
     write_env(memory / 'honcho.env', native)
     write_env(memory / 'meter.env', {})
     env = compose_environment(state)
+    # The dashboard asks Docker for container status and storage sizes; on a
+    # Linux host the socket belongs to the docker group, not root.
+    if os.path.exists('/var/run/docker.sock'):
+        env.setdefault('NOCHEH_DOCKER_GID', str(os.stat('/var/run/docker.sock').st_gid))
     owned = []
     command = None
 
@@ -193,6 +197,13 @@ def main():
         if args.prepare_only:
             print(json.dumps({'prepared': True, 'project': project, 'services_started': False, 'live_acceptance': False}), flush=True)
             return
+        # On a Linux host Docker creates a missing bind source as root, which the
+        # services' own user then cannot write. Create the fixture's folders first.
+        for service in rendered['services'].values():
+            for mount in service.get('volumes', []):
+                source = Path(mount['source']) if mount['type'] == 'bind' else None
+                if source and source.is_relative_to(directory) and not source.exists() and not Path(mount['target']).suffix:
+                    source.mkdir(parents=True, mode=0o700)
         run(['up', '-d', '--no-build', '--wait', '--wait-timeout', '300'])
         verify(directory, command, env, project, images)
     except Exception as error:
