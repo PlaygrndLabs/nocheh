@@ -281,19 +281,19 @@ class Handler(BaseHTTPRequestHandler):
             bot_token = environment_secret('TELEGRAM_BOT_TOKEN', required=False)
             if not bot_token:
                 raise RuntimeError('telegram_not_configured')
-            chat = body.get('chat_id')
-            if not isinstance(chat, str) or not re.fullmatch(r'-?[1-9][0-9]{0,18}', chat):
+            chat_id = body.get('chat_id')
+            if not isinstance(chat_id, str) or not re.fullmatch(r'-?[1-9][0-9]{0,18}', chat_id):
                 raise ValueError('invalid_chat_id')
             async def read_chat():
                 async with Bot(bot_token) as bot:
                     try:
-                        found = await bot.get_chat(int(chat))
+                        found = await bot.get_chat(int(chat_id))
                     except ChatMigrated as error:
-                        return {'chat_id': chat, 'state': 'migrated', 'migrate_to_chat_id': str(error.new_chat_id)}
+                        return {'chat_id': chat_id, 'state': 'migrated', 'migrate_to_chat_id': str(error.new_chat_id)}
                     except Forbidden:
-                        return {'chat_id': chat, 'state': 'not_member'}
+                        return {'chat_id': chat_id, 'state': 'not_member'}
                     except BadRequest:
-                        return {'chat_id': chat, 'state': 'not_found'}
+                        return {'chat_id': chat_id, 'state': 'not_found'}
                     return {'chat_id': str(found.id), 'state': 'available', 'type': found.type, 'title': found.title,
                             'username': found.username, 'is_forum': bool(getattr(found, 'is_forum', False))}
             return asyncio.run(read_chat())
