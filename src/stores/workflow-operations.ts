@@ -1,4 +1,5 @@
 import {blockingPublications} from './publications.js';
+import {canonical} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import {observation,type Observation,type WorkflowOperation} from '../workflows/pipeline.js';
@@ -10,7 +11,7 @@ import {terminalLearningCodes} from './learning-engine.js';
 import {advanceReactionEpoch} from './reaction-state.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
-const superseded=new Set(['guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','honcho_receipt_missing']);
+const superseded=new Set(['native_review_missing','guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','honcho_receipt_missing']);
 const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','honcho_sync_busy','memory_session_rebuilt']);
 
 /** Initial replies and their prerequisites; every other storage family shares the background slot. */
@@ -196,6 +197,13 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       let row=await s.reviews.inspect(id);
       if(row.paused)return waiting('review','owner_paused');
       if(row.state==='done')return observation('completed','review',row.attempts);
+      if(row.state==='pending'&&row.attempts===0&&canonical(row.binding)!==canonical(await s.guards.state())) {
+        // A newer epoch renews a review that never started where it waits, instead of closing it for the next sweep to queue again.
+        const renewed=await fenced('memory_review',authority,async()=>(await s.reviews.queue(row.source_reference)).includes(id)?
+          observation('running','review'):observation('skipped','review',0,Date.now(),'superseded'));
+        if(renewed.state!=='running')return renewed;
+        row=await s.reviews.inspect(id);
+      }
       if(row.state==='pending') {
         // A native note review can hold this background slot for minutes. Give
         // current primary-memory writes their first attempt before starting it.
@@ -207,6 +215,9 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
           AND r.state='pending' AND r.attempts=0 AND r.error_code IS NULL AND r.next_attempt<=now() LIMIT 1`,
           [row.binding.generation])).rowCount;
         if(initial)return waiting('review','prerequisite',10000);
+        // Hermes runs one native review at a time, so a waiting review doesn't ask while another is running.
+        if((await control.query(`SELECT 1 FROM native_review_jobs WHERE state='running' AND id<>$1 AND updated_at>now()-interval '10 minutes' LIMIT 1`,[id])).rowCount)
+          return waiting('review','prerequisite',15000);
       }
       if(row.next_attempt<=new Date()){await s.reviews.run(id,authority);row=await s.reviews.inspect(id);}
       // Uncertain native effects are observed under the same identity. Inngest

@@ -19,16 +19,23 @@ export const terminalLearningCodes=new Set(['invalid_interpretation_result','lea
 /** Honcho rejects a longer reasoning query before any model call. */
 const honchoQueryLimit=10000;
 /** The learning query within Honcho's limit. Other evidence keeps only its text first, then rules
- * are left out from the end, then the trigger keeps only its text; anything longer cannot be asked. */
-export function learningQuery(instruction:string,context:Pick<PreparedLearningContext,'source'|'space'|'projects'|'organization_context'|'entities'|'observations'|'rules'|'limitations'>):string {
+ * are left out from the end, then the trigger keeps only its text, then other evidence is left out from
+ * the end; anything longer cannot be asked. The instruction lists the evidence the query still shows. */
+export function learningQuery(instruction:string|((citable:string[])=>string),context:Pick<PreparedLearningContext,'source'|'space'|'projects'|'organization_context'|'entities'|'observations'|'rules'|'limitations'>):string {
   const textOnly=(item:PreparedLearningContext['observations'][number])=>({...item,value:{text:(item.value as {text?:unknown})?.text??null}});
   let observations=context.observations,rules=context.rules;const limitations=[...context.limitations];
-  const query=()=>instruction+`\n${canonical({space:context.space,projects:context.projects,organization_context:context.organization_context,entities:context.entities,observations,rules,limitations})}`;
+  const query=()=>(typeof instruction==='string'?instruction:instruction(observations.map(item=>item.source.id)))+
+    `\n${canonical({space:context.space,projects:context.projects,organization_context:context.organization_context,entities:context.entities,observations,rules,limitations})}`;
   const fits=()=>Array.from(query()).length<=honchoQueryLimit;
   if(fits())return query();
   observations=observations.map(item=>item.source.id===context.source.id?item:textOnly(item));limitations.push('other_evidence_text_only');
   if(!fits()&&rules.length){limitations.push('rules_omitted');while(rules.length&&!fits())rules=rules.slice(0,-1);}
   if(!fits()){observations=observations.map(item=>item.source.id===context.source.id?textOnly(item):item);limitations.push('trigger_text_only');}
+  if(!fits()&&observations.length>1) {
+    limitations.push('other_evidence_omitted');
+    const others=observations.filter(item=>item.source.id!==context.source.id);
+    while(!fits()&&others.length){const dropped=others.pop();observations=observations.filter(item=>item!==dropped);}
+  }
   if(!fits())throw new HttpError(413,'learning_query_limit');
   return query();
 }
@@ -99,8 +106,8 @@ export class ContextualLearningRepository {
         const operation='learning-result:'+id;
         let result=await this.derived.checkpoint(operation);
         if(!result) {
-          const query=learningQuery(learningInstruction((await ownerPrompts(this.contexts.access.stores.control))['learning.interpret'],
-            {trigger_id:context.source.id,citable_ids:canonical(context.evidence.map(e=>e.reference.id))}),context);
+          const prompt=(await ownerPrompts(this.contexts.access.stores.control))['learning.interpret'];
+          const query=learningQuery(citable=>learningInstruction(prompt,{trigger_id:context.source.id,citable_ids:canonical(citable)}),context);
           await this.provenance.current(job.workspace,job.audience,job.binding);
           const peer=context.entities.speaker?honchoPeerId(context.entities.speaker):evidencePeerId(context.source);
           // A group or topic interpretation reasons only over that audience's own sessions.

@@ -5,7 +5,7 @@ import pg from 'pg';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {digest,type Envelope} from '../src/archive.js';
+import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
@@ -115,20 +115,43 @@ test('native review runs once per source across authorization epochs and stops o
     const [done]=await services.reviews.queue(reviewed);assert.equal(await services.reviews.run(done!,authority),'done');assert.equal(starts,1);
     const [superseded]=await services.reviews.queue(waiting);
 
-    // Reactions, rule changes and guard transitions advance the epoch and sweep every archived source again.
-    const before=(await services.guards.state()).epoch;await services.guards.setMode('off');await services.guards.setMode('on');
-    assert.ok((await services.guards.state()).epoch>before);
+    // Reactions, rule changes, learned-memory revisions and guard transitions advance the epoch and sweep every archived source again.
+    const bump=async()=>{
+      const before=(await services.guards.state()).epoch;await services.guards.setMode('off');await services.guards.setMode('on');
+      assert.ok((await services.guards.state()).epoch>before);
+    };
+    await bump();
     assert.deepEqual(await services.reviews.queue(reviewed),[done],'a reviewed source is not reviewed again for a new epoch');
     assert.deepEqual(await jobs(reviewed),[done]);
-    const [renewed]=await services.reviews.queue(waiting);
-    assert.notEqual(renewed,superseded,'a review that never started is queued under the current epoch');
-    assert.deepEqual(await services.reviews.queue(waiting),[renewed]);
-    assert.equal(await services.reviews.run(renewed!,authority),'done');assert.equal(starts,2);
+    for(let index=0;index<3;index++){assert.deepEqual(await services.reviews.queue(waiting),[superseded]);await bump();}
+    assert.deepEqual(await services.reviews.queue(waiting),[superseded],'a review that never started keeps its identity under the current epoch');
+    assert.deepEqual(await jobs(waiting),[superseded],'later epochs never add copies of a waiting review');
+    assert.equal(canonical((await services.reviews.inspect(superseded!)).binding),canonical(await services.guards.state()));
+
+    // Its own workflow renews it after a later epoch, without waiting for the sweep to queue it again.
+    const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});
+    await bump();
+    assert.equal((await operations.memory_review!('native:'+superseded,authority)).state,'completed');assert.equal(starts,2);
+    assert.deepEqual(await jobs(waiting),[superseded]);
+
+    // Changed input becomes a new review; the old copy is cleared and its workflow closes.
+    const first=await makeSource(4),[original]=await services.reviews.queue(first);await bump();
+    await stores.control.query(`UPDATE native_review_jobs SET input_reference=jsonb_set(input_reference,'{input_hash}','"${'0'.repeat(64)}"') WHERE id=$1`,[original]);
+    const [changed]=await services.reviews.queue(first);
+    assert.notEqual(changed,original,'a review whose input changed is prepared again');
+    assert.deepEqual(await jobs(first),[changed]);
+    assert.deepEqual(await operations.memory_review!('native:'+original,authority).then(result=>[result.state,result.waiting_reason]),['skipped','superseded']);
+
+    // While Hermes runs one review, a waiting review doesn't ask it again.
+    await stores.control.query("UPDATE native_review_jobs SET state='running',updated_at=now() WHERE id=$1",[changed]);
+    const [queued]=await services.reviews.queue(await makeSource(6));
+    assert.equal((await operations.memory_review!('native:'+queued,authority)).state,'waiting');assert.equal(starts,2);
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[changed]);
+    assert.equal((await operations.memory_review!('native:'+queued,authority)).state,'completed');assert.equal(starts,3);
 
     // A review whose start was never confirmed is observed with growing gaps, never relaunched, then closed as uncertain.
-    const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});
     const [uncertain]=await services.reviews.queue(await makeSource(3));mode='missing';
-    assert.equal(await services.reviews.run(uncertain!,authority),'ambiguous');assert.equal(starts,3);
+    assert.equal(await services.reviews.run(uncertain!,authority),'ambiguous');assert.equal(starts,4);
     const gaps:number[]=[];
     for(let index=0;index<nativeReconcileLimit;index++) {
       await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[uncertain]);
@@ -136,7 +159,7 @@ test('native review runs once per source across authorization epochs and stops o
       gaps.push(row.next_attempt.getTime()-row.updated_at.getTime());
       assert.equal(result.state,index<nativeReconcileLimit-1?'waiting':'ambiguous');
     }
-    assert.equal(observations,nativeReconcileLimit);assert.equal(starts,3,'an unconfirmed review never starts again');
+    assert.equal(observations,nativeReconcileLimit);assert.equal(starts,4,'an unconfirmed review never starts again');
     assert.ok(gaps.every((gap,index)=>index===0||gap>=gaps[index-1]!),'each unconfirmed observation waits at least as long as the last');
     assert.ok(gaps.at(-1)!>=30*60000);
     await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[uncertain]);
@@ -145,6 +168,6 @@ test('native review runs once per source across authorization epochs and stops o
     const row=await services.reviews.inspect(uncertain!);
     await services.reviews.controlJob(owner,uncertain!,{action:'resume',expected_revision:row.revision});
     assert.equal((await operations.memory_review!('native:'+uncertain,authority)).state,'waiting','an owner resume observes the same identity again');
-    assert.equal(observations,nativeReconcileLimit+1);assert.equal(starts,3);
+    assert.equal(observations,nativeReconcileLimit+1);assert.equal(starts,4);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
