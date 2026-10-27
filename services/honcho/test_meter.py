@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
-from .meter import REASONING_MODEL, ArchivePreparation, CoolingDown, Egress, Ledger, Rejected, handler, validate
+from .meter import REASONING_MODEL, ArchivePreparation, CoolingDown, Egress, Ledger, PreparationUnavailable, Rejected, handler, validate
 
 
 GATEWAY='https://gateway.example.test/v1'
@@ -216,6 +216,43 @@ class BudgetTests(unittest.TestCase):
         preparation('current','/v1/embeddings',{'input':'fixture'})
         preparation('current','/v1/embeddings',{'input':'fixture'},True)
         self.assertNotIn('background',sent[0]);self.assertIs(sent[1]['background'],True)
+
+    def test_archive_preparation_outage_is_retryable_and_refusal_is_final(self):
+        def failing(error):
+            preparation=ArchivePreparation('http://archive','internal')
+            def open_(request,timeout): raise error
+            preparation.opener=SimpleNamespace(open=open_)
+            return preparation
+        def http(code,reason):
+            return urllib.error.HTTPError('http://archive',code,'',{},io.BytesIO(json.dumps({'error':reason}).encode()))
+        for error in [TimeoutError(),urllib.error.URLError('refused'),http(503,'service_unavailable'),http(503,'detector_contract_rejected'),
+                      http(409,'audience_context_changed'),http(409,'runtime_context_conflict')]:
+            with self.assertRaises(PreparationUnavailable): failing(error)('current','/v1/embeddings',{'input':'fixture'})
+        for error in [http(403,'bound_guard_context_required'),http(409,'memory_context_retired'),http(422,'guard_candidate_rejected')]:
+            with self.assertRaises(Rejected) as refused: failing(error)('current','/v1/embeddings',{'input':'fixture'})
+            self.assertNotIsInstance(refused.exception,PreparationUnavailable)
+            self.assertEqual(str(refused.exception),'memory_preparation_refused')
+
+    def test_preparation_outage_answers_503_and_refusal_answers_403_without_spending(self):
+        def unavailable(workspace,route,payload,background): raise PreparationUnavailable()
+        def refused(workspace,route,payload,background): raise Rejected('memory_preparation_refused')
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite');transport=Transport()
+            def post(prepare):
+                endpoint=handler(Egress(ledger,'internal','temporary',transport,prepare,reasoning_key='honcho-client',reasoning_url=GATEWAY))
+                body=json.dumps({'model':REASONING_MODEL,'messages':[{'role':'user','content':'fixture'}]}).encode()
+                request=object.__new__(endpoint);request.path='/v1/chat/completions'
+                request.headers={'Authorization':'Bearer internal','Content-Length':str(len(body)),'X-Nocheh-Workspace':'current'}
+                request.rfile=io.BytesIO(body);request.wfile=io.BytesIO()
+                result={'headers':{}}
+                request.send_response=lambda status:result.update(status=status)
+                request.send_header=lambda key,value:result['headers'].update({key:value})
+                request.end_headers=lambda:None
+                request.do_POST()
+                return result['status'],result['headers'].get('Retry-After'),json.loads(request.wfile.getvalue())['error']['message']
+            self.assertEqual(post(unavailable),(503,'15','memory_preparation_unavailable'))
+            self.assertEqual(post(refused),(403,None,'memory_preparation_refused'))
+            self.assertEqual(transport.calls,[]);self.assertEqual(ledger.report()['reserved_usd'],0)
 
     def test_concurrent_budget_restart_and_zero_egress(self):
         with tempfile.TemporaryDirectory() as root:
