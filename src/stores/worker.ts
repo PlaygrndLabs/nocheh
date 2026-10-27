@@ -5,13 +5,14 @@ import {startLoops} from '../worker-loops.js';
 import {workflowClient} from '../workflows/client.js';
 import {publishOutbox,retireSupersededSourceWorkflows} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
+import {requestStrandedSources} from './native-review.js';
 import {expireStageTimings} from './stage-timings.js';
 import {restoredInactive,storageHeartbeat} from './lifecycle.js';
 import type {StorageServices} from './services.js';
 
 export function startStorageCapture(s:StorageServices,config:Settings,interval=1000) {
   const status:Record<string,string>={capture:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting'};
-  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,timingsExpired=0,remindersChecked=0;
+  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,started=new Date(),timingsExpired=0,remindersChecked=0;
   const jobs:Record<string,()=>Promise<unknown>>={
     capture:()=>drainSourceSpool(s.capture,config.dataDir),
     reconciliation:()=>s.capture.reconcile(),
@@ -22,6 +23,7 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     outbox:async()=>{
       if(existsSync(join(config.dataDir,'workflows/inactive'))){status.outbox='inactive';return;}
       if(!staleSourcesReconciled)staleSourcesReconciled=(await retireSupersededSourceWorkflows(s.stores.control))<100;
+      if(staleSourcesReconciled&&!strandedRequested)strandedRequested=(await requestStrandedSources(s.stores.control,started))<100;
       publisher??=workflowClient('pipeline');await publishOutbox(s.stores.control,event=>publisher!.send(event));
     },
     heartbeat:()=>storageHeartbeat(s.stores,config.service),
