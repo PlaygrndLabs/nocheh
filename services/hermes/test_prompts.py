@@ -30,6 +30,33 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(dispatch('/nonexistent', 'model', None, {'action': 'prompts'}),
                          {'defaults': prompts.DEFAULTS, 'limit': prompts.LIMIT})
 
+    def test_provider_call_sends_no_empty_tools_list(self):
+        import sys
+        from .subscription import _call_subscription
+        sent = {}
+
+        class Completions:
+            def create(self, **kwargs):
+                sent.update(kwargs)
+                return reply({'literals': []})
+
+        class Client:
+            def __init__(self, **kwargs):
+                self.chat = SimpleNamespace(completions=Completions())
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *error):
+                return False
+
+        fakes = {'openai': SimpleNamespace(OpenAI=Client), 'httpx': SimpleNamespace(Client=lambda **kwargs: None)}
+        with patch.dict(sys.modules, fakes):
+            _call_subscription(SubscriptionCredentials('synthetic-token'), 'model',
+                               [{'role': 'user', 'content': 'hello'}])
+        self.assertNotIn('tools', sent)
+        self.assertEqual(sent['messages'], [{'role': 'user', 'content': 'hello'}])
+
     def test_secret_check_uses_the_owner_text_and_keeps_its_contract(self):
         credentials, mine = SubscriptionCredentials('synthetic-token'), {'guard.secret_check': 'Find only passwords. Return {"literals":[]}.'}
         with patch('services.hermes.subscription._call_subscription', return_value=reply({'literals': []})) as call:
