@@ -228,10 +228,15 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const rebound=(await stores.control.query('SELECT state,binding FROM interpretation_jobs WHERE id=$1',[waiting])).rows[0];
     assert.equal(rebound.state,'done');assert.deepEqual(rebound.binding,await guards.state());
     assert.deepEqual(await learning.renew(wink),[]);
+    // Inputs that changed meanwhile are learned as they are now, and only once.
     const changed=await learning.request(nod,retiredWorkspace,space);
     await stores.control.query('UPDATE interpretation_jobs SET context_hash=$2 WHERE id=$1',[changed,digest('changed inputs')]);await bump();
-    await assert.rejects(learning.run(changed,detect,authority),{code:'guard_context_changed'},'changed inputs are left to the source sweep');
-    assert.equal(calls,8);
+    const twin=await learning.request(nod,retiredWorkspace,space);assert.notEqual(twin,changed);
+    const learnedNow=await learning.run(changed,detect,authority);assert.equal(calls,9);
+    const relearned=(await stores.control.query('SELECT state,context_hash FROM interpretation_jobs WHERE id=$1',[changed])).rows[0];
+    assert.equal(relearned.state,'done');assert.notEqual(relearned.context_hash,digest('changed inputs'));
+    await bump();assert.deepEqual(await learning.run(twin,detect,authority),learnedNow);assert.equal(calls,9,'the same inputs are not learned twice');
+    assert.equal((await stores.control.query('SELECT 1 FROM interpretation_jobs WHERE id=$1',[twin])).rowCount,0);
     const stale=await guards.state();
     await access.setConsent({admin:true,scope:null},parent,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
     await assert.rejects(guards.assertCurrent(stale),{code:'guard_context_changed'});
@@ -239,7 +244,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(!(await contexts.prepare(reaction,await guards.state())).evidence.some(item=>item.reference.id===parent.id),'withdrawn evidence never reaches reasoning');
     await stores.control.query("UPDATE memory_generations SET state='retired' WHERE id=$1",[workspace]);
     await assert.rejects(learning.request(reaction,workspace,space),{code:'memory_context_retired'});
-    assert.equal(calls,8);
+    assert.equal(calls,9);
   } finally {
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');await stores.close();
   }

@@ -121,14 +121,16 @@ export class ContextualLearningRepository {
         await this.complete(client,id);
         return job.result_ids as string[];
       }
-      // A job that never started keeps its place across epochs when its inputs are unchanged; changed inputs are asked again by the source sweep.
+      // A job that never started keeps its place across epochs: it runs on its inputs as prepared now,
+      // unless learning on exactly those inputs already finished.
       const binding=await this.guards.state();
       if(job.state==='pending'&&job.attempts===0&&canonical(job.binding)!==canonical(binding)) {
         const prepared=await this.prepare(job.source_reference,job.workspace,job.audience,binding);
-        if(prepared.contextHash!==job.context_hash)throw new HttpError(409,'guard_context_changed');
+        const completed=(await client.query("SELECT result_ids FROM interpretation_jobs WHERE context_hash=$1 AND state='done' ORDER BY created_at DESC LIMIT 1",[prepared.contextHash])).rows[0];
+        if(completed){await client.query("DELETE FROM interpretation_jobs WHERE id=$1 AND state='pending' AND attempts=0",[id]);return completed.result_ids as string[];}
         job.input_reference=await this.record(job.source_reference,prepared.id,prepared.context,binding);job.binding=binding;
-        await client.query("UPDATE interpretation_jobs SET binding=$2,input_reference=$3 WHERE id=$1 AND state='pending' AND attempts=0",
-          [id,JSON.stringify(binding),JSON.stringify(job.input_reference)]);
+        await client.query("UPDATE interpretation_jobs SET binding=$2,input_reference=$3,context_hash=$4 WHERE id=$1 AND state='pending' AND attempts=0",
+          [id,JSON.stringify(binding),JSON.stringify(job.input_reference),prepared.contextHash]);
       }
       // A revoked context never reaches the reasoning endpoint, even on retry.
       await this.provenance.current(job.workspace,job.audience,job.binding);
