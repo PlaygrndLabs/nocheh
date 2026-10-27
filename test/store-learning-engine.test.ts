@@ -198,6 +198,22 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(terminalLearningCodes.has('invalid_interpretation_result'));
     assert.deepEqual((await stores.control.query('SELECT state,error_code FROM interpretation_jobs WHERE id=$1',[unusableJob])).rows[0],
       {state:'failed',error_code:'invalid_interpretation_result'});
+    // Learning an epoch stopped before it finished is asked again under the current epoch; finished or unusable learning is not.
+    const nod=(await archive.capture(event('nod',{update_id:52,message_reaction:{chat:{id:group},message_id:1,date:1700000022,user:{id:7},
+      old_reaction:[],new_reaction:[{type:'emoji',emoji:'👌'}]}}))).source.reference;
+    await guards.prepare(nod,'fixture',detect);
+    const stranded=await learning.request(nod,retiredWorkspace,space);
+    assert.deepEqual(await learning.renew(nod),[],'current learning is left to run');
+    const bump=async()=>{const before=(await guards.state()).epoch;await guards.setMode('off');await guards.setMode('on');assert.ok((await guards.state()).epoch>before);};
+    await bump();
+    const [renewed]=await learning.renew(nod);
+    assert.ok(renewed&&renewed!==stranded,'a job stopped by a newer epoch is asked again');
+    assert.deepEqual(await learning.renew(nod),[]);
+    await stores.control.query("UPDATE interpretation_jobs SET state='failed',error_code='learning_query_limit' WHERE id=$1",[renewed]);await bump();
+    const [resized]=await learning.renew(nod);assert.ok(resized&&resized!==renewed,'a query too large for an earlier version is prepared again');
+    assert.deepEqual(await learning.renew(thumbs),[],'finished learning is not asked again');
+    assert.deepEqual(await learning.renew(wave),[],'an unusable saved result stays closed');
+    assert.equal(calls,7);
     const stale=await guards.state();
     await access.setConsent({admin:true,scope:null},parent,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
     await assert.rejects(guards.assertCurrent(stale),{code:'guard_context_changed'});
