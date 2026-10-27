@@ -9,7 +9,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
-import {NativeReviewRepository,nativeReconcileLimit} from '../src/stores/native-review.js';
+import {NativeReviewRepository,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 
 test('native review preserves profile waits, guarded inputs, durable completion and uncertain execution identity',
@@ -169,5 +169,18 @@ test('native review runs once per source across authorization epochs and stops o
     await services.reviews.controlJob(owner,uncertain!,{action:'resume',expected_revision:row.revision});
     assert.equal((await operations.memory_review!('native:'+uncertain,authority)).state,'waiting','an owner resume observes the same identity again');
     assert.equal(observations,nativeReconcileLimit+1);assert.equal(starts,4);
+
+    // A review stranded under an earlier epoch before a restart is renewed by its per-source step, requested once.
+    const since=new Date(Date.now()-60000),stranded=await makeSource(7),[strandedReview]=await services.reviews.queue(stranded);await bump();
+    const sourceWorkflows=async()=>(await stores.control.query("SELECT generation FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+stranded.id])).rows;
+    // Capture asked for this source's step already; an open step is left to run instead.
+    assert.equal((await sourceWorkflows()).length,1);
+    assert.equal(await requestStrandedSources(stores.control,new Date()),0);
+    await stores.control.query("UPDATE workflow_registry SET state='completed',created_at=$2 WHERE family='memory_review' AND job_id=$1",['source:'+stranded.id,since]);
+    assert.ok(await requestStrandedSources(stores.control,new Date(since.getTime()+1))>=1);assert.equal((await sourceWorkflows()).length,2);
+    await requestStrandedSources(stores.control,new Date(since.getTime()+1));assert.equal((await sourceWorkflows()).length,2,'a stranded source is asked for once');
+    assert.equal((await operations.memory_review!('source:'+stranded.id,authority)).state,'completed');
+    assert.equal(canonical((await services.reviews.inspect(strandedReview!)).binding),canonical(await services.guards.state()));
+    assert.equal(starts,4);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
