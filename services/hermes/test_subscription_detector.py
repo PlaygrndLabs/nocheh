@@ -38,17 +38,37 @@ class DetectorTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     detect_literals(text,credentials,'test-model')
 
-    def test_one_json_code_fence_is_accepted_and_other_wrapping_fails_closed(self):
+    def test_the_one_answer_inside_a_fence_or_sentence_is_used_and_anything_else_fails_closed(self):
         text='Password: juniper-ONLY-7642';credentials=SubscriptionCredentials('synthetic-token')
         fenced=lambda content:SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
         body=json.dumps({'literals':['juniper-ONLY-7642']})
-        for content in ('```json\n'+body+'\n```','```\n'+body+'\n```\n'):
+        for content in ('```json\n'+body+'\n```','```\n'+body+'\n```\n','Here it is: ```json\n'+body+'\n```',
+                        '```json\n'+body+'\n``` and more','I found one password.\n\n'+body,body+'\nThat is the only secret.',
+                        'Answer: '+body+' Repeated: '+body):
             with self.subTest(content=content),patch('services.hermes.subscription._call_subscription',return_value=fenced(content)):
                 self.assertEqual(detect_literals(text,credentials,'model'),['juniper-ONLY-7642'])
-        for content in ('Here it is: ```json\n'+body+'\n```','```json\n'+body+'\n``` and more','```json\n```'):
+        for content in ('```json\n```','No secrets here.','{"literals":[]} or maybe '+body,
+                        'Here: {"literals":["juniper-ONLY-7642"],"note":"x"}','Here: {"literals":["absent"]}',None):
             with self.subTest(content=content),patch('services.hermes.subscription._call_subscription',return_value=fenced(content)):
                 with self.assertRaises(DetectorContractError):
                     detect_literals(text,credentials,'model')
+
+    def test_a_rejected_reply_is_described_by_its_shape_not_its_content(self):
+        text='Password: juniper-ONLY-7642';credentials=SubscriptionCredentials('synthetic-token')
+        content='The password is juniper-ONLY-7642 but I cannot format it'
+        cut=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content),finish_reason='length')])
+        with patch('services.hermes.subscription._call_subscription',return_value=cut):
+            with self.assertRaises(DetectorContractError) as raised:
+                detect_literals(text,credentials,'model')
+        self.assertEqual(str(raised.exception),'detector_json_rejected')
+        self.assertEqual(raised.exception.shape,{'length':len(content),'fence':False,'object':False,'prose_before':True,
+                                                 'prose_after':False,'finish_reason':'length'})
+        self.assertNotIn('juniper',json.dumps(raised.exception.shape))
+        empty=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None),finish_reason='stop')])
+        with patch('services.hermes.subscription._call_subscription',return_value=empty):
+            with self.assertRaises(DetectorContractError) as raised:
+                detect_literals(text,credentials,'model')
+        self.assertEqual(raised.exception.shape,{'type':'NoneType','finish_reason':'stop'})
 
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),
