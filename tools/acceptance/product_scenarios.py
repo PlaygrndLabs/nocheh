@@ -418,7 +418,8 @@ class ProductScenarios(Scenarios):
             return {'raw': final['result'][:500]}
 
     def tasks_from_chat_with_reminder(self):
-        soon = (datetime.now(timezone.utc)+timedelta(minutes=2)).strftime('%Y-%m-%dT%H:%MZ')
+        # Far enough out that a slow turn below never sees the reminder arrive as a second reply.
+        soon = (datetime.now(timezone.utc)+timedelta(minutes=4)).strftime('%Y-%m-%dT%H:%MZ')
         added = self.task_tool({'action': 'add', 'title': 'خرید نان TASK1', 'tags': ['Home'], 'reminders': [soon]})
         task = added.get('task', added)
         self.gate('task_added', bool(task.get('id')), result=str(added)[:300])
