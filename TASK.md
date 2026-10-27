@@ -216,6 +216,16 @@ People stays persistent or dated: one-time access belongs to approving a
 pending request, where it already exists. Pending: a look at the new fields on
 the running installation.
 
+Logo (October 27, owner: "I want use something like it as project logo but need
+improve it and compatible with our app design or make app design same it"): the
+owner's pixel brain is redrawn on crisp grids and shown in the dashboard
+navigation, phone header, mini app, favicon and README, and the dashboard colours
+follow it: lavender accent, navy dark mode, mint for success
+([decision](docs/adr/0180-pixel-brain-logo-and-logo-colours.md),
+[logo](dashboard/ui/logo.tsx), [assets](docs/assets/logo)). The Telegram bot
+picture (`docs/assets/logo/nocheh-avatar-512.png`) is set by the owner in
+BotFather; it is not set yet.
+
 Role and skills per chat (October 16 and 17, owner: "want to ability to set role
 or skill for projects or GPs ... for a group or user use role and skills and for
 other one use other role and skill"; "if can have role and skill for own Hermes
