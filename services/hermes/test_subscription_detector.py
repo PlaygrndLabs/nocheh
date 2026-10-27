@@ -70,6 +70,16 @@ class DetectorTests(unittest.TestCase):
                 detect_literals(text,credentials,'model')
         self.assertEqual(raised.exception.shape,{'type':'NoneType','finish_reason':'stop'})
 
+    def test_a_safety_filter_decline_is_reported_as_a_refusal(self):
+        text='Password: juniper-ONLY-7642';credentials=SubscriptionCredentials('synthetic-token')
+        for content in ('',None,json.dumps({'literals':[]})):
+            declined=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content),finish_reason='content_filter')])
+            with self.subTest(content=content),patch('services.hermes.subscription._call_subscription',return_value=declined):
+                with self.assertRaises(DetectorContractError) as raised:
+                    detect_literals(text,credentials,'model')
+                self.assertEqual(str(raised.exception),'detector_refused')
+                self.assertEqual(raised.exception.shape['finish_reason'],'content_filter')
+
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),
                                   ('https://chatgpt.com/backend-api/codex','openai-codex','codex_responses'),

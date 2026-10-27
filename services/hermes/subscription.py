@@ -50,8 +50,11 @@ def embedded_literals(content):
 
 def detector_reply(content, text, finish_reason=None):
     """The literals of a detector reply, or a contract error. Some models wrap the JSON
-    in a Markdown code fence or a sentence; the one {"literals": [...]} object inside is used."""
+    in a Markdown code fence or a sentence; the one {"literals": [...]} object inside is used.
+    A provider safety filter that declined the request is its own error, not a format one."""
     import json
+    if finish_reason == 'content_filter':
+        raise DetectorContractError('detector_refused', reply_shape(content, finish_reason))
     try:
         parsed = json.loads(content)
     except (ValueError, TypeError):
