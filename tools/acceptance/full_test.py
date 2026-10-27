@@ -172,8 +172,9 @@ def main():
     steps, fresh = [], args.directory is None
     directory = (args.directory or ROOT/'data/acceptance/results'/('full-'+time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))).resolve()
     log = (directory.parent if fresh else directory)/(directory.name+'.log' if fresh else 'full-test.log')
-    if fresh and args.build:
+    if fresh:
         directory.parent.mkdir(parents=True, exist_ok=True)
+    if fresh and args.build:
         built, tags = build_images(log)
         steps += built
         for role, tag in tags.items():
