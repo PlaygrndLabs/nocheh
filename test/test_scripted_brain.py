@@ -56,6 +56,17 @@ class ScriptedBrainTests(unittest.TestCase):
         self.assertEqual(self.brain.respond(blank),{'content':''})
         self.assertEqual(self.brain.respond(blank),{'content':'[brain] recovered E'})
 
+    def test_any_tool_turn_markers_and_silence_after_a_tool(self):
+        user=message('user','add it [[tool:nocheh_tasks {"action":"create","title":"Buy milk"}]] [[after:silent]]')
+        self.assertEqual(self.brain.respond(request(user,tools=('nocheh_tasks',))),
+                         {'tool':'nocheh_tasks','arguments':{'action':'create','title':'Buy milk'}})
+        final=self.brain.respond(request(user,message('assistant',None),message('tool','{"id":"t1"}'),tools=('nocheh_tasks',)))
+        self.assertEqual(final,{'content':'[NO_REPLY]'})
+        older=message('user','UNADDR42 earlier')
+        present=self.brain.respond(request(message('user','UNADDR42 said before\n[[turn:UNADDR42]]')))
+        absent=self.brain.respond(request(older,message('assistant','ok'),message('user','[[turn:UNADDR42]]')))
+        self.assertEqual((present['content'],absent['content']),('[brain] turn UNADDR42 present','[brain] turn UNADDR42 absent'))
+
     def test_raw_canary_in_scripted_turn_is_counted_and_rejected(self):
         result=self.brain.respond(request(message('system','fixture-canary'),message('user','[[search:x]]')))
         self.assertEqual(result,{'error':'unguarded_fixture_canary'})
