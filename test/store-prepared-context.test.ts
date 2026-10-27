@@ -142,11 +142,15 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     assert.equal((await stores.derived.query('SELECT 1 FROM derived_artifacts WHERE operation_id=$1',[first.operation_id])).rowCount,0,'batch rollback leaves no partial outputs');
     await assert.rejects(services.prepared.prepare(reader,'Invalid detector fixture',async()=>['not present']),{code:'detector_contract_rejected'});
 
-    // A later guard epoch, such as after hiding a message, reuses detector results for text already checked.
+    // A later guard epoch, such as after hiding a message, reuses detector results and the guarded copy for text already prepared.
+    const copies=async()=>Number((await stores.derived.query("SELECT count(*) FROM derived_artifacts WHERE operation_id LIKE 'guard-context:%'")).rows[0].count);
+    const copiesBefore=await copies();
     await stores.control.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton');
     const later=await principal(source.id);
     const again=await services.prepared.prepare(later,'Concurrent saffronpass',async()=>{throw Error('a later epoch detected identical text again');});
-    assert.ok(!String(again).includes('saffronpass'));
+    assert.equal(again,simultaneous[0]);assert.equal(await copies(),copiesBefore,'unchanged text saves no new copy in a later epoch');
+    const fresh=await services.prepared.prepare(later,'Changed text saffronpass',detect);
+    assert.ok(!String(fresh).includes('saffronpass'));assert.equal(await copies(),copiesBefore+1,'changed text is prepared as before');
     reader=later;
 
     await services.guards.setMode('off');
