@@ -27,6 +27,7 @@ import {importWorkflowSchema} from '../workflows/imports.js';
 import {memoryAccessSchema} from './memory-access-schema.js';
 import {ownerAutonomySchema} from './owner-autonomy.js';
 import {taskSchema} from './tasks.js';
+import {notionSchema} from './notion.js';
 import {promptSchema} from '../prompts.js';
 import {telegramChatSchema} from './telegram-chats.js';
 import {telegramTopicSchema} from './telegram-topics.js';
@@ -142,6 +143,7 @@ ${sharingContentSchema}
 ${memoryAccessSchema}
 ${ownerAutonomySchema}
 ${taskSchema}
+${notionSchema}
 ${promptSchema}
 ${telegramChatSchema}
 ${telegramTopicSchema}

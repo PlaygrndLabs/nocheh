@@ -8,6 +8,17 @@ export function actionArguments(kind:unknown,value:unknown) {
     if(keys.some(k=>k!=='command')||!command.trim()||command.includes('\0'))throw new HttpError(400,'invalid_shell_action');
     return {command};
   }
+  if(kind==='mcp'&&args.connection!==undefined) {
+    // A connected service: its address and sign-in are fixed by the owner's connection, never by the model.
+    if(args.connection!=='notion'||args.url!==undefined)throw new HttpError(400,'invalid_mcp_action');
+    if(args.operation==='list') {
+      if(keys.some(k=>!['connection','operation'].includes(k)))throw new HttpError(400,'invalid_mcp_action');
+      return {connection:'notion',operation:'list'};
+    }
+    const tool=string(args.tool,128),input=object(args.input);
+    if(keys.some(k=>!['connection','tool','input','operation'].includes(k))||(args.operation!==undefined&&args.operation!=='call')||!/^[\w.:-]{1,128}$/.test(tool)||canonical(input).length>32000)throw new HttpError(400,'invalid_mcp_action');
+    return {connection:'notion',tool,input};
+  }
   if(kind==='browser'||kind==='mcp') {
     const address=string(args.url,4096);let url:URL;
     try {url=new URL(address);}catch{throw new HttpError(400,'invalid_action_url');}

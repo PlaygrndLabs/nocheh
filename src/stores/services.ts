@@ -1,4 +1,5 @@
 import {OwnerAutonomyRepository} from './owner-autonomy.js';
+import {NotionRepository} from './notion.js';
 import {TaskRepository,type TaskActor} from './tasks.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
@@ -85,7 +86,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
-  const ownerAutonomy=new OwnerAutonomyRepository(stores.control),prompts=new PromptRepository(stores.control,options.runtime);
+  const ownerAutonomy=new OwnerAutonomyRepository(stores.control),notion=new NotionRepository(stores.control),prompts=new PromptRepository(stores.control,options.runtime);
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
@@ -112,7 +113,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
   },{call:options.runtime,owner:()=>options.policy().owner_id});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
-  return {ownerAutonomy,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {ownerAutonomy,notion,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

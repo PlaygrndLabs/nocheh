@@ -33,6 +33,7 @@ export const pageTabs = {
     privacy: 'Privacy & data',
     assistant: 'Assistant',
     tasks: 'Tasks',
+    connections: 'Connections',
     advanced: 'Advanced',
   },
 } as const satisfies Partial<Record<PageId, Record<string, string>>>;
