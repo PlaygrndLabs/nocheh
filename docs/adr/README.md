@@ -18,6 +18,7 @@ Owner Honcho budget control: [0078](0078-owner-honcho-budget-control.md).
 Separated Honcho budgets and settlement: [0079](0079-separated-honcho-budgets-and-settlement.md).
 Durable embedding outage cooldown: [0100](0100-durable-embedding-egress-cooldown.md).
 Honcho terminal-error readiness: [0101](0101-honcho-terminal-queue-errors-block-readiness.md).
+Honcho retrying a memory preparation outage: [0174](0174-memory-preparation-outages-are-retried.md).
 Standard Honcho entity model: [0109](0109-standard-honcho-entity-model.md), implemented by
 [0115](0115-honcho-session-revisions.md).
 Re-running or replacing Honcho memory: [0153](0153-owner-reruns-and-replaces-honcho-memory.md).
