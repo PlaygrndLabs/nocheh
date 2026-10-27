@@ -393,6 +393,39 @@ class ProductScenarios(Scenarios):
             self.current['observed']['notion'] = 'not built on this revision'
         self.gate('settings_readable', bool(text))
 
+    def settings_apply_is_followed_to_the_end(self):
+        """Save and apply as the Settings page does. While the services restart, a
+        reload of the page sees the running apply and its step, and the apply always
+        ends with a result. The names are put back and applied again afterwards."""
+        dashboard = self.dashboard()
+        names = next(field['value'] for field in dashboard.get('/settings')['fields'] if field['key'] == 'TELEGRAM_BOT_NAMES')
+
+        def save_and_apply(value):
+            dashboard.post('/settings', {'changes': {'TELEGRAM_BOT_NAMES': value}, 'revision': dashboard.get('/settings')['revision']})
+            job = dashboard.post('/settings/apply', {})
+            reloaded = dashboard.get('/settings')
+            started, steps = time.monotonic(), []
+            current = job
+            # The server bounds every apply step; the page waits up to 25 minutes.
+            while current['state'] in ('running', 'queued') and time.monotonic()-started < 25*60:
+                time.sleep(0.5)
+                current = dashboard.get('/jobs/'+job['id'])
+                if current.get('step') and current['step'] not in steps: steps.append(current['step'])
+            return job, reloaded, current, steps, round(time.monotonic()-started, 1)
+
+        job, reloaded, current, steps, seconds = save_and_apply(names+',Tester')
+        applying = reloaded.get('applying') or {}
+        self.gate('reload_sees_the_running_apply', applying.get('id') == job['id'] or reloaded.get('apply_state') == 'current',
+                  applying=applying, apply_state=reloaded.get('apply_state'))
+        self.gate('apply_ends_with_a_result', current['state'] == 'complete', state=current['state'],
+                  error=current.get('error'), status=(current.get('result') or {}).get('status'), seconds=seconds)
+        self.gate('apply_reports_its_steps', bool(steps) and steps[-1] == 'telegram', steps=steps)
+        after = dashboard.get('/settings')
+        self.gate('settings_in_use_afterwards', after.get('apply_state') == 'current' and not after.get('applying'),
+                  apply_state=after.get('apply_state'), applying=after.get('applying'))
+        _, _, restored, _, _ = save_and_apply(names)
+        self.gate('names_put_back', restored['state'] == 'complete', state=restored['state'])
+
     # Owner dashboard session ------------------------------------------------------------------------
 
     def dashboard(self):
@@ -405,4 +438,4 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group',
-                 'defaults_keep_history_and_notion_off']
+                 'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end']

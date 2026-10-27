@@ -56,4 +56,5 @@ def operate(state,action):
         arguments=['up','-d','--no-build','--wait','--wait-timeout','240',*SERVICES]
     elif action=='down':arguments=['stop',*reversed(SERVICES)]
     else:arguments=['ps',*SERVICES]
-    return subprocess.call(command+['--profile','honcho']+arguments,env=env)
+    # Compose's own wait ends first; the extra minute covers pulling up and reporting.
+    return subprocess.call(command+['--profile','honcho']+arguments,env=env,timeout=300 if action=='up' else 120)

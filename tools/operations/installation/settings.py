@@ -101,7 +101,9 @@ def save(state, changes, expected):
     return view(state)
 
 
-def apply(state):
+def apply(state, progress=lambda step: None):
+    """Restarts the services with the saved settings. `progress` hears each step so
+    the dashboard can say what is happening while services restart."""
     try:
         from tools.operations.installation.operations import compose, environment
         from tools.operations.installation.configuration import read_env
@@ -126,16 +128,20 @@ def apply(state):
                 ok = subprocess.run(compose(state) + ['rm', '-s', '-f', *mini_app.SERVICES], env=environment(state),
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120).returncode == 0
             return ok
+        progress('restarting')
         try: ok = run()
         except subprocess.TimeoutExpired: ok = False
         if not ok:
             rolled_back = False
             if previous.exists():
+                progress('rolling_back')
                 write_env(env_path(state), read_env(previous))
                 try: rolled_back = run()
                 except subprocess.TimeoutExpired: pass
             return {'status': 'apply_failed', 'rolled_back': rolled_back}
+        progress('memory')
         honcho = refresh_honcho(state, values)
+        progress('telegram')
         menu = mini_app.menu_button(values, telegram_api, shown_before=mini_app.enabled(before))
         temporary = directory / 'applied.tmp'
         temporary.write_text(json.dumps({'revision': revision(values)})); temporary.chmod(0o600)
