@@ -84,6 +84,12 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     const repaired=await services.prepared.prepare(await principal(next.id),interrupted,async()=>{throw Error('completed detector work must not repeat');});
     assert.ok(!String(repaired).includes('saffronpass'));assert.equal(calls,afterFault);
 
+    // A secret check that failed under one model leaves its checkpointed text; another model chosen in the same epoch prepares it afresh.
+    const stalled='Model switch saffronpass';
+    await assert.rejects(services.prepared.prepare(reader,stalled,async()=>{throw Error('fixture_detector_unavailable');}),/fixture_detector_unavailable/);
+    const switched=new PreparedContextRepository(services.derived,services.guards,services.prepared.root,'fixture-next');
+    assert.ok(!String(await switched.prepare(reader,stalled,detect)).includes('saffronpass'));
+
     // A failed sibling cannot release the audience queue while other durable
     // publications are still running. Completed detector work remains reusable.
     const prepare=services.guards.prepare.bind(services.guards);
