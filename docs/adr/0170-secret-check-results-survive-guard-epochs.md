@@ -25,9 +25,16 @@ detector model again.
 - The shared secret-check result for a text is keyed by the installation
   generation, guard mode, detector version and the text, not by the epoch.
   Text already checked in an earlier epoch reuses that result.
-- Prepared values, guarded copies and per-audience checkpoints stay per
-  audience and per epoch. Retired content is still withheld by the epoch's own
-  preparation, as before.
+- Prepared values and per-audience checkpoints stay per audience and per
+  epoch. Retired content is still withheld by the epoch's own preparation, as
+  before.
+- A guarded copy is the text masked by its shared secret-check result and
+  fixed patterns, so it does not depend on the epoch either. Text an audience
+  already prepared in an earlier epoch, under the same installation
+  generation, guard mode and detector, reuses that guarded copy: the new epoch
+  saves only a pointer row (`runtime_prepared_inputs.text_key`), not another
+  copy of the text, its detection checkpoint and guard revision. A copy that
+  is no longer ready is prepared again. (Amended 2026-10-27, owner: "yes all".)
 </decision>
 
 <consequences>

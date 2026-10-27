@@ -20,7 +20,7 @@ const shapes:Record<string,Shape>={
   guard_activations:shape('derived','operation_id',{operation_id:'text',source_id:'text',revision:'number',activated_at:'date'}),
   guard_fragments:shape('derived','id',{id:'text',source_id:'text',input_hash:'text',preparation_version:'text',content:'bytes',created_at:'date'},true),
   runtime_prepared_values:shape('derived','id',{id:'text',audience:'text',generation:'text',epoch:'number',content:'bytes'},true),
-  runtime_prepared_inputs:shape('derived','id',{id:'text',audience:'text',generation:'text',epoch:'number',source_id:'text'},true),
+  runtime_prepared_inputs:shape('derived','id',{id:'text',audience:'text',generation:'text',epoch:'number',source_id:'text',text_key:'text'},true),
   derivative_selections:shape('derived','id',{id:'text',event_id:'text',artifact_id:'text',kind:'text',active_revision:'number'}),
   derivative_selection_revisions:shape('derived','operation_id',{operation_id:'text',selection_id:'text',revision:'number',expected_revision:'number',derived_id:'text',author:'text',created_at:'date'}),
   derivative_activations:shape('derived','operation_id',{operation_id:'text',activated_at:'date'}),
