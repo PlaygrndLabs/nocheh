@@ -545,19 +545,26 @@ class AssistantGateway:
 
     async def send_refusal(self,body):
         """The owner's fixed reply to someone not allowed in an allowed group who
-        addressed Nocheh. No model runs and nothing else about the chat is sent."""
+        addressed Nocheh, or to anyone but the owner who writes to it privately,
+        there at most once a UTC day per person. No model runs and nothing else
+        about the chat is sent."""
         import re
+        from datetime import datetime, timezone
         chat,user,message,topic=(str(body.get(key) or '') for key in ('chat_id','user_id','message_id','topic'))
-        if (not re.fullmatch('[a-f0-9]{64}',body.get('event_id','')) or chat not in (self.scopes.groups or []) or
+        personal=body.get('private') is True
+        if (not re.fullmatch('[a-f0-9]{64}',body.get('event_id','')) or (chat!=user or topic if personal else chat not in (self.scopes.groups or [])) or
                 not re.fullmatch(r'[1-9]\d{0,18}',user) or not re.fullmatch(r'[1-9]\d{0,18}',message) or topic and not re.fullmatch(r'[1-9]\d{0,15}',topic)):
             raise ValueError('invalid_refusal')
         reply=body.get('reply')
         if not isinstance(reply,str) or not reply.strip() or len(reply)>1000:raise ValueError('invalid_refusal')
-        access=(getattr(self.scopes,'group_access',None) or {}).get(chat,{})
-        if user==str(self.scopes.owner) or user in access.get('granted',[]) and user not in access.get('denied',[]):return {'state':'skipped'}
-        if not self.group_turn({'group_addressing':body.get('group_addressing'),'text':body.get('text')},addressed_only=True):return {'state':'skipped'}
+        if user==str(self.scopes.owner):return {'state':'skipped'}
+        if not personal:
+            access=(getattr(self.scopes,'group_access',None) or {}).get(chat,{})
+            if user in access.get('granted',[]) and user not in access.get('denied',[]):return {'state':'skipped'}
+            if not self.group_turn({'group_addressing':body.get('group_addressing'),'text':body.get('text')},addressed_only=True):return {'state':'skipped'}
         if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
-        name='refusal-'+body['event_id']
+        # One private reply a day: a stranger who keeps writing can't make the bot keep answering.
+        name='refusal-private-'+user+'-'+datetime.now(timezone.utc).strftime('%Y%m%d') if personal else 'refusal-'+body['event_id']
         async with self.action_lock:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())

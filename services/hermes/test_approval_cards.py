@@ -86,6 +86,20 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):await gateway.send_refusal(bad)
             self.assertEqual(len(sent),2)
 
+    async def test_anyone_but_the_owner_writing_privately_gets_the_private_reply_once_a_day(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];gateway=self.gateway(Path(folder),sent)
+            ask={'event_id':'e'*64,'chat_id':'9','user_id':'9','message_id':'5','private':True,'reply':'Sorry, this is private.'}
+            self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'message_id':'6'}),{'state':'done'})
+            self.assertEqual(sent,[(9,None,'Sorry, this is private.',None,5,[])],'one fixed reply a day, however often they write')
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'chat_id':'10','user_id':'10'}),{'state':'done'})
+            self.assertEqual(len(sent),2,'each person gets their own reply')
+            self.assertEqual(await gateway.send_refusal({**ask,'chat_id':'123','user_id':'123'}),{'state':'skipped'},'the owner is never refused')
+            for bad in [{**ask,'chat_id':'10'},{**ask,'chat_id':'-20','user_id':'-20'},{**ask,'topic':'17'},{**ask,'reply':''}]:
+                with self.assertRaises(ValueError):await gateway.send_refusal(bad)
+            self.assertEqual(len(sent),2)
+
 
 if __name__=='__main__':
     unittest.main()

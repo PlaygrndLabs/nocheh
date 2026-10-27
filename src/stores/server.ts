@@ -1,7 +1,7 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 import {admin,reader} from '../access.js';
-import {telegramDeliveryAllowed} from '../assistant-policy.js';
+import {outsideChat,telegramDeliveryAllowed} from '../assistant-policy.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
@@ -134,8 +134,18 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     const ownerView=path.match(/^\/v1\/owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)$/);
     if(req.method==='GET'&&ownerView) {
       await s.knowledge.ownerTurn(principal);
-      const reader={admin:true,scope:null},view=ownerView[1]!;
-      if(view==='telegram-identities')return json(res,200,await telegramDirectory(s.stores.archive,reader,await s.telegramChats.observations()));
+      const reader={admin:true,scope:null},view=ownerView[1]!,policy=s.access.policy();
+      // Chats with people Nocheh doesn't serve are named by those people; the turn never sees them.
+      if(view==='telegram-identities') {
+        const found=await telegramDirectory(s.stores.archive,reader,await s.telegramChats.observations());
+        return json(res,200,{...found,groups:found.groups.filter(group=>!outsideChat(policy,{origin:'live',channel:'telegram',kind:'telegram_update',scope:group.id}))});
+      }
+      if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
+        limit:limit(url.searchParams.get('limit'),50,100)},await s.supervision.outsiders(policy)));
+      if(view==='conversation-context') {
+        const space=url.searchParams.get('space')??'';
+        if((await s.supervision.outsiders(policy)).has(space.split('/topic/')[0]!))throw new HttpError(404,'conversation_not_found');
+      }
       if(view==='people')return json(res,200,await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
         after:url.searchParams.get('after')??'',state:'active'}));
       const target=({conversations:'/v1/conversations','conversation-context':'/v1/conversations/context',projects:'/v1/projects',

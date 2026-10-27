@@ -61,6 +61,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent in a group, as a reply, when someone you haven’t allowed asks Nocheh something there. No model is used.',
   },
   {
+    key: 'telegram.not_allowed_private',
+    title: 'Reply to strangers in private',
+    hint: 'Sent when anyone but you writes to Nocheh in a private chat, at most once a day per person. No model is used.',
+  },
+  {
     key: 'telegram.approval_card',
     title: 'Approval card for a message',
     hint: 'The card with Approve and Reject buttons in Telegram. {destination} is where it goes, {origin} where it was asked, {text} the exact message. A line whose value is missing is left out.',
