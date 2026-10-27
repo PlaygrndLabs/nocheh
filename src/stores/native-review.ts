@@ -166,7 +166,9 @@ export class NativeReviewRepository {
         return await complete(output.id);
       }
       if(result.state!=='running')return await unconfirmed();
-      await db.query("UPDATE native_review_jobs SET state='running',error_code=NULL,next_attempt=now()+interval '60 seconds',updated_at=now() WHERE id=$1",[id]);return 'running';
+      // Most reviews finish within seconds: a running review is observed after 5 seconds, then at doubling gaps up to a minute.
+      await db.query(`UPDATE native_review_jobs SET state='running',error_code=NULL,updated_at=now(),next_attempt=now()+CASE WHEN $2
+        THEN least(interval '60 seconds',greatest(interval '5 seconds',(next_attempt-updated_at)*2)) ELSE interval '5 seconds' END WHERE id=$1`,[id,uncertain]);return 'running';
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803359)');if(fenced)await leaveFamily(db,'memory_review');});}
   }
   async list(principal:Reader,after='') {
