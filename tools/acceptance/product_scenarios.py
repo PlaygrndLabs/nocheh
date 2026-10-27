@@ -406,8 +406,8 @@ class ProductScenarios(Scenarios):
             reloaded = dashboard.get('/settings')
             started, steps = time.monotonic(), []
             current = job
-            # The server bounds every apply step; the page waits up to 25 minutes.
-            while current['state'] in ('running', 'queued') and time.monotonic()-started < 25*60:
+            # The server bounds every apply step; the page waits up to 45 minutes.
+            while current['state'] in ('running', 'queued') and time.monotonic()-started < 45*60:
                 time.sleep(0.5)
                 current = dashboard.get('/jobs/'+job['id'])
                 if current.get('step') and current['step'] not in steps: steps.append(current['step'])

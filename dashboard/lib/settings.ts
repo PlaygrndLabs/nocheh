@@ -115,8 +115,8 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 type ApplyJob = {id: string; state: string; step?: string; created_at?: string; result?: any; error?: string};
 type ApplyOutcome = {job: ApplyJob; ended: 'finished' | 'too_long' | 'unreachable'};
 // The server bounds every apply step (each restart, a rollback and the memory
-// refresh), about 22 minutes at the very worst; past this the page stops waiting.
-const APPLY_LIMIT = 25 * 60_000;
+// refresh), about 40 minutes at the very worst; past this the page stops waiting.
+const APPLY_LIMIT = 45 * 60_000;
 // A restart can make the dashboard miss a few answers; this long without one means it is gone.
 const UNREACHABLE_LIMIT = 2 * 60_000;
 // Applies this page already followed to their end, so a late settings answer never restarts one.

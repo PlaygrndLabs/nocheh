@@ -120,9 +120,12 @@ def apply(state, progress=lambda step: None):
             current = load(state)
             services = ['nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb']
             if mini_app.enabled(current): services += list(mini_app.SERVICES)
+            # Compose stops and restarts each changed service in dependency order: the
+            # app may take its whole 300 s grace to finish work in flight and Hermes its
+            # 120 s, each then waits to report healthy, and the last wait is up to 180 s.
             ok = subprocess.run(compose(state) + ['up', '-d', '--no-build', '--wait', '--wait-timeout', '180', *services],
                                 env=environment(state), stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, timeout=420).returncode == 0
+                                stderr=subprocess.DEVNULL, timeout=900).returncode == 0
             if ok and not mini_app.enabled(current):
                 # Turning the mini app off also closes its tunnel.
                 ok = subprocess.run(compose(state) + ['rm', '-s', '-f', *mini_app.SERVICES], env=environment(state),
