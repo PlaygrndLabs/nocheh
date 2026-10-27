@@ -183,8 +183,12 @@ def main():
         action, *parts = rest
         if action == 'show' and not parts: result = view(STATE)
         elif action == 'apply' and not parts: result = apply(STATE)
-        elif action == 'set' and len(parts) in (1, 2):
+        elif action == 'set' and len(parts) in (1, 2, 3):
             from tools.operations.installation.settings import SECRETS
+            # --rebuild-memory confirms that changing the memory search model replaces long-term memory.
+            rebuild = '--rebuild-memory' in parts
+            parts = [part for part in parts if part != '--rebuild-memory']
+            if not parts or len(parts) > 2: parser.error('Use config set KEY [VALUE] [--rebuild-memory].')
             key = parts[0]
             if key in SECRETS and len(parts) == 2:
                 parser.error('Use a hidden prompt or piped stdin for secret values.')
@@ -193,8 +197,8 @@ def main():
                 from getpass import getpass
                 value = getpass(key + ': ')
             else: value = sys.stdin.read(65536).rstrip('\r\n')
-            result = save(STATE, {key: value}, view(STATE)['revision'])
-        else: parser.error('Use config show, config set KEY [VALUE], or config apply.')
+            result = save(STATE, {key: value}, view(STATE)['revision'], rebuild)
+        else: parser.error('Use config show, config set KEY [VALUE] [--rebuild-memory], or config apply.')
         print(json.dumps(result, indent=2)); return 1 if result.get('status') == 'apply_failed' else 0
     if args.command == "init":
         print("Local configuration ready. Edit " + str(env_path(STATE))); return 0

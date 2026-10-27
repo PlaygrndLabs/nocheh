@@ -75,5 +75,18 @@ class EmbeddingConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(Rejected,'embedding_model_change_requires_rebuild'):restored.reserve('/v1/embeddings',b'fixture')
             self.assertEqual(restored.report()['embedding_route']['model'],large.model)
 
+    def test_a_confirmed_rebuild_moves_the_route_and_keeps_spending(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ledger=Ledger(Path(folder)/'budget.sqlite')
+            small,large=embeddings({}),embeddings({'NOCHEH_EMBEDDING_MODEL':'text-embedding-3-large'})
+            ledger.reserve('/v1/embeddings',b'fixture',small);spent=ledger.report()['reserved_usd']
+            with self.assertRaisesRegex(Rejected,'embedding_model_change_requires_rebuild'):ledger.reserve('/v1/embeddings',b'fixture',large)
+            ledger.switch_embedding(large)
+            ledger.reserve('/v1/embeddings',b'fixture',large)
+            # Vectors of the old model are gone with the replaced memory; it is refused from now on.
+            with self.assertRaisesRegex(Rejected,'embedding_model_change_requires_rebuild'):ledger.reserve('/v1/embeddings',b'fixture',small)
+            self.assertEqual(ledger.report()['embedding_route']['model'],large.model)
+            self.assertAlmostEqual(ledger.report()['reserved_usd'],spent+large.reservation/1e6)
+
 
 if __name__=='__main__':unittest.main()

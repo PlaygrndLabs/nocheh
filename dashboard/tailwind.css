@@ -2,56 +2,57 @@
 @source "./**/*.{ts,tsx}";
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Semantic colours. Pages use these names, never raw palette colours. */
+/* Semantic colours, taken from the logo: lavender accent, navy dark mode, mint for things that work.
+   Pages use these names, never raw palette colours. */
 :root {
-  --bg: oklch(0.985 0.002 180);
+  --bg: oklch(0.985 0.004 290);
   --surface: oklch(1 0 0);
-  --subtle: oklch(0.965 0.004 180);
-  --border: oklch(0.91 0.006 180);
-  --strong-border: oklch(0.84 0.008 180);
-  --text: oklch(0.22 0.01 200);
-  --muted: oklch(0.5 0.012 200);
-  --accent: oklch(0.52 0.09 182);
-  --accent-hover: oklch(0.46 0.09 182);
-  --accent-soft: oklch(0.95 0.03 182);
-  --accent-text: oklch(0.42 0.08 182);
+  --subtle: oklch(0.966 0.008 290);
+  --border: oklch(0.91 0.012 290);
+  --strong-border: oklch(0.84 0.016 290);
+  --text: oklch(0.22 0.035 272);
+  --muted: oklch(0.5 0.03 275);
+  --accent: oklch(0.53 0.17 293);
+  --accent-hover: oklch(0.47 0.17 293);
+  --accent-soft: oklch(0.95 0.03 293);
+  --accent-text: oklch(0.46 0.16 293);
   --on-accent: oklch(0.99 0 0);
-  --good: oklch(0.52 0.12 150);
-  --good-soft: oklch(0.95 0.04 150);
+  --good: oklch(0.55 0.11 170);
+  --good-soft: oklch(0.95 0.04 170);
   --warn: oklch(0.55 0.12 70);
   --warn-soft: oklch(0.96 0.05 85);
   --bad: oklch(0.54 0.18 27);
   --bad-soft: oklch(0.96 0.03 27);
   --info: oklch(0.52 0.13 250);
   --info-soft: oklch(0.96 0.025 250);
-  --ring: oklch(0.6 0.1 182 / 0.45);
-  --shadow: 0 1px 2px oklch(0.2 0.01 200 / 0.06), 0 1px 3px oklch(0.2 0.01 200 / 0.04);
-  --overlay: oklch(0.2 0.01 200 / 0.4);
+  --ring: oklch(0.6 0.15 293 / 0.45);
+  --shadow: 0 1px 2px oklch(0.2 0.03 272 / 0.06), 0 1px 3px oklch(0.2 0.03 272 / 0.04);
+  --overlay: oklch(0.2 0.03 272 / 0.4);
 }
 .dark {
-  --bg: oklch(0.17 0.006 200);
-  --surface: oklch(0.205 0.007 200);
-  --subtle: oklch(0.235 0.008 200);
-  --border: oklch(0.29 0.008 200);
-  --strong-border: oklch(0.36 0.01 200);
-  --text: oklch(0.94 0.004 200);
-  --muted: oklch(0.7 0.01 200);
-  --accent: oklch(0.7 0.1 182);
-  --accent-hover: oklch(0.76 0.1 182);
-  --accent-soft: oklch(0.3 0.04 182);
-  --accent-text: oklch(0.8 0.09 182);
-  --on-accent: oklch(0.18 0.02 182);
-  --good: oklch(0.75 0.13 150);
-  --good-soft: oklch(0.3 0.05 150);
+  --bg: oklch(0.155 0.035 272);
+  --surface: oklch(0.195 0.038 272);
+  --subtle: oklch(0.23 0.04 272);
+  --border: oklch(0.29 0.04 272);
+  --strong-border: oklch(0.36 0.045 272);
+  --text: oklch(0.95 0.012 85);
+  --muted: oklch(0.72 0.03 275);
+  --accent: oklch(0.76 0.13 296);
+  --accent-hover: oklch(0.81 0.12 296);
+  --accent-soft: oklch(0.3 0.08 293);
+  --accent-text: oklch(0.82 0.11 296);
+  --on-accent: oklch(0.17 0.04 272);
+  --good: oklch(0.85 0.12 172);
+  --good-soft: oklch(0.3 0.06 172);
   --warn: oklch(0.8 0.12 80);
   --warn-soft: oklch(0.32 0.05 75);
   --bad: oklch(0.72 0.15 27);
   --bad-soft: oklch(0.31 0.06 27);
   --info: oklch(0.74 0.11 250);
   --info-soft: oklch(0.3 0.05 250);
-  --ring: oklch(0.7 0.1 182 / 0.5);
+  --ring: oklch(0.76 0.13 296 / 0.5);
   --shadow: 0 1px 2px oklch(0 0 0 / 0.3);
-  --overlay: oklch(0 0 0 / 0.6);
+  --overlay: oklch(0.08 0.03 272 / 0.6);
 }
 
 @theme inline {

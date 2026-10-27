@@ -162,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
         except AttachmentTooLarge:
             self.reply(413, {'error':'attachment_too_large'})
         except DetectorContractError as error:
-            ERRORS.append({'route':'/internal/detect','kind':str(error)})
+            ERRORS.append({'route':'/internal/detect','kind':str(error),'shape':error.shape})
             self.reply(503, {'error':'detector_contract_rejected'})
         except ValueError as error:
             if self.path == '/internal/manage':

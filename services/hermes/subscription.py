@@ -13,28 +13,58 @@ RETRY_SECONDS = 2
 
 
 class DetectorContractError(ValueError):
-    pass
+    """A detector reply outside the contract. `shape` describes the reply without its content."""
+
+    def __init__(self, kind, shape=None):
+        super().__init__(kind)
+        self.shape = shape or {}
 
 
-def detector_reply(content, text):
-    """The literals of a detector reply, or a contract error. Some models wrap the
-    JSON in one Markdown code fence; only that exact wrapper is removed."""
+def reply_shape(content, finish_reason=None):
+    """Lengths and flags only: what a rejected detector reply looked like, never what it said."""
+    if not isinstance(content, str):
+        return {'type': type(content).__name__, 'finish_reason': finish_reason}
+    stripped = content.strip()
+    start, end = stripped.find('{'), stripped.rfind('}')
+    return {'length': len(content), 'fence': '```' in content, 'object': start >= 0 and end > start,
+            'prose_before': start > 0 if start >= 0 else bool(stripped),
+            'prose_after': 0 <= end < len(stripped) - 1, 'finish_reason': finish_reason}
+
+
+def embedded_literals(content):
+    """The literals list of the single distinct {"literals": [...]} object inside prose or a fence.
+    No object, or two different ones, is not an answer."""
     import json
-    import re
-    if isinstance(content, str):
-        fenced = re.fullmatch(r'\s*```(?:json)?[ \t]*\n(.*)\n```\s*', content, re.DOTALL)
-        content = fenced[1] if fenced else content
+    decoder, found = json.JSONDecoder(), []
+    for index, char in enumerate(content):
+        if char != '{':
+            continue
+        try:
+            value, _ = decoder.raw_decode(content, index)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and set(value) == {"literals"} and value not in found:
+            found.append(value)
+    return found[0] if len(found) == 1 else None
+
+
+def detector_reply(content, text, finish_reason=None):
+    """The literals of a detector reply, or a contract error. Some models wrap the JSON
+    in a Markdown code fence or a sentence; the one {"literals": [...]} object inside is used."""
+    import json
     try:
         parsed = json.loads(content)
     except (ValueError, TypeError):
-        raise DetectorContractError('detector_json_rejected') from None
+        parsed = embedded_literals(content) if isinstance(content, str) else None
+        if parsed is None:
+            raise DetectorContractError('detector_json_rejected', reply_shape(content, finish_reason)) from None
     if not isinstance(parsed, dict) or set(parsed) != {"literals"}:
-        raise DetectorContractError('detector_shape_rejected')
+        raise DetectorContractError('detector_shape_rejected', reply_shape(content, finish_reason))
     candidates = parsed["literals"]
     if not isinstance(candidates, list) or any(
         not isinstance(value, str) or not value or value not in text for value in candidates
     ):
-        raise DetectorContractError('detector_literal_rejected')
+        raise DetectorContractError('detector_literal_rejected', reply_shape(content, finish_reason))
     return candidates
 
 
@@ -133,7 +163,8 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str,
                     {"role": "system", "content": prompt(prompts, "guard.secret_check")},
                     {"role": "user", "content": text},
                 ])
-            candidates = detector_reply(response.choices[0].message.content, text)
+            choice = response.choices[0]
+            candidates = detector_reply(choice.message.content, text, getattr(choice, 'finish_reason', None))
             failed = False
             return candidates
         except Exception as error:

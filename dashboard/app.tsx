@@ -31,6 +31,7 @@ import {cn} from './lib/utils';
 import {Button, Dot, Spinner, type Tone} from './ui/core';
 import {FeedbackProvider} from './ui/overlay';
 import {SaveWatcher} from './ui/save-bar';
+import {LogoMark, Wordmark} from './ui/logo';
 
 type NavItem = {id: PageId; title: string; Icon: React.ComponentType<{className?: string}>};
 const nav: NavItem[] = [
@@ -183,13 +184,9 @@ function Navigation({
     <div className="flex h-full flex-col">
       <div className={cn('mb-5 flex items-center gap-2 pt-1', collapsed ? 'flex-col' : 'justify-between pr-1')}>
         <a href="#home" onClick={onNavigate} className={cn('flex items-center gap-2.5', !collapsed && 'px-3')}>
-          <span
-            aria-hidden
-            className="grid size-8 place-items-center rounded-lg bg-accent text-base font-bold text-on-accent"
-          >
-            ن
-          </span>
-          <span className={collapsed ? 'sr-only' : 'text-[15px] font-semibold'}>Nocheh</span>
+          <LogoMark className="w-8 shrink-0" />
+          {!collapsed && <Wordmark className="w-[92px]" />}
+          <span className="sr-only">Nocheh</span>
         </a>
         {toggle}
       </div>
@@ -352,14 +349,10 @@ function App() {
           <Button variant="ghost" size="icon" aria-label="Open navigation" onClick={() => setMenuOpen(true)}>
             <Menu aria-hidden />
           </Button>
-          <a href="#home" className="flex items-center gap-2 font-semibold">
-            <span
-              aria-hidden
-              className="grid size-7 place-items-center rounded-md bg-accent text-sm font-bold text-on-accent"
-            >
-              ن
-            </span>
-            Nocheh
+          <a href="#home" className="flex items-center gap-2">
+            <LogoMark className="w-8" />
+            <Wordmark className="w-[92px]" />
+            <span className="sr-only">Nocheh</span>
           </a>
         </header>
         <main ref={main} id="main" className="min-h-0 flex-1 overflow-y-auto">
