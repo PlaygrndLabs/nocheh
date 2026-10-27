@@ -191,6 +191,14 @@ def register(ctx):
             'tag':{'type':'string','maxLength':40},'person':{'type':'string'},'q':{'type':'string','maxLength':200},
             'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
+    name='nocheh_notion';description=('The owner\'s own Notion, through Notion\'s MCP server, when the owner has connected it and turned it on. Only in the owner\'s '
+        'private conversation. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
+        'notion-create-pages or notion-update-page) with its input. Reads may run right away and changes may wait for the owner to approve the exact call, '
+        'as the owner set; the result says which. Nocheh\'s own task list stays the main one: use Notion when the owner asks for Notion.')
+    ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
+        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
+            'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string','maxLength':128},'input':{'type':'object'}},
+            'required':['operation'],'additionalProperties':False}},handler=notion_tool)
     name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
         'Without an id it lists this chat\'s recent Telegram message requests with their destinations and states; read one by its id for its text.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
@@ -256,6 +264,30 @@ def controlled_tool(kind,args):
         if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
         return json.dumps(request('/v1/tools/propose',{'kind':kind,'arguments':args}),ensure_ascii=False)
     except Exception:return json.dumps({'error':'controlled_action_unavailable'})
+
+
+def notion_tool(args,**kwargs):
+    from urllib.error import HTTPError
+    try:
+        from pathlib import Path
+        from .profile_config import inherited_config,read,preferences
+        home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
+        if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.mcp']!='on':return json.dumps({'error':'tool_disabled_by_owner'})
+        body={'connection':'notion',**({'operation':'list'} if args.get('operation')=='list' else {'tool':args.get('tool'),'input':args.get('input') or {}})}
+        proposed=request('/v1/tools/propose',{'kind':'mcp','arguments':body})
+        if proposed.get('state')!='approved':return json.dumps(proposed,ensure_ascii=False)
+        # A call the owner's setting allows runs now; wait briefly so the answer comes back in this turn.
+        deadline=time.monotonic()+60
+        while time.monotonic()<deadline:
+            time.sleep(1)
+            value=request('/v1/tools/actions/'+proposed['id'])
+            if value.get('state') in ('done','failed','rejected','ambiguous'):
+                result=json.dumps({key:value.get(key) for key in ('id','state','result','error_code')},ensure_ascii=False)
+                return result if len(result)<=24000 else json.dumps({'id':value['id'],'state':value['state'],'excerpt':result[:22000],'truncated':True},ensure_ascii=False)
+        return json.dumps({'id':proposed['id'],'state':'running','note':'Still running; read it later with nocheh_action_status.'})
+    except HTTPError as error:
+        return json.dumps({'error':{400:'invalid_notion_call',403:'notion_only_in_owner_private_chat',409:'notion_is_off_or_changed'}.get(error.code,'notion_unavailable')})
+    except Exception:return json.dumps({'error':'notion_unavailable'})
 
 
 def controlled_status(args,**kwargs):
