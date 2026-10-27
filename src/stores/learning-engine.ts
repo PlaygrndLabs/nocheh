@@ -7,7 +7,7 @@ import {learningResult,parseInterpretations,triggeredInterpretations,type Learni
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
-import {GuardRepository} from './guards.js';
+import {GuardRepository,type GuardBinding} from './guards.js';
 import {HonchoProvenanceRepository} from './honcho-provenance.js';
 import {LearnedMemoryRepository,type LearnedPublication} from './learned.js';
 import {LearningContextRepository,type PreparedLearningContext} from './learning-context.js';
@@ -45,19 +45,26 @@ export class ContextualLearningRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly guards:GuardRepository,
     readonly learned:LearnedMemoryRepository,readonly provenance:HonchoProvenanceRepository,readonly call:HonchoCall){}
 
-  async request(source:SourceReference,workspace:string,audience:string):Promise<string> {
-    const binding=await this.guards.state();await this.provenance.current(workspace,audience,binding);
+  /** The source's learning inputs under the binding; the hash leaves out the binding and rule wording. */
+  private async prepare(source:SourceReference,workspace:string,audience:string,binding:GuardBinding) {
+    await this.provenance.current(workspace,audience,binding);
     const context=await this.contexts.prepare(source,binding);
     const owner=this.contexts.access.policy().owner_id;
     if(audience!==(context.space===owner?'owner':context.space))throw new HttpError(403,'learning_workspace_scope_mismatch');
-    const {binding:_,rules:_rules,rule_ids:_ruleIds,...inputs}=context,contextHash=digest(canonical([protocol,audience,inputs]));
+    const {binding:_,rules:_rules,rule_ids:_ruleIds,...inputs}=context;
+    return {context,contextHash:digest(canonical([protocol,audience,inputs])),id:digest(canonical([protocol,workspace,context]))};
+  }
+  private async record(source:SourceReference,id:string,context:PreparedLearningContext,binding:GuardBinding) {
+    return this.derived.record({operation_id:'learning-input:'+id,source,kind:'runtime_context',content:Buffer.from(canonical(context)),
+      producer:'nocheh',producer_version:protocol,configuration:{},provenance:{purpose:'contextual_learning',binding}});
+  }
+  async request(source:SourceReference,workspace:string,audience:string):Promise<string> {
+    const binding=await this.guards.state(),{context,contextHash,id}=await this.prepare(source,workspace,audience,binding);
     // Unrelated epochs and regenerated rule wording cannot cause a reasoning loop.
     // Every source, selected result and applicable convention is still revalidated above.
     const completed=(await this.contexts.access.stores.control.query("SELECT id FROM interpretation_jobs WHERE context_hash=$1 AND state='done' ORDER BY created_at DESC LIMIT 1",[contextHash])).rows[0];
     if(completed)return completed.id;
-    const id=digest(canonical([protocol,workspace,context]));
-    const input=await this.derived.record({operation_id:'learning-input:'+id,source,kind:'runtime_context',content:Buffer.from(canonical(context)),
-      producer:'nocheh',producer_version:protocol,configuration:{},provenance:{purpose:'contextual_learning',binding}});
+    const input=await this.record(source,id,context,binding);
     const client=await this.contexts.access.stores.control.connect();
     try {
       await client.query('BEGIN');
@@ -113,6 +120,15 @@ export class ContextualLearningRepository {
         for(const operation of job.publication_ids)await this.learned.finish(operation);
         await this.complete(client,id);
         return job.result_ids as string[];
+      }
+      // A job that never started keeps its place across epochs when its inputs are unchanged; changed inputs are asked again by the source sweep.
+      const binding=await this.guards.state();
+      if(job.state==='pending'&&job.attempts===0&&canonical(job.binding)!==canonical(binding)) {
+        const prepared=await this.prepare(job.source_reference,job.workspace,job.audience,binding);
+        if(prepared.contextHash!==job.context_hash)throw new HttpError(409,'guard_context_changed');
+        job.input_reference=await this.record(job.source_reference,prepared.id,prepared.context,binding);job.binding=binding;
+        await client.query("UPDATE interpretation_jobs SET binding=$2,input_reference=$3 WHERE id=$1 AND state='pending' AND attempts=0",
+          [id,JSON.stringify(binding),JSON.stringify(job.input_reference)]);
       }
       // A revoked context never reaches the reasoning endpoint, even on retry.
       await this.provenance.current(job.workspace,job.audience,job.binding);
