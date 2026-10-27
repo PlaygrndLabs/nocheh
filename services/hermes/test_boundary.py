@@ -119,11 +119,14 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
             sent.append((request.method,request.url.path));return httpx.Response(200,json={'data':[]})
         with httpx.Client(transport=httpx.MockTransport(answer)) as client:
             client.get('https://provider.example/v1/models');client.get('https://provider.example/models/')
+            client.get('https://provider.example/v1/models?limit=1000')
+            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models?limit=raw')
+            with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models?limit=10&after_id=raw')
             with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models/claude-x')
             with self.assertRaises(GuardUnavailable):client.get('https://provider.example/v1/models?q=raw')
             with self.assertRaises(GuardUnavailable):client.request('GET','https://provider.example/v1/models',content=b'raw')
             with self.assertRaises(GuardUnavailable):client.post('https://provider.example/v1/models',content=b'raw')
-        self.assertEqual(sent,[('GET','/v1/models'),('GET','/models/')])
+        self.assertEqual(sent,[('GET','/v1/models'),('GET','/models/'),('GET','/v1/models')])
 
 
 if __name__=='__main__':unittest.main()
