@@ -62,14 +62,17 @@ def problems(monitoring, usage_rows, today):
     work = monitoring.get('workflows') or {}
     if work.get('unavailable'):
         add('work_unchecked', 1, 'work_unchecked')
-    failed, uncertain = {}, {}
+    failed, uncertain, retryable = {}, {}, {}
     for row in work.get('counts') or []:
         if row.get('state') in ('failed', 'retryable_failed'):
             failed[row['family']] = failed.get(row['family'], 0) + row['count']
+            # The tasks Retry failed can start now; the rest are closed for good.
+            if row['state'] == 'retryable_failed' or row['family'] == 'organization':
+                retryable[row['family']] = retryable.get(row['family'], 0) + row['count']
         elif row.get('state') == 'ambiguous':
             uncertain[row['family']] = uncertain.get(row['family'], 0) + row['count']
     for family, count in failed.items():
-        add('failed:' + family, count, 'failed', total=True, label=_family(family), family=family)
+        add('failed:' + family, count, 'failed', total=True, label=_family(family), family=family, retryable=retryable.get(family, 0))
     for family, count in uncertain.items():
         add('uncertain:' + family, count, 'uncertain', total=True, label=_family(family), family=family)
     workers = [w for w in work.get('workers') or [] if w.get('owner') != 'legacy']
@@ -166,13 +169,25 @@ def _write(state, record):
     os.replace(file.name, path)
 
 
-def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=None):
+def opening(values):
+    """Where the notice's Open button goes: the mini app's Problems page when the mini app is set up,
+    else System › Health at the dashboard address from Settings, or this computer's own."""
+    from tools.operations.installation import mini_app
+    if mini_app.enabled(values):
+        return {'kind': 'web_app', 'url': values['NOCHEH_MINI_APP_URL'].rstrip('/') + '/?page=problems'}
+    address = values.get('NOCHEH_DASHBOARD_URL') or 'http://127.0.0.1:' + os.environ.get('NOCHEH_DASHBOARD_PORT', '8783')
+    return {'kind': 'url', 'url': address.rstrip('/') + '/#system'}
+
+
+def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=None, values=None):
     """Report new or worse problems to the owner. Returns what was reported and how it went."""
     from tools.operations.installation.configuration import load
     now = now if now is not None else datetime.now(timezone.utc).timestamp()
     today = datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%d')
+    if values is None:
+        values = load(state)
     if enabled is None:
-        enabled = load(state).get('TELEGRAM_PROBLEM_NOTICES', 'true') != 'false'
+        enabled = values.get('TELEGRAM_PROBLEM_NOTICES', 'true') != 'false'
     if monitoring is None:
         from tools.operations.provider.monitoring import status
         monitoring = status(state)
@@ -196,7 +211,8 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
             from tools.operations.archive.archive import API
             send = lambda body: API().call('/v1/runtime/owner-notice', body, timeout=60)
         try:
-            outcome = send({'id': notice, 'problems': lines}).get('state')
+            retry = any(problem['kind'] == 'failed' and problem['retryable'] for problem, _ in report)
+            outcome = send({'id': notice, 'problems': lines, 'open': opening(values), 'retry': retry}).get('state')
         except Exception:
             outcome = 'unavailable'
         result['state'] = outcome

@@ -91,6 +91,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent to your private chat when a failure or other problem is new or worse, at most once an hour for the same problem. {problems} is the list, one line each. Turn it off in Settings › Telegram.',
   },
   {
+    key: 'system.problem_buttons',
+    title: 'Problem notice buttons',
+    hint: 'One “name: text” line each for the Open and Retry failed buttons under a problem notice and the short answers to a press. {count} is how many tasks are retried. A line you remove keeps its default.',
+  },
+  {
     key: 'guard.secret_check',
     title: 'Secret check',
     hint: 'Finds passwords and keys before anything is stored. Keep its JSON reply format, or the check fails and messages wait.',

@@ -1,6 +1,7 @@
 """The owner's problem notices: new or worse problems reach Telegram once, without spam."""
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 from tools.operations.provider import problems
@@ -9,8 +10,9 @@ NOW = datetime(2026, 10, 28, 12, tzinfo=timezone.utc).timestamp()
 TODAY = '2026-10-28'
 
 
-def monitoring(failed=11, uncertain=0, services=(), work=True):
+def monitoring(failed=11, uncertain=0, services=(), work=True, retryable=0):
     counts = [{'family': 'memory_review', 'state': 'failed', 'count': failed},
+              {'family': 'telegram', 'state': 'retryable_failed', 'count': retryable},
               {'family': 'memory_review', 'state': 'completed', 'count': 500}]
     if uncertain:
         counts.append({'family': 'telegram', 'state': 'ambiguous', 'count': uncertain})
@@ -32,11 +34,11 @@ class ProblemNoticeTests(unittest.TestCase):
         self.sent = []
         self.outcome = 'done'
 
-    def check(self, now, state=None, usage=(), enabled=True, outcome=None):
+    def check(self, now, state=None, usage=(), enabled=True, outcome=None, values=None):
         def send(body):
             self.sent.append(body)
             return {'state': outcome or self.outcome}
-        return problems.check(self.state, state or monitoring(), list(usage), send, now, enabled)
+        return problems.check(self.state, state or monitoring(), list(usage), send, now, enabled, values or {})
 
     def test_old_failures_are_not_announced_and_new_ones_are_counted_from_them(self):
         self.assertEqual(self.check(NOW)['state'], 'nothing_new')
@@ -92,10 +94,22 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 360, monitoring(failed=11))
         self.assertEqual(len(self.sent), 1, 'the old failures are not news once it can be read again')
 
+    def test_open_goes_to_the_mini_app_or_the_dashboard_and_retry_shows_for_retryable_tasks(self):
+        self.check(NOW)
+        with patch.dict('os.environ', {'NOCHEH_DASHBOARD_PORT': '8783'}):
+            self.check(NOW + 120, monitoring(failed=12))
+        self.assertEqual((self.sent[-1]['open'], self.sent[-1]['retry']), ({'kind': 'url', 'url': 'http://127.0.0.1:8783/#system'}, False),
+                         'closed failures cannot be retried, and without a mini app Open goes to this computer’s dashboard')
+        self.check(NOW + 240, monitoring(failed=12, retryable=2), values={'NOCHEH_DASHBOARD_URL': 'https://dash.example.test/'})
+        self.assertEqual((self.sent[-1]['open'], self.sent[-1]['retry']), ({'kind': 'url', 'url': 'https://dash.example.test/#system'}, True))
+        mini = {'TELEGRAM_ENABLED': 'true', 'NOCHEH_MINI_APP_URL': 'https://mini.example.test', 'CLOUDFLARE_TUNNEL_TOKEN': 'x' * 40}
+        self.assertEqual(problems.opening(mini), {'kind': 'web_app', 'url': 'https://mini.example.test/?page=problems'})
+
     def test_only_todays_model_failures_count(self):
         found = problems.problems(monitoring(), refusals(1, 1), TODAY)
         self.assertEqual({problem['kind'] for problem in found}, {'failed', 'model'})
-        self.assertEqual(problems.problems(monitoring(), [{**refusals(1, 1)[0], 'day': '2026-10-27'}], TODAY)[1:], [],
+        yesterday = problems.problems(monitoring(), [{**refusals(1, 1)[0], 'day': '2026-10-27'}], TODAY)
+        self.assertEqual([problem for problem in yesterday if problem['kind'] == 'model'], [],
                          'yesterday’s failures are not today’s')
 
 

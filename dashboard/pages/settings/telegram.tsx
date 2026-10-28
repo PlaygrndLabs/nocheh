@@ -19,6 +19,7 @@ export const telegramKeys = [
   'TELEGRAM_TOPIC_MEMORY',
   'TELEGRAM_TYPING',
   'TELEGRAM_PROBLEM_NOTICES',
+  'NOCHEH_DASHBOARD_URL',
   'NOCHEH_MINI_APP_URL',
   'CLOUDFLARE_TUNNEL_TOKEN',
 ];
@@ -246,6 +247,25 @@ export function TelegramSettings() {
                 onChange={on => s.set('TELEGRAM_PROBLEM_NOTICES', on ? 'true' : 'false')}
               />
             </div>
+          </SettingRow>
+          <SettingRow
+            title={
+              <>
+                Dashboard address
+                <Unsaved show={s.changed('NOCHEH_DASHBOARD_URL')} />
+              </>
+            }
+            description="Where Open under a problem notice and review links go when the mini app is off. Leave empty for this computer’s own address, which opens only on this computer."
+            htmlFor="dashboard-url"
+          >
+            <Input
+              id="dashboard-url"
+              inputMode="url"
+              value={s.value('NOCHEH_DASHBOARD_URL')}
+              placeholder="https://nocheh.example.com"
+              disabled={s.busy}
+              onChange={e => s.set('NOCHEH_DASHBOARD_URL', e.target.value.trim())}
+            />
           </SettingRow>
           <SettingRow
             title={
