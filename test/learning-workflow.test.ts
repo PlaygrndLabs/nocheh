@@ -59,3 +59,31 @@ test('a learning query fits Honcho\'s limit by trimming other evidence, then rul
   assert.deepEqual(parse(omitted).limitations,['other_evidence_text_only','rules_omitted','trigger_text_only','other_evidence_omitted']);
   assert.throws(()=>learningQuery('i'.repeat(10001),context(0,0,0)),{code:'learning_query_limit'});
 });
+
+test('sources outside any conversation close instead of waiting, and refresh sweeps leave wire batches out',async()=>{
+  const registered:string[]=[];
+  const client={release:()=>{},query:async(sql:string,params:unknown[]=[])=>{
+    if(sql.includes('pg_try_advisory_lock_shared'))return {rows:[{locked:true}]};
+    if(sql.includes('FROM workflow_owners'))return {rows:[{owner:'inngest',admission:true,epoch:1}]};
+    if(sql.includes('FROM guard_state'))return {rows:[{mode:'on',epoch:1}]};
+    if(sql.includes('SELECT * FROM learning_refresh_sweeps'))return {rows:[{stage:'sources',source_after_sequence:'0',learned_after:''}]};
+    if(sql.includes('INSERT INTO workflow_registry'))registered.push(String(params[2]));
+    return {rows:[]};
+  }};
+  let observed:{audience:unknown;reaction:unknown}={audience:null,reaction:null};
+  const wire=digest('synthetic-wire'),update=digest('synthetic-update');
+  const services:any={stores:{control:{connect:async()=>client,query:client.query}},guards:{state:async()=>({generation:'1',epoch:1,mode:'on'})},
+    archive:{captured:async(id:string)=>({reference:{id}}),page:async()=>[{reference:{id:wire},kind:'telegram_wire',sequence:'1'},{reference:{id:update},kind:'telegram_update',sequence:'2'}]},
+    access:{space:async()=>null,relationships:{describe:async()=>observed}}};
+  const operations=storageWorkflowOperations(services,async()=>{throw Error('no runtime calls');});
+  const authority={owner:'inngest' as const,epoch:1},job='source:'+update;
+  const closed=await operations.memory_review!(job,authority);
+  assert.deepEqual([closed.state,closed.waiting_reason],['skipped','no_conversation'],'a button press or import manifest never gets a conversation');
+  safeMetadata(closed);
+  observed={audience:null,reaction:{sequence:1}};
+  assert.deepEqual(await operations.memory_review!(job,authority).then(r=>[r.state,r.waiting_reason]),['waiting','prerequisite'],'a reaction can still find its message');
+  observed={audience:{chat_id:'-100',topic_state:'unknown'},reaction:null};
+  assert.equal((await operations.memory_review!(job,authority)).state,'waiting');
+  assert.equal((await operations.memory_review!('refresh',authority)).state,'completed');
+  assert.deepEqual(registered,[update,'source:'+update],'only the update is prepared and reviewed again');
+});

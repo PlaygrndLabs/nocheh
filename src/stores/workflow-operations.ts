@@ -113,6 +113,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(stage==='sources') {
         const sources=await s.archive.page(String(after),25);
         for(const source of sources) {
+          // As at capture, wire batches are transport evidence: their updates are prepared and reviewed on their own.
+          if(source.kind==='telegram_wire')continue;
           await requestWorkflow(db,'preparation',source.reference.id,binding.epoch);
           await requestWorkflow(db,family,'source:'+source.reference.id,binding.epoch);
         }
@@ -125,7 +127,12 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
   });
   const sourceReady=async(id:string):Promise<{source:Awaited<ReturnType<typeof s.archive.captured>>;binding:GuardBinding}|Observation>=>{
     const source=await s.archive.captured(id),binding=await s.guards.state();
-    if(!await s.access.space(source.reference))return waiting('review','prerequisite');
+    if(!await s.access.space(source.reference)) {
+      // Button presses, import manifests and wire batches belong to no conversation and never will, so there is nothing to learn.
+      // A reaction can still find its message's conversation, so it waits.
+      const observed=await s.access.relationships.describe(source.reference);
+      return observed.audience||observed.reaction?waiting('review','prerequisite'):observation('skipped','review',0,Date.now(),'no_conversation');
+    }
     if(!await s.access.canLearn(source.reference,binding))return observation('denied','review',0,Date.now(),'consent_required');
     const ready=await s.preparation.status(id);if(ready.state==='failed')return ready;
     if(ready.state!=='completed')return waiting(ready.stage,'prerequisite',Math.max(1000,ready.next_attempt-Date.now()));
