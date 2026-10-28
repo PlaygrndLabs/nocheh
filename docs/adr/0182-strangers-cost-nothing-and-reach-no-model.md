@@ -28,7 +28,7 @@ Telegram account and saw its command menu. Extends
   selected group's own scope, where native Hermes put forum menus. The
   adapter that actually connects (the committed one) runs this clearing
   after each connect; it skipped all native housekeeping before, so the first
-  version never ran and the machine still showed the default menu (2026-10-28).
+  version never ran and the development machine still showed the default menu (2026-10-28).
   Each scope is read back, checked again a minute later and retried with
   backoff, and failures are logged.
 - A live Telegram update from a chat Nocheh doesn't serve (a private chat

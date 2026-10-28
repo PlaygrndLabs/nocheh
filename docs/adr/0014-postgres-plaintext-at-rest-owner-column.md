@@ -91,7 +91,7 @@ and no `IF NOT EXISTS` bootstrap functions. The schema stops being whatever accu
 auth changes, and no UI changes. This is not multi-tenancy; it is the column that makes
 multi-tenancy possible later. Retrofitting it afterwards means touching every primary key,
 all eight indexes, twelve port interfaces, the most-copied domain shape in the codebase,
-and three bugs that fail silently rather than loudly: the hardcoded `person:sam` node id
+and three bugs that fail silently rather than loudly: the hardcoded `person:<owner>` node id
 overwriting under `ON CONFLICT`, the `flushing` set colliding on shared conversation ids,
 and the process-global vector cache serving one owner's vectors to another. During this
 rewrite it is a day. Afterwards it is weeks.
