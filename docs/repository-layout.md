@@ -13,7 +13,7 @@ Git contains source code, configuration needed to build and deploy it, documenta
 | `src/` | TypeScript application services |
 | `test/` | Tests and explicitly synthetic fixtures |
 | `tools/` | CLI routing, operations, runtime helpers, acceptance harnesses, development tools, and build helpers |
-| Root Compose files and manifests, `AGENTS.md`, `SPECS.md`, `TASK.md` | Operating and development Compose configuration, build inputs, and authoritative project context |
+| Root Compose files and manifests, `AGENTS.md`, `SPECS.md`, `TASK.md`, `LICENSE` | Operating and development Compose configuration, build inputs, and authoritative project context |
 
 The former top-level `compatibility/` mixed these roles. Its reusable scripts are under `tools/acceptance`, Compose overlays under `deploy/acceptance`, synthetic fixtures under `test/fixtures/acceptance`, and procedures under `docs/acceptance`.
 
