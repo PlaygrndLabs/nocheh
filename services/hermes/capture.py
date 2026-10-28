@@ -6,6 +6,7 @@ import base64
 import contextvars
 import hashlib
 import json
+import logging
 import os
 import time
 import uuid
@@ -269,6 +270,45 @@ def instrument_request(request, capture: Capture, polling=False):
     return request
 
 
+async def clear_command_menu(bot, sleep=asyncio.sleep, waits=(0, 60, 300, 900)):
+    """Leave no command menu in any scope Hermes ever filled, and check that it stayed empty.
+
+    A process that is still shutting down, or a rate limit, can leave a menu
+    behind, so each scope is read back and cleared again after a while.
+    """
+    from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeChat, BotCommandScopeDefault
+    from telegram.error import BadRequest, Forbidden
+    from .environment import telegram_policy
+    log = logging.getLogger(__name__)
+    scopes = [BotCommandScopeDefault(), BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()]
+    try:
+        # Native Hermes gave each forum group its own menu, which outranks the shared ones.
+        scopes += [BotCommandScopeChat(chat_id=int(chat)) for chat in telegram_policy()['group_ids']]
+    except (ValueError, TypeError):
+        pass
+    for attempt, wait in enumerate(waits):
+        await sleep(wait)
+        left = []
+        for scope in scopes:
+            try:
+                if await bot.get_my_commands(scope=scope):
+                    await bot.delete_my_commands(scope=scope)
+                    if await bot.get_my_commands(scope=scope):
+                        left.append(scope)
+            except (BadRequest, Forbidden):
+                pass  # The bot is no longer in that chat, so it shows no menu there.
+            except Exception as error:  # A rate limit or network error: try again later.
+                log.warning('command_menu_not_cleared: %s %s', scope.type, type(error).__name__)
+                left.append(scope)
+        if attempt == 0:
+            # Recheck every scope once more later: an exiting process may still write its menu.
+            continue
+        if not left:
+            return
+        scopes = left
+    log.warning('command_menu_left: %s', ','.join(scope.type for scope in scopes))
+
+
 def captured_adapter_class():
     from plugins.platforms.telegram.adapter import TelegramAdapter
     from telegram import Update
@@ -306,14 +346,11 @@ def captured_adapter_class():
             # Nocheh runs no native command: a slash command is ordinary text for
             # the owner, and nobody else may use the bot. The native menu would
             # list commands to everyone, so clear it in every scope it fills.
-            from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
             if not self._bot:
                 return
-            for scope in (BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats):
-                try:
-                    await self._bot.delete_my_commands(scope=scope())
-                except Exception:
-                    pass  # Best effort: the next connect tries again.
+            task = getattr(self, '_menu_clear_task', None)
+            if task is None or task.done():
+                self._menu_clear_task = asyncio.ensure_future(clear_command_menu(self._bot))
 
         async def _build_ptb_requests(self):
             request, updates = await super()._build_ptb_requests()
