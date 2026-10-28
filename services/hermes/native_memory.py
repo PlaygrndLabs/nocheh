@@ -38,6 +38,12 @@ def save_receipt(path, state):
     finally:os.close(directory)
 
 
+def notes_snapshot(profile):
+    """The profile's native notes as they are now, to tell whether a review changed them."""
+    files = (Path(profile) / 'memories' / name for name in ('MEMORY.md', 'USER.md'))
+    return tuple(file.read_bytes() if file.is_file() and not file.is_symlink() else None for file in files)
+
+
 def recall(root, body, retirements=None):
     from hermes_state import SessionDB
     query = body.get('query', '')
