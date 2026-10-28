@@ -102,7 +102,7 @@ def main():
     env = compose_environment(state)
     # The dashboard asks Docker for container status and storage sizes; on a
     # Linux host the socket belongs to the docker group, not root. Docker
-    # Desktop's socket inside its VM stays root's, whatever the machine file shows.
+    # Desktop's socket inside its VM stays root's, whatever the macOS host file shows.
     if sys.platform.startswith('linux') and os.path.exists('/var/run/docker.sock'):
         env.setdefault('NOCHEH_DOCKER_GID', str(os.stat('/var/run/docker.sock').st_gid))
     owned = []
