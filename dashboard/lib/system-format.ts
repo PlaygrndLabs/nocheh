@@ -165,6 +165,10 @@ const reasons: Record<string, string> = {
   waiting_for_attachments: 'Waiting for files to download',
   waiting_for_transcription: 'Waiting for a voice transcription',
   delivery_unconfirmed: 'Telegram didn’t confirm delivery; it won’t be resent automatically',
+  native_review_unconfirmed: 'The notes review stopped without confirming it finished, so it isn’t repeated automatically',
+  input_limit: 'The message and its context were too long to learn from',
+  invalid_model_output: 'The model’s answer couldn’t be used',
+  no_conversation: 'Not part of a chat, so there is nothing to learn',
 };
 export const reason = (value: string | null | undefined): string => (value ? (reasons[value] ?? readable(value)) : '');
 
