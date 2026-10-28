@@ -6,7 +6,7 @@ $NOCHEH_PRIVATE_TERMS_FILE, then data/privacy-terms.txt. Without it the scan fai
 can't pass unchecked.
 
     python3 -m tools.development.privacy_scan              # commits not yet on origin/main
-    python3 -m tools.development.privacy_scan --range A..B # commit messages and added lines
+    python3 -m tools.development.privacy_scan --range A..B # authors, commit messages and added lines
     python3 -m tools.development.privacy_scan --tree       # every tracked file at HEAD
 """
 from tools.paths import ROOT
@@ -52,6 +52,7 @@ def scan_range(span, compiled):
     for commit in git('rev-list', *span.split()).split():
         short = commit[:10]
         hits += findings(git('log', '-1', '--format=%B', commit), f'{short} message', compiled)
+        hits += findings(git('log', '-1', '--format=%an <%ae>%n%cn <%ce>', commit), f'{short} author', compiled)
         current = None
         for line in git('show', '--format=', '--unified=0', '--no-color', commit).splitlines():
             if line.startswith('+++ '): current = line[6:] if line.startswith('+++ b/') else line[4:]
