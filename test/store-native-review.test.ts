@@ -94,13 +94,13 @@ test('native review runs once per source across authorization epochs and stops o
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-once-')),key='review-once:'+Date.now(),group='-'+Date.now();
   const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null};
-  let mode:'done'|'missing'|'running'='done',starts=0,observations=0;
+  let mode:'done'|'missing'|'running'|'failed'='done',starts=0,observations=0;
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       assert.equal(operation,'memory.review');
-      if(input.observe_only){observations++;return {state:mode==='running'?'running':'ambiguous'};}
-      starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:mode==='running'?'running':'done'};
+      if(input.observe_only){observations++;return {state:mode==='running'?'running':mode==='failed'?'failed':'ambiguous'};}
+      starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:['running','failed'].includes(mode)?'running':'done'};
     },honcho:async()=>{throw Error('no provider calls');}});
   const makeSource=async(index:number)=>{
     const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
@@ -191,5 +191,19 @@ test('native review runs once per source across authorization epochs and stops o
       const row=await services.reviews.inspect(running!);runningGaps.push(Math.round((row.next_attempt.getTime()-row.updated_at.getTime())/1000));
     }
     assert.deepEqual(runningGaps,[5,10,20,40,60,60]);assert.equal(starts,5);
+
+    // A review that failed without changing the notes runs again at growing gaps, then closes as uncertain.
+    mode='failed';const [failed]=await services.reviews.queue(await makeSource(9));
+    assert.equal(await services.reviews.run(failed!,authority),'running');assert.equal(starts,6);
+    const attempts:string[]=[];
+    for(let index=0;index<8&&attempts.at(-1)!=='ambiguous';index++) {
+      await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[failed]);
+      attempts.push(await services.reviews.run(failed!,authority));
+    }
+    assert.deepEqual(attempts,['pending','running','pending','running','pending','running','ambiguous']);
+    assert.equal(starts,9,'each retry starts the same review again, four starts in all');
+    const exhausted=await services.reviews.inspect(failed!);
+    assert.deepEqual([exhausted.state,exhausted.error_code,exhausted.attempts],['ambiguous','native_review_failed',4]);
+    assert.equal(await services.reviews.run(failed!,authority),'ambiguous','a closed review is not started again');assert.equal(starts,9);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

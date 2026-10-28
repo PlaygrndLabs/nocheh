@@ -255,19 +255,26 @@ def main():
             profile=Path(os.environ['HERMES_HOME'])
             (profile/'plugins').mkdir(exist_ok=True)
             (profile/'plugins'/'nocheh').symlink_to(Path(__file__).resolve().parent,target_is_directory=True)
-        from .native_memory import memory_lock, save_receipt
+        from .native_memory import memory_lock, notes_snapshot, save_receipt
         with memory_lock(os.environ['HERMES_HOME'], reclaim_native=os.environ.get('NOCHEH_ISOLATED_TURN')=='1'), contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             if body.get('review'):
                 import re
                 if not re.fullmatch(r'[a-f0-9]{64}', body['review_id']): raise ValueError('invalid_review_id')
-                receipt=Path(os.environ['HERMES_HOME'])/'reviews'/body['review_id']
+                home=Path(os.environ['HERMES_HOME']);receipt=home/'reviews'/body['review_id']
                 receipt.parent.mkdir(exist_ok=True)
-                if receipt.exists(): result={'state':'done' if receipt.read_text()=='done' else 'ambiguous'}
+                # A review that ended without changing the notes left no effect, so it may run again.
+                if receipt.exists() and receipt.read_text()!='failed': result={'state':'done' if receipt.read_text()=='done' else 'ambiguous'}
                 else:
+                    before=notes_snapshot(home)
                     save_receipt(receipt,'running')
-                    result=run(body)
+                    try:result=run(body)
+                    except Exception:
+                        if notes_snapshot(home)==before:save_receipt(receipt,'failed')
+                        raise
                     if result.get('state')=='done':
                         save_receipt(receipt,'done')
+                    elif notes_snapshot(home)==before:
+                        save_receipt(receipt,'failed')
             else:
                 def emit(event): output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
                 result=run(body, emit if body.get('stream') else None)

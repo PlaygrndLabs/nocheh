@@ -25,6 +25,8 @@ CREATE INDEX IF NOT EXISTS native_review_jobs_source ON native_review_jobs((sour
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
 export const nativeReconcileLimit=8;
+/** A review that failed without changing any notes runs again up to this many attempts in all. */
+export const nativeAttemptLimit=4;
 
 /** Sources whose native review never started, or whose newest learning stopped, under an earlier epoch are renewed by
  * their per-source step. That step runs after each epoch; work stranded before a restart asks for it once more here,
@@ -164,6 +166,14 @@ export class NativeReviewRepository {
         const output=await this.derived.record({operation_id:operationId,source:job.source_reference,parents:[job.input_reference],kind:'runtime_result',content:Buffer.from(canonical({state:'done'})),
           producer:'hermes',producer_version:protocol,configuration:{review_id:id},provenance:{binding:job.binding,native_receipt:id}});
         return await complete(output.id);
+      }
+      if(result.state==='failed') {
+        // Hermes reports failed only when the review left the notes unchanged, so it may run again at growing gaps.
+        const row=(await db.query(`UPDATE native_review_jobs SET state=CASE WHEN attempts<$2 THEN 'pending' ELSE 'ambiguous' END,
+          reconciliations=CASE WHEN attempts<$2 THEN 0 ELSE $3 END,error_code='native_review_failed',
+          next_attempt=now()+interval '60 seconds'*power(2,least(attempts,5)),updated_at=now() WHERE id=$1 RETURNING state`,
+          [id,nativeAttemptLimit,nativeReconcileLimit])).rows[0];
+        return row.state;
       }
       if(result.state!=='running')return await unconfirmed();
       // Most reviews finish within seconds: a running review is observed after 5 seconds, then at doubling gaps up to a minute.
