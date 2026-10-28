@@ -80,6 +80,13 @@ class DetectorTests(unittest.TestCase):
                 self.assertEqual(str(raised.exception),'detector_refused')
                 self.assertEqual(raised.exception.shape['finish_reason'],'content_filter')
 
+    def test_a_check_declined_once_at_random_is_asked_again(self):
+        text='Password: juniper-ONLY-7642';credentials=SubscriptionCredentials('synthetic-token')
+        declined=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=''),finish_reason='content_filter')])
+        with patch('services.hermes.subscription._call_subscription',side_effect=[declined,response({'literals':['juniper-ONLY-7642']})]) as call:
+            self.assertEqual(detect_literals(text,credentials,'model'),['juniper-ONLY-7642'])
+        self.assertEqual(call.call_count,2)
+
     def test_a_declined_batch_is_checked_again_in_halves_and_a_declined_fragment_fails(self):
         credentials=SubscriptionCredentials('synthetic-token');joined='\n<NOCHEH_FRAGMENT>\n'.join
         texts=['Password: juniper-ONLY-7642','hello','Token: kite-99','bye']
@@ -90,14 +97,14 @@ class DetectorTests(unittest.TestCase):
             return response({'literals':[value for value in ('juniper-ONLY-7642','kite-99') if value in text]})
         with patch('services.hermes.subscription._call_subscription',side_effect=answer) as call:
             self.assertEqual(detect_literals(joined(texts),credentials,'model'),['juniper-ONLY-7642','kite-99'])
-        self.assertEqual(call.call_count,3,'the batch, then each half')
+        self.assertEqual(call.call_count,4,'the batch twice, then each half')
         refused=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=''),finish_reason='content_filter')])
         with patch('services.hermes.subscription._call_subscription',return_value=refused) as call:
             with self.assertRaises(DetectorContractError) as raised:
                 detect_literals(joined(texts),credentials,'model')
         self.assertEqual(str(raised.exception),'detector_refused')
         self.assertEqual(raised.exception.shape['parts'],1)
-        self.assertEqual(call.call_count,3,'stops at the first fragment declined on its own')
+        self.assertEqual(call.call_count,6,'each level asked twice, stopping at the first fragment declined on its own')
 
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),
