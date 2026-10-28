@@ -2,6 +2,12 @@
 
 <current>
 
+Production move (owner, 2026-10-28): Nocheh moves to an always-on server as a
+clean install once the MVP checks pass (stuck notes-review fix, full tester on
+main, one clean day of use); dev-mode rules end at the move. Daily automatic
+backups come first ([ADR-0187](docs/adr/0187-daily-automatic-backups.md));
+pending: a live scheduled backup on a running installation.
+
 Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
 chose to drop the live safety check): with the Honcho service enabled, the store
 attaches Honcho memory once at startup without a live acceptance report and

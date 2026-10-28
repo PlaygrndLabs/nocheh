@@ -191,6 +191,16 @@ disabled; a saved native Hermes login is held outside its active path.
 hold archive workers, controlled tools and scheduled runs. No second bot, executor
 or login is activated by the rehearsal. Diagnostics expose these holds.
 
+The dashboard also backs up automatically once a day, by default at 04:00 UTC,
+through the same path as System › Backups › Back up now. Settings › Privacy &
+data turns this off or sets the time, time zone and number of automatic backups
+kept (default 7). Older automatic backups are deleted; backups started by hand
+are never deleted. A machine that was off at the set time backs up at the
+dashboard's next five-minute check, and a backup is skipped while free disk
+space is under twice the newest automatic backup (at least 1 GiB). Copies stay
+on the same disk; use the host's own backups or copy a backup elsewhere to
+survive losing the machine. See [ADR-0187](adr/0187-daily-automatic-backups.md).
+
 For a planned cutover, use `backup --leave-stopped` to keep the source writers
 stopped after its final snapshot. First reconcile pending work against deliveries
 and receipts after the snapshot; verify the source is stopped. Commands for the

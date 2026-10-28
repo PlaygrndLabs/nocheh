@@ -32,7 +32,25 @@ import {
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 
-type Job = {id: string; kind: string; state: string; created_at: string; error?: string | null; result?: any};
+type Job = {
+  id: string;
+  kind: string;
+  state: string;
+  created_at: string;
+  error?: string | null;
+  result?: any;
+  automatic?: boolean;
+};
+type Backup = {id: string; created_at: string; files: number; automatic?: boolean};
+type Schedule = {
+  enabled: boolean;
+  time: string;
+  time_zone: string;
+  keep: number;
+  next_at: string | null;
+  skipped?: string | null;
+};
+const taskName = (job: Job) => (job.automatic ? 'Automatic backup' : jobName(job.kind));
 type Action = 'backup' | 'export' | 'portable-export' | 'diagnose' | 'restart' | 'restore';
 
 const isExport = (job: Job) => job.kind === 'operations.export' || job.kind === 'operations.portable-export';
@@ -57,7 +75,7 @@ function DownloadButton({job, size = 'sm'}: {job: Job; size?: 'sm' | 'md'}) {
 
 export function BackupsView() {
   const jobs = useResource<Job[]>('/jobs', 5000);
-  const listing = useResource<{backups: {id: string; created_at: string; files: number}[]}>('/operations', 10000);
+  const listing = useResource<{backups: Backup[]; schedule?: Schedule}>('/operations', 10000);
   const {toast, confirm} = useFeedback();
   const [busy, setBusy] = useState<Action | ''>('');
   const [problem, setProblem] = useState<{action: Action; text: string} | null>(null);
@@ -69,6 +87,7 @@ export function BackupsView() {
   const active = tasks.find(running);
   const latest = (action: Action) => tasks.find(job => job.kind === 'operations.' + action);
   const backups = listing.data?.backups ?? [];
+  const schedule = listing.data?.schedule;
 
   const start = async (action: Action, options?: Record<string, unknown>) => {
     setBusy(action);
@@ -158,7 +177,7 @@ export function BackupsView() {
   return (
     <>
       {active && (
-        <Notice tone="info" title={`${jobName(active.kind)} is running`} action={<Spinner />}>
+        <Notice tone="info" title={`${taskName(active)} is running`} action={<Spinner />}>
           Started {ago(active.created_at)}. Other tasks can start when it finishes.
         </Notice>
       )}
@@ -170,6 +189,18 @@ export function BackupsView() {
           'Back up now',
           'Saves messages, files, settings and the assistant’s state on this machine, including keys.',
           'Back up now',
+          schedule && (
+            <p className="mt-3 text-xs text-muted">
+              {schedule.enabled
+                ? `Every day at ${schedule.time} (${schedule.time_zone.replace(/_/g, ' ')}), keeping the last ${schedule.keep}.` +
+                  (schedule.next_at ? ` Next ${dateTime(schedule.next_at)}.` : '')
+                : 'Automatic backups are off.'}{' '}
+              {schedule.skipped === 'low_disk' && 'The last one was skipped: not enough free disk space. '}
+              <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
+                Change
+              </a>
+            </p>
+          ),
         )}
         {card(
           'restore',
@@ -240,7 +271,7 @@ function RestoreDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  backups: {id: string; created_at: string; files: number}[];
+  backups: Backup[];
   busy: boolean;
   problem: string;
   onRestore: (backup: string, port: number) => void;
@@ -280,7 +311,7 @@ function RestoreDialog({
           <Select id="restore-backup" value={chosen?.id ?? ''} onChange={e => setBackup(e.target.value)}>
             {backups.map(b => (
               <option key={b.id} value={b.id}>
-                {dateTime(b.created_at)} · {count(b.files)} files
+                {dateTime(b.created_at)} · {count(b.files)} files{b.automatic ? ' · automatic' : ''}
               </option>
             ))}
           </Select>
@@ -345,7 +376,7 @@ function JobHistory({tasks, loading}: {tasks: Job[]; loading: boolean}) {
                     className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3 hover:bg-subtle/60 focus-visible:bg-subtle focus-visible:outline-none"
                   >
                     <div className="min-w-0 flex-1 basis-56">
-                      <p className="text-sm font-medium">{jobName(job.kind)}</p>
+                      <p className="text-sm font-medium">{taskName(job)}</p>
                       <p className="text-[13px] text-muted">{jobOutcome(job)}</p>
                     </div>
                     <span className="text-xs text-muted" title={dateTime(job.created_at)}>
@@ -381,7 +412,7 @@ function JobDrawer({tasks}: {tasks: Job[]}) {
     <Drawer
       open={!!id}
       onOpenChange={open => !open && setParams({job: null})}
-      title={job ? jobName(job.kind) : 'Task'}
+      title={job ? taskName(job) : 'Task'}
       description={job ? dateTime(job.created_at) : undefined}
       footer={job && isExport(job) && job.state === 'complete' ? <DownloadButton job={job} size="md" /> : undefined}
     >
