@@ -27,7 +27,7 @@ class ReviewHandoffTests(unittest.TestCase):
                 # A receipt can become durable immediately before the worker
                 # releases its file descriptors. Wait for cleanup before reuse.
                 lease=self.root/'nocheh-review-runs'/(body['id']+'.lock')
-                if state in ('done','ambiguous') and lease.exists():
+                if state in ('done','ambiguous','failed') and lease.exists():
                     with lease.open('rb') as file:
                         try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
                         except BlockingIOError:time.sleep(.01);continue
@@ -73,6 +73,25 @@ class ReviewHandoffTests(unittest.TestCase):
             receipts=self.profile/'reviews';receipts.mkdir();(receipts/self.body['id']).write_text('done')
             self.assertEqual(observe(self.root,self.policy,self.body),{'state':'done'})
             self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'done'})
+
+    def test_a_review_that_failed_without_changing_notes_starts_again(self):
+        receipts=self.profile/'reviews';receipts.mkdir()
+        def failed(*args):
+            (receipts/self.body['id']).write_text('failed');return {'state':'failed','error_code':'assistant_runtime_unavailable'}
+        def done(*args):
+            (receipts/self.body['id']).write_text('done');return {'state':'done'}
+        with patch('services.hermes.review_worker._review',side_effect=failed):
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'failed')
+        with patch('services.hermes.review_worker._review',side_effect=done) as child:
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'done');self.assertEqual(child.call_count,1)
+        (receipts/self.body['id']).write_text('running')
+        with patch('services.hermes.review_worker._review',side_effect=AssertionError('replayed effect')):
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'done'},'the supervisor done receipt still wins')
+        (self.root/'nocheh-review-runs'/(self.body['id']+'.done')).unlink()
+        with patch('services.hermes.review_worker._review',side_effect=AssertionError('replayed effect')):
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'ambiguous'},'a review that may have changed notes never starts again')
 
     def test_failed_thread_launch_keeps_ambiguity_and_releases_capacity(self):
         with patch('services.hermes.review_worker.threading.Thread.start',side_effect=RuntimeError('fixture_launch_failed')):

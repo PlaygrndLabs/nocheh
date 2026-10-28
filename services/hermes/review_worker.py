@@ -24,14 +24,14 @@ def observe(root,policy,body):
         if not receipt.exists():continue
         if receipt.is_symlink() or not receipt.resolve().is_relative_to(profile.resolve()):raise ValueError('review_receipt_path_denied')
         with receipt.open('r') as file:value=file.read(32)
-        if value=='done':found.append('done');continue
+        if value in ('done','failed'):found.append(value);continue
         lock=profile/'.memory.lock'
         if lock.is_symlink():raise ValueError('review_receipt_path_denied')
         if not lock.exists():found.append('ambiguous');continue
         with lock.open('rb') as file:
             try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB);found.append('ambiguous')
             except BlockingIOError:found.append('running')
-    native='running' if 'running' in found else 'ambiguous' if 'ambiguous' in found else 'done' if found else 'not_found'
+    native=next((state for state in ('running','ambiguous','done','failed') if state in found),'not_found')
     directory=Path(root)/'nocheh-review-runs'
     if directory.is_symlink():raise ValueError('review_receipt_path_denied')
     started=directory/(body['id']+'.started');done=directory/(body['id']+'.done');lease=directory/(body['id']+'.lock')
@@ -44,7 +44,7 @@ def observe(root,policy,body):
             with lease.open('rb') as file:
                 try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 except BlockingIOError:return {'state':'running'}
-        return {'state':'running' if native=='running' else 'ambiguous'}
+        return {'state':native if native in ('running','failed') else 'ambiguous'}
     return {'state':native}
 
 
@@ -84,12 +84,13 @@ def start(root,policy,model,credentials,body):
     """Handoff one native review without holding a workflow/pool slot for its run.
 
     The supervisor journal contains only effect identities and state. Neither a
-    crash nor a missing child receipt authorizes launching that identity again.
+    crash nor a missing child receipt authorizes launching that identity again;
+    only a child that reported a failure without changing the notes does.
     """
     import fcntl
     from .capture import immutable_file
     previous=observe(root,policy,body)
-    if previous['state']!='not_found':return previous
+    if previous['state'] not in ('not_found','failed'):return previous
     profile=review_profile(root,policy,model,body)
     directory=Path(root)/'nocheh-review-runs'
     if directory.is_symlink():raise ValueError('review_receipt_path_denied')
@@ -103,9 +104,11 @@ def start(root,policy,model,credentials,body):
             file=locks.enter_context(path.open('a'));path.chmod(0o600)
             try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:return {'state':'waiting','error_code':'profile_busy'}
-        # A competing request may have completed between observation and locks.
+        # The lease is held here, so no supervisor runs this identity: a failed run's
+        # start marker can go. A competing request may have completed meanwhile.
+        if previous['state']=='failed':(directory/(body['id']+'.started')).unlink(missing_ok=True)
         previous=observe(root,policy,body)
-        if previous['state']!='not_found':return previous
+        if previous['state'] not in ('not_found','failed'):return previous
         if profile_recent(profile):return {'state':'waiting','error_code':'profile_busy'}
         immutable_file(directory,body['id']+'.started',b'{}')
         owned=locks.pop_all()
