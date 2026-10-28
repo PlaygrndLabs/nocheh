@@ -46,6 +46,19 @@ class SettingsTests(unittest.TestCase):
                 self.assertEqual(result['apply_state'], 'current')
                 self.assertFalse((state / 'admin/previous.env').exists())
 
+    def test_backup_settings_work_live_without_apply(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state)
+            with patch('tools.operations.installation.settings.subprocess.run') as run, \
+                    patch('tools.operations.installation.settings.refresh_honcho', return_value='unchanged'):
+                run.return_value.returncode = 0
+                apply(state)
+            saved = save(state, {'NOCHEH_BACKUP_TIME': '02:30', 'NOCHEH_BACKUP_KEEP': '14'}, view(state)['revision'])
+            self.assertEqual(saved['apply_state'], 'current')
+            self.assertFalse((state / 'admin/previous.env').exists())
+            self.assertEqual({field['key']: field['takes_effect'] for field in saved['fields']}['NOCHEH_BACKUP_TIME'], 'right away')
+            self.assertEqual(save(state, {'NOCHEH_GUARD_MODE': 'off'}, saved['revision'])['apply_state'], 'pending')
+
     def test_models_are_owner_settings_and_embeddings_never_mix(self):
         import sqlite3
         from tools.operations.memory.honcho_setup import state_for

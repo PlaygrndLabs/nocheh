@@ -22,6 +22,7 @@ DEFAULTS = {
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
     'NOCHEH_WORKFLOW_UI_PORT': '8288',
     'NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS': '0', 'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': '0',
+    'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7',
     'NOCHEH_LOG_MAX_SIZE': '10m', 'NOCHEH_LOG_MAX_FILES': '3',
     'NOCHEH_PARALLEL_REPLIES': '3', 'NOCHEH_PARALLEL_RUNS': '4', 'NOCHEH_PARALLEL_GUARD_CHECKS': '3',
     'NOCHEH_HONCHO_ENABLED': 'true',
@@ -159,6 +160,19 @@ def group_access(values):
     return result
 
 
+def validate_backups(values):
+    if values.get('NOCHEH_BACKUP_SCHEDULE','daily') not in ('daily','off'):raise ValueError('NOCHEH_BACKUP_SCHEDULE must be daily or off')
+    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',str(values.get('NOCHEH_BACKUP_TIME','04:00'))):raise ValueError('NOCHEH_BACKUP_TIME must be a time such as 04:00')
+    zone=str(values.get('NOCHEH_BACKUP_TIME_ZONE','UTC'))
+    try:
+        from zoneinfo import ZoneInfo
+        if not re.fullmatch(r'[A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*',zone):raise ValueError
+        ZoneInfo(zone)
+    except Exception:raise ValueError('NOCHEH_BACKUP_TIME_ZONE must be a time zone such as Europe/Berlin') from None
+    keep=str(values.get('NOCHEH_BACKUP_KEEP','7'))
+    if not re.fullmatch(r'[1-9]\d{0,2}',keep) or int(keep)>365:raise ValueError('NOCHEH_BACKUP_KEEP must be 1-365')
+
+
 def validate(values):
     embeddings(values)
     layout=values.get('NOCHEH_STORAGE_LAYOUT','original-only-v1')
@@ -172,6 +186,7 @@ def validate(values):
     if not re.fullmatch(r'\d{1,4}',retention) or int(retention)>3650:raise ValueError('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS must be 0 (off) or 1-3650 days')
     journals=str(values.get('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS','0'))
     if not re.fullmatch(r'\d{1,4}',journals) or int(journals)>3650:raise ValueError('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS must be 0 (off) or 1-3650 days')
+    validate_backups(values)
     if not re.fullmatch(r'[1-9]\d{0,4}[kmg]',str(values.get('NOCHEH_LOG_MAX_SIZE','10m'))):raise ValueError('NOCHEH_LOG_MAX_SIZE must be a size such as 10m')
     if not re.fullmatch(r'[1-9]\d{0,2}',str(values.get('NOCHEH_LOG_MAX_FILES','3'))):raise ValueError('NOCHEH_LOG_MAX_FILES must be 1-999')
     runs,replies=str(values.get('NOCHEH_PARALLEL_RUNS','4')),str(values.get('NOCHEH_PARALLEL_REPLIES','3'))

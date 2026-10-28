@@ -26,7 +26,9 @@ type Job = {id: string; kind: string; state: string; created_at: string; complet
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
   mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown;workflow?:'pending'|'inngest';
   /** The step a settings apply is on, so a reloaded page can still follow it. */
-  step?: string};
+  step?: string;
+  /** A backup the daily schedule started rather than the owner. */
+  automatic?: boolean};
 
 async function atomic(path: string, value: unknown) {
   const temporary = path + '.' + randomUUID() + '.tmp';
@@ -187,6 +189,27 @@ export async function startManagement() {
     if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
     if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
+  /** Starts an enumerated operation; callers hold the writer-start lock. `request` is the
+   * caller's own admitted request, which a backup's drain must not wait for. */
+  async function startOperation(action:string,options:unknown,request:symbol,automatic=false):Promise<Job> {
+    if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
+    operationBusy=true;
+    let coordinator:string|undefined,job:Job|undefined;
+    try {job=await newJob('operations.'+action);job.state='running';if(automatic)job.automatic=true;await putJob(job);
+      if(automatic)await python({operation:'backups.started',job:job.id});
+      if(action==='backup'){
+        const draining=maintenance.begin(job.id,request);
+        live.closeAll();
+        coordinator=await draining;
+        for(const socket of sockets)socket.destroy();maintenance.ready(coordinator);
+      }
+      launch(job,{operation:'operations.run',action,job:job.id,options},coordinator);return job;
+    }catch(error){
+      operationBusy=false;if(coordinator)maintenance.end(coordinator);
+      if(job){job.state='failed';job.error=error instanceof HttpError?error.code:'operation_failed';await putJob(job).catch(()=>{});}
+      throw error;
+    }
+  }
   const server = createServer((req, res) => {
     if(stopping){json(res,503,{error:'dashboard_stopping'});return;}
     const tracked=maintenance.enter();
@@ -249,18 +272,7 @@ export async function startManagement() {
       if(req.method==='POST' && route==='/operations') return exclusive('writer-start', async () => {
         const body=object(await readJson(req));const action=string(body.action,30);
         if(!['diagnose','backup','restore','restart','export','portable-export'].includes(action))throw new HttpError(400,'operation_denied');
-        if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
-        operationBusy=true;
-        let coordinator:string|undefined;
-        try {const job=await newJob('operations.'+action);job.state='running';await putJob(job);
-          if(action==='backup'){
-            const draining=maintenance.begin(job.id,tracked.id);
-            live.closeAll();
-            coordinator=await draining;
-            for(const socket of sockets)socket.destroy();maintenance.ready(coordinator);
-          }
-          launch(job,{operation:'operations.run',action,job:job.id,options:body.options??{}},coordinator);return json(res,202,job);
-        }catch(error){operationBusy=false;if(coordinator)maintenance.end(coordinator);throw error;}
+        return json(res,202,await startOperation(action,body.options??{},tracked.id));
       });
       if (route === '/policy' && ['GET','POST'].includes(req.method??'')) {
         const body=req.method==='POST'?object(await readJson(req)):{};
@@ -416,8 +428,17 @@ export async function startManagement() {
   })(); });
   server.listen(PORT, CONTAINER?'0.0.0.0':'127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`));
   let stopping=false;
+  // The daily automatic backup goes through the same path as Back up now. A busy dashboard
+  // waits for the next check; the schedule records each start, so a failure is not retried
+  // until the next day.
+  const automaticBackup=async()=>{
+    if(stopping||operationBusy||active.size||maintenance.active||locked.has('writer-start'))return;
+    if(object(await python({operation:'backups.due'})).due!==true)return;
+    await exclusive('writer-start',async()=>{if(!stopping&&!operationBusy&&!active.size)await startOperation('backup',{},Symbol('schedule'),true);});
+  };
+  const schedule=setInterval(()=>void automaticBackup().catch(()=>{}),5*60*1000);schedule.unref();
   const stop = () => {
-    if(stopping)return;stopping=true;
+    if(stopping)return;stopping=true;clearInterval(schedule);
     live.closeAll();
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');

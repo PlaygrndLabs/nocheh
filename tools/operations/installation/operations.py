@@ -90,6 +90,12 @@ def honcho_state(memory):
     return list(HONCHO_STATE),['honcho/'+HONCHO_REBUILDABLE]
 
 
+def source_revision():
+    """The checkout's commit, or None where the code has no Git checkout (the dashboard image)."""
+    try:return subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True,stderr=subprocess.DEVNULL).strip()
+    except (OSError,subprocess.CalledProcessError):return None
+
+
 def backup(state,output,leave_stopped=False):
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
@@ -124,7 +130,7 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
         for service in stopped:
             if service!='hermes':subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
-                  'git_revision':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+                  'git_revision':source_revision(),
                   'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
         if three_stores:
             from tools.operations.installation.store_recovery import assert_no_state_writers

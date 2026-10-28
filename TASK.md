@@ -2,6 +2,12 @@
 
 <current>
 
+Production move (owner, 2026-10-28): Nocheh moves to an always-on server as a
+clean install once the MVP checks pass (stuck notes-review fix, full tester on
+main, one clean day of use); dev-mode rules end at the move. Daily automatic
+backups come first ([ADR-0187](docs/adr/0187-daily-automatic-backups.md));
+pending: a live scheduled backup on a running installation.
+
 Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
 chose to drop the live safety check): with the Honcho service enabled, the store
 attaches Honcho memory once at startup without a live acceptance report and
@@ -34,7 +40,7 @@ installation, versioned sessions per conversation, entity evidence and learned
 interpretation, targeted session rebuilds instead of per-epoch re-ingestion,
 live session context read on arrival and prefetched when Honcho finishes work,
 and session allowlists for group and topic recall. On 2026-10-10 the owner's
-development machine development installation ran the fresh start (H5) and live acceptance
+development-machine installation ran the fresh start (H5) and live acceptance
 (H6) on the Claude provider; see item 7. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
@@ -175,7 +181,7 @@ that starts as “Nocheh” and “نوچه”
 [trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
 gateway check ([test](services/hermes/test_gateway.py)) and the
 `group_answers_only_when_addressed` simulator scenario run only on the owner's
-machine and have not been run. Addressing by a name at the start passed live on
+development machine and have not been run. Addressing by a name at the start passed live on
 October 12 (four group messages, one reply each). Pending: a live unaddressed
 group message that gets no reply, and a reply or @mention that gets one.
 
@@ -466,7 +472,7 @@ not yet run on the owner's installation:
   ([decision](docs/adr/0175-notion-through-its-mcp-server.md),
   [check](test/store-notion.test.ts), [sign-in check](services/hermes/test_notion_connection.py),
   [browser check](test/dashboard-pages.browser.mjs)). Live check pending: the
-  owner connects Notion on the machine and asks Nocheh to search it, then to add a
+  owner connects Notion on the development machine and asks Nocheh to search it, then to add a
   page and approves the card.
 - Release test 4 (October 20) passed on the owner's installation. A private
   message stating a synthetic locker code got one reply. Hiding it and
@@ -577,7 +583,7 @@ patches are re-anchored, moved Hermes symbols are followed, and Hermes' direct
 Hermes or Honcho source checkout. Checked here: the Node suite on Node 26 with
 PostgreSQL 18 (190 pass, 77 skipped), Honcho v3.3.0 migrations, provenance and
 export on PostgreSQL with pgvector, and the Inngest 1.46 inspection pages in
-Chromium. On the owner's machine (October 23) the fresh-database rebuild runs on
+Chromium. On the owner's development machine (October 23) the fresh-database rebuild runs on
 PostgreSQL 18.6 and Honcho 3.3.0 with all services healthy and one poller. The
 store image installs libatomic for Node 26, the Hermes image installs PyYAML,
 which Hermes 0.22 no longer ships, and both builds check for them. `make dev`
@@ -616,7 +622,7 @@ itself at startup.
   live install after the machine pull.
 - Menu still shown in the default scope after the strangers change (2026-10-28,
   [ADR-0182](docs/adr/0182-strangers-cost-nothing-and-reach-no-model.md)):
-  after the machine pull the private and group menus were empty but the default
+  after the development-machine pull the private and group menus were empty but the default
   scope still listed 33 commands. Cause: the clearing lived on the capture
   adapter's menu step, but the adapter that connects skips all native
   post-connect housekeeping, so it never ran. That adapter now clears the
@@ -1114,7 +1120,7 @@ new model, moves the gateway ledger and replaces Honcho memory from the archive
 installation still uses `text-embedding-3-small`; switching it waits for the
 owner's own choice.
 
-Providers per part (October 13, owner: use the hosted provider gateway instead
+Providers per part (October 13, owner: use their hosted provider gateway instead
 of Nocheh's own provider; its wake-up time does not matter): Settings › Models
 now lists providers (OpenAI and Anthropic by API key, and custom
 OpenAI-compatible providers by HTTPS address and key) and the provider
@@ -1130,7 +1136,7 @@ provider logins and the ChatGPT speech route are gone; a fresh installation has
 no provider and its model calls wait with `provider_not_configured`; voice
 notes are archived without transcription and never hold a reply
 ([decision](docs/adr/0142-external-providers-only.md)). Pending: the owner
-applies my-gateway on Cloudflare (or adds an API key), adds it in Settings and
+sets up the gateway (or adds an API key), adds it in Settings and
 applies; then a live reply, memory answer and secret check through it; whether
 and how voice transcription returns is the owner's decision. An existing
 installation keeps its old `data/local/provider/` folder (the CPA logins);
