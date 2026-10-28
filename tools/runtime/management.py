@@ -83,7 +83,15 @@ def dispatch(body):
         return API().call(path,body.get('body'))
     if operation == 'operations.list':
         from tools.operations.installation.admin_operations import backups
-        return {'backups':backups(state)}
+        from tools.operations.installation.backup_schedule import status
+        schedule=status(state);automatic=set(schedule.pop('automatic'))
+        return {'backups':[{**row,'automatic':row['id'] in automatic} for row in backups(state)],'schedule':schedule}
+    if operation == 'backups.due':
+        from tools.operations.installation.backup_schedule import due
+        return due(state)
+    if operation == 'backups.started':
+        from tools.operations.installation.backup_schedule import started
+        return started(state,body['job'])
     if operation == 'operations.run':
         from tools.operations.installation.admin_operations import run
         return run(state,body['action'],body['job'],body.get('options'))

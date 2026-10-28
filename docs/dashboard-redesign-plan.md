@@ -92,4 +92,4 @@ Group and people settings move to Chats & access. Every setting that exists toda
 4. **Settings**: sections and one save/apply bar.
 5. **Memory and Archive tidy-up**: Graph inside Memory, Imports inside Archive, phone layout pass.
 
-Each PR comes with screenshots from the synthetic preview. You see the change on your machine after it is merged and the dashboard restarts.
+Each PR comes with screenshots from the synthetic preview. You see the change on your installation after it is merged and the dashboard restarts.

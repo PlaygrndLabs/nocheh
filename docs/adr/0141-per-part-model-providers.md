@@ -9,8 +9,8 @@ the subscription-only reasoning rule. Extends
 </status>
 
 <context>
-The owner wants Nocheh's logic off their machine and chose to use their hosted
-provider gateway (CLIProxyAPI on Cloudflare) instead of Nocheh's own provider
+The owner wants Nocheh's logic off their own machine and chose to use their hosted
+provider gateway instead of Nocheh's own provider
 login. They asked for a provider feature in Settings: existing providers such
 as GPT and Anthropic, or a custom provider added by URL and API key; one key is
 enough, but each part may use its own provider and model, for example GPT for
@@ -52,7 +52,7 @@ address fixed in several allowlists, and embeddings were fixed to OpenAI.
 
 <consequences>
 
-- The owner can point every part at my-gateway with one key, or split parts
+- The owner can point every part at the gateway with one key, or split parts
   between providers, from Settings › Models; Apply recreates only the services
   whose routes changed, and refreshes Honcho when its generated settings
   change.
