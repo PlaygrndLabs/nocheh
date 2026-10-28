@@ -203,7 +203,7 @@ export function memoryRebuildModel(): string | null {
   return model && locked && model !== locked ? model : null;
 }
 
-/** Saves every edit, then applies the saved settings to the running services. */
+/** Saves every edit, then applies the saved settings to the running services when they need a restart. */
 export async function saveSettings({rebuildMemory = false}: {rebuildMemory?: boolean} = {}): Promise<boolean> {
   if (state.phase === 'saving' || state.phase === 'applying' || !state.data) return false;
   const changes = state.changes;
@@ -218,6 +218,11 @@ export async function saveSettings({rebuildMemory = false}: {rebuildMemory?: boo
       update({changes: {}, revision: null});
       if (data?.fields) update({data});
       else await loadSettings();
+      // Settings that work live, such as automatic backups, need no restart.
+      if (state.data?.apply_state === 'current') {
+        update({phase: 'idle', message: '', progress: null});
+        return true;
+      }
     }
     update({phase: 'applying', message: '', progress: {step: 'starting', started: Date.now()}});
     let job: ApplyJob;

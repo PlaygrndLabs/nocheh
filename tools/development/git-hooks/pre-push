@@ -11,6 +11,6 @@ if [ -x "$common/hooks/pre-push" ]; then
 fi
 printf '%s\n' "$input" | while read -r local_ref local_sha remote_ref remote_sha; do
   [ -n "$local_sha" ] && [ "$local_sha" != "$zero" ] || continue
-  if [ "$remote_sha" = "$zero" ]; then span="$local_sha --not --remotes"; else span="$remote_sha..$local_sha"; fi
-  python3 -m tools.development.privacy_scan --range "$span" || exit 1
+  # Only commits no remote has yet: ones already published, such as a merge of main, can't be taken back here.
+  python3 -m tools.development.privacy_scan --range "$local_sha --not --remotes" || exit 1
 done

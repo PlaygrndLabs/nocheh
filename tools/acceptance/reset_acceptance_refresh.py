@@ -148,5 +148,5 @@ def finish(journal, *, runner=reset_acceptance.run, environment=None):
         raise ValueError('reset_refresh_activation_changed')
     if intent['stage'] != 'complete':
         reset_protocol.atomic(path, {**intent, 'stage': 'complete'})
-    _mark_applied(journal.state, intent['saved_revision'])
+    _mark_applied(journal.state, settings.service_revision(after))
     return {'stage': 'complete', 'services': list(SERVICES), 'restart_ownership': False}
