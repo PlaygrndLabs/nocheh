@@ -1,6 +1,6 @@
 import type {Reader} from '../access.js';
 import {admin} from '../access.js';
-import type {AssistantPolicy} from '../assistant-policy.js';
+import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
 import {inRecall,parentSpace,recallScope,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
@@ -26,6 +26,8 @@ export class SourceAccessRepository {
       if(await this.retirements?.isRetired(reference))return false;
       if(!options.historical&&this.reactions&&!await this.reactions.isCurrent(reference))return false;
     }
+    // What someone Nocheh doesn't serve wrote stays out of every conversation, the owner's included.
+    if(!principal.admin&&outsideChat(this.policy(),source))return false;
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
     if(!['telegram','browser'].includes(source.channel)||source.scope!==principal.scope)return false;
     const observed=(await this.relationships.describe(reference)).audience,scope=this.recall(principal)!;

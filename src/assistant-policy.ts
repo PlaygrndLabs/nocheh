@@ -52,6 +52,17 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
   return {owner,chat_id:scope,user_id:String(sender.id)};
 }
 
+/**
+ * A live Telegram update from a chat Nocheh does not serve: a private chat with
+ * anyone but the owner, or a group or channel the owner has not selected. It is
+ * kept as received, but never prepared, learned from or read by the assistant.
+ */
+export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel:string;kind:string;scope:string}):boolean {
+  if(!policy.enabled||!policy.owner_id||source.origin!=='live'||source.channel!=='telegram'||source.kind!=='telegram_update')return false;
+  // Updates without a chat (scope "system") are not a conversation anyone holds.
+  return /^-?\d+$/.test(source.scope)&&source.scope!==policy.owner_id&&!policy.group_ids.includes(source.scope);
+}
+
 /** Final Telegram send authorization uses the captured original, never a prepared representation. */
 export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null},source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
   if(!source)return false;
