@@ -24,7 +24,13 @@ Telegram account and saw its command menu. Extends
 
 <decision>
 - The polling adapter clears the native command menu in the default, all
-  private chats and all group chats scopes instead of filling it.
+  private chats and all group chats scopes instead of filling it, and in each
+  selected group's own scope, where native Hermes put forum menus. The
+  adapter that actually connects (the committed one) runs this clearing
+  after each connect; it skipped all native housekeeping before, so the first
+  version never ran and the machine still showed the default menu (2026-10-28).
+  Each scope is read back, checked again a minute later and retried with
+  backoff, and failures are logged.
 - A live Telegram update from a chat Nocheh doesn't serve (a private chat
   with anyone but the owner, or a group or channel the owner hasn't
   selected) is still archived as received. Its preparation closes as skipped
