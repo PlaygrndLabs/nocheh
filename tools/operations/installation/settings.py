@@ -21,25 +21,37 @@ MODEL_SETTINGS = {'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_PROVIDER', 'NOCHEH_EMBEDDING
 EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - WORKFLOW_INTERNAL - STORE_INTERNAL
 
 
+# Read again by the dashboard at each check, so they work as soon as they are saved
+# and never need Apply to restart the services.
+LIVE = {'NOCHEH_BACKUP_SCHEDULE', 'NOCHEH_BACKUP_TIME', 'NOCHEH_BACKUP_TIME_ZONE', 'NOCHEH_BACKUP_KEEP'}
+
+
 def revision(values):
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+
+
+def service_revision(values):
+    """What the running services use; Apply records it, and settings that work live are left out."""
+    return revision({key: value for key, value in values.items() if key not in LIVE})
 
 
 def view(state):
     values = load(state)
     applied = Path(state) / 'admin/applied.json'
     saved_revision = revision(values)
+    in_use = service_revision(values)
     active = json.loads(applied.read_text()).get('revision') if applied.exists() else None
     fields = [{'key': key, 'value': None if key in SECRETS else values[key],
                'configured': bool(values[key]), 'secret': key in SECRETS,
-               'editable': key in EDITABLE, 'source': '.env', 'takes_effect': 'apply / service restart'}
+               'editable': key in EDITABLE, 'source': '.env',
+               'takes_effect': 'right away' if key in LIVE else 'apply / service restart'}
               for key in DEFAULTS]
     from tools.operations.provider.embedding_config import MODELS
     return {'revision': saved_revision, 'applied_revision': active,
             'models': {'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state),
                        'embedding_rebuild': (pending_rebuild(state) or {}).get('model')},
             'providers': provider_view(values),
-            'apply_state': 'current' if active == saved_revision else 'pending' if active else 'unverified',
+            'apply_state': 'current' if active == in_use else 'pending' if active else 'unverified',
             'fields': fields}
 
 
@@ -145,7 +157,7 @@ def save(state, changes, expected, rebuild_memory=False):
                 temporary.replace(marker)
         # Preserve the last applied baseline across multiple un-applied saves.
         previous = directory / 'previous.env'
-        if not previous.exists(): write_env(previous, current)
+        if not previous.exists() and service_revision(updated) != service_revision(current): write_env(previous, current)
         write_env(env_path(state), updated)
     return view(state)
 
@@ -199,7 +211,7 @@ def apply(state, progress=lambda step: None):
         # A rebuild that did not start leaves the settings waiting to apply, so Apply tries it again.
         if memory != 'failed':
             temporary = directory / 'applied.tmp'
-            temporary.write_text(json.dumps({'revision': revision(values)})); temporary.chmod(0o600)
+            temporary.write_text(json.dumps({'revision': service_revision(values)})); temporary.chmod(0o600)
             temporary.replace(directory / 'applied.json')
         previous.unlink(missing_ok=True)
     return {'status': 'applied', 'honcho': honcho, 'memory_rebuild': memory, 'mini_app': menu, **view(state)}
