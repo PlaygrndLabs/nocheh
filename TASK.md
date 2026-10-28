@@ -604,6 +604,18 @@ itself at startup.
 
 <verification>
 
+- Strangers kept away from models, downloads and the menu (2026-10-27,
+  [ADR-0182](docs/adr/0182-strangers-cost-nothing-and-reach-no-model.md)):
+  the new store test `store-strangers` and every Node test file pass on a
+  fresh store cluster; the Hermes refusal tests pass. A fresh cloud run of
+  the full tester passed 61 of 62; the miss was the new scenario's own search
+  gate matching the owner's query message. After that gate was corrected,
+  `menu_shown_to_nobody` and `stranger_in_private_gets_one_reply` passed on a
+  fresh fixture: no command menu in any scope, one fixed private reply for a
+  file and two slash commands, no model turn, no download, and nothing in the
+  owner's search, conversation or identity lists. Not yet run on the development machine
+  or against live Telegram.
+
 - Settings apply followed to its end (2026-10-27, revision 5f1010e,
   [ADR-0178](docs/adr/0178-settings-apply-is-followed-to-its-end.md)): the
   full tester on the development machine, beside the live stack, passed the new

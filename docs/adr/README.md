@@ -46,6 +46,7 @@ Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instru
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
 Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md); secret-check results carried across guard epochs: [0170](0170-secret-check-results-survive-guard-epochs.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
+Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
 superseding the retry-order hints in [0085](0085-fair-background-workflow-admission.md);
 reply runs not refused for worker capacity: [0169](0169-reply-runs-are-not-refused-for-worker-capacity.md).

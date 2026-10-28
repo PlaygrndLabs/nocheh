@@ -10,7 +10,7 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  * owner never changed follows the code's default.
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
-  'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.approval_card','telegram.approval_action',
+  'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
   'telegram.approval_texts','tasks.reminder'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
@@ -20,6 +20,8 @@ export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.i
 
 /** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
 export const notAllowedReply='Sorry, I only work with people the owner has allowed in this group.';
+/** Sent, without a model and at most once a day, to anyone but the owner who writes to Nocheh privately. */
+export const notAllowedPrivateReply='Sorry, this is a private assistant. It only works for its owner.';
 
 export const learningPrompt=(
   "Interpret permitted conversation evidence silently. "+
@@ -83,7 +85,7 @@ export function fillTemplate(template:string,values:Record<string,string|null|un
  * such as the due day or the project's list, is left out. */
 export const taskReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
 /** Texts Nocheh uses itself; the runtime never receives them. */
-const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,
+const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
   'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder};
 
 export const promptSchema=`
