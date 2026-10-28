@@ -22,7 +22,7 @@ from plugins.platforms.telegram.update_admission import TelegramApplication
 from telegram.ext import Application, ExtBot
 from telegram.request import BaseRequest
 
-from services.hermes.assistant_gateway import AssistantGateway, TURN, committed_adapter_class
+from services.hermes.assistant_gateway import AssistantGateway, TURN, committed_adapter_class, typing_enabled
 from services.hermes.capture import canonical, digest, instrument_request
 from services.hermes.scopes import Scopes
 
@@ -322,6 +322,74 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(self.request.delivered), 1)
             self.assertEqual(await self.new_gateway().send_action(body), result)
             self.assertEqual(len(self.request.delivered), 1)
+
+    def chat_actions(self):
+        return [data for operation, data in self.request.calls if operation == 'sendChatAction']
+
+    def slow_answer(self, seconds=0.3, result=None):
+        async def answer(event):
+            await asyncio.sleep(seconds)
+            TURN.get()['agent_result'] = result or {'state': 'done', 'text': self.answer, 'session_id': 'synthetic'}
+            return self.answer if (result or {}).get('state', 'done') == 'done' else None
+        self.adapter.set_message_handler(answer)
+
+    async def test_working_turn_shows_typing_in_its_own_topic_until_the_reply(self):
+        self.adapter.turn_typing = True
+        self.slow_answer()
+        with patch('services.hermes.assistant_gateway.TYPING_INTERVAL', 0.05):
+            self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+            await asyncio.sleep(0.2)
+        actions = self.chat_actions()
+        self.assertGreaterEqual(len(actions), 3, 'typing is renewed while the turn works')
+        self.assertTrue(all(str(a['chat_id']) == '-20' and a['message_thread_id'] == 17 and a['action'] == 'typing' for a in actions))
+        operations = [operation for operation, _ in self.request.calls if operation in ('sendChatAction', 'sendMessage')]
+        self.assertEqual(operations[-1], 'sendMessage', 'no typing after the reply, it would show again')
+        journal = b''.join(path.read_bytes() for path in (self.root / 'spool/outbound').glob('*'))
+        self.assertNotIn(b'sendChatAction', journal, 'typing adds no delivery records')
+        self.assertIn(b'sendMessage', journal)
+
+    async def test_typing_stops_when_the_turn_fails_or_authority_is_gone(self):
+        self.adapter.turn_typing = True
+        self.slow_answer(result={'state': 'failed', 'error_code': 'model_unavailable'})
+        with patch('services.hermes.assistant_gateway.TYPING_INTERVAL', 0.05):
+            result = await self.gateway.dispatch(self.envelope())
+            self.assertEqual(result['state'], 'failed')
+            count = len(self.chat_actions())
+            self.assertGreater(count, 0)
+            await asyncio.sleep(0.2)
+            self.assertEqual(len(self.chat_actions()), count, 'a failed turn stops typing')
+            self.allowed = False
+            self.slow_answer()
+            await self.gateway.dispatch(self.envelope(identifier=2))
+        self.assertEqual(len(self.chat_actions()), count, 'a revoked space sees no typing')
+        self.assertEqual(self.request.delivered, [])
+
+    async def test_no_typing_when_switched_off_unaddressed_or_a_fixed_reply(self):
+        self.slow_answer(0.1)
+        with patch('services.hermes.assistant_gateway.TYPING_INTERVAL', 0.02):
+            self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+            self.adapter.turn_typing = True
+            unaddressed = self.envelope(identifier=2)
+            unaddressed['group_addressing'] = {'direct': False, 'handles': []}
+            self.assertEqual(await self.gateway.dispatch(unaddressed), {'state': 'suppressed', 'error_code': 'not_addressed'})
+            fixed = self.envelope(identifier=3)
+            fixed['control_reply'] = 'Synthetic fixed reply'
+            self.assertEqual(await self.gateway.dispatch(fixed), {'state': 'done'})
+        self.assertEqual(self.chat_actions(), [])
+        self.assertEqual(len(self.request.delivered), 2)
+
+    def test_typing_setting_defaults_on_and_rejects_malformed_values(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(typing_enabled())
+        with patch.dict(os.environ, {'TELEGRAM_TYPING': 'false'}):
+            self.assertFalse(typing_enabled())
+        with patch.dict(os.environ, {'TELEGRAM_TYPING': 'off'}), self.assertRaises(ValueError):
+            typing_enabled()
+
+    async def test_a_chat_action_outside_a_turn_is_refused_before_any_request(self):
+        with self.assertRaisesRegex(Exception, 'telegram_chat_action_unbound'):
+            await self.bot.send_chat_action(chat_id=-20, action='typing', message_thread_id=17)
+        self.assertEqual(self.chat_actions(), [])
 
 
 if __name__ == '__main__':

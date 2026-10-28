@@ -43,7 +43,8 @@ class GroupTriggerTests(unittest.TestCase):
         self.assertEqual((compose['TELEGRAM_GROUP_REPLIES'], compose['TELEGRAM_BOT_NAMES']),
                          ('${TELEGRAM_GROUP_REPLIES:-addressed}', '${TELEGRAM_BOT_NAMES-'+DEFAULT_NAMES+'}'))
         self.assertEqual((DEFAULTS['TELEGRAM_GROUP_REPLIES'], DEFAULTS['TELEGRAM_BOT_NAMES']), ('addressed', DEFAULT_NAMES))
-        self.assertLessEqual({'TELEGRAM_GROUP_REPLIES', 'TELEGRAM_BOT_NAMES', 'TELEGRAM_TOPIC_MEMORY'}, EDITABLE)
+        self.assertLessEqual({'TELEGRAM_GROUP_REPLIES', 'TELEGRAM_BOT_NAMES', 'TELEGRAM_TOPIC_MEMORY', 'TELEGRAM_TYPING'}, EDITABLE)
+        self.assertEqual((compose['TELEGRAM_TYPING'], DEFAULTS['TELEGRAM_TYPING']), ('${TELEGRAM_TYPING:-true}', 'true'))
         # Storage services decide recall scope, so the topic-memory choice reaches every service sharing the base environment.
         storage = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())['x-service']['environment']
         self.assertEqual((storage['TELEGRAM_TOPIC_MEMORY'], DEFAULTS['TELEGRAM_TOPIC_MEMORY']), ('${TELEGRAM_TOPIC_MEMORY:-group}', 'group'))
@@ -52,8 +53,8 @@ class GroupTriggerTests(unittest.TestCase):
                 'POSTGRES_PASSWORD': 'p' * 24, 'SERVICE_TOKEN': 's' * 24}
         validate(base)
         validate({**base, 'TELEGRAM_GROUP_REPLIES': 'all', 'TELEGRAM_BOT_NAMES': ''})
-        validate({**base, 'TELEGRAM_TOPIC_MEMORY': 'topic'})
-        for key, bad in (('TELEGRAM_GROUP_REPLIES', 'some'), ('TELEGRAM_BOT_NAMES', 'n' * 33), ('TELEGRAM_TOPIC_MEMORY', 'chat')):
+        validate({**base, 'TELEGRAM_TOPIC_MEMORY': 'topic', 'TELEGRAM_TYPING': 'false'})
+        for key, bad in (('TELEGRAM_GROUP_REPLIES', 'some'), ('TELEGRAM_BOT_NAMES', 'n' * 33), ('TELEGRAM_TOPIC_MEMORY', 'chat'), ('TELEGRAM_TYPING', 'yes')):
             with self.assertRaises(ValueError, msg=key):
                 validate({**base, key: bad})
 

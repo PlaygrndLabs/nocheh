@@ -285,7 +285,12 @@ class TelegramMock:
                     parameters={'migrate_to_chat_id':chat['migrate_to_chat_id']})
             # ChatFullInfo requires these fields; they carry no fixture meaning.
             result={'accent_color_id':0,'max_reaction_count':11,**{key:value for key,value in chat.items() if key in ('id','type','title','username','is_forum')}}
-        elif method=='sendChatAction':result=True
+        elif method=='sendChatAction':
+            # https://core.telegram.org/bots/api#sendchataction: a status shown for up to five seconds.
+            if data.get('action') not in ('typing','upload_photo','record_video','upload_video','record_voice','upload_voice',
+                                          'upload_document','choose_sticker','find_location','record_video_note','upload_video_note'):
+                return self.error(400,'Bad Request: wrong parameter action in request')
+            result=True
         elif method=='setChatMenuButton':result=True
         elif method in ('setMyCommands','deleteMyCommands','getMyCommands'):
             # https://core.telegram.org/bots/api#setmycommands: one list per scope
