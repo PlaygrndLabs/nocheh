@@ -8,6 +8,8 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {DashboardSessions} from '../src/dashboard-auth.js';
 import {HttpError,json,readJson} from '../src/http.js';
+import {MiniAppLock,miniAppLockRoute} from '../src/mini-app-lock.js';
+import {tmpdir} from 'node:os';
 import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
 import {NotionRepository,notionSchema} from '../src/stores/notion.js';
 import {controlPolicySchema} from '../src/stores/policy-schema.js';
@@ -15,7 +17,7 @@ import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
-const pool=new pg.Pool(),sessions=new DashboardSessions(),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
+const pool=new pg.Pool(),sessions=new DashboardSessions(),miniAppLock=new MiniAppLock(join(tmpdir(),'nocheh-preview-'+randomUUID(),'lock.json')),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
 await initialize(pool);
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
 await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);
@@ -324,6 +326,7 @@ const server=createServer((req,res)=>{void(async()=>{
  const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
  const mode=await scenario();if(mode==='conflict'&&!modeRevision){settingsRevision+='external';revision++;modeRevision=true;}if(mode!=='conflict')modeRevision=false;if(mode==='offline'&&['/monitoring','/workflows/metrics','/status','/tools/actions'].includes(route))throw new HttpError(503,'fixture_observation_unavailable');
  if(await messagesFixture(req,res,route,url))return;
+ if(route==='/mini-app/lock'||route.startsWith('/mini-app/lock/'))return miniAppLockRoute(miniAppLock,req,res,route);
  if(req.method==='GET'){
   if(route==='/health')return json(res,200,{ok:true});
   if(route==='/usage'){const days=Number(url.searchParams.get('days')||30),day=(ago:number)=>new Date(Date.now()-ago*864e5).toISOString().slice(0,10);

@@ -1,5 +1,5 @@
 import {createServer,request,type IncomingMessage,type ServerResponse} from 'node:http';
-import {createPublicKey,verify,type KeyObject} from 'node:crypto';
+import {createHash,createPublicKey,verify,type KeyObject} from 'node:crypto';
 import {createReadStream} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -88,8 +88,9 @@ export class DashboardClient {
       const session=await this.open();
       const result=await send(this.target,method,'/api/nocheh'+path,{cookie:session.cookie,'x-nocheh-csrf':session.csrf,
         ...(body?{'content-type':'application/json'}:{})},body);
-      // A restarted dashboard forgets its sessions; open a new one once.
-      if((result.status===401||result.status===403&&/csrf_required|owner_session_required/.test(result.body.toString()))&&attempt===0){this.session=null;continue;}
+      // A restarted dashboard forgets its sessions; open a new one once. Other refusals,
+      // such as a wrong mini app password, are answers and are never sent twice.
+      if([401,403].includes(result.status)&&/"(?:csrf_required|owner_session_required)"/.test(result.body.toString())&&attempt===0){this.session=null;continue;}
       return result;
     }
   }
@@ -102,29 +103,86 @@ async function readBody(req:IncomingMessage,max=1024*1024):Promise<Buffer> {
 }
 
 export type MiniAppOptions={check:Omit<LaunchCheck,'now'>;dashboard:DashboardClient;assets:string;now?:()=>number};
+type LockState='signed_in'|'signed_out'|'no_password';
+
+/**
+ * The mini app's password sign-in. The dashboard keeps the password and the
+ * sessions; this only remembers that a session is signed in for half a minute,
+ * so a password change or "Sign out everywhere" reaches the phone within that
+ * time.
+ */
+class MiniAppSessions {
+  private known=new Map<string,{state:LockState;until:number}>();
+  constructor(private dashboard:DashboardClient,private now:()=>number) {}
+  private async lock(path:string,body:unknown) {
+    const result=await this.dashboard.call('POST','/mini-app/lock/'+path,Buffer.from(JSON.stringify(body)));
+    let value:Record<string,unknown>={};try{value=JSON.parse(result.body.toString('utf8')) as Record<string,unknown>;}catch{}
+    if(result.status>=500||!value||typeof value!=='object')throw new HttpError(503,'dashboard_unavailable');
+    return {status:result.status,value};
+  }
+  async state(token:string):Promise<LockState> {
+    const id=createHash('sha256').update(token).digest('hex'),cached=this.known.get(id);
+    if(cached&&cached.until>this.now())return cached.state;
+    const {status,value}=await this.lock('check',{token});
+    if(status!==200||!['signed_in','signed_out','no_password'].includes(String(value.state)))throw new HttpError(503,'dashboard_unavailable');
+    for(const [key,entry] of this.known)if(entry.until<=this.now())this.known.delete(key);
+    // Only a signed-in answer is kept: a phone that just signed in or a password just set counts at once.
+    if(value.state==='signed_in'&&this.known.size<64)this.known.set(id,{state:'signed_in',until:this.now()+30000});
+    return value.state as LockState;
+  }
+  async require(token:string) {
+    const state=await this.state(token);
+    if(state==='no_password')throw new HttpError(401,'mini_app_password_not_set');
+    if(state!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');
+  }
+  signIn(password:unknown) {return this.lock('sign-in',{password});}
+  async signOut(token:string) {
+    this.known.delete(createHash('sha256').update(token).digest('hex'));
+    await this.lock('sign-out',{token});
+  }
+}
 const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; "+
   "frame-ancestors 'self' https://web.telegram.org https://webk.telegram.org https://webz.telegram.org";
 
 /**
  * The Telegram Mini App's own small server. It is the only part of Nocheh
  * that a tunnel exposes: it serves the mini app page and forwards a fixed set
- * of owner routes to the local dashboard after checking Telegram's signature.
+ * of owner routes to the local dashboard after checking Telegram's signature
+ * and the phone's password sign-in.
  */
 export function miniAppServer(options:MiniAppOptions) {
-  return createServer((req,res)=>{void handle(options,req,res).catch(error=>{
+  const sessions=new MiniAppSessions(options.dashboard,options.now??Date.now);
+  return createServer((req,res)=>{void handle(options,sessions,req,res).catch(error=>{
     if(!res.headersSent)json(res,error instanceof HttpError?error.status:502,{error:error instanceof HttpError?error.code:'mini_app_unavailable'});else res.destroy();
   });});
 }
 
-async function handle(options:MiniAppOptions,req:IncomingMessage,res:ServerResponse) {
+async function handle(options:MiniAppOptions,sessions:MiniAppSessions,req:IncomingMessage,res:ServerResponse) {
   const url=new URL(req.url??'/','http://mini.invalid'),path=url.pathname,method=req.method??'';
   res.setHeader('referrer-policy','no-referrer');res.setHeader('x-content-type-options','nosniff');res.setHeader('content-security-policy',CSP);
   if(method==='GET'&&path==='/health')return json(res,200,{ok:true});
+  const token=String(req.headers['x-nocheh-mini-session']??'').slice(0,100);
+  // Signing in, checking and signing out: each still needs the owner's Telegram launch data.
+  const own=['GET /api/mini/session','POST /api/mini/sign-in','POST /api/mini/sign-out'].includes(method+' '+path);
+  if(own||path.startsWith('/api/nocheh/')) {
+    if(req.headers.origin&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
+  }
+  if(own) {
+    if(url.search)throw new HttpError(404,'not_found');
+    verifyLaunch(String(req.headers['x-telegram-init-data']??''),{...options.check,now:(options.now??Date.now)()});
+    res.setHeader('cache-control','no-store');
+    if(path==='/api/mini/session')return json(res,200,{state:await sessions.state(token)});
+    if(path==='/api/mini/sign-out'){await sessions.signOut(token);return json(res,200,{ok:true});}
+    let password:unknown;try{password=(JSON.parse((await readBody(req,4096)).toString('utf8')) as {password?:unknown})?.password;}catch(error){if(error instanceof HttpError)throw error;throw new HttpError(400,'invalid_json');}
+    const {status,value}=await sessions.signIn(password);
+    const pick=(key:string)=>value[key]!==undefined?{[key]:value[key]}:{};
+    return json(res,status,{...pick('token'),...pick('error'),...pick('until'),...pick('tries_left')});
+  }
   if(path.startsWith('/api/nocheh/')) {
     const route=path.slice('/api/nocheh'.length);
     if(!miniAppRoute(method,route)||url.search.length>600)throw new HttpError(404,'not_found');
-    if(req.headers.origin&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
     verifyLaunch(String(req.headers['x-telegram-init-data']??''),{...options.check,now:(options.now??Date.now)()});
+    await sessions.require(token);
     const body=method==='POST'?await readBody(req):undefined;
     const result=await options.dashboard.call(method,route+url.search,body);
     // The Inbox reads settings only to know which chat is the owner's own.

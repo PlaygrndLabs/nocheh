@@ -14,6 +14,7 @@ import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
 import {ManagementMaintenance} from './management-maintenance.js';
 import {DashboardLiveUpdates} from './dashboard-live.js';
+import {MiniAppLock,miniAppLockRoute} from './mini-app-lock.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -169,6 +170,7 @@ export async function startManagement() {
   const token = (await readFile(join(STATE, 'admin/dashboard/token'), 'utf8')).trim();
   if (token.length < 32) throw new Error('dashboard_token_missing');
   const sessions=new DashboardSessions();
+  const miniAppLock=new MiniAppLock(join(STATE,'admin/mini-app/lock.json'));
   const archiveConnection=object(await python({operation:'archive.connection'}));
   const sockets=new Set<Duplex>();
   const live=new DashboardLiveUpdates();
@@ -282,6 +284,9 @@ export async function startManagement() {
       if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
+      // The mini app's password. The owner sets it here; the mini app service signs in and
+      // checks its sessions through the same routes.
+      if(route==='/mini-app/lock'||route.startsWith('/mini-app/lock/'))return miniAppLockRoute(miniAppLock,req,res,route);
       if (req.method === 'GET' && route === '/settings') {
         // A running apply is named so a page opened or reloaded meanwhile follows it instead of offering Apply again.
         const applying=[...activeJobs.values()].find(job=>job.kind==='settings.apply');
