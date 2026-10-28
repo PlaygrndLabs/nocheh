@@ -239,6 +239,7 @@ export async function startManagement() {
       if(req.method==='GET'&&route==='/database-browser')return json(res,200,await python({operation:'database.browser',
         request:Object.fromEntries(url.searchParams)}));
       if(req.method==='GET'&&/^\/workflows(?:\/(?:health|metrics|timings(?:\/[a-f0-9]{64})?|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
+      if(req.method==='POST'&&route==='/workflows/retry-failed')return json(res,200,await python({operation:'workflow.api',path:'/v1/workflows/retry-failed',body:{}}));
       if(req.method==='POST'&&/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route,body:await readJson(req)}));
       if(route==='/tools/actions' && req.method==='GET')return json(res,200,await python({operation:'tools.manage'}));
       if(/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method==='GET')return json(res,200,await python({operation:'tools.manage',action:route.slice(7)}));

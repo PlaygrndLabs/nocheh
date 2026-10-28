@@ -21,12 +21,13 @@ import {listWorkflows,workflowDetail,workflowHealth} from '../workflows/owner.js
 import {workflowMetrics} from '../workflows/metrics.js';
 import {eventBreakdown,stageSummary,timed} from './stage-timings.js';
 import {proxyInngestInspection} from '../workflows/inspection.js';
-import {controlStorageWorkflow} from './workflow-owner.js';
+import {controlStorageWorkflow,retryFailedWorkflows} from './workflow-owner.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
 import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
-import {fillTemplate,ownerPrompts,problemNotice} from '../prompts.js';
+import {fillTemplate,labeledLines,ownerPrompts,problemButtons,problemNotice} from '../prompts.js';
+import {retryButton} from './action-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
@@ -85,9 +86,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         throw new HttpError(400,'invalid_owner_notice');
       const owner=s.access.policy().owner_id;
       if(!owner)return json(res,200,{state:'not_started',error_code:'owner_not_set'});
-      const template=(await ownerPrompts(s.stores.control))['system.problems']??problemNotice;
-      const text=fillTemplate(template,{problems:lines.map(line=>'• '+line).join('\n')}).slice(0,4000);
-      return json(res,200,await call('telegram.notice',{id,chat_id:owner,text},30000));
+      // Open goes to the mini app's Problems page, or the dashboard; Retry failed is a button press storage handles.
+      const open=input.open===undefined||input.open===null?null:object(input.open),retry=input.retry===true;
+      if(open&&(!['web_app','url'].includes(String(open.kind))||typeof open.url!=='string'||open.url.length>512||
+        !(open.kind==='web_app'?/^https:\/\/[^\s]+$/:/^https?:\/\/[^\s]+$/).test(open.url)))throw new HttpError(400,'invalid_owner_notice');
+      const prompts=await ownerPrompts(s.stores.control),labels=labeledLines(problemButtons,prompts['system.problem_buttons']);
+      const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map(line=>'• '+line).join('\n')}).slice(0,4000);
+      const buttons=[...(open?[{text:labels.open!.slice(0,40),[String(open.kind)]:open.url}]:[]),...(retry?[{text:labels.retry!.slice(0,40),callback:retryButton}]:[])];
+      return json(res,200,await call('telegram.notice',{id,chat_id:owner,text,...(buttons.length?{buttons}:{})},30000));
     }
     if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
       admin(principal);
@@ -255,6 +261,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(timing)return json(res,200,await eventBreakdown(s.stores,timing[1]!));
         if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(s.stores.control,path.split('/').at(-1)!));
       }
+      if(path==='/v1/workflows/retry-failed'&&req.method==='POST')return json(res,200,await retryFailedWorkflows(s.stores.control,principal));
       const control=path.match(/^\/v1\/workflows\/([a-f0-9]{64})\/(retry|cancel)$/);
       if(control&&req.method==='POST')return json(res,200,await controlStorageWorkflow(s.stores.control,principal,control[1]!,control[2]!,await readJson(req)));
       if(path==='/v1/workflows/migrations'||path.startsWith('/v1/workflows/migrations/'))throw new HttpError(409,'legacy_migration_not_applicable');

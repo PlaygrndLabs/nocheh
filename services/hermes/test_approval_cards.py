@@ -11,8 +11,12 @@ try:
 except ImportError:
     # The card only needs the two keyboard types; keep this check runnable without the runtime image.
     fake=types.ModuleType('telegram')
-    fake.InlineKeyboardButton=lambda text,callback_data:(text,callback_data)
+    fake.InlineKeyboardButton=lambda text,callback_data=None,url=None,web_app=None:(text,callback_data or url or web_app)
     fake.InlineKeyboardMarkup=lambda rows:rows
+    fake.WebAppInfo=lambda url:('web_app',url)
+    fake.error=types.ModuleType('telegram.error')
+    fake.error.BadRequest=type('BadRequest',(Exception,),{})
+    sys.modules['telegram.error']=fake.error
     fake.MessageEntity=type('MessageEntity',(),{'TEXT_LINK':'text_link','__init__':lambda self,type,offset,length,url=None:self.__dict__.update(type=type,offset=offset,length=length,url=url)})
     sys.modules['telegram']=fake
 
@@ -99,6 +103,31 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             for bad in [{**ask,'chat_id':'10'},{**ask,'chat_id':'-20','user_id':'-20'},{**ask,'topic':'17'},{**ask,'reply':''}]:
                 with self.assertRaises(ValueError):await gateway.send_refusal(bad)
             self.assertEqual(len(sent),2)
+
+    async def test_a_problem_notice_carries_its_buttons_and_falls_back_to_none(self):
+        from telegram.error import BadRequest
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];gateway=self.gateway(Path(folder),sent)
+            notice={'id':'a'*64,'chat_id':'123','text':'⚠️ Nocheh found a problem','buttons':[
+                {'text':'Open','web_app':'https://mini.example.test/?page=problems'},{'text':'Retry failed','callback':'nr'}]}
+            self.assertEqual(await gateway.send_notice(notice),{'state':'done'})
+            self.assertEqual(await gateway.send_notice(notice),{'state':'done'})
+            self.assertEqual(len(sent),1,'sent once')
+            buttons=sent[0][3]
+            self.assertEqual([button[0] for button in buttons[0]],['Open','Retry failed'])
+            for bad in [{'text':'Open','url':'javascript:alert(1)'},{'text':'Open','web_app':'http://mini.example.test'},{'text':'Run','callback':'na'+'a'*56},
+                        {'text':'','url':'https://example.test'},{'text':'Open','url':'https://example.test','callback':'nr'}]:
+                with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'b'*64,'buttons':[bad]})
+            # Telegram refuses a dashboard address it does not accept: nothing was sent, so the text goes alone.
+            send=gateway.adapter._bot.send_message
+            async def strict(chat,text,reply_markup=None,**options):
+                if reply_markup is not None:raise BadRequest('Wrong http url')
+                return await send(chat,text,**options)
+            gateway.adapter._bot.send_message=strict
+            self.assertEqual(await gateway.send_notice({**notice,'id':'c'*64,'buttons':[{'text':'Open','url':'http://127.0.0.1:8783/#system'}]}),{'state':'done'})
+            self.assertEqual((len(sent),sent[-1][3]),(2,None))
+            with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'d'*64,'chat_id':'-20'},)  # only the owner's private chat
+
 
 
 if __name__=='__main__':

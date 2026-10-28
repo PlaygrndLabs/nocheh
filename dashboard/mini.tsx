@@ -1,30 +1,33 @@
 /**
- * The Telegram Mini App: Home, Inbox and Tasks on the owner's phone, inside
- * Telegram. It uses the same owner API and pages as the dashboard; Settings
- * and System stay on the dashboard at home.
+ * The Telegram Mini App: Home, Inbox, Tasks and Health on the owner's phone,
+ * inside Telegram. It uses the same owner API and pages as the dashboard;
+ * Settings and the rest of System stay on the dashboard at home.
  */
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
-import {CalendarClock, Home, Inbox as InboxIcon, ListChecks, Monitor} from 'lucide-react';
+import {Activity, CalendarClock, Home, Inbox as InboxIcon, ListChecks, Monitor} from 'lucide-react';
 import {useHash, useParam} from './lib/navigation';
 import {useInboxCount} from './lib/inbox';
-import {useResource} from './lib/resource';
+import {apiPost} from './lib/api';
+import {refreshResources, useResource} from './lib/resource';
+import {issues, workCounts} from './lib/system-health';
 import {setParams} from './lib/routes';
 import {decisionLabels, type DecisionKind} from './lib/supervision';
 import {cn} from './lib/utils';
-import {Card, CardBody, Notice} from './ui/core';
-import {FeedbackProvider} from './ui/overlay';
+import {Button, Card, CardBody, Dot, LoadError, Notice, Skeleton} from './ui/core';
+import {FeedbackProvider, useFeedback} from './ui/overlay';
 import {Page} from './ui/page';
 import {ActionDrawer, DecisionDrawer} from './pages/inbox/drawers';
 import {Waiting} from './pages/inbox/waiting';
 import Tasks, {day, type Task} from './pages/tasks';
 import {LogoMark} from './ui/logo';
 
-type MiniPage = 'home' | 'inbox' | 'tasks';
+type MiniPage = 'home' | 'inbox' | 'tasks' | 'problems';
 const tabs: {id: MiniPage; title: string; Icon: React.ComponentType<{className?: string}>}[] = [
   {id: 'home', title: 'Home', Icon: Home},
   {id: 'inbox', title: 'Inbox', Icon: InboxIcon},
   {id: 'tasks', title: 'Tasks', Icon: ListChecks},
+  {id: 'problems', title: 'Health', Icon: Activity},
 ];
 
 /**
@@ -39,7 +42,9 @@ function launchData(): string {
     const theme = JSON.parse(params.get('tgWebAppThemeParams') || 'null');
     if (theme?.bg_color) sessionStorage.setItem('nocheh.telegram-theme', theme.bg_color);
   } catch {}
-  if (fresh) history.replaceState(null, '', location.pathname + '#home');
+  // A problem notice's Open button asks for the Health page.
+  const start = new URLSearchParams(location.search).get('page') === 'problems' ? '#problems' : '#home';
+  if (fresh) history.replaceState(null, '', location.pathname + start);
   try {
     return fresh || sessionStorage.getItem('nocheh.telegram-launch') || '';
   } catch {
@@ -124,7 +129,66 @@ function MiniHome() {
         </Card>
       </a>
       <p className="flex items-center gap-2 text-[13px] text-muted">
-        <Monitor className="size-4" aria-hidden /> Settings and System are on your dashboard at home.
+        <Monitor className="size-4" aria-hidden /> Settings are on your dashboard at home.
+      </p>
+    </Page>
+  );
+}
+
+/** What System › Health lists, with Retry failed; fixes such as choosing a model stay on the dashboard. */
+function MiniProblems() {
+  const monitoring = useResource<any>('/monitoring', 30000);
+  const feedback = useFeedback();
+  const [busy, setBusy] = React.useState(false);
+  const m = monitoring.data;
+  const list = issues(m);
+  const retryable = workCounts(m?.workflows).retrying;
+  const retry = async () => {
+    setBusy(true);
+    try {
+      const {retried} = await apiPost<{retried: number}>('/workflows/retry-failed', {});
+      feedback.toast(
+        retried
+          ? `Retrying ${retried} failed ${retried === 1 ? 'task' : 'tasks'} now.`
+          : 'Nothing failed can be retried right now.',
+      );
+      await refreshResources();
+    } catch {
+      feedback.toast('Couldn’t retry right now. Try again.', 'bad');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Page title="Health" description="What needs a look, the same as System › Health on the dashboard.">
+      {monitoring.error && !m && <LoadError what="health" />}
+      {!m && !monitoring.error && <Skeleton className="h-24 w-full rounded-xl" />}
+      {m && (
+        <Card>
+          {list.length ? (
+            <ul>
+              {list.map(item => (
+                <li key={item.text} className="flex items-start gap-3 border-t border-line px-4 py-3 first:border-t-0">
+                  <Dot tone={item.tone} className="mt-1.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{item.text}</p>
+                    {item.detail && <p className="text-[13px] text-muted">{item.detail}</p>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <CardBody className="text-sm">Everything is running.</CardBody>
+          )}
+        </Card>
+      )}
+      {retryable > 0 && (
+        <Button onClick={retry} busy={busy} disabled={busy}>
+          Retry {retryable} failed {retryable === 1 ? 'task' : 'tasks'} now
+        </Button>
+      )}
+      <p className="flex items-center gap-2 text-[13px] text-muted">
+        <Monitor className="size-4" aria-hidden /> Other fixes, such as choosing another model, are on your dashboard.
       </p>
     </Page>
   );
@@ -154,7 +218,7 @@ function MiniInbox() {
 function MiniApp({launched}: {launched: boolean}) {
   const hash = useHash();
   const key = hash.replace(/^#/, '').split('?')[0];
-  const page: MiniPage = key === 'inbox' || key === 'tasks' ? key : 'home';
+  const page: MiniPage = key === 'inbox' || key === 'tasks' || key === 'problems' ? key : 'home';
   const waiting = useInboxCount();
   if (!launched)
     return (
@@ -170,6 +234,7 @@ function MiniApp({launched}: {launched: boolean}) {
         {page === 'home' && <MiniHome />}
         {page === 'inbox' && <MiniInbox />}
         {page === 'tasks' && <Tasks />}
+        {page === 'problems' && <MiniProblems />}
       </main>
       <nav aria-label="Main" className="flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
         {tabs.map(({id, title, Icon}) => (

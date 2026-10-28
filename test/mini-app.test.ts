@@ -30,13 +30,15 @@ test('only the owner\'s fresh, Telegram-signed launch data opens the mini app',(
   assert.equal(ed25519(TELEGRAM_KEYS.production).asymmetricKeyType,'ed25519');
 });
 
-test('the mini app reaches only home, Inbox decisions and tasks with their chats and people',()=>{
+test('the mini app reaches only home, Inbox decisions, tasks with their chats and people, and problems',()=>{
   const id='a'.repeat(64);
   for(const [method,route] of [['GET','/status'],['GET','/tasks'],['POST','/tasks'],['POST','/tasks/'+id],['GET','/entities'],['GET','/decisions'],['GET','/decisions/telegram_action/'+id],
-    ['POST','/tools/telegram-decision'],['POST','/memory-access/requests/'+id+'/decide'],['POST','/knowledge/proposals/'+id+'/undo']])
+    ['POST','/tools/telegram-decision'],['POST','/memory-access/requests/'+id+'/decide'],['POST','/knowledge/proposals/'+id+'/undo'],
+    ['GET','/monitoring'],['POST','/workflows/retry-failed']])
     assert.equal(miniAppRoute(method!,route!),true,method+' '+route);
   for(const [method,route] of [['POST','/settings'],['POST','/settings/apply'],['GET','/database-browser'],['POST','/shutdown'],['POST','/tools/revoke'],
-    ['GET','/storage'],['POST','/memory/honcho/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/ws-ticket'],['POST','/entities/'+id+'/merge']])
+    ['GET','/storage'],['POST','/memory/honcho/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/ws-ticket'],['POST','/entities/'+id+'/merge'],
+    ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring']])
     assert.equal(miniAppRoute(method!,route!),false,method+' '+route);
 });
 

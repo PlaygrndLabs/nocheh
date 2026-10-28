@@ -126,3 +126,17 @@ export async function controlStorageWorkflow(pool:pg.Pool,principal:Reader,id:st
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   return workflowDetail(pool,id);
 }
+
+/** Retry now every failed task that may be retried, as the owner would one by one; at most 100 a call.
+ * Work that changed or started meanwhile is left alone. */
+export async function retryFailedWorkflows(pool:pg.Pool,principal:Reader):Promise<{retried:number;skipped:number}> {
+  admin(principal);
+  const rows=(await pool.query(`SELECT * FROM workflow_observations WHERE state='retryable_failed' OR family='organization' AND state='failed'
+    ORDER BY updated_at DESC LIMIT 100`)).rows.map(workflowView).filter(row=>row.can_retry);
+  let retried=0;
+  for(const row of rows) {
+    try{await controlStorageWorkflow(pool,principal,row.id,'retry',{revision:row.revision});retried++;}
+    catch(error){if(!(error instanceof HttpError)||error.status!==409&&error.status!==404)throw error;}
+  }
+  return {retried,skipped:rows.length-retried};
+}
