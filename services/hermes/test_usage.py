@@ -41,6 +41,22 @@ class UsageTests(unittest.TestCase):
                              ('2026-10-13', 'reply', 2, 1, 3, 15))
             self.assertEqual((row['cost_usd'], row['priced_runs']), (0.5, 1), 'the unpriced run stays visible as unpriced')
 
+    def test_refusals_and_hidden_texts_are_counted_and_an_older_table_gains_their_columns(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'usage/usage.sqlite'
+            path.parent.mkdir()
+            old = sqlite3.connect(str(path))
+            old.execute(usage.SCHEMA.replace('refused INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, ', ''))
+            old.execute("INSERT INTO usage_daily(day,part,provider,model,runs,failed) VALUES('2026-10-13','guard','anthropic','m',3,1)")
+            old.commit()
+            old.close()
+            usage.record('guard', {'calls': 1}, 'm', failed=True, refused=True, provider='anthropic', path=path, now=DAY)
+            usage.record('guard', {'calls': 1}, 'm', refused=True, provider='anthropic', path=path, now=DAY)
+            usage.note_hidden('guard', 'm', provider='anthropic', path=path, now=DAY)
+            row = usage.rows('2026-10-13', path)[0]
+            self.assertEqual((row['runs'], row['failed'], row['refused'], row['hidden']), (5, 3, 2, 1),
+                             'a refusal is always a failure; a hidden text is not a run')
+
     def test_record_never_fails_the_work_it_measures(self):
         with tempfile.TemporaryDirectory() as root:
             # Outside a Hermes installation nothing is written.

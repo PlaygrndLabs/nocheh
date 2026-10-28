@@ -107,9 +107,13 @@ class DetectorTests(unittest.TestCase):
                 with patch('services.hermes.subscription._call_subscription',side_effect=hello) as call:
                     self.assertEqual(detect_literals(separator.join(texts),credentials,'model'),['juniper-ONLY-7642','hello','kite-99'])
                 self.assertEqual(call.call_count,8,'batch, first half and the declined text each twice; the other text and half once')
-        with patch('services.hermes.subscription._call_subscription',return_value=refused) as call:
+        with patch('services.hermes.subscription._call_subscription',return_value=refused) as call, \
+                patch('services.hermes.usage.record') as record,patch('services.hermes.usage.note_hidden') as hidden:
             self.assertEqual(detect_literals('Password: juniper-ONLY-7642',credentials,'model'),['Password: juniper-ONLY-7642'])
         self.assertEqual(call.call_count,2)
+        # Usage counts both declined calls as refused failures and the text as hidden, for the owner's notice.
+        self.assertEqual([(c.args[3],c.kwargs['refused']) for c in record.call_args_list],[(True,True),(True,True)])
+        hidden.assert_called_once_with('guard','model')
 
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),

@@ -23,7 +23,7 @@ EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVI
 
 # Read again by the dashboard at each check, so they work as soon as they are saved
 # and never need Apply to restart the services.
-LIVE = {'NOCHEH_BACKUP_SCHEDULE', 'NOCHEH_BACKUP_TIME', 'NOCHEH_BACKUP_TIME_ZONE', 'NOCHEH_BACKUP_KEEP'}
+LIVE = {'NOCHEH_BACKUP_SCHEDULE', 'NOCHEH_BACKUP_TIME', 'NOCHEH_BACKUP_TIME_ZONE', 'NOCHEH_BACKUP_KEEP', 'TELEGRAM_PROBLEM_NOTICES'}
 
 
 def revision(values):

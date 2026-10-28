@@ -110,6 +110,23 @@ export function issues(m: any): Issue[] {
       link: href('system', {view: 'work'}),
       action: 'Details',
     });
+  const models: any[] = Array.isArray(m.model_problems) ? m.model_problems : [];
+  for (const row of models) {
+    const failed = row.failed
+      ? `${row.failed} model ${row.failed === 1 ? 'call' : 'calls'} failed today` +
+        (row.refused ? `, ${row.refused} refused by the model` : '')
+      : '';
+    const hidden = row.hidden
+      ? `${row.hidden} ${row.hidden === 1 ? 'text was' : 'texts were'} hidden whole because the model refused to check ${row.hidden === 1 ? 'it' : 'them'}`
+      : '';
+    list.push({
+      tone: 'warn',
+      text: `${routeName(row.part, row.label)}: ${[failed, hidden].filter(Boolean).join('; ')}`,
+      detail: `Model ${row.model}.${row.refused || row.hidden ? ' If it keeps refusing, choose another model for this part.' : ''}`,
+      link: href('usage', {days: '1'}),
+      action: 'Usage',
+    });
+  }
   const spool = m.archive?.archive?.spool_failures;
   if (Array.isArray(spool) && spool.length)
     list.push({

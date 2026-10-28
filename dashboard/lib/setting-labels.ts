@@ -9,6 +9,7 @@ export const settingLabels: Record<string, string> = {
   TELEGRAM_BOT_NAMES: 'Names that call Nocheh',
   TELEGRAM_TOPIC_MEMORY: 'Topic memory',
   TELEGRAM_TYPING: 'Show typing while working',
+  TELEGRAM_PROBLEM_NOTICES: 'Tell me about problems',
   NOCHEH_MINI_APP_URL: 'Mini app address',
   CLOUDFLARE_TUNNEL_TOKEN: 'Mini app tunnel token',
   NOCHEH_PROVIDER: 'Default provider',

@@ -44,6 +44,9 @@ def dispatch(body):
     if operation == 'monitoring.status':
         from tools.operations.provider.monitoring import status
         return status(state)
+    if operation == 'problems.check':
+        from tools.operations.provider.problems import check
+        return check(state)
     if operation == 'storage.report':
         from tools.operations.installation.storage import report
         return report(state)

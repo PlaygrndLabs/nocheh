@@ -11,12 +11,12 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_texts','tasks.reminder'] as const;
+  'telegram.approval_texts','tasks.reminder','system.problems'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'tasks.reminder':['{title}']};
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'tasks.reminder':['{title}'],'system.problems':['{problems}']};
 
 /** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
 export const notAllowedReply='Sorry, I only work with people the owner has allowed in this group.';
@@ -84,9 +84,11 @@ export function fillTemplate(template:string,values:Record<string,string|null|un
 /** A task reminder in the owner's private chat. A line whose value is missing,
  * such as the due day or the project's list, is left out. */
 export const taskReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
+/** A message to the owner's private chat about new or worse problems, one line each. */
+export const problemNotice='⚠️ Nocheh found a problem:\n{problems}\n\nSee System › Health in the dashboard.';
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder};
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'system.problems':problemNotice};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

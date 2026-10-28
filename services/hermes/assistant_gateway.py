@@ -622,8 +622,8 @@ class AssistantGateway:
         return asyncio.run_coroutine_threadsafe(self.send_notice(body),self.loop).result(timeout=55)
 
     async def send_notice(self,body):
-        """A task reminder in the owner's private chat. No model runs; the text is
-        the owner's reminder template filled in by storage, sent at most once."""
+        """A task reminder or a problem notice in the owner's private chat. No model runs;
+        the text is the owner's template filled in by storage, sent at most once."""
         import re
         chat=str(body.get('chat_id') or '')
         if not re.fullmatch('[a-f0-9]{64}',body.get('id','')) or not self.scopes.owner or chat!=str(self.scopes.owner) or not re.fullmatch(r'[1-9]\d{0,18}',chat):

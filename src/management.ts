@@ -437,8 +437,16 @@ export async function startManagement() {
     await exclusive('writer-start',async()=>{if(!stopping&&!operationBusy&&!active.size)await startOperation('backup',{},Symbol('schedule'),true);});
   };
   const schedule=setInterval(()=>void automaticBackup().catch(()=>{}),5*60*1000);schedule.unref();
+  // Every two minutes, new or worse problems go to the owner's private chat. Backups, restores
+  // and Apply restart services on purpose, so the check waits until they finish.
+  let checkingProblems=false;
+  const problemCheck=setInterval(()=>{
+    if(stopping||checkingProblems||operationBusy||maintenance.active)return;
+    checkingProblems=true;
+    void python({operation:'problems.check'}).catch(()=>{}).finally(()=>{checkingProblems=false;});
+  },2*60*1000);problemCheck.unref();
   const stop = () => {
-    if(stopping)return;stopping=true;clearInterval(schedule);
+    if(stopping)return;stopping=true;clearInterval(schedule);clearInterval(problemCheck);
     live.closeAll();
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
