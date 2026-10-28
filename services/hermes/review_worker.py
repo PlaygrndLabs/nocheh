@@ -89,6 +89,7 @@ def start(root,policy,model,credentials,body):
     """
     import fcntl
     from .capture import immutable_file
+    from .native_memory import notes_snapshot
     previous=observe(root,policy,body)
     if previous['state'] not in ('not_found','failed'):return previous
     profile=review_profile(root,policy,model,body)
@@ -114,17 +115,29 @@ def start(root,policy,model,credentials,body):
         owned=locks.pop_all()
         def execute():
             with owned:
+                before=notes_snapshot(profile)
                 try:
                     result=_review(profile,policy,model,credentials,body)
                     if result.get('state')=='done':immutable_file(directory,body['id']+'.done',b'{}')
                 except Exception:
                     # The start marker survives. Observation reports ambiguity
                     # without saving protected input, credentials or exception text.
-                    pass
+                    try:stopped(profile,body['id'],before)
+                    except Exception:pass
         try:threading.Thread(target=execute,daemon=True,name='nocheh-memory-review').start()
         except BaseException:owned.close();raise
         return {'state':'running'}
     finally:locks.close()
+
+
+def stopped(profile,review_id,before):
+    """A child stopped at its time limit never reports. Once the notes lock is free no run of
+    this review is left, so a 'running' receipt with the notes unchanged had no effect."""
+    from .native_memory import memory_lock, notes_snapshot, save_receipt
+    receipt=profile/'reviews'/review_id
+    with memory_lock(profile):
+        if receipt.is_file() and not receipt.is_symlink() and receipt.read_text()=='running' and notes_snapshot(profile)==before:
+            save_receipt(receipt,'failed')
 
 
 def _review(profile,policy,model,credentials,body):

@@ -13,7 +13,8 @@ source once with bounded uncertain observation in [0124](0124-native-review-once
 reviews keeping their place across epochs in [0173](0173-waiting-native-reviews-keep-their-place.md), and
 learning stopped by an epoch asked again in [0176](0176-stopped-learning-is-asked-again.md),
 stranded memory work picked up at start in [0177](0177-stranded-memory-work-is-picked-up-at-start.md),
-and a review that failed without changing notes run again in [0183](0183-failed-native-review-without-effect-runs-again.md).
+and a review that failed or was stopped without changing notes run again in [0183](0183-failed-native-review-without-effect-runs-again.md)
+and [0185](0185-review-stopped-at-its-time-limit-runs-again.md).
 Isolated native lease recovery: [0098](0098-isolated-native-lease-recovery.md).
 Historical recall eligibility: [0099](0099-independent-evidence-for-historical-recall.md).
 Honcho service default: [0076](0076-honcho-enabled-local-default.md).

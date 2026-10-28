@@ -93,6 +93,23 @@ class ReviewHandoffTests(unittest.TestCase):
         with patch('services.hermes.review_worker._review',side_effect=AssertionError('replayed effect')):
             self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'ambiguous'},'a review that may have changed notes never starts again')
 
+    def test_a_review_stopped_at_its_time_limit_without_changing_notes_starts_again(self):
+        import subprocess
+        receipts=self.profile/'reviews';receipts.mkdir();notes=self.profile/'memories';notes.mkdir()
+        (notes/'MEMORY.md').write_text('earlier note')
+        def killed(*args):
+            (receipts/self.body['id']).write_text('running');raise subprocess.TimeoutExpired('review',220)
+        with patch('services.hermes.review_worker._review',side_effect=killed):
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'failed')
+        def wrote(*args):
+            (receipts/self.body['id']).write_text('running');(notes/'MEMORY.md').write_text('a new note')
+            raise subprocess.TimeoutExpired('review',220)
+        with patch('services.hermes.review_worker._review',side_effect=wrote) as child:
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'ambiguous');self.assertEqual(child.call_count,1)
+        self.assertEqual((receipts/self.body['id']).read_text(),'running','a stopped review that changed notes stays uncertain')
+
     def test_failed_thread_launch_keeps_ambiguity_and_releases_capacity(self):
         with patch('services.hermes.review_worker.threading.Thread.start',side_effect=RuntimeError('fixture_launch_failed')):
             with self.assertRaisesRegex(RuntimeError,'fixture_launch_failed'):start(self.root,self.policy,'model',None,self.body)
