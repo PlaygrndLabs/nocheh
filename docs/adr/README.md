@@ -13,7 +13,8 @@ source once with bounded uncertain observation in [0124](0124-native-review-once
 reviews keeping their place across epochs in [0173](0173-waiting-native-reviews-keep-their-place.md), and
 learning stopped by an epoch asked again in [0176](0176-stopped-learning-is-asked-again.md),
 stranded memory work picked up at start in [0177](0177-stranded-memory-work-is-picked-up-at-start.md),
-and a review that failed without changing notes run again in [0183](0183-failed-native-review-without-effect-runs-again.md).
+and a review that failed or was stopped without changing notes run again in [0183](0183-failed-native-review-without-effect-runs-again.md)
+and [0185](0185-review-stopped-at-its-time-limit-runs-again.md).
 Isolated native lease recovery: [0098](0098-isolated-native-lease-recovery.md).
 Historical recall eligibility: [0099](0099-independent-evidence-for-historical-recall.md).
 Honcho service default: [0076](0076-honcho-enabled-local-default.md).
@@ -45,7 +46,8 @@ Task lists, links to a group and people, and tags, with project chats reaching t
 Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
-Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md); secret-check results carried across guard epochs: [0170](0170-secret-check-results-survive-guard-epochs.md).
+Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md); secret-check results carried across guard epochs: [0170](0170-secret-check-results-survive-guard-epochs.md);
+text the secret check always declines hidden whole: [0184](0184-text-the-secret-check-always-declines-is-hidden.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
 Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),

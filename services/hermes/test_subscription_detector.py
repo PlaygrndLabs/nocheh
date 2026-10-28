@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from .subscription import BROKER_URL, DetectorContractError, SubscriptionCredentials, detect_literals
+from .subscription import BROKER_URL, DetectorContractError, SubscriptionCredentials, detect_literals, detector_reply
 
 
 def response(output):
@@ -71,12 +71,12 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(raised.exception.shape,{'type':'NoneType','finish_reason':'stop','input_length':len(text),'parts':1})
 
     def test_a_safety_filter_decline_is_reported_as_a_refusal(self):
-        text='Password: juniper-ONLY-7642';credentials=SubscriptionCredentials('synthetic-token')
+        text='Password: juniper-ONLY-7642'
         for content in ('',None,json.dumps({'literals':[]})):
             declined=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content),finish_reason='content_filter')])
-            with self.subTest(content=content),patch('services.hermes.subscription._call_subscription',return_value=declined):
+            with self.subTest(content=content):
                 with self.assertRaises(DetectorContractError) as raised:
-                    detect_literals(text,credentials,'model')
+                    detector_reply(content,text,'content_filter')
                 self.assertEqual(str(raised.exception),'detector_refused')
                 self.assertEqual(raised.exception.shape['finish_reason'],'content_filter')
 
@@ -87,24 +87,29 @@ class DetectorTests(unittest.TestCase):
             self.assertEqual(detect_literals(text,credentials,'model'),['juniper-ONLY-7642'])
         self.assertEqual(call.call_count,2)
 
-    def test_a_declined_batch_is_checked_again_in_halves_and_a_declined_fragment_fails(self):
-        credentials=SubscriptionCredentials('synthetic-token');joined='\n<NOCHEH_FRAGMENT>\n'.join
+    def test_a_declined_batch_is_checked_again_in_halves_and_a_declined_text_is_hidden_whole(self):
+        credentials=SubscriptionCredentials('synthetic-token')
         texts=['Password: juniper-ONLY-7642','hello','Token: kite-99','bye']
-        def answer(credentials,model,messages):
-            text=messages[1]['content']
-            if text.count('<NOCHEH_FRAGMENT>')==3:
-                return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=''),finish_reason='content_filter')])
-            return response({'literals':[value for value in ('juniper-ONLY-7642','kite-99') if value in text]})
-        with patch('services.hermes.subscription._call_subscription',side_effect=answer) as call:
-            self.assertEqual(detect_literals(joined(texts),credentials,'model'),['juniper-ONLY-7642','kite-99'])
-        self.assertEqual(call.call_count,4,'the batch twice, then each half')
         refused=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=''),finish_reason='content_filter')])
+        for separator in ('\n<NOCHEH_FRAGMENT>\n','\n⟪NOCHEH_FIELD_BOUNDARY⟫\n'):
+            marker=separator.strip()
+            def answer(credentials,model,messages):
+                text=messages[1]['content']
+                if text.count(marker)==3:return refused
+                return response({'literals':[value for value in ('juniper-ONLY-7642','kite-99') if value in text]})
+            with self.subTest(separator=marker):
+                with patch('services.hermes.subscription._call_subscription',side_effect=answer) as call:
+                    self.assertEqual(detect_literals(separator.join(texts),credentials,'model'),['juniper-ONLY-7642','kite-99'])
+                self.assertEqual(call.call_count,4,'the batch twice, then each half')
+                def hello(credentials,model,messages):
+                    text=messages[1]['content']
+                    return refused if 'hello' in text else response({'literals':[value for value in ('juniper-ONLY-7642','kite-99') if value in text]})
+                with patch('services.hermes.subscription._call_subscription',side_effect=hello) as call:
+                    self.assertEqual(detect_literals(separator.join(texts),credentials,'model'),['juniper-ONLY-7642','hello','kite-99'])
+                self.assertEqual(call.call_count,8,'batch, first half and the declined text each twice; the other text and half once')
         with patch('services.hermes.subscription._call_subscription',return_value=refused) as call:
-            with self.assertRaises(DetectorContractError) as raised:
-                detect_literals(joined(texts),credentials,'model')
-        self.assertEqual(str(raised.exception),'detector_refused')
-        self.assertEqual(raised.exception.shape['parts'],1)
-        self.assertEqual(call.call_count,6,'each level asked twice, stopping at the first fragment declined on its own')
+            self.assertEqual(detect_literals('Password: juniper-ONLY-7642',credentials,'model'),['Password: juniper-ONLY-7642'])
+        self.assertEqual(call.call_count,2)
 
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),

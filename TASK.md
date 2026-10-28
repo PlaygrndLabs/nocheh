@@ -611,7 +611,7 @@ itself at startup.
 <verification>
 
 - Typing while Nocheh works (2026-10-28,
-  [ADR-0184](docs/adr/0184-typing-status-while-a-turn-works.md)): Telegram
+  [ADR-0188](docs/adr/0188-typing-status-while-a-turn-works.md)): Telegram
   showed nothing while a reply was being worked on, because native typing is
   off and the committed adapter replaces the code that starts it. A committed
   turn now renews "typing…" every four seconds in its own chat or topic until

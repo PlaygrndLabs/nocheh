@@ -1,4 +1,4 @@
-# ADR-0184: Telegram shows typing while a turn works
+# ADR-0188: Telegram shows typing while a turn works
 
 <status>
 Accepted on 2026-10-28, after the owner asked: "can when agent is working

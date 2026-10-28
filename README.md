@@ -124,3 +124,7 @@ npm ci
 ```
 
 [SPECS.md](SPECS.md) defines what Nocheh must be and do, [TASK.md](TASK.md) tracks status and open checks, and [AGENTS.md](AGENTS.md) holds the working rules. Decisions live in the [ADRs](docs/adr/README.md), and [docs/repository-layout.md](docs/repository-layout.md) explains every folder. Agent skills for [admin inspection](.agent/skills/nocheh-admin-cli/SKILL.md), [deployment](.agent/skills/nocheh-deploy/SKILL.md) and [Graphify](.agent/skills/graphify/SKILL.md) live in `.agent/skills`. Code from before Hermes is kept on the `archive/pre-hermes-nocheh` branch.
+
+## License
+
+See [LICENSE](LICENSE). Nocheh's code and docs are MIT. The Nocheh name and logo remain © PlaygrndLabs; you may use them to refer to Nocheh, but not as the name or logo of your own product. The [Graphify skill](.agent/skills/graphify/SKILL.md) comes from Graphify and keeps its own [MIT notice](.agent/skills/graphify/LICENSE). Hermes (MIT) and Honcho (AGPL-3.0) are not part of this repository: they are downloaded when you build and keep their own licenses.
