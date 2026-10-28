@@ -86,6 +86,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent to your private chat when a task reminder is due. {title} is the task, {due} its due day, {list} its project and {notes} its notes. A line whose value is missing is left out.',
   },
   {
+    key: 'system.problems',
+    title: 'Problem notice',
+    hint: 'Sent to your private chat when a failure or other problem is new or worse, at most once an hour for the same problem. {problems} is the list, one line each. Turn it off in Settings › Telegram.',
+  },
+  {
     key: 'guard.secret_check',
     title: 'Secret check',
     hint: 'Finds passwords and keys before anything is stored. Keep its JSON reply format, or the check fails and messages wait.',

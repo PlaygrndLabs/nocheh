@@ -174,7 +174,10 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str,
             error.shape.update(input_length=len(text), parts=len(parts))
             raise
     if len(parts) < 2:
+        from services.hermes.usage import note_hidden
         print(f'secret check declined one text of {len(text)} characters twice; it is hidden whole', file=sys.stderr, flush=True)
+        if text:
+            note_hidden('guard', model)
         return [text] if text else []
     found = []
     for half in (parts[:len(parts) // 2], parts[len(parts) // 2:]):
@@ -191,7 +194,7 @@ def _detect_once(text, credentials, model, prompts):
     # A provider waking from idle can refuse its first request with a server error. The check
     # changes nothing, so one quick retry spares the turn the workflow's 30-second retry wait.
     for attempt in (1, 2):
-        response, failed = None, True
+        response, failed, refused = None, True, False
         try:
             with trusted_detector(credentials.base_url):
                 response = _call_subscription(credentials, model, [
@@ -203,11 +206,12 @@ def _detect_once(text, credentials, model, prompts):
             failed = False
             return candidates
         except Exception as error:
+            refused = isinstance(error, DetectorContractError) and str(error) == 'detector_refused'
             status = getattr(error, "status_code", None)
             if attempt == 2 or not isinstance(status, int) or status < 500:
                 raise
         finally:
             # Nocheh's usage tracker: the provider's reported tokens, priced by Hermes.
             record('guard', response_usage(response, model, credentials.base_url) if response is not None else {'calls': 1},
-                   model, failed)
+                   model, failed, refused=refused)
         time.sleep(RETRY_SECONDS)

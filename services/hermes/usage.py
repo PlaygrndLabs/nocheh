@@ -22,7 +22,11 @@ SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT N
           'output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, '
           'cache_write_tokens INTEGER NOT NULL DEFAULT 0, reasoning_tokens INTEGER NOT NULL DEFAULT 0, '
           'cost_usd REAL NOT NULL DEFAULT 0, priced_runs INTEGER NOT NULL DEFAULT 0, '
+          'refused INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, '
           'PRIMARY KEY(day,part,provider,model))')
+# Counts added after the first table: `refused` is a failed run the model declined to answer,
+# `hidden` a text the secret check hid whole because the model declined to check it.
+ADDED = ('refused', 'hidden')
 
 
 def _count(value):
@@ -117,19 +121,33 @@ def connect(path=None):
     db = sqlite3.connect(str(path), timeout=10, isolation_level=None)
     db.execute('PRAGMA journal_mode=WAL')
     db.execute(SCHEMA)
+    present = {row[1] for row in db.execute('PRAGMA table_info(usage_daily)')}
+    for name in ADDED:
+        if name not in present:
+            db.execute(f'ALTER TABLE usage_daily ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0')
     return db
 
 
-def record(part, usage, model, failed=False, provider=None, path=None, now=None):
+def record(part, usage, model, failed=False, provider=None, path=None, now=None, refused=False):
     """Add one run to today's totals. Usage tracking never fails the work it measures."""
+    usage = usage or {}
+    _add(part, usage.get('model') or model, provider, path, now, runs=1, failed=int(bool(failed or refused)),
+         refused=int(bool(refused)), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
+         cost_usd=float(usage.get('cost_usd') or 0), priced_runs=int('cost_usd' in usage))
+
+
+def note_hidden(part, model, provider=None, path=None, now=None):
+    """Count one text hidden whole because the model declined to check it; not a run of its own."""
+    _add(part, model, provider, path, now, hidden=1)
+
+
+def _add(part, model, provider, path, now, **amounts):
     if part not in PARTS:
         return
-    usage = usage or {}
     provider = (provider if provider is not None else os.environ.get(PROVIDERS['guard' if part == 'guard' else 'reply'], '')) or 'unknown'
-    model = (usage.get('model') or model or 'unknown')[:120]
+    model = (model or 'unknown')[:120]
     moment = datetime.fromtimestamp(now or time.time(), timezone.utc)
     day = moment.strftime('%Y-%m-%d')
-    priced = 'cost_usd' in usage
     target = Path(path or DATABASE)
     if not target.parent.parent.is_dir():
         return  # Not inside a Hermes installation, such as a unit test.
@@ -139,11 +157,9 @@ def record(part, usage, model, failed=False, provider=None, path=None, now=None)
             db.execute('BEGIN IMMEDIATE')
             db.execute('INSERT INTO usage_daily(day,part,provider,model) VALUES(?,?,?,?) ON CONFLICT DO NOTHING',
                        (day, part, provider[:40], model))
-            db.execute('UPDATE usage_daily SET runs=runs+1,failed=failed+?,calls=calls+?,' +
-                       ','.join(f'{name}={name}+?' for name in TOKENS) +
-                       ',cost_usd=cost_usd+?,priced_runs=priced_runs+? WHERE day=? AND part=? AND provider=? AND model=?',
-                       (int(bool(failed)), _count(usage.get('calls')), *(_count(usage.get(name)) for name in TOKENS),
-                        float(usage.get('cost_usd') or 0), int(priced), day, part, provider[:40], model))
+            db.execute('UPDATE usage_daily SET ' + ','.join(f'{name}={name}+?' for name in amounts) +
+                       ' WHERE day=? AND part=? AND provider=? AND model=?',
+                       (*amounts.values(), day, part, provider[:40], model))
             cutoff = (moment - timedelta(days=RETENTION_DAYS)).strftime('%Y-%m-%d')
             db.execute('DELETE FROM usage_daily WHERE day<?', (cutoff,))
             db.execute('COMMIT')

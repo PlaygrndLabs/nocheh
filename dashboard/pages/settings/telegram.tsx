@@ -14,6 +14,7 @@ export const telegramKeys = [
   'TELEGRAM_GROUP_ACCESS',
   'TELEGRAM_TOPIC_MEMORY',
   'TELEGRAM_TYPING',
+  'TELEGRAM_PROBLEM_NOTICES',
   'NOCHEH_MINI_APP_URL',
   'CLOUDFLARE_TUNNEL_TOKEN',
 ];
@@ -88,6 +89,26 @@ export function TelegramSettings() {
                 checked={s.value('TELEGRAM_TYPING') !== 'false'}
                 disabled={s.busy}
                 onChange={on => s.set('TELEGRAM_TYPING', on ? 'true' : 'false')}
+              />
+            </div>
+          </SettingRow>
+          <SettingRow
+            title={
+              <>
+                Tell me about problems
+                <Unsaved show={s.changed('TELEGRAM_PROBLEM_NOTICES')} />
+              </>
+            }
+            description="Messages your private chat about each new failure or problem, such as failed work or a model that refused. The same problem repeats at most once an hour, and only when it gets worse."
+            htmlFor="telegram-problem-notices"
+          >
+            <div className="flex sm:justify-end">
+              <Switch
+                id="telegram-problem-notices"
+                label="Tell me about problems"
+                checked={s.value('TELEGRAM_PROBLEM_NOTICES') !== 'false'}
+                disabled={s.busy}
+                onChange={on => s.set('TELEGRAM_PROBLEM_NOTICES', on ? 'true' : 'false')}
               />
             </div>
           </SettingRow>

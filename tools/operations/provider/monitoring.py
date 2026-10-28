@@ -45,6 +45,7 @@ def status(state):
         result={name:future.result() for name,future in jobs.items()}
     result['services']=describe(result['containers'],config,result['hosts']) if isinstance(result['containers'],list) else None
     result['routes']=attempt(lambda:routes(config))
+    result['model_problems']=attempt(lambda:model_problems(state))
     result['keys']=internal_keys(config)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
@@ -72,3 +73,13 @@ def routes(config):
     return [{'part':route.part,'label':labels[route.part],'provider':route.provider,
              'provider_name':known[route.provider]['name'] if route.configured else '',
              'model':route.model if route.configured else '','configured':route.configured} for route in selected]
+
+
+def model_problems(state, now=None):
+    """Today's failed, refused and hidden model calls per part and model, from the usage tracker."""
+    from tools.operations.provider import usage
+    day=(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')
+    rows=(usage.hermes_rows(state,day) or [])+(usage.honcho_rows(state,day) or [])
+    return [{'day':day,'part':row['part'],'label':usage.PARTS.get(row['part'],(row['part'],))[0],'provider':row['provider'],
+             'model':row['model'],'calls':row['calls'],'failed':row['failed'],'refused':row.get('refused') or 0,'hidden':row.get('hidden') or 0}
+            for row in rows if row['day']==day and (row['failed'] or row.get('hidden'))]

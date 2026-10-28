@@ -17,6 +17,7 @@ DEFAULTS = {
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}', 'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true',
+    'TELEGRAM_PROBLEM_NOTICES': 'true',
     'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
@@ -206,6 +207,7 @@ def validate(values):
     if values.get('TELEGRAM_GROUP_REPLIES','addressed') not in ('addressed','all'):raise ValueError('TELEGRAM_GROUP_REPLIES must be addressed or all')
     if values.get('TELEGRAM_TOPIC_MEMORY','group') not in ('group','topic'):raise ValueError('TELEGRAM_TOPIC_MEMORY must be group or topic')
     if values.get('TELEGRAM_TYPING','true') not in ('true','false'):raise ValueError('TELEGRAM_TYPING must be true or false')
+    if values.get('TELEGRAM_PROBLEM_NOTICES','true') not in ('true','false'):raise ValueError('TELEGRAM_PROBLEM_NOTICES must be true or false')
     names=[name.strip() for name in str(values.get('TELEGRAM_BOT_NAMES','')).split(',') if name.strip()]
     if len(names)>10 or any(len(name)>32 for name in names):raise ValueError('TELEGRAM_BOT_NAMES must be up to 10 comma-separated names of up to 32 characters')
     if values['TELEGRAM_ENABLED'] == 'true' and (not owner or not values['TELEGRAM_BOT_TOKEN']): raise ValueError('Enabling Telegram requires TELEGRAM_OWNER_ID and TELEGRAM_BOT_TOKEN')

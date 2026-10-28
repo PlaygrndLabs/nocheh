@@ -26,6 +26,7 @@ import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkf
 import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
+import {fillTemplate,ownerPrompts,problemNotice} from '../prompts.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
@@ -75,6 +76,18 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.
       admin(principal);
       return json(res,200,await call('usage.price',object(await readJson(req,512*1024)),15000));
+    }
+    if(req.method==='POST'&&path==='/v1/runtime/owner-notice'){
+      // The dashboard's problem check: one message to the owner's private chat, in the owner's wording, sent at most once.
+      admin(principal);
+      const input=object(await readJson(req,64*1024)),id=string(input.id,64),lines=input.problems;
+      if(!/^[a-f0-9]{64}$/.test(id)||!Array.isArray(lines)||!lines.length||lines.length>20||lines.some(line=>typeof line!=='string'||!line.trim()||line.length>500))
+        throw new HttpError(400,'invalid_owner_notice');
+      const owner=s.access.policy().owner_id;
+      if(!owner)return json(res,200,{state:'not_started',error_code:'owner_not_set'});
+      const template=(await ownerPrompts(s.stores.control))['system.problems']??problemNotice;
+      const text=fillTemplate(template,{problems:lines.map(line=>'• '+line).join('\n')}).slice(0,4000);
+      return json(res,200,await call('telegram.notice',{id,chat_id:owner,text},30000));
     }
     if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
       admin(principal);

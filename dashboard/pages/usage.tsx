@@ -12,7 +12,7 @@ import {compact, cost, count, duration, partName} from '../lib/system-format';
 import {cn} from '../lib/utils';
 import {Card, CardHeader, Empty, LoadError, Notice, Segmented, Skeleton, Stat, Table, Td, Th} from '../ui/core';
 import {Page} from '../ui/page';
-import {addRow, emptyTotal, groupRows as group, type Usage, type UsageRow} from '../lib/system-usage';
+import {addRow, emptyTotal, failures, groupRows as group, type Usage, type UsageRow} from '../lib/system-usage';
 import {ReplySpeed, type TimingSummary} from './usage/reply-speed';
 
 const DailyChart = lazy(() => import('./usage/daily-chart'));
@@ -41,6 +41,11 @@ export default function UsagePage() {
   if (all.unknown && data?.sources.pricing !== 'unavailable')
     notes.push('Some models have no published price, for example a custom provider, so part of the cost is unknown.');
 
+  if (all.refused || all.hidden)
+    notes.push(
+      'Refused means the model declined to answer. A text the secret check’s model refuses twice is hidden whole, so nothing unchecked is kept or sent. Try another model for that part in Settings › Models.',
+    );
+
   const median = timings.data?.reply_ms_p50;
   return (
     <Page
@@ -65,11 +70,7 @@ export default function UsagePage() {
               value={all.calls ? cost(all) : '$0.00'}
               hint={all.unknown ? 'Some calls can’t be priced' : 'Estimated from list prices'}
             />
-            <Stat
-              label="Model calls"
-              value={count(all.calls)}
-              hint={all.failed ? `${count(all.failed)} failed` : 'None failed'}
-            />
+            <Stat label="Model calls" value={count(all.calls)} hint={failures(all) || 'None failed'} />
             <Stat
               label="Tokens"
               value={compact(all.input + all.output)}
@@ -215,7 +216,7 @@ function PartTable({data}: {data: Usage}) {
                 </Td>
                 <Num>
                   {count(total.calls)}
-                  {total.failed > 0 && <span className="block text-xs text-bad">{count(total.failed)} failed</span>}
+                  {failures(total) && <span className="block text-xs text-bad">{failures(total)}</span>}
                 </Num>
                 <Num>{compact(total.input)}</Num>
                 <Num>{compact(total.output)}</Num>
@@ -278,7 +279,7 @@ function ModelTable({rows}: {rows: UsageRow[]}) {
               <Td className="min-w-40 text-muted">{[...entry.parts].join(', ')}</Td>
               <Num>
                 {count(total.calls)}
-                {total.failed > 0 && <span className="block text-xs text-bad">{count(total.failed)} failed</span>}
+                {failures(total) && <span className="block text-xs text-bad">{failures(total)}</span>}
               </Num>
               <Num>{compact(total.input + total.output)}</Num>
               <Num className={cn(total.unknown && 'text-warn')}>{cost(total)}</Num>
