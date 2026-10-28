@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 import os
+import sys
 import time
 
 # The security broker relays every isolated model call to the configured reply provider.
@@ -10,8 +11,9 @@ BROKER_URL = "http://nocheh-security:8786/v1"
 FIXTURE_URL = "http://model-fixture:8317/v1"
 # Wait before the secret check's one retry after a provider server error.
 RETRY_SECONDS = 2
-# Nocheh joins the texts of one secret check with this separator.
+# Nocheh joins the texts of one secret check with one of these separators.
 FRAGMENT = '\n<NOCHEH_FRAGMENT>\n'
+FIELD = '\n⟪NOCHEH_FIELD_BOUNDARY⟫\n'
 
 
 class DetectorContractError(ValueError):
@@ -156,9 +158,10 @@ def _call_subscription(credentials: SubscriptionCredentials, model: str, message
 def detect_literals(text: str, credentials: SubscriptionCredentials, model: str, prompts=None):
     """Return validated literal candidates, never rewritten text. A provider safety filter can
     decline a check at random and pass the same text a moment later, so a declined check is
-    asked once more; a batch still declined is checked again in halves. One fragment declined
-    twice on its own still fails the whole check."""
-    parts = text.split(FRAGMENT)
+    asked once more; a batch still declined is checked again in halves. A single text declined
+    twice on its own is returned whole as a secret, so it is hidden rather than sent unchecked."""
+    separator = FRAGMENT if FRAGMENT in text else FIELD
+    parts = text.split(separator)
     try:
         try:
             return _detect_once(text, credentials, model, prompts)
@@ -167,12 +170,15 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str,
                 raise
         return _detect_once(text, credentials, model, prompts)
     except DetectorContractError as error:
-        if str(error) != 'detector_refused' or len(parts) < 2:
+        if str(error) != 'detector_refused':
             error.shape.update(input_length=len(text), parts=len(parts))
             raise
+    if len(parts) < 2:
+        print(f'secret check declined one text of {len(text)} characters twice; it is hidden whole', file=sys.stderr, flush=True)
+        return [text] if text else []
     found = []
     for half in (parts[:len(parts) // 2], parts[len(parts) // 2:]):
-        for literal in detect_literals(FRAGMENT.join(half), credentials, model, prompts):
+        for literal in detect_literals(separator.join(half), credentials, model, prompts):
             if literal not in found:
                 found.append(literal)
     return found
