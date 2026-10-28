@@ -630,6 +630,7 @@ class AssistantGateway:
             raise ValueError('notice_chat_not_allowed')
         text=body.get('text')
         if not isinstance(text,str) or not text.strip() or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_notice')
+        markup=notice_buttons(body.get('buttons'))
         if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
         name='notice-'+body['id']
         async with self.action_lock:
@@ -640,7 +641,13 @@ class AssistantGateway:
             token=DISPATCH_KEY.set('notice:'+body['id'])
             check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True))
             try:
-                await self.adapter._bot.send_message(int(chat),text,parse_mode=None)
+                from telegram.error import BadRequest
+                try:await self.adapter._bot.send_message(int(chat),text,parse_mode=None,reply_markup=markup)
+                except BadRequest:
+                    # Telegram refused a button, such as a dashboard address it does not accept;
+                    # nothing was sent, so the notice goes without buttons.
+                    if markup is None:raise
+                    await self.adapter._bot.send_message(int(chat),text,parse_mode=None)
                 result={'state':'done'}
             except Exception:result={'state':'ambiguous'}
             finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
@@ -652,6 +659,25 @@ class AssistantGateway:
         if self.loop and self.adapter:
             try:asyncio.run_coroutine_threadsafe(self.adapter.disconnect(),self.loop).result(timeout=20)
             except Exception:pass
+
+
+def notice_buttons(buttons):
+    """One row of buttons under a problem notice: open a page in the mini app or a browser, or
+    the Retry failed press that storage handles. Anything else is refused."""
+    import re
+    if buttons is None:return None
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    if not isinstance(buttons,list) or not 0<len(buttons)<=3:raise ValueError('invalid_notice')
+    row=[]
+    for button in buttons:
+        label=button.get('text') if isinstance(button,dict) else None
+        if not isinstance(label,str) or not 0<len(label)<=40 or len(button)!=2:raise ValueError('invalid_notice')
+        web,url,callback=button.get('web_app'),button.get('url'),button.get('callback')
+        if isinstance(web,str) and len(web)<=512 and re.fullmatch(r'https://\S+',web):row.append(InlineKeyboardButton(label,web_app=WebAppInfo(web)))
+        elif isinstance(url,str) and len(url)<=512 and re.fullmatch(r'https?://\S+',url):row.append(InlineKeyboardButton(label,url=url))
+        elif callback=='nr':row.append(InlineKeyboardButton(label,callback_data=callback))
+        else:raise ValueError('invalid_notice')
+    return InlineKeyboardMarkup([row])
 
 
 def check_delivery_policy(credential):

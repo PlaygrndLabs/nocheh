@@ -2,7 +2,8 @@ import {canonical} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {approvalAction,approvalCard,approvalLines,fillTemplate,ownerPrompts,type ApprovalText} from '../prompts.js';
+import {approvalAction,approvalCard,approvalLines,fillTemplate,labeledLines,ownerPrompts,problemButtons,type ApprovalText} from '../prompts.js';
+import {retryFailedWorkflows} from './workflow-owner.js';
 import {evaluate} from '../security/store.js';
 import type {Effect} from '../security/contract.js';
 import type {SourceReference} from './archive.js';
@@ -14,6 +15,8 @@ type ActionKind='telegram'|'controlled';
 // Telegram allows 64 bytes of button data: a marker, the choice, and prefixes
 // of the action ID and of the fingerprint of its exact content.
 const buttonData=/^n([ad])([a-f0-9]{40})([a-f0-9]{16})$/;
+/** The Retry failed button under a problem notice in the owner's private chat. */
+export const retryButton='nr';
 const reviewLimit=2200;
 // While a card is filled, \u0001N\u0002label\u0003 marks a label linked to the Nth
 // address. These control characters are removed from every other text first.
@@ -189,6 +192,7 @@ export class ActionCommandRepository {
     if(original.kind!=='telegram_update'||original.origin!=='live')return false;
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
     const query=row?JSON.parse(row.payload.toString()).callback_query:null,data=typeof query?.data==='string'?query.data.match(buttonData):null;
+    if(query?.data===retryButton&&typeof query.id==='string')return this.retryPressed(query);
     if(!data||typeof query.id!=='string')return false;
     const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),{line}=await this.texts();
     const answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:text.slice(0,200)},10000);
@@ -211,6 +215,18 @@ export class ActionCommandRepository {
       reply=line.decided;
     }
     await answer(reply);await this.settle(kind,action.id);return true;
+  }
+  /** Retry failed under a problem notice: only the owner's press in their private chat retries anything. */
+  private async retryPressed(query:any):Promise<boolean> {
+    const chat=String(query.message?.chat?.id??''),owner=this.access.policy().owner_id;
+    const labels=labeledLines(problemButtons,(await ownerPrompts(this.access.stores.control))['system.problem_buttons']);
+    let reply=labels.only_owner!;
+    if(owner&&String(query.from?.id??'')===owner&&chat===owner) {
+      const {retried}=await retryFailedWorkflows(this.access.stores.control,{admin:true,scope:null});
+      reply=retried?fillTemplate(labels.retried!,{count:String(retried)}):labels.nothing!;
+    }
+    await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:reply.slice(0,200)},10000);
+    return true;
   }
   async controlReply(source:SourceReference):Promise<string|null> {
     const original=await this.access.archive.verify(source);

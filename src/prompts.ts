@@ -11,7 +11,7 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_texts','tasks.reminder','system.problems'] as const;
+  'telegram.approval_texts','tasks.reminder','system.problems','system.problem_buttons'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -73,8 +73,12 @@ export type ApprovalText='approve'|'reject'|'private_chat'|'unnamed_group'|'topi
   'only_owner'|'only_requester'|'changed'|'decided';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
+  return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;
+}
+/** "name: text" lines over their defaults; a line the owner removed or left empty keeps its default. */
+export function labeledLines(defaults:string,text:string|undefined):Record<string,string> {
   const read=(value:string)=>Object.fromEntries(value.split('\n').map(line=>line.match(/^\s*([a-z_]+)\s*:\s*(.*\S)\s*$/)).filter(match=>!!match).map(match=>[match![1],match![2]]));
-  return {...read(approvalTexts),...read(text??'')} as Record<ApprovalText,string>;
+  return {...read(defaults),...read(text??'')};
 }
 /** Fill a card template; a line naming a value that is missing is left out. */
 export function fillTemplate(template:string,values:Record<string,string|null|undefined>):string {
@@ -86,9 +90,12 @@ export function fillTemplate(template:string,values:Record<string,string|null|un
 export const taskReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
 /** A message to the owner's private chat about new or worse problems, one line each. */
 export const problemNotice='⚠️ Nocheh found a problem:\n{problems}\n\nSee System › Health in the dashboard.';
+/** The buttons under a problem notice and the short answers to a press. */
+export const problemButtons=['open: 🔎 Open','retry: 🔁 Retry failed','retried: 🔁 Retrying {count} failed tasks now.',
+  'nothing: Nothing failed can be retried right now.','only_owner: Only the owner can do this.'].join('\n');
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'system.problems':problemNotice};
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'system.problems':problemNotice,'system.problem_buttons':problemButtons};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (
