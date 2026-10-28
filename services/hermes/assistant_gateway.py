@@ -26,6 +26,16 @@ TURN_CAPACITY = parallel('NOCHEH_PARALLEL_REPLIES', 3)
 NOT_TRANSMITTED = {'state':'failed','error_code':'assistant_runtime_unavailable','error_stage':'telegram_send_not_transmitted'}
 SOURCE_CITATION = re.compile(r'\s*【nocheh:event:[a-f0-9]{64}】')
 SOURCE_ID = re.compile(r'nocheh:event:[a-f0-9]{64}')
+# Telegram shows "typing…" for about five seconds per chat action, so a working
+# turn renews it a little sooner.
+TYPING_INTERVAL = 4.0
+
+
+def typing_enabled():
+    """Owner setting; a malformed value stops startup rather than guessing."""
+    value = os.environ.get('TELEGRAM_TYPING', '').strip() or 'true'
+    if value not in ('true', 'false'): raise ValueError('Invalid TELEGRAM_TYPING')
+    return value == 'true'
 
 
 def render_reply_citations(text):
@@ -154,6 +164,9 @@ def committed_adapter_class():
     class CommittedAdapter(captured_adapter_class()):
         # This adapter is the one that connects. Of the native housekeeping it
         # keeps only the menu, which it clears; no status or DM topics.
+        # Native typing stays off: it would re-arm after the final reply. A
+        # committed turn shows its own, see _turn_typing.
+        turn_typing=False
         async def _run_post_connect_housekeeping(self):await self._register_command_menu()
         async def _ensure_forum_commands(self,msg):pass
         def _is_user_authorized_from_message(self,msg):return TURN.get() is not None
@@ -196,10 +209,31 @@ def committed_adapter_class():
             # Native media preprocessing would re-download files and can invoke
             # a global sticker vision/cache path outside this conversation.
             await self.handle_message(event)
+        async def _turn_typing(self,event,turn):
+            """Show "typing…" in this turn's chat or topic until its reply is ready.
+
+            Each chat action passes the same audience and authority check as the
+            reply, so it never reaches another chat, topic or a revoked space.
+            """
+            from gateway.platforms.base import _thread_metadata_for_event
+            scope=turn['scope'];cancelled=turn.get('cancelled')
+            check=OUTBOUND_CHECK.set(outbound_check(scope.chat_id,scope.space,
+                lambda:check_delivery_policy(turn['body']['archive_credential']),cancelled))
+            try:
+                while not (cancelled and cancelled.is_set()):
+                    try:await asyncio.wait_for(self.send_typing(event.source.chat_id,metadata=_thread_metadata_for_event(event)),TYPING_INTERVAL)
+                    except Exception:pass # A missed status is cosmetic; the next tick tries again.
+                    await asyncio.sleep(TYPING_INTERVAL)
+            finally:OUTBOUND_CHECK.reset(check)
         async def handle_message(self,event):
             turn=TURN.get()
             if turn is None:raise RuntimeError('uncommitted_message')
-            response=await self._message_handler(event)
+            # A fixed control reply needs no model, so there is nothing to wait for.
+            typing=asyncio.create_task(self._turn_typing(event,turn)) if self.turn_typing and turn['body'].get('control_reply') is None else None
+            try:response=await self._message_handler(event)
+            finally:
+                # Stop before delivery: a status sent after the reply would show again.
+                if typing:typing.cancel();await asyncio.wait([typing])
             # A failed assistant turn is not intentional silence. Keep the
             # pre-delivery failure visible to the dispatcher so it can retry
             # under a fresh attempt identity without sending anything here.
@@ -306,7 +340,7 @@ class AssistantGateway:
             from gateway.config import PlatformConfig
             self.loop=asyncio.get_running_loop();self.capacity=asyncio.Semaphore(TURN_CAPACITY);self.action_lock=asyncio.Lock()
             config=PlatformConfig(enabled=True,token=self.token,typing_indicator=False,gateway_restart_notification=False)
-            self.adapter=committed_adapter_class()(config)
+            self.adapter=committed_adapter_class()(config);self.adapter.turn_typing=typing_enabled()
             async def message(event):
                 turn=TURN.get()
                 if turn is None:raise RuntimeError('uncommitted_turn')

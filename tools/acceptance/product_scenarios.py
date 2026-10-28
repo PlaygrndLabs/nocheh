@@ -120,6 +120,26 @@ class ProductScenarios(Scenarios):
         _, text = self.turn(self.f.message(GROUP, 'و حالا؟ [[turn:UNADDR42]]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
         self.gate('shown_only_once', 'absent' in text, answer=text)
 
+    def typing_shows_while_working(self):
+        # Telegram shows "typing…" in the chat or topic while Nocheh works, and it stops with the reply.
+        def calls(since, chat):
+            return [call for call in self.f.telegram()['calls'] if call['at'] >= since and str(call['parameters'].get('chat_id')) == str(chat)]
+        for chat, topic, name in ((OWNER, None, 'private'), (GROUP, TEAM_TOPIC, 'topic')):
+            started = time.time()
+            self.turn(self.f.message(chat, 'یک سؤال کوتاه دارم', topic=topic), chat, topic)
+            time.sleep(6)
+            seen = calls(started, chat)
+            typing = [call for call in seen if call['method'] == 'sendChatAction']
+            reply = max(call['at'] for call in seen if call['method'] == 'sendMessage')
+            self.gate(name+'_typing_shown', typing and all(call['parameters'].get('action') == 'typing' and
+                      str(call['parameters'].get('message_thread_id') or '') == str(topic or '') for call in typing),
+                      count=len(typing), threads=sorted({str(call['parameters'].get('message_thread_id')) for call in typing}))
+            self.gate(name+'_typing_stops_with_the_reply', all(call['at'] <= reply for call in typing))
+        # A group message nobody addressed to Nocheh starts no work, so no typing either.
+        started = time.time()
+        self.turn(self.f.message(GROUP, 'فقط برای بقیه TYPING42', sender=MEMBER, mention=False, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC, expect_reply=False)
+        self.gate('no_typing_when_not_addressed', not [call for call in calls(started, GROUP) if call['method'] == 'sendChatAction'])
+
     def not_allowed_person_gets_fixed_reply(self):
         # Someone not allowed who addresses Nocheh gets the owner's fixed text once; no model runs.
         brain = len(self.f.brain())
@@ -556,7 +576,8 @@ class ProductScenarios(Scenarios):
         return Dashboard(self.f)
 
 
-PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'not_allowed_person_gets_fixed_reply',
+PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
+                 'not_allowed_person_gets_fixed_reply',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',

@@ -1,4 +1,4 @@
-"""Fsync before PTB sees updates; journal writes before any outbound request."""
+"""Fsync before PTB sees updates; journal writes before any outbound request but a chat action."""
 from __future__ import annotations
 
 import asyncio
@@ -243,6 +243,14 @@ def instrument_request(request, capture: Capture, polling=False):
             # Formatting, chunks and native retries may change routing. Check
             # the actual request before journaling or transmission each time.
             check = OUTBOUND_CHECK.get()
+            if method == 'sendChatAction':
+                # A chat action ("typing…") carries no content and expires by
+                # itself. It is sent only inside a bound turn and is not
+                # journaled, so a long turn adds no archive records.
+                if check is None:
+                    raise RuntimeError('telegram_chat_action_unbound')
+                await asyncio.to_thread(check, method, parameters)
+                return await super().do_request(*args, **kwargs)
             if check is not None:
                 await asyncio.to_thread(check, method, parameters)
             # Parent context is inherited by PTB's background reply tasks.

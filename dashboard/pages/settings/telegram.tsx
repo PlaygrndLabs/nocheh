@@ -13,6 +13,7 @@ export const telegramKeys = [
   'TELEGRAM_GROUP_IDS',
   'TELEGRAM_GROUP_ACCESS',
   'TELEGRAM_TOPIC_MEMORY',
+  'TELEGRAM_TYPING',
   'NOCHEH_MINI_APP_URL',
   'CLOUDFLARE_TUNNEL_TOKEN',
 ];
@@ -67,6 +68,26 @@ export function TelegramSettings() {
                 checked={enabled}
                 disabled={s.busy}
                 onChange={on => s.set('TELEGRAM_ENABLED', on ? 'true' : 'false')}
+              />
+            </div>
+          </SettingRow>
+          <SettingRow
+            title={
+              <>
+                Show typing while working
+                <Unsaved show={s.changed('TELEGRAM_TYPING')} />
+              </>
+            }
+            description="Shows “typing…” in the chat or topic while Nocheh works on a reply."
+            htmlFor="telegram-typing"
+          >
+            <div className="flex sm:justify-end">
+              <Switch
+                id="telegram-typing"
+                label="Show typing while working"
+                checked={s.value('TELEGRAM_TYPING') !== 'false'}
+                disabled={s.busy}
+                onChange={on => s.set('TELEGRAM_TYPING', on ? 'true' : 'false')}
               />
             </div>
           </SettingRow>

@@ -604,6 +604,16 @@ itself at startup.
 
 <verification>
 
+- Typing while Nocheh works (2026-10-28,
+  [ADR-0184](docs/adr/0184-typing-status-while-a-turn-works.md)): Telegram
+  showed nothing while a reply was being worked on, because native typing is
+  off and the committed adapter replaces the code that starts it. A committed
+  turn now renews "typing…" every four seconds in its own chat or topic until
+  the answer is ready or the turn fails, under the reply's audience check and
+  outside the outbound journal; Settings › Telegram can turn it off. Checks:
+  [simulation tests](services/hermes/test_telegram_simulation.py) and the full
+  tester scenario `typing_shows_while_working`. Pending: seen on the owner's
+  live install after the machine pull.
 - Menu still shown in the default scope after the strangers change (2026-10-28,
   [ADR-0182](docs/adr/0182-strangers-cost-nothing-and-reach-no-model.md)):
   after the machine pull the private and group menus were empty but the default
