@@ -604,6 +604,19 @@ itself at startup.
 
 <verification>
 
+- Menu still shown in the default scope after the strangers change (2026-10-28,
+  [ADR-0182](docs/adr/0182-strangers-cost-nothing-and-reach-no-model.md)):
+  after the Mac pull the private and group menus were empty but the default
+  scope still listed 33 commands. Cause: the clearing lived on the capture
+  adapter's menu step, but the adapter that connects skips all native
+  post-connect housekeeping, so it never ran. That adapter now clears the
+  menu after each connect, reads each scope back, rechecks a minute later and
+  retries, and also clears the selected groups' own menus. The Hermes capture
+  tests cover the connect path, a rate-limited scope, a menu that comes back
+  and a group the bot has left. The fake Telegram now starts with a leftover
+  default and forum-group menu; `menu_shown_to_nobody` failed on that before
+  the fix.
+
 - Strangers kept away from models, downloads and the menu (2026-10-27,
   [ADR-0182](docs/adr/0182-strangers-cost-nothing-and-reach-no-model.md)):
   the new store test `store-strangers` and every Node test file pass on a
