@@ -152,7 +152,9 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
 
 def committed_adapter_class():
     class CommittedAdapter(captured_adapter_class()):
-        async def _run_post_connect_housekeeping(self):pass
+        # This adapter is the one that connects. Of the native housekeeping it
+        # keeps only the menu, which it clears; no status or DM topics.
+        async def _run_post_connect_housekeeping(self):await self._register_command_menu()
         async def _ensure_forum_commands(self,msg):pass
         def _is_user_authorized_from_message(self,msg):return TURN.get() is not None
         def _should_process_message(self,msg,**kwargs):return TURN.get() is not None

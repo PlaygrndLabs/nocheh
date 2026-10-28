@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from .capture import Capture, DISPATCH_KEY, canonical, captured_adapter_class, digest, instrument_request
+from .capture import Capture, DISPATCH_KEY, canonical, captured_adapter_class, clear_command_menu, digest, instrument_request
 
 
 class Request:
@@ -166,6 +166,34 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
                     Capture(self.root,'testbot').outbound('sendMessage',parameters,dispatch)
                 receipt=json.loads((self.root/'outbound'/(digest(retry)+'.result')).read_bytes())
                 self.assertEqual(receipt['state'],'ambiguous')
+
+    async def test_command_menu_is_cleared_everywhere_and_cleared_again_if_it_comes_back(self):
+        from telegram.error import BadRequest, RetryAfter
+        menus={'default':['status'],'all_private_chats':['status'],'all_group_chats':['status'],'-100':['status'],'-200':[]}
+        failures={'all_group_chats':[RetryAfter(5)]}
+        def name(scope): return str(scope.chat_id) if scope.type=='chat' else scope.type
+        class Bot:
+            async def get_my_commands(self,scope):
+                if name(scope)=='-300': raise BadRequest('Chat not found')
+                return menus[name(scope)]
+            async def delete_my_commands(self,scope):
+                if failures.get(name(scope)): raise failures[name(scope)].pop()
+                menus[name(scope)]=[]
+        waits=[]
+        async def sleep(seconds):
+            waits.append(seconds)
+            if len(waits)==2: menus['default']=['status']  # A process still shutting down writes its menu again.
+        with patch.dict('os.environ',{'TELEGRAM_GROUP_IDS':'-100,-200,-300'}),self.assertLogs('services.hermes.capture',level='WARNING'):
+            await clear_command_menu(Bot(),sleep=sleep)
+        self.assertEqual(menus,{key:[] for key in menus})
+        self.assertEqual(waits,[0,60])
+
+    async def test_the_connecting_adapter_clears_the_menu_after_connect(self):
+        from .assistant_gateway import committed_adapter_class
+        adapter=object.__new__(committed_adapter_class());adapter._bot=object()
+        with patch('services.hermes.capture.clear_command_menu',new_callable=AsyncMock) as clear:
+            await adapter._run_post_connect_housekeeping();await adapter._menu_clear_task
+        clear.assert_awaited_once_with(adapter._bot)
 
     async def test_native_cold_start_retains_updates_and_handlers_require_committed_dispatch(self):
         from plugins.platforms.telegram.adapter import TelegramAdapter

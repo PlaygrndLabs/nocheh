@@ -83,7 +83,10 @@ class TelegramMock:
         self.path=Path(state);self.changed=asyncio.Event()
         self.state=json.loads(self.path.read_text()) if self.path.exists() else {
             'updates':[],'sent':[],'calls':[],'unknown':[],'faults':[],'files':{},'allowed_updates':[],
-            'next_message_id':1000,'offset':0}
+            'next_message_id':1000,'offset':0,
+            # Menus an earlier native Hermes left behind: the default one and a forum group's own.
+            'commands':{json.dumps([scope,''],sort_keys=True):[{'command':'status','description':'Show status'}]
+                        for scope in ({'type':'default'},{'type':'chat','chat_id':-10042})}}
 
     def save(self):
         self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
