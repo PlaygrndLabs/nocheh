@@ -155,10 +155,16 @@ def _call_subscription(credentials: SubscriptionCredentials, model: str, message
 
 def detect_literals(text: str, credentials: SubscriptionCredentials, model: str, prompts=None):
     """Return validated literal candidates, never rewritten text. A provider safety filter can
-    decline a large batch of joined fragments while passing each part, so a declined batch is
-    checked again in halves; one fragment declined on its own still fails the whole check."""
+    decline a check at random and pass the same text a moment later, so a declined check is
+    asked once more; a batch still declined is checked again in halves. One fragment declined
+    twice on its own still fails the whole check."""
     parts = text.split(FRAGMENT)
     try:
+        try:
+            return _detect_once(text, credentials, model, prompts)
+        except DetectorContractError as error:
+            if str(error) != 'detector_refused':
+                raise
         return _detect_once(text, credentials, model, prompts)
     except DetectorContractError as error:
         if str(error) != 'detector_refused' or len(parts) < 2:
