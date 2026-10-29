@@ -1,13 +1,18 @@
 """The owner's dashboard API in a kept fixture, through its localhost preview relay.
 
-The tester signs in like the browser does: it opens the page, keeps the session
-cookie and sends the page's CSRF token with every call. Only a fixture started
-with --preview-port has the relay.
+The tester signs in like the browser does: it creates the fixture's synthetic
+owner password, or signs in with it, keeps the session cookie and sends the
+page's CSRF token with every call. Only a fixture started with --preview-port
+has the relay.
 """
 import json
 import re
 import urllib.error
 import urllib.request
+
+
+# A synthetic password for disposable fixtures only.
+FIXTURE_PASSWORD = 'fixture-owner-password'
 
 
 def preview_port(manifest):
@@ -20,8 +25,11 @@ def preview_port(manifest):
 class Dashboard:
     def __init__(self, fixture, port=None):
         self.origin = 'http://127.0.0.1:'+str(port or preview_port(fixture.manifest))
-        page = urllib.request.urlopen(urllib.request.Request(self.origin+'/'), timeout=60)
-        cookies = [value.split(';')[0] for value in page.headers.get_all('Set-Cookie') or [] if value.startswith('nocheh_session=')]
+        # The first sign-in on a fresh fixture creates the password; later ones use it.
+        login = urllib.request.urlopen(urllib.request.Request(self.origin+'/api/nocheh/login', method='POST',
+            data=json.dumps({'password': FIXTURE_PASSWORD}).encode(), headers={'content-type': 'application/json'}), timeout=60)
+        cookies = [value.split(';')[0] for value in login.headers.get_all('Set-Cookie') or [] if value.startswith('nocheh_session=')]
+        page = urllib.request.urlopen(urllib.request.Request(self.origin+'/', headers={'cookie': cookies[0]} if cookies else {}), timeout=60)
         csrf = re.search(r'window\.__NOCHEH_CSRF__=("[A-Za-z0-9_-]+")', page.read().decode())
         if not cookies or not csrf:
             raise ValueError('dashboard_session_unavailable')

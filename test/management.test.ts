@@ -93,9 +93,24 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const aliasMetrics=await fetch(base.replace('/api/plugins/nocheh','/api/nocheh')+'/workflows/metrics?range=7d&family=browser',{headers});assert.deepEqual(await aliasMetrics.json(),metrics);
     assert.equal((await fetch(base+'/workflows',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);
     assert.equal((await request('/workflows?limit=1')).workflows[0].state,'waiting');
-    const root=await fetch(base.replace('/api/plugins/nocheh','/'));
-    const sessionCookie=root.headers.get('set-cookie')!.split(';')[0]!;
+    // Signed out, the page opens on its sign-in screen: first creating the owner's password.
+    const login=base.replace('/api/plugins/nocheh','/api/nocheh/login'),page=base.replace('/api/plugins/nocheh','/');
+    const signedOut=await fetch(page);assert.equal(signedOut.headers.get('set-cookie'),null);
+    const signedOutPage=await signedOut.text();assert.match(signedOutPage,/window.__NOCHEH_LOGIN__="create"/);assert.doesNotMatch(signedOutPage,/__NOCHEH_CSRF__/);
+    assert.equal((await fetch(base+'/settings',{headers:{Cookie:'nocheh_session='+'a'.repeat(43)}})).status,401);
+    const created=await fetch(login,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"river-lamp-42"}'});
+    assert.equal(created.status,200);assert.match(created.headers.get('set-cookie')??'',/^nocheh_session=[A-Za-z0-9_-]{43}; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000$/);
+    const wrong=await fetch(login,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"guess-guess"}'});
+    assert.equal(wrong.status,401);assert.equal(wrong.headers.get('set-cookie'),null);
+    const signedIn=await fetch(login,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"river-lamp-42"}'});
+    const sessionCookie=signedIn.headers.get('set-cookie')!.split(';')[0]!;
+    const root=await fetch(page,{headers:{Cookie:sessionCookie}});
     const csrf=/window.__NOCHEH_CSRF__="([^"]+)"/.exec(await root.text())![1]!;
+    // A phone's session reaches only the mini app's routes.
+    const phone=(await (await fetch(base.replace('/api/plugins/nocheh','/api/nocheh/mini-app/sign-in'),{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"river-lamp-42"}'})).json() as any).token;
+    assert.equal((await fetch(base+'/settings/apply',{method:'POST',headers:{'X-Nocheh-Mini-Session':phone}})).status,404);
+    assert.equal((await fetch(base+'/owner-lock',{headers:{'X-Nocheh-Mini-Session':phone}})).status,404);
+    assert.equal((await fetch(base+'/status',{headers:{'X-Nocheh-Mini-Session':'b'.repeat(43)}})).status,401);
     const controlPath='/workflows/'+'a'.repeat(64)+'/retry';
     assert.equal((await fetch(base+controlPath,{method:'POST',headers:{Cookie:sessionCookie,'Content-Type':'application/json'},body:'{"revision":1}'})).status,403);
     assert.equal((await fetch(base+controlPath,{method:'POST',headers:{Cookie:sessionCookie,'X-Nocheh-CSRF':csrf,Origin:'https://untrusted.example'},body:'{"revision":1}'})).status,403);
@@ -121,6 +136,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     await request('/jobs/'+job.id+'/cancel',{});
     assert.equal((await request('/jobs/'+job.id)).state,'cancelled');
     await stop();slow=false;await start();
+    assert.deepEqual(await (await fetch(login,{headers:{Cookie:sessionCookie}})).json(),{state:'signed_in',paused_until:null},'a restart keeps the browser signed in');
     assert.equal((await fetch(base+'/jobs/'+job.id+'/start',{method:'POST',headers,body:JSON.stringify({mapping:{},review_approved:true})})).status,409);
     await request('/jobs/'+job.id+'/start',{mapping:{}});
     imports.set(job.id,{state:'completed',completed:12,duplicates:0});

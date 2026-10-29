@@ -8,7 +8,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {DashboardSessions} from '../src/dashboard-auth.js';
 import {HttpError,json,readJson} from '../src/http.js';
-import {MiniAppLock,miniAppLockRoute} from '../src/mini-app-lock.js';
+import {OwnerLock} from '../src/owner-lock.js';
 import {tmpdir} from 'node:os';
 import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
 import {NotionRepository,notionSchema} from '../src/stores/notion.js';
@@ -17,8 +17,9 @@ import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
-const pool=new pg.Pool(),sessions=new DashboardSessions(),miniAppLock=new MiniAppLock(join(tmpdir(),'nocheh-preview-'+randomUUID(),'lock.json')),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
+const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLock(join(tmpdir(),'nocheh-preview-'+randomUUID(),'lock.json')),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
 await initialize(pool);
+await ownerLock.create('preview-password');
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
 await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);
 // Two synthetic projects, each with its own list beside the personal one.
@@ -321,12 +322,23 @@ const server=createServer((req,res)=>{void(async()=>{
   res.setHeader('content-type','text/html');res.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;
  }
  if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;}
- sessions.authorize(req,req.method!=='GET');
+ // The mini app's phones sign in with the preview's synthetic password and send their session instead of a cookie.
+ const phoneRoute=path.match(/^\/api\/nocheh\/mini-app\/(sign-in|check|sign-out)$/)?.[1];
+ if(phoneRoute){const body=await readJson(req) as any;
+  if(phoneRoute==='check')return json(res,200,{state:await ownerLock.check(body.token,'phone')});
+  if(phoneRoute==='sign-out'){await ownerLock.signOut(body.token);return json(res,200,{ok:true});}
+  try{return json(res,200,await ownerLock.signIn(body.password,'phone'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
+ const phone=req.headers['x-nocheh-mini-session'];
+ if(typeof phone==='string'){if(await ownerLock.check(phone,'phone')!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');}
+ else sessions.authorize(req,req.method!=='GET');
  if(['/inngest/runs','/hermes/nocheh'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
  const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
  const mode=await scenario();if(mode==='conflict'&&!modeRevision){settingsRevision+='external';revision++;modeRevision=true;}if(mode!=='conflict')modeRevision=false;if(mode==='offline'&&['/monitoring','/workflows/metrics','/status','/tools/actions'].includes(route))throw new HttpError(503,'fixture_observation_unavailable');
  if(await messagesFixture(req,res,route,url))return;
- if(route==='/mini-app/lock'||route.startsWith('/mini-app/lock/'))return miniAppLockRoute(miniAppLock,req,res,route);
+ // The owner password card, on a synthetic password; the preview itself has no sign-in.
+ if(route==='/owner-lock'&&req.method==='GET')return json(res,200,await ownerLock.status());
+ if(route==='/owner-lock/password'&&req.method==='POST'){const body=await readJson(req) as any;const {token}=await ownerLock.changePassword(body.current,body.password);return json(res,200,{...await ownerLock.status(token),csrf:sessions.authorize(req).csrf});}
+ if(route==='/owner-lock/sign-out-others'&&req.method==='POST'){await ownerLock.signOutOthers('');return json(res,200,await ownerLock.status());}
  if(req.method==='GET'){
   if(route==='/health')return json(res,200,{ok:true});
   if(route==='/usage'){const days=Number(url.searchParams.get('days')||30),day=(ago:number)=>new Date(Date.now()-ago*864e5).toISOString().slice(0,10);

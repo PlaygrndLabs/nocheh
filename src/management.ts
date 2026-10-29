@@ -1,12 +1,12 @@
 import { createReadStream } from 'node:fs';
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, open, stat, unlink, chmod } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { HttpError, json, object, readJson, string } from './http.js';
-import {DashboardSessions} from './dashboard-auth.js';
+import {OwnerSessions,SESSION_COOKIE_AGE,csrfFor} from './dashboard-auth.js';
 import type {Duplex} from 'node:stream';
 import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 import {importConfiguration} from './workflows/imports.js';
@@ -14,7 +14,8 @@ import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
 import {ManagementMaintenance} from './management-maintenance.js';
 import {DashboardLiveUpdates} from './dashboard-live.js';
-import {MiniAppLock,miniAppLockRoute} from './mini-app-lock.js';
+import {OwnerLock} from './owner-lock.js';
+import {miniAppRoute} from './mini-app.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -169,21 +170,41 @@ export async function startManagement() {
   await mkdir(JOBS, {recursive: true, mode: 0o700});
   const token = (await readFile(join(STATE, 'admin/dashboard/token'), 'utf8')).trim();
   if (token.length < 32) throw new Error('dashboard_token_missing');
-  const sessions=new DashboardSessions();
-  const miniAppLock=new MiniAppLock(join(STATE,'admin/mini-app/lock.json'));
+  const lock=new OwnerLock(join(STATE,'admin/owner-lock.json'));
+  const sessions=new OwnerSessions(lock);
   const archiveConnection=object(await python({operation:'archive.connection'}));
   const sockets=new Set<Duplex>();
   const live=new DashboardLiveUpdates();
   for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
   }
-  function authorized(req: IncomingMessage, download=false) {
+  /** Who is calling: the installation token, a signed-in browser, or a signed-in phone through the mini app. */
+  async function authorized(req: IncomingMessage, route: string, download=false):Promise<'token'|'browser'|'phone'> {
     const cookie = download ? req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('nocheh_download='))?.slice('nocheh_download='.length) : undefined;
     const actual = Buffer.from(String(req.headers['x-nocheh-session-token'] ?? req.headers['x-hermes-session-token'] ?? cookie ?? ''));
     const expected = Buffer.from(token);
-    if (actual.length === expected.length && timingSafeEqual(actual, expected))return true;
-    sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
-    return false;
+    if (actual.length === expected.length && timingSafeEqual(actual, expected))return 'token';
+    const phone=req.headers['x-nocheh-mini-session'];
+    if(typeof phone==='string'&&!sessions.token(req)) {
+      // A phone reaches only the mini app's own routes, with a header token and no cookie, so no CSRF applies.
+      if(!miniAppRoute(req.method??'',route))throw new HttpError(404,'not_found');
+      const state=await sessions.state(phone,'phone');
+      if(state==='no_password')throw new HttpError(401,'mini_app_password_not_set');
+      if(state!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');
+      return 'phone';
+    }
+    await sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
+    return 'browser';
+  }
+  const sessionCookie=(value:string,age=SESSION_COOKIE_AGE)=>`nocheh_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}`;
+  /** Answers a password check with its refusal details: tries left before a pause, or when the pause ends. */
+  async function passwordAnswer(res:ServerResponse,work:()=>Promise<unknown>) {
+    try {return json(res,200,await work());}
+    catch(error) {
+      if(!(error instanceof HttpError))throw error;
+      const {until,tries_left}=error as HttpError&{until?:number;tries_left?:number};
+      return json(res,error.status,{error:error.code,...(until?{until}:{}),...(tries_left!==undefined?{tries_left}:{})});
+    }
   }
   function checkOrigin(req:IncomingMessage) {
     const authority = `127.0.0.1:${PORT}`;
@@ -224,7 +245,22 @@ export async function startManagement() {
     const prefix=path.startsWith(PRIMARY+'/')?PRIMARY:PREFIX;
     if (path.startsWith(prefix + '/')) {
       const route = path.slice(prefix.length);
-      const legacy=authorized(req,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
+      // Signing in needs no session: the password is the check. Only the browser's own sign-in sets a cookie.
+      if(route==='/login'&&req.method==='GET'){
+        const status=await lock.status();
+        return json(res,200,{state:await sessions.session(req)?'signed_in':status.password_set?'sign_in':'create',paused_until:status.paused_until});
+      }
+      if(route==='/login'&&req.method==='POST')return passwordAnswer(res,async()=>{
+        const {password}=object(await readJson(req,4096));
+        const {token:session}=(await lock.status()).password_set?await lock.signIn(password,'browser'):await lock.create(password);
+        res.setHeader('set-cookie',sessionCookie(session));return {ok:true};
+      });
+      // The mini app service signs phones in and checks them here; it holds no credential of its own.
+      if(route==='/mini-app/sign-in'&&req.method==='POST')return passwordAnswer(res,async()=>lock.signIn(object(await readJson(req,4096)).password,'phone'));
+      if(route==='/mini-app/check'&&req.method==='POST')return json(res,200,{state:await sessions.state(String(object(await readJson(req,4096)).token??''),'phone')});
+      if(route==='/mini-app/sign-out'&&req.method==='POST'){await lock.signOut(object(await readJson(req,4096)).token);sessions.forget();return json(res,200,{ok:true});}
+      const caller=await authorized(req,route,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
+      const legacy=caller==='token';
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
       if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
@@ -247,7 +283,7 @@ export async function startManagement() {
       if(/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method==='GET')return json(res,200,await python({operation:'tools.manage',action:route.slice(7)}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
-      if (req.method==='POST' && route==='/ws-ticket')return json(res,200,{ticket:sessions.ticket(sessions.authorize(req)),ttl_seconds:30});
+      if (req.method==='POST' && route==='/ws-ticket')return json(res,200,{ticket:sessions.ticket(await sessions.authorize(req)),ttl_seconds:30});
       if(['/memory/honcho','/memory/honcho/rebuild','/memory/honcho/retry-failed','/memory/honcho/fresh-start','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview'].includes(route) && ['GET','POST'].includes(req.method??'')) {
         return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
           ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
@@ -287,10 +323,25 @@ export async function startManagement() {
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
       // The mini app's password. The owner sets it here; the mini app service signs in and
       // checks its sessions through the same routes.
-      if(route==='/mini-app/lock'||route.startsWith('/mini-app/lock/'))return miniAppLockRoute(miniAppLock,req,res,route);
+      // The owner's password, from a signed-in browser only.
+      if(caller!=='phone'&&route==='/owner-lock'&&req.method==='GET')return json(res,200,await lock.status(sessions.token(req)));
+      if(caller==='browser'&&route==='/owner-lock/password'&&req.method==='POST')return passwordAnswer(res,async()=>{
+        const body=object(await readJson(req,4096));
+        const {token:session}=await lock.changePassword(body.current,body.password);
+        // The new session has a new CSRF value; the page keeps using it.
+        sessions.forget();res.setHeader('set-cookie',sessionCookie(session));return {...await lock.status(session),csrf:csrfFor(session)};
+      });
+      if(caller==='browser'&&route==='/owner-lock/sign-out-others'&&req.method==='POST'){
+        await lock.signOutOthers(sessions.token(req));sessions.forget();return json(res,200,await lock.status(sessions.token(req)));
+      }
+      if(caller==='browser'&&route==='/logout'&&req.method==='POST'){
+        await lock.signOut(sessions.token(req));sessions.forget();res.setHeader('set-cookie',sessionCookie('',0));return json(res,200,{ok:true});
+      }
       if (req.method === 'GET' && route === '/settings') {
         // A running apply is named so a page opened or reloaded meanwhile follows it instead of offering Apply again.
         const applying=[...activeJobs.values()].find(job=>job.kind==='settings.apply');
+        // A phone reads settings only to know which chat is the owner's own.
+        if(caller==='phone')return json(res,200,{fields:((object(await python({operation:'settings.view'})).fields??[]) as {key:string}[]).filter(field=>field.key==='TELEGRAM_OWNER_ID')});
         return json(res, 200, {...object(await python({operation: 'settings.view'})),
           applying:applying?{id:applying.id,step:applying.step??'starting',started_at:applying.created_at}:null});
       }
@@ -389,10 +440,12 @@ export async function startManagement() {
       res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});res.end(revision);return;
     }
     if(req.method==='GET'&&path==='/') {
-      const session=sessions.page(req);
-      res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
+      // Without a signed-in session the same page opens on its sign-in screen, with no CSRF value.
+      const session=await sessions.session(req);
+      const bootstrap=session?`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`
+        :`window.__NOCHEH_LOGIN__=${JSON.stringify((await lock.status()).password_set?'sign_in':'create')};`;
       const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision){if(window.__nochehUnsaved)return;location.reload()}nochehRevision=next}catch{}},1000)</script>` : '';
-      const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`).replace('</head>',reload+'</head>');
+      const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',bootstrap).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
     }
     const asset=path.match(/^\/assets\/(app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/);
@@ -401,18 +454,19 @@ export async function startManagement() {
       createReadStream(join(ROOT,'dashboard/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;
     }
     if(path.startsWith('/inngest/')){
-      const session=sessions.authorize(req,req.method!=='GET');
+      const session=await sessions.authorize(req,req.method!=='GET');
       await proxyOwnerInspection(req,res,Number(archiveConnection.port),string(archiveConnection.token),session.csrf,String(archiveConnection.host??'127.0.0.1'));return;
     }
     if(path.startsWith('/hermes/')) {
       if(req.method==='POST'&&path==='/hermes/api/auth/ws-ticket') {
         // Native's ticket helper uses cookie + Origin, without a custom header.
         if(!req.headers.origin)throw new HttpError(403,'origin_required');
-        return json(res,200,{ticket:sessions.ticket(sessions.authorize(req,false)),ttl_seconds:30});
+        return json(res,200,{ticket:sessions.ticket(await sessions.authorize(req,false)),ttl_seconds:30});
       }
       const page=req.method==='GET'&&!path.startsWith('/hermes/api/')&&!path.startsWith('/hermes/assets/')&&!path.startsWith('/hermes/dashboard-plugins/');
-      const session=page?sessions.page(req):sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
-      if(page)res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
+      const session=page?await sessions.session(req):await sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
+      // A signed-out browser signs in on the dashboard first.
+      if(!session){res.writeHead(303,{location:'/'});res.end();return;}
       const connection=object(await python({operation:'native.connection'}));
       proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf,String(connection.host??'127.0.0.1'));return;
     }
@@ -426,7 +480,7 @@ export async function startManagement() {
       checkOrigin(req);if(!req.headers.origin)throw new HttpError(403,'origin_required');
       const url=new URL(req.url??'','http://local');
       if(!['/hermes/api/pty','/hermes/api/ws','/hermes/api/events'].includes(url.pathname))throw new HttpError(403,'websocket_route_denied');
-      sessions.consume(req,url.searchParams.get('ticket')??'');
+      await sessions.consume(req,url.searchParams.get('ticket')??'');
       sockets.add(socket);socket.on('close',()=>sockets.delete(socket));
       const connection=object(await python({operation:'native.connection'}));
       if(!socket.destroyed)proxyNativeSocket(req,socket,head,Number(connection.port),string(connection.token),String(connection.host??'127.0.0.1'));

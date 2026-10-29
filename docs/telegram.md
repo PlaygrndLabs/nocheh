@@ -98,14 +98,12 @@ the owner's Telegram account gets in: every request carries the launch data
 Telegram signs, and the mini app checks that signature with Telegram's public
 key and the bot's public ID. Settings and System stay on the dashboard.
 
-On top of that, the mini app asks for a password. The owner sets and changes it
-in the dashboard, in Settings › Telegram under Mini app; until one is set, the
-mini app stays locked. Each phone signs in once and stays signed in until it
-signs out from Home or goes 30 days without opening the mini app. A new
-password, or Sign out everywhere in the same place, signs every phone out
-within half a minute. After five wrong passwords in a row, sign-in pauses for
-15 minutes, and each further wrong password doubles the pause, up to a day.
-The dashboard keeps only a hash of the password and of each phone's session.
+On top of that, the mini app asks for the owner's Nocheh password, the same one
+as the dashboard ([sign-in](dashboard.md#sign-in)); until the dashboard has
+created it, the mini app stays locked. Each phone signs in once and stays
+signed in until it signs out from Home or goes 30 days without opening the
+mini app. A new password, or Sign out everywhere else in Settings › Privacy &
+data, signs every phone out at once.
 
 The mini app runs as its own small service with no credentials. A Cloudflare
 tunnel connects it, and nothing else, to an https address on the owner's own
@@ -121,7 +119,7 @@ To turn it on:
 3. In the dashboard, open Settings, then Telegram. Under Mini app, enter the
    address (such as `https://nocheh.example.com`) and paste the tunnel token.
    Save, then Apply.
-4. In the same place, set the mini app password.
+4. The mini app asks for the dashboard's password once on each phone.
 
 Apply starts the mini app and the tunnel and puts the mini app on the menu
 button of the owner's private chat. Clearing both fields and applying stops

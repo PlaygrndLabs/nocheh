@@ -2,7 +2,7 @@
  * The Telegram Mini App: Home, Inbox, Tasks and Health on the owner's phone,
  * inside Telegram. It uses the same owner API and pages as the dashboard;
  * Settings and the rest of System stay on the dashboard at home. Each phone
- * signs in once with the password the owner sets in the dashboard.
+ * signs in once with the owner's Nocheh password, the same as the dashboard's.
  */
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
@@ -115,7 +115,7 @@ function minutes(until: number): string {
   return left >= 120 ? `${Math.round(left / 60)} hours` : `${left} ${left === 1 ? 'minute' : 'minutes'}`;
 }
 
-/** Asks for the mini app password once on this phone. */
+/** Asks for the owner's Nocheh password once on this phone. */
 function SignIn({onSignedIn}: {onSignedIn: () => void}) {
   const [password, setPassword] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -138,10 +138,10 @@ function SignIn({onSignedIn}: {onSignedIn: () => void}) {
           ? value.tries_left > 0 && value.tries_left <= 2
             ? `Wrong password. ${value.tries_left} ${value.tries_left === 1 ? 'try' : 'tries'} left before a pause.`
             : 'Wrong password.'
-          : value.error === 'mini_app_sign_in_paused'
+          : value.error === 'sign_in_paused'
             ? `Too many wrong passwords. Try again in ${minutes(Number(value.until))}.`
-            : value.error === 'mini_app_password_not_set'
-              ? 'No password is set yet. Set one in the dashboard first.'
+            : value.error === 'owner_password_not_set'
+              ? 'No password is set yet. Open the dashboard once to create it.'
               : 'Nocheh could not be reached. Try again in a minute.',
       );
     } catch {
@@ -172,8 +172,8 @@ function SignIn({onSignedIn}: {onSignedIn: () => void}) {
         </Button>
       </form>
       <p className="text-[13px] text-muted">
-        You set and change this password in the dashboard, in Settings › Telegram. This phone stays signed in until you
-        sign out or don’t open the mini app for 30 days.
+        Your Nocheh password, the same one as the dashboard. This phone stays signed in until you sign out or don’t open
+        the mini app for 30 days.
       </p>
     </div>
   );
@@ -213,8 +213,8 @@ function Locked({children}: {children: React.ReactNode}) {
   return (
     <div className="mx-auto max-w-md p-6">
       {state === 'no_password' ? (
-        <Notice tone="warn" title="Set a password first">
-          The mini app opens only with a password. Set one in the dashboard, in Settings › Telegram, under Mini app.
+        <Notice tone="warn" title="Create your password first">
+          The mini app opens only with your Nocheh password. Open the dashboard once to create it.
         </Notice>
       ) : (
         <Notice
