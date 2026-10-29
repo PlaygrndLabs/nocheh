@@ -266,8 +266,8 @@ it does not mean credentials are configured or a quota-limited model can answer.
 
 Archive capture precedes inference. Database outages leave updates in the durable
 spool; retries commit them idempotently after recovery. Attachment extraction
-failures retain their source and failure state. Voice notes are archived without
-transcription and never hold a reply. Quota failures pause work for retry;
+failures retain their source and failure state. A reply waits for its voice note's
+transcript; without a voice provider key the note is archived only. Quota failures pause work for retry;
 they do not switch to another provider. Required guard failures send zero
 requests to the protected destination. Unknown outbound outcomes stay ambiguous.
 Action receipt polling backs off for 30 seconds after an uncertain RPC response.

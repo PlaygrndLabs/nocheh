@@ -22,6 +22,7 @@ import {
   preparationLabel,
   problemText,
   secretCheckCostLabel,
+  voiceCostLabel,
   type ImportJob,
 } from '../../lib/messages-format';
 import {
@@ -504,6 +505,7 @@ function ImportReview({job}: {job: ImportJob}) {
           <span className="text-xs text-muted">
             Old messages are archived only; no replies are sent.
             {job.preview && ' ' + secretCheckCostLabel(job.preview.secret_check)}
+            {job.preview?.voice?.notes ? ' ' + voiceCostLabel(job.preview.voice) : ''}
           </span>
         </div>
       </CardBody>

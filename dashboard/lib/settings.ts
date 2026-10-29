@@ -23,7 +23,12 @@ export type SettingsView = {
   apply_state: 'current' | 'pending' | 'unverified';
   fields: SettingField[];
   providers?: {list: ProviderRow[]; parts: ProviderPart[]};
-  models?: {embedding: string[]; embedding_locked: string | null; embedding_rebuild?: string | null};
+  models?: {
+    embedding: string[];
+    embedding_locked: string | null;
+    embedding_rebuild?: string | null;
+    transcription?: {model: string; usd_per_minute: number}[];
+  };
   /** The apply that is running now, if any. */
   applying?: {id: string; step: string; started_at: string} | null;
 };

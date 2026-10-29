@@ -623,6 +623,10 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
   const locked = data.models?.embedding_locked;
   const embeddingModel = settings.value('NOCHEH_EMBEDDING_MODEL');
   const rebuilding = data.models?.embedding_rebuild;
+  const voiceProvider = settings.value('NOCHEH_TRANSCRIPTION_PROVIDER') || 'openai';
+  const voiceModel = settings.value('NOCHEH_TRANSCRIPTION_MODEL') || 'gpt-transcribe';
+  const voiceModels = data.models?.transcription ?? [{model: voiceModel, usd_per_minute: 0}];
+  const voiceKey = providers.find(p => p.id === voiceProvider)?.has_key;
   const providerOptions = (blank: string) => (
     <>
       <option value="">{blank}</option>
@@ -722,6 +726,56 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
               {(data.models?.embedding ?? [embeddingModel]).map(model => (
                 <option key={model} value={model}>
                   {model}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="grid gap-3 border-t border-line px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+          <div>
+            <p className="text-sm font-medium">Voice notes</p>
+            <p className="text-[13px] text-muted">
+              Turns voice notes and audio files into text, which is checked for secrets like typed text. Needs OpenAI or
+              a gateway that offers the same transcription models.
+            </p>
+          </div>
+          <Field
+            label="Provider"
+            htmlFor="voice-provider"
+            hint={voiceKey === false ? 'This provider has no key yet, so voice notes are only archived.' : undefined}
+          >
+            <Select
+              id="voice-provider"
+              value={voiceProvider}
+              disabled={busy}
+              onChange={e => settings.set('NOCHEH_TRANSCRIPTION_PROVIDER', e.target.value)}
+            >
+              {providers
+                .filter(p => p.id !== 'anthropic')
+                .concat(
+                  providers.some(p => p.id === voiceProvider)
+                    ? []
+                    : [{id: voiceProvider, name: name(voiceProvider)} as Provider],
+                )
+                .map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.has_key === false ? ' (no key)' : ''}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+          <Field label="Model" htmlFor="voice-model" hint="Price per hour of audio, from OpenAI.">
+            <Select
+              id="voice-model"
+              value={voiceModel}
+              disabled={busy}
+              onChange={e => settings.set('NOCHEH_TRANSCRIPTION_MODEL', e.target.value)}
+            >
+              {voiceModels.map(row => (
+                <option key={row.model} value={row.model}>
+                  {row.model}
+                  {row.usd_per_minute ? ` ($${(row.usd_per_minute * 60).toFixed(2)} per hour)` : ''}
                 </option>
               ))}
             </Select>

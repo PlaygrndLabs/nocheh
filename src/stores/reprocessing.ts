@@ -9,6 +9,7 @@ import {DerivedRepository,type DerivativeReference} from './derived.js';
 import {GuardRepository} from './guards.js';
 import type {StorePools} from './connections.js';
 import {timed} from './stage-timings.js';
+import type {RuntimeCall} from '../runtime.js';
 
 export interface DerivationEngine {
   readonly name:string;readonly version:string;readonly outputKind:'transcript'|'extracted_text';
@@ -32,13 +33,61 @@ export function textExtraction():DerivationEngine {
   }};
 }
 
-/** Voice notes keep their original bytes; Nocheh has no speech recognition, so
- * the derived reading is a status and no runtime or provider call is made. */
+const READINGS:Record<string,string>={
+  scanned:'This document is scanned pages without a text layer; its original file is kept.',
+  unreadable:'This document could not be read; its original file is kept.',
+  unsupported:'Text extraction is unavailable for this original file.',
+  too_large:'This document is too large to read; its original file is kept.'};
+/** Documents are read by the runtime's own document reader (Hermes: Word, Excel, PowerPoint,
+ * old Office, OpenDocument, RTF, EPUB and PDF). Plain UTF-8 text is read here, and images and
+ * video wait for their own reader. */
+export function documentExtraction(runtime:RuntimeCall):DerivationEngine {
+  return {name:'runtime-documents',version:'1',outputKind:'extracted_text',async run(bytes,file,configuration){
+    if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_extraction_configuration');
+    if(['photo','image','video','sticker','animation'].includes(file.kind))return {kind:'extraction_status',text:READINGS.unsupported!};
+    if(bytes.length<=200000&&!bytes.includes(0)&&!isPdf(bytes)) {
+      try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* a binary document goes to the reader */}
+    }
+    const name=[file.metadata.file_name,file.metadata.relative_path].find(value=>typeof value==='string')??'';
+    const result=await runtime('file.extract',{bytes_base64:bytes.toString('base64'),name,
+      mime_type:typeof file.metadata.mime_type==='string'?file.metadata.mime_type:''},180000);
+    if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
+    return {kind:'extraction_status',text:READINGS[String(result.state)]??READINGS.unreadable!};
+  }};
+}
+
+/** Recordings to transcribe: Telegram's own kinds and the media types of a Telegram Desktop export. */
+export const RECORDINGS:readonly string[]=['voice','audio','video_note','voice_message','audio_file','video_message'];
+/** Voice notes saved before transcription was set up keep their original bytes and this status. */
 export const VOICE_ARCHIVED='Voice note archived; transcription is not available.';
 export function archivedVoice():DerivationEngine {
   return {name:'nocheh-voice-archive',version:'1',outputKind:'transcript',async run(_bytes,_file,configuration){
     if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_transcription_configuration');
     return {kind:'extraction_status',text:VOICE_ARCHIVED};
+  }};
+}
+
+const HEARINGS:Record<string,string>={
+  not_configured:VOICE_ARCHIVED,
+  silent:'This recording has no speech to transcribe; its original audio is kept.',
+  unsupported:'This recording cannot be transcribed in its format; its original audio is kept.',
+  too_large:'This recording is too large to transcribe; its original audio is kept.',
+  failed:'This recording could not be transcribed; its original audio is kept.'};
+// A provider that is busy or unreachable is tried again by the preparation workflow.
+const RETRY=new Set(['rate_limited','provider_error','timed_out']);
+/** Voice notes, audio files and round videos are transcribed by the runtime's own transcriber
+ * (Hermes) with the provider chosen in Settings › Models. Without one, a note keeps the archived
+ * status, so its reply never waits, and is transcribed once a provider is chosen. */
+export function voiceTranscription(runtime:RuntimeCall):DerivationEngine {
+  return {name:'runtime-voice',version:'1',outputKind:'transcript',async run(bytes,file,configuration){
+    if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_transcription_configuration');
+    const text=(name:string)=>typeof file.metadata[name]==='string'?file.metadata[name] as string:'';
+    const duration=file.metadata.duration;
+    const result=await runtime('voice.transcribe',{bytes_base64:bytes.toString('base64'),name:text('file_name')||text('relative_path'),
+      mime_type:text('mime_type'),kind:file.kind,...(typeof duration==='number'&&duration>=0?{duration}:{})},660000);
+    if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
+    if(result.state==='failed'&&RETRY.has(String(result.reason)))throw new HttpError(503,'transcription_unavailable');
+    return {kind:'extraction_status',text:HEARINGS[String(result.state)]??HEARINGS.failed!};
   }};
 }
 

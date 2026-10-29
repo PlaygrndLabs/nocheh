@@ -6,7 +6,7 @@ import {observation,type Observation} from '../workflows/pipeline.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
 import {AttachmentRepository} from './attachments.js';
 import {GuardRepository} from './guards.js';
-import {ReprocessingRepository,type DerivationEngine} from './reprocessing.js';
+import {RECORDINGS,ReprocessingRepository,VOICE_ARCHIVED,type DerivationEngine} from './reprocessing.js';
 import {SelectionRepository} from './selections.js';
 import type {SourceReference} from './archive.js';
 
@@ -37,7 +37,7 @@ export class PreparationRepository {
       WHERE s.event_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status')`,[eventId])).rows;
     const pending=manifests.filter(m=>!selected.some(s=>s.artifact_id===m.id));
     for(const manifest of pending) {
-      const engine=['voice','audio','video_note'].includes(manifest.kind)?this.transcription:this.extraction;
+      const engine=RECORDINGS.includes(manifest.kind)?this.transcription:this.extraction;
       const id=digest('reprocess:initial:'+manifest.id+':'+digest(engine.name+':'+engine.version));
       const job=(await this.stores.control.query('SELECT attempts,error_code FROM reprocess_jobs WHERE id=$1',[id])).rows[0];
       if(job?.error_code==='invalid_transcription_response')return observation('failed','transcription',job.attempts);
@@ -80,7 +80,7 @@ export class PreparationRepository {
           JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
           WHERE s.artifact_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status') LIMIT 1`,[file.id])).rows[0];
         if(!selected) {
-          const engine=['voice','audio','video_note'].includes(manifest.kind)?this.transcription:this.extraction;
+          const engine=RECORDINGS.includes(manifest.kind)?this.transcription:this.extraction;
           const request=await this.reprocessing.request(file,engine.name,engine.version,{},'initial:'+file.id+':'+digest(engine.name+':'+engine.version));
           const output=await this.reprocessing.run(request,detectorVersion,check,authority);
           if(output)try {await this.selections.activate(output,null,digest('initial-selection:'+output.id),'automatic');}
@@ -94,6 +94,38 @@ export class PreparationRepository {
       if(slot>=0)await client.query('SELECT pg_advisory_unlock(803357,$1)',[slot]);
       if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended($1,803357))',[eventId]);
       if(fenced)await leaveFamily(client,'preparation');});}
+  }
+
+  /** Voice notes saved while no transcription provider was chosen keep the archived status.
+   *  Once one is chosen they are transcribed a few at a time, each once, through the same
+   *  reprocessing and secret check as new notes; the transcript then shows instead of the status. */
+  async transcribeArchived(configured:()=>Promise<boolean>,limit=5):Promise<number> {
+    const archived=(await this.stores.derived.query(`SELECT DISTINCT s.artifact_id FROM derivative_selections s
+      JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
+      JOIN derived_artifacts d ON d.id=r.derived_id
+      WHERE s.kind='extraction_status' AND s.artifact_id IS NOT NULL AND d.content=$1
+        AND NOT EXISTS(SELECT 1 FROM derivative_selections t WHERE t.artifact_id=s.artifact_id AND t.kind='transcript' AND t.active_revision IS NOT NULL)
+      ORDER BY s.artifact_id LIMIT 500`,[Buffer.from(VOICE_ARCHIVED)])).rows.map(row=>row.artifact_id as string);
+    if(!archived.length||!await configured())return 0;
+    const engine=this.transcription,operation=(artifact:string)=>'voice:'+artifact+':'+digest(engine.name+':'+engine.version);
+    const jobs=new Map((await this.stores.control.query('SELECT id,state,derived_id FROM reprocess_jobs WHERE id=ANY($1::text[])',
+      [archived.map(artifact=>digest('reprocess:'+operation(artifact)))])).rows.map(row=>[row.id as string,row]));
+    let requested=0;
+    for(const artifact of archived) {
+      const job=jobs.get(digest('reprocess:'+operation(artifact)));
+      if(!job) {
+        if(requested>=limit)continue;
+        await this.reprocessing.request(await this.attachments.file(artifact),engine.name,engine.version,{},operation(artifact));requested++;
+        continue;
+      }
+      if(job.state!=='done'||!job.derived_id)continue;
+      const output=(await this.stores.derived.query('SELECT id,kind,content_hash FROM derived_artifacts WHERE id=$1',[job.derived_id])).rows[0];
+      // A recording that could not be transcribed keeps its status; it is not tried again.
+      if(output?.kind!=='transcript')continue;
+      try {await this.selections.activate({store:'derived',kind:'artifact',id:output.id,input_hash:output.content_hash},null,digest('voice-selection:'+output.id),'automatic');}
+      catch(error){if(!(error instanceof HttpError)||!['derivative_selection_conflict','guard_preparation_pending'].includes(error.code))throw error;}
+    }
+    return requested;
   }
 
   /** An imported message is checked together with up to a page of the same import's unchecked

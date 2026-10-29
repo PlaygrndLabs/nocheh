@@ -14,6 +14,8 @@ MAX_FILES = 10000
 MAX_EXPORT = 128 * 1024 * 1024
 # The original export is kept as parts under the per-file limit.
 EXPORT_PART = 32 * 1024 * 1024
+# Export media types Nocheh transcribes: voice messages, audio files and round videos.
+RECORDINGS = {'voice_message', 'audio_file', 'video_message'}
 
 
 def safe_name(name):
@@ -73,9 +75,12 @@ def inspect(directory, mapping=None):
     if not isinstance(chats, list) or not chats: raise ValueError('empty_export')
     summaries = []
     # Validate every record/path before committing anything to the archive.
-    count = missing = supplied = characters = 0
+    count = missing = supplied = characters = voices = seconds = 0
     for record, uploads in desktop_records(document, file.parent, scope_map=mapping):
         count += 1; supplied += len(uploads); characters += len(record['event']['text'] or '')
+        if any(a['kind'] in RECORDINGS and a['state'] == 'pending' for a in record['artifacts']):
+            length = record['event']['payload']['message'].get('duration_seconds')
+            voices += 1; seconds += length if type(length) is int and 0 <= length < 10**6 else 0
         missing += sum(a['state'] == 'failed' for a in record['artifacts'])
         if any(path.stat().st_size > MAX_FILE for _, path in uploads): raise ValueError('attachment_exceeds_50_mib')
     for chat in chats:
@@ -88,7 +93,8 @@ def inspect(directory, mapping=None):
     starts = [chat['first_at'] for chat in summaries if chat['first_at']]
     ends = [chat['last_at'] for chat in summaries if chat['last_at']]
     return {'file': str(file.relative_to(directory)), 'sha256': digest(file.read_bytes()),
-            'chats': summaries, 'messages': count, 'characters': characters, 'missing_files': missing, 'supplied_files': supplied,
+            'chats': summaries, 'messages': count, 'characters': characters, 'voice_notes': voices, 'voice_seconds': seconds,
+            'missing_files': missing, 'supplied_files': supplied,
             'first_at': min(starts, default=None), 'last_at': max(ends, default=None)}
 
 

@@ -159,6 +159,25 @@ class ProviderRouteTests(unittest.TestCase):
         self.assertNotIn('synthetic-gateway-key', (state_for(self.state) / 'honcho.env').read_text())
 
 
+    def test_voice_notes_use_their_own_provider_and_go_to_hermes_only_with_a_key(self):
+        values = load(self.state)
+        self.assertEqual(routes.environment(values)['NOCHEH_TRANSCRIPTION_ROUTE_URL'], '', 'without a key voice notes are archived only')
+        values.update(OPENAI_API_KEY='synthetic-openai-key')
+        env = routes.environment(values)
+        self.assertEqual([env['NOCHEH_TRANSCRIPTION_ROUTE_' + field] for field in ('URL', 'KEY', 'MODEL', 'PROVIDER', 'PRICE')],
+                         ['https://api.openai.com/v1', 'synthetic-openai-key', 'gpt-transcribe', 'openai', '0.0045'])
+        values.update(NOCHEH_PROVIDERS=json.dumps([GATEWAY]), NOCHEH_PROVIDER_KEYS='{"gateway":"synthetic-gateway-key"}',
+                      NOCHEH_TRANSCRIPTION_PROVIDER='gateway', NOCHEH_TRANSCRIPTION_MODEL='whisper-1')
+        routes.validate(values)
+        self.assertEqual((routes.transcription_route(values).url, routes.transcription_route(values).key), (GATEWAY['url'], 'synthetic-gateway-key'))
+        for change, message in (({'NOCHEH_TRANSCRIPTION_PROVIDER': 'anthropic'}, 'OpenAI-compatible'),
+                                ({'NOCHEH_TRANSCRIPTION_MODEL': 'made-up-model'}, 'must be one of')):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, message):
+                routes.validate({**values, **change})
+        self.assertEqual([row['model'] for row in view(self.state)['models']['transcription']],
+                         ['gpt-transcribe', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'])
+
+
 class HermesCredentialTests(unittest.TestCase):
     def test_each_part_uses_only_its_configured_provider(self):
         environment = {'NOCHEH_MODEL': 'claude-opus-5-5',

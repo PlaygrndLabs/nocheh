@@ -112,8 +112,8 @@ Service map: [docs/services.md](docs/services.md).
 
 - Nocheh answers only while its services are running. Telegram holds new messages for up to 24 hours, so short breaks lose nothing there.
 - Dependable answers come before speed. A reply usually takes around half a minute.
-- Voice notes are saved but not transcribed.
-- No local models. You pay your model provider for replies and learning, plus OpenAI embeddings for memory search.
+- Voice notes are saved and transcribed with OpenAI (set in Settings › Models).
+- No local models. You pay your model provider for replies and learning, plus OpenAI embeddings for memory search and voice transcription.
 - Nocheh is in development and not released yet. Live release checks are tracked in [docs/mvp-acceptance-status.md](docs/mvp-acceptance-status.md).
 
 ## Develop

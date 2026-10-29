@@ -292,6 +292,8 @@ export type ImportJob = {
     last_at?: string | null;
     /** A rough cost of the secret check, which always runs at import; null when it couldn't be worked out. */
     secret_check?: {cost_usd: number | null; calls: number} | null;
+    /** Voice notes in the export: transcribed at import when a voice provider has a key. */
+    voice?: {configured: boolean; notes: number; minutes: number; cost_usd: number | null; model?: string} | null;
     /** A rough cost to learn these messages; null when it couldn't be worked out. */
     learning?: {
       cost_usd: number | null;
@@ -344,6 +346,16 @@ const dollars = (value: number) => '$' + (value < 10 ? value.toFixed(2) : Math.r
 export function secretCheckCostLabel(check: NonNullable<ImportJob['preview']>['secret_check']): string {
   if (!check || check.cost_usd === null) return 'No cost estimate for the secret check right now.';
   return `Estimated secret check cost: about ${dollars(check.cost_usd)}.`;
+}
+/** The voice notes line: what transcribing them costs, or that they are archived only. */
+export function voiceCostLabel(voice: NonNullable<ImportJob['preview']>['voice']): string {
+  if (!voice || !voice.notes) return '';
+  const notes = `${voice.notes.toLocaleString()} voice notes (${voice.minutes.toLocaleString()} minutes)`;
+  if (!voice.configured)
+    return `${notes} are archived without text, because Voice notes in Settings › Models has no key.`;
+  return voice.cost_usd === null
+    ? `${notes} are transcribed.`
+    : `${notes} are transcribed, about ${dollars(voice.cost_usd)}.`;
 }
 /** The learning cost line under the learning choice. */
 export function learningCostLabel(learning: NonNullable<ImportJob['preview']>['learning']): string {

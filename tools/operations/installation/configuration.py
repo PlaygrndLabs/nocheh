@@ -6,6 +6,7 @@ import re
 import secrets
 from pathlib import Path
 from tools.operations.provider.embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
+from tools.operations.provider.transcription_config import DEFAULTS as TRANSCRIPTION_DEFAULTS
 from tools.operations.provider import routes as provider_routes
 from tools.operations.installation import mini_app
 
@@ -30,6 +31,7 @@ DEFAULTS = {
     'NOCHEH_MINI_APP_URL': '', 'CLOUDFLARE_TUNNEL_TOKEN': '',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
+    **TRANSCRIPTION_DEFAULTS,
     **provider_routes.DEFAULTS,
 }
 

@@ -13,9 +13,10 @@ from pathlib import Path
 
 DATABASE = Path(os.environ.get('NOCHEH_USAGE_DB', '/workspace/data/local/hermes/usage/usage.sqlite'))
 RETENTION_DAYS = 400
-PARTS = ('reply', 'browser', 'schedule', 'memory_review', 'guard')
+PARTS = ('reply', 'browser', 'schedule', 'memory_review', 'guard', 'transcription')
 TOKENS = ('input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens')
-PROVIDERS = {'reply': 'NOCHEH_REPLY_ROUTE_PROVIDER', 'guard': 'NOCHEH_GUARD_ROUTE_PROVIDER'}
+PROVIDERS = {'reply': 'NOCHEH_REPLY_ROUTE_PROVIDER', 'guard': 'NOCHEH_GUARD_ROUTE_PROVIDER',
+             'transcription': 'NOCHEH_TRANSCRIPTION_ROUTE_PROVIDER'}
 SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT NOT NULL, provider TEXT NOT NULL, '
           'model TEXT NOT NULL, runs INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, '
           'calls INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0, '
@@ -27,8 +28,10 @@ SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT N
           'PRIMARY KEY(day,part,provider,model))')
 # Columns added after the first table: `refused` is a failed run the model declined to answer,
 # `hidden` a text the secret check hid whole because the model declined to check it, and
-# `reasons` the failed runs counted by why they failed, such as {"refused": 2, "timed_out": 1}.
-ADDED = {'refused': 'INTEGER NOT NULL DEFAULT 0', 'hidden': 'INTEGER NOT NULL DEFAULT 0', 'reasons': "TEXT NOT NULL DEFAULT '{}'"}
+# `reasons` the failed runs counted by why they failed, such as {"refused": 2, "timed_out": 1}, and
+# `audio_seconds` the length of the recordings voice-note transcription was sent.
+ADDED = {'refused': 'INTEGER NOT NULL DEFAULT 0', 'hidden': 'INTEGER NOT NULL DEFAULT 0', 'reasons': "TEXT NOT NULL DEFAULT '{}'",
+         'audio_seconds': 'REAL NOT NULL DEFAULT 0'}
 # Why a run failed. Codes only: never the provider's message or any content.
 REASONS = ('refused', 'rate_limited', 'key_rejected', 'model_not_found', 'too_long', 'timed_out',
            'provider_error', 'interrupted', 'empty_answer', 'bad_answer', 'nocheh_error', 'unknown')
@@ -194,7 +197,8 @@ def record(part, usage, model, failed=False, provider=None, path=None, now=None,
     reason = 'refused' if refused else reason if reason in REASONS else 'unknown'
     _add(part, usage.get('model') or model, provider, path, now, reason if failed else None, runs=1, failed=int(failed),
          refused=int(reason == 'refused' and failed), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
-         cost_usd=float(usage.get('cost_usd') or 0), priced_runs=int('cost_usd' in usage))
+         cost_usd=float(usage.get('cost_usd') or 0), priced_runs=int('cost_usd' in usage),
+         **({'audio_seconds': float(usage.get('audio_seconds') or 0)} if part == 'transcription' else {}))
 
 
 def note_hidden(part, model, provider=None, path=None, now=None):
@@ -205,7 +209,7 @@ def note_hidden(part, model, provider=None, path=None, now=None):
 def _add(part, model, provider, path, now, reason, **amounts):
     if part not in PARTS:
         return
-    provider = (provider if provider is not None else os.environ.get(PROVIDERS['guard' if part == 'guard' else 'reply'], '')) or 'unknown'
+    provider = (provider if provider is not None else os.environ.get(PROVIDERS.get(part, PROVIDERS['reply']), '')) or 'unknown'
     model = (model or 'unknown')[:120]
     moment = datetime.fromtimestamp(now or time.time(), timezone.utc)
     day = moment.strftime('%Y-%m-%d')

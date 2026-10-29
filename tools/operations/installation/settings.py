@@ -17,7 +17,8 @@ from tools.operations.provider import routes as provider_routes
 SECRETS = {'TELEGRAM_BOT_TOKEN', 'CLOUDFLARE_TUNNEL_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN'} | provider_routes.KEY_SETTINGS | WORKFLOW_INTERNAL | STORE_INTERNAL
 # Providers, keys and the provider and model of each part are chosen in
 # Settings › Models; Apply also refreshes Honcho when its routes change.
-MODEL_SETTINGS = {'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_PROVIDER', 'NOCHEH_EMBEDDING_MODEL'} | set(provider_routes.DEFAULTS)
+MODEL_SETTINGS = {'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_PROVIDER', 'NOCHEH_EMBEDDING_MODEL',
+                  'NOCHEH_TRANSCRIPTION_PROVIDER', 'NOCHEH_TRANSCRIPTION_MODEL'} | set(provider_routes.DEFAULTS)
 EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - WORKFLOW_INTERNAL - STORE_INTERNAL
 
 
@@ -48,8 +49,10 @@ def view(state):
                'takes_effect': 'right away' if key in LIVE else 'apply / service restart'}
               for key in DEFAULTS]
     from tools.operations.provider.embedding_config import MODELS
+    from tools.operations.provider.transcription_config import MODELS as VOICE_MODELS
     return {'revision': saved_revision, 'applied_revision': active,
-            'models': {'embedding': sorted(MODELS), 'embedding_locked': embedding_route(state),
+            'models': {'embedding': sorted(MODELS), 'transcription': [{'model': model, 'usd_per_minute': price} for model, price in VOICE_MODELS.items()],
+                       'embedding_locked': embedding_route(state),
                        'embedding_rebuild': (pending_rebuild(state) or {}).get('model')},
             'providers': provider_view(values),
             'apply_state': 'current' if active == in_use else 'pending' if active else 'unverified',
