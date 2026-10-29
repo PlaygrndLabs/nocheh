@@ -31,8 +31,9 @@ def revision(values):
 
 
 def service_revision(values):
-    """What the running services use; Apply records it, and settings that work live are left out."""
-    return revision({key: value for key, value in values.items() if key not in LIVE})
+    """What the running services use; Apply records it. Settings that work live are left out, and so
+    are settings at their default, so a newly added setting does not ask for Apply."""
+    return revision({key: value for key, value in values.items() if key not in LIVE and DEFAULTS.get(key) != value})
 
 
 def view(state):

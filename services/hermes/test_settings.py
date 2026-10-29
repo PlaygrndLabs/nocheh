@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from tools.operations.installation.configuration import initialize, load, write_env, env_path
-from tools.operations.installation.settings import view, save, apply
+from tools.operations.installation.settings import view, save, apply, service_revision
 
 
 class SettingsTests(unittest.TestCase):
@@ -58,6 +58,17 @@ class SettingsTests(unittest.TestCase):
             self.assertFalse((state / 'admin/previous.env').exists())
             self.assertEqual({field['key']: field['takes_effect'] for field in saved['fields']}['NOCHEH_BACKUP_TIME'], 'right away')
             self.assertEqual(save(state, {'NOCHEH_GUARD_MODE': 'off'}, saved['revision'])['apply_state'], 'pending')
+
+    def test_a_newly_added_setting_at_its_default_does_not_ask_for_apply(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state)
+            before = {key: value for key, value in load(state).items() if key != 'NOCHEH_DASHBOARD_URL'}
+            (state / 'admin').mkdir(exist_ok=True)
+            (state / 'admin/applied.json').write_text(json.dumps({'revision': service_revision(before)}))
+            self.assertEqual(view(state)['apply_state'], 'current')
+            saved = save(state, {'NOCHEH_DASHBOARD_URL': 'https://dash.example.test'}, view(state)['revision'])
+            self.assertEqual(saved['apply_state'], 'pending')
+            self.assertEqual(save(state, {'NOCHEH_DASHBOARD_URL': ''}, saved['revision'])['apply_state'], 'current')
 
     def test_models_are_owner_settings_and_embeddings_never_mix(self):
         import sqlite3
