@@ -4,6 +4,8 @@ declare global {
     __NOCHEH_CSRF__?: string;
     /** The Telegram Mini App's signed launch data; the mini app server checks it on every call. */
     __NOCHEH_TELEGRAM__?: string;
+    /** The mini app's password sign-in for this phone. */
+    __NOCHEH_MINI_SESSION__?: string;
   }
 }
 
@@ -20,6 +22,7 @@ export async function authedFetch(path: string, options: RequestInit = {}): Prom
       ...(options.headers as Record<string, string> | undefined),
       'X-Nocheh-CSRF': window.__NOCHEH_CSRF__ ?? '',
       ...(window.__NOCHEH_TELEGRAM__ ? {'X-Telegram-Init-Data': window.__NOCHEH_TELEGRAM__} : {}),
+      ...(window.__NOCHEH_MINI_SESSION__ ? {'X-Nocheh-Mini-Session': window.__NOCHEH_MINI_SESSION__} : {}),
     },
   });
 }
@@ -29,6 +32,9 @@ export async function fetchJSON<T = any>(path: string, options: RequestInit = {}
   const response = await authedFetch(path, options);
   const value = await response.json();
   if (!response.ok) {
+    // The mini app shows its sign-in again when the password changed or the phone was signed out.
+    if (response.status === 401 && /^mini_app_(?:sign_in_required|password_not_set)$/.test(value?.error))
+      window.dispatchEvent(new CustomEvent('nocheh:mini-signed-out', {detail: value.error}));
     const error: ApiError = new Error(value?.error || 'request_failed');
     error.status = response.status;
     throw error;

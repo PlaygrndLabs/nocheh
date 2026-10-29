@@ -1,20 +1,30 @@
 /**
  * The Telegram Mini App: Home, Inbox, Tasks and Health on the owner's phone,
  * inside Telegram. It uses the same owner API and pages as the dashboard;
- * Settings and the rest of System stay on the dashboard at home.
+ * Settings and the rest of System stay on the dashboard at home. Each phone
+ * signs in once with the password the owner sets in the dashboard.
  */
 import * as React from 'react';
 import {createRoot} from 'react-dom/client';
-import {Activity, CalendarClock, Home, Inbox as InboxIcon, ListChecks, Monitor} from 'lucide-react';
+import {
+  Activity,
+  CalendarClock,
+  Home,
+  Inbox as InboxIcon,
+  ListChecks,
+  LockKeyhole,
+  LogOut,
+  Monitor,
+} from 'lucide-react';
 import {useHash, useParam} from './lib/navigation';
 import {useInboxCount} from './lib/inbox';
-import {apiPost} from './lib/api';
+import {apiPost, authedFetch} from './lib/api';
 import {refreshResources, useResource} from './lib/resource';
 import {issues, workCounts} from './lib/system-health';
 import {setParams} from './lib/routes';
 import {decisionLabels, type DecisionKind} from './lib/supervision';
 import {cn} from './lib/utils';
-import {Button, Card, CardBody, Dot, LoadError, Notice, Skeleton} from './ui/core';
+import {Button, Card, CardBody, Dot, Field, Input, LoadError, LoadingRows, Notice, Skeleton} from './ui/core';
 import {FeedbackProvider, useFeedback} from './ui/overlay';
 import {Page} from './ui/page';
 import {ActionDrawer, DecisionDrawer} from './pages/inbox/drawers';
@@ -78,6 +88,167 @@ function telegramEvent(type: string) {
   } catch {}
 }
 
+const SESSION_KEY = 'nocheh.mini-session';
+type LockState = 'checking' | 'signed_in' | 'signed_out' | 'no_password' | 'unavailable';
+
+/** Keeps this phone's mini app sign-in, so the password is asked once per phone. */
+function rememberSession(token: string | null) {
+  window.__NOCHEH_MINI_SESSION__ = token ?? undefined;
+  try {
+    if (token) localStorage.setItem(SESSION_KEY, token);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {}
+}
+
+async function miniCall(path: string, body?: unknown): Promise<{status: number; value: any}> {
+  const response = await authedFetch(
+    '/api/mini/' + path,
+    body === undefined
+      ? {}
+      : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
+  );
+  return {status: response.status, value: await response.json().catch(() => ({}))};
+}
+
+function minutes(until: number): string {
+  const left = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+  return left >= 120 ? `${Math.round(left / 60)} hours` : `${left} ${left === 1 ? 'minute' : 'minutes'}`;
+}
+
+/** Asks for the mini app password once on this phone. */
+function SignIn({onSignedIn}: {onSignedIn: () => void}) {
+  const [password, setPassword] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [problem, setProblem] = React.useState<string | null>(null);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!password || busy) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      const {status, value} = await miniCall('sign-in', {password});
+      if (status === 200 && value.token) {
+        rememberSession(value.token);
+        onSignedIn();
+        return;
+      }
+      setPassword('');
+      setProblem(
+        value.error === 'wrong_password'
+          ? value.tries_left > 0 && value.tries_left <= 2
+            ? `Wrong password. ${value.tries_left} ${value.tries_left === 1 ? 'try' : 'tries'} left before a pause.`
+            : 'Wrong password.'
+          : value.error === 'mini_app_sign_in_paused'
+            ? `Too many wrong passwords. Try again in ${minutes(Number(value.until))}.`
+            : value.error === 'mini_app_password_not_set'
+              ? 'No password is set yet. Set one in the dashboard first.'
+              : 'Nocheh could not be reached. Try again in a minute.',
+      );
+    } catch {
+      setProblem('Nocheh could not be reached. Try again in a minute.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mx-auto flex max-w-sm flex-col gap-5 p-6 pt-16">
+      <div className="flex items-center gap-2.5 text-lg font-semibold">
+        <LogoMark className="w-8" /> Nocheh
+      </div>
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Password" htmlFor="mini-password" error={problem}>
+          <Input
+            id="mini-password"
+            type="password"
+            autoComplete="current-password"
+            autoFocus
+            value={password}
+            disabled={busy}
+            onChange={e => setPassword(e.target.value)}
+          />
+        </Field>
+        <Button type="submit" variant="primary" className="w-full" busy={busy} disabled={!password}>
+          <LockKeyhole aria-hidden /> Sign in
+        </Button>
+      </form>
+      <p className="text-[13px] text-muted">
+        You set and change this password in the dashboard, in Settings › Telegram. This phone stays signed in until you
+        sign out or don’t open the mini app for 30 days.
+      </p>
+    </div>
+  );
+}
+
+/** Shows the mini app only to a phone signed in with the password. */
+function Locked({children}: {children: React.ReactNode}) {
+  const [state, setState] = React.useState<LockState>('checking');
+  const check = React.useCallback(async () => {
+    setState('checking');
+    try {
+      const {status, value} = await miniCall('session');
+      if (status !== 200) throw new Error(value.error);
+      if (value.state !== 'signed_in') rememberSession(null);
+      setState(value.state === 'signed_in' || value.state === 'no_password' ? value.state : 'signed_out');
+    } catch {
+      setState('unavailable');
+    }
+  }, []);
+  React.useEffect(() => {
+    void check();
+    const signedOut = (event: Event) => {
+      rememberSession(null);
+      setState((event as CustomEvent).detail === 'mini_app_password_not_set' ? 'no_password' : 'signed_out');
+    };
+    window.addEventListener('nocheh:mini-signed-out', signedOut);
+    return () => window.removeEventListener('nocheh:mini-signed-out', signedOut);
+  }, [check]);
+  if (state === 'signed_in') return <>{children}</>;
+  if (state === 'checking')
+    return (
+      <div className="mx-auto max-w-md p-6">
+        <LoadingRows rows={2} />
+      </div>
+    );
+  if (state === 'signed_out') return <SignIn onSignedIn={() => setState('signed_in')} />;
+  return (
+    <div className="mx-auto max-w-md p-6">
+      {state === 'no_password' ? (
+        <Notice tone="warn" title="Set a password first">
+          The mini app opens only with a password. Set one in the dashboard, in Settings › Telegram, under Mini app.
+        </Notice>
+      ) : (
+        <Notice
+          tone="bad"
+          title="Nocheh can’t be reached"
+          action={<Button onClick={() => void check()}>Try again</Button>}
+        >
+          Check that Nocheh is running at home.
+        </Notice>
+      )}
+    </div>
+  );
+}
+
+function SignOut() {
+  const [busy, setBusy] = React.useState(false);
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="-ml-2.5"
+      busy={busy}
+      onClick={async () => {
+        setBusy(true);
+        await miniCall('sign-out', {}).catch(() => {});
+        rememberSession(null);
+        window.dispatchEvent(new CustomEvent('nocheh:mini-signed-out', {detail: 'mini_app_sign_in_required'}));
+      }}
+    >
+      <LogOut aria-hidden /> Sign out of this phone
+    </Button>
+  );
+}
+
 function MiniHome() {
   const waiting = useInboxCount();
   const tasks = useResource<{tasks: Task[]; counts: Record<string, number>}>('/tasks?state=open&limit=3', 30000);
@@ -131,6 +302,7 @@ function MiniHome() {
       <p className="flex items-center gap-2 text-[13px] text-muted">
         <Monitor className="size-4" aria-hidden /> Settings are on your dashboard at home.
       </p>
+      <SignOut />
     </Page>
   );
 }
@@ -229,40 +401,45 @@ function MiniApp({launched}: {launched: boolean}) {
       </div>
     );
   return (
-    <div className="flex h-dvh flex-col">
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        {page === 'home' && <MiniHome />}
-        {page === 'inbox' && <MiniInbox />}
-        {page === 'tasks' && <Tasks />}
-        {page === 'problems' && <MiniProblems />}
-      </main>
-      <nav aria-label="Main" className="flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
-        {tabs.map(({id, title, Icon}) => (
-          <a
-            key={id}
-            href={'#' + id}
-            aria-current={page === id ? 'page' : undefined}
-            className={cn(
-              'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium',
-              page === id ? 'text-accent-text' : 'text-muted',
-            )}
-          >
-            <Icon className="size-5" />
-            {title}
-            {id === 'inbox' && !!waiting && (
-              <span className="absolute top-1 left-1/2 ml-2 rounded-full bg-accent px-1.5 text-[10px] leading-4 font-semibold text-on-accent">
-                {waiting > 99 ? '99+' : waiting}
-              </span>
-            )}
-          </a>
-        ))}
-      </nav>
-    </div>
+    <Locked>
+      <div className="flex h-dvh flex-col">
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          {page === 'home' && <MiniHome />}
+          {page === 'inbox' && <MiniInbox />}
+          {page === 'tasks' && <Tasks />}
+          {page === 'problems' && <MiniProblems />}
+        </main>
+        <nav aria-label="Main" className="flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
+          {tabs.map(({id, title, Icon}) => (
+            <a
+              key={id}
+              href={'#' + id}
+              aria-current={page === id ? 'page' : undefined}
+              className={cn(
+                'relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium',
+                page === id ? 'text-accent-text' : 'text-muted',
+              )}
+            >
+              <Icon className="size-5" />
+              {title}
+              {id === 'inbox' && !!waiting && (
+                <span className="absolute top-1 left-1/2 ml-2 rounded-full bg-accent px-1.5 text-[10px] leading-4 font-semibold text-on-accent">
+                  {waiting > 99 ? '99+' : waiting}
+                </span>
+              )}
+            </a>
+          ))}
+        </nav>
+      </div>
+    </Locked>
   );
 }
 
 const launch = launchData();
 window.__NOCHEH_TELEGRAM__ = launch;
+try {
+  window.__NOCHEH_MINI_SESSION__ = localStorage.getItem(SESSION_KEY) || undefined;
+} catch {}
 applyTheme();
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

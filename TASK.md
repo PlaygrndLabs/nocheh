@@ -17,6 +17,15 @@ failed buttons (owner, 2026-10-28: "better to have action btn for errors to
 dashboard or directly action, also better to open in mini app"). Pending: a live
 button press on a running installation.
 
+Mini app password (owner, 2026-10-28: "better to set a password for it, can set
+and change from main dash", "an auth"): each phone signs in once with a password
+the owner sets in Settings › Telegram; the dashboard keeps its hash and the
+sessions ([ADR-0189](docs/adr/0189-mini-app-password.md),
+[check](test/mini-app.test.ts)). Pending: set the password on the running
+installation, since the mini app stays locked until one is set, and a live
+sign-in from the owner's phone. Open question for the owner: the same login for
+the main dashboard before the server move.
+
 Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
 chose to drop the live safety check): with the Honcho service enabled, the store
 attaches Honcho memory once at startup without a live acceptance report and
