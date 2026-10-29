@@ -11,7 +11,13 @@ import {useFeedback} from '../../ui/overlay';
 import {errorWords, when} from '../memory/shared';
 
 type Session = {kind: 'browser' | 'phone'; created_at: number; last_seen_at: number; current: boolean};
-type OwnerLock = {password_set: boolean; changed_at: number | null; paused_until: number | null; sessions: Session[]};
+type OwnerLock = {
+  password_set: boolean;
+  changed_at: number | null;
+  paused_until: number | null;
+  sessions: Session[];
+  login_off?: boolean;
+};
 
 const at = (time: number) => when(new Date(time).toISOString());
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -76,6 +82,15 @@ export function PasswordSettings() {
     return (
       <Card>
         <LoadingRows rows={2} />
+      </Card>
+    );
+  if (data.login_off)
+    return (
+      <Card>
+        <CardHeader
+          title="Password"
+          description="Sign-in is off on this development setup, so the dashboard and the mini app open without a password. A server installation always asks for it."
+        />
       </Card>
     );
   return (

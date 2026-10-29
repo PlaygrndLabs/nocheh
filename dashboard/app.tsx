@@ -277,15 +277,17 @@ function Navigation({
           {label('Assistant console')}
           {!collapsed && <ArrowUpRight className="size-3.5" />}
         </a>
-        <button
-          type="button"
-          onClick={() => void apiPost('/logout', {}).finally(() => location.reload())}
-          className={cn(footerItem, 'text-left')}
-          title={collapsed ? 'Sign out' : undefined}
-        >
-          <LogOut className="size-4 shrink-0" />
-          {label('Sign out')}
-        </button>
+        {!window.__NOCHEH_LOGIN_OFF__ && (
+          <button
+            type="button"
+            onClick={() => void apiPost('/logout', {}).finally(() => location.reload())}
+            className={cn(footerItem, 'text-left')}
+            title={collapsed ? 'Sign out' : undefined}
+          >
+            <LogOut className="size-4 shrink-0" />
+            {label('Sign out')}
+          </button>
+        )}
         <button
           type="button"
           onClick={cycleTheme}

@@ -119,6 +119,10 @@ receives an HttpOnly, SameSite=Strict session cookie, and a CSRF value derived
 from it. A forgotten password is reset by stopping the dashboard, removing that
 file, and creating a new password on the next visit.
 
+The development stack (`make dev`) skips the login: the dashboard and the mini
+app open without a password, still with the CSRF check. An installation always
+asks for the password.
+
 ## Native browser chat
 
 Open Hermes → Chat. The context banner identifies the owner-private default or

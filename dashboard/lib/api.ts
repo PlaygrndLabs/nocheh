@@ -6,6 +6,8 @@ declare global {
     __NOCHEH_TELEGRAM__?: string;
     /** Set instead of the CSRF value when the dashboard opens signed out: create the password, or sign in. */
     __NOCHEH_LOGIN__?: 'create' | 'sign_in';
+    /** Set on the development stack, which skips the login. */
+    __NOCHEH_LOGIN_OFF__?: boolean;
     /** The mini app's password sign-in for this phone. */
     __NOCHEH_MINI_SESSION__?: string;
   }
