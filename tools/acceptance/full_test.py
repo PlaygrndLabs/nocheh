@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 
+from tools.acceptance.owner_dashboard import FIXTURE_PASSWORD
 from tools.paths import ROOT
 
 IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
@@ -126,7 +127,7 @@ def dashboard_pages(fixture, report):
     result = subprocess.run(['docker', 'run', '--rm', '--network', network, '--read-only', '--tmpfs', '/tmp', '--shm-size', '256m',
                              '-e', 'HOME=/tmp', '-e', 'XDG_CONFIG_HOME=/tmp/.config', '-e', 'XDG_CACHE_HOME=/tmp/.cache',
                              '-v', str(ROOT/'tools/acceptance/dashboard_pages.mjs')+':/tester/dashboard_pages.mjs:ro', '-v', str(out)+':/out',
-                             BROWSER_IMAGE, '/tester/dashboard_pages.mjs', 'nocheh-dashboard', str(port), '/out'],
+                             BROWSER_IMAGE, '/tester/dashboard_pages.mjs', 'nocheh-dashboard', str(port), '/out', FIXTURE_PASSWORD],
                             capture_output=True, text=True)
     pages = json.loads((out/'dashboard-pages.json').read_text()) if (out/'dashboard-pages.json').exists() else []
     return {'scenario': 'dashboard_pages', 'passed': result.returncode == 0 and bool(pages) and all(row['passed'] for row in pages),
