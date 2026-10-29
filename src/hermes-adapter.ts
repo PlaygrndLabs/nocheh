@@ -19,6 +19,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
     'telegram.refusal':'/internal/telegram/refusal',
     'telegram.notice':'/internal/telegram/notice',
     'usage.price':'/internal/usage/price',
+    'file.extract':'/internal/extract',
     'run.resume':'/internal/run/resume','run.events':'/internal/run/events','run.cancel':'/internal/run/cancel',
   };
   const actions: Partial<Record<RuntimeOperation, string>> = {

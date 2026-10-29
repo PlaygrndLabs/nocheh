@@ -40,7 +40,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal((await fetch(base+'/v1/projects')).status,401);
     const transferTypes=await request('/v1/exports/derivatives/types');assert.ok(transferTypes.types.includes('guard_revisions'));
     await request('/v1/exports/derivatives?type=workflow_registry',undefined,400);
-    assert.equal((await request('/v1/derivation-engines')).engines.length,2);
+    assert.equal((await request('/v1/derivation-engines')).engines.length,3);
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'88',revision:'1',occurred_at:null,text:'A convention',
       payload:{message:{message_id:88,chat:{id:123,type:'private'},voice:{file_id:key}}}};
     const captured=(await services.capture.capture(event)).source,file=await services.attachments.commit(captured.artifact_ids[0]!,Buffer.from('Original voice bytes'));

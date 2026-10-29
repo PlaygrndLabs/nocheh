@@ -16,7 +16,7 @@ import {CaptureCoordinator} from './capture.js';
 import {GuardRepository} from './guards.js';
 import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
-import {ReprocessingRepository,archivedVoice,textExtraction,type DerivationEngine} from './reprocessing.js';
+import {ReprocessingRepository,archivedVoice,documentExtraction,textExtraction,type DerivationEngine} from './reprocessing.js';
 import {PreparationRepository} from './preparation.js';
 import {SourceAccessRepository} from './access.js';
 import {SourceRepository} from './retrieval.js';
@@ -60,8 +60,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   runtime:RuntimeCall;honcho:HonchoCall;transcription?:DerivationEngine;serviceToken?:string}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
-  const transcription=options.transcription??archivedVoice(),extraction=textExtraction();
-  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction]);
+  const transcription=options.transcription??archivedVoice(),extraction=documentExtraction(options.runtime);
+  // Files read before the runtime's reader keep their readings; an earlier request still completes.
+  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction,textExtraction()]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction);
   const retirements=new SourceRetirementRepository(stores,archive);
   const reactions=new ReactionStateRepository(archive,stores.control);

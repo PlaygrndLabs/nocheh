@@ -9,6 +9,7 @@ import {DerivedRepository,type DerivativeReference} from './derived.js';
 import {GuardRepository} from './guards.js';
 import type {StorePools} from './connections.js';
 import {timed} from './stage-timings.js';
+import type {RuntimeCall} from '../runtime.js';
 
 export interface DerivationEngine {
   readonly name:string;readonly version:string;readonly outputKind:'transcript'|'extracted_text';
@@ -29,6 +30,29 @@ export function textExtraction():DerivationEngine {
       try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* preserve unsupported original bytes */}
     }
     return {kind:'extraction_status',text:'Text extraction is unavailable for this original file.'};
+  }};
+}
+
+const READINGS:Record<string,string>={
+  scanned:'This document is scanned pages without a text layer; its original file is kept.',
+  unreadable:'This document could not be read; its original file is kept.',
+  unsupported:'Text extraction is unavailable for this original file.',
+  too_large:'This document is too large to read; its original file is kept.'};
+/** Documents are read by the runtime's own document reader (Hermes: Word, Excel, PowerPoint,
+ * old Office, OpenDocument, RTF, EPUB and PDF). Plain UTF-8 text is read here, and images and
+ * video wait for their own reader. */
+export function documentExtraction(runtime:RuntimeCall):DerivationEngine {
+  return {name:'runtime-documents',version:'1',outputKind:'extracted_text',async run(bytes,file,configuration){
+    if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_extraction_configuration');
+    if(['photo','image','video','sticker','animation'].includes(file.kind))return {kind:'extraction_status',text:READINGS.unsupported!};
+    if(bytes.length<=200000&&!bytes.includes(0)&&!isPdf(bytes)) {
+      try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* a binary document goes to the reader */}
+    }
+    const name=[file.metadata.file_name,file.metadata.relative_path].find(value=>typeof value==='string')??'';
+    const result=await runtime('file.extract',{bytes_base64:bytes.toString('base64'),name,
+      mime_type:typeof file.metadata.mime_type==='string'?file.metadata.mime_type:''},180000);
+    if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
+    return {kind:'extraction_status',text:READINGS[String(result.state)]??READINGS.unreadable!};
   }};
 }
 

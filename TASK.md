@@ -41,9 +41,14 @@ review per message plus Honcho memory calls,
 from this installation's last 30 days of learning or typical token counts
 ([estimate](tools/operations/archive/learning_estimate.py),
 [check](services/hermes/test_learning_estimate.py)).
-Pending: a large made-up import on a running installation, then parts 2 to 4
-(Hermes file reading and voice transcription, reading a chat in order with
-project-level role and skills, background sessions on Hermes Kanban).
+Part 2, files: documents are read by Hermes's own reader from Nocheh's
+preparation step ([ADR-0192](docs/adr/0192-files-are-read-by-the-runtime-document-reader.md),
+[reader](services/hermes/test_document_text.py), [engine](test/document-extraction.test.ts));
+checked with made-up Word and PDF files in the Hermes image.
+Pending: a large made-up import on a running installation, then voice
+transcription and images (rest of part 2), reading a chat in order with
+project-level role and skills (part 3), background sessions on Hermes Kanban
+(part 4).
 
 Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
 chose to drop the live safety check): with the Honcho service enabled, the store
