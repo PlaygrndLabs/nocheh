@@ -39,6 +39,17 @@ def isolated_turns(*options):
             time.sleep(2)
 
 
+def synthetic_png(size=8):
+    """A small plain white PNG that decodes, since the vision tool decodes an image before reading it."""
+    import struct
+    import zlib
+    def chunk(kind, data):
+        return struct.pack('>I', len(data))+kind+data+struct.pack('>I', zlib.crc32(kind+data) & 0xffffffff)
+    rows = b''.join(b'\x00'+b'\xff\xff\xff'*size for _ in range(size))
+    return (b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+            +chunk(b'IDAT', zlib.compress(rows))+chunk(b'IEND', b''))
+
+
 def synthetic_pdf(lines):
     """A minimal one-page PDF with a Helvetica text layer."""
     stream = '\n'.join('BT /F1 12 Tf 20 %d Td (%s) Tj ET' % (760-row*14, line) for row, line in enumerate(lines))
@@ -646,7 +657,7 @@ class Scenarios:
     def photo_is_read(self):
         # A photo keeps its original bytes and is read once by Hermes's vision
         # tool with the Images model before its reply.
-        content = b'\x89PNG\r\n\x1a\n' + b'synthetic photo bytes' * 8
+        content = synthetic_png()
         file_id = 'photo-'+str(self.f.ids())
         self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.png',
                                    'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
