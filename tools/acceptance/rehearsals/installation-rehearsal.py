@@ -69,6 +69,9 @@ def main():
         NOCHEH_PROVIDERS=json.dumps([{'id': FIXTURE_PROVIDER, 'name': 'Model fixture', 'url': FIXTURE_MODEL_URL}]))
     if args.preview_port:
         config['NOCHEH_DASHBOARD_PORT'] = str(args.preview_port)
+    # The rehearsals restart services on purpose and count every Telegram message sent, so the
+    # owner's problem notices stay off here; their own tests cover them.
+    config['TELEGRAM_PROBLEM_NOTICES'] = 'false'
     write_env(state / '.env', config)
     memory = state / 'honcho'
     (memory / 'ledger').mkdir(parents=True, mode=0o700, exist_ok=True)
