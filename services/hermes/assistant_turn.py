@@ -12,7 +12,7 @@ import re
 import sys
 from pathlib import Path
 
-ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
+ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_archive_page','nocheh_memory_search','nocheh_action_request',
                'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall',
                'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read','nocheh_telegram_destinations','nocheh_tasks','nocheh_notion',
                'skills_list','skill_view'}

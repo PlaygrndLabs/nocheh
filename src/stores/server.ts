@@ -335,6 +335,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return result(path.endsWith('/context')?await s.memory.context(principal):
         await timed(s.stores.control,principal.turnEvent,'honcho_recall','nocheh',()=>s.memory.recall(principal,string(body.query??'',2000))),true);
     }
+    if(path==='/v1/memory/honcho/search'&&req.method==='POST') {
+      if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
+      const body=object(await readJson(req)),count=limit(body.limit,5,10);
+      const found=await timed(s.stores.control,principal.turnEvent,'honcho_search','nocheh',()=>s.memory.search(principal,string(body.query??'',2000),count));
+      return result({sources:await s.sources.found(principal,found.ids,count),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
+    }
     if(path==='/v1/memory/context'&&req.method==='GET') {
       const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
       return result({...existing,sources:[...existing.sources,...granted.sources]},true);
@@ -360,6 +366,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(mode!=='text')throw new HttpError(400,'invalid_search_mode');
         return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
       }
+      if(path==='/v1/archive/page')return result(await s.sources.page(principal,{chat:url.searchParams.get('chat')??'',from:url.searchParams.get('from')??'',
+        to:url.searchParams.get('to')??'',after:url.searchParams.get('after')??'',count:limit(url.searchParams.get('limit'),30,50)}),true);
       if(path==='/v1/imports/pending') {
         const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});

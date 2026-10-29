@@ -47,7 +47,7 @@ def request(path,body=None):
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Prepared context can include a cold guard-model pass. It is still bounded,
     # but must not share the short timeout used by ordinary archive reads.
-    timeout = 615 if path == '/v1/memory/honcho/recall' else 60 if path == '/v1/context/prepare' else 15
+    timeout = 615 if path == '/v1/memory/honcho/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/honcho/search') else 15
     if path == '/v1/memory/honcho/recall' and _PROCESS_DEADLINE is not None:
         # Leave time for Hermes to reason and check delivery policy.
         timeout = min(timeout, _PROCESS_DEADLINE-time.time()-45)
@@ -87,6 +87,31 @@ def search_tool(args, **kwargs):
         return json.dumps({'sources':rows+shared['sources'],'filter_status':shared.get('filter_status'),**({'import_status':status} if status else {})},ensure_ascii=False)
     except Exception:
         return json.dumps({'error':'archive_search_unavailable'})
+
+
+def page_tool(args, **kwargs):
+    from urllib.error import HTTPError
+    from urllib.parse import urlencode
+    try:
+        query={key:args[key] for key in ('chat','from','to','after') if isinstance(args.get(key),str) and args[key]}
+        query['limit']=min(50,max(1,int(args.get('limit',30))))
+        status=import_status()
+        return json.dumps({**request('/v1/archive/page?'+urlencode(query)),**({'import_status':status} if status else {})},ensure_ascii=False)
+    except HTTPError as error:
+        # The agent can correct its own arguments; other failures stay opaque.
+        return json.dumps({'error':{400:'invalid_page_request',403:'conversation_not_permitted'}.get(error.code,'archive_page_unavailable'),
+                           **({'note':'from and to are YYYY-MM-DD or a time with its zone; after is the next value of the previous page.'} if error.code==400 else {})})
+    except Exception:
+        return json.dumps({'error':'archive_page_unavailable'})
+
+
+def meaning_tool(args, **kwargs):
+    try:
+        query=args.get('query')
+        if not isinstance(query,str) or not query.strip() or len(query)>2000:raise ValueError('invalid_query')
+        return json.dumps(request('/v1/memory/honcho/search',{'query':query,'limit':min(10,max(1,int(args.get('limit',5))))}),ensure_ascii=False)
+    except Exception:
+        return json.dumps({'error':'memory_search_unavailable'})
 
 
 def reaction_observation(event):
@@ -137,6 +162,13 @@ def register(ctx):
          {'mode':{'type':'string','enum':['text','current_reactions']},'query':{'type':'string','description':'Required for text mode; omitted for current_reactions.'},'limit':{'type':'integer','minimum':1,'maximum':10}},[],search_tool),
         ('nocheh_archive_read','Read an archived source, its observed reaction data, and links to captured current reactions. Follow reaction links to inspect changes or removals; a reaction is not proof of task completion. Originals and generated artifacts have distinct provenance.',
          {'id':{'type':'string'}},['id'],read_tool),
+        ('nocheh_archive_page','Read a conversation in time order, oldest first, one page at a time: messages, edits, reactions, replies and the text of their files and voice notes. '
+         'Use it to go through a period (from and to as YYYY-MM-DD) or a whole chat; pass next as after for the following page until complete is true. '
+         'position says how many of the chat\'s records are read through. Only the owner may name another chat, by an ID from nocheh_owner_read.',
+         {'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'after':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},[],page_tool),
+        ('nocheh_memory_search','Find archived messages by meaning rather than exact words, among the messages learned into memory for this audience. '
+         'Chats that were not learned return nothing (learned is false); use nocheh_archive_search or nocheh_archive_page for them. Cite returned source references.',
+         {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],meaning_tool),
         ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions Honcho read, so read them with nocheh_archive_read before relying on a claim that matters.',
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
         ('nocheh_action_request','Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',

@@ -522,6 +522,34 @@ class ProductScenarios(Scenarios):
         result = self.task_tool({'action': 'list'}, chat=GROUP, topic=TEAM_TOPIC)
         self.gate('no_task_list_in_group_without_project', 'TASK1' not in json.dumps(result, ensure_ascii=False), result=str(result)[:300])
 
+    # Reading a chat --------------------------------------------------------------------------------------
+
+    def page_tool(self, arguments, chat, topic=None):
+        self.turn(self.f.message(chat, 'مرور [[tool:nocheh_archive_page '+json.dumps(arguments)+']]', topic=topic), chat, topic)
+        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_archive_page' and event['phase'] == 'final'][-1]
+        try:
+            return json.loads(final['result'])
+        except ValueError:
+            return {'raw': final['result'][:500]}
+
+    def chat_is_read_in_order(self):
+        # Messages nobody addressed are kept; the agent reads the group back oldest first,
+        # without another group's messages, and the owner may read the group by its ID.
+        since = datetime.fromtimestamp(int(time.time())-1, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        for chat, text in ((GROUP, 'یادداشت ORDERMARK1'), (OTHER_GROUP, 'یادداشت ORDERMARKX'), (GROUP, 'یادداشت ORDERMARK2')):
+            update = self.f.message(chat, text, topic=TEAM_TOPIC if chat == GROUP else None, mention=False)
+            self.f.inject(update)
+            self.captured(update)
+            time.sleep(1.1)
+        page = self.page_tool({'from': since}, GROUP, TEAM_TOPIC)
+        texts = [item.get('text') or '' for item in page.get('items', [])]
+        order = [next((index for index, text in enumerate(texts) if mark in text), None) for mark in ('ORDERMARK1', 'ORDERMARK2')]
+        self.gate('group_read_in_order', None not in order and order[0] < order[1], order=order, items=len(texts))
+        self.gate('other_group_not_read', 'ORDERMARKX' not in json.dumps(page, ensure_ascii=False))
+        self.gate('page_says_how_far', page.get('complete') is True and page.get('position', {}).get('total', 0) >= 2, position=page.get('position'))
+        owner = self.page_tool({'chat': str(GROUP), 'from': since}, OWNER)
+        self.gate('owner_reads_group_by_id', 'ORDERMARK2' in json.dumps(owner, ensure_ascii=False), items=len(owner.get('items', [])))
+
     # Settings defaults ----------------------------------------------------------------------------------
 
     def defaults_keep_history_and_notion_off(self):
@@ -582,6 +610,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
-                 'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group',
+                 'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']
