@@ -290,6 +290,11 @@ export type ImportJob = {
     }[];
     first_at?: string | null;
     last_at?: string | null;
+    /** A rough cost to learn these messages; null when it couldn't be worked out. */
+    learning?: {
+      cost_usd: number | null;
+      parts: {part: string; label: string; cost_usd: number | null; measured: boolean}[];
+    } | null;
   };
   mapping?: Record<string, string>;
   review_approved?: boolean;
@@ -331,6 +336,16 @@ export function importStatus(job: ImportJob): Status {
   };
   if (job.state === 'complete' && !job.prepared_at && job.prepared) return {label: 'Preparing', tone: 'info'};
   return states[job.state] ?? {label: job.state.replaceAll('_', ' '), tone: 'neutral'};
+}
+/** The learning cost line under the learning choice. */
+export function learningCostLabel(learning: NonNullable<ImportJob['preview']>['learning']): string {
+  const dollars = (value: number) => '$' + (value < 10 ? value.toFixed(2) : Math.round(value).toLocaleString('en-US'));
+  if (!learning || learning.cost_usd === null) return 'No cost estimate right now.';
+  const parts = learning.parts.map(part => `${part.label.toLowerCase()} ${dollars(part.cost_usd ?? 0)}`).join(', ');
+  const basis = learning.parts.every(part => part.measured)
+    ? 'from what learning cost here in the last 30 days'
+    : 'from typical use, so treat it as rough';
+  return `Estimated cost to learn: about ${dollars(learning.cost_usd)} (${parts}), ${basis}.`;
 }
 /** The progress line while imported messages are read and checked for secrets. */
 export function preparationLabel(prepared: NonNullable<ImportJob['prepared']>): string {

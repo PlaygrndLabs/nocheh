@@ -17,6 +17,7 @@ import {
   fullTime,
   importStatus,
   isResume,
+  learningCostLabel,
   matchingGroup,
   preparationLabel,
   problemText,
@@ -448,6 +449,7 @@ function ImportReview({job}: {job: ImportJob}) {
             <span className="mt-0.5 block text-[13px] text-muted">
               Optional. Without it, imported messages are kept and searchable but not learned from.
               {resume ? ' This choice is kept when resuming.' : ''}
+              {job.preview && ' ' + learningCostLabel(job.preview.learning)}
             </span>
           </span>
         </label>
