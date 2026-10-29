@@ -104,17 +104,6 @@ test('a browser is signed in only by its own cookie, with a CSRF value derived f
   } finally {await rm(directory,{recursive:true,force:true});}
 });
 
-test('the development stack counts every browser and phone as signed in, still with a CSRF check',async()=>{
-  const directory=await mkdtemp(join(tmpdir(),'nocheh-lock-'));
-  const sessions=new OwnerSessions(new OwnerLock(join(directory,'lock.json'),()=>now),()=>now,true);
-  try {
-    const session=(await sessions.session({headers:{}}))!;
-    assert.equal(await sessions.state(undefined,'phone'),'signed_in');
-    assert.equal((await sessions.authorize({method:'POST',headers:{'x-nocheh-csrf':session.csrf}})).id,session.id);
-    await assert.rejects(sessions.authorize({method:'POST',headers:{}}),{code:'csrf_required'});
-  } finally {await rm(directory,{recursive:true,force:true});}
-});
-
 test('the mini app server forwards checked owner calls to the local dashboard with the phone\'s session',async()=>{
   const calls:{path:string;host:string;session:string;cookie:string;body:string}[]=[],lockCalls:string[]=[];
   const directory=await mkdtemp(join(tmpdir(),'nocheh-lock-')),lock=new OwnerLock(join(directory,'lock.json'),()=>now);

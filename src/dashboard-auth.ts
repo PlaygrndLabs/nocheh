@@ -58,18 +58,13 @@ export const csrfFor=(token:string)=>createHmac('sha256','nocheh-csrf').update(t
 export class OwnerSessions {
   private known=new Map<string,{kind:SessionKind;until:number}>();
   private tickets=new Map<string,{session:string;expires:number}>();
-  /** With `open`, every browser and phone counts as signed in: the development stack on the developer's own computer. */
-  private openSession:OwnerSession|undefined;
-  constructor(readonly lock:OwnerLock,private now=Date.now,readonly open=false) {
-    if(open){const token=randomBytes(32).toString('base64url');this.openSession={id:tokenId(token),token,csrf:csrfFor(token)};}
-  }
+  constructor(readonly lock:OwnerLock,private now=Date.now) {}
   /** The single `nocheh_session` cookie's token, if any. */
   token(req:Pick<IncomingMessage,'headers'>):string|undefined {
     const cookies=(req.headers.cookie??'').split(';').map(c=>c.trim()).filter(c=>c.startsWith('nocheh_session='));
     return cookies.length===1?cookies[0]!.slice('nocheh_session='.length):undefined;
   }
   async state(token:string|undefined,kind:SessionKind):Promise<SessionState> {
-    if(this.open)return 'signed_in';
     if(!token)return (await this.lock.status()).password_set?'signed_out':'no_password';
     const id=tokenId(token),known=this.known.get(id);
     if(known&&known.kind===kind&&known.until>this.now())return 'signed_in';
@@ -81,7 +76,6 @@ export class OwnerSessions {
     return state;
   }
   async session(req:Pick<IncomingMessage,'headers'>):Promise<OwnerSession|undefined> {
-    if(this.openSession)return this.openSession;
     const token=this.token(req);
     if(!token||await this.state(token,'browser')!=='signed_in')return;
     return {id:tokenId(token),token,csrf:csrfFor(token)};

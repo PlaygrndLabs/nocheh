@@ -171,8 +171,7 @@ export async function startManagement() {
   const token = (await readFile(join(STATE, 'admin/dashboard/token'), 'utf8')).trim();
   if (token.length < 32) throw new Error('dashboard_token_missing');
   const lock=new OwnerLock(join(STATE,'admin/owner-lock.json'));
-  // The development stack (make dev) runs on the developer's own computer and skips the login; an installation always asks.
-  const sessions=new OwnerSessions(lock,Date.now,process.env.NOCHEH_DEV_WATCH==='1');
+  const sessions=new OwnerSessions(lock);
   const archiveConnection=object(await python({operation:'archive.connection'}));
   const sockets=new Set<Duplex>();
   const live=new DashboardLiveUpdates();
@@ -325,7 +324,7 @@ export async function startManagement() {
       // The mini app's password. The owner sets it here; the mini app service signs in and
       // checks its sessions through the same routes.
       // The owner's password, from a signed-in browser only.
-      if(caller!=='phone'&&route==='/owner-lock'&&req.method==='GET')return json(res,200,{...await lock.status(sessions.token(req)),login_off:sessions.open});
+      if(caller!=='phone'&&route==='/owner-lock'&&req.method==='GET')return json(res,200,await lock.status(sessions.token(req)));
       if(caller==='browser'&&route==='/owner-lock/password'&&req.method==='POST')return passwordAnswer(res,async()=>{
         const body=object(await readJson(req,4096));
         const {token:session}=await lock.changePassword(body.current,body.password);
@@ -443,7 +442,7 @@ export async function startManagement() {
     if(req.method==='GET'&&path==='/') {
       // Without a signed-in session the same page opens on its sign-in screen, with no CSRF value.
       const session=await sessions.session(req);
-      const bootstrap=session?`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};${sessions.open?'window.__NOCHEH_LOGIN_OFF__=true;':''}`
+      const bootstrap=session?`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`
         :`window.__NOCHEH_LOGIN__=${JSON.stringify((await lock.status()).password_set?'sign_in':'create')};`;
       const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision){if(window.__nochehUnsaved)return;location.reload()}nochehRevision=next}catch{}},1000)</script>` : '';
       const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',bootstrap).replace('</head>',reload+'</head>');
