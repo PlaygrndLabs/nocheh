@@ -290,6 +290,8 @@ export type ImportJob = {
     }[];
     first_at?: string | null;
     last_at?: string | null;
+    /** A rough cost of the secret check, which always runs at import; null when it couldn't be worked out. */
+    secret_check?: {cost_usd: number | null; calls: number} | null;
     /** A rough cost to learn these messages; null when it couldn't be worked out. */
     learning?: {
       cost_usd: number | null;
@@ -337,9 +339,14 @@ export function importStatus(job: ImportJob): Status {
   if (job.state === 'complete' && !job.prepared_at && job.prepared) return {label: 'Preparing', tone: 'info'};
   return states[job.state] ?? {label: job.state.replaceAll('_', ' '), tone: 'neutral'};
 }
+const dollars = (value: number) => '$' + (value < 10 ? value.toFixed(2) : Math.round(value).toLocaleString('en-US'));
+/** The secret check's cost line; it runs at every import. */
+export function secretCheckCostLabel(check: NonNullable<ImportJob['preview']>['secret_check']): string {
+  if (!check || check.cost_usd === null) return 'No cost estimate for the secret check right now.';
+  return `Estimated secret check cost: about ${dollars(check.cost_usd)}.`;
+}
 /** The learning cost line under the learning choice. */
 export function learningCostLabel(learning: NonNullable<ImportJob['preview']>['learning']): string {
-  const dollars = (value: number) => '$' + (value < 10 ? value.toFixed(2) : Math.round(value).toLocaleString('en-US'));
   if (!learning || learning.cost_usd === null) return 'No cost estimate right now.';
   const parts = learning.parts.map(part => `${part.label.toLowerCase()} ${dollars(part.cost_usd ?? 0)}`).join(', ');
   const basis = learning.parts.every(part => part.measured)

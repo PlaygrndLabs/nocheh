@@ -183,12 +183,13 @@ def dispatch(body):
         directory = state / 'admin/jobs' / job
         if operation == 'import.inspect':
             preview = inspect(directory)
-            # A rough learning cost, so the owner can decide before Start; the import works without it.
+            # A rough cost of the secret check and of learning, so the owner can decide before Start;
+            # the import works without it.
             try:
                 from tools.operations.archive.learning_estimate import estimate
-                preview['learning'] = estimate(state, preview['messages'], preview['characters'])
+                preview.update(estimate(state, preview['messages'], preview['characters']))
             except Exception:
-                preview['learning'] = None
+                preview.update(learning=None, secret_check=None)
             return preview
     raise ValueError('unknown_operation')
 

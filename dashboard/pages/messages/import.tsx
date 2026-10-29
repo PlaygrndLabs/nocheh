@@ -21,6 +21,7 @@ import {
   matchingGroup,
   preparationLabel,
   problemText,
+  secretCheckCostLabel,
   type ImportJob,
 } from '../../lib/messages-format';
 import {
@@ -500,7 +501,10 @@ function ImportReview({job}: {job: ImportJob}) {
               See imported messages
             </Button>
           )}
-          <span className="text-xs text-muted">Old messages are archived only; no replies are sent.</span>
+          <span className="text-xs text-muted">
+            Old messages are archived only; no replies are sent.
+            {job.preview && ' ' + secretCheckCostLabel(job.preview.secret_check)}
+          </span>
         </div>
       </CardBody>
     </Card>

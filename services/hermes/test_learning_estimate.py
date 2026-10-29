@@ -21,7 +21,8 @@ class LearningEstimateTests(unittest.TestCase):
         self.state = Path(folder.name)
         initialize(self.state)
         values = read_env(env_path(self.state))
-        values.update(NOCHEH_PROVIDER='anthropic', NOCHEH_REPLY_MODEL='reply-model', NOCHEH_MEMORY_MODEL='memory-model')
+        values.update(NOCHEH_PROVIDER='anthropic', NOCHEH_REPLY_MODEL='reply-model', NOCHEH_MEMORY_MODEL='memory-model',
+                      NOCHEH_GUARD_PROVIDER='anthropic', NOCHEH_GUARD_MODEL='guard-model')
         write_env(env_path(self.state), values)
 
     def test_without_history_typical_tokens_are_priced_for_reviews_and_memory(self):
@@ -29,9 +30,13 @@ class LearningEstimateTests(unittest.TestCase):
 
         def call(path, body, timeout):
             asked.append(body['rows'])
-            return {'costs': [1.5, 38.4]}
-        result = learning_estimate.estimate(self.state, 1200, 90000, call=call, now=DAY)
-        memory, reviews = asked[0]
+            return {'costs': [0.3, 1.5, 38.4]}
+        estimate = learning_estimate.estimate(self.state, 1200, 90000, call=call, now=DAY)
+        result = estimate['learning']
+        check, memory, reviews = asked[0]
+        # Each message's words twice plus its other fields, in calls of up to 45,000 characters.
+        self.assertEqual((check['model'], check['calls']), ('guard-model', 8))
+        self.assertEqual(estimate['secret_check'], {'cost_usd': 0.3, 'calls': 8})
         # 90,000 characters are about 30 Honcho windows, plus a summary every 20 and every 60 messages.
         self.assertEqual((memory['model'], memory['calls']), ('memory-model', 30 + 60 + 20))
         self.assertEqual((reviews['model'], reviews['calls'], reviews['input_tokens']), ('reply-model', 1200, 1200 * 12000))
@@ -52,21 +57,24 @@ class LearningEstimateTests(unittest.TestCase):
 
         def call(path, body, timeout):
             asked.append(body['rows'])
-            return {'costs': [0.75]}
-        result = learning_estimate.estimate(self.state, 1000, 0, call=call, now=DAY)
-        self.assertEqual(len(asked[0]), 1, 'reviews are costed from their own recent cost')
-        self.assertEqual((asked[0][0]['input_tokens'], asked[0][0]['output_tokens']), (2000 * 66, 300 * 66))
+            return {'costs': [0.1, 0.75]}
+        result = learning_estimate.estimate(self.state, 1000, 0, call=call, now=DAY)['learning']
+        self.assertEqual(len(asked[0]), 2, 'reviews are costed from their own recent cost')
+        self.assertEqual((asked[0][1]['input_tokens'], asked[0][1]['output_tokens']), (2000 * 66, 300 * 66))
         self.assertEqual([part['cost_usd'] for part in result['parts']], [20.0, 0.75])
         self.assertEqual(result['cost_usd'], 20.75)
         self.assertTrue(all(part['measured'] for part in result['parts']))
 
     def test_no_price_means_no_estimate_rather_than_zero(self):
-        result = learning_estimate.estimate(self.state, 10, 500, call=lambda *a, **k: {'costs': [None, 0.1]}, now=DAY)
-        self.assertIsNone(result['cost_usd'])
+        result = learning_estimate.estimate(self.state, 10, 500, call=lambda *a, **k: {'costs': [0.01, None, 0.1]}, now=DAY)
+        self.assertIsNone(result['learning']['cost_usd'])
+        self.assertEqual(result['secret_check']['cost_usd'], 0.01)
 
         def down(*args, **kwargs):
             raise OSError('hermes is down')
-        self.assertIsNone(learning_estimate.estimate(self.state, 10, 500, call=down, now=DAY)['cost_usd'])
+        unpriced = learning_estimate.estimate(self.state, 10, 500, call=down, now=DAY)
+        self.assertIsNone(unpriced['learning']['cost_usd'])
+        self.assertIsNone(unpriced['secret_check']['cost_usd'])
         with self.assertRaises(ValueError):
             learning_estimate.estimate(self.state, -1, 0, call=down, now=DAY)
 

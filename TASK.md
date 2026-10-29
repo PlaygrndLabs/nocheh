@@ -34,8 +34,10 @@ the export once, accept a 128 MB messages file, show preparation progress, and
 become ready with one Telegram notice
 ([ADR-0191](docs/adr/0191-imports-share-secret-checks-and-become-ready.md),
 [checks](test/store-preparation.test.ts), [ready](test/store-imports.test.ts)).
-The Import page shows a learning cost estimate before Start (owner, 2026-10-29:
-"estimate is ok"): one memory-notes review per message plus Honcho memory calls,
+The Import page shows cost estimates before Start (owner, 2026-10-29: "estimate
+is ok", "base on imported data and count calc the estimate"): the secret check
+from the export's text size and message count, and learning as one memory-notes
+review per message plus Honcho memory calls,
 from this installation's last 30 days of learning or typical token counts
 ([estimate](tools/operations/archive/learning_estimate.py),
 [check](services/hermes/test_learning_estimate.py)).
