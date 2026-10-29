@@ -126,6 +126,27 @@ class ArchiveTests(unittest.TestCase):
             for path in ('../outside','/etc/passwd','escape/passwd'):
                 with self.assertRaises(ValueError): media_path(root,path)
 
+    def test_search_says_when_history_is_still_importing(self):
+        import base64
+        claims=base64.urlsafe_b64encode(json.dumps({'scope':'-1001'}).encode()).decode().rstrip('=')
+        token=archive_tools.ARCHIVE_CREDENTIAL.set('scope.'+claims+'.signature')
+        def answer(path):
+            if path=='/v1/imports/pending':return {'imports':pending}
+            return [{'id':'nocheh:source:'+'a'*64}]
+        try:
+            pending=[{'messages':40000,'ready_percent':42}]
+            with patch.object(archive_tools,'request',side_effect=answer):
+                result=json.loads(archive_tools.search_tool({'query':'Friday'}))
+            self.assertEqual(result['import_status'],'Still importing: 42% of 40000 messages ready, so older history may be missing')
+            self.assertEqual(len(result['sources']),1)
+            pending=[]
+            with patch.object(archive_tools,'request',side_effect=answer):
+                self.assertNotIn('import_status',json.loads(archive_tools.search_tool({'query':'Friday'})))
+            # A failed status check never blocks the search itself.
+            with patch.object(archive_tools,'request',side_effect=lambda path:(_ for _ in ()).throw(ValueError('unavailable')) if 'pending' in path else []):
+                self.assertEqual(json.loads(archive_tools.search_tool({'query':'Friday'}))['sources'],[])
+        finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)
+
     def test_archive_tools_require_bound_scope_and_never_accept_scope_from_model(self):
         with patch('urllib.request.urlopen') as network:
             self.assertIn('error',json.loads(archive_tools.search_tool({'query':'Friday','scope':'private'})))

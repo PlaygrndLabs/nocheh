@@ -27,6 +27,8 @@ const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
   mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown;workflow?:'pending'|'inngest';
+  /** After the messages are written: how far they are read and checked, and when all were. */
+  prepared?: Record<string, unknown> | null; prepared_at?: string | null;
   /** The step a settings apply is on, so a reloaded page can still follow it. */
   step?: string;
   /** A backup the daily schedule started rather than the owner. */
@@ -54,6 +56,7 @@ async function getJob(id: string): Promise<Job> {
       if(status.owned){
         const current=object(status.job);job.state=current.state==='completed'?'complete':['queued','running'].includes(String(current.state))?'running':String(current.state);
         job.completed=Number(current.completed);job.duplicates=Number(current.duplicates);
+        job.prepared=current.progress?object(current.progress):null;job.prepared_at=current.ready_at?String(current.ready_at):null;
         if(job.state==='complete')job.result={completed:job.completed,duplicates:job.duplicates,telegram_replies:0,review_approved:job.review_approved};
       }
     }
@@ -140,24 +143,29 @@ function launch(job: Job, body: Record<string, unknown>, coordinator?:string) {
 const activeJobs = new Map<string, Job>();
 let operationBusy = false;
 
-async function upload(req: IncomingMessage, job: Job, name: string) {
+/** A large file can arrive in pieces, so it fits through proxies that limit one request's size. */
+async function upload(req: IncomingMessage, job: Job, name: string, offset = 0, more = false) {
   if (job.state !== 'uploading' || job.files >= 10000) throw new HttpError(409, 'upload_closed');
-  const path = join(jobPath(job.id), 'upload', uploadName(name));
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, 'invalid_upload_offset');
+  const path = join(jobPath(job.id), 'upload', uploadName(name)), partial = path + '.part';
+  const max = name.endsWith('.zip') ? 512 * 1024 * 1024 : name.endsWith('.json') ? 128 * 1024 * 1024 : 50 * 1024 * 1024;
   await mkdir(dirname(path), {recursive: true, mode: 0o700});
-  const temporary = path + '.' + randomUUID() + '.part';
-  const file = await open(temporary, 'wx', 0o600); let size = 0;
+  try { await stat(path); throw new HttpError(409, 'duplicate_upload'); }
+  catch (error) { if (error instanceof HttpError) throw error; }
+  if (offset === 0) await unlink(partial).catch(() => {});
+  else if ((await stat(partial).catch(() => null))?.size !== offset) throw new HttpError(409, 'upload_offset_mismatch');
+  const file = await open(partial, offset === 0 ? 'wx' : 'a', 0o600); let size = offset;
   try {
-    try { await stat(path); throw new HttpError(409, 'duplicate_upload'); }
-    catch (error) { if (error instanceof HttpError) throw error; }
     for await (const raw of req.iterator({destroyOnReturn: false})) {
       const chunk = raw as Buffer; size += chunk.length;
-      const max = name.endsWith('.zip') ? 256 * 1024 * 1024 : 50 * 1024 * 1024;
       if (size > max || job.bytes + size > 512 * 1024 * 1024) throw new HttpError(413, 'upload_size_limit');
       await file.write(chunk);
     }
-    await file.sync(); await file.close(); await rename(temporary, path);
-    job.files++; job.bytes += size; await putJob(job);
-  } catch (error) { await file.close().catch(() => {}); await unlink(temporary).catch(() => {}); throw error; }
+    await file.sync(); await file.close();
+  } catch (error) { await file.close().catch(() => {}); await unlink(partial).catch(() => {}); throw error; }
+  if (more) return job;
+  await rename(partial, path);
+  job.files++; job.bytes += size; await putJob(job);
   return job;
 }
 
@@ -398,7 +406,8 @@ export async function startManagement() {
         if (req.method === 'GET' && !action) return json(res, 200, await getJob(id));
         return exclusive(id, async () => {
           const job = await getJob(id);
-          if (req.method === 'PUT' && action === 'upload') return json(res, 200, await upload(req, job, url.searchParams.get('name') ?? ''));
+          if (req.method === 'PUT' && action === 'upload') return json(res, 200, await upload(req, job, url.searchParams.get('name') ?? '',
+            Number(url.searchParams.get('offset') ?? 0), url.searchParams.get('more') === '1'));
           if (req.method === 'POST' && action === 'preview') {
             if (job.state !== 'uploading' && job.state !== 'preview_failed') throw new HttpError(409, 'preview_closed');
             // A preview that can't read the upload says so instead of looking unfinished.
@@ -416,7 +425,10 @@ export async function startManagement() {
             job.review_approved=job.review_approved??(body.review_approved===true);
             if (job.mapping && JSON.stringify(mapping) !== JSON.stringify(job.mapping)) throw new HttpError(409, 'resume_scope_cannot_change');
             job.mapping=mapping;job.workflow='pending';delete job.error;await putJob(job);
-            const confirmed=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/confirm',body:{id,configuration_hash:importConfiguration(job.preview,mapping,job.review_approved),review_approved:job.review_approved,total:job.preview.messages,completed:job.completed,duplicates:job.duplicates,resume:['failed','cancelled','interrupted'].includes(job.state)}}));
+            const chats=(Array.isArray(job.preview.chats)?job.preview.chats:[]).map(chat=>object(chat));
+            const confirmed=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/confirm',body:{id,configuration_hash:importConfiguration(job.preview,mapping,job.review_approved),review_approved:job.review_approved,total:job.preview.messages,completed:job.completed,duplicates:job.duplicates,resume:['failed','cancelled','interrupted'].includes(job.state),
+              label:chats.map(chat=>String(chat.name??'')).filter(Boolean).join(', ').slice(0,300),
+              scopes:chats.map(chat=>String(mapping[String(chat.id)]??chat.scope??'')).filter(Boolean)}}));
             if(confirmed.owned===true){job.workflow='inngest';job.state='running';await putJob(job);return json(res,202,await getJob(id));}
             throw new HttpError(503,'import_admission_unavailable');
           });

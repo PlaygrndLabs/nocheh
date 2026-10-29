@@ -121,7 +121,12 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     assert.equal((await fetch(inspection+'/runs',{headers:{Cookie:sessionCookie,Origin:'https://untrusted.example'}})).status,403);
     const job=await request('/jobs',{});
     const document={id:77,type:'private_group',name:'Synthetic export',messages:Array.from({length:12},(_,id)=>({id,type:'message',text:'Exact متن  '+id}))};
-    const put=await fetch(base+'/jobs/'+job.id+'/upload?name=result.json',{method:'PUT',headers,body:JSON.stringify(document)});assert.equal(put.status,200);
+    // A large file arrives in pieces; a piece out of order is refused.
+    const serialized=Buffer.from(JSON.stringify(document)),half=Math.floor(serialized.length/2);
+    assert.equal((await fetch(base+'/jobs/'+job.id+'/upload?name=result.json&offset=0&more=1',{method:'PUT',headers,body:serialized.subarray(0,half)})).status,200);
+    assert.equal((await fetch(base+'/jobs/'+job.id+'/upload?name=result.json&offset=1',{method:'PUT',headers,body:serialized.subarray(half)})).status,409);
+    const put=await fetch(base+'/jobs/'+job.id+'/upload?name=result.json&offset='+half,{method:'PUT',headers,body:serialized.subarray(half)});assert.equal(put.status,200);
+    assert.equal((await put.json() as any).bytes,serialized.length);
     const bad=await fetch(base+'/jobs/'+job.id+'/upload?name=..%2Fescape',{method:'PUT',headers,body:'x'});assert.equal(bad.status,400);
     const preview=await request('/jobs/'+job.id+'/preview',{});assert.equal(preview.preview.messages,12);
     const unreadable=await request('/jobs',{});

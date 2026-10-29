@@ -28,6 +28,16 @@ on the first dashboard visit, with sessions that survive restarts
 [HTTP check](test/management.test.ts)). Pending: create the password on the
 running installation, and a live sign-in from the owner's phone.
 
+Chat-review build, part 1 of 4 (owner, 2026-10-29: "I all thing is ready start
+build."): imports check a page of messages per secret-check call, send and parse
+the export once, accept a 128 MB messages file, show preparation progress, and
+become ready with one Telegram notice
+([ADR-0191](docs/adr/0191-imports-share-secret-checks-and-become-ready.md),
+[checks](test/store-preparation.test.ts), [ready](test/store-imports.test.ts)).
+Pending: a large made-up import on a running installation, then parts 2 to 4
+(Hermes file reading and voice transcription, reading a chat in order with
+project-level role and skills, background sessions on Hermes Kanban).
+
 Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
 chose to drop the live safety check): with the Honcho service enabled, the store
 attaches Honcho memory once at startup without a live acceptance report and

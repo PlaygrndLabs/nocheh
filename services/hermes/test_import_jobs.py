@@ -5,6 +5,8 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
+from tools.operations.archive import import_job
 from tools.operations.archive.import_job import inspect, run
 
 
@@ -92,3 +94,27 @@ class ImportJobTests(unittest.TestCase):
                 clean=FakeArchive()
                 with self.assertRaises(ValueError):run(root,{},api=clean,**kwargs)
                 self.assertFalse(clean.records)
+
+    def test_export_is_parsed_once_and_sent_once_in_parts(self):
+        with tempfile.TemporaryDirectory() as folder,contextlib.redirect_stdout(io.StringIO()):
+            root,original=self.prepare(folder);api=FakeArchive()
+            parsed=mock.Mock(wraps=import_job.desktop_records)
+            with mock.patch.object(import_job,'EXPORT_PART',100),mock.patch.object(import_job,'desktop_records',parsed):
+                first=run(root,{},api=api,limit=1)
+                sent=dict(api.files)
+                second=run(root,{},after=1,api=api,limit=1,duplicates=first['duplicates'])
+            self.assertTrue(second['complete']);self.assertEqual(parsed.call_count,1)
+            manifest=next(r for r in api.records.values() if r['event']['kind']=='import_manifest')
+            parts=[a for a in manifest['artifacts'] if a['kind']=='telegram_export']
+            self.assertEqual(len(parts),-(-len(original)//100))
+            self.assertEqual([a['metadata']['part'] for a in parts],list(range(1,len(parts)+1)))
+            import base64
+            self.assertEqual(b''.join(base64.b64decode(sent[f"/v1/artifacts/{a['id']}/bytes"]['bytes_base64']) for a in parts),original)
+            # The second batch sends only its own message's files.
+            self.assertFalse([path for path in api.files if path not in sent])
+            self.assertTrue(all(api.files[path] is sent[path] for path in sent))
+
+    def test_messages_file_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root,_=self.prepare(folder)
+            with mock.patch.object(import_job,'MAX_EXPORT',10),self.assertRaisesRegex(ValueError,'export_json_exceeds_128_mib'):inspect(root)

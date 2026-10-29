@@ -11,7 +11,7 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_texts','tasks.reminder','system.problems','system.problem_buttons'] as const;
+  'telegram.approval_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -88,6 +88,8 @@ export function fillTemplate(template:string,values:Record<string,string|null|un
 /** A task reminder in the owner's private chat. A line whose value is missing,
  * such as the due day or the project's list, is left out. */
 export const taskReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
+/** Sent to the owner's private chat once an import's messages are all prepared. */
+export const importReady='✅ Import ready: {chats}\n{messages} messages are saved, read and checked for secrets. You can ask about them now.\n⚠️ {failed} of them could not be prepared; see System › Health.';
 /** A message to the owner's private chat about new or worse problems, one line each. */
 export const problemNotice='⚠️ Nocheh found a problem:\n{problems}\n\nSee System › Health in the dashboard.';
 /** The buttons under a problem notice and the short answers to a press. */
@@ -95,7 +97,7 @@ export const problemButtons=['open: 🔎 Open','retry: 🔁 Retry failed','retri
   'nothing: Nothing failed can be retried right now.','only_owner: Only the owner can do this.'].join('\n');
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'system.problems':problemNotice,'system.problem_buttons':problemButtons};
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

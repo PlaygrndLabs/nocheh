@@ -59,6 +59,16 @@ def request(path,body=None):
         return json.loads(data)
 
 
+def import_status():
+    """History still being imported says so, so an answer about it is not taken as complete."""
+    try:
+        pending=request('/v1/imports/pending').get('imports') or []
+        return '; '.join(f"Still importing{' '+item['label'] if item.get('label') else ''}: {int(item['ready_percent'])}% of "
+                         f"{int(item['messages'])} messages ready, so older history may be missing" for item in pending) or None
+    except Exception:
+        return None
+
+
 def search_tool(args, **kwargs):
     from urllib.parse import urlencode
     try:
@@ -70,10 +80,11 @@ def search_tool(args, **kwargs):
         query=args.get('query')
         if not isinstance(query,str) or not query.strip() or len(query)>2000:
             raise ValueError('invalid_query')
+        status=import_status()
         rows=request('/v1/search?'+urlencode({'q':query,'limit':count}))
         claims=json.loads(base64.urlsafe_b64decode((_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()).split('.')[1]+'==='))
         shared=request('/v1/memory/context?'+urlencode({'q':query})) if claims.get('space') and claims.get('scope') is not None else {'sources':[]}
-        return json.dumps({'sources':rows+shared['sources'],'filter_status':shared.get('filter_status')},ensure_ascii=False)
+        return json.dumps({'sources':rows+shared['sources'],'filter_status':shared.get('filter_status'),**({'import_status':status} if status else {})},ensure_ascii=False)
     except Exception:
         return json.dumps({'error':'archive_search_unavailable'})
 

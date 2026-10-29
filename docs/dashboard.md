@@ -79,8 +79,9 @@ replies and do not automatically run memory derivation.
 
 Jobs retain progress under the private `data/local/admin/jobs/` directory. Stop
 or interrupted jobs can resume; already committed sources remain preserved.
-Upload limits are 32 MiB export JSON, 50 MiB per media file, 256 MiB uploaded ZIP,
-512 MiB total unpacked/uploaded content and 10,000 files. The old import commands
+Upload limits are 128 MiB export JSON, 50 MiB per media file, 512 MiB uploaded ZIP,
+512 MiB total unpacked/uploaded content and 10,000 files. The dashboard sends large
+files in 16 MiB pieces, so a proxy's request size limit does not stop them. The old import commands
 remain supported alongside these conveniences:
 
 ```sh
