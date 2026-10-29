@@ -64,20 +64,22 @@ def running_development_source(state, project=None):
     installation, if any. Recreating its services from docker-compose.yml alone
     would replace the watched source with the old code baked into the images."""
     if os.environ.get('NOCHEH_CONTAINER')=='1' or project or Path(state).resolve()!=DEFAULT_STATE: return None
-    try:
-        result=subprocess.run(['docker','ps','--filter','label=com.docker.compose.project=nocheh',
-                               '--filter','label=com.docker.compose.project.working_dir='+str(INSTALLATION_ROOT),
-                               '--filter','label=com.nocheh.runtime-mode=source-watched',
-                               '--format','{{.Label "com.docker.compose.project.config_files"}}'],
-                              capture_output=True,text=True,timeout=30)
-    except (OSError,subprocess.TimeoutExpired): return None
-    files={line.strip() for line in result.stdout.splitlines() if line.strip()} if result.returncode==0 else set()
-    if not files: return None
-    # Refuse rather than guess when the running stack's Compose files are not one checkout's pair.
-    paths=[Path(path) for path in next(iter(files)).split(',')] if len(files)==1 else []
-    source=paths[0].parent if paths else None
-    if (not source or not source.is_absolute() or paths!=[source/'docker-compose.yml',source/'docker-compose.dev.yml']
-            or not paths[1].is_file()):
+    def docker(*arguments):
+        try: result=subprocess.run(['docker',*arguments],capture_output=True,text=True,timeout=30)
+        except (OSError,subprocess.TimeoutExpired): return None
+        return result.stdout if result.returncode==0 else None
+    running=(docker('ps','-q','--filter','label=com.docker.compose.project=nocheh',
+                    '--filter','label=com.docker.compose.project.working_dir='+str(INSTALLATION_ROOT),
+                    '--filter','label=com.nocheh.runtime-mode=source-watched') or '').split()
+    if not running: return None
+    # The host path of the watched source mount, not the Compose files label: an
+    # apply from the dashboard container labels services with its own /dev-source path.
+    mounts={line.strip() for line in (docker('inspect','--format',
+             '{{range .Mounts}}{{if eq .Destination "/app/src"}}{{.Source}}{{end}}{{end}}',*running) or '').splitlines()}
+    mount=Path(next(iter(mounts))) if len(mounts)==1 else None
+    source=mount.parent if mount and mount.is_absolute() and mount.name=='src' else None
+    # Refuse rather than guess when the running stack's checkout is not found on this host.
+    if not source or not all((source/name).is_file() for name in ('docker-compose.yml','docker-compose.dev.yml')):
         raise ValueError('development_source_unavailable')
     return source
 
