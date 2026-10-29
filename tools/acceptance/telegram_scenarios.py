@@ -648,7 +648,7 @@ class Scenarios:
         # tool with the Images model before its reply.
         content = b'\x89PNG\r\n\x1a\n' + b'synthetic photo bytes' * 8
         file_id = 'photo-'+str(self.f.ids())
-        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'photos/'+file_id+'.png',
+        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.png',
                                    'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
         update = self.f.message(OWNER, None, extra={'caption': 'این تابلو را نگه دار', 'photo': [
             {'file_id': file_id, 'file_unique_id': 'u'+file_id, 'width': 64, 'height': 48, 'file_size': len(content)}]})
