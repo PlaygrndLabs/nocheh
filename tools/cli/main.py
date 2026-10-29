@@ -225,7 +225,8 @@ def main():
         if args.command in ('up','build') and env.get('NOCHEH_HONCHO_ENABLED')=='true':
             from tools.operations.memory.honcho_setup import sources as honcho_sources
             honcho_sources()
-    command = compose_command(STATE)
+    # Builds make the installed images; everything else keeps a running `make dev` stack as it is.
+    command = compose_command(STATE, development=args.command != 'build')
     if args.command == 'db':
         from tools.operations.installation.database_viewer import start
         return start(STATE, command, ROOT)

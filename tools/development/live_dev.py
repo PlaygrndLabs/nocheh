@@ -124,6 +124,13 @@ def operating_config(root):
     return values
 
 
+def overlay_environment(source):
+    """What docker-compose.dev.yml needs besides the installation's own settings."""
+    return dict(NOCHEH_DEV_PROJECT=DEV_IMAGES, NOCHEH_DEV_SOURCE_ROOT=str(source),
+                NOCHEH_DEV_HERMES_BASE=DEV_IMAGES + ':hermes-base',
+                NOCHEH_DEV_HONCHO_IMAGE=DEV_IMAGES + ':honcho')
+
+
 def docker_env(root, values):
     keep = ('PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG',
             'XDG_RUNTIME_DIR', 'SSL_CERT_FILE')
@@ -132,11 +139,9 @@ def docker_env(root, values):
     # Settings › Models: the resolved provider and model of replies and secret checks.
     env.update(provider_routes.environment(values))
     env.update(mini_app.environment(values))
-    env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_DEV_PROJECT=DEV_IMAGES,
-               NOCHEH_DEV_SOURCE_ROOT=str(ROOT), NOCHEH_INSTALLATION_ROOT=str(root),
+    env.update(overlay_environment(ROOT))
+    env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_INSTALLATION_ROOT=str(root),
                NOCHEH_STATE_DIR=str(root / 'data/local'),
-               NOCHEH_DEV_HERMES_BASE=DEV_IMAGES + ':hermes-base',
-               NOCHEH_DEV_HONCHO_IMAGE=DEV_IMAGES + ':honcho',
                NOCHEH_NATIVE_ADMIN_PORT=str(int(values['NOCHEH_PORT']) + 5),
                COMPOSE_PROFILES='honcho,miniapp' if mini_app.enabled(values) else 'honcho',
                COMPOSE_PROGRESS='plain',
