@@ -157,11 +157,15 @@ def _review(profile,policy,model,credentials,body):
         request.update(scoped_transport(body['archive_credential'],transport['api_mode']))
         request['preferences']=preferences(effective)
         env['SERVICE_TOKEN']=secret('SERVICE_TOKEN');module='services.hermes.security_client'
-    result=subprocess.run([sys.executable,'-m',module],input=json.dumps(request).encode(),
-                          stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,timeout=220,cwd=Path(__file__).resolve().parents[2])
-    if result.returncode or len(result.stdout)>1024*1024:raise RuntimeError('review_worker_failed')
+    from .usage import record
+    try:result=subprocess.run([sys.executable,'-m',module],input=json.dumps(request).encode(),
+                              stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,timeout=220,cwd=Path(__file__).resolve().parents[2])
+    except subprocess.TimeoutExpired:
+        # A review stopped at its time limit reports nothing else; count it so its failure shows.
+        record('memory_review',None,model,True,reason='timed_out');raise
+    if result.returncode or len(result.stdout)>1024*1024:
+        record('memory_review',None,model,True,reason='nocheh_error');raise RuntimeError('review_worker_failed')
     value=json.loads(result.stdout)
     if isinstance(value,dict):
-        from .usage import record
-        record('memory_review',value.pop('usage',None),model,value.get('state')!='done')
+        record('memory_review',value.pop('usage',None),model,value.get('state')!='done',reason=value.pop('failure_reason',None))
     return value

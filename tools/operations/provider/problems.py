@@ -27,6 +27,14 @@ FAMILIES = {
     'honcho': 'Long-term memory sync', 'actions': 'Approved messages', 'tools': 'Approved tools',
     'organization': 'Organizing knowledge',
 }
+# Why model calls failed, by the usage tracker's codes (services/hermes/usage.py REASONS).
+MODEL_REASONS = {
+    'refused': 'refused by the model', 'rate_limited': 'over the provider’s rate or usage limit',
+    'key_rejected': 'the provider refused the key', 'model_not_found': 'the provider doesn’t know this model',
+    'too_long': 'too long for the model', 'timed_out': 'took too long', 'provider_error': 'the provider had an error',
+    'interrupted': 'stopped before finishing', 'empty_answer': 'the model gave an empty answer',
+    'bad_answer': 'the model’s answer couldn’t be used', 'nocheh_error': 'Nocheh’s own error', 'unknown': 'reason not known',
+}
 TELEGRAM_REASONS = {
     'telegram_network_error': 'it couldn’t reach Telegram', 'telegram_polling_conflict': 'another copy of the bot was running',
     'invalid_token': 'Telegram refused the bot token', 'missing_credentials': 'no bot token is set',
@@ -88,8 +96,25 @@ def problems(monitoring, usage_rows, today):
         hidden = row.get('hidden') or 0
         add(f"model:{today}:{row['part']}:{row['provider']}:{row['model']}", (row.get('failed') or 0) + hidden, 'model',
             label=row.get('label') or row['part'], model=row['model'], failed=row.get('failed') or 0,
-            refused=row.get('refused') or 0, hidden=hidden)
+            refused=row.get('refused') or 0, hidden=hidden, reasons=row.get('reasons') or {})
     return found
+
+
+def why(problem):
+    """Why a part's model calls failed, most common first, such as '2 refused by the model, 1 took too long',
+    or '' when no reason is known."""
+    reasons = {key: count for key, count in (problem.get('reasons') or {}).items() if isinstance(count, int) and count > 0}
+    # Calls counted before reasons were kept: only their refusals are known.
+    refused = problem.get('refused') or 0
+    if refused > reasons.get('refused', 0):
+        reasons['refused'] = refused
+    known = sum(reasons.values())
+    if known < (problem.get('failed') or 0) and reasons:
+        reasons['unknown'] = reasons.get('unknown', 0) + problem['failed'] - known
+    if not reasons or list(reasons) == ['unknown']:
+        return ''
+    ordered = sorted(reasons.items(), key=lambda item: (-item[1], list(MODEL_REASONS).index(item[0]) if item[0] in MODEL_REASONS else 99))
+    return ', '.join(f"{count} {MODEL_REASONS.get(key, MODEL_REASONS['unknown'])}" for key, count in ordered)
 
 
 def text(problem, new):
@@ -117,8 +142,8 @@ def text(problem, new):
         return f"Telegram stopped working at {problem['at'][:16].replace('T', ' ')} UTC: {reason}."
     parts = []
     if problem['failed']:
-        refused = f", {problem['refused']} refused by the model" if problem['refused'] else ''
-        parts.append(f"{_plural(problem['failed'], 'model call', 'model calls')} failed today{refused}")
+        reasons = why(problem)
+        parts.append(f"{_plural(problem['failed'], 'model call', 'model calls')} failed today" + (': ' + reasons if reasons else ''))
     if problem['hidden']:
         parts.append(f"{_plural(problem['hidden'], 'text was', 'texts were')} hidden whole because the model refused to check "
                      f"{'it' if problem['hidden'] == 1 else 'them'}")

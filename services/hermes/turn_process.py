@@ -159,7 +159,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         if result is not None:
             # Nocheh's usage tracker: Hermes's own token counts and cost for this turn.
             from .usage import part_of, record
-            await asyncio.to_thread(record, part_of(body), result.pop('usage',None), model, result.get('state')!='done')
+            await asyncio.to_thread(record, part_of(body), result.pop('usage',None), model, result.get('state')!='done',
+                                    reason=result.pop('failure_reason',None))
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
         from .assistant_gateway import check_delivery_policy
@@ -168,6 +169,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             return {'state':'failed','error_code':'guard_context_changed','timings':safe(result.get('timings'))}
         return result
     try: return await asyncio.wait_for(collect(), timeout=230)
+    except asyncio.TimeoutError:
+        # A turn stopped at its time limit reports nothing else; count it so its failure shows.
+        from .usage import part_of, record
+        await asyncio.to_thread(record, part_of(body), None, model, True, reason='timed_out')
+        raise
     finally:
         watcher.cancel()
         if process.returncode is None: process.kill();await process.wait()

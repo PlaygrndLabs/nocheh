@@ -23,10 +23,25 @@ SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT N
           'cache_write_tokens INTEGER NOT NULL DEFAULT 0, reasoning_tokens INTEGER NOT NULL DEFAULT 0, '
           'cost_usd REAL NOT NULL DEFAULT 0, priced_runs INTEGER NOT NULL DEFAULT 0, '
           'refused INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, '
+          "reasons TEXT NOT NULL DEFAULT '{}', "
           'PRIMARY KEY(day,part,provider,model))')
-# Counts added after the first table: `refused` is a failed run the model declined to answer,
-# `hidden` a text the secret check hid whole because the model declined to check it.
-ADDED = ('refused', 'hidden')
+# Columns added after the first table: `refused` is a failed run the model declined to answer,
+# `hidden` a text the secret check hid whole because the model declined to check it, and
+# `reasons` the failed runs counted by why they failed, such as {"refused": 2, "timed_out": 1}.
+ADDED = {'refused': 'INTEGER NOT NULL DEFAULT 0', 'hidden': 'INTEGER NOT NULL DEFAULT 0', 'reasons': "TEXT NOT NULL DEFAULT '{}'"}
+# Why a run failed. Codes only: never the provider's message or any content.
+REASONS = ('refused', 'rate_limited', 'key_rejected', 'model_not_found', 'too_long', 'timed_out',
+           'provider_error', 'interrupted', 'empty_answer', 'bad_answer', 'nocheh_error', 'unknown')
+# Hermes's classified failure reasons, by the code Nocheh keeps.
+HERMES_REASONS = {
+    'refused': ('content_policy_blocked', 'provider_policy_blocked', 'data_policy_denied'),
+    'rate_limited': ('rate_limit', 'upstream_rate_limit', 'billing'),
+    'key_rejected': ('auth', 'auth_permanent', 'model_entitlement'),
+    'model_not_found': ('model_not_found',),
+    'too_long': ('context_overflow', 'payload_too_large', 'truncated', 'image_too_large'),
+    'timed_out': ('timeout',),
+    'provider_error': ('overloaded', 'server_error', 'upstream_blocked', 'incomplete_response', 'format_error'),
+}
 
 
 def _count(value):
@@ -48,6 +63,50 @@ def turn_usage(result):
     if isinstance(result.get('model'), str):
         usage['model'] = result['model'][:120]
     return usage
+
+
+def failure_reason(results):
+    """Why a Hermes turn failed, from the run results of its process, as one of REASONS."""
+    for result in results or []:
+        if not isinstance(result, dict):
+            return 'unknown'
+        code = str(result.get('failure_reason') or '')
+        exit_reason = str(result.get('turn_exit_reason') or '')
+        found = next((reason for reason, codes in HERMES_REASONS.items() if code in codes), None)
+        if found:
+            return found
+        if 'finish_reason=refusal' in exit_reason or 'finish_reason=content_filter' in exit_reason:
+            return 'refused'
+        if exit_reason.startswith(('max_iterations_reached', 'budget_exhausted', 'review_input_budget_exhausted',
+                                   'context_compression_timeout')):
+            return 'too_long'
+        if result.get('interrupted'):
+            return 'interrupted'
+        if result.get('failed'):
+            return 'unknown' if code in ('', 'unknown') else 'provider_error'
+        if result.get('completed') is not True:
+            return 'interrupted'
+        if not str(result.get('final_response') or '').strip():
+            return 'empty_answer'
+    return 'unknown'
+
+
+def error_reason(error):
+    """Why one direct model call failed, from its exception, as one of REASONS."""
+    status = getattr(error, 'status_code', None)
+    if isinstance(status, int):
+        if status == 429:
+            return 'rate_limited'
+        if status in (401, 403):
+            return 'key_rejected'
+        if status == 404:
+            return 'model_not_found'
+        if status == 413:
+            return 'too_long'
+        return 'provider_error'
+    if isinstance(error, TimeoutError) or 'Timeout' in type(error).__name__:
+        return 'timed_out'
+    return 'unknown'
 
 
 def combine(results):
@@ -122,26 +181,28 @@ def connect(path=None):
     db.execute('PRAGMA journal_mode=WAL')
     db.execute(SCHEMA)
     present = {row[1] for row in db.execute('PRAGMA table_info(usage_daily)')}
-    for name in ADDED:
+    for name, kind in ADDED.items():
         if name not in present:
-            db.execute(f'ALTER TABLE usage_daily ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0')
+            db.execute(f'ALTER TABLE usage_daily ADD COLUMN {name} {kind}')
     return db
 
 
-def record(part, usage, model, failed=False, provider=None, path=None, now=None, refused=False):
-    """Add one run to today's totals. Usage tracking never fails the work it measures."""
+def record(part, usage, model, failed=False, provider=None, path=None, now=None, refused=False, reason=None):
+    """Add one run to today's totals, and a failed run's reason. Usage tracking never fails the work it measures."""
     usage = usage or {}
-    _add(part, usage.get('model') or model, provider, path, now, runs=1, failed=int(bool(failed or refused)),
-         refused=int(bool(refused)), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
+    failed = bool(failed or refused)
+    reason = 'refused' if refused else reason if reason in REASONS else 'unknown'
+    _add(part, usage.get('model') or model, provider, path, now, reason if failed else None, runs=1, failed=int(failed),
+         refused=int(reason == 'refused' and failed), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
          cost_usd=float(usage.get('cost_usd') or 0), priced_runs=int('cost_usd' in usage))
 
 
 def note_hidden(part, model, provider=None, path=None, now=None):
     """Count one text hidden whole because the model declined to check it; not a run of its own."""
-    _add(part, model, provider, path, now, hidden=1)
+    _add(part, model, provider, path, now, None, hidden=1)
 
 
-def _add(part, model, provider, path, now, **amounts):
+def _add(part, model, provider, path, now, reason, **amounts):
     if part not in PARTS:
         return
     provider = (provider if provider is not None else os.environ.get(PROVIDERS['guard' if part == 'guard' else 'reply'], '')) or 'unknown'
@@ -160,6 +221,9 @@ def _add(part, model, provider, path, now, **amounts):
             db.execute('UPDATE usage_daily SET ' + ','.join(f'{name}={name}+?' for name in amounts) +
                        ' WHERE day=? AND part=? AND provider=? AND model=?',
                        (*amounts.values(), day, part, provider[:40], model))
+            if reason:
+                db.execute("UPDATE usage_daily SET reasons=json_set(reasons,'$.'||?,coalesce(json_extract(reasons,'$.'||?),0)+1) "
+                           'WHERE day=? AND part=? AND provider=? AND model=?', (reason, reason, day, part, provider[:40], model))
             cutoff = (moment - timedelta(days=RETENTION_DAYS)).strftime('%Y-%m-%d')
             db.execute('DELETE FROM usage_daily WHERE day<?', (cutoff,))
             db.execute('COMMIT')
@@ -169,6 +233,16 @@ def _add(part, model, provider, path, now, **amounts):
         pass
 
 
+def reasons(value):
+    """A row's failed runs by reason, keeping only known reasons and counts."""
+    import json
+    try:
+        found = json.loads(value or '{}')
+    except ValueError:
+        return {}
+    return {key: _count(count) for key, count in found.items() if key in REASONS and _count(count)} if isinstance(found, dict) else {}
+
+
 def rows(since_day, path=None):
     path = Path(path or DATABASE)
     if not path.exists():
@@ -176,6 +250,7 @@ def rows(since_day, path=None):
     db = connect(path)
     try:
         db.row_factory = sqlite3.Row
-        return [dict(row) for row in db.execute('SELECT * FROM usage_daily WHERE day>=? ORDER BY day,part,provider,model', (since_day,))]
+        return [{**dict(row), 'reasons': reasons(row['reasons'])}
+                for row in db.execute('SELECT * FROM usage_daily WHERE day>=? ORDER BY day,part,provider,model', (since_day,))]
     finally:
         db.close()

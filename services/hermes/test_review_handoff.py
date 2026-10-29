@@ -110,6 +110,21 @@ class ReviewHandoffTests(unittest.TestCase):
             self.wait_state(self.body,'ambiguous');self.assertEqual(child.call_count,1)
         self.assertEqual((receipts/self.body['id']).read_text(),'running','a stopped review that changed notes stays uncertain')
 
+    def test_a_review_counts_why_its_model_calls_failed(self):
+        import json,subprocess
+        from .review_worker import _review
+        credentials=SimpleNamespace(runtime=lambda:{'api_mode':'chat_completions'})
+        child=SimpleNamespace(returncode=0,stdout=json.dumps({'state':'failed','error_code':'assistant_runtime_unavailable',
+                                                              'failure_reason':'refused','usage':{'calls':1}}).encode())
+        with patch('services.hermes.security_transport.isolated_enabled',return_value=False), \
+                patch('services.hermes.usage.record') as record:
+            with patch('services.hermes.review_worker.subprocess.run',return_value=child):
+                self.assertEqual(_review(self.profile,self.policy,'model',credentials,self.body),
+                                 {'state':'failed','error_code':'assistant_runtime_unavailable'})
+            with patch('services.hermes.review_worker.subprocess.run',side_effect=subprocess.TimeoutExpired('review',220)):
+                with self.assertRaises(subprocess.TimeoutExpired):_review(self.profile,self.policy,'model',credentials,self.body)
+        self.assertEqual([c.kwargs['reason'] for c in record.call_args_list],['refused','timed_out'])
+
     def test_failed_thread_launch_keeps_ambiguity_and_releases_capacity(self):
         with patch('services.hermes.review_worker.threading.Thread.start',side_effect=RuntimeError('fixture_launch_failed')):
             with self.assertRaisesRegex(RuntimeError,'fixture_launch_failed'):start(self.root,self.policy,'model',None,self.body)

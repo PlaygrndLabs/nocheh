@@ -76,10 +76,11 @@ def routes(config):
 
 
 def model_problems(state, now=None):
-    """Today's failed, refused and hidden model calls per part and model, from the usage tracker."""
-    from tools.operations.provider import usage
+    """Today's failed, refused and hidden model calls per part and model, with why they failed, from the usage tracker."""
+    from tools.operations.provider import problems, usage
     day=(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')
     rows=(usage.hermes_rows(state,day) or [])+(usage.honcho_rows(state,day) or [])
     return [{'day':day,'part':row['part'],'label':usage.PARTS.get(row['part'],(row['part'],))[0],'provider':row['provider'],
-             'model':row['model'],'calls':row['calls'],'failed':row['failed'],'refused':row.get('refused') or 0,'hidden':row.get('hidden') or 0}
+             'model':row['model'],'calls':row['calls'],'failed':row['failed'],'refused':row.get('refused') or 0,'hidden':row.get('hidden') or 0,
+             'reasons':row.get('reasons') or {},'why':problems.why(row)}
             for row in rows if row['day']==day and (row['failed'] or row.get('hidden'))]

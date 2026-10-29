@@ -286,9 +286,11 @@ def main():
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names
     record('total',started);result['timings']=safe(VALUES)
-    from .usage import combine
+    from .usage import combine,failure_reason
     measured=combine(RUNS)
     if measured:result['usage']=measured
+    # Why it failed, as a code for the usage tracker: a run's own reason, else Nocheh's error.
+    if result.get('state')!='done':result['failure_reason']=failure_reason(RUNS) if RUNS else 'nocheh_error'
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()
 
 

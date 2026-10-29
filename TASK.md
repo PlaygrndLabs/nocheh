@@ -14,8 +14,10 @@ private Telegram chat new or worse problems, including model refusals and texts
 the secret check hid; Health and Usage show refusals. Live since 2026-10-28.
 Notices carry Open (mini app Health page, else the dashboard address) and Retry
 failed buttons (owner, 2026-10-28: "better to have action btn for errors to
-dashboard or directly action, also better to open in mini app"). Pending: a live
-button press on a running installation.
+dashboard or directly action, also better to open in mini app"). Failed model
+calls keep a reason code, and notices and Health say why they failed (owner,
+2026-10-29: "all yes" to keeping failure reasons). Pending: a live button press
+on a running installation.
 
 Mini app password (owner, 2026-10-28: "better to set a password for it, can set
 and change from main dash", "an auth"): each phone signs in once with a password
