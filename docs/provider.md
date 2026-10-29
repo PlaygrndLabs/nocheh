@@ -39,6 +39,13 @@ missing.
 
 ## Voice notes
 
-Nocheh has no voice transcription. A voice note keeps its original audio and
-records the status "Voice note archived; transcription is not available." It
-never holds a reply.
+Voice notes, audio files and round videos, live or imported, are transcribed by
+Hermes's own transcriber with the provider and model under Voice notes in
+Settings › Models: OpenAI with its key and `gpt-transcribe` by default, or a
+gateway that serves the same models. The transcript is checked for secrets like
+typed text, and the original audio is kept. A reply waits for the transcript; a
+busy provider is tried again, and a recording that cannot be transcribed records
+why and does not hold the reply. Without a key, a voice note records "Voice note
+archived; transcription is not available." and is transcribed once a key is
+added. Usage shows each transcription's audio length and cost
+([ADR-0193](adr/0193-voice-notes-are-transcribed-by-the-runtime-transcriber.md)).

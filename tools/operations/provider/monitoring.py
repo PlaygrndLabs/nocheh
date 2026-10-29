@@ -68,11 +68,13 @@ def status(state):
 def routes(config):
     """Which provider and model each part uses; never a key."""
     known=provider_routes.providers(config)
-    selected=[*provider_routes.routes(config).values(),provider_routes.embedding_route(config)]
-    labels={**{part:label for part,(label,_,_) in provider_routes.PARTS.items()},'embedding':'Memory search'}
+    selected=[*provider_routes.routes(config).values(),provider_routes.embedding_route(config),provider_routes.transcription_route(config)]
+    labels={**{part:label for part,(label,_,_) in provider_routes.PARTS.items()},'embedding':'Memory search','transcription':'Voice notes'}
+    # Voice notes without their provider's key are archived only.
+    ready=lambda route:route.configured and (route.part!='transcription' or bool(route.key))
     return [{'part':route.part,'label':labels[route.part],'provider':route.provider,
              'provider_name':known[route.provider]['name'] if route.configured else '',
-             'model':route.model if route.configured else '','configured':route.configured} for route in selected]
+             'model':route.model if route.configured else '','configured':ready(route)} for route in selected]
 
 
 def model_problems(state, now=None):

@@ -122,9 +122,12 @@ export class SourceRepository {
       }
       artifacts.push({id:item.id,...metadata,state:item.file_hash?'ready':'pending',...(principal.admin?{file_hash:item.file_hash,byte_size:item.byte_size}:{}),source:'nocheh:artifact:'+item.id});
     }
+    // A status that a reading replaced, such as a voice note saved before transcription was set up, is not shown.
     const selected=(await this.stores.derived.query(`SELECT s.artifact_id,s.kind,r.derived_id,d.content,d.provenance FROM derivative_selections s
       JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
-      JOIN derived_artifacts d ON d.id=r.derived_id WHERE s.event_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status') ORDER BY s.id`,[id])).rows;
+      JOIN derived_artifacts d ON d.id=r.derived_id WHERE s.event_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status')
+        AND NOT (s.kind='extraction_status' AND EXISTS(SELECT 1 FROM derivative_selections t WHERE t.artifact_id=s.artifact_id
+          AND t.kind IN ('transcript','extracted_text') AND t.active_revision IS NOT NULL)) ORDER BY s.id`,[id])).rows;
     const derived=[];
     for(const item of selected) {
       const value=binding?(await this.selections.current(id,item.artifact_id,item.kind,binding)).value as any:{text:item.content.toString(),kind:item.kind,provenance:item.provenance};

@@ -139,8 +139,9 @@ class SettingsTests(unittest.TestCase):
             result = applied()
             self.assertEqual((result['memory_rebuild'], result['apply_state']), ('started', 'current'))
             self.assertEqual(calls[-1], ('/v1/memory/honcho/fresh-start', {'expected_revision': 7, 'operation_id': operation, 'from_archive': True}))
-            self.assertEqual(result['models'], {'embedding': ['text-embedding-3-large', 'text-embedding-3-small'],
-                                                'embedding_locked': 'text-embedding-3-large', 'embedding_rebuild': None})
+            self.assertEqual({key: value for key, value in result['models'].items() if key != 'transcription'},
+                             {'embedding': ['text-embedding-3-large', 'text-embedding-3-small'],
+                              'embedding_locked': 'text-embedding-3-large', 'embedding_rebuild': None})
             # Nothing is rebuilt twice, and the spending records stay.
             self.assertIsNone(applied()['memory_rebuild'])
             with sqlite3.connect(ledger) as db:

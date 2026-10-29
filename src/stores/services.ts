@@ -16,7 +16,7 @@ import {CaptureCoordinator} from './capture.js';
 import {GuardRepository} from './guards.js';
 import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
-import {ReprocessingRepository,archivedVoice,documentExtraction,textExtraction,type DerivationEngine} from './reprocessing.js';
+import {ReprocessingRepository,archivedVoice,documentExtraction,textExtraction,voiceTranscription,type DerivationEngine} from './reprocessing.js';
 import {PreparationRepository} from './preparation.js';
 import {SourceAccessRepository} from './access.js';
 import {SourceRepository} from './retrieval.js';
@@ -60,9 +60,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   runtime:RuntimeCall;honcho:HonchoCall;transcription?:DerivationEngine;serviceToken?:string}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
-  const transcription=options.transcription??archivedVoice(),extraction=documentExtraction(options.runtime);
-  // Files read before the runtime's reader keep their readings; an earlier request still completes.
-  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction,textExtraction()]);
+  const transcription=options.transcription??voiceTranscription(options.runtime),extraction=documentExtraction(options.runtime);
+  // Files and voice notes read before the runtime's readers keep their readings; an earlier request still completes.
+  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction,textExtraction(),...(options.transcription?[]:[archivedVoice()])]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction);
   const retirements=new SourceRetirementRepository(stores,archive);
   const reactions=new ReactionStateRepository(archive,stores.control);
@@ -114,7 +114,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
   },{call:options.runtime,owner:()=>options.policy().owner_id});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
-  return {ownerAutonomy,notion,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  // Voice notes saved before a transcription provider was chosen are transcribed once one is.
+  const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
+  return {ownerAutonomy,notion,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

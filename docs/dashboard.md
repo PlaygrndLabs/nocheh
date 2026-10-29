@@ -129,7 +129,7 @@ The terminal, its model turn and the sidebar metadata connection have distinct r
 only the managed turn runner can invoke a model.
 
 Submitted text and up to 10 files (25 MiB total) are archived before execution.
-Voice attachments are archived without transcription; bounded UTF-8 files
+Voice attachments are transcribed like Telegram voice notes; bounded UTF-8 files
 (up to 200 kB each, 1 MB total) are included as context. Other binary files remain
 retrievable. Original images remain owner-only while guarding is on; required guarding
 rejects opaque image context. Generated results and transcripts retain provenance.

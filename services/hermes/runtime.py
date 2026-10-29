@@ -144,8 +144,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(401, {"error": "unauthorized"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            # A document to read arrives whole, as base64 of up to 50 MB.
-            if not 0 < length <= (70 if self.path == '/internal/extract' else 36) * 1024 * 1024:
+            # A document to read or a recording to transcribe arrives whole, as base64 of up to 50 MB.
+            if not 0 < length <= (70 if self.path in ('/internal/extract', '/internal/transcribe') else 36) * 1024 * 1024:
                 return self.reply(413, {"error": "invalid_body_size"})
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
@@ -207,6 +207,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/internal/extract':
             from .document_text import extract
             return extract(body)
+        if self.path == '/internal/transcribe':
+            from .voice_text import transcribe
+            return transcribe(body)
         if self.path == '/internal/memory/filter':
             from .privacy import filter_knowledge
             return filter_knowledge(resolve_credentials(),MODEL,body)

@@ -6,8 +6,8 @@ addresses; a custom provider is a name, an HTTPS address and an API key. One
 default provider and model serves every reasoning part unless a part names its
 own. A part with no provider is unconfigured: a fresh installation is valid and
 starts, and that part's model calls fail with `provider_not_configured` until a
-provider is chosen in Settings › Models. Embeddings always name their own
-provider.
+provider is chosen in Settings › Models. Embeddings and voice-note
+transcription always name their own provider.
 """
 import json
 import os
@@ -162,6 +162,19 @@ def embedding_route(values):
                  key(values, provider))
 
 
+def transcription_route(values):
+    """Where voice notes are sent to be transcribed. Without a key, voice notes are archived only."""
+    from tools.operations.provider.transcription_config import DEFAULTS as VOICE, MODELS
+    provider = (values.get('NOCHEH_TRANSCRIPTION_PROVIDER') or VOICE['NOCHEH_TRANSCRIPTION_PROVIDER']).strip()
+    model = (values.get('NOCHEH_TRANSCRIPTION_MODEL') or VOICE['NOCHEH_TRANSCRIPTION_MODEL']).strip()
+    known = providers(values)
+    if provider == 'anthropic' or provider not in known:
+        raise ValueError('Voice notes need an OpenAI-compatible provider with transcription, such as OpenAI')
+    if model not in MODELS:
+        raise ValueError('The voice notes model must be one of ' + ', '.join(MODELS))
+    return Route('transcription', provider, known[provider]['url'], model, key(values, provider))
+
+
 def routes(values):
     return {part: route(values, part) for part in PARTS}
 
@@ -184,6 +197,7 @@ def validate(values):
         if not selected.key:
             raise ValueError(label + ' uses ' + known[selected.provider]['name'] + ', which has no API key')
     embedding_route(values)
+    transcription_route(values)
 
 
 def environment(values):
@@ -197,6 +211,11 @@ def environment(values):
         result.update({f'NOCHEH_{name}_ROUTE_URL': current.url, f'NOCHEH_{name}_ROUTE_MODEL': current.model if configured else '',
                        f'NOCHEH_{name}_ROUTE_KEY': current.key, f'NOCHEH_{name}_ROUTE_PROVIDER': current.provider})
     result['NOCHEH_MEMORY_ROUTE_MODEL'] = selected['memory'].model if selected['memory'].configured else ''
+    from tools.operations.provider.transcription_config import MODELS
+    voice = transcription_route(values)
+    result.update({'NOCHEH_TRANSCRIPTION_ROUTE_URL': voice.url if voice.key else '', 'NOCHEH_TRANSCRIPTION_ROUTE_KEY': voice.key,
+                   'NOCHEH_TRANSCRIPTION_ROUTE_MODEL': voice.model, 'NOCHEH_TRANSCRIPTION_ROUTE_PROVIDER': voice.provider,
+                   'NOCHEH_TRANSCRIPTION_ROUTE_PRICE': str(MODELS[voice.model])})
     return result
 
 

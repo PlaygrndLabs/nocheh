@@ -65,6 +65,16 @@ class LearningEstimateTests(unittest.TestCase):
         self.assertEqual(result['cost_usd'], 20.75)
         self.assertTrue(all(part['measured'] for part in result['parts']))
 
+    def test_voice_notes_are_priced_per_minute_once_their_provider_has_a_key(self):
+        down = lambda *args, **kwargs: {'costs': [None, None, None]}
+        archived = learning_estimate.estimate(self.state, 10, 500, call=down, now=DAY, voice_notes=3, voice_seconds=600)['voice']
+        self.assertEqual(archived, {'configured': False, 'notes': 3, 'minutes': 10.0, 'cost_usd': None})
+        values = read_env(env_path(self.state))
+        values.update(OPENAI_API_KEY='synthetic-openai-key', NOCHEH_TRANSCRIPTION_MODEL='gpt-4o-mini-transcribe')
+        write_env(env_path(self.state), values)
+        priced = learning_estimate.estimate(self.state, 10, 500, call=down, now=DAY, voice_notes=400, voice_seconds=36000)['voice']
+        self.assertEqual(priced, {'configured': True, 'notes': 400, 'minutes': 600.0, 'model': 'gpt-4o-mini-transcribe', 'cost_usd': 1.8})
+
     def test_no_price_means_no_estimate_rather_than_zero(self):
         result = learning_estimate.estimate(self.state, 10, 500, call=lambda *a, **k: {'costs': [0.01, None, 0.1]}, now=DAY)
         self.assertIsNone(result['learning']['cost_usd'])

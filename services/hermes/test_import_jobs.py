@@ -58,6 +58,20 @@ class ImportJobTests(unittest.TestCase):
             texts=[r['event']['text'] for r in api.records.values()]
             self.assertIn('Original  متن\r\n  ',texts)
 
+    def test_preview_counts_voice_notes_and_their_minutes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder); upload=root/'upload'; (upload/'voice_messages').mkdir(parents=True)
+            (upload/'voice_messages/audio_1.ogg').write_bytes(b'OggS synthetic')
+            document={'id':42,'type':'private_group','name':'Fixture','messages':[
+                {'id':1,'type':'message','date':'2026-10-09T09:00:00','text':'','file':'voice_messages/audio_1.ogg',
+                 'media_type':'voice_message','mime_type':'audio/ogg','duration_seconds':75},
+                {'id':2,'type':'message','date':'2026-10-09T09:01:00','text':'','file':'(File not included. Change data exporting settings to download.)',
+                 'media_type':'voice_message','duration_seconds':40},
+                {'id':3,'type':'message','date':'2026-10-09T09:02:00','text':'Synthetic text'}]}
+            (upload/'result.json').write_text(json.dumps(document))
+            preview=inspect(root)
+            self.assertEqual((preview['voice_notes'],preview['voice_seconds']),(1,75),'a voice note without its file is not transcribed')
+
     def test_zip_paths_symlinks_and_duplicate_members_are_rejected(self):
         for name,symlink in [('../escape.json',False),('/absolute.json',False),('symlink',True)]:
             with self.subTest(name=name),tempfile.TemporaryDirectory() as folder:

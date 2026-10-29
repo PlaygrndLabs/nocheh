@@ -7,6 +7,7 @@ import {GuardRepository,type GuardBinding} from './guards.js';
 import {LearnedMemoryRepository,type PreparedDependency} from './learned.js';
 import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
+import {RECORDINGS} from './reprocessing.js';
 import {EntityRepository,type EntityContext,type KnownPeople} from './entities.js';
 
 export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner'|'owner_guard';id:string;revision:number;text:string};
@@ -52,7 +53,7 @@ export class LearningContextRepository {
       const selected=(await this.access.stores.derived.query(`SELECT artifact_id,kind FROM derivative_selections WHERE event_id=$1
         AND kind IN ('transcript','extracted_text') AND active_revision IS NOT NULL ORDER BY id LIMIT 31`,[reference.id])).rows;
       if(selected.length>30)throw new HttpError(409,'learning_derivative_limit');
-      const media=(await this.access.stores.archive.query("SELECT id FROM artifacts WHERE event_id=$1 AND kind IN ('voice','audio','video_note')",[reference.id])).rows;
+      const media=(await this.access.stores.archive.query('SELECT id FROM artifacts WHERE event_id=$1 AND kind=ANY($2::text[])',[reference.id,RECORDINGS])).rows;
       if(media.some(m=>!selected.some(s=>s.artifact_id===m.id&&s.kind==='transcript')))throw new HttpError(409,'derivative_selection_pending');
       for(const selection of selected) {
         const current=await this.selections.current(reference.id,selection.artifact_id,selection.kind,binding);

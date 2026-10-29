@@ -20,6 +20,7 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
     'telegram.notice':'/internal/telegram/notice',
     'usage.price':'/internal/usage/price',
     'file.extract':'/internal/extract',
+    'voice.transcribe':'/internal/transcribe',
     'run.resume':'/internal/run/resume','run.events':'/internal/run/events','run.cancel':'/internal/run/cancel',
   };
   const actions: Partial<Record<RuntimeOperation, string>> = {

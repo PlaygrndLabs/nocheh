@@ -60,8 +60,8 @@ the owner DM may search the complete archive and registered native memory. Unsel
 chats and participants without a group grant cannot trigger the assistant. Bot
 senders, edits and historical replay do not trigger new replies.
 Normal group chatter can produce intentional silence. Voice, audio and round
-video notes are archived with their original bytes and an extraction status
-saying transcription is not available; they never hold a reply. Media bytes are downloaded
+video notes keep their original bytes and are transcribed before their reply
+(see [provider.md](provider.md#voice-notes)). Media bytes are downloaded
 by the archive worker; the assistant does not repeat native media downloads or
 run a shared sticker-description cache. Photos/documents remain available as
 archived files and captions; automatic visual interpretation is not enabled.

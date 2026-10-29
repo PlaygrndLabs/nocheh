@@ -24,6 +24,8 @@ export const settingLabels: Record<string, string> = {
   NOCHEH_EMBEDDING_PROVIDER: 'Memory search provider',
   NOCHEH_EMBEDDING_MODEL: 'Memory search model',
   NOCHEH_EMBEDDING_DIMENSIONS: 'Memory search dimensions',
+  NOCHEH_TRANSCRIPTION_PROVIDER: 'Voice notes provider',
+  NOCHEH_TRANSCRIPTION_MODEL: 'Voice notes model',
   NOCHEH_PROVIDERS: 'Custom providers',
   NOCHEH_PROVIDER_KEYS: 'Provider keys',
   OPENAI_API_KEY: 'OpenAI key',

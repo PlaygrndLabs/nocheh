@@ -20,6 +20,7 @@ PARTS = {
     'schedule': ('Scheduled runs', 'Hermes'),
     'memory_review': ('Memory notes', 'Hermes'),
     'guard': ('Secret check', 'Nocheh'),
+    'transcription': ('Voice notes', 'Hermes'),
     'memory': ('Memory', 'Honcho'),
     'embedding': ('Memory search', 'Honcho'),
 }

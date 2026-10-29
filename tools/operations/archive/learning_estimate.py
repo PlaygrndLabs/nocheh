@@ -9,6 +9,9 @@ cost on this installation over the last 30 days; without that history, typical
 token counts are priced. Honcho uses its own recent token counts per call, or
 typical ones. Prices come from Hermes's price table for the models in Settings ›
 Models. It is an estimate: real cost depends on the messages and the models.
+
+Voice notes are transcribed at import when Settings › Models has a voice provider with a key,
+priced per minute of audio from the export's own durations.
 """
 import math
 from datetime import datetime, timedelta, timezone
@@ -36,8 +39,20 @@ def recent(state, now=None):
     return hermes_rows(state, since) or [], honcho_rows(state, since) or []
 
 
-def estimate(state, messages, characters, call=None, now=None):
-    if type(messages) is not int or messages < 0 or type(characters) is not int or characters < 0:
+def voice(values, notes, seconds):
+    """What transcribing an import's voice notes costs, or that they are archived only."""
+    from tools.operations.provider.transcription_config import MODELS
+    route = provider_routes.transcription_route(values)
+    minutes = round(seconds / 60, 1)
+    if not route.key:
+        return {'configured': False, 'notes': notes, 'minutes': minutes, 'cost_usd': None}
+    return {'configured': True, 'notes': notes, 'minutes': minutes, 'model': route.model,
+            'cost_usd': round(math.ceil(seconds / 60) * MODELS[route.model], 2)}
+
+
+def estimate(state, messages, characters, call=None, now=None, voice_notes=0, voice_seconds=0):
+    if type(messages) is not int or messages < 0 or type(characters) is not int or characters < 0 \
+            or type(voice_notes) is not int or voice_notes < 0 or type(voice_seconds) is not int or voice_seconds < 0:
         raise ValueError('invalid_learning_estimate')
     from tools.operations.installation.configuration import load
     values = load(state); known = provider_routes.providers(values)
@@ -74,4 +89,5 @@ def estimate(state, messages, characters, call=None, now=None):
         if part['cost_usd'] is not None: part['cost_usd'] = round(part['cost_usd'], 2)
     secret = known_cost(costs[0])
     return {'learning': {'cost_usd': total, 'messages': messages, 'parts': parts},
-            'secret_check': {'cost_usd': None if secret is None else round(secret, 2), 'calls': check_calls}}
+            'secret_check': {'cost_usd': None if secret is None else round(secret, 2), 'calls': check_calls},
+            'voice': voice(values, voice_notes, voice_seconds)}
