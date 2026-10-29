@@ -47,7 +47,8 @@ Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
 Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md); secret-check results carried across guard epochs: [0170](0170-secret-check-results-survive-guard-epochs.md);
-text the secret check always declines hidden whole: [0184](0184-text-the-secret-check-always-declines-is-hidden.md).
+text the secret check always declines hidden whole: [0184](0184-text-the-secret-check-always-declines-is-hidden.md);
+imported messages checked a page at a time, and imports ready once prepared: [0191](0191-imports-share-secret-checks-and-become-ready.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
 Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),

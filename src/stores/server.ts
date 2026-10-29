@@ -23,7 +23,7 @@ import {eventBreakdown,stageSummary,timed} from './stage-timings.js';
 import {proxyInngestInspection} from '../workflows/inspection.js';
 import {controlStorageWorkflow,retryFailedWorkflows} from './workflow-owner.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
-import {confirmImport,cancelImport,enterImportWrite,reconcileImportReceipt} from '../workflows/imports.js';
+import {confirmImport,cancelImport,enterImportWrite,importProgress,pendingImports,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
 import {drainSourceSpool} from './capture.js';
 import {fillTemplate,labeledLines,ownerPrompts,problemButtons,problemNotice} from '../prompts.js';
@@ -232,9 +232,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(s.stores.control,object(body).id));
       }
       if(req.method==='GET'&&/^\/v1\/workflows\/imports\/[a-f0-9-]{36}$/.test(path)){
-        const job=(await s.stores.control.query('SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at FROM workflow_imports WHERE id=$1',[path.split('/').at(-1)])).rows[0];
+        const id=path.split('/').at(-1)!;
+        const job=(await s.stores.control.query('SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at,ready_at FROM workflow_imports WHERE id=$1',[id])).rows[0];
         const owner=(await s.stores.control.query("SELECT owner FROM workflow_owners WHERE family='imports'")).rows[0].owner;
-        return json(res,200,{owned:!!job,owner,job});
+        // How far its messages are prepared, until the import is ready to ask about.
+        const progress=job&&!job.ready_at&&['running','completed'].includes(job.state)?await importProgress(s.stores.control,id):null;
+        return json(res,200,{owned:!!job,owner,job:job&&{...job,progress}});
       }
       if(req.method==='POST'&&path.startsWith('/v1/workflows/host/')) {
         const body=await readJson(req);
@@ -356,6 +359,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);
         if(mode!=='text')throw new HttpError(400,'invalid_search_mode');
         return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
+      }
+      if(path==='/v1/imports/pending') {
+        const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
+        return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
       }
       if(path==='/v1/graph')return json(res,200,await s.sources.graph(principal,url.searchParams.get('scope')??'*',url.searchParams.get('after')??'',limit(url.searchParams.get('limit')),url.searchParams.get('focus')??''));
       const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);

@@ -13,6 +13,17 @@ CREATE TABLE IF NOT EXISTS workflow_imports (
  lease_token uuid,lease_until timestamptz,updated_at timestamptz NOT NULL DEFAULT now(),
  CHECK(completed BETWEEN 0 AND total),CHECK(learning_after BETWEEN 0 AND total),CHECK(duplicates>=0)
 );
+ALTER TABLE workflow_imports ADD COLUMN IF NOT EXISTS label text NOT NULL DEFAULT '';
+ALTER TABLE workflow_imports ADD COLUMN IF NOT EXISTS scopes text[] NOT NULL DEFAULT '{}';
+ALTER TABLE workflow_imports ADD COLUMN IF NOT EXISTS ready_notice text CHECK(ready_notice IN ('sent','uncertain','off'));
+-- An import is ready to ask about once every message it brought is prepared.
+-- Imports finished before this column existed are ready already and get no notice.
+DO $$BEGIN
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='workflow_imports' AND column_name='ready_at') THEN
+  ALTER TABLE workflow_imports ADD COLUMN ready_at timestamptz;
+  UPDATE workflow_imports SET ready_at=updated_at,ready_notice='off' WHERE state='completed';
+ END IF;
+END$$;
 CREATE TABLE IF NOT EXISTS workflow_host_receipts (
  token uuid PRIMARY KEY,workflow_id text NOT NULL REFERENCES workflow_registry(id),
  observation jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now()
@@ -27,7 +38,10 @@ export function importConfiguration(preview:unknown,mapping:unknown,approved:unk
 export async function confirmImport(pool:pg.Pool,input:unknown) {
   const b=object(input),id=uuid(b.id);
   if(typeof b.configuration_hash!=='string'||!/^[a-f0-9]{64}$/.test(b.configuration_hash)||typeof b.review_approved!=='boolean'||!Number.isSafeInteger(b.total)||Number(b.total)<0)throw new HttpError(400,'invalid_import_configuration');
-  const completed=b.completed??0,duplicates=b.duplicates??0;
+  // The chats' names and where their history goes, so a question there can say it is still importing.
+  const completed=b.completed??0,duplicates=b.duplicates??0,label=b.label??'',scopes=b.scopes??[];
+  if(typeof label!=='string'||label.length>300||!Array.isArray(scopes)||scopes.length>100||scopes.some(scope=>typeof scope!=='string'||!scope||scope.length>200))
+    throw new HttpError(400,'invalid_import_configuration');
   if(!Number.isSafeInteger(completed)||Number(completed)<0||Number(completed)>Number(b.total)||!Number.isSafeInteger(duplicates)||Number(duplicates)<0)throw new HttpError(400,'invalid_import_checkpoint');
   const client=await pool.connect();let held=false;
   try {
@@ -35,7 +49,7 @@ export async function confirmImport(pool:pg.Pool,input:unknown) {
     if(!owner?.admission)throw new HttpError(409,'import_owner_paused');
     held=await enterFamily(client,'imports',owner.owner,owner.epoch);if(!held)throw new HttpError(409,'import_owner_paused');
     await client.query('BEGIN');
-    await client.query(`INSERT INTO workflow_imports(id,configuration_hash,review_approved,total,completed,duplicates) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,[id,b.configuration_hash,b.review_approved,b.total,completed,duplicates]);
+    await client.query(`INSERT INTO workflow_imports(id,configuration_hash,review_approved,total,completed,duplicates,label,scopes) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,[id,b.configuration_hash,b.review_approved,b.total,completed,duplicates,label,[...new Set(scopes)]]);
     let job=(await client.query('SELECT * FROM workflow_imports WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(job.configuration_hash!==b.configuration_hash||job.review_approved!==b.review_approved||job.total!==b.total)throw new HttpError(409,'resume_import_configuration_cannot_change');
     if(['cancelled','failed'].includes(job.state)){
@@ -97,4 +111,34 @@ export async function enterImportWrite(pool:pg.Pool,id:unknown,token:unknown,own
     if(!job)throw new HttpError(409,'import_execution_closed');
     return {job,release:async()=>{await releaseOperation(client,async()=>{await client.query('COMMIT');await leaveFamily(client,'imports');});}};
   }catch(error){await releaseOperation(client,async()=>{await client.query('ROLLBACK');if(held)await leaveFamily(client,'imports');});throw error;}
+}
+
+const settled="('completed','failed','skipped','cancelled','denied')";
+/** How far an import's messages are prepared: files read and secrets checked. */
+export async function importProgress(pool:Pick<pg.Pool,'query'>,id:string) {
+  const row=(await pool.query(`SELECT count(*)::int AS total,count(*) FILTER (WHERE w.state IN ('completed','skipped'))::int AS ready,
+    count(*) FILTER (WHERE w.state IN ('failed','cancelled','denied'))::int AS failed,
+    count(*) FILTER (WHERE w.state NOT IN ${settled} AND w.stage IN ('attachments','transcription'))::int AS files
+    FROM import_sources s LEFT JOIN LATERAL (SELECT state,stage FROM workflow_registry WHERE family='preparation' AND job_id=s.event_id
+      ORDER BY generation DESC,version DESC LIMIT 1) w ON true WHERE s.job_id=$1`,[uuid(id)])).rows[0];
+  return {...row,checking:row.total-row.ready-row.failed-row.files};
+}
+/** Imports whose messages were all written and are now all prepared. */
+export async function preparedImports(pool:Pick<pg.Pool,'query'>,limit=5):Promise<{id:string;label:string;total:number}[]> {
+  return (await pool.query(`SELECT id,label,total FROM workflow_imports i WHERE state='completed' AND ready_at IS NULL
+    AND NOT EXISTS(SELECT 1 FROM import_sources s WHERE s.job_id=i.id AND NOT EXISTS(SELECT 1 FROM workflow_registry w
+      WHERE w.family='preparation' AND w.job_id=s.event_id AND w.state IN ${settled}))
+    ORDER BY updated_at,id LIMIT $1`,[limit])).rows;
+}
+/** Imports into `scope` (every scope when null) that are not ready yet, and how far along each is. */
+export async function pendingImports(pool:Pick<pg.Pool,'query'>,scope:string|null) {
+  const rows=(await pool.query(`SELECT id,label,total FROM workflow_imports WHERE ready_at IS NULL AND state IN ('queued','running','completed')
+    AND ($1::text IS NULL OR $1=ANY(scopes)) ORDER BY updated_at DESC,id LIMIT 3`,[scope])).rows;
+  const pending=[];
+  for(const row of rows){
+    const progress=await importProgress(pool,row.id);
+    // A group sees how far its own history is, never the names of other chats in the same export.
+    pending.push({...(scope===null?{label:row.label}:{}),messages:row.total,ready_percent:Math.min(100,Math.floor(100*(progress.ready+progress.failed)/Math.max(1,row.total)))});
+  }
+  return pending;
 }

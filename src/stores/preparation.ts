@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import {digest} from '../archive.js';
 import {guardChecks} from '../config.js';
 import {HttpError} from '../http.js';
@@ -7,6 +8,10 @@ import {AttachmentRepository} from './attachments.js';
 import {GuardRepository} from './guards.js';
 import {ReprocessingRepository,type DerivationEngine} from './reprocessing.js';
 import {SelectionRepository} from './selections.js';
+import type {SourceReference} from './archive.js';
+
+/** One shared check takes up to this many other messages of an import, and about this much of their text. */
+const COMPANIONS=200,COMPANION_BYTES=120000;
 
 export class PreparationRepository {
   constructor(readonly attachments:AttachmentRepository,readonly reprocessing:ReprocessingRepository,
@@ -47,7 +52,7 @@ export class PreparationRepository {
   }
 
   /** One existing workflow step; no timer or competing retry owner is added. */
-  async run(eventId:string,fetchFile:(ref:string)=>Promise<Buffer>,detectorVersion:string,detect:(text:string)=>Promise<unknown>,authority:ExecutionAuthority):Promise<Observation> {
+  async run(eventId:string,fetchFile:(ref:string)=>Promise<Buffer>,detectorVersion:string,detect:(text:string,background?:boolean)=>Promise<unknown>,authority:ExecutionAuthority):Promise<Observation> {
     const client=await this.stores.control.connect();let fenced=false,locked=false,slot=-1;
     try {
       fenced=await enterFamily(client,'preparation',authority.owner,authority.epoch);
@@ -62,6 +67,9 @@ export class PreparationRepository {
       if(slot<0)return observation('waiting','preparation',0,Date.now()+2000,'receipt_pending');
       const source=(await this.attachments.archive.captured(eventId)).reference;
       const before=await this.status(eventId);if(before.state==='failed')return before;
+      // An import is old history: its checks wait behind checks for replies.
+      const job=(await client.query('SELECT job_id FROM import_sources WHERE event_id=$1 LIMIT 1',[eventId])).rows[0]?.job_id as string|undefined;
+      const check=job?(text:string)=>detect(text,true):(text:string)=>detect(text);
       await this.guards.register(source);
       await this.attachments.fetch(eventId,fetchFile,authority);
       const manifests=(await this.stores.archive.query('SELECT id,kind,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[eventId])).rows;
@@ -73,18 +81,50 @@ export class PreparationRepository {
           WHERE s.artifact_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status') LIMIT 1`,[file.id])).rows[0];
         if(!selected) {
           const engine=['voice','audio','video_note'].includes(manifest.kind)?this.transcription:this.extraction;
-          const job=await this.reprocessing.request(file,engine.name,engine.version,{},'initial:'+file.id+':'+digest(engine.name+':'+engine.version));
-          const output=await this.reprocessing.run(job,detectorVersion,detect,authority);
+          const request=await this.reprocessing.request(file,engine.name,engine.version,{},'initial:'+file.id+':'+digest(engine.name+':'+engine.version));
+          const output=await this.reprocessing.run(request,detectorVersion,check,authority);
           if(output)try {await this.selections.activate(output,null,digest('initial-selection:'+output.id),'automatic');}
           catch(error){if(!(error instanceof HttpError)||error.code!=='derivative_selection_conflict')throw error;}
         }
-        if((await this.guards.state()).mode==='on')await this.guards.prepare(file,detectorVersion,detect);
+        if((await this.guards.state()).mode==='on')await this.guards.prepare(file,detectorVersion,check);
       }
-      if((await this.guards.state()).mode==='on')await this.guards.prepare(source,detectorVersion,detect);
+      if((await this.guards.state()).mode==='on')await this.prepareSource(client,source,job,detectorVersion,check);
       return this.status(eventId);
     } finally {await releaseOperation(client,async()=>{
       if(slot>=0)await client.query('SELECT pg_advisory_unlock(803357,$1)',[slot]);
       if(locked)await client.query('SELECT pg_advisory_unlock(hashtextextended($1,803357))',[eventId]);
       if(fenced)await leaveFamily(client,'preparation');});}
+  }
+
+  /** An imported message is checked together with up to a page of the same import's unchecked
+   *  messages. Each companion stays locked meanwhile, so its own preparation waits and then
+   *  finds its text already checked. Files are still checked by each message's own preparation. */
+  private async prepareSource(client:pg.PoolClient,source:SourceReference,job:string|undefined,version:string,detect:(text:string)=>Promise<unknown>) {
+    if(!job)return this.guards.prepare(source,version,detect);
+    // A message already checked has a guard publication, even while its own preparation still waits to finish.
+    const candidates=(await client.query(`SELECT s.event_id,s.source_reference FROM import_sources s WHERE s.job_id=$1 AND s.event_id<>$2
+      AND NOT EXISTS(SELECT 1 FROM guard_publications p WHERE p.source_id='events:'||s.event_id AND p.operation_kind='guard')
+      AND NOT EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='preparation' AND w.job_id=s.event_id
+        AND w.state IN ('completed','failed','skipped','cancelled','denied'))
+      ORDER BY s.event_id LIMIT $3`,[job,source.id,COMPANIONS*2])).rows as {event_id:string;source_reference:SourceReference}[];
+    const checked=new Set((await this.stores.derived.query(`SELECT source_id FROM guard_sources
+      WHERE kind='events' AND source_id=ANY($1::text[]) AND active_revision IS NOT NULL`,[candidates.map(c=>c.event_id)])).rows.map(r=>r.source_id));
+    const sizes=new Map((await this.stores.archive.query(`SELECT id,coalesce(octet_length(original_text),0)+octet_length(payload) AS size
+      FROM events WHERE id=ANY($1::text[])`,[candidates.map(c=>c.event_id)])).rows.map(r=>[r.id,Number(r.size)]));
+    const held:SourceReference[]=[];let budget=COMPANION_BYTES;
+    try {
+      for(const candidate of candidates) {
+        if(held.length>=COMPANIONS||budget<=0)break;
+        if(checked.has(candidate.event_id)||!sizes.has(candidate.event_id))continue;
+        if(!(await client.query('SELECT pg_try_advisory_lock(hashtextextended($1,803357)) AS locked',[candidate.event_id])).rows[0].locked)continue;
+        held.push(candidate.source_reference);budget-=sizes.get(candidate.event_id)!;
+      }
+      if(held.length)try {return await this.guards.prepareMany(source,held,version,detect);}
+      catch(error) {
+        // A text the checker can't take must not hold back the page: each message is then checked alone.
+        if(!(error instanceof HttpError)||error.code!=='detector_contract_rejected')throw error;
+      }
+      return await this.guards.prepare(source,version,detect);
+    } finally {for(const companion of held)await client.query('SELECT pg_advisory_unlock(hashtextextended($1,803357))',[companion.id]);}
   }
 }

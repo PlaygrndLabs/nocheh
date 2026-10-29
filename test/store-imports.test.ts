@@ -105,3 +105,55 @@ test('host imports preserve originals through retries and fence job writes, lear
     assert.equal((await stores.control.query("SELECT app FROM workflow_worker_registrations WHERE family='imports'")).rows[0].app,'host');
   }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));await stores.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('an import shows how far its messages are prepared, becomes ready once all are, and tells the owner once',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-import-')),key='ready:'+Date.now(),token=digest(key);
+  const policy={enabled:true,owner_id:'123',group_ids:[]},notices:Record<string,unknown>[]=[];let telegram='not_started';
+  const runtime=async(operation:string,body:Record<string,unknown>)=>{
+    if(operation!=='telegram.notice')throw Error('only the ready notice is sent');
+    notices.push(body);return {state:telegram};
+  };
+  const s=storageServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime:runtime as any,honcho:runtime as any});
+  const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
+    hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
+  await s.guards.reconcile();await s.configuration.configure(policy,'on');
+  const server=storageServer(s,settings,runtime as any);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const address=server.address();assert.ok(address&&typeof address==='object');const base='http://127.0.0.1:'+address.port;
+  const status=async(id:string)=>(await (await fetch(base+'/v1/workflows/imports/'+id,{headers:{authorization:'Bearer '+token}})).json() as any).job;
+  try{
+    const id=randomUUID();
+    await stores.control.query("INSERT INTO workflow_imports(id,configuration_hash,review_approved,total,completed,state,label,scopes) VALUES($1,$2,false,2,2,'completed','Garden club',ARRAY['-1001'])",[id,digest(id)]);
+    const binding=await s.guards.state();
+    const pending=async(scope:string|null)=>(await (await fetch(base+'/v1/imports/pending',{headers:{authorization:'Bearer '+(scope===null?token:
+      scopeToken(token,scope,Date.now()+60000,{generation:binding.generation,guard_epoch:binding.epoch}))}})).json() as any).imports;
+    const events:string[]=[];
+    for(const suffix of [':a',':b']) {
+      const event:Envelope={version:1,key:key+suffix,origin:'import',bot_id:'desktop-export',kind:'telegram_desktop_message',scope:'123',source_id:suffix,revision:'1',occurred_at:null,
+        text:'Synthetic note '+suffix,payload:{chat:{id:123,type:'personal_chat'},message:{id:1,type:'message',text:'Synthetic note '+suffix}}};
+      const source=(await s.capture.capture(event)).source.reference;events.push(source.id);
+      await stores.control.query('INSERT INTO import_sources(job_id,event_id,source_reference) VALUES($1,$2,$3)',[id,source.id,source]);
+    }
+    assert.deepEqual((await status(id)).progress,{total:2,ready:0,failed:0,files:0,checking:2});
+    // A question in the group says its history is still importing, without naming other chats of the export.
+    assert.deepEqual(await pending('-1001'),[{messages:2,ready_percent:0}]);
+    assert.deepEqual(await pending('-1002'),[]);
+    const named=async(scope:string|null)=>(await pending(scope)).filter((item:any)=>item.label==='Garden club');
+    assert.deepEqual(await named(null),[{label:'Garden club',messages:2,ready_percent:0}]);
+    assert.deepEqual(await named('123'),[{label:'Garden club',messages:2,ready_percent:0}],'the owner\'s private chat sees every import');
+    assert.equal(await s.imports.settle(),0);assert.equal((await status(id)).ready_at,null);assert.equal(notices.length,0);
+    await stores.control.query("UPDATE workflow_registry SET state='completed' WHERE family='preparation' AND job_id=$1",[events[0]]);
+    assert.deepEqual((await status(id)).progress,{total:2,ready:1,failed:0,files:0,checking:1});
+    await stores.control.query("UPDATE workflow_registry SET state='failed' WHERE family='preparation' AND job_id=$1",[events[1]]);
+    // Telegram isn't connected yet: the import is ready, and the notice waits for a later pass.
+    assert.equal(await s.imports.settle(),0);
+    const ready=await status(id);assert.ok(ready.ready_at);assert.equal(ready.progress,null);
+    assert.deepEqual(await pending('-1001'),[]);
+    telegram='done';assert.equal(await s.imports.settle(),1);
+    assert.equal(notices.length,2);assert.equal(notices[1]!.chat_id,'123');assert.equal(notices[0]!.id,notices[1]!.id);
+    assert.match(String(notices[1]!.text),/Garden club/);assert.match(String(notices[1]!.text),/^2 messages/m);assert.match(String(notices[1]!.text),/1 of them could not be prepared/);
+    assert.equal(await s.imports.settle(),0);assert.equal(notices.length,2,'the owner hears about an import once');
+  }finally{await new Promise(resolve=>server.close(resolve));await stores.close();await rm(root,{recursive:true,force:true});}
+});

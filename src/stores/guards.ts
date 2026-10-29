@@ -2,7 +2,7 @@ import {blockingPublications} from './publications.js';
 import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {prepareValue,textValues} from '../guarded.js';
+import {prepareValues,textValues} from '../guarded.js';
 import {requestWorkflow} from '../workflows/store.js';
 import {ArchiveRepository,type SourceReference,type FileReference} from './archive.js';
 import type {DerivativeReference} from './derived.js';
@@ -155,16 +155,33 @@ export class GuardRepository {
   }
 
   async prepare(reference:GuardReference,version:string,detect:(text:string)=>Promise<unknown>):Promise<GuardRevision|null> {
-    const id=await this.register(reference),source=(await this.stores.derived.query('SELECT input,input_hash,active_revision FROM guard_sources WHERE id=$1',[id])).rows[0];
-    if(source.active_revision!==null)return null; // Includes authoritative owner edits.
-    const client=await this.stores.derived.connect();let content:unknown;
-    try {content=await prepareValue(client,id,JSON.parse(source.input.toString()),version,detect);}
+    return this.prepareMany(reference,[],version,detect);
+  }
+
+  /** Check `reference` together with `companions`, sharing detector calls. A companion that
+   *  can't be registered or published is left for its own preparation to report. */
+  async prepareMany(reference:GuardReference,companions:GuardReference[],version:string,detect:(text:string)=>Promise<unknown>):Promise<GuardRevision|null> {
+    const id=await this.register(reference),ids=[id];
+    for(const companion of companions)try {ids.push(await this.register(companion));}catch(error) {if(!(error instanceof HttpError))throw error;}
+    // Includes authoritative owner edits.
+    const sources=(await this.stores.derived.query('SELECT id,input,input_hash FROM guard_sources WHERE id=ANY($1::text[]) AND active_revision IS NULL',[ids])).rows;
+    if(!sources.some(source=>source.id===id))return null;
+    const client=await this.stores.derived.connect();let contents:Map<string,unknown>;
+    try {contents=await prepareValues(client,sources.map(source=>({id:source.id,input:JSON.parse(source.input.toString())})),version,detect);}
     finally {client.release();}
-    const operationId=digest(canonical(['guard',id,source.input_hash,version]));
-    let revision:GuardRevision;
-    try {revision=await this.stage(id,null,content,'automatic',version,operationId);}
-    catch(error) {if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
-    await this.beginPublication(revision);await this.finishPublication(operationId);return revision;
+    let primary:GuardRevision|null=null;
+    for(const source of sources) {
+      const operationId=digest(canonical(['guard',source.id,source.input_hash,version]));
+      try {
+        const revision=await this.stage(source.id,null,contents.get(source.id),'automatic',version,operationId);
+        await this.beginPublication(revision);await this.finishPublication(operationId);
+        if(source.id===id)primary=revision;
+      } catch(error) {
+        if(!(error instanceof HttpError))throw error;
+        if(source.id===id&&error.code!=='guard_revision_conflict')throw error;
+      }
+    }
+    return primary;
   }
 
   async edit(id:string,expected:number|null,content:unknown,operationId:string):Promise<GuardRevision> {

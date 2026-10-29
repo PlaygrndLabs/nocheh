@@ -238,7 +238,7 @@ export function problemText(error: unknown): string {
     duplicate_upload: 'The same file was chosen twice.',
     unsafe_upload_path: 'A file name isn’t allowed. Re-export from Telegram and try again.',
     select_one_telegram_export: 'Choose exactly one Telegram export (one result.json).',
-    export_json_exceeds_32_mib: 'The export’s result.json is bigger than 32 MB.',
+    export_json_exceeds_128_mib: 'The export’s result.json is bigger than 128 MB.',
     expected_telegram_desktop_json: 'This isn’t a Telegram Desktop JSON export.',
     empty_export: 'The export has no chats in it.',
     attachment_exceeds_50_mib: 'A file in the export is bigger than 50 MB.',
@@ -294,6 +294,10 @@ export type ImportJob = {
   mapping?: Record<string, string>;
   review_approved?: boolean;
   error?: string;
+  /** After the messages are written: how many are read and checked for secrets. */
+  prepared?: {total: number; ready: number; failed: number; files: number; checking: number} | null;
+  /** When every message was prepared, so the chat can be asked about. */
+  prepared_at?: string | null;
 };
 
 const desktopChannelTypes = new Set(['private_supergroup', 'public_supergroup', 'private_channel', 'public_channel']);
@@ -325,7 +329,20 @@ export function importStatus(job: ImportJob): Status {
     cancelled: {label: 'Stopped', tone: 'neutral'},
     interrupted: {label: 'Interrupted', tone: 'warn'},
   };
+  if (job.state === 'complete' && !job.prepared_at && job.prepared) return {label: 'Preparing', tone: 'info'};
   return states[job.state] ?? {label: job.state.replaceAll('_', ' '), tone: 'neutral'};
+}
+/** The progress line while imported messages are read and checked for secrets. */
+export function preparationLabel(prepared: NonNullable<ImportJob['prepared']>): string {
+  const done = prepared.ready + prepared.failed;
+  return [
+    `Preparing for questions: ${done.toLocaleString()} of ${prepared.total.toLocaleString()} messages`,
+    prepared.files ? `${prepared.files.toLocaleString()} with files to read` : '',
+    prepared.checking ? `${prepared.checking.toLocaleString()} to check for secrets` : '',
+    prepared.failed ? `${prepared.failed.toLocaleString()} failed` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 export const canStart = (job: ImportJob) =>
   !!job.preview && ['ready', 'failed', 'cancelled', 'interrupted'].includes(job.state);

@@ -96,23 +96,41 @@ async function sourceInput(client:pg.PoolClient,source:{kind:string;source_id:st
 // Persist each successful bounded fragment before continuing. A failed later
 // fragment or a worker restart does not repeat the completed detector work.
 export async function prepareValue(client:pg.PoolClient,id:string,input:unknown,version:string,detect:(text:string)=>Promise<unknown>) {
-  const pieces=new Map<string,string[]>(),prepared=new Map<string,string>();
-  const pending=new Set<string>();
-  for(const value of new Set(textValues(input))) {
-    const parts:string[]=[];
-    for(let offset=0;offset<value.length;) {
-      let end=Math.min(value.length,offset+24000);
-      if(end<value.length && /[\uD800-\uDBFF]/.test(value[end-1]!))end--;
-      const fragment=value.slice(offset,end);parts.push(fragment);pending.add(fragment);offset=end;
+  return (await prepareValues(client,[{id,input}],version,detect)).get(id);
+}
+
+/** Several sources share detector calls, so an import checks a page of messages at once.
+ *  Text repeated across them is checked once, and a secret found in one is hidden in all. */
+export async function prepareValues(client:pg.PoolClient,items:{id:string;input:unknown}[],version:string,detect:(text:string)=>Promise<unknown>) {
+  const key=(id:string,fragment:string)=>digest(canonical({id,version,hash:digest(fragment)}));
+  const sources=new Map<string,{input:unknown;pieces:Map<string,string[]>}>();
+  for(const {id,input} of items) {
+    if(sources.has(id))continue;
+    const pieces=new Map<string,string[]>();
+    for(const value of new Set(textValues(input))) {
+      const parts:string[]=[];
+      for(let offset=0;offset<value.length;) {
+        let end=Math.min(value.length,offset+24000);
+        if(end<value.length && /[\uD800-\uDBFF]/.test(value[end-1]!))end--;
+        parts.push(value.slice(offset,end));offset=end;
+      }
+      pieces.set(value,parts);
     }
-    pieces.set(value,parts);
+    sources.set(id,{input,pieces});
   }
-  const key=(fragment:string)=>digest(canonical({id,version,hash:digest(fragment)}));
-  for(const fragment of pending) {
-    const saved=await client.query('SELECT content FROM guard_fragments WHERE id=$1',[key(fragment)]);
-    if(saved.rows[0]){prepared.set(fragment,saved.rows[0].content.toString());pending.delete(fragment);}
+  const prepared=new Map<string,string>(),owners=new Map<string,Set<string>>();
+  const wanted=[...sources].flatMap(([id,{pieces}])=>[...new Set([...pieces.values()].flat())].map(fragment=>({id,fragment,key:key(id,fragment)})));
+  const saved=new Map<string,string>();
+  for(let offset=0;offset<wanted.length;offset+=1000)
+    for(const row of (await client.query('SELECT id,content FROM guard_fragments WHERE id=ANY($1::text[])',[wanted.slice(offset,offset+1000).map(w=>w.key)])).rows)
+      saved.set(row.id,row.content.toString());
+  for(const entry of wanted) {
+    const content=saved.get(entry.key);
+    if(content!==undefined)prepared.set(entry.key,content);
+    else if(owners.has(entry.fragment))owners.get(entry.fragment)!.add(entry.id);
+    else owners.set(entry.fragment,new Set([entry.id]));
   }
-  const missing=[...pending];
+  const missing=[...owners.keys()];
   while(missing.length) {
     const batch:string[]=[];let length=0;
     while(missing.length && length+missing[0]!.length<50000){const part=missing.shift()!;batch.push(part);length+=part.length+32;}
@@ -122,14 +140,16 @@ export async function prepareValue(client:pg.PoolClient,id:string,input:unknown,
     try {
       for(const fragment of batch) {
         const guarded=mask(fragment,[...literalSpans(fragment,literals.filter(v=>fragment.includes(v))),...patternSpans(fragment)]).text;
-        await client.query('INSERT INTO guard_fragments(id,source_id,input_hash,preparation_version,content) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',[key(fragment),id,digest(fragment),version,Buffer.from(guarded)]);
-        prepared.set(fragment,guarded);
+        for(const id of owners.get(fragment)!) {
+          await client.query('INSERT INTO guard_fragments(id,source_id,input_hash,preparation_version,content) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',[key(id,fragment),id,digest(fragment),version,Buffer.from(guarded)]);
+          prepared.set(key(id,fragment),guarded);
+        }
       }
       await client.query('COMMIT');
     }catch(error){await client.query('ROLLBACK');throw error;}
   }
-  const replacements=new Map([...pieces].map(([value,parts])=>[value,parts.map(part=>prepared.get(part)!).join('')]));
-  return replaceValues(input,replacements);
+  return new Map([...sources].map(([id,{input,pieces}])=>
+    [id,replaceValues(input,new Map([...pieces].map(([value,parts])=>[value,parts.map(part=>prepared.get(key(id,part))!).join('')])))]));
 }
 
 export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null,authority:ExecutionAuthority) {

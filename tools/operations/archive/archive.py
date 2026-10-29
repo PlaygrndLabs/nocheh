@@ -121,10 +121,15 @@ def desktop_records(document,root,scope=None,scope_map=None):
 
 def upload(api,artifact_id,path,expected=None,source_only=False,derived=False):
     if path.stat().st_size>50*1024*1024: raise ValueError('attachment_exceeds_50_mib')
-    data=path.read_bytes(); checksum=digest(data)
-    if expected and checksum!=expected: raise ValueError('artifact_integrity_failed')
+    data=path.read_bytes()
+    if expected and digest(data)!=expected: raise ValueError('artifact_integrity_failed')
+    send_bytes(api,artifact_id,data,source_only,derived)
+
+
+def send_bytes(api,artifact_id,data,source_only=False,derived=False):
+    if len(data)>50*1024*1024: raise ValueError('attachment_exceeds_50_mib')
     route='imports/legacy/files' if derived else 'original-files' if source_only else 'artifacts'
-    api.call(f'/v1/{route}/{artifact_id}/bytes',{'bytes_base64':base64.b64encode(data).decode(),'sha256':checksum})
+    api.call(f'/v1/{route}/{artifact_id}/bytes',{'bytes_base64':base64.b64encode(data).decode(),'sha256':digest(data)})
 
 
 def export_archive(api,directory,source_only=False):

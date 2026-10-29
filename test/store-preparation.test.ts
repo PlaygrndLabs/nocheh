@@ -139,3 +139,68 @@ test('different events prepare side by side up to the guard-check setting, and o
     assert.equal((await preparation.run(third!,fetch,'fixture',detect,authority)).state,'completed');
   } finally {release();await stores.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('an import checks a page of its messages for secrets in one call, and a message the checker refuses is checked alone',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive);
+  const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),capture=new CaptureCoordinator(archive,stores.control);
+  const root=await mkdtemp(join(tmpdir(),'nocheh-preparation-')),attachments=new AttachmentRepository(stores,archive,root),key='batch:'+Date.now();
+  const extraction=textExtraction(),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[extraction]);
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,extraction,extraction),authority={owner:'inngest' as const,epoch:1};
+  const event=(suffix:string,text:string,origin:'live'|'import'='import'):Envelope=>({version:1,key:key+suffix,origin,bot_id:'fixture',kind:'telegram_update',scope:'123',
+    source_id:key+suffix,revision:'1',occurred_at:null,text:null,payload:{message:{chat:{id:123,type:'group'},text}}});
+  const calls:{text:string;background:boolean}[]=[];
+  const detect=async(text:string,background=false)=>{
+    calls.push({text,background});
+    // The checker refuses any call that has the refused note together with another note.
+    if(text.includes('Refused note')&&/Note \d/.test(text))throw new HttpError(503,'detector_contract_rejected');
+    return text.includes('door code 4417')?['4417']:[];
+  };
+  const fetch=async()=>{throw Error('text messages have no files');};
+  const imported=async(job:string,suffix:string,text:string)=>{
+    const source=(await capture.capture(event(suffix,text))).source.reference;
+    await stores.control.query('INSERT INTO import_sources(job_id,event_id,source_reference) VALUES($1,$2,$3)',[job,source.id,source]);
+    return source.id;
+  };
+  const job=async()=>{
+    const id=crypto.randomUUID();
+    await stores.control.query("INSERT INTO workflow_imports(id,configuration_hash,review_approved,total) VALUES($1,$2,false,100)",[id,digest(id)]);
+    return id;
+  };
+  const checked=async(id:string)=>(await stores.derived.query("SELECT active_revision FROM guard_sources WHERE id=$1",['events:'+id])).rows[0]?.active_revision!=null;
+  try {
+    await guards.reconcile();await selections.reconcile();await guards.setMode('on');
+    const first=await job(),ids:string[]=[];
+    for(let index=0;index<30;index++)ids.push(await imported(first,':'+index,index===7?'Note 7: the door code 4417 is for the side gate':`Note ${index} about the garden`));
+    // A message whose own preparation is running is left to it.
+    const busy=await stores.control.connect();
+    try {
+      await busy.query('SELECT pg_advisory_lock(hashtextextended($1,803357))',[ids[29]]);
+      assert.equal((await preparation.run(ids[0]!,fetch,'fixture',detect,authority)).state,'completed');
+    } finally {await busy.query('SELECT pg_advisory_unlock(hashtextextended($1,803357))',[ids[29]]);busy.release();}
+    assert.equal(calls.length,1,'thirty messages share one check');
+    assert.equal(calls[0]!.background,true,'old history waits behind checks for replies');
+    for(const id of ids.slice(0,29))assert.ok(await checked(id));
+    assert.equal(await checked(ids[29]!),false);
+    const secret=await guards.read('events:'+ids[7],await guards.state());
+    assert.doesNotMatch(JSON.stringify(secret.value),/4417/);
+    assert.match(JSON.stringify(secret.value),/side gate/);
+    assert.equal((await preparation.run(ids[3]!,fetch,'fixture',detect,authority)).state,'completed');
+    assert.equal(calls.length,1,'a message checked with the page needs no call of its own');
+    assert.equal((await preparation.run(ids[29]!,fetch,'fixture',detect,authority)).state,'completed');
+    assert.equal(calls.length,2);
+
+    const live=(await capture.capture(event(':live','Note 99 sent live','live'))).source.reference.id;
+    assert.equal((await preparation.run(live,fetch,'fixture',detect,authority)).state,'completed');
+    assert.equal(calls.length,3);assert.equal(calls[2]!.background,false);
+
+    const second=await job(),good=await imported(second,':good','Note 1 for the second import'),refused=await imported(second,':refused','Refused note');
+    await imported(second,':other','Note 2 for the second import');
+    assert.equal((await preparation.run(good,fetch,'fixture',detect,authority)).state,'completed');
+    assert.equal(await checked(refused),false,'the refused message does not block the others');
+    assert.equal((await preparation.run(refused,fetch,'fixture',detect,authority)).state,'completed');
+  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});

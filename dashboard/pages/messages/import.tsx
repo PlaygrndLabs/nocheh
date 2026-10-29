@@ -18,6 +18,7 @@ import {
   importStatus,
   isResume,
   matchingGroup,
+  preparationLabel,
   problemText,
   type ImportJob,
 } from '../../lib/messages-format';
@@ -59,6 +60,8 @@ function Progress({value, max, label}: {value: number; max: number; label: strin
   );
 }
 
+const UPLOAD_PIECE = 16 * 1024 * 1024;
+
 export function ImportView() {
   const jobs = useResource<ImportJob[]>('/jobs', 4000);
   const selectedId = useParam('job');
@@ -75,11 +78,26 @@ export function ImportView() {
       let done = 0;
       for (const file of files) {
         const name = file.webkitRelativePath || file.name;
-        const response = await authedFetch(`${apiBase}/jobs/${job.id}/upload?name=${encodeURIComponent(name)}`, {
-          method: 'PUT',
-          body: file,
-        });
-        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'request_failed');
+        // Large files go in pieces, so a proxy's request size limit doesn't stop them.
+        for (let offset = 0; offset === 0 || offset < file.size; offset += UPLOAD_PIECE) {
+          const end = Math.min(file.size, offset + UPLOAD_PIECE),
+            more = end < file.size;
+          const response = await authedFetch(
+            `${apiBase}/jobs/${job.id}/upload?name=${encodeURIComponent(name)}&offset=${offset}${more ? '&more=1' : ''}`,
+            {
+              method: 'PUT',
+              body: file.slice(offset, end),
+            },
+          );
+          if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'request_failed');
+          if (more)
+            setUpload({
+              done,
+              total: files.length,
+              stage: `Uploading file ${done + 1} of ${files.length} (${Math.round((end / file.size) * 100)}%)`,
+              error: '',
+            });
+        }
         done++;
         setUpload({done, total: files.length, stage: `Uploaded ${done} of ${files.length} files`, error: ''});
       }
@@ -121,8 +139,8 @@ export function ImportView() {
             />
           </div>
           <p className="text-xs text-muted">
-            Pick the folder or a ZIP to include photos and voice notes; a JSON file alone brings text only. Limits: 256
-            MB ZIP, 50 MB per file, 512 MB in total.
+            Pick the folder or a ZIP to include photos and voice notes; a JSON file alone brings text only. Limits: 128
+            MB for the messages file (result.json), 50 MB per other file, 512 MB in total.
           </p>
           {upload && !upload.error && <Progress value={upload.done} max={upload.total} label={upload.stage} />}
           {upload?.error && (
@@ -440,6 +458,18 @@ function ImportReview({job}: {job: ImportJob}) {
             max={total}
             label={`${job.completed.toLocaleString()} of ${total.toLocaleString()} messages${job.duplicates ? ` · ${job.duplicates.toLocaleString()} already kept` : ''}`}
           />
+        )}
+        {job.state === 'complete' && job.prepared && !job.prepared_at && (
+          <Progress
+            value={job.prepared.ready + job.prepared.failed}
+            max={Math.max(1, job.prepared.total)}
+            label={preparationLabel(job.prepared)}
+          />
+        )}
+        {job.state === 'complete' && job.prepared_at && (
+          <p className="text-sm text-muted">
+            Ready: every message is saved, read and checked for secrets. You can ask about this chat now.
+          </p>
         )}
         {job.error && (
           <Notice tone={job.state === 'failed' ? 'bad' : 'warn'} title="Last problem">
