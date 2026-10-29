@@ -40,6 +40,7 @@ def verify_capability(credential,secret,scope,event_id):
         if claims.get('purpose','assistant') not in ('assistant','memory-review','filter'):raise ValueError()
         if 'logical_profile' in claims and (generation is None or not isinstance(claims['logical_profile'],str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',claims['logical_profile'])):raise ValueError()
         if scope.logical_profile and claims.get('logical_profile')!=scope.logical_profile:raise ValueError()
+        if 'project' in claims and (not isinstance(claims['project'],str) or not re.fullmatch(r'[a-f0-9]{64}',claims['project'])):raise ValueError()
         return claims
     except Exception:raise ValueError('archive_capability_scope_mismatch') from None
 
@@ -56,6 +57,7 @@ class Scope:
     generation: str = ''
     purpose: str = 'assistant'
     logical_profile: str = ''
+    project: str = ''
 
 
 class Scopes:
@@ -109,6 +111,11 @@ class Scopes:
             default=Scopes.profile(scope.space or scope.chat_id)
             if logical and logical!=default:identity.append(logical)
             scope=replace(scope,profile=Scopes.profile(json.dumps(identity,separators=(',',':'),ensure_ascii=False)),generation=generation,purpose=purpose,logical_profile=logical or '')
+        # The chat's project brings its role and skills; it never changes which profile or history the turn uses.
+        project=claims.get('project')
+        if project is not None:
+            if not isinstance(project,str) or not re.fullmatch(r'[a-f0-9]{64}',project):raise ValueError('invalid_project')
+            scope=replace(scope,project=project)
         return scope
 
     def resolve(self,update,expected_scope):

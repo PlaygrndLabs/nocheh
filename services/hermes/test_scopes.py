@@ -63,6 +63,10 @@ class ScopeTests(unittest.TestCase):
             default_bound=Scopes.apply_revision(a,default_claims)
             implicit=Scopes.apply_revision(a,{key:value for key,value in default_claims.items() if key!='logical_profile'})
             self.assertEqual(default_bound.profile,implicit.profile,'default browser and Telegram profiles share native state')
+            joined=Scopes.apply_revision(a,verify_capability(signed({**named_claims,'project':'c'*64}),secret,a,event))
+            self.assertEqual((joined.project,joined.profile),('c'*64,bound.profile),'a project brings its role and skills, never another profile')
+            for invalid in ('C'*64,'../projects',5):
+                with self.assertRaises(ValueError):verify_capability(signed({**named_claims,'project':invalid}),secret,a,event)
 
     def test_native_memory_and_session_search_cannot_open_other_profiles(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override

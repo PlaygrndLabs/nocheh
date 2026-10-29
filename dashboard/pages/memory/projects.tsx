@@ -27,6 +27,7 @@ import {
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 import {ChatPicker} from '../chats/chat-picker';
+import {RoleAndSkills} from '../chats/role-skills';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
 
 type Project = {id: string; name: string; description: string; state: 'active' | 'archived'; revision: number};
@@ -326,6 +327,11 @@ function ProjectDetail({
       ) : (
         <>
           <ProjectChats project={project} context={context} />
+          <RoleAndSkills
+            scope={'project:' + project.id}
+            where={project.name}
+            description="Only you set these. Every chat in this project uses them, with the chat’s own on top. Defaults are in Settings › Assistant."
+          />
           <ProjectKnowledge project={project} context={context} />
           {context.decisions.total > 0 && (
             <section>

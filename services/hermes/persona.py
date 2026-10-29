@@ -1,9 +1,10 @@
 """Owner-set role and skills, kept in Hermes' own profile layout.
 
 A chat's canonical profile holds its role as Hermes `SOUL.md` and its skills as
-Hermes `skills/<name>/SKILL.md`. `nocheh-default/` holds the same files for every
-chat. Before each turn the effective files are copied into the turn's profile,
-where the turn reads them and cannot change them. Topics use their group's.
+Hermes `skills/<name>/SKILL.md`. `projects/<id>/` holds the same files for every
+chat in a project, and `nocheh-default/` for every chat. Before each turn the
+effective files are copied into the turn's profile, where the turn reads them and
+cannot change them. Topics use their group's.
 """
 import fcntl
 import hashlib
@@ -24,6 +25,7 @@ SKILL_LIMIT = 30
 DESCRIPTION_LIMIT = 1024
 BODY_LIMIT = 20000
 NAME = re.compile(r'[a-z][a-z0-9-]{0,63}')
+PROJECT = re.compile(r'[a-f0-9]{64}')
 FRONTMATTER = re.compile(r'^---\n(.*?)\n---\n?(.*)$', re.S)
 
 
@@ -33,6 +35,11 @@ def default_path(root):
 
 def chat_path(root, chat):
     return Path(root) / 'profiles' / Scopes.profile(chat)
+
+
+def project_path(root, project):
+    if not isinstance(project, str) or not PROJECT.fullmatch(project): raise ValueError('invalid_project')
+    return Path(root) / 'projects' / project
 
 
 def _safe(path):
@@ -141,15 +148,18 @@ def save(path, role, skills, expected):
     return view(path)
 
 
-def effective(root, chat):
-    """The chat's own role, else the default role; default skills plus the chat's, the chat's winning by name."""
-    own, shared = read(chat_path(root, chat)), read(default_path(root))
-    skills = {skill['name']: skill for skill in shared['skills']}
-    skills.update({skill['name']: skill for skill in own['skills']})
-    return {'role': own['role'] or shared['role'], 'skills': [skills[name] for name in sorted(skills)]}
+def effective(root, chat, project=''):
+    """The chat's own role, else its project's, else the default role. Skills add up from the
+    default to the project's to the chat's, and a later one wins by name."""
+    layers = [read(default_path(root)), read(project_path(root, project)) if project else {'role': '', 'skills': []},
+              read(chat_path(root, chat))]
+    skills = {}
+    for layer in layers: skills.update({skill['name']: skill for skill in layer['skills']})
+    return {'role': next((layer['role'] for layer in reversed(layers) if layer['role']), ''),
+            'skills': [skills[name] for name in sorted(skills)]}
 
 
-def materialize(root, profile, chat):
+def materialize(root, profile, chat, project=''):
     """Give a turn profile its effective role and skills; the owner's own source folder is never rewritten."""
     profile = Path(profile)
     if profile.resolve() == chat_path(root, chat).resolve():
@@ -157,7 +167,7 @@ def materialize(root, profile, chat):
         (profile / 'skills').mkdir(exist_ok=True, mode=0o700)
         if not (profile / 'SOUL.md').exists(): _write(profile / 'SOUL.md', '')
         return
-    value = effective(root, chat)
+    value = effective(root, chat, project)
     with (profile / '.persona.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if (profile / 'SOUL.md').is_file() and (profile / 'skills').is_dir() and read(profile) == value: return
