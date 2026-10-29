@@ -52,8 +52,13 @@ Settings › Models, and notes saved without a key are transcribed once one is
 added ([ADR-0193](docs/adr/0193-voice-notes-are-transcribed-by-the-runtime-transcriber.md),
 [transcriber](services/hermes/test_voice_text.py), [engine and backfill](test/store-voice-transcription.test.ts));
 checked with a made-up recording and a stand-in provider in the Hermes image.
+Part 2, images: photos and image files are read once by Hermes's own vision tool
+with the Images part of Settings › Models and the editable "Reading images"
+instruction ([ADR-0194](docs/adr/0194-images-are-read-by-the-runtime-vision-tool.md),
+[reader](services/hermes/test_image_text.py), [engine](test/document-extraction.test.ts));
+checked with made-up images and a stand-in provider in the Hermes image.
 Pending: a large made-up import on a running installation, a real voice note
-on the development machine, then images (rest of part 2), reading a chat in order with
+and photo on the development machine, then reading a chat in order with
 project-level role and skills (part 3), background sessions on Hermes Kanban
 (part 4).
 

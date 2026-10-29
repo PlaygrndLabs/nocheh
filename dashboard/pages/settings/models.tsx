@@ -22,6 +22,10 @@ const PART_TEXT: Record<string, {title: string; hint: string}> = {
     title: 'Secret check',
     hint: 'Looks for passwords and keys before any model sees a message. A small, fast model is enough.',
   },
+  image: {
+    title: 'Images',
+    hint: 'Reads the text in photos and images and describes them, so they can be searched. Needs a model that sees images.',
+  },
 };
 const httpsAddress = (url: string) => /^https:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(url.trim());
 

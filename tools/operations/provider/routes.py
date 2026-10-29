@@ -28,12 +28,14 @@ PARTS = {
     'reply': ('Replies (Hermes)', 'NOCHEH_REPLY_PROVIDER', 'NOCHEH_REPLY_MODEL'),
     'memory': ('Memory (Honcho)', 'NOCHEH_MEMORY_PROVIDER', 'NOCHEH_MEMORY_MODEL'),
     'guard': ('Secret check', 'NOCHEH_GUARD_PROVIDER', 'NOCHEH_GUARD_MODEL'),
+    'image': ('Images', 'NOCHEH_IMAGE_PROVIDER', 'NOCHEH_IMAGE_MODEL'),
 }
 DEFAULTS = {
     'NOCHEH_PROVIDER': '',
     'NOCHEH_REPLY_PROVIDER': '', 'NOCHEH_REPLY_MODEL': '',
     'NOCHEH_MEMORY_PROVIDER': '', 'NOCHEH_MEMORY_MODEL': '',
     'NOCHEH_GUARD_PROVIDER': '', 'NOCHEH_GUARD_MODEL': '',
+    'NOCHEH_IMAGE_PROVIDER': '', 'NOCHEH_IMAGE_MODEL': '',
     'NOCHEH_PROVIDERS': '[]', 'NOCHEH_PROVIDER_KEYS': '{}', 'ANTHROPIC_API_KEY': '',
 }
 KEY_SETTINGS = {'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'NOCHEH_PROVIDER_KEYS'}
@@ -205,7 +207,7 @@ def environment(values):
     An unconfigured part gets empty values."""
     selected = routes(values)
     result = {}
-    for part, name in (('reply', 'REPLY'), ('guard', 'GUARD')):
+    for part, name in (('reply', 'REPLY'), ('guard', 'GUARD'), ('image', 'IMAGE')):
         current = selected[part]
         configured = current.configured
         result.update({f'NOCHEH_{name}_ROUTE_URL': current.url, f'NOCHEH_{name}_ROUTE_MODEL': current.model if configured else '',

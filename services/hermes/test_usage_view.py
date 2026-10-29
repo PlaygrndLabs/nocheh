@@ -78,7 +78,7 @@ class UsageViewTests(unittest.TestCase):
         result = view_usage.view(self.state, 7, call=lambda *a, **k: self.fail('nothing to price'), now=DAY)
         self.assertEqual(result['rows'], [])
         self.assertEqual([part['id'] for part in result['parts']],
-                         ['reply', 'browser', 'schedule', 'memory_review', 'guard', 'transcription', 'memory', 'embedding'])
+                         ['reply', 'browser', 'schedule', 'memory_review', 'guard', 'transcription', 'image', 'memory', 'embedding'])
         self.assertEqual(result['sources'], {'hermes': 'empty', 'honcho': 'empty', 'pricing': 'not_needed'})
         for days in (0, 401, '7', 1.5, True):
             with self.assertRaises(ValueError):

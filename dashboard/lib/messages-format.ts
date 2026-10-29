@@ -294,6 +294,8 @@ export type ImportJob = {
     secret_check?: {cost_usd: number | null; calls: number} | null;
     /** Voice notes in the export: transcribed at import when a voice provider has a key. */
     voice?: {configured: boolean; notes: number; minutes: number; cost_usd: number | null; model?: string} | null;
+    /** Photos and images in the export: each is read once, with the Images model. */
+    images?: {count: number; model: string; cost_usd: number | null} | null;
     /** A rough cost to learn these messages; null when it couldn't be worked out. */
     learning?: {
       cost_usd: number | null;
@@ -356,6 +358,12 @@ export function voiceCostLabel(voice: NonNullable<ImportJob['preview']>['voice']
   return voice.cost_usd === null
     ? `${notes} are transcribed.`
     : `${notes} are transcribed, about ${dollars(voice.cost_usd)}.`;
+}
+/** The images line: how many are read and what that costs. */
+export function imagesCostLabel(images: NonNullable<ImportJob['preview']>['images']): string {
+  if (!images || !images.count) return '';
+  const count = `${images.count.toLocaleString()} images are read for their text`;
+  return images.cost_usd === null ? `${count}.` : `${count}, about ${dollars(images.cost_usd)}.`;
 }
 /** The learning cost line under the learning choice. */
 export function learningCostLabel(learning: NonNullable<ImportJob['preview']>['learning']): string {

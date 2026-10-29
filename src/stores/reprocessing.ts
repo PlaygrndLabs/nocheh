@@ -38,19 +38,33 @@ const READINGS:Record<string,string>={
   unreadable:'This document could not be read; its original file is kept.',
   unsupported:'Text extraction is unavailable for this original file.',
   too_large:'This document is too large to read; its original file is kept.'};
-/** Documents are read by the runtime's own document reader (Hermes: Word, Excel, PowerPoint,
- * old Office, OpenDocument, RTF, EPUB and PDF). Plain UTF-8 text is read here, and images and
- * video wait for their own reader. */
+const SIGHTS:Record<string,string>={
+  not_configured:'Images are not read until Settings › Models has a provider for them; the original file is kept.',
+  unreadable:'This image could not be read; its original file is kept.',
+  too_large:'This image is too large to read; its original file is kept.',
+  failed:'This image could not be read; its original file is kept.'};
+// Moving pictures and stickers keep their original only.
+const UNREAD=['video','sticker','animation','video_file'];
+/** Files are read by the runtime's own readers (Hermes): documents (Word, Excel, PowerPoint, old
+ * Office, OpenDocument, RTF, EPUB and PDF) by its document reader, and photos and images by its
+ * vision tool with the Images model of Settings › Models. Plain UTF-8 text is read here. */
 export function documentExtraction(runtime:RuntimeCall):DerivationEngine {
-  return {name:'runtime-documents',version:'1',outputKind:'extracted_text',async run(bytes,file,configuration){
+  return {name:'runtime-documents',version:'2',outputKind:'extracted_text',async run(bytes,file,configuration){
     if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_extraction_configuration');
-    if(['photo','image','video','sticker','animation'].includes(file.kind))return {kind:'extraction_status',text:READINGS.unsupported!};
+    const name=[file.metadata.file_name,file.metadata.relative_path].find(value=>typeof value==='string')??'';
+    const mime=typeof file.metadata.mime_type==='string'?file.metadata.mime_type:'';
+    if(UNREAD.includes(file.kind))return {kind:'extraction_status',text:READINGS.unsupported!};
+    if(['photo','image'].includes(file.kind)||/^image\//i.test(mime)) {
+      const result=await runtime('image.read',{bytes_base64:bytes.toString('base64'),name,mime_type:mime},300000);
+      if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
+      if(result.state==='failed'&&['provider_error','rate_limited','timed_out'].includes(String(result.reason)))
+        throw new HttpError(503,'image_reading_unavailable');
+      return {kind:'extraction_status',text:SIGHTS[String(result.state)]??SIGHTS.failed!};
+    }
     if(bytes.length<=200000&&!bytes.includes(0)&&!isPdf(bytes)) {
       try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* a binary document goes to the reader */}
     }
-    const name=[file.metadata.file_name,file.metadata.relative_path].find(value=>typeof value==='string')??'';
-    const result=await runtime('file.extract',{bytes_base64:bytes.toString('base64'),name,
-      mime_type:typeof file.metadata.mime_type==='string'?file.metadata.mime_type:''},180000);
+    const result=await runtime('file.extract',{bytes_base64:bytes.toString('base64'),name,mime_type:mime},180000);
     if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
     return {kind:'extraction_status',text:READINGS[String(result.state)]??READINGS.unreadable!};
   }};
