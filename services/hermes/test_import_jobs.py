@@ -58,7 +58,7 @@ class ImportJobTests(unittest.TestCase):
             texts=[r['event']['text'] for r in api.records.values()]
             self.assertIn('Original  متن\r\n  ',texts)
 
-    def test_preview_counts_voice_notes_and_their_minutes(self):
+    def test_preview_counts_voice_notes_their_minutes_and_images(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder); upload=root/'upload'; (upload/'voice_messages').mkdir(parents=True)
             (upload/'voice_messages/audio_1.ogg').write_bytes(b'OggS synthetic')
@@ -67,10 +67,15 @@ class ImportJobTests(unittest.TestCase):
                  'media_type':'voice_message','mime_type':'audio/ogg','duration_seconds':75},
                 {'id':2,'type':'message','date':'2026-10-09T09:01:00','text':'','file':'(File not included. Change data exporting settings to download.)',
                  'media_type':'voice_message','duration_seconds':40},
-                {'id':3,'type':'message','date':'2026-10-09T09:02:00','text':'Synthetic text'}]}
+                {'id':3,'type':'message','date':'2026-10-09T09:02:00','text':'Synthetic text','photo':'photos/a.jpg'},
+                {'id':4,'type':'message','date':'2026-10-09T09:03:00','text':'','file':'stickers/s.webp','media_type':'sticker','mime_type':'image/webp'},
+                {'id':5,'type':'message','date':'2026-10-09T09:04:00','text':'','file':'files/scan.png','mime_type':'image/png'}]}
+            for name in ('photos/a.jpg','stickers/s.webp','files/scan.png'):
+                (upload/name).parent.mkdir(parents=True,exist_ok=True); (upload/name).write_bytes(b'synthetic image')
             (upload/'result.json').write_text(json.dumps(document))
             preview=inspect(root)
             self.assertEqual((preview['voice_notes'],preview['voice_seconds']),(1,75),'a voice note without its file is not transcribed')
+            self.assertEqual(preview['image_files'],2,'a photo and an image file are read; a sticker is not')
 
     def test_zip_paths_symlinks_and_duplicate_members_are_rejected(self):
         for name,symlink in [('../escape.json',False),('/absolute.json',False),('symlink',True)]:

@@ -11,7 +11,8 @@ typical ones. Prices come from Hermes's price table for the models in Settings â
 Models. It is an estimate: real cost depends on the messages and the models.
 
 Voice notes are transcribed at import when Settings â€º Models has a voice provider with a key,
-priced per minute of audio from the export's own durations.
+priced per minute of audio from the export's own durations. Each photo or image is read once
+with the Images model, priced at typical tokens for one image and its text.
 """
 import math
 from datetime import datetime, timedelta, timezone
@@ -31,6 +32,9 @@ HISTORY = 20
 # The secret check sees each message's words twice (text and entities) and about this much more of its
 # other fields, in calls of up to this many characters, each answering with a short list.
 CHECK_FIELDS, CHECK_CALL, CHECK_PROMPT_TOKENS, CHECK_OUTPUT_TOKENS = 150, 45000, 300, 300
+# Typical tokens (input, output) of reading one image: the image at the model's usual size, the
+# instruction, and its text and description.
+IMAGE_TOKENS = (1800, 300)
 
 
 def recent(state, now=None):
@@ -50,9 +54,8 @@ def voice(values, notes, seconds):
             'cost_usd': round(math.ceil(seconds / 60) * MODELS[route.model], 2)}
 
 
-def estimate(state, messages, characters, call=None, now=None, voice_notes=0, voice_seconds=0):
-    if type(messages) is not int or messages < 0 or type(characters) is not int or characters < 0 \
-            or type(voice_notes) is not int or voice_notes < 0 or type(voice_seconds) is not int or voice_seconds < 0:
+def estimate(state, messages, characters, call=None, now=None, voice_notes=0, voice_seconds=0, images=0):
+    if any(type(value) is not int or value < 0 for value in (messages, characters, voice_notes, voice_seconds, images)):
         raise ValueError('invalid_learning_estimate')
     from tools.operations.installation.configuration import load
     values = load(state); known = provider_routes.providers(values)
@@ -71,7 +74,8 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
                 'base_url': route.url, 'calls': count, 'input_tokens': round(tokens[0] * count), 'output_tokens': round(tokens[1] * count)}
     checked = 2 * characters + CHECK_FIELDS * messages; check_calls = math.ceil(checked / CHECK_CALL)
     check = row('guard', check_calls, (checked / CHARACTERS_PER_TOKEN / max(1, check_calls) + CHECK_PROMPT_TOKENS, CHECK_OUTPUT_TOKENS))
-    priced = [check, row('memory', honcho_calls, per_call)] + ([] if runs >= HISTORY else [row('reply', messages, REVIEW_TOKENS)])
+    pictures = row('image', images, IMAGE_TOKENS)
+    priced = [check, row('memory', honcho_calls, per_call), pictures] + ([] if runs >= HISTORY else [row('reply', messages, REVIEW_TOKENS)])
     if call is None:
         from tools.operations.archive.archive import API
         call = API().call
@@ -81,7 +85,7 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
     except Exception:
         costs = [None] * len(priced)
     known_cost = lambda value: float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
-    review = sum(row['cost_usd'] for row in reviews) / runs * messages if runs >= HISTORY else known_cost(costs[2])
+    review = sum(row['cost_usd'] for row in reviews) / runs * messages if runs >= HISTORY else known_cost(costs[3])
     parts = [{'part': 'memory_review', 'label': 'Memory notes', 'cost_usd': review, 'measured': runs >= HISTORY},
              {'part': 'memory', 'label': 'Long-term memory', 'cost_usd': known_cost(costs[1]), 'measured': calls >= HISTORY}]
     total = None if any(part['cost_usd'] is None for part in parts) else round(sum(part['cost_usd'] for part in parts), 2)
@@ -90,4 +94,6 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
     secret = known_cost(costs[0])
     return {'learning': {'cost_usd': total, 'messages': messages, 'parts': parts},
             'secret_check': {'cost_usd': None if secret is None else round(secret, 2), 'calls': check_calls},
-            'voice': voice(values, voice_notes, voice_seconds)}
+            'voice': voice(values, voice_notes, voice_seconds),
+            'images': {'count': images, 'model': pictures['model'],
+                       'cost_usd': None if known_cost(costs[2]) is None else round(known_cost(costs[2]), 2)}}

@@ -49,3 +49,15 @@ why and does not hold the reply. Without a key, a voice note records "Voice note
 archived; transcription is not available." and is transcribed once a key is
 added. Usage shows each transcription's audio length and cost
 ([ADR-0193](adr/0193-voice-notes-are-transcribed-by-the-runtime-transcriber.md)).
+
+## Images
+
+Photos and image files, live or imported, are read once by Hermes's own vision
+tool with the Images part of Settings › Models, which uses the main model
+unless another is chosen; it needs a model that sees images. The reading is the
+image's text and a short description, from the "Reading images" instruction in
+Settings › Assistant. It is checked for secrets like typed text, and the
+original image is kept. A reply waits for it; a busy provider is tried again,
+and an image that cannot be read records why. Stickers, animations and video
+are not read. Usage shows each reading's tokens and cost
+([ADR-0194](adr/0194-images-are-read-by-the-runtime-vision-tool.md)).

@@ -164,10 +164,15 @@ def provider():
     from src.mock_provider import chat, embeddings
     import uvicorn
     original = chat._response_content
-    counts = {'detector': 0, 'learning': 0, 'chat': 0, 'embeddings': 0, 'raw_canary_outside_detector': 0}
+    counts = {'detector': 0, 'learning': 0, 'chat': 0, 'embeddings': 0, 'transcriptions': 0, 'images': 0, 'raw_canary_outside_detector': 0}
     canary = 'fixture-secret-ORCHID-2718'
 
     def answer(body):
+        parts = [part for message in body.messages if isinstance(message.content, list) for part in message.content if isinstance(part, dict)]
+        if any(part.get('type') == 'image_url' for part in parts):
+            # Reading an image: its text and a short description.
+            counts['images'] += 1
+            return 'SIGNMARK88 Synthetic sign\nA made-up sign on a plain background.'
         texts = [message.content for message in body.messages if isinstance(message.content, str)]
         text = '\n'.join(texts)
         if texts and texts[0].startswith('Find secret values in the supplied data.'):
@@ -230,6 +235,16 @@ def provider():
             if scripted is None:
                 return await chat.chat_completions(body)
             return brain.render(body, scripted)
+
+    if not upstream:
+        @app.post('/v1/audio/transcriptions')
+        async def transcriptions(request: Request):
+            # The upload is multipart; only its bytes matter here.
+            audio = await request.body()
+            counts['transcriptions'] += 1
+            if canary.encode() in audio:
+                counts['raw_canary_outside_detector'] += 1
+            return JSONResponse({'text': 'Synthetic voice VOICEMARK77: water the garden on Friday.'})
 
     @app.get('/fixture/brain')
     def brain_events():

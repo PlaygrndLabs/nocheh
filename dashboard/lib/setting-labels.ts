@@ -21,6 +21,8 @@ export const settingLabels: Record<string, string> = {
   NOCHEH_MEMORY_MODEL: 'Memory model',
   NOCHEH_GUARD_PROVIDER: 'Secret check provider',
   NOCHEH_GUARD_MODEL: 'Secret check model',
+  NOCHEH_IMAGE_PROVIDER: 'Images provider',
+  NOCHEH_IMAGE_MODEL: 'Images model',
   NOCHEH_EMBEDDING_PROVIDER: 'Memory search provider',
   NOCHEH_EMBEDDING_MODEL: 'Memory search model',
   NOCHEH_EMBEDDING_DIMENSIONS: 'Memory search dimensions',

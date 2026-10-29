@@ -15,6 +15,7 @@ import {
   canStart,
   dateSpan,
   fullTime,
+  imagesCostLabel,
   importStatus,
   isResume,
   learningCostLabel,
@@ -506,6 +507,7 @@ function ImportReview({job}: {job: ImportJob}) {
             Old messages are archived only; no replies are sent.
             {job.preview && ' ' + secretCheckCostLabel(job.preview.secret_check)}
             {job.preview?.voice?.notes ? ' ' + voiceCostLabel(job.preview.voice) : ''}
+            {job.preview?.images?.count ? ' ' + imagesCostLabel(job.preview.images) : ''}
           </span>
         </div>
       </CardBody>

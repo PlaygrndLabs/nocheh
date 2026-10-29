@@ -66,7 +66,8 @@ def main():
         COMPOSE_PROJECT_NAME=project, NOCHEH_AGENT_NETWORK=project + '-agent', NOCHEH_MEMORY_NETWORK=project + '-memory',
         TELEGRAM_OWNER_ID='123', TELEGRAM_GROUP_IDS='-10042,-10043', TELEGRAM_ENABLED='false', NOCHEH_PORT='18990',
         NOCHEH_PROVIDER=FIXTURE_PROVIDER, NOCHEH_PROVIDER_KEYS=json.dumps({FIXTURE_PROVIDER: 'synthetic-fixture-model-key'}),
-        NOCHEH_PROVIDERS=json.dumps([{'id': FIXTURE_PROVIDER, 'name': 'Model fixture', 'url': FIXTURE_MODEL_URL}]))
+        NOCHEH_PROVIDERS=json.dumps([{'id': FIXTURE_PROVIDER, 'name': 'Model fixture', 'url': FIXTURE_MODEL_URL}]),
+        NOCHEH_TRANSCRIPTION_PROVIDER=FIXTURE_PROVIDER)
     if args.preview_port:
         config['NOCHEH_DASHBOARD_PORT'] = str(args.preview_port)
     # The rehearsals restart services on purpose and count every Telegram message sent, so the

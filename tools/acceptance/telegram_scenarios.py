@@ -630,17 +630,34 @@ class Scenarios:
         self.gate('voice_bytes_unchanged', (self.f.directory/'state/files'/expected).read_bytes() == content)
         return update, event_id
 
-    def voice_is_archived_without_blocking(self):
-        # Nocheh has no speech recognition: a voice note keeps its original
-        # bytes, records an extraction status, and never holds later replies.
+    def voice_is_transcribed(self):
+        # A voice note keeps its original bytes, is transcribed by Hermes's
+        # transcriber through the Voice notes route, and its reply waits for it.
         _, event_id = self.voice(b'OggS\x00\x02synthetic voice note\n\xff'*4)
         row = self.finished(event_id, seconds=300)
         self.gate('voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
-        self.gate('voice_status_recorded', self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE "
-                  "kind='extraction_status' AND event_id='"+event_id+"'") != '0')
+        transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'"
+                                  " AND position('VOICEMARK77' in convert_from(content,'UTF8'))>0")
+        self.gate('voice_transcribed', transcript == '1', count=transcript)
         started = time.monotonic()
         self.turn(self.f.message(OWNER, 'یک پیام متنی بعد از ویس'), OWNER)
         self.gate('next_message_not_held', time.monotonic()-started < 90, seconds=round(time.monotonic()-started, 1))
+
+    def photo_is_read(self):
+        # A photo keeps its original bytes and is read once by Hermes's vision
+        # tool with the Images model before its reply.
+        content = b'\x89PNG\r\n\x1a\n' + b'synthetic photo bytes' * 8
+        file_id = 'photo-'+str(self.f.ids())
+        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.png',
+                                   'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
+        update = self.f.message(OWNER, None, extra={'caption': 'این تابلو را نگه دار', 'photo': [
+            {'file_id': file_id, 'file_unique_id': 'u'+file_id, 'width': 64, 'height': 48, 'file_size': len(content)}]})
+        event_id, _ = self.turn(update, OWNER)
+        expected = hashlib.sha256(content).hexdigest()
+        self.wait('photo_bytes_archived', lambda: self.f.query('nocheh_archive', "SELECT file_hash FROM artifacts WHERE event_id='"+event_id+"'") == expected, 120)
+        read = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='extracted_text' AND event_id='"+event_id+"'"
+                            " AND position('SIGNMARK88' in convert_from(content,'UTF8'))>0")
+        self.gate('photo_text_read', read == '1', count=read)
 
     # Owner authority ------------------------------------------------------------
 
@@ -822,7 +839,7 @@ class Scenarios:
 ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
-         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_archived_without_blocking',
+         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'photo_is_read',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_executes_owner_requests', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
 

@@ -232,6 +232,7 @@ const parts: Record<string, string> = {
   memory_review: 'Memory notes',
   guard: 'Secret check',
   transcription: 'Voice notes',
+  image: 'Images',
   memory: 'Long-term memory',
   embedding: 'Memory search',
 };
@@ -244,6 +245,7 @@ const routeParts: Record<string, string> = {
   guard: 'Secret check',
   embedding: 'Memory search',
   transcription: 'Voice notes',
+  image: 'Images',
 };
 export const routeName = (part: string, label?: string): string => routeParts[part] ?? label ?? readable(part);
 

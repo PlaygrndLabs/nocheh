@@ -11,7 +11,7 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons'] as const;
+  'telegram.approval_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -127,7 +127,7 @@ export function learningInstruction(text:string|undefined,values:{trigger_id:str
   return (text??learningPrompt).replaceAll('{trigger_id}',values.trigger_id).replaceAll('{citable_ids}',values.citable_ids);
 }
 
-const carried=new Set<RuntimeOperation>(['run.start','memory.review','guard.detect','memory.filter']);
+const carried=new Set<RuntimeOperation>(['run.start','memory.review','guard.detect','memory.filter','image.read']);
 /** Send the owner's replacement texts with every runtime call that runs one of them. */
 export function withPrompts(call:RuntimeCall,control:Pick<pg.Pool,'query'>):RuntimeCall {
   return async(operation,input,timeout)=>{

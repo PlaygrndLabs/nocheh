@@ -63,8 +63,9 @@ Normal group chatter can produce intentional silence. Voice, audio and round
 video notes keep their original bytes and are transcribed before their reply
 (see [provider.md](provider.md#voice-notes)). Media bytes are downloaded
 by the archive worker; the assistant does not repeat native media downloads or
-run a shared sticker-description cache. Photos/documents remain available as
-archived files and captions; automatic visual interpretation is not enabled.
+run a shared sticker-description cache. Photos and documents remain available as
+archived files and captions, and their text is read before the reply
+([provider.md](provider.md#images)).
 
 In an ordinary bot chat, Telegram's Bot API does not report when a user deletes
 a message. A voice note that Nocheh already captured remains source evidence and

@@ -13,10 +13,10 @@ from pathlib import Path
 
 DATABASE = Path(os.environ.get('NOCHEH_USAGE_DB', '/workspace/data/local/hermes/usage/usage.sqlite'))
 RETENTION_DAYS = 400
-PARTS = ('reply', 'browser', 'schedule', 'memory_review', 'guard', 'transcription')
+PARTS = ('reply', 'browser', 'schedule', 'memory_review', 'guard', 'transcription', 'image')
 TOKENS = ('input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens')
 PROVIDERS = {'reply': 'NOCHEH_REPLY_ROUTE_PROVIDER', 'guard': 'NOCHEH_GUARD_ROUTE_PROVIDER',
-             'transcription': 'NOCHEH_TRANSCRIPTION_ROUTE_PROVIDER'}
+             'transcription': 'NOCHEH_TRANSCRIPTION_ROUTE_PROVIDER', 'image': 'NOCHEH_IMAGE_ROUTE_PROVIDER'}
 SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT NOT NULL, provider TEXT NOT NULL, '
           'model TEXT NOT NULL, runs INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, '
           'calls INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0, '

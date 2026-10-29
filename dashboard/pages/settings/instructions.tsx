@@ -105,6 +105,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     title: 'Secret check',
     hint: 'Finds passwords and keys before anything is stored. Keep its JSON reply format, or the check fails and messages wait.',
   },
+  {
+    key: 'images.read',
+    title: 'Reading images',
+    hint: 'Sent with each photo or image when it is saved, live or imported. Its answer is checked for secrets and becomes the image’s searchable text.',
+  },
 ];
 
 /** A plain-language problem with an edited text, or null. */

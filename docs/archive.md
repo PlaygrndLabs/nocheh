@@ -49,9 +49,10 @@ Committed media uses native Telegram event decoding and replies. The integration
 bypasses native duplicate downloads and sticker vision preprocessing; those paths
 would operate outside the scoped assistant process. Voice, audio and round video
 notes keep their original bytes and are transcribed by the runtime's transcriber
-(see [provider.md](provider.md#voice-notes)). Photos, stickers and documents are archived
-with their captions and source references; automatic image/document interpretation
-is not enabled in this release.
+(see [provider.md](provider.md#voice-notes)). Photos and documents are archived
+with their captions and source references, and read by the runtime's readers: Hermes's
+document reader and, for photos and images, its vision tool with the Images model
+([provider.md](provider.md#images)). Stickers keep their original only.
 
 ## Verification
 
