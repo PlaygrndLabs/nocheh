@@ -73,9 +73,9 @@ def inspect(directory, mapping=None):
     if not isinstance(chats, list) or not chats: raise ValueError('empty_export')
     summaries = []
     # Validate every record/path before committing anything to the archive.
-    count = missing = supplied = 0
+    count = missing = supplied = characters = 0
     for record, uploads in desktop_records(document, file.parent, scope_map=mapping):
-        count += 1; supplied += len(uploads)
+        count += 1; supplied += len(uploads); characters += len(record['event']['text'] or '')
         missing += sum(a['state'] == 'failed' for a in record['artifacts'])
         if any(path.stat().st_size > MAX_FILE for _, path in uploads): raise ValueError('attachment_exceeds_50_mib')
     for chat in chats:
@@ -88,7 +88,7 @@ def inspect(directory, mapping=None):
     starts = [chat['first_at'] for chat in summaries if chat['first_at']]
     ends = [chat['last_at'] for chat in summaries if chat['last_at']]
     return {'file': str(file.relative_to(directory)), 'sha256': digest(file.read_bytes()),
-            'chats': summaries, 'messages': count, 'missing_files': missing, 'supplied_files': supplied,
+            'chats': summaries, 'messages': count, 'characters': characters, 'missing_files': missing, 'supplied_files': supplied,
             'first_at': min(starts, default=None), 'last_at': max(ends, default=None)}
 
 

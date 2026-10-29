@@ -17,9 +17,11 @@ import {
   fullTime,
   importStatus,
   isResume,
+  learningCostLabel,
   matchingGroup,
   preparationLabel,
   problemText,
+  secretCheckCostLabel,
   type ImportJob,
 } from '../../lib/messages-format';
 import {
@@ -448,6 +450,7 @@ function ImportReview({job}: {job: ImportJob}) {
             <span className="mt-0.5 block text-[13px] text-muted">
               Optional. Without it, imported messages are kept and searchable but not learned from.
               {resume ? ' This choice is kept when resuming.' : ''}
+              {job.preview && ' ' + learningCostLabel(job.preview.learning)}
             </span>
           </span>
         </label>
@@ -498,7 +501,10 @@ function ImportReview({job}: {job: ImportJob}) {
               See imported messages
             </Button>
           )}
-          <span className="text-xs text-muted">Old messages are archived only; no replies are sent.</span>
+          <span className="text-xs text-muted">
+            Old messages are archived only; no replies are sent.
+            {job.preview && ' ' + secretCheckCostLabel(job.preview.secret_check)}
+          </span>
         </div>
       </CardBody>
     </Card>

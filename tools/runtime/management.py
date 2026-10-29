@@ -181,7 +181,16 @@ def dispatch(body):
         job = body['job']
         if not re.fullmatch(r'[a-f0-9-]{36}', job): raise ValueError('invalid_job')
         directory = state / 'admin/jobs' / job
-        if operation == 'import.inspect': return inspect(directory)
+        if operation == 'import.inspect':
+            preview = inspect(directory)
+            # A rough cost of the secret check and of learning, so the owner can decide before Start;
+            # the import works without it.
+            try:
+                from tools.operations.archive.learning_estimate import estimate
+                preview.update(estimate(state, preview['messages'], preview['characters']))
+            except Exception:
+                preview.update(learning=None, secret_check=None)
+            return preview
     raise ValueError('unknown_operation')
 
 
