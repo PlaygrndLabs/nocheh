@@ -6,13 +6,13 @@
  *
  * The dashboard answers only its own local address, so a small relay on
  * 127.0.0.1 inside this container forwards to the fixture's dashboard.
- * Usage: node dashboard_pages.mjs <dashboard host> <port> <report directory>
+ * Usage: node dashboard_pages.mjs <dashboard host> <port> <report directory> <owner password>
  */
 import net from 'node:net';
 import {writeFileSync} from 'node:fs';
 import {chromium} from 'playwright-core';
 
-const [host, port, out] = process.argv.slice(2);
+const [host, port, out, password] = process.argv.slice(2);
 const routes = [
   ...[
     ['home', 'Home'],
@@ -46,9 +46,13 @@ const relay = net
 await new Promise(resolve => relay.on('listening', resolve));
 
 const browser = await chromium.launch({args: ['--no-sandbox', '--disable-crash-reporter', '--disable-crashpad-for-testing']});
+// Every page opens signed in: the first sign-in on a fresh fixture creates the password, later ones use it.
+const context = await browser.newContext({viewport: {width: 1440, height: 900}});
+const login = await context.request.post(`http://127.0.0.1:${port}/api/nocheh/login`, {data: {password}});
+if (!login.ok()) throw new Error(`sign-in failed: ${login.status()} ${await login.text()}`);
 const results = [];
 for (const [route, title] of routes) {
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await context.newPage();
   const problems = [];
   page.on('pageerror', error => problems.push('page error: ' + error.message));
   page.on('console', message => {
