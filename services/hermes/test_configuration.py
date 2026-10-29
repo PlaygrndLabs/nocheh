@@ -116,6 +116,47 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual([command[i+1] for i,v in enumerate(command) if v=='-f'],
                              [str(source/'docker-compose.yml'),str(source/'docker-compose.dev.yml')])
 
+    def test_apply_from_the_host_keeps_a_running_make_dev_stack(self):
+        from subprocess import CompletedProcess
+        from tools.operations.installation import configuration
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'installation';state=root/'data/local'
+            source=Path(folder)/'worktree';source.mkdir()
+            (source/'docker-compose.dev.yml').write_text('services: {}\n')
+            files=f'{source}/docker-compose.yml,{source}/docker-compose.dev.yml'
+            with patch.object(configuration,'INSTALLATION_ROOT',root),patch.object(configuration,'DEFAULT_STATE',state),\
+                 patch.dict(os.environ,{'NOCHEH_CONTAINER':''}):
+                initialize(state)
+                def running(output,code=0):
+                    return patch.object(configuration.subprocess,'run',return_value=CompletedProcess([],code,output,''))
+                with running(''):
+                    installed=configuration.compose_command(state)
+                    self.assertNotIn('NOCHEH_DEV_SOURCE_ROOT',compose_environment(state))
+                self.assertEqual(installed[installed.index('-f')+1],str(root/'docker-compose.yml'))
+                with running('',1):self.assertEqual(configuration.compose_command(state),installed)
+                with patch.object(configuration.subprocess,'run',side_effect=FileNotFoundError):
+                    self.assertEqual(configuration.compose_command(state),installed)
+                with running(files+'\n') as probe:
+                    command=configuration.compose_command(state)
+                    environment=compose_environment(state)
+                    # Image builds and other projects keep the installed Compose file.
+                    self.assertEqual(configuration.compose_command(state,development=False),installed)
+                    self.assertEqual(configuration.compose_command(state,'nocheh-fixture'),installed+['-p','nocheh-fixture'])
+                self.assertIn('label=com.docker.compose.project.working_dir='+str(root),probe.call_args.args[0])
+                self.assertEqual(command[command.index('--project-directory')+1],str(root))
+                self.assertEqual([command[i+1] for i,v in enumerate(command) if v=='-f'],
+                                 [str(source/'docker-compose.yml'),str(source/'docker-compose.dev.yml')])
+                self.assertEqual(environment['NOCHEH_DEV_SOURCE_ROOT'],str(source))
+                self.assertEqual(environment['NOCHEH_DEV_HERMES_BASE'],'nocheh-dev:hermes-base')
+                # A stack whose Compose files cannot be matched is refused, not replaced.
+                for odd in (f'{source}/docker-compose.yml', f'{source}/docker-compose.yml,{Path(folder)}/docker-compose.dev.yml',
+                            files+'\n'+f'{root}/docker-compose.yml,{root}/docker-compose.dev.yml'):
+                    with running(odd+'\n'),self.assertRaisesRegex(ValueError,'development_source_unavailable'):
+                        configuration.compose_command(state)
+                (source/'docker-compose.dev.yml').unlink()
+                with running(files+'\n'),self.assertRaisesRegex(ValueError,'development_source_unavailable'):
+                    configuration.compose_command(state)
+
     def test_native_admin_port_follows_isolated_archive_port(self):
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder); values = initialize(state)

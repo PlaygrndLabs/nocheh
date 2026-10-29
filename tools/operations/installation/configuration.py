@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+import subprocess
 from pathlib import Path
 from tools.operations.provider.embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
 from tools.operations.provider.transcription_config import DEFAULTS as TRANSCRIPTION_DEFAULTS
@@ -58,11 +59,35 @@ def development_source():
     return source
 
 
-def compose_command(state, project=None):
+def running_development_source(state, project=None):
+    """On the host: the source checkout of a running `make dev` stack on this
+    installation, if any. Recreating its services from docker-compose.yml alone
+    would replace the watched source with the old code baked into the images."""
+    if os.environ.get('NOCHEH_CONTAINER')=='1' or project or Path(state).resolve()!=DEFAULT_STATE: return None
+    try:
+        result=subprocess.run(['docker','ps','--filter','label=com.docker.compose.project=nocheh',
+                               '--filter','label=com.docker.compose.project.working_dir='+str(INSTALLATION_ROOT),
+                               '--filter','label=com.nocheh.runtime-mode=source-watched',
+                               '--format','{{.Label "com.docker.compose.project.config_files"}}'],
+                              capture_output=True,text=True,timeout=30)
+    except (OSError,subprocess.TimeoutExpired): return None
+    files={line.strip() for line in result.stdout.splitlines() if line.strip()} if result.returncode==0 else set()
+    if not files: return None
+    # Refuse rather than guess when the running stack's Compose files are not one checkout's pair.
+    paths=[Path(path) for path in next(iter(files)).split(',')] if len(files)==1 else []
+    source=paths[0].parent if paths else None
+    if (not source or not source.is_absolute() or paths!=[source/'docker-compose.yml',source/'docker-compose.dev.yml']
+            or not paths[1].is_file()):
+        raise ValueError('development_source_unavailable')
+    return source
+
+
+def compose_command(state, project=None, development=True):
+    """`development=False` keeps the installed services even while `make dev` runs, as image builds need."""
     command=['docker','compose','--env-file',str(env_path(state)),'-f',str(INSTALLATION_ROOT/'docker-compose.yml')]
-    source=development_source()
+    source=development_source() or (running_development_source(state,project) if development else None)
     if source:
-        # Apply inside `make dev` keeps the source-watched services and their images,
+        # Apply inside or beside `make dev` keeps the source-watched services and their images,
         # exactly as make dev started them, instead of the installed images.
         command=['docker','compose','--env-file',str(env_path(state)),'--project-directory',str(INSTALLATION_ROOT),
                  '-f',str(source/'docker-compose.yml'),'-f',str(source/'docker-compose.dev.yml')]
@@ -270,4 +295,9 @@ def compose_environment(state):
     result['NOCHEH_HONCHO_STATE_DIR']=load(state).get('NOCHEH_HONCHO_STATE_DIR') or str(Path(state).resolve()/'honcho')
     result['COMPOSE_PROFILES']=','.join(profiles)
     result.update(provider_routes.environment({**DEFAULTS,**load(state)}))
+    source=running_development_source(state)
+    if source:
+        # The dashboard container gets these from docker-compose.dev.yml itself.
+        from tools.development.live_dev import overlay_environment
+        result.update(overlay_environment(source))
     return result
