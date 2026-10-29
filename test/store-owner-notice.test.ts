@@ -20,7 +20,7 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
     const address=server.address();assert.ok(address&&typeof address==='object');
     const send=(body:unknown,bearer=token)=>fetch(`http://127.0.0.1:${address.port}/v1/runtime/owner-notice`,
       {method:'POST',headers:{authorization:'Bearer '+bearer,'content-type':'application/json'},body:JSON.stringify(body)});
-    const id='a'.repeat(64),problems=['Memory notes: 2 tasks failed (13 so far).','Secret check (synthetic-model): 1 model call failed today, 1 refused by the model.'];
+    const id='a'.repeat(64),problems=['Memory notes: 2 tasks failed (13 so far).','Secret check (synthetic-model): 1 model call failed today: 1 refused by the model.'];
     const sent=await send({id,problems});
     assert.equal(sent.status,200);assert.deepEqual(await sent.json(),{state:'done'});
     assert.deepEqual(calls[0],['telegram.notice',{id,chat_id:'42',text:'⚠️ Nocheh found a problem:\n• '+problems[0]+'\n• '+problems[1]+'\n\nSee System › Health in the dashboard.'}]);

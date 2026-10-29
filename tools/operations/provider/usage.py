@@ -6,6 +6,7 @@ Honcho's egress (services/honcho/meter.py). Both keep daily totals per part,
 provider and model, never content. Memory tokens are priced by Hermes's own
 pricing table; a cost Hermes cannot price stays unknown rather than zero.
 """
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -40,6 +41,17 @@ def _read(path, query, args):
         db.close()
 
 
+def failure_reasons(value):
+    """Failed runs by why they failed, such as {'refused': 2}; codes and counts only."""
+    try:
+        found = json.loads(value or '{}')
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(found, dict):
+        return {}
+    return {str(key)[:40]: count for key, count in found.items() if type(count) is int and count > 0}
+
+
 def hermes_rows(state, since):
     rows = _read(Path(state) / 'hermes/usage/usage.sqlite', 'SELECT * FROM usage_daily WHERE day>=?', (since,))
     if rows is None:
@@ -48,6 +60,7 @@ def hermes_rows(state, since):
         priced = row.pop('priced_runs', 0)
         row['cost_usd'] = row['cost_usd'] if priced else None
         row['cost_complete'] = priced == row['runs']
+        row['reasons'] = failure_reasons(row.get('reasons'))
     return rows
 
 

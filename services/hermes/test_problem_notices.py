@@ -52,12 +52,12 @@ class ProblemNoticeTests(unittest.TestCase):
 
     def test_refusals_repeat_at_most_once_an_hour_and_only_when_worse(self):
         self.check(NOW, usage=refusals(1, 1))
-        self.assertEqual(self.sent[-1]['problems'], ['Secret check (synthetic-model): 1 model call failed today, 1 refused by the model.'])
+        self.assertEqual(self.sent[-1]['problems'], ['Secret check (synthetic-model): 1 model call failed today: 1 refused by the model.'])
         self.check(NOW + 600, usage=refusals(4, 3, hidden=1))
         self.assertEqual(len(self.sent), 1, 'worse, but within the quiet hour')
         self.check(NOW + 3700, usage=refusals(4, 3, hidden=1))
         self.assertEqual(self.sent[-1]['problems'], [
-            'Secret check (synthetic-model): 4 model calls failed today, 3 refused by the model; '
+            'Secret check (synthetic-model): 4 model calls failed today: 3 refused by the model, 1 reason not known; '
             '1 text was hidden whole because the model refused to check it.'])
         self.check(NOW + 8000, usage=refusals(4, 3, hidden=1))
         self.assertEqual(len(self.sent), 2, 'not worse, so not repeated')
@@ -104,6 +104,17 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual((self.sent[-1]['open'], self.sent[-1]['retry']), ({'kind': 'url', 'url': 'https://dash.example.test/#system'}, True))
         mini = {'TELEGRAM_ENABLED': 'true', 'NOCHEH_MINI_APP_URL': 'https://mini.example.test', 'CLOUDFLARE_TUNNEL_TOKEN': 'x' * 40}
         self.assertEqual(problems.opening(mini), {'kind': 'web_app', 'url': 'https://mini.example.test/?page=problems'})
+
+    def test_a_notice_says_why_model_calls_failed(self):
+        row = {**refusals(4, 1)[0], 'part': 'memory_review', 'label': 'Memory notes',
+               'reasons': {'timed_out': 2, 'refused': 1, 'provider_error': 1}}
+        self.check(NOW, usage=[row])
+        self.assertEqual(self.sent[-1]['problems'], [
+            'Memory notes (synthetic-model): 4 model calls failed today: 2 took too long, 1 refused by the model, '
+            '1 the provider had an error.'])
+        found = problems.problems(monitoring(), [{**row, 'reasons': {'unknown': 4}, 'refused': 0}], TODAY)
+        self.assertEqual(problems.text(next(p for p in found if p['kind'] == 'model'), 4),
+                         'Memory notes (synthetic-model): 4 model calls failed today.', 'no reason known, none said')
 
     def test_only_todays_model_failures_count(self):
         found = problems.problems(monitoring(), refusals(1, 1), TODAY)

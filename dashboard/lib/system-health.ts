@@ -114,7 +114,7 @@ export function issues(m: any): Issue[] {
   for (const row of models) {
     const failed = row.failed
       ? `${row.failed} model ${row.failed === 1 ? 'call' : 'calls'} failed today` +
-        (row.refused ? `, ${row.refused} refused by the model` : '')
+        (row.why ? `: ${row.why}` : row.refused ? `, ${row.refused} refused by the model` : '')
       : '';
     const hidden = row.hidden
       ? `${row.hidden} ${row.hidden === 1 ? 'text was' : 'texts were'} hidden whole because the model refused to check ${row.hidden === 1 ? 'it' : 'them'}`

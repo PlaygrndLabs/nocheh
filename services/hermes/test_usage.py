@@ -46,7 +46,8 @@ class UsageTests(unittest.TestCase):
             path = Path(root) / 'usage/usage.sqlite'
             path.parent.mkdir()
             old = sqlite3.connect(str(path))
-            old.execute(usage.SCHEMA.replace('refused INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, ', ''))
+            old.execute(usage.SCHEMA.replace('refused INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, ', '')
+                        .replace("reasons TEXT NOT NULL DEFAULT '{}', ", ''))
             old.execute("INSERT INTO usage_daily(day,part,provider,model,runs,failed) VALUES('2026-10-13','guard','anthropic','m',3,1)")
             old.commit()
             old.close()
@@ -56,6 +57,38 @@ class UsageTests(unittest.TestCase):
             row = usage.rows('2026-10-13', path)[0]
             self.assertEqual((row['runs'], row['failed'], row['refused'], row['hidden']), (5, 3, 2, 1),
                              'a refusal is always a failure; a hidden text is not a run')
+            self.assertEqual(row['reasons'], {'refused': 2}, 'the older table gains the reasons too')
+
+    def test_failed_runs_keep_why_they_failed_as_codes_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'usage/usage.sqlite'
+            for reason in ('timed_out', 'timed_out', 'refused', 'a provider message, not a code'):
+                usage.record('memory_review', {'calls': 1}, 'm', failed=True, reason=reason, provider='anthropic', path=path, now=DAY)
+            usage.record('memory_review', {'calls': 1}, 'm', reason='timed_out', provider='anthropic', path=path, now=DAY)
+            row = usage.rows('2026-10-13', path)[0]
+            self.assertEqual((row['failed'], row['refused']), (4, 1))
+            self.assertEqual(row['reasons'], {'timed_out': 2, 'refused': 1, 'unknown': 1},
+                             'an unknown code is kept as unknown, and a run that worked has no reason')
+
+    def test_why_a_hermes_turn_or_a_direct_call_failed(self):
+        cases = [
+            ([{'failed': True, 'failure_reason': 'content_policy_blocked', 'error': 'private words'}], 'refused'),
+            ([{'completed': True, 'turn_exit_reason': 'text_response(finish_reason=refusal)', 'final_response': ''}], 'refused'),
+            ([{'failed': True, 'failure_reason': 'rate_limit'}], 'rate_limited'),
+            ([{'failed': True, 'failure_reason': 'server_error'}], 'provider_error'),
+            ([{'failed': True, 'failure_reason': 'timeout'}], 'timed_out'),
+            ([{'completed': False, 'turn_exit_reason': 'max_iterations_reached(90/90)'}], 'too_long'),
+            ([{'completed': False, 'interrupted': True}], 'interrupted'),
+            ([{'completed': True, 'final_response': ' '}], 'empty_answer'),
+            ([{'completed': True, 'final_response': 'fine'}, {'failed': True}], 'unknown'),
+            ([], 'unknown'),
+        ]
+        for results, reason in cases:
+            self.assertEqual(usage.failure_reason(results), reason, results)
+        class Status(Exception):
+            def __init__(self, status_code): self.status_code = status_code
+        self.assertEqual([usage.error_reason(error) for error in (Status(429), Status(401), Status(503), TimeoutError(), ValueError())],
+                         ['rate_limited', 'key_rejected', 'provider_error', 'timed_out', 'unknown'])
 
     def test_record_never_fails_the_work_it_measures(self):
         with tempfile.TemporaryDirectory() as root:

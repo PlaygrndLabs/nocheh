@@ -115,6 +115,14 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual([(c.args[3],c.kwargs['refused']) for c in record.call_args_list],[(True,True),(True,True)])
         hidden.assert_called_once_with('guard','model')
 
+    def test_a_failed_check_records_why_it_failed(self):
+        class Busy(Exception):status_code=503
+        credentials=SubscriptionCredentials('synthetic-token')
+        with patch('services.hermes.subscription._call_subscription',side_effect=Busy()), \
+                patch('services.hermes.subscription.RETRY_SECONDS',0),patch('services.hermes.usage.record') as record:
+            with self.assertRaises(Exception):detect_literals('Password: juniper-ONLY-7642',credentials,'model')
+        self.assertEqual({c.kwargs['reason'] for c in record.call_args_list},{'provider_error'})
+
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),
                                   ('https://chatgpt.com/backend-api/codex','openai-codex','codex_responses'),
