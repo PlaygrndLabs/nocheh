@@ -84,7 +84,7 @@ const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpre
   defaults:{'reply.common':'You are Nocheh. Use authorized sources as evidence.','reply.owner':'This is the owner private conversation.',
     'reply.group':'This is a shared space. For routine chatter return exactly [NO_REPLY].','memory.limited':'Long-term memory is limited.',
     'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
-    'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.',
+    'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.','images.read':'Write out the text in this image, then describe it.',
     'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.'} as Record<string,string>};
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};

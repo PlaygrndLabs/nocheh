@@ -51,7 +51,7 @@ TITLES = {
     'action_denial': 'A rejected message is never sent', 'group_current_action': 'Group post in the same topic',
     'schedule_fires_and_waits_for_review': 'Scheduled job waits for approval', 'participant_not_permitted': 'Stranger in a group',
     'group_answers_only_when_addressed': 'Groups: answers only when addressed', 'unselected_group': 'Groups not selected stay silent',
-    'retirement_hides_fact': 'Hidden message leaves search', 'voice_is_archived_without_blocking': 'Voice notes are kept and do not block',
+    'retirement_hides_fact': 'Hidden message leaves search', 'voice_is_transcribed': 'Voice notes are turned into text', 'photo_is_read': 'Photos are read for their text',
     'owner_directory_lists_conversations': 'Your chat list', 'unparseable_update_does_not_wedge_polling': 'A broken update does not stop Telegram',
     'telegram_refresh_names': 'Group names refresh', 'owner_freedom_executes_owner_requests': 'Setting: your private requests run without approval',
     'launcher_stop_mid_turn': 'Stopping mid-answer recovers', 'deleted_topic': 'A deleted topic does not leak elsewhere',
