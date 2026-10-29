@@ -94,11 +94,30 @@ remain supported alongside these conveniences:
 
 Secret settings take a hidden prompt or piped stdin, never a value in argv.
 The dashboard owner session is separate from the archive service credential and
-model provider keys. No remote login is implemented; ports bind only to localhost.
-The browser receives a separate HttpOnly owner session and CSRF value. Native HTTP
-and one-use, 30-second WebSocket tickets are checked by Nocheh before proxying.
-Internal backend credentials are not injected into native pages. Existing CLI
-headers remain compatible; download-only cookies cannot administer settings.
+model provider keys. Ports bind only to localhost. Native HTTP and one-use,
+30-second WebSocket tickets are checked by Nocheh before proxying. Internal
+backend credentials are not injected into native pages. Existing CLI headers
+remain compatible; download-only cookies cannot administer settings.
+
+## Sign-in
+
+The dashboard asks for the owner's Nocheh password; the Telegram mini app uses
+the same one. On the first visit it asks to create the password, at least 8
+characters. After that it opens on a sign-in screen, and a browser stays signed
+in until it signs out (Sign out, at the bottom of the menu) or goes 30 days
+without being used. Sign-ins survive dashboard restarts.
+
+Settings › Privacy & data › Password changes the password after asking for the
+current one; every other browser and phone then signs in again. Sign out
+everywhere else ends every other session at once. After five wrong passwords in
+a row, sign-in pauses for 15 minutes, and each further wrong password doubles
+the pause, up to a day; one count covers browsers and phones.
+
+The dashboard keeps a scrypt hash of the password and SHA-256 hashes of the
+session tokens in `admin/owner-lock.json` in its state folder. The browser
+receives an HttpOnly, SameSite=Strict session cookie, and a CSRF value derived
+from it. A forgotten password is reset by stopping the dashboard, removing that
+file, and creating a new password on the next visit.
 
 ## Native browser chat
 

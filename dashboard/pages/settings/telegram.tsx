@@ -1,11 +1,7 @@
-import {useState} from 'react';
-import {apiPost} from '../../lib/api';
-import {refreshResources, useResource} from '../../lib/resource';
+import {useResource} from '../../lib/resource';
 import {useSettings} from '../../lib/settings';
 import {href} from '../../lib/routes';
-import {Badge, Button, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
-import {useFeedback} from '../../ui/overlay';
-import {errorWords, when} from '../memory/shared';
+import {Badge, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
 
 export const telegramKeys = [
@@ -31,137 +27,6 @@ export function Unsaved({show}: {show: boolean}) {
       Not saved
     </Badge>
   ) : null;
-}
-
-type MiniAppLock = {
-  password_set: boolean;
-  changed_at: number | null;
-  sessions: {created_at: number; last_seen_at: number}[];
-  paused_until: number | null;
-};
-const passwordErrors: Record<string, string> = {
-  password_too_short: 'Use at least 8 characters.',
-  password_too_long: 'Use at most 200 characters.',
-};
-
-/**
- * The mini app's password and the phones signed in with it. These save at
- * once with their own buttons: the password is never part of the settings
- * that Save at the top writes.
- */
-function MiniAppPassword() {
-  const lock = useResource<MiniAppLock>('/mini-app/lock');
-  const feedback = useFeedback();
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  const data = lock.data;
-  const phones = data?.sessions.length ?? 0;
-  const run = async (name: string, work: () => Promise<void>) => {
-    setBusy(name);
-    setProblem(null);
-    try {
-      await work();
-      await refreshResources();
-    } catch (e) {
-      setProblem(passwordErrors[(e as Error)?.message] ?? errorWords(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-  const save = () =>
-    run('password', async () => {
-      await apiPost('/mini-app/lock/password', {password});
-      setPassword('');
-      feedback.toast(
-        data?.password_set ? 'Password changed. Every phone signs in again with the new one.' : 'Password set.',
-      );
-    });
-  const signOutAll = async () => {
-    const ok = await feedback.confirm({
-      title: 'Sign out every phone?',
-      body: 'Each phone asks for the mini app password again the next time it opens the mini app.',
-      confirm: 'Sign out everywhere',
-      danger: true,
-    });
-    if (ok)
-      await run('sign-out', async () => {
-        await apiPost('/mini-app/lock/sign-out-all', {});
-        feedback.toast('Every phone is signed out.');
-      });
-  };
-  return (
-    <>
-      <SettingRow
-        title={
-          <>
-            Password
-            {data && !data.password_set && (
-              <Badge tone="warn" className="ml-2 align-middle">
-                Not set
-              </Badge>
-            )}
-          </>
-        }
-        description={
-          problem ? (
-            <span className="text-bad" role="alert">
-              {problem}
-            </span>
-          ) : data?.password_set ? (
-            `Each phone asks for it once.${data.changed_at ? ' Changed ' + when(new Date(data.changed_at).toISOString()) + '.' : ''} A new password signs every phone out.`
-          ) : (
-            'The mini app stays locked until you set one. Each phone asks for it once.'
-          )
-        }
-        htmlFor="mini-app-password"
-      >
-        <form
-          className="flex gap-2"
-          onSubmit={e => {
-            e.preventDefault();
-            if (password && !busy) void save();
-          }}
-        >
-          <Input
-            id="mini-app-password"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            placeholder={data?.password_set ? 'New password' : 'At least 8 characters'}
-            disabled={!!busy || !data}
-            onChange={e => setPassword(e.target.value)}
-          />
-          <Button type="submit" busy={busy === 'password'} disabled={!password || !!busy}>
-            {data?.password_set ? 'Change' : 'Set'}
-          </Button>
-        </form>
-      </SettingRow>
-      {data?.password_set && (
-        <SettingRow
-          title="Signed-in phones"
-          description={
-            data.paused_until
-              ? `Sign-in is paused after too many wrong passwords, until ${when(new Date(data.paused_until).toISOString())}.`
-              : phones
-                ? `${phones} ${phones === 1 ? 'phone is' : 'phones are'} signed in. Last used ${when(new Date(data.sessions[0]!.last_seen_at).toISOString())}.`
-                : 'No phone is signed in.'
-          }
-        >
-          <div className="flex sm:justify-end">
-            <Button
-              variant="danger"
-              busy={busy === 'sign-out'}
-              disabled={!phones || !!busy}
-              onClick={() => void signOutAll()}
-            >
-              Sign out everywhere
-            </Button>
-          </div>
-        </SettingRow>
-      )}
-    </>
-  );
 }
 
 export function TelegramSettings() {
@@ -425,7 +290,7 @@ export function TelegramSettings() {
       <Card>
         <CardHeader
           title="Mini app"
-          description="Home, Inbox and Tasks on your phone, from the button next to the message box in your private chat with Nocheh. Only your Telegram account can open it, with the password below; Settings and System stay here."
+          description="Home, Inbox and Tasks on your phone, from the button next to the message box in your private chat with Nocheh. Only your Telegram account can open it, with your Nocheh password; Settings and System stay here."
           className="pb-3"
         />
         <div className="border-t border-line">
@@ -476,7 +341,14 @@ export function TelegramSettings() {
               onChange={e => s.set('CLOUDFLARE_TUNNEL_TOKEN', e.target.value.trim())}
             />
           </SettingRow>
-          <MiniAppPassword />
+          <SettingRow
+            title="Password"
+            description="Each phone signs in once with your Nocheh password, the same one as this dashboard."
+          >
+            <div className="flex sm:justify-end">
+              <LinkButton href={href('settings', {view: 'privacy'})}>Change in Privacy & data</LinkButton>
+            </div>
+          </SettingRow>
         </div>
       </Card>
     </>

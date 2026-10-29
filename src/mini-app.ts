@@ -1,5 +1,5 @@
 import {createServer,request,type IncomingMessage,type ServerResponse} from 'node:http';
-import {createHash,createPublicKey,verify,type KeyObject} from 'node:crypto';
+import {createPublicKey,verify,type KeyObject} from 'node:crypto';
 import {createReadStream} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -55,7 +55,6 @@ const routes:[string,RegExp][]=[
 ];
 export const miniAppRoute=(method:string,route:string):boolean=>routes.some(([m,re])=>m===method&&re.test(route));
 
-type Session={cookie:string;csrf:string;expires:number};
 export type DashboardTarget={host:string;port:number};
 
 /** One request to the local dashboard, as the local dashboard page would make it. */
@@ -73,28 +72,17 @@ function send(target:DashboardTarget,method:string,path:string,headers:Record<st
   });
 }
 
+/**
+ * Calls the local dashboard for a phone. The mini app holds no credential: an
+ * owner call carries the phone's own session token, which the dashboard checks
+ * and limits to the mini app's routes.
+ */
 export class DashboardClient {
-  private session:Session|null=null;
-  constructor(readonly target:DashboardTarget,private now=Date.now){}
-  private async open():Promise<Session> {
-    if(this.session&&this.session.expires>this.now())return this.session;
-    const page=await send(this.target,'GET','/',{});
-    const cookie=String([page.headers['set-cookie']??[]].flat().find(value=>value.startsWith('nocheh_session='))??'').split(';')[0]!;
-    const csrf=page.body.toString('utf8').match(/window\.__NOCHEH_CSRF__=("[A-Za-z0-9_-]+")/)?.[1];
-    if(page.status!==200||!cookie||!csrf)throw new HttpError(503,'dashboard_unavailable');
-    // Dashboard sessions last 12 hours; renew well before.
-    return this.session={cookie,csrf:JSON.parse(csrf) as string,expires:this.now()+10*60*60*1000};
-  }
-  async call(method:string,path:string,body?:Buffer) {
-    for(let attempt=0;;attempt++) {
-      const session=await this.open();
-      const result=await send(this.target,method,'/api/nocheh'+path,{cookie:session.cookie,'x-nocheh-csrf':session.csrf,
-        ...(body?{'content-type':'application/json'}:{})},body);
-      // A restarted dashboard forgets its sessions; open a new one once. Other refusals,
-      // such as a wrong mini app password, are answers and are never sent twice.
-      if([401,403].includes(result.status)&&/"(?:csrf_required|owner_session_required)"/.test(result.body.toString())&&attempt===0){this.session=null;continue;}
-      return result;
-    }
+  constructor(readonly target:DashboardTarget){}
+  call(method:string,path:string,body?:Buffer,phone?:string) {
+    // A phone call always names a session, even an empty one, so the dashboard answers it as a phone.
+    return send(this.target,method,'/api/nocheh'+path,{...(phone!==undefined?{'x-nocheh-mini-session':phone||'none'}:{}),
+      ...(body?{'content-type':'application/json'}:{})},body);
   }
 }
 
@@ -105,43 +93,23 @@ async function readBody(req:IncomingMessage,max=1024*1024):Promise<Buffer> {
 }
 
 export type MiniAppOptions={check:Omit<LaunchCheck,'now'>;dashboard:DashboardClient;assets:string;now?:()=>number};
-type LockState='signed_in'|'signed_out'|'no_password';
 
-/**
- * The mini app's password sign-in. The dashboard keeps the password and the
- * sessions; this only remembers that a session is signed in for half a minute,
- * so a password change or "Sign out everywhere" reaches the phone within that
- * time.
- */
+/** The phone sign-in routes of the dashboard, which holds the owner's password and every session. */
 class MiniAppSessions {
-  private known=new Map<string,{state:LockState;until:number}>();
-  constructor(private dashboard:DashboardClient,private now:()=>number) {}
+  constructor(private dashboard:DashboardClient) {}
   private async lock(path:string,body:unknown) {
-    const result=await this.dashboard.call('POST','/mini-app/lock/'+path,Buffer.from(JSON.stringify(body)));
+    const result=await this.dashboard.call('POST','/mini-app/'+path,Buffer.from(JSON.stringify(body)));
     let value:Record<string,unknown>={};try{value=JSON.parse(result.body.toString('utf8')) as Record<string,unknown>;}catch{}
     if(result.status>=500||!value||typeof value!=='object')throw new HttpError(503,'dashboard_unavailable');
     return {status:result.status,value};
   }
-  async state(token:string):Promise<LockState> {
-    const id=createHash('sha256').update(token).digest('hex'),cached=this.known.get(id);
-    if(cached&&cached.until>this.now())return cached.state;
+  async state(token:string):Promise<string> {
     const {status,value}=await this.lock('check',{token});
     if(status!==200||!['signed_in','signed_out','no_password'].includes(String(value.state)))throw new HttpError(503,'dashboard_unavailable');
-    for(const [key,entry] of this.known)if(entry.until<=this.now())this.known.delete(key);
-    // Only a signed-in answer is kept: a phone that just signed in or a password just set counts at once.
-    if(value.state==='signed_in'&&this.known.size<64)this.known.set(id,{state:'signed_in',until:this.now()+30000});
-    return value.state as LockState;
-  }
-  async require(token:string) {
-    const state=await this.state(token);
-    if(state==='no_password')throw new HttpError(401,'mini_app_password_not_set');
-    if(state!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');
+    return String(value.state);
   }
   signIn(password:unknown) {return this.lock('sign-in',{password});}
-  async signOut(token:string) {
-    this.known.delete(createHash('sha256').update(token).digest('hex'));
-    await this.lock('sign-out',{token});
-  }
+  async signOut(token:string) {await this.lock('sign-out',{token});}
 }
 const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; "+
   "frame-ancestors 'self' https://web.telegram.org https://webk.telegram.org https://webz.telegram.org";
@@ -153,7 +121,7 @@ const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inlin
  * and the phone's password sign-in.
  */
 export function miniAppServer(options:MiniAppOptions) {
-  const sessions=new MiniAppSessions(options.dashboard,options.now??Date.now);
+  const sessions=new MiniAppSessions(options.dashboard);
   return createServer((req,res)=>{void handle(options,sessions,req,res).catch(error=>{
     if(!res.headersSent)json(res,error instanceof HttpError?error.status:502,{error:error instanceof HttpError?error.code:'mini_app_unavailable'});else res.destroy();
   });});
@@ -184,9 +152,9 @@ async function handle(options:MiniAppOptions,sessions:MiniAppSessions,req:Incomi
     const route=path.slice('/api/nocheh'.length);
     if(!miniAppRoute(method,route)||url.search.length>600)throw new HttpError(404,'not_found');
     verifyLaunch(String(req.headers['x-telegram-init-data']??''),{...options.check,now:(options.now??Date.now)()});
-    await sessions.require(token);
     const body=method==='POST'?await readBody(req):undefined;
-    const result=await options.dashboard.call(method,route+url.search,body);
+    // The dashboard checks the phone's sign-in and refuses any route outside the mini app's.
+    const result=await options.dashboard.call(method,route+url.search,body,token);
     // The Inbox reads settings only to know which chat is the owner's own.
     if(route==='/settings'&&result.status===200) {
       const view=JSON.parse(result.body.toString('utf8')) as {fields?:{key:string}[]};

@@ -10,6 +10,8 @@ import {
   Home,
   Inbox,
   ListChecks,
+  LockKeyhole,
+  LogOut,
   Menu,
   MessagesSquare,
   Monitor,
@@ -28,7 +30,8 @@ import {tabLinks} from './lib/page-tabs';
 import {useResource} from './lib/resource';
 import {useInboxCount} from './lib/inbox';
 import {cn} from './lib/utils';
-import {Button, Dot, Spinner, type Tone} from './ui/core';
+import {apiPost} from './lib/api';
+import {Button, Dot, Field, Input, Spinner, type Tone} from './ui/core';
 import {FeedbackProvider} from './ui/overlay';
 import {SaveWatcher} from './ui/save-bar';
 import {LogoMark, Wordmark} from './ui/logo';
@@ -276,6 +279,15 @@ function Navigation({
         </a>
         <button
           type="button"
+          onClick={() => void apiPost('/logout', {}).finally(() => location.reload())}
+          className={cn(footerItem, 'text-left')}
+          title={collapsed ? 'Sign out' : undefined}
+        >
+          <LogOut className="size-4 shrink-0" />
+          {label('Sign out')}
+        </button>
+        <button
+          type="button"
           onClick={cycleTheme}
           className={cn(footerItem, 'text-left')}
           title={collapsed ? themeName : undefined}
@@ -372,8 +384,111 @@ function App() {
   );
 }
 
+function minutes(until: number): string {
+  const left = Math.max(1, Math.ceil((until - Date.now()) / 60000));
+  return left >= 120 ? `${Math.round(left / 60)} hours` : `${left} ${left === 1 ? 'minute' : 'minutes'}`;
+}
+
+/**
+ * The dashboard's sign-in. On the first visit it creates the owner's Nocheh
+ * password, which the mini app uses too; after that it asks for it.
+ */
+function Login({mode}: {mode: 'create' | 'sign_in'}) {
+  const [password, setPassword] = React.useState('');
+  const [repeat, setRepeat] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [problem, setProblem] = React.useState<string | null>(null);
+  const create = mode === 'create';
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    if (create && password !== repeat) return setProblem('The two passwords are different.');
+    setBusy(true);
+    setProblem(null);
+    const response = await fetch('/api/nocheh/login', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password}),
+    }).catch(() => null);
+    const value = await response?.json().catch(() => ({}));
+    if (response?.ok) return location.reload();
+    setBusy(false);
+    if (!create) setPassword('');
+    setProblem(
+      value?.error === 'wrong_password'
+        ? value.tries_left > 0 && value.tries_left <= 2
+          ? `Wrong password. ${value.tries_left} ${value.tries_left === 1 ? 'try' : 'tries'} left before a pause.`
+          : 'Wrong password.'
+        : value?.error === 'sign_in_paused'
+          ? `Too many wrong passwords. Try again in ${minutes(Number(value.until))}.`
+          : value?.error === 'password_too_short'
+            ? 'Use at least 8 characters.'
+            : value?.error === 'password_too_long'
+              ? 'Use at most 200 characters.'
+              : value?.error === 'owner_password_already_set'
+                ? 'A password was just created. Reload the page and sign in.'
+                : 'Nocheh could not be reached. Try again in a minute.',
+    );
+  };
+  return (
+    <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center gap-6 p-6">
+      <div className="flex items-center gap-2.5">
+        <LogoMark className="w-9" />
+        <Wordmark className="w-[100px]" />
+      </div>
+      <div>
+        <h1 className="text-lg font-semibold">{create ? 'Create your password' : 'Sign in'}</h1>
+        <p className="mt-1 text-[13px] text-muted">
+          {create
+            ? 'One password for this dashboard and the Telegram mini app. Use at least 8 characters.'
+            : 'Your Nocheh password. This browser stays signed in for 30 days of use.'}
+        </p>
+      </div>
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Password" htmlFor="login-password" error={create ? undefined : problem}>
+          <Input
+            id="login-password"
+            type="password"
+            autoComplete={create ? 'new-password' : 'current-password'}
+            autoFocus
+            value={password}
+            disabled={busy}
+            onChange={e => setPassword(e.target.value)}
+          />
+        </Field>
+        {create && (
+          <Field label="Repeat the password" htmlFor="login-repeat" error={problem}>
+            <Input
+              id="login-repeat"
+              type="password"
+              autoComplete="new-password"
+              value={repeat}
+              disabled={busy}
+              onChange={e => setRepeat(e.target.value)}
+            />
+          </Field>
+        )}
+        <Button
+          type="submit"
+          variant="primary"
+          className="w-full"
+          busy={busy}
+          disabled={!password || (create && !repeat)}
+        >
+          <LockKeyhole aria-hidden /> {create ? 'Create password' : 'Sign in'}
+        </Button>
+      </form>
+    </main>
+  );
+}
+
 createRoot(document.getElementById('root')!).render(
-  <FeedbackProvider>
-    <App />
-  </FeedbackProvider>,
+  window.__NOCHEH_LOGIN__ ? (
+    <Login mode={window.__NOCHEH_LOGIN__} />
+  ) : (
+    <FeedbackProvider>
+      <App />
+    </FeedbackProvider>
+  ),
 );

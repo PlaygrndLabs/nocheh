@@ -32,7 +32,10 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
   const base=`http://127.0.0.1:${port}`;
   try{
     for(let i=0;i<100;i++){try{if((await fetch(base)).ok)break;}catch{}await new Promise(r=>setTimeout(r,40));}
-    const page=await fetch(base),html=await page.text(),cookie=page.headers.get('set-cookie')!.split(';')[0]!;
+    assert.equal((await fetch(base+'/hermes/nocheh',{redirect:'manual'})).status,303,'signed out, native pages send the browser to sign in');
+    const created=await fetch(base+'/api/nocheh/login',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"river-lamp-42"}'});
+    const cookie=created.headers.get('set-cookie')!.split(';')[0]!;
+    const page=await fetch(base,{headers:{cookie}}),html=await page.text();
     const csrf=JSON.parse(html.match(/window\.__NOCHEH_CSRF__=("[^"]+")/)![1]!);
     assert.match(html,/Nocheh/);assert.ok(!html.includes(secret));assert.ok(!html.includes('__HERMES_PLUGIN_SDK__'));
     assert.equal((await fetch(base+'/assets/app.js')).status,200);

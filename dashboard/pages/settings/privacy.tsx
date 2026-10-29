@@ -1,6 +1,7 @@
 import {useSettings} from '../../lib/settings';
 import {Button, Card, CardHeader, Input, Segmented, Select, SettingRow} from '../../ui/core';
 import {Unsaved} from './telegram';
+import {PasswordSettings} from './password';
 
 export const privacyKeys = [
   'NOCHEH_GUARD_MODE',
@@ -188,6 +189,7 @@ export function PrivacySettings() {
   const has = (key: string) => !!s.field(key);
   return (
     <>
+      <PasswordSettings />
       <Card>
         <CardHeader
           title="Secret check"
