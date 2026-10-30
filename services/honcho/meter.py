@@ -376,6 +376,10 @@ def validate(route, payload, embedding=None):
         for field in ('max_tokens','max_completion_tokens'):
             if field in payload and (type(payload[field]) is not int or not 0 < payload[field] <= OUTPUT_BOUND): raise Rejected('output_bound_exceeded')
         if not any(k in payload for k in ('max_tokens','max_completion_tokens')): payload['max_completion_tokens']=OUTPUT_BOUND
+        # Honcho's json_object mode already puts the schema in the prompt and repairs the
+        # reply. Claude's OpenAI-compatible endpoint refuses that format type, so drop it.
+        if isinstance(payload.get('response_format'),dict) and payload['response_format'].get('type')=='json_object':
+            payload={k:v for k,v in payload.items() if k!='response_format'}
     else: raise Rejected('route_denied')
     return payload
 

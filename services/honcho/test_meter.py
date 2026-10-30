@@ -414,6 +414,13 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(validate('/v1/chat/completions',dict(summary))['max_tokens'],6000)
         with self.assertRaises(Rejected): validate('/v1/chat/completions',{**summary,'max_tokens':8193})
 
+    def test_json_object_format_is_dropped_and_other_formats_pass(self):
+        # The deriver's json_object mode carries its schema in the prompt; Claude refuses the format type.
+        deriver={'model':REASONING_MODEL,'messages':[],'max_tokens':100,'response_format':{'type':'json_object'}}
+        self.assertNotIn('response_format',validate('/v1/chat/completions',dict(deriver)))
+        schema={'type':'json_schema','json_schema':{'name':'x','schema':{'type':'object'}}}
+        self.assertEqual(validate('/v1/chat/completions',{**deriver,'response_format':schema})['response_format'],schema)
+
     def test_memory_provider_from_settings_must_use_https(self):
         with tempfile.TemporaryDirectory() as root:
             transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
