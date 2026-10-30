@@ -227,7 +227,7 @@ def telegram_api(token, method, **params):
 
 
 def refresh_honcho(state, values):
-    """Rewrite Honcho's generated settings from the saved routes and restart it when they changed."""
+    """Rewrite Honcho's generated settings from the saved routes and bring its containers in line with them."""
     if values.get('NOCHEH_HONCHO_ENABLED') != 'true': return 'disabled'
     try:
         from tools.operations.memory.honcho_setup import initialize, state_for
@@ -243,7 +243,10 @@ def refresh_honcho(state, values):
             return digest.hexdigest()
         before = generated()
         initialize(state)
-        if generated() == before: return 'unchanged'
-        return 'refreshed' if operate(state, 'up') == 0 else 'failed'
+        changed = generated() != before
+        # Compose recreates only containers whose settings differ from the files, so this
+        # also repairs a container left on an older route by an earlier failed start.
+        if operate(state, 'up') != 0: return 'failed'
+        return 'refreshed' if changed else 'unchanged'
     except Exception:
         return 'failed'
