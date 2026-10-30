@@ -20,6 +20,9 @@ separate `:tester` tags, so the run tests the current code and the live
 images stay as they are.
 
 Reports go to data/acceptance/results/full-<time>/report.md and result.json.
+A failed run also keeps every container's state and log in logs/ there. When
+the start fails, its logs are kept and one fresh start is tried; the report
+says so.
 """
 import argparse
 import json
@@ -135,7 +138,46 @@ def dashboard_pages(fixture, report):
             'failed_pages': [row for row in pages if not row['passed']], 'error': result.stderr[-1500:] if result.returncode else None}
 
 
-def write_report(directory, steps, scenarios):
+def containers(project):
+    """Every container of the fixture's Compose project, whatever profile or file started it."""
+    return subprocess.run(['docker', 'ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project='+project],
+                          capture_output=True, text=True).stdout.split()
+
+
+def keep_logs(project, directory):
+    """Save each container's exit state and log before teardown removes them."""
+    out = directory/'logs'
+    out.mkdir(exist_ok=True)
+    ids = containers(project)
+    lines = subprocess.run(['docker', 'inspect', '--format', '{{index .Config.Labels "com.docker.compose.service"}} {{json .State}}']+ids,
+                           capture_output=True, text=True).stdout.splitlines() if ids else []
+    services = [line.split(' ', 1)[0] for line in lines]
+    rows = [json.loads(line.split(' ', 1)[1]) for line in lines]
+    (out/'containers.json').write_text(json.dumps(dict(zip(services, rows)), indent=2)+'\n')
+    for identifier, service in zip(ids, services):
+        with (out/(service+'.log')).open('w') as output:
+            subprocess.call(['docker', 'logs', '--timestamps', identifier], stdout=output, stderr=subprocess.STDOUT)
+    return [f"{service} (exit code {row['ExitCode']}{', out of memory' if row['OOMKilled'] else ''})"
+            for service, row in zip(services, rows) if row['Status'] == 'exited' and row['ExitCode'] != 0]
+
+
+def remove_fixture(project, directory, log):
+    """Remove the fixture's containers, networks and volumes, and say so if anything stays."""
+    # The data is thrown away, so services need no long graceful stop; a Honcho
+    # worker still starting otherwise holds removal for its full two minutes.
+    step('remove_fixture', ['docker', 'compose', '-p', project, '-f', str(directory/'compose.json'), '--profile', '*',
+                            'down', '--volumes', '--remove-orphans', '--timeout', '20'], log)
+    left = containers(project)
+    if left:
+        step('remove_leftover_containers', ['docker', 'rm', '--force', '--volumes']+left, log)
+    for suffix in ('_honcho_database', '_honcho_redis'):
+        subprocess.call(['docker', 'volume', 'rm', project+suffix], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    left = containers(project)
+    if left:
+        print(json.dumps({'warning': 'fixture_containers_left', 'project': project, 'containers': len(left)}), flush=True)
+
+
+def write_report(directory, steps, scenarios, exited=()):
     passed = [row for row in scenarios if row.get('passed')]
     failed = [row for row in scenarios if not row.get('passed')]
     revision = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip() or 'unknown'
@@ -145,6 +187,13 @@ def write_report(directory, steps, scenarios):
     broken = [row for row in steps if not row['passed']]
     if broken:
         lines += ['Setup steps that failed: '+', '.join(row['step'] for row in broken), '']
+    for row in steps:
+        if row.get('first_start'):
+            first = row['first_start']
+            lines += [f"The first start failed after {first['seconds']} s"+(' ('+', '.join(first['stopped'])+' stopped)' if first['stopped'] else '')
+                      + f"; a fresh start {'passed' if row['passed'] else 'failed too'}. Its logs are in {first['directory']}/logs/.", '']
+    if exited:
+        lines += ['Containers that stopped with an error: '+', '.join(exited)+'. Their logs are in logs/.', '']
     if failed:
         lines += ['## Failed', '']
         for row in failed:
@@ -185,8 +234,17 @@ def main():
         for role, tag in tags.items():
             setattr(args, role+'_image', tag)
     if fresh and all(row['passed'] for row in steps):
-        steps.append(step('start_synthetic_nocheh', [sys.executable, 'tools/acceptance/rehearsals/installation-rehearsal.py', '--directory', str(directory),
-                          '--keep', '--preview-port', str(free_port())]+[value for role in IMAGES for value in ('--'+role+'-image', getattr(args, role+'_image'))], log))
+        start = lambda: step('start_synthetic_nocheh', [sys.executable, 'tools/acceptance/rehearsals/installation-rehearsal.py', '--directory', str(directory),
+                             '--keep', '--preview-port', str(free_port())]+[value for role in IMAGES for value in ('--'+role+'-image', getattr(args, role+'_image'))], log)
+        steps.append(start())
+        if not steps[-1]['passed'] and (directory/'fixture.json').exists():
+            # A service can stop during a busy cloud start while a fresh start passes.
+            # Keep this start's logs and state for diagnosis, then try once more.
+            project = json.loads((directory/'fixture.json').read_text())['project']
+            first = {'seconds': steps[-1]['seconds'], 'stopped': keep_logs(project, directory), 'directory': directory.name+'-first-start'}
+            remove_fixture(project, directory, log)
+            directory.rename(directory.parent/first['directory'])
+            steps[-1] = {**start(), 'first_start': first}
         if steps[-1]['passed']:
             steps.append(step('connect_fake_telegram', [sys.executable, '-m', 'tools.acceptance.telegram_rehearsal', '--directory', str(directory)], log))
     scenarios = []
@@ -196,13 +254,12 @@ def main():
         if not args.only or 'dashboard_pages' in args.only:
             scenarios.append(dashboard_pages(directory, directory))
     directory.mkdir(parents=True, exist_ok=True)
-    write_report(directory, steps, scenarios)
-    if fresh and not args.keep and (directory/'compose.json').exists():
-        project = json.loads((directory/'fixture.json').read_text())['project']
-        subprocess.call(['docker', 'compose', '-p', project, '-f', str(directory/'compose.json'), 'down', '--volumes', '--remove-orphans'],
-                        cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for suffix in ('_honcho_database', '_honcho_redis'):
-            subprocess.call(['docker', 'volume', 'rm', project+suffix], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    project = json.loads((directory/'fixture.json').read_text())['project'] if (directory/'fixture.json').exists() else None
+    passed = all(row['passed'] for row in steps) and all(row.get('passed') for row in scenarios)
+    exited = keep_logs(project, directory) if project and not passed else []
+    write_report(directory, steps, scenarios, exited)
+    if fresh and not args.keep and project and (directory/'compose.json').exists():
+        remove_fixture(project, directory, log)
     print((directory/'report.md').read_text(), flush=True)
     return 0 if json.loads((directory/'result.json').read_text())['passed'] else 1
 

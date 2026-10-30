@@ -193,7 +193,11 @@ the fake Telegram, runs the scenario list above and then the
 dashboard page in a browser and writes `report.md` and `result.json` with
 plain-English check names under `data/acceptance/results/full-<time>/`. It
 removes the fixture afterwards unless `--keep` is given; `--directory` reuses a
-kept fixture and `--skip-existing` runs only the product scenarios. The owner
+kept fixture and `--skip-existing` runs only the product scenarios. A failed
+run first saves every container's state and log under `logs/`, and removal
+covers every container of the fixture's Compose project. When the start
+itself fails, its logs are kept in `full-<time>-first-start/` and one fresh
+start is tried; the report names the containers that stopped. The owner
 allowed it to run beside the live installation (2026-10-26): it never reads the
 live state, credentials or volumes and never stops the live stack.
 
