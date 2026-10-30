@@ -202,7 +202,8 @@ class Ledger:
             start,mode=self.window(db)
             limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else db.execute('SELECT monthly_limit FROM policy WHERE id=1').fetchone()[0]
             total = db.execute("SELECT coalesce(sum(CASE WHEN outcome IN ('http_error','legacy_error_unverified') THEN 0 ELSE reserved END),0) FROM calls WHERE route='/v1/embeddings' AND started>=?",(start,)).fetchone()[0]
-            reasoning = db.execute("SELECT count(*) FROM calls WHERE route='/v1/chat/completions' AND started>=?",(start,)).fetchone()[0]
+            # A request the provider refused outright, such as a dead key, used none of the allowance.
+            reasoning = db.execute("SELECT count(*) FROM calls WHERE route='/v1/chat/completions' AND started>=? AND outcome IS NOT 'http_error'",(start,)).fetchone()[0]
             if amount and total + amount > limit:
                 raise Rejected('pilot_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
             if route=='/v1/chat/completions' and reasoning >= REQUEST_LIMIT:
@@ -290,7 +291,7 @@ class Ledger:
         report=self.report();start=datetime.fromisoformat(report['window_started_at']).timestamp()
         current=[call for call in report['calls'] if call['started']>=start]
         embeddings=[call for call in current if call['route']=='/v1/embeddings']
-        reasoning=sum(call['route']=='/v1/chat/completions' for call in current)
+        reasoning=sum(call['route']=='/v1/chat/completions' and call['outcome']!='http_error' for call in current)
         tokens=reported=0
         for call in embeddings:
             if not isinstance(call['status'],int) or not 200 <= call['status'] < 300: continue

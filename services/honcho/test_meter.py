@@ -173,6 +173,20 @@ class BudgetTests(unittest.TestCase):
                 ledger.reserve('/v1/embeddings',b'second-paid')
             self.assertEqual(ledger.summary()['reasoning_remaining_requests'],0)
 
+    def test_refused_reasoning_requests_do_not_use_the_allowance(self):
+        # A dead provider key answers every retry with 401; those must not use up the allowance.
+        with tempfile.TemporaryDirectory() as root, patch('services.honcho.meter.REQUEST_LIMIT',2):
+            ledger=Ledger(Path(root)/'budget.sqlite')
+            for index in range(3):
+                call=ledger.reserve('/v1/chat/completions',f'refused-{index}'.encode())
+                ledger.finish(call,401,.1,None,'http_error')
+            call=ledger.reserve('/v1/chat/completions',b'dropped')
+            ledger.finish(call,502,.1,None,'transport_error')
+            self.assertEqual(ledger.summary()['reasoning_remaining_requests'],1)
+            ledger.reserve('/v1/chat/completions',b'answered')
+            with self.assertRaisesRegex(Rejected,'subscription_request_limit_exhausted'):
+                ledger.reserve('/v1/chat/completions',b'over')
+
     def test_monthly_cutover_is_durable_and_does_not_erase_pilot(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'budget.sqlite';ledger=Ledger(path)
