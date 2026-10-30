@@ -9,6 +9,7 @@ import sys
 import time
 import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from decimal import Decimal, ROUND_CEILING
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -376,10 +377,6 @@ def validate(route, payload, embedding=None):
         for field in ('max_tokens','max_completion_tokens'):
             if field in payload and (type(payload[field]) is not int or not 0 < payload[field] <= OUTPUT_BOUND): raise Rejected('output_bound_exceeded')
         if not any(k in payload for k in ('max_tokens','max_completion_tokens')): payload['max_completion_tokens']=OUTPUT_BOUND
-        # Honcho's json_object mode already puts the schema in the prompt and repairs the
-        # reply. Claude's OpenAI-compatible endpoint refuses that format type, so drop it.
-        if isinstance(payload.get('response_format'),dict) and payload['response_format'].get('type')=='json_object':
-            payload={k:v for k,v in payload.items() if k!='response_format'}
     else: raise Rejected('route_denied')
     return payload
 
@@ -423,6 +420,12 @@ class Egress:
             payload=validate(route,self.prepare(workspace,route,payload,background),self.embedding)
         paid=route=='/v1/embeddings'
         if not paid and not self.reasoning_url: raise Rejected('provider_not_configured')
+        # Anthropic's OpenAI-compatible endpoint refuses response_format json_object (and
+        # ignores the field). Honcho's json_object mode already puts the schema in the
+        # prompt and repairs the reply, so the format is dropped there.
+        if (not paid and urllib.parse.urlsplit(self.reasoning_url).hostname=='api.anthropic.com'
+                and isinstance(payload.get('response_format'),dict) and payload['response_format'].get('type')=='json_object'):
+            payload={k:v for k,v in payload.items() if k!='response_format'}
         if paid and not self.paid_key: raise Rejected('temporary_embedding_key_missing')
         data=json.dumps(payload,ensure_ascii=False).encode()
         if len(data)>1024*1024: raise Rejected('request_too_large')
