@@ -445,4 +445,11 @@ export class BackgroundStepRepository extends ManagedExecutionRepository {
     return super.finish(result);
   }
   async stop(id:string){return this.cancelRow(id);}
+  /** Whether a step's turn may go on: its run and job still run, for the same chat and profile. */
+  async deliveryAllowed(principal:Reader):Promise<boolean> {
+    const row=principal.turnEvent?await this.row(principal.turnEvent):null;
+    if(!row||row.state!=='running'||row.cancel_requested||row.space_id!==principal.space||row.logical_profile!==principal.logical_profile||
+      (row.scope===this.access.policy().owner_id?null:row.scope)!==principal.scope)return false;
+    try{await this.current(row);return true;}catch(error){if(error instanceof HttpError&&error.status<500)return false;throw error;}
+  }
 }

@@ -20,7 +20,7 @@ ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive
 OWNER_SET_TOOLS={'skill_manage'}
 TURN_TOOLSETS=['memory','session_search','nocheh_archive','skills']
 # A background job's steps also keep Hermes's own to-do list, restored from the job's history each step.
-BACKGROUND_TOOLS=ALLOWED_TOOLS|{'todo'}
+BACKGROUND_TOOLS=ALLOWED_TOOLS|{'todo_list'}
 BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
 
 

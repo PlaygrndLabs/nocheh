@@ -125,10 +125,13 @@ test('a background job is sized, approved on its card, runs step after step in i
     await s.jobs.operation('job:'+stopped.id,await authority());
     const started=(await step(stopped.id)).event_id,context=await s.jobs.steps.context({event_id:started,owner_epoch:(await authority()).epoch});
     await s.jobs.steps.claim({...context,actor:context.actor});assert.equal((await step(stopped.id)).run,'running');
+    const stepReader:Reader={admin:false,scope:group,space:group,turnEvent:started,logical_profile:'job-'+stopped.id.slice(0,24)};
+    assert.equal(await s.jobs.steps.deliveryAllowed(stepReader),true,'a running step passes the turn policy check');
     await assert.rejects(s.jobs.stop(await actor((await capture('elsewhere',{message:{message_id:900,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'x'}},'123')).id),{id:stopped.id}),
       (error:any)=>error.status>=400,'a chat stops only its own jobs unless it is the owner');
     assert.equal((await s.jobs.stop(await actor((await message('stop-it')).id),{id:stopped.id})).state,'stopping');
     assert.equal((await stores.control.query('SELECT cancel_requested FROM managed_runs WHERE event_id=$1',[(await step(stopped.id)).event_id])).rows[0].cancel_requested,true);
+    assert.equal(await s.jobs.steps.deliveryAllowed(stepReader),false,'a stopped step may not go on');
     assert.equal((await s.jobs.operation('job:'+stopped.id,await authority())).state,'waiting');
     await stores.control.query("UPDATE managed_runs SET state='cancelled' WHERE event_id=$1",[(await step(stopped.id)).event_id]);
     assert.equal((await s.jobs.operation('job:'+stopped.id,await authority())).state,'cancelled');

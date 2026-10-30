@@ -103,7 +103,7 @@ export const backgroundJob=['[Background job: {title}]',
   'The instruction from the person who asked:','{instruction}','',
   'Chat to work on: {chat}','Period: {period}','Size: {size}','',
   'Read what the instruction needs. nocheh_archive_page reads a chat in time order, page by page: pass next as after until complete is true. '+
-  'Keep a to-do list with the todo tool of what is left and what you found; it is kept when this session goes on in a new step. '+
+  'Keep a to-do list with the todo_list tool of what is left and what you found; it is kept when this session goes on in a new step. '+
   'When the work is done, write the final report as your answer, in the language of the instruction. It is sent to the chat where the job was asked. '+
   'Nobody answers questions during the job: say in the report what was unclear.',
   'The job stops at {limits}, whichever comes first.'].join('\n');
