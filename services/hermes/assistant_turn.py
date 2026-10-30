@@ -12,13 +12,16 @@ import re
 import sys
 from pathlib import Path
 
-ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_action_request',
+ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_archive_page','nocheh_memory_search','nocheh_action_request',
                'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall',
                'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read','nocheh_telegram_destinations','nocheh_tasks','nocheh_notion',
-               'skills_list','skill_view'}
+               'nocheh_background_job','skills_list','skill_view'}
 # The owner sets skills; a turn may read them but never create or change one.
 OWNER_SET_TOOLS={'skill_manage'}
 TURN_TOOLSETS=['memory','session_search','nocheh_archive','skills']
+# A background job's steps also keep Hermes's own to-do list, restored from the job's history each step.
+BACKGROUND_TOOLS=ALLOWED_TOOLS|{'todo_list'}
+BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
 
 
 class UnexpectedProfileTool(RuntimeError):
@@ -38,8 +41,8 @@ def bind_profile_home(profile):
     from hermes_constants import set_hermes_home_override
     set_hermes_home_override(profile)
 
-def verify_profile_tools(names):
-    unexpected=set(names)-ALLOWED_TOOLS
+def verify_profile_tools(names,allowed=ALLOWED_TOOLS):
+    unexpected=set(names)-allowed
     if unexpected:raise UnexpectedProfileTool(unexpected)
 
 
@@ -126,6 +129,38 @@ def conversation_result(result, session_id, limited_memory=False):
     return {'state':'done','text':text,'session_id':session_id}
 
 
+def background_limits(body):
+    """How many tool and thinking steps one step of a background job may take."""
+    limits=body.get('background')
+    iterations=limits.get('max_iterations') if isinstance(limits,dict) else None
+    if type(iterations) is not int or not 1<=iterations<=60:raise ValueError('invalid_background_step')
+    return iterations
+
+
+def todo_snapshot(agent):
+    """The job's to-do list after a step, bounded, for the job list."""
+    store=getattr(agent,'_todo_store',None)
+    try:items=store.read() if store is not None else []
+    except Exception:return []
+    return [{'content':str(item.get('content',''))[:200],'status':str(item.get('status',''))[:20]}
+            for item in items[:50] if isinstance(item,dict)]
+
+
+def step_result(result, session_id, todo):
+    """A background job step. An answer that ends on its own ends the job; a step
+    stopped at its step limit leaves Hermes's progress summary and continues next step."""
+    if not isinstance(result,dict) or result.get('failed') or result.get('interrupted'):
+        return {'state':'failed','error_code':'model_unavailable'}
+    reason=str(result.get('turn_exit_reason') or '')
+    limited=reason.startswith('max_iterations_reached') or reason=='budget_exhausted'
+    text=result.get('final_response')
+    text=text if isinstance(text,str) else ''
+    if text.strip()=='[NO_REPLY]':text=''
+    if not limited and (result.get('completed') is not True or not text.strip()):
+        return {'state':'failed','error_code':'model_unavailable'}
+    return {'state':'done','text':text,'session_id':session_id,'continue':limited,'todo':todo}
+
+
 def run(body, emit=None):
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
@@ -147,6 +182,8 @@ def run(body, emit=None):
     from hermes_state import SessionDB
     install();native_gate();restrict_session_search()
     review = body.get('review') is True
+    background = body.get('channel')=='background' and not review
+    iterations = background_limits(body) if background else None
     bind_process_credential(body['archive_credential'])
     if body.get('review') is not True:bind_process_deadline(body['turn_deadline_epoch'])
     from .prepared_context import install as prepare_native, prepare
@@ -190,12 +227,14 @@ def run(body, emit=None):
     if placement=='evidence':long_term='\n'+prompt('memory.evidence')
     agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
         api_key=credentials.access_token,base_url=credentials.base_url,
-        enabled_toolsets=['memory'] if review else TURN_TOOLSETS,fallback_model=None,
+        enabled_toolsets=['memory'] if review else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,fallback_model=None,
         session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
         skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
-        quiet_mode=True,save_trajectories=False,max_iterations=prefs['agent.max_iterations'],
-        run_budget_seconds=prefs['agent.run_budget_seconds'],
+        quiet_mode=True,save_trajectories=False,max_iterations=iterations or prefs['agent.max_iterations'],
+        # A job step is bounded by its step count and Nocheh's step time, not by a wrap-up notice
+        # that would ask for the final answer before the job is done.
+        run_budget_seconds=None if background else prefs['agent.run_budget_seconds'],
         reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
             reply(body.get('prompts'),body['owner'])+long_term))
     record('agent_init',phase)
@@ -208,14 +247,14 @@ def run(body, emit=None):
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
         agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in OWNER_SET_TOOLS]
         agent.valid_tool_names=set(agent.valid_tool_names)-OWNER_SET_TOOLS
-        verify_profile_tools(agent.valid_tool_names)
+        verify_profile_tools(agent.valid_tool_names,BACKGROUND_TOOLS if background else ALLOWED_TOOLS)
         for tool in agent.tools:
             if tool['function']['name']=='session_search':
                 tool['function']['parameters']['properties'].pop('profile',None)
                 tool['function']['description']='Search or read native history in this profile only. Other profiles cannot be accessed.'
         options = {'conversation_history':history}
         if emit: options['stream_callback'] = lambda text: emit({'event':'message.delta','text':text})
-        if body.get('channel') in ('browser','scheduler'): options['persist_user_message'] = body.get('source_text',body['text'])
+        if body.get('channel') in ('browser','scheduler','background'): options['persist_user_message'] = body.get('source_text',body['text'])
         message=body['text']
         if body.get('images'):
             import base64,hashlib,re
@@ -238,6 +277,7 @@ def run(body, emit=None):
         from .timing import measure
         with measure('conversation'):result=agent.run_conversation(message,**options)
         RUNS.append(result)
+        if background:return step_result(result,agent.session_id,todo_snapshot(agent))
         return conversation_result(result,agent.session_id,memory.get('limited_memory',False))
     finally:
         agent.close();database.close();restore_evidence()
@@ -276,8 +316,16 @@ def main():
                     elif notes_snapshot(home)==before:
                         save_receipt(receipt,'failed')
             else:
-                def emit(event): output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
-                result=run(body, emit if body.get('stream') else None)
+                import threading
+                lock=threading.Lock();finished=threading.Event()
+                def emit(event):
+                    with lock:output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
+                def heartbeat():
+                    # A long job step sends a line now and then so the bridge does not take silence for a lost turn.
+                    while not finished.wait(20):emit({'event':'heartbeat'})
+                if body.get('heartbeat') is True:threading.Thread(target=heartbeat,daemon=True).start()
+                try:result=run(body, emit if body.get('stream') else None)
+                finally:finished.set()
     except Exception as error:
         import traceback
         frames=traceback.extract_tb(error.__traceback__)

@@ -894,4 +894,33 @@ export class NativeMemoryRepository {
         limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing};
     } catch(error){await this.prepared.audience.assert(principal);return corrections.length?{...limited,sources:corrections}:limited;}
   }
+  /** Archived messages Honcho finds by meaning among what was learned for this audience, best first.
+   * Only their ids leave here: the reader gets the messages back through the archive's own access check. */
+  async search(principal:Reader,query:string,count:number):Promise<{ids:string[];learned:boolean;syncing?:boolean}> {
+    string(query,2000);if(!query.trim())throw new HttpError(400,'empty_query');
+    const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
+    if(!workspace)return {ids:[],learned:false};
+    const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
+    const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
+    const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
+    if(sessions?.length===0)return {ids:[],learned:false};
+    // The question is checked for secrets before it reaches Honcho, as a recall question is.
+    const question=await this.prepared.prepare(actor,query,this.detect);
+    const found=await this.call('/v3/workspaces/'+id+'/search',{query:String(question),limit:Math.min(50,count*3),
+      ...(sessions?{filters:{session_id:{in:sessions}}}:{})});
+    if(!Array.isArray(found))throw new HttpError(502,'invalid_honcho_search');
+    const ids:string[]=[];
+    for(const message of found.slice(0,50)) {
+      const receipt=message?.metadata?.nocheh_receipt;
+      if(!nativeId(message?.id)||typeof receipt!=='string'||!/^[a-f0-9]{64}$/.test(receipt))continue;
+      const row=(await this.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
+        WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done' AND retired_at IS NULL
+        AND ($4::text='owner' OR ${recallCondition('audience','$4','$5')})`,[receipt,id,message.id,audience,group])).rows[0];
+      if(!row)continue;
+      for(const reference of (row.source_references?.length?row.source_references:[row.source_reference]).slice(0,30))
+        if(typeof reference?.id==='string'&&/^[a-f0-9]{64}$/.test(reference.id)&&!ids.includes(reference.id))ids.push(reference.id);
+    }
+    await this.current(id);await this.prepared.audience.assert(principal);
+    return {ids,learned:true,...(current.row.state==='building'?{syncing:true}:{})};
+  }
 }

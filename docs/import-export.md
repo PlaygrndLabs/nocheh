@@ -84,6 +84,8 @@ credential without receiving administrative API authority.
 | POST `/v1/replay` | `{ "event_ids": [...] }`, archive-only replay |
 | GET `/v1/status` | Service heartbeats, pending/failed archive work |
 
-The `nocheh_archive_search` and `nocheh_archive_read` native Hermes tools carry
-source references and bounded context. Their scope credential must be bound by
+The `nocheh_archive_search`, `nocheh_archive_read`, `nocheh_archive_page`
+(one chat in time order, GET `/v1/archive/page?chat=&from=&to=&after=&limit=`)
+and `nocheh_memory_search` (Honcho search by meaning in learned chats) native
+Hermes tools carry source references and bounded context. Their scope credential must be bound by
 the trusted dispatcher; an unbound invocation fails before network access.

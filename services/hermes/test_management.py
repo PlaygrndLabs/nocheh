@@ -31,6 +31,17 @@ class ManagementTests(unittest.TestCase):
             (profile_path(root,'123',policy)/'memories/MEMORY.md').symlink_to(root/'profiles'/Scopes.profile('-30')/'memories/MEMORY.md')
             with self.assertRaises(ValueError):call(action='memory',scope='123')
 
+    def test_a_project_role_and_skills_are_kept_in_their_own_folder(self):
+        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);call=lambda **body:dispatch(root,'test-model',policy,body);scope='project:'+'d'*64
+            first=call(action='persona',scope=scope)
+            self.assertEqual((first['scope'],first['role'],first['skills']),(scope,'',[]))
+            call(action='persona',scope=scope,role='Client project role',skills=[],revision=first['revision'])
+            self.assertEqual((root/'projects'/('d'*64)/'SOUL.md').read_text(),'Client project role\n')
+            for bad in ('project:../profiles','project:'+'D'*64):
+                with self.assertRaises(ValueError):call(action='persona',scope=bad)
+
     def test_owner_inspects_retired_topic_notes_by_registered_profile(self):
         policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
         with tempfile.TemporaryDirectory() as folder:

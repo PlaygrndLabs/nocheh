@@ -1,7 +1,8 @@
 /**
  * "Role and skills": who Nocheh is in a chat and the skills it may use there.
  * They live in the chat's own Hermes profile (its SOUL.md and skills folder);
- * `default` holds the ones every chat starts from. Only the owner sets them.
+ * `project:<id>` holds the ones every chat in a project adds, and `default` the
+ * ones every chat starts from. Only the owner sets them.
  */
 import {useState} from 'react';
 import {Plus, Trash2} from 'lucide-react';
@@ -41,6 +42,7 @@ export function personaProblems(role: string, skills: Skill[]): Record<string, s
 const same = (a: Skill[], b: Skill[]) => JSON.stringify(a) === JSON.stringify(b);
 
 export function RoleAndSkills({scope, where, description}: {scope: string; where: string; description: string}) {
+  const project = scope.startsWith('project:');
   const persona = useResource<Persona>('/memory/persona?scope=' + encodeURIComponent(scope));
   const data = persona.data && persona.data.scope === scope ? persona.data : null;
   const [role, setRole] = useState<string | null>(null);
@@ -116,7 +118,11 @@ export function RoleAndSkills({scope, where, description}: {scope: string; where
                 rows={4}
                 value={currentRole}
                 placeholder={
-                  scope === 'default' ? 'No role set. Nocheh uses its built-in one.' : 'Uses the role for every chat.'
+                  scope === 'default'
+                    ? 'No role set. Nocheh uses its built-in one.'
+                    : project
+                      ? 'Uses the role for every chat.'
+                      : 'Uses its project’s role, or the role for every chat.'
                 }
                 onChange={event => {
                   start();
@@ -130,7 +136,9 @@ export function RoleAndSkills({scope, where, description}: {scope: string; where
                 <p className="text-xs text-muted">
                   {scope === 'default'
                     ? 'Every chat can use these.'
-                    : 'Added to the skills for every chat. A skill with the same name replaces that one here.'}
+                    : project
+                      ? 'Every chat in this project can use these too. A skill with the same name replaces that one here.'
+                      : 'Added to the skills for every chat and its project. A skill with the same name replaces that one here.'}
                 </p>
               </div>
               {checked && problems.skills && (

@@ -11,6 +11,7 @@ import {runtimeContextSchema} from './prepared-context.js';
 import {runtimeTurnSchema} from './turns.js';
 import {managedStorageSchema} from './browser-runs.js';
 import {scheduleStorageSchema} from './schedules.js';
+import {backgroundJobSchema} from './background-jobs.js';
 import {runtimeProfileSchema} from './runtime-profiles.js';
 import {securityCoreSchema} from '../security/store.js';
 import {nativeReviewSchema} from './native-review.js';
@@ -137,6 +138,7 @@ ${runtimeTurnSchema}
 ${runtimeProfileSchema}
 ${managedStorageSchema}
 ${scheduleStorageSchema}
+${backgroundJobSchema}
 ${securityCoreSchema}
 ${nativeReviewSchema}
 ${sharingContentSchema}

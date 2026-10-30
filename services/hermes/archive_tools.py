@@ -29,11 +29,11 @@ def bind_process_credential(credential):
 
 
 def bind_process_deadline(deadline):
-    """Bound a foreground memory call to the trusted parent turn lifetime."""
+    """Bound a foreground memory call to the trusted parent turn lifetime (a background job step is the longest)."""
     global _PROCESS_DEADLINE
     if (_PROCESS_DEADLINE is not None or isinstance(deadline,bool) or
             not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or
-            deadline > time.time()+300):
+            deadline > time.time()+600):
         raise RuntimeError('invalid_process_deadline')
     _PROCESS_DEADLINE=float(deadline)
 
@@ -47,7 +47,7 @@ def request(path,body=None):
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Prepared context can include a cold guard-model pass. It is still bounded,
     # but must not share the short timeout used by ordinary archive reads.
-    timeout = 615 if path == '/v1/memory/honcho/recall' else 60 if path == '/v1/context/prepare' else 15
+    timeout = 615 if path == '/v1/memory/honcho/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/honcho/search') or path.startswith('/v1/jobs/') else 15
     if path == '/v1/memory/honcho/recall' and _PROCESS_DEADLINE is not None:
         # Leave time for Hermes to reason and check delivery policy.
         timeout = min(timeout, _PROCESS_DEADLINE-time.time()-45)
@@ -87,6 +87,51 @@ def search_tool(args, **kwargs):
         return json.dumps({'sources':rows+shared['sources'],'filter_status':shared.get('filter_status'),**({'import_status':status} if status else {})},ensure_ascii=False)
     except Exception:
         return json.dumps({'error':'archive_search_unavailable'})
+
+
+def page_tool(args, **kwargs):
+    from urllib.error import HTTPError
+    from urllib.parse import urlencode
+    try:
+        query={key:args[key] for key in ('chat','from','to','after') if isinstance(args.get(key),str) and args[key]}
+        query['limit']=min(50,max(1,int(args.get('limit',30))))
+        status=import_status()
+        return json.dumps({**request('/v1/archive/page?'+urlencode(query)),**({'import_status':status} if status else {})},ensure_ascii=False)
+    except HTTPError as error:
+        # The agent can correct its own arguments; other failures stay opaque.
+        return json.dumps({'error':{400:'invalid_page_request',403:'conversation_not_permitted'}.get(error.code,'archive_page_unavailable'),
+                           **({'note':'from and to are YYYY-MM-DD or a time with its zone; after is the next value of the previous page.'} if error.code==400 else {})})
+    except Exception:
+        return json.dumps({'error':'archive_page_unavailable'})
+
+
+def meaning_tool(args, **kwargs):
+    try:
+        query=args.get('query')
+        if not isinstance(query,str) or not query.strip() or len(query)>2000:raise ValueError('invalid_query')
+        return json.dumps(request('/v1/memory/honcho/search',{'query':query,'limit':min(10,max(1,int(args.get('limit',5))))}),ensure_ascii=False)
+    except Exception:
+        return json.dumps({'error':'memory_search_unavailable'})
+
+
+JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job')
+
+
+def job_tool(args, **kwargs):
+    """Background jobs: size a chat, ask to start a job, list this chat's jobs, or stop one."""
+    from urllib.error import HTTPError
+    try:
+        action=args.get('action')
+        if action not in ('size','propose','status','stop'):raise ValueError('invalid_job_action')
+        body={key:args[key] for key in ('title','instruction','chat','from','to','id') if isinstance(args.get(key),str) and args[key]}
+        return json.dumps(request('/v1/jobs/'+action,body),ensure_ascii=False)
+    except HTTPError as error:
+        # Storage says what to correct, such as a member's daily limit; other failures stay opaque.
+        try:code=json.loads(error.read(4096)).get('error')
+        except Exception:code=None
+        return json.dumps({'error':code if code in JOB_ERRORS else {400:'invalid_job_request',403:'job_not_permitted',404:'job_not_found'}.get(error.code,'background_jobs_unavailable')})
+    except Exception:
+        return json.dumps({'error':'background_jobs_unavailable'})
 
 
 def reaction_observation(event):
@@ -137,10 +182,24 @@ def register(ctx):
          {'mode':{'type':'string','enum':['text','current_reactions']},'query':{'type':'string','description':'Required for text mode; omitted for current_reactions.'},'limit':{'type':'integer','minimum':1,'maximum':10}},[],search_tool),
         ('nocheh_archive_read','Read an archived source, its observed reaction data, and links to captured current reactions. Follow reaction links to inspect changes or removals; a reaction is not proof of task completion. Originals and generated artifacts have distinct provenance.',
          {'id':{'type':'string'}},['id'],read_tool),
+        ('nocheh_archive_page','Read a conversation in time order, oldest first, one page at a time: messages, edits, reactions, replies and the text of their files and voice notes. '
+         'Use it to go through a period (from and to as YYYY-MM-DD) or a whole chat; pass next as after for the following page until complete is true. '
+         'position says how many of the chat\'s records are read through. Only the owner may name another chat, by an ID from nocheh_owner_read.',
+         {'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'after':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},[],page_tool),
+        ('nocheh_memory_search','Find archived messages by meaning rather than exact words, among the messages learned into memory for this audience. '
+         'Chats that were not learned return nothing (learned is false); use nocheh_archive_search or nocheh_archive_page for them. Cite returned source references.',
+         {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],meaning_tool),
         ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions Honcho read, so read them with nocheh_archive_read before relying on a claim that matters.',
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
         ('nocheh_action_request','Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',
          {'destination':{'type':'string','description':'Use current for this Telegram conversation including its topic, a numeric Telegram chat ID, or CHAT_ID/topic/THREAD_ID. The server resolves current from the authenticated source turn.'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
+        ('nocheh_background_job','Background jobs: work too big for one reply, such as reading a whole chat or months of messages, which runs on its own and '
+         'reports back here when it is done. action=size counts what a chat holds, or the period from and to (YYYY-MM-DD): messages, files and voice notes, '
+         'with an estimate of the time and cost to read it all. action=propose asks to start a job, with a short title and the full instruction it will follow, '
+         'written so that a fresh session can do it without this conversation; nothing runs until it is approved with buttons, and the result says who approves '
+         'and what to tell the person. action=status lists this chat\'s jobs with their progress; action=stop with id stops one. Only the owner may name another chat.',
+         {'action':{'type':'string','enum':['size','propose','status','stop']},'title':{'type':'string','maxLength':100},'instruction':{'type':'string','maxLength':8000},
+          'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'id':{'type':'string'}},['action'],job_tool),
         ('nocheh_telegram_destinations','In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner\'s approval.',
          {},[],destinations_tool),
     ):

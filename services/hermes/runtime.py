@@ -183,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def dispatch(self, body):
         if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
-            if body.get('channel') in ('browser','scheduler'):
+            if body.get('channel') in ('browser','scheduler','background'):
                 if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
                 if self.path.endswith('/start'):return MANAGED.start(body)
                 return getattr(MANAGED.runs,self.path.rsplit('/',1)[-1])(body)
@@ -310,7 +310,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/internal/usage/price":
             # Prices Honcho's reported memory tokens with Hermes's own pricing table; counts only, no content.
             from services.hermes.usage import price
-            return {"costs": price(body.get("rows"))}
+            rows = body.get("rows")
+            if isinstance(rows, list):
+                # A row for the reply model, such as a background job's estimate, is priced as the model replies use.
+                reply = {"model": MODEL or "", "provider": os.environ.get("NOCHEH_REPLY_ROUTE_PROVIDER") or "openai",
+                         "base_url": os.environ.get("NOCHEH_REPLY_ROUTE_URL") or ""}
+                rows = [{**row, **reply} if isinstance(row, dict) and row.get("part") == "reply" else row for row in rows]
+            return {"costs": price(rows)}
         if self.path in ("/internal/chat", "/internal/detect"):
             text = body["text"]
             if not isinstance(text, str) or len(text) > 100000:

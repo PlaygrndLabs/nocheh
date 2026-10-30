@@ -19,6 +19,15 @@ import type {RelationshipAudience} from './relationships.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
+import {PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
+import {parentSpace} from '../spaces.js';
+
+const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
+// One chat's records in time order. Telegram gives a message's own time; an assistant reply has only the time it was saved.
+const pageRecords=`FROM (SELECT id,kind,at,(extract(epoch FROM at)*1000000)::bigint AS micros FROM (SELECT id,kind,
+  CASE WHEN occurred_at ~ '^[0-9]{1,12}$' THEN to_timestamp(occurred_at::bigint) ELSE received_at END AS at FROM events
+  WHERE scope=$1 AND origin<>'generated' AND kind NOT IN ('telegram_wire','import_manifest')) a) e
+  WHERE ($2::timestamptz IS NULL OR e.at>=$2) AND ($3::timestamptz IS NULL OR e.at<$3)`;
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
 export function scopedObservation(value:unknown):any {
@@ -100,6 +109,21 @@ export class SourceRepository {
     // Empty or bounded results never establish that a message has no reactions.
     const result={sources,complete:false as const};await this.allowPrepared(principal,result);return result;
   }
+  /** A message's file and voice texts, guarded for a scoped reader. A status that a reading replaced,
+   * such as a voice note saved before transcription was set up, is not shown. */
+  private async derivedTexts(id:string,binding:GuardBinding|null) {
+    const selected=(await this.stores.derived.query(`SELECT s.artifact_id,s.kind,r.derived_id,d.content,d.provenance FROM derivative_selections s
+      JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
+      JOIN derived_artifacts d ON d.id=r.derived_id WHERE s.event_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status')
+        AND NOT (s.kind='extraction_status' AND EXISTS(SELECT 1 FROM derivative_selections t WHERE t.artifact_id=s.artifact_id
+          AND t.kind IN ('transcript','extracted_text') AND t.active_revision IS NOT NULL)) ORDER BY s.id`,[id])).rows;
+    const texts:{id:string;artifact_id:string;kind:string;text:string;provenance:unknown}[]=[];
+    for(const item of selected) {
+      const value=binding?(await this.selections.current(id,item.artifact_id,item.kind,binding)).value as any:{text:item.content.toString(),kind:item.kind,provenance:item.provenance};
+      texts.push({id:item.derived_id,artifact_id:item.artifact_id,kind:value.kind,text:String(value.text),provenance:value.provenance});
+    }
+    return texts;
+  }
   async read(principal:Reader,id:string) {
     const binding=principal.admin?null:await this.audience.assert(principal),reference=await this.permitted(principal,id,binding);
     const row=(await this.stores.archive.query('SELECT * FROM events WHERE id=$1',[id])).rows[0];
@@ -122,18 +146,9 @@ export class SourceRepository {
       }
       artifacts.push({id:item.id,...metadata,state:item.file_hash?'ready':'pending',...(principal.admin?{file_hash:item.file_hash,byte_size:item.byte_size}:{}),source:'nocheh:artifact:'+item.id});
     }
-    // A status that a reading replaced, such as a voice note saved before transcription was set up, is not shown.
-    const selected=(await this.stores.derived.query(`SELECT s.artifact_id,s.kind,r.derived_id,d.content,d.provenance FROM derivative_selections s
-      JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
-      JOIN derived_artifacts d ON d.id=r.derived_id WHERE s.event_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status')
-        AND NOT (s.kind='extraction_status' AND EXISTS(SELECT 1 FROM derivative_selections t WHERE t.artifact_id=s.artifact_id
-          AND t.kind IN ('transcript','extracted_text') AND t.active_revision IS NOT NULL)) ORDER BY s.id`,[id])).rows;
-    const derived=[];
-    for(const item of selected) {
-      const value=binding?(await this.selections.current(id,item.artifact_id,item.kind,binding)).value as any:{text:item.content.toString(),kind:item.kind,provenance:item.provenance};
-      derived.push({id:item.derived_id,event_id:id,artifact_id:item.artifact_id,kind:value.kind,representation:binding?.mode==='on'?'guarded':'derived',
-        content_base64:Buffer.from(value.text).toString('base64'),provenance:value.provenance,source:'nocheh:derivative:'+item.derived_id});
-    }
+    const derived=(await this.derivedTexts(id,binding)).map(item=>({id:item.id,event_id:id,artifact_id:item.artifact_id,kind:item.kind,
+      representation:binding?.mode==='on'?'guarded':'derived',content_base64:Buffer.from(item.text).toString('base64'),provenance:item.provenance,
+      source:'nocheh:derivative:'+item.id}));
     const relationships=await this.access.relationships.context(reference,binding?this.relationAudience(principal):{kind:'owner'},20);
     if(binding){await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const replies=principal.admin?await archiveReplyPreviews(this.stores.archive,this.stores.control,[{id,kind:row.kind,scope:row.scope}]):new Map();
@@ -196,6 +211,94 @@ export class SourceRepository {
       for(const hit of hits){hit.reply_messages=replies.get(hit.id)??[];hit.transcript_preview=transcripts.get(hit.id)??null;hit.agent_copy=copies.get(hit.id);}
     }
     await this.allowPrepared(principal,hits);return hits;
+  }
+  /** Messages another index found, such as memory search by meaning, read back through the reader's own access. */
+  async found(principal:Reader,ids:string[],count:number) {
+    const binding=principal.admin?null:await this.audience.assert(principal);
+    const liveCopies=await this.access.retirements?.liveCopies(ids)??new Set<string>();
+    const hits:{source:string;scope:string;kind:string;occurred_at:string|null;text:string;truncated?:true}[]=[];
+    for(const id of ids) {
+      if(hits.length===count)break;
+      if(!principal.admin&&liveCopies.has(id))continue;
+      const captured=await this.access.archive.captured(id).catch(()=>null);
+      if(!captured||binding&&!await this.access.canRead(principal,captured.reference,binding))continue;
+      const original=(await this.stores.archive.query('SELECT occurred_at,original_text FROM events WHERE id=$1',[id])).rows[0];
+      let text=original.original_text?.toString()??'';
+      if(binding?.mode==='on') {
+        const guarded=await this.access.guards.read('events:'+id,binding).catch(error=>{if(pending(error))return null;throw error;});
+        if(!guarded)continue;
+        text=String(scopedObservation(guarded.value).text??'');
+      }
+      hits.push({source:'nocheh:event:'+id,scope:captured.scope,kind:captured.kind,occurred_at:original.occurred_at,text:text.slice(0,2000),...(text.length>2000?{truncated:true as const}:{})});
+    }
+    if(binding){for(const hit of hits)await this.permitted(principal,hit.source.slice(13),binding);await this.audience.assert(principal);}
+    await this.allowPrepared(principal,hits);return hits;
+  }
+  /** A conversation in time order, one page at a time, with only what the reader may read.
+   * The owner may name any chat; anyone else reads the chat they are in. */
+  /** The chat a page or a size reads: the owner names any chat, anyone else only their own. */
+  private async conversation(principal:Reader,input:{chat:string;from:string;to:string}) {
+    string(input.chat,256);
+    const from=pageDate(input.from),to=pageDate(input.to,true);
+    const binding=principal.admin?null:await this.audience.assert(principal),owner=principal.admin||principal.scope===null;
+    if(!owner&&input.chat&&input.chat!==principal.scope)throw new HttpError(403,'conversation_not_permitted');
+    // A topic is read with the rest of its group, as a group reader reads it.
+    const space=principal.space?parentSpace(principal.space)??principal.space:null;
+    const chat=owner?input.chat||(principal.admin?'':space??this.access.policy().owner_id):principal.scope!;
+    if(!chat)throw new HttpError(400,'conversation_required');
+    return {chat,from,to,binding};
+  }
+  /** How much a chat, or a period of it, holds, so a big job can be sized before it starts. */
+  async size(principal:Reader,input:{chat:string;from:string;to:string}) {
+    const {chat,from,to}=await this.conversation(principal,input);
+    const totals=(await this.stores.archive.query(`SELECT count(*)::integer AS records,
+      count(*) FILTER (WHERE r.kind IN ('telegram_update','telegram_desktop_message','browser_input'))::integer AS messages,
+      coalesce(sum(octet_length(t.original_text)),0)::bigint AS characters,min(r.at) AS first,max(r.at) AS last
+      FROM (SELECT e.id,e.kind,e.at ${pageRecords}) r JOIN events t ON t.id=r.id`,[chat,from,to])).rows[0];
+    // A photo is kept in several sizes, so files are counted by the message that has them.
+    const files=(await this.stores.archive.query(`SELECT count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('document','file'))::integer AS files,
+      count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('photo','image'))::integer AS images,
+      count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('voice','audio','video_note'))::integer AS voice_notes
+      FROM (SELECT e.id ${pageRecords}) r JOIN artifacts a ON a.event_id=r.id`,[chat,from,to])).rows[0];
+    return {chat,records:totals.records,messages:totals.messages,characters:Number(totals.characters),
+      files:files.files,images:files.images,voice_notes:files.voice_notes,
+      first:totals.first?.toISOString()??null,last:totals.last?.toISOString()??null};
+  }
+  async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number}) {
+    const after=cursor(input.after),{chat,from,to,binding}=await this.conversation(principal,input);
+    const records=pageRecords;
+    const rows=(await this.stores.archive.query(`SELECT id,kind,at,micros ${records} AND ($4::bigint IS NULL OR (e.micros,e.id)>($4::bigint,$5))
+      ORDER BY e.micros,e.id LIMIT 201`,[chat,from,to,after?.micros??null,after?.id??''])).rows;
+    const liveCopies=principal.admin?new Set<string>():await this.access.retirements?.liveCopies(rows.map(row=>row.id))??new Set<string>();
+    const items:Record<string,unknown>[]=[],shown:string[]=[];let last:{micros:string;id:string}|null=null,size=0,full=false;
+    for(const row of rows.slice(0,200)) {
+      if(items.length===input.count||size>=PAGE_BUDGET){full=true;break;}
+      last=row;
+      if(liveCopies.has(row.id))continue;
+      const captured=await this.access.archive.captured(row.id);
+      if(binding&&!await this.access.canRead(principal,captured.reference,binding))continue;
+      const original=(await this.stores.archive.query('SELECT original_text,payload FROM events WHERE id=$1',[row.id])).rows[0];
+      let value:any={text:original.original_text?.toString()??'',payload:JSON.parse(original.payload.toString())};
+      const type=pageEntry(row.kind,value.payload);
+      if(!type)continue;
+      shown.push(row.id);
+      if(binding?.mode==='on') {
+        const guarded=await this.access.guards.read('events:'+row.id,binding).catch(error=>{if(pending(error))return null;throw error;});
+        if(!guarded){items.push({source:'nocheh:event:'+row.id,at:row.at.toISOString(),type,checking:true});continue;}
+        value=guarded.value;
+      }
+      const files=captured.artifact_ids.length?await this.derivedTexts(row.id,binding).catch(error=>{if(pending(error))return null;throw error;}):[];
+      const item=pageItem({id:row.id,kind:row.kind,at:row.at,payload:value.payload,text:String(value.text??''),files:files??[]});
+      const entry=files===null?{...item,files_checking:true}:item;
+      size+=JSON.stringify(entry).length;items.push(entry);
+    }
+    const more=full||rows.length>200;
+    const position=(await this.stores.archive.query(`SELECT count(*)::integer AS total,
+      count(*) FILTER (WHERE $4::bigint IS NOT NULL AND (e.micros,e.id)<=($4::bigint,$5))::integer AS through ${records}`,
+      [chat,from,to,last?.micros??after?.micros??null,last?.id??after?.id??''])).rows[0];
+    if(binding){for(const id of shown)await this.permitted(principal,id,binding);await this.audience.assert(principal);}
+    const result={chat,items,next:more&&last?last.micros+'-'+last.id:null,position:{through:position.through,total:position.total},complete:!more};
+    await this.allowPrepared(principal,result);return result;
   }
   async bytes(principal:Reader,id:string):Promise<Buffer> {
     const binding=principal.admin?null:await this.audience.assert(principal);

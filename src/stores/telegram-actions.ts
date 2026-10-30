@@ -242,7 +242,8 @@ export class TelegramActionRepository {
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,trustedTextLimit);
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
-    return {id,source,proposal,binding,scope:principal.scope,space:principal.space,profile:principal.logical_profile,destination,
+    // The owner's own audience is stored by the owner's chat, as their requests are.
+    return {id,source,proposal,binding,scope:principal.scope??this.access.policy().owner_id,space:principal.space,profile:principal.logical_profile,destination,
       fingerprint:digest(canonical({destination,text:preparedText})),text_hash:digest(preparedText),guard_revision:representation.revision};
   }
   /** Trusted callers commit this action and its workflow request with their own control decision. */

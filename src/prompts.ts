@@ -11,12 +11,14 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read'] as const;
+  'telegram.approval_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
+  'background.job','background.continue','background.wrap_up','background.card','background.texts'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'tasks.reminder':['{title}'],'system.problems':['{problems}']};
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
+  'background.job':['{instruction}'],'background.card':['{instruction}']};
 
 /** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
 export const notAllowedReply='Sorry, I only work with people the owner has allowed in this group.';
@@ -95,9 +97,30 @@ export const problemNotice='⚠️ Nocheh found a problem:\n{problems}\n\nSee Sy
 /** The buttons under a problem notice and the short answers to a press. */
 export const problemButtons=['open: 🔎 Open','retry: 🔁 Retry failed','retried: 🔁 Retrying {count} failed tasks now.',
   'nothing: Nothing failed can be retried right now.','only_owner: Only the owner can do this.'].join('\n');
+/** The first step of a background job. A line whose value is missing is left out. */
+export const backgroundJob=['[Background job: {title}]',
+  'You are running a background job in a session of your own, apart from the chat. Work through it with your tools until it is done.','',
+  'The instruction from the person who asked:','{instruction}','',
+  'Chat to work on: {chat}','Period: {period}','Size: {size}','',
+  'Read what the instruction needs. nocheh_archive_page reads a chat in time order, page by page: pass next as after until complete is true. '+
+  'Keep a to-do list with the todo_list tool of what is left and what you found; it is kept when this session goes on in a new step. '+
+  'When the work is done, write the final report as your answer, in the language of the instruction. It is sent to the chat where the job was asked. '+
+  'Nobody answers questions during the job: say in the report what was unclear.',
+  'The job stops at {limits}, whichever comes first.'].join('\n');
+/** Each later step of a background job. */
+export const backgroundContinue='[Background job: {title}]\nContinue the job where you stopped. Your to-do list and the work so far are above. When the work is done, write the final report as your answer.';
+/** The last step when a background job reaches its cost or time limit. */
+export const backgroundWrapUp='[Background job: {title}]\nThe job reached its limit of {limit}. Stop reading now. Write the final report from what you have found, in the language of the instruction, and say what is left undone.';
+/** The Approve and Reject card for a background job. A line whose value is missing is left out. */
+export const backgroundCard='🗂 Background job: {title}\n📏 {size}\n⏱ About {minutes} min, {cost}\n🛑 Stops at {cost_limit} or {minutes_limit} min\n\n{instruction}';
+/** One "name: text" line for each state shown on a decided job card. */
+export const backgroundTexts=['running: ⏳ Approved. It runs now and reports here when done.','queued: ⏳ Approved. It starts when a running job finishes.',
+  'done: ✅ Done. The report is in the chat.','stopped: 🚫 Stopped. Nothing more runs.','failed: ⚠️ It stopped because of a problem. See Background work in the dashboard.',
+  'rejected: ❌ Rejected. Nothing ran.'].join('\n');
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons};
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
+  'background.job':backgroundJob,'background.continue':backgroundContinue,'background.wrap_up':backgroundWrapUp,'background.card':backgroundCard,'background.texts':backgroundTexts};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

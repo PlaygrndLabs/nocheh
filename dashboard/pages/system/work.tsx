@@ -43,6 +43,7 @@ import {
 import {Drawer, useFeedback} from '../../ui/overlay';
 import type {Metrics} from './work-charts';
 import {LinkButton} from '../../ui/link-button';
+import {BackgroundJobs} from './jobs';
 
 const WorkCharts = lazy(() => import('./work-charts'));
 
@@ -78,6 +79,7 @@ export function WorkView() {
           Counts and failures are unknown right now. They will appear when the scheduler answers.
         </Notice>
       )}
+      <BackgroundJobs />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {!monitoring.data ? (
           [0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)

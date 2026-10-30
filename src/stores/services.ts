@@ -54,6 +54,7 @@ import {SourceRetirementRepository} from './source-retirement.js';
 import {ReactionStateRepository} from './reaction-state.js';
 import {KnowledgeManagementRepository} from './knowledge-management.js';
 import {OwnerSupervisionRepository} from './owner-supervision.js';
+import {BackgroundJobRepository} from './background-jobs.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -72,7 +73,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
       const source=(await archive.captured(principal.turnEvent!)).reference;
       if(!await access.canRead(principal,source,binding))throw new HttpError(403,'turn_source_denied');return source;
     } catch(error) {if(!(error instanceof HttpError)||error.code!=='source_not_found')throw error;}
-    const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind='scheduled_trigger'",[principal.turnEvent])).rows[0];
+    const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind IN ('scheduled_trigger','background_step')",[principal.turnEvent])).rows[0];
     if(!operation||operation.scope!==principal.space)throw new HttpError(403,'turn_source_denied');
     const reference={store:'control' as const,kind:'operation' as const,id:operation.id,generation:operation.generation,input_hash:operation.input_hash};
     await operations.verify(reference);return reference;
@@ -91,7 +92,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
-  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime);
+
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
@@ -113,10 +114,14 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
     return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
   },{call:options.runtime,owner:()=>options.policy().owner_id});
+  const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,detect,options.serviceToken??'');
+  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs);
+  // A card edit is best effort: a job never fails because its card could not be updated.
+  jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
-  return {ownerAutonomy,notion,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {jobs,ownerAutonomy,notion,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

@@ -83,3 +83,26 @@ class ManagedAsyncTests(unittest.TestCase):
     def test_original_only_context_cannot_route_an_unselected_conversation(self):
         self.context.update(storage_layout='original-only-v1',space='-999',scope='-999',profile='research',revision=8)
         self.runtime.runs.start(self.body);self.assertEqual(self.settle()['state'],'ambiguous');self.assertEqual(self.count,0)
+    def test_background_job_step_uses_its_own_routes_and_leaves_what_the_job_needs(self):
+        routes=[]
+        def background(route,body):
+            routes.append(route)
+            return self.call(route,body)
+        self.runtime=ManagedAsync(self.admin,lambda:object(),lambda route,body:self.fail('a job step must not use browser routes'),self.runner,background_call=background)
+        self.context.update(storage_layout='original-only-v1',space='-123',scope='-123',profile='job-'+'c'*24,revision=8,
+            background={'job_id':'c'*64,'step':2,'kind':'work','max_iterations':20})
+        seen={}
+        async def runner(root,scope,body,model,credentials,session,emit,cancelled):
+            seen.update(body=body,emit=emit);self.count+=1
+            return {'state':'done','text':'progress so far','session_id':session,'continue':True,'todo':[{'content':'read March','status':'pending'}],'cost_usd':0.4}
+        self.runtime.runner=runner
+        step={**self.body,'channel':'background'}
+        self.runtime.runs.start(step)
+        for _ in range(200):
+            if self.runtime.runs.resume(step)['state'] in ('done','failed','ambiguous','cancelled'):break
+            time.sleep(.01)
+        self.assertEqual(seen['body']['background']['max_iterations'],20)
+        self.assertIsNone(seen['emit'],'a job step streams nothing to a browser')
+        self.assertEqual(self.finished['continue'],True);self.assertEqual(self.finished['cost_usd'],0.4)
+        self.assertEqual(self.finished['todo'],[{'content':'read March','status':'pending'}])
+        self.assertEqual(routes[:3],['workflow-context','claim','prepare']);self.assertIn('finish',routes)

@@ -15,8 +15,8 @@ const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation
 const superseded=new Set(['native_review_missing','learning_job_missing','guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','honcho_receipt_missing']);
 const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','honcho_sync_busy','memory_session_rebuilt']);
 
-/** Initial replies and their prerequisites; every other storage family shares the background slot. */
-export const foregroundFamilies:ReadonlySet<WorkflowFamily>=new Set(['preparation','telegram','browser','schedules','actions']);
+/** Initial replies and their prerequisites, and the jobs people approved; every other storage family shares the background slot. */
+export const foregroundFamilies:ReadonlySet<WorkflowFamily>=new Set(['preparation','telegram','browser','schedules','actions','background']);
 export const backgroundFamilies=(families:Iterable<WorkflowFamily>)=>new Set([...families].filter(family=>!foregroundFamilies.has(family)));
 
 /** Bound admission before borrowing any pool connection, including nested publication work. */
@@ -155,6 +155,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     telegram:(id,authority)=>s.telegram.run(id,authority),
     browser:(id,authority)=>s.browser.run(id,authority),
     schedules:(id,authority)=>s.scheduled.operation(id,authority),
+    background:(id,authority)=>s.jobs.operation(id,authority),
     actions:async(id,authority)=>{
       const result=await s.telegramActions.run(id,authority);
       // The approval card, if any, then says the message was sent.

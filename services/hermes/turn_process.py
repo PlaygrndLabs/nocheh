@@ -11,6 +11,10 @@ from pathlib import Path
 from .capture import canonical
 
 
+# The longest one background job step may run. A job takes as many steps as it needs.
+STEP_SECONDS=540
+
+
 def scheduled_preferences(profile,body):
     from .profile_config import inherited_config,read,preferences
     from .policy_config import validate
@@ -74,6 +78,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     if body.get('transcripts'):
         text += '\n\n[Derived voice transcript; original audio is separately archived]\n' + '\n'.join(body['transcripts'])
     if not text: text = '[An attachment or non-text event was archived. Use its source reference if useful.]'
+    # A background job step may run for minutes; every other turn has the usual reply time.
+    limit = STEP_SECONDS if body.get('channel')=='background' else 230
     for file in body.get('files',[]):
         text += '\n\n[Archived attachment: ' + file['name'] + '; SHA-256: ' + file['sha256'] + ']'
         if file.get('text') is not None: text += '\n' + file['text']
@@ -108,9 +114,12 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image'],
-               'turn_deadline_epoch':time.time()+230,'prompts':body.get('prompts') or {}}
+               'turn_deadline_epoch':time.time()+limit,'prompts':body.get('prompts') or {}}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
+    if body.get('channel')=='background':
+        # A job step: its step count comes from the job, and it reports now and then while it works.
+        request.update(background={'max_iterations':body['background']['max_iterations']},heartbeat=True)
     from .security_transport import isolated_enabled,scoped_transport
     isolated=isolated_enabled()
     if isolated:
@@ -152,6 +161,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                 from .assistant_gateway import check_delivery_policy
                 if not await asyncio.to_thread(check_delivery_policy,body['archive_credential']):raise RuntimeError('guard_context_changed')
                 if isinstance(value.get('text'),str): emit(value['text'])
+            elif isinstance(value,dict) and value.get('event') == 'heartbeat':
+                continue
             elif isinstance(value,dict) and value.get('state') in ('done','failed'):
                 result = value
             else: raise RuntimeError('assistant_output_invalid')
@@ -159,8 +170,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         if result is not None:
             # Nocheh's usage tracker: Hermes's own token counts and cost for this turn.
             from .usage import part_of, record
-            await asyncio.to_thread(record, part_of(body), result.pop('usage',None), model, result.get('state')!='done',
+            usage=result.pop('usage',None)
+            await asyncio.to_thread(record, part_of(body), usage, model, result.get('state')!='done',
                                     reason=result.pop('failure_reason',None))
+            # A job counts what each step cost against its cost limit.
+            if body.get('channel')=='background':result['cost_usd']=usage.get('cost_usd') if isinstance(usage,dict) else None
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
         from .assistant_gateway import check_delivery_policy
@@ -168,7 +182,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             from .timing import safe
             return {'state':'failed','error_code':'guard_context_changed','timings':safe(result.get('timings'))}
         return result
-    try: return await asyncio.wait_for(collect(), timeout=230)
+    try: return await asyncio.wait_for(collect(), timeout=limit)
     except asyncio.TimeoutError:
         # A turn stopped at its time limit reports nothing else; count it so its failure shows.
         from .usage import part_of, record

@@ -13,7 +13,7 @@ from pathlib import Path
 
 DATABASE = Path(os.environ.get('NOCHEH_USAGE_DB', '/workspace/data/local/hermes/usage/usage.sqlite'))
 RETENTION_DAYS = 400
-PARTS = ('reply', 'browser', 'schedule', 'memory_review', 'guard', 'transcription', 'image')
+PARTS = ('reply', 'browser', 'schedule', 'background', 'memory_review', 'guard', 'transcription', 'image')
 TOKENS = ('input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens')
 PROVIDERS = {'reply': 'NOCHEH_REPLY_ROUTE_PROVIDER', 'guard': 'NOCHEH_GUARD_ROUTE_PROVIDER',
              'transcription': 'NOCHEH_TRANSCRIPTION_ROUTE_PROVIDER', 'image': 'NOCHEH_IMAGE_ROUTE_PROVIDER'}
@@ -174,7 +174,7 @@ def part_of(body):
     """Which part a Hermes turn served."""
     if body.get('review') is True:
         return 'memory_review'
-    return {'scheduler': 'schedule', 'browser': 'browser'}.get(body.get('channel'), 'reply')
+    return {'scheduler': 'schedule', 'browser': 'browser', 'background': 'background'}.get(body.get('channel'), 'reply')
 
 
 def connect(path=None):

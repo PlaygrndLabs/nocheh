@@ -134,6 +134,35 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   assert.ok(fallback.sources.at(-1).limitations.includes('evidence_unavailable'));
 });
 
+test('search by meaning asks Honcho within the audience\'s learned sessions and returns only the archived messages behind its hits',async()=>{
+  const workspace=digest('search-workspace'),sessions=[digest('search-session')],ref=(name:string)=>({store:'archive',kind:'event',id:digest(name),revision:'1',input_hash:digest(name+'-hash')});
+  const receipts:Record<string,unknown>={[digest('receipt-a')]:{source_reference:ref('first'),source_references:[]},
+    [digest('receipt-c')]:{source_reference:ref('first'),source_references:[ref('first'),ref('second')]}};
+  const queries:unknown[][]=[],bodies:{path:string;body:any}[]=[],asked:string[]=[];let learned=sessions;
+  const contexts={access:{stores:{control:{query:async(_sql:string,params:unknown[])=>{queries.push(params);const row=receipts[String(params[0])];return {rows:row?[row]:[]};}}},
+    policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:'-100'})},guards:{}};
+  const binding={generation:'fixture',epoch:1,mode:'on'};
+  const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>{asked.push(query);return 'checked: '+query;},allow:async()=>{}};
+  const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,{sessions:async()=>learned} as any,async(path:string,body:any)=>{
+    bodies.push({path,body});
+    return [{id:'A'.repeat(21),metadata:{nocheh_receipt:digest('receipt-a')}},{id:'B'.repeat(21),metadata:{nocheh_receipt:digest('receipt-b')}},
+      {id:'not-native',metadata:{nocheh_receipt:digest('receipt-a')}},{id:'C'.repeat(21),metadata:{nocheh_receipt:digest('receipt-c')}}];
+  },async()=>[]);
+  Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
+  const group={admin:false,scope:'-100',space:'-100/topic/3',turnEvent:digest('turn')} as Reader;
+  assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
+  assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
+  assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
+  assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3','-100'],[workspace,'B'.repeat(21),'-100/topic/3','-100'],
+    [workspace,'C'.repeat(21),'-100/topic/3','-100']],'a hit counts only with its own receipt, in this audience or its group');
+  await memory.search({admin:false,scope:null,space:'123',turnEvent:digest('turn')} as Reader,'invoice',2);
+  assert.deepEqual(bodies[1]!.body,{query:'checked: invoice',limit:6},'the owner searches everything learned');
+  learned=[];
+  assert.deepEqual(await memory.search(group,'invoice',2),{ids:[],learned:false});
+  assert.equal(bodies.length,2,'a chat that was not learned is not searched');
+  await assert.rejects(memory.search(group,'  ',2),{code:'empty_query'});
+});
+
 test('terminal Honcho derivation errors cannot mark a generation ready',async()=>{
   const id=digest('failed-derivation'),updates:{sql:string;values:unknown[]}[]=[];
   let failed=true,valid=true;

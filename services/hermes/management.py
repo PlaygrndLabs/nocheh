@@ -51,7 +51,9 @@ def dispatch(root, model, policy, body):
     if action == 'persona':
         from . import persona
         scope = body.get('scope')
-        path = persona.default_path(root) if scope == 'default' else profile_path(root, scope, policy)
+        path = (persona.default_path(root) if scope == 'default' else
+                persona.project_path(root, scope.removeprefix('project:')) if isinstance(scope, str) and scope.startswith('project:') else
+                profile_path(root, scope, policy))
         if 'role' in body or 'skills' in body:
             return {'scope': scope, **persona.save(path, body.get('role', ''), body.get('skills', []), body.get('revision'))}
         return {'scope': scope, **persona.view(path)}

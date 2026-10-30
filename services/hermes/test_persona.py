@@ -64,6 +64,31 @@ class PersonaTests(unittest.TestCase):
                 {**COOKING, 'name': 'reminders', 'body': 'Default reminders.'}, COOKING]})
             self.assertEqual(persona.read(chat)['skills'], [], 'the owner source is never rewritten by a turn')
 
+    def test_a_chats_project_adds_its_role_and_skills_between_the_default_and_the_chats_own(self):
+        project = 'a' * 64
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            default, shared, chat = persona.default_path(root), persona.project_path(root, project), persona.chat_path(root, '-20')
+            persona.save(default, 'Default role', [COOKING], persona.view(default)['revision'])
+            persona.save(shared, 'Client project role', [{**COOKING, 'body': 'Project menu.'}, {**COOKING, 'name': 'done-marks',
+                         'description': 'When deciding whether a task is finished.', 'body': 'A green check means done.'}],
+                         persona.view(shared)['revision'])
+            turn = root / 'profiles' / Scopes.profile('-20:policy:3'); turn.mkdir(parents=True)
+            persona.materialize(root, turn, '-20', project)
+            value = persona.read(turn)
+            self.assertEqual(value['role'], 'Client project role')
+            self.assertEqual({s['name']: s['body'] for s in value['skills']}, {'weekly-menu': 'Project menu.', 'done-marks': 'A green check means done.'})
+            persona.save(chat, 'Group role', [{**COOKING, 'body': 'Group menu.'}], persona.view(chat)['revision'])
+            persona.materialize(root, turn, '-20', project)
+            value = persona.read(turn)
+            self.assertEqual(value['role'], 'Group role', 'the chat\'s own role wins')
+            self.assertEqual({s['name']: s['body'] for s in value['skills']}, {'weekly-menu': 'Group menu.', 'done-marks': 'A green check means done.'})
+            persona.materialize(root, turn, '-20')
+            self.assertNotIn('done-marks', [s['name'] for s in persona.read(turn)['skills']], 'a chat outside the project never gets its skills')
+            for bad in ('../profiles', 'A' * 64, ''):
+                with self.assertRaisesRegex(ValueError, 'invalid_project'):
+                    persona.project_path(root, bad)
+
     def test_other_chats_never_receive_a_groups_role_or_skills(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

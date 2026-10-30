@@ -43,7 +43,7 @@ Notion through its MCP server, used only from the owner's private chat: [0175](0
 The Telegram mini app: [0162](0162-telegram-mini-app.md); its password: [0189](0189-mini-app-password.md); one owner login with the dashboard: [0190](0190-one-owner-login.md).
 A chat's conversation carrying into new guard epochs: [0163](0163-chat-conversation-carries-into-new-guard-epochs.md), with superseded profiles removed once idle in [0168](0168-superseded-epoch-profiles-are-removed.md).
 Task lists, links to a group and people, and tags, with project chats reaching their own list: [0164](0164-task-lists-links-and-tags.md).
-Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md).
+Chat role and skills: [0151](0151-chat-role-and-skills-in-hermes-profiles.md), with a project's own in [0196](0196-projects-have-their-own-role-and-skills.md).
 Owner-editable built-in instructions: [0152](0152-owner-editable-built-in-instructions.md).
 Honcho reads after a guard epoch: [0148](0148-honcho-reads-wait-for-epoch-correction.md), narrowed to owner changes in [0149](0149-only-owner-changes-hold-honcho.md).
 Honcho recall check priority: [0150](0150-honcho-recall-checks-take-reply-priority.md); secret-check results carried across guard epochs: [0170](0170-secret-check-results-survive-guard-epochs.md);
@@ -51,7 +51,9 @@ text the secret check always declines hidden whole: [0184](0184-text-the-secret-
 imported messages checked a page at a time, and imports ready once prepared: [0191](0191-imports-share-secret-checks-and-become-ready.md);
 files read by the runtime's document reader: [0192](0192-files-are-read-by-the-runtime-document-reader.md);
 voice notes transcribed by the runtime's transcriber: [0193](0193-voice-notes-are-transcribed-by-the-runtime-transcriber.md);
-images read by the runtime's vision tool: [0194](0194-images-are-read-by-the-runtime-vision-tool.md).
+images read by the runtime's vision tool: [0194](0194-images-are-read-by-the-runtime-vision-tool.md);
+a chat read in order and searched by meaning: [0195](0195-the-agent-reads-a-chat-in-order-and-searches-by-meaning.md);
+background jobs as a chain of sealed steps: [0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
 Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),

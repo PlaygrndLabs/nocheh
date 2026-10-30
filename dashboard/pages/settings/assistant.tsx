@@ -1,4 +1,4 @@
-/** Settings › Assistant: how much Nocheh may do without asking, its role and skills, limits for each chat and its built-in instructions. */
+/** Settings › Assistant: how much Nocheh may do without asking, its role and skills, limits for each chat and for background jobs, and its built-in instructions. */
 import {useEffect, useState} from 'react';
 import {RotateCcw} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
@@ -8,6 +8,7 @@ import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardHeader, Field, Input, LoadError, LoadingRows, Select} from '../../ui/core';
 import {RoleAndSkills} from '../chats/role-skills';
 import {BuiltInInstructions} from './instructions';
+import {BackgroundJobLimits} from '../system/jobs';
 
 const freedom = [
   {
@@ -264,6 +265,7 @@ export function AssistantSettings() {
         description="Every chat starts from these. A chat’s own role replaces this one; set it on the chat’s page in Chats."
       />
       <Limits />
+      <BackgroundJobLimits />
       <BuiltInInstructions />
     </>
   );

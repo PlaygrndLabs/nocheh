@@ -204,6 +204,18 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(operation==='delivery')return json(res,200,await s.actionCommands.offer('telegram',await s.scheduled.delivery(body) as Record<string,any>));
       throw new HttpError(404,'not_found');
     }
+    if(req.method==='POST'&&path.startsWith('/v1/background/')) {
+      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/background/'.length),steps=s.jobs.steps;
+      if(operation==='finish')return json(res,200,await steps.finish(body));
+      if(operation==='cancel')return json(res,200,await steps.cancel(body));
+      if(operation==='observe')return json(res,200,await steps.observe(body));
+      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
+      if(operation==='workflow-context')return json(res,200,await steps.context(body));
+      if(operation==='claim')return json(res,200,await steps.claim(body));
+      if(operation==='prepare')return json(res,200,await steps.prepare(body));
+      if(operation==='heartbeat')return json(res,200,await steps.heartbeat(body));
+      throw new HttpError(404,'not_found');
+    }
     if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/browser/'.length);
       if(operation==='finish')return json(res,200,await s.browser.finish(body));
@@ -276,6 +288,16 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
     if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
+    if(req.method==='POST'&&/^\/v1\/jobs\/(?:size|propose|status|stop)$/.test(path)) {
+      const body=await readJson(req),action=path.slice('/v1/jobs/'.length);
+      if(action==='size')return result(await s.jobs.size(principal,body));
+      if(action==='propose')return result(await s.actionCommands.offer('background',await s.jobs.propose(principal,body)));
+      if(action==='status')return result(await s.jobs.list(principal));
+      const stopped=await s.jobs.stop(principal,body);
+      // A stopped job's card shows that it stopped.
+      void s.actionCommands.settle('background',stopped.id).catch(()=>{});
+      return result(stopped);
+    }
     if(req.method==='POST'&&['/v1/tools/claim','/v1/tools/start','/v1/tools/finish'].includes(path)) {
       admin(principal);const body=await readJson(req,2*1024*1024);
       if(path==='/v1/tools/finish')return json(res,200,await s.controlledExecution.finish(body));
@@ -308,8 +330,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/memory/check'&&req.method==='GET'){
       const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
-      // Schedule fires are control operations, never archived; the admitted run is their authority.
-      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)});
+      // Schedule fires and job steps are control operations, never archived; the admitted run is their authority.
+      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)||await s.jobs.steps.deliveryAllowed(principal)});
       const retired=principal.turnEvent?await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference):false;
       return json(res,200,{valid:principal.admin||!retired&&telegramDeliveryAllowed(s.access.policy(),principal,source)});
     }
@@ -334,6 +356,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const body=object(await readJson(req));
       return result(path.endsWith('/context')?await s.memory.context(principal):
         await timed(s.stores.control,principal.turnEvent,'honcho_recall','nocheh',()=>s.memory.recall(principal,string(body.query??'',2000))),true);
+    }
+    if(path==='/v1/memory/honcho/search'&&req.method==='POST') {
+      if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
+      const body=object(await readJson(req)),count=limit(body.limit,5,10);
+      const found=await timed(s.stores.control,principal.turnEvent,'honcho_search','nocheh',()=>s.memory.search(principal,string(body.query??'',2000),count));
+      return result({sources:await s.sources.found(principal,found.ids,count),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {
       const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
@@ -360,6 +388,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(mode!=='text')throw new HttpError(400,'invalid_search_mode');
         return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
       }
+      if(path==='/v1/archive/page')return result(await s.sources.page(principal,{chat:url.searchParams.get('chat')??'',from:url.searchParams.get('from')??'',
+        to:url.searchParams.get('to')??'',after:url.searchParams.get('after')??'',count:limit(url.searchParams.get('limit'),30,50)}),true);
       if(path==='/v1/imports/pending') {
         const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});

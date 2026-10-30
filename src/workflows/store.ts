@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import {HttpError} from '../http.js';
 
-export const families=['preparation','telegram','imports','memory_review','honcho','browser','schedules','actions','tools','organization'] as const;
+export const families=['preparation','telegram','imports','memory_review','honcho','browser','schedules','actions','tools','organization','background'] as const;
 export type WorkflowFamily=typeof families[number];
 export type ExecutionAuthority={owner:'inngest';epoch:number};
 export const closedStates=['completed','failed','skipped','cancelled','ambiguous','denied'] as const;

@@ -110,6 +110,31 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     title: 'Reading images',
     hint: 'Sent with each photo or image when it is saved, live or imported. Its answer is checked for secrets and becomes the image’s searchable text.',
   },
+  {
+    key: 'background.job',
+    title: 'Background job: first step',
+    hint: 'Starts an approved background job in its own session. {instruction} is what the person asked; {title}, {chat}, {period}, {size} and {limits} are filled in.',
+  },
+  {
+    key: 'background.continue',
+    title: 'Background job: next steps',
+    hint: 'Sent at each later step of a job, after the work so far. {title} is the job’s name.',
+  },
+  {
+    key: 'background.wrap_up',
+    title: 'Background job: at its limit',
+    hint: 'The last short step when a job reaches its cost or time limit. {limit} is the limit it reached.',
+  },
+  {
+    key: 'background.card',
+    title: 'Background job card',
+    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit} and {minutes_limit} are filled in. A line whose value is missing is left out.',
+  },
+  {
+    key: 'background.texts',
+    title: 'Background job card answers',
+    hint: 'One “name: text” line each for what a decided job card says: running, queued, done, stopped, failed and rejected. A line you remove keeps its default.',
+  },
 ];
 
 /** A plain-language problem with an edited text, or null. */
