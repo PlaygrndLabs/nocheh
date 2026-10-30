@@ -23,7 +23,8 @@ MODEL = 'text-embedding-3-small'
 REASONING_MODEL = os.environ.get('NOCHEH_REASONING_MODEL') or os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5')
 PILOT_LIMIT_MICRODOLLARS = 5_000_000
 MAX_MONTHLY_LIMIT_CENTS = 1_500
-REQUEST_LIMIT = 1_500  # Reasoning attempts per budget window.
+SUGGESTED_REASONING_LIMIT = 1_500  # Offered when the owner turns the monthly thinking limit on.
+MAX_REASONING_LIMIT = 1_000_000
 
 
 class Rejected(Exception):
@@ -54,6 +55,8 @@ class Ledger:
             if 'monthly_limit' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN monthly_limit INTEGER NOT NULL DEFAULT 5000000')
             if 'revision' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
             if 'last_operation_id' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN last_operation_id TEXT')
+            # No limit until the owner turns one on.
+            if 'reasoning_limit' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN reasoning_limit INTEGER')
             db.execute('CREATE TABLE IF NOT EXISTS embedding_route(id INTEGER PRIMARY KEY CHECK(id=1),provider TEXT,model TEXT,dimensions INTEGER)')
             db.execute('CREATE TABLE IF NOT EXISTS egress_cooldown(route TEXT PRIMARY KEY, until REAL NOT NULL, streak INTEGER NOT NULL, failed_at REAL NOT NULL)')
             if 'audit' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]: db.execute('ALTER TABLE calls ADD COLUMN audit TEXT')
@@ -175,6 +178,34 @@ class Ledger:
                        (proposed,operation_id))
             return revision+1
 
+    def set_reasoning_limit(self, limit, expected_revision, operation_id):
+        """Turn the monthly thinking limit on with a request count, or off with None."""
+        if limit is not None and (type(limit) is not int or not 1 <= limit <= MAX_REASONING_LIMIT):
+            raise Rejected('invalid_reasoning_limit')
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise Rejected('invalid_budget_revision')
+        try:
+            if type(operation_id) is not str or str(uuid.UUID(operation_id)) != operation_id:
+                raise ValueError()
+        except (ValueError, AttributeError):
+            raise Rejected('invalid_budget_operation') from None
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current, revision, previous=db.execute(
+                'SELECT reasoning_limit,revision,last_operation_id FROM policy WHERE id=1').fetchone()
+            if previous==operation_id:
+                if current!=limit: raise Rejected('budget_operation_conflict')
+                return revision
+            if revision!=expected_revision: raise Rejected('budget_version_conflict')
+            db.execute('UPDATE policy SET reasoning_limit=?,revision=revision+1,last_operation_id=? WHERE id=1',
+                       (limit,operation_id))
+            return revision+1
+
+    @staticmethod
+    def month_start(now=None):
+        return datetime.fromtimestamp(now or time.time(),timezone.utc).replace(
+            day=1,hour=0,minute=0,second=0,microsecond=0).timestamp()
+
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=20)
@@ -202,11 +233,14 @@ class Ledger:
             start,mode=self.window(db)
             limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else db.execute('SELECT monthly_limit FROM policy WHERE id=1').fetchone()[0]
             total = db.execute("SELECT coalesce(sum(CASE WHEN outcome IN ('http_error','legacy_error_unverified') THEN 0 ELSE reserved END),0) FROM calls WHERE route='/v1/embeddings' AND started>=?",(start,)).fetchone()[0]
-            reasoning = db.execute("SELECT count(*) FROM calls WHERE route='/v1/chat/completions' AND started>=?",(start,)).fetchone()[0]
             if amount and total + amount > limit:
                 raise Rejected('pilot_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
-            if route=='/v1/chat/completions' and reasoning >= REQUEST_LIMIT:
-                raise Rejected('subscription_request_limit_exhausted')
+            reasoning_limit=db.execute('SELECT reasoning_limit FROM policy WHERE id=1').fetchone()[0]
+            if route=='/v1/chat/completions' and reasoning_limit is not None:
+                # A request the provider refused outright, such as a dead key, used none of the limit.
+                reasoning=db.execute("SELECT count(*) FROM calls WHERE route='/v1/chat/completions' AND started>=? "
+                                     "AND outcome IS NOT 'http_error'",(self.month_start(),)).fetchone()[0]
+                if reasoning >= reasoning_limit: raise Rejected('reasoning_request_limit_reached')
             audit={'owner_wording':b'Database credentials are in my password manager.' in body,
                    'synthetic_raw_canary':b'mango123' in body}
             return db.execute('INSERT INTO calls(route,digest,reserved,started,audit) VALUES(?,?,?,?,?)',
@@ -266,7 +300,7 @@ class Ledger:
             calls = [dict(row) for row in db.execute('SELECT * FROM calls ORDER BY id')]
             rollups = [dict(row) for row in db.execute('SELECT * FROM call_rollups ORDER BY month,route,outcome')]
             start,mode=self.window(db)
-            monthly_limit,revision=db.execute('SELECT monthly_limit,revision FROM policy WHERE id=1').fetchone()
+            monthly_limit,revision,reasoning_limit=db.execute('SELECT monthly_limit,revision,reasoning_limit FROM policy WHERE id=1').fetchone()
             selected=db.execute('SELECT provider,model,dimensions FROM embedding_route WHERE id=1').fetchone()
         limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else monthly_limit
         active=[c for c in calls if c['started']>=start and c['route']=='/v1/embeddings']
@@ -276,7 +310,7 @@ class Ledger:
         embedding=embeddings({'NOCHEH_EMBEDDING_MODEL':selected['model']}) if selected else embeddings({})
         return {'limit_usd':limit/1e6,'limit_cents':limit//10_000,'max_limit_cents':MAX_MONTHLY_LIMIT_CENTS,
                 'revision':revision,'window_started_at':datetime.fromtimestamp(start,timezone.utc).isoformat(),
-                'mode':mode,'reserved_usd':reserved/1e6,'remaining_usd':max(0,limit-reserved)/1e6,
+                'mode':mode,'reasoning_request_limit':reasoning_limit,'reserved_usd':reserved/1e6,'remaining_usd':max(0,limit-reserved)/1e6,
                 'counted_toward_cap_usd':reserved/1e6,
                 'lifetime_reserved_usd':(sum(c['reserved'] for c in calls)+sum(r['reserved'] for r in rollups))/1e6,
                 'released_error_holds_usd':released/1e6,
@@ -290,7 +324,10 @@ class Ledger:
         report=self.report();start=datetime.fromisoformat(report['window_started_at']).timestamp()
         current=[call for call in report['calls'] if call['started']>=start]
         embeddings=[call for call in current if call['route']=='/v1/embeddings']
-        reasoning=sum(call['route']=='/v1/chat/completions' for call in current)
+        month=self.month_start()
+        reasoning=sum(call['route']=='/v1/chat/completions' and call['outcome']!='http_error' and call['started']>=month
+                      for call in report['calls'])
+        limit=report['reasoning_request_limit']
         tokens=reported=0
         for call in embeddings:
             if not isinstance(call['status'],int) or not 200 <= call['status'] < 300: continue
@@ -298,8 +335,9 @@ class Ledger:
             if count is not None:tokens+=count;reported+=1
         return {key:value for key,value in report.items() if key!='calls'} | {
             'embedding_requests':len(embeddings),'reasoning_requests':reasoning,
-            'total_requests':len(current),'reasoning_request_limit':REQUEST_LIMIT,
-            'reasoning_remaining_requests':max(0,REQUEST_LIMIT-reasoning),
+            'total_requests':len(current),'suggested_reasoning_limit':SUGGESTED_REASONING_LIMIT,
+            'max_reasoning_limit':MAX_REASONING_LIMIT,
+            'reasoning_remaining_requests':None if limit is None else max(0,limit-reasoning),
             'embedding_reported_requests':reported,'embedding_unreported_requests':len(embeddings)-reported,
             'embedding_tokens':tokens,
             'estimated_embedding_cost_usd':round(tokens*report['pricing_usd_per_million_embedding_tokens']/1_000_000,8)}

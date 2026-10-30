@@ -24,4 +24,20 @@ class HonchoBudgetOperationTests(unittest.TestCase):
                 update({**request,'unexpected':True},state,{'attached':True,'verified':True})
 
 
+    def test_owner_turns_the_thinking_limit_on_and_off(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);(state/'honcho/ledger').mkdir(parents=True)
+            accepted={'attached':True,'verified':True}
+            self.assertIsNone(view(state)['reasoning_request_limit'])
+            request={'reasoning_limit':1500,'expected_revision':0,'operation_id':str(uuid.uuid4())}
+            with self.assertRaisesRegex(ValueError,'honcho_budget_requires_accepted_memory'):
+                update(request,state,{'attached':False,'verified':True})
+            turned_on=update(request,state,accepted)
+            self.assertEqual((turned_on['reasoning_request_limit'],turned_on['revision']),(1500,1))
+            turned_off=update({'reasoning_limit':None,'expected_revision':1,'operation_id':str(uuid.uuid4())},state,accepted)
+            self.assertIsNone(turned_off['reasoning_request_limit'])
+            with self.assertRaisesRegex(ValueError,'invalid_budget_request'):
+                update({**request,'limit_cents':700},state,accepted)
+
+
 if __name__=='__main__': unittest.main()

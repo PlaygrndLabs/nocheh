@@ -20,6 +20,7 @@ import {
   Select,
   SettingRow,
   Skeleton,
+  Switch,
   Technical,
   type Tone,
 } from '../../ui/core';
@@ -50,8 +51,11 @@ type Budget = {
   released_error_holds_usd?: number;
   legacy_error_exposure_unverified_usd?: number;
   reasoning_requests: number;
-  reasoning_request_limit: number;
-  reasoning_remaining_requests: number;
+  /** Null while no thinking limit is turned on. */
+  reasoning_request_limit: number | null;
+  reasoning_remaining_requests: number | null;
+  suggested_reasoning_limit: number;
+  max_reasoning_limit: number;
   window_started_at?: string;
 };
 
@@ -371,7 +375,7 @@ function BudgetCard({editable}: {editable: boolean}) {
       <Card>
         <CardHeader
           title="Memory thinking"
-          description="How often long-term memory may ask the memory model this month. A count, not money."
+          description="How often long-term memory asked the memory model this month. A count, not money."
         />
         <CardBody className="space-y-2">
           {!data && !budget.error && <LoadingRows rows={1} />}
@@ -381,25 +385,111 @@ function BudgetCard({editable}: {editable: boolean}) {
                 {data.reasoning_requests.toLocaleString()}
                 <span className="text-sm font-normal text-muted">
                   {' '}
-                  of {data.reasoning_request_limit.toLocaleString()} requests
+                  {data.reasoning_request_limit === null
+                    ? 'requests'
+                    : `of ${data.reasoning_request_limit.toLocaleString()} requests`}
                 </span>
               </p>
-              <Meter
-                value={
-                  data.reasoning_request_limit ? (100 * data.reasoning_requests) / data.reasoning_request_limit : 0
-                }
-                tone={data.reasoning_remaining_requests <= 0 ? 'bad' : 'accent'}
-                label="Thinking requests used"
-              />
-              <p className="text-xs text-muted">
-                {data.reasoning_remaining_requests.toLocaleString()} left. Resets each month.
-              </p>
+              {data.reasoning_request_limit !== null && data.reasoning_remaining_requests !== null ? (
+                <>
+                  <Meter
+                    value={(100 * data.reasoning_requests) / data.reasoning_request_limit}
+                    tone={data.reasoning_remaining_requests <= 0 ? 'bad' : 'accent'}
+                    label="Thinking requests used"
+                  />
+                  <p className="text-xs text-muted">
+                    {data.reasoning_remaining_requests.toLocaleString()} left. Resets each month.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted">No limit. Turn one on below to cap requests each month.</p>
+              )}
+              {editable ? (
+                <ThinkingLimitForm budget={data} />
+              ) : (
+                <p className="text-[13px] text-muted">Connect long-term memory to set a limit.</p>
+              )}
             </>
           )}
           {budget.error && !data && <p className="text-[13px] text-muted">Couldn’t load the request count.</p>}
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+function ThinkingLimitForm({budget}: {budget: Budget}) {
+  const feedback = useFeedback();
+  const command = useCommand();
+  const saved = budget.reasoning_request_limit;
+  const [on, setOn] = useState<boolean | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [problem, setProblem] = useState('');
+  const enabled = on ?? saved !== null;
+  const value = draft ?? String(saved ?? budget.suggested_reasoning_limit);
+  const changed = enabled !== (saved !== null) || (enabled && value.trim() !== String(saved));
+  const save = async () => {
+    setProblem('');
+    const limit = enabled ? Number(value.trim()) : null;
+    if (limit !== null && (!/^\d{1,7}$/.test(value.trim()) || limit < 1 || limit > budget.max_reasoning_limit))
+      return setProblem(`Enter a whole number from 1 to ${budget.max_reasoning_limit.toLocaleString()}.`);
+    const result = await command.run<Budget>('/honcho/budget', {
+      reasoning_limit: limit,
+      expected_revision: budget.revision,
+    });
+    if (result) {
+      setOn(null);
+      setDraft(null);
+      feedback.toast(
+        result.reasoning_request_limit === null
+          ? 'Memory thinking has no limit now.'
+          : `Memory thinking is limited to ${result.reasoning_request_limit.toLocaleString()} requests a month.`,
+      );
+    }
+  };
+  return (
+    <form
+      className="space-y-3 border-t border-line pt-4"
+      onSubmit={event => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <Switch
+          id="thinking-limit-on"
+          checked={enabled}
+          label="Limit thinking requests each month"
+          onChange={checked => {
+            setOn(checked);
+            setProblem('');
+            command.clear();
+          }}
+        />
+        <label htmlFor="thinking-limit-on" className="text-sm">
+          Limit thinking requests each month
+        </label>
+      </div>
+      {enabled && (
+        <Field label="Requests a month" htmlFor="thinking-limit" error={problem}>
+          <Input
+            id="thinking-limit"
+            inputMode="numeric"
+            className="w-40"
+            value={value}
+            onChange={event => {
+              setDraft(event.target.value);
+              setProblem('');
+              command.clear();
+            }}
+          />
+        </Field>
+      )}
+      <Button type="submit" variant="primary" busy={command.busy} disabled={!changed}>
+        Save
+      </Button>
+      {command.error && <Notice tone="bad">{command.error}</Notice>}
+    </form>
   );
 }
 
