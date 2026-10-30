@@ -20,6 +20,7 @@ import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
+import {parentSpace} from '../spaces.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
 
@@ -235,7 +236,9 @@ export class SourceRepository {
     const from=pageDate(input.from),to=pageDate(input.to,true),after=cursor(input.after);
     const binding=principal.admin?null:await this.audience.assert(principal),owner=principal.admin||principal.scope===null;
     if(!owner&&input.chat&&input.chat!==principal.scope)throw new HttpError(403,'conversation_not_permitted');
-    const chat=owner?input.chat||(principal.admin?'':principal.space??this.access.policy().owner_id):principal.scope!;
+    // A topic is read with the rest of its group, as a group reader reads it.
+    const space=principal.space?parentSpace(principal.space)??principal.space:null;
+    const chat=owner?input.chat||(principal.admin?'':space??this.access.policy().owner_id):principal.scope!;
     if(!chat)throw new HttpError(400,'conversation_required');
     // Telegram gives a message's own time; an assistant reply has only the time it was saved.
     const records=`FROM (SELECT id,kind,at,(extract(epoch FROM at)*1000000)::bigint AS micros FROM (SELECT id,kind,
