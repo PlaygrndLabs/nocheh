@@ -89,8 +89,10 @@ export class LearningContextRepository {
       FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
       LEFT JOIN guard_sources g ON g.id='derived_artifacts:'||v.derived_id
       LEFT JOIN guard_revisions r ON r.source_id=g.id AND r.revision=g.active_revision WHERE e.active_revision IS NOT NULL AND
-      ((scope_kind='conversation' AND scope_id=$1) OR (scope_kind='project' AND scope_id=$2)) ORDER BY e.id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
-    if(candidates.length>100)throw new HttpError(409,'learning_rule_limit');
+      ((scope_kind='conversation' AND scope_id=$1) OR (scope_kind='project' AND scope_id=$2))
+      ORDER BY v.author='owner' DESC,e.kind='convention' DESC,v.created_at DESC,e.id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
+    // A busy chat keeps learning past 100 rules: the owner's own rules, then conventions, then the newest are kept.
+    if(candidates.length>100){candidates.pop();limitations.push('rule_catalog_limit');}
     const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>();
     for(const candidate of candidates)try {
       const version=await this.learned.read(principal,candidate.id,binding,async reference=>
