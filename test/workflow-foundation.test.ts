@@ -20,7 +20,7 @@ test('workflow config requires dedicated keys and local endpoints without a clou
 test('background memory work waits in one shared engine queue instead of polling the busy slot',()=>{
   const background=backgroundFamilies(families),client=new Inngest({id:'fixture',isDev:false,eventKey:'a'.repeat(64),signingKey:'b'.repeat(64)});
   assert.deepEqual([...background].filter(family=>['memory_review','honcho','organization'].includes(family)).sort(),['honcho','memory_review','organization']);
-  for(const family of ['preparation','telegram','browser','schedules','actions'] as const)assert.equal(background.has(family),false);
+  for(const family of ['preparation','telegram','browser','schedules','actions','background'] as const)assert.equal(background.has(family),false);
   const registered=Object.fromEntries(coordinatedFunctions(client,['telegram','preparation','honcho','memory_review'],async()=>{throw Error('not executed');},async()=>{},background)
     .map(fn=>[fn.opts.id,fn.opts.concurrency]));
   assert.deepEqual(registered['honcho-v1'],[backgroundConcurrency]);assert.deepEqual(registered['memory_review-v1'],[backgroundConcurrency]);

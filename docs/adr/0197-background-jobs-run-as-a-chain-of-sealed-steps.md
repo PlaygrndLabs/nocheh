@@ -33,7 +33,7 @@ a live view and Stop. Extends [ADR-0031](0031-native-managed-schedules.md),
   approved estimate when that is higher.
 - The report goes to the chat where the job was asked, under the job's approval,
   in parts sent in order. Stop cancels the running step and sends no report.
-- At most two jobs run at once. Members start a few jobs a day in each group, set
+- A job's steps are admitted like replies, not behind memory reviews. At most two jobs run at once. Members start a few jobs a day in each group, set
   by the owner; the owner has no daily limit.
 </decision>
 

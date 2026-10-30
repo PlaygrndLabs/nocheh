@@ -271,7 +271,7 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
             time.sleep(2)
         raise AssertionError('fixture_gate_timeout:' + label)
 
-    wait('pipeline_registered', lambda: query('nocheh_control', "SELECT string_agg(family,',' ORDER BY family) FROM workflow_worker_registrations WHERE app='pipeline' AND seen_at>now()-interval '30 seconds'") == 'actions,browser,honcho,memory_review,organization,preparation,schedules,telegram')
+    wait('pipeline_registered', lambda: query('nocheh_control', "SELECT string_agg(family,',' ORDER BY family) FROM workflow_worker_registrations WHERE app='pipeline' AND seen_at>now()-interval '30 seconds'") == 'actions,background,browser,honcho,memory_review,organization,preparation,schedules,telegram')
     wait('host_worker_registered', lambda: query('nocheh_control', "SELECT string_agg(family,',' ORDER BY family) FROM workflow_worker_registrations WHERE app='host' AND seen_at>now()-interval '30 seconds'") == 'imports,tools')
     # Seed only this fresh fixture's prerequisite. Never submit a fabricated
     # live report to the public verification endpoint or touch live control.
