@@ -12,7 +12,7 @@ import {Dialog, useFeedback} from '../../ui/overlay';
 
 type Custom = {id: string; name: string; url: string};
 type Provider = ProviderRow & {unsaved?: boolean; newKey?: boolean};
-type Listing = {models: string[]; error?: string; loading?: boolean; retry?: () => void};
+type Listing = {models: string[]; url?: string; error?: string; loading?: boolean; retry?: () => void};
 
 const PRESET_KEY: Record<string, string> = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY'};
 const PART_TEXT: Record<string, {title: string; hint: string}> = {
@@ -28,19 +28,22 @@ const PART_TEXT: Record<string, {title: string; hint: string}> = {
   },
 };
 const httpsAddress = (url: string) => /^https:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(url.trim());
+const trimmed = (url: string) => url.trim().replace(/\/+$/, '');
+/** Whether the address names an API version, such as /v1 or /v1beta/openai. Without one, the check also tries /v1. */
+const versioned = (url: string) => /(^|\/)v\d+[a-z0-9]*(\/|$)/i.test(trimmed(url).replace(/^https:\/\/[^/]*/, ''));
 
 export function listError(error: string): string {
   if (error === 'missing_key') return 'Enter its API key to check it.';
   if (error === 'invalid_url') return 'The address must start with https:// and have no password or “?” part.';
   if (error === 'invalid_key') return 'This key has characters an API key can’t have.';
   if (error === 'http_401' || error === 'http_403') return 'It refused the key. Check the key.';
-  if (error === 'http_404') return 'No model list at this address. Check the address; most end in /v1.';
+  if (error === 'http_404') return 'No model list at this address. Check the address.';
   if (error.startsWith('http_')) return `It answered with error ${error.slice(5)}.`;
   return 'It couldn’t be reached. Check the address. A gateway that sleeps may need a minute to wake up.';
 }
 
 /** Asks the server which models a provider lists, using the typed key or its saved one. */
-function useModelList(request: Record<string, string> | null): Listing | null {
+function useModelList(request: Record<string, string | boolean> | null): Listing | null {
   const [state, setState] = useState<{signature: string; listing: Listing} | null>(null);
   const [attempt, setAttempt] = useState(0);
   const signature = request ? JSON.stringify(request) + '#' + attempt : '';
@@ -51,11 +54,11 @@ function useModelList(request: Record<string, string> | null): Listing | null {
     if (state?.signature === signature && !state.listing.loading) return;
     const timer = setTimeout(() => {
       setState({signature, listing: {models: [], loading: true}});
-      const done = (result: {models?: string[]; error?: string}) => {
+      const done = (result: {models?: string[]; url?: string; error?: string}) => {
         if (latest.current === signature)
-          setState({signature, listing: {models: result.models ?? [], error: result.error}});
+          setState({signature, listing: {models: result.models ?? [], url: result.url, error: result.error}});
       };
-      apiPost<{models?: string[]; error?: string}>('/settings/provider-models', request).then(done, () =>
+      apiPost<{models?: string[]; url?: string; error?: string}>('/settings/provider-models', request).then(done, () =>
         done({error: 'unreachable'}),
       );
     }, 500);
@@ -347,13 +350,16 @@ function ProviderDialog({
     return 'custom-' + n;
   }, [kind, editing]);
   const savedKey = !!editing?.has_key && !editing.newKey;
+  // The saved address typed without its /v1 is still the saved address.
   const addressChanged =
-    !!editing && custom && url.trim().replace(/\/$/, '') !== (editing.url ?? '').replace(/\/$/, '');
+    !!editing &&
+    custom &&
+    ![trimmed(url), versioned(url) ? '' : trimmed(url) + '/v1'].includes(trimmed(editing.url ?? ''));
   // A saved key is only ever sent to the saved address, so a changed address needs the key again.
   const needsKey = !savedKey || addressChanged;
   const request =
     (custom ? httpsAddress(url) : true) && (key.trim() || !needsKey)
-      ? {provider: id, ...(custom ? {url: url.trim()} : {}), ...(key.trim() ? {key: key.trim()} : {})}
+      ? {provider: id, ...(custom ? {url: url.trim(), try_v1: true} : {}), ...(key.trim() ? {key: key.trim()} : {})}
       : null;
   const listing = useModelList(request);
   useEffect(() => {
@@ -365,11 +371,16 @@ function ProviderDialog({
 
   const nameError = custom && name.trim().length > 40 ? 'Use 40 characters or fewer.' : '';
   const urlError =
-    custom && url.trim() && !httpsAddress(url) ? 'Use an https:// address, like https://gateway.example.com/v1.' : '';
+    custom && url.trim() && !httpsAddress(url) ? 'Use an https:// address, like https://gateway.example.com.' : '';
+  // The address the check found answering, such as the typed one with /v1 added; it is the one saved.
+  const called = custom && listing?.url && listing.url !== trimmed(url) ? listing.url : '';
+  // Without a version the check decides the address of a new one, so it is waited for.
+  const resolving = custom && (!editing || addressChanged) && !versioned(url) && !!listing?.loading;
   const valid =
     (!custom || (name.trim() && !nameError && httpsAddress(url))) &&
     (!needsKey || key.trim()) &&
-    (!makeMain || model.trim());
+    (!makeMain || model.trim()) &&
+    !resolving;
   const title = editing ? `Edit ${editing.name}` : 'Add a provider';
 
   return (
@@ -389,7 +400,8 @@ function ProviderDialog({
                 kind,
                 id,
                 name: name.trim(),
-                url: url.trim().replace(/\/$/, ''),
+                // The saved address typed without its /v1 stays the saved address.
+                url: called || (editing && custom && !addressChanged ? trimmed(editing.url ?? '') : trimmed(url)),
                 key: key.trim(),
                 makeMain,
                 model: model.trim(),
@@ -445,13 +457,13 @@ function ProviderDialog({
               label="Address"
               htmlFor="provider-url"
               error={urlError}
-              hint="Starts with https:// and usually ends in /v1."
+              hint={called ? `Nocheh will call ${called}` : 'Starts with https://. Adding /v1 is optional.'}
             >
               <Input
                 id="provider-url"
                 value={url}
                 inputMode="url"
-                placeholder="https://gateway.example.com/v1"
+                placeholder="https://gateway.example.com"
                 onChange={e => setUrl(e.target.value)}
               />
             </Field>

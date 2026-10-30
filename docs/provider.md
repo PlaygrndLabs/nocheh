@@ -10,10 +10,14 @@ to a provider chosen in Settings › Models
 - **OpenAI**: `https://api.openai.com/v1` with `OPENAI_API_KEY`.
 - **Anthropic**: `https://api.anthropic.com/v1` with `ANTHROPIC_API_KEY`.
 - **Custom**: any OpenAI-compatible HTTPS provider, such as a hosted
-  gateway. It needs a short id, a name, its address (usually ending in `/v1`)
-  and its API key. Custom providers are saved in `NOCHEH_PROVIDERS`; their keys
-  in `NOCHEH_PROVIDER_KEYS`. Addresses must be `https://` without a password or
-  query.
+  gateway. It needs a short id, a name, its address and its API key. Custom
+  providers are saved in `NOCHEH_PROVIDERS`; their keys in
+  `NOCHEH_PROVIDER_KEYS`. Addresses must be `https://` without a password or
+  query. `/v1` is optional. When an address has no API version in its path, such
+  as `https://gateway.example.com`, and no model list there, the connection
+  check in Settings › Models tries it with `/v1` and saves the address that
+  answers. An address that answers as typed, or that has a version such as `/v1`
+  or `/v1beta/openai`, is saved as typed. Saved addresses are used as saved.
 
 Keys are saved in the installation `.env` and never returned to the browser.
 

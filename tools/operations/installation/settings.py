@@ -73,11 +73,12 @@ def provider_view(values):
     return {'list': rows, 'parts': parts}
 
 
-def provider_models(state, provider, url=None, key=None):
+def provider_models(state, provider, url=None, key=None, try_v1=False):
     """Models an external provider lists, fetched server-side with the key being typed
-    or its saved key, so the list follows the provider while it is still being edited."""
+    or its saved key, so the list follows the provider while it is still being edited.
+    The provider dialog sets `try_v1` to find an address typed without /v1."""
     if not isinstance(provider, str): raise ValueError('unknown_provider')
-    return provider_routes.list_models(load(state), provider, url=url or None, secret=key or None)
+    return provider_routes.list_models(load(state), provider, url=url or None, secret=key or None, try_v1=try_v1 is True)
 
 
 def embedding_route(state):

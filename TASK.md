@@ -276,6 +276,15 @@ People stays persistent or dated: one-time access belongs to approving a
 pending request, where it already exists. Pending: a look at the new fields on
 the running installation.
 
+Provider addresses without `/v1` (October 30, owner: "why need /v1 endpoint?";
+"make it work for all things without the endpoint"): a custom provider's address
+works with or without its API version. The connection check tries an address
+without a version as typed, then with `/v1`, and Settings › Models saves the
+address that answers and shows it; saved addresses are used as saved
+([routes](tools/operations/provider/routes.py),
+[checks](services/hermes/test_provider_routes.py),
+[browser checks](test/dashboard-pages.browser.mjs)).
+
 Logo (October 27, owner: "I want use something like it as project logo but need
 improve it and compatible with our app design or make app design same it"): the
 owner's pixel brain is redrawn on crisp grids and shown in the dashboard

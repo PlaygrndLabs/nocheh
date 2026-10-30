@@ -45,6 +45,8 @@ MAX_CUSTOM = 10
 LIST_TIMEOUT = 90
 ID = re.compile(r'[a-z0-9][a-z0-9-]{0,31}')
 MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}')
+# An API version segment such as /v1, /v1beta or /v4 anywhere in the address path.
+VERSION = re.compile(r'(?:^|/)v\d+[a-z0-9]*(?:/|$)', re.IGNORECASE | re.ASCII)
 
 
 @dataclass(frozen=True)
@@ -221,10 +223,36 @@ def environment(values):
     return result
 
 
-def list_models(values, provider, opener=None, url=None, secret=None):
-    """Model IDs an external provider lists; the key never leaves this process.
-    An unsaved custom provider is listed from the address and key being typed. A saved
-    key is only sent to the saved address, so a typed address needs its own key."""
+def _listed(address, secret, kind, opener):
+    # Anthropic lists models with its own key header; the others use a bearer key.
+    headers = ({'x-api-key': secret, 'anthropic-version': '2023-06-01'} if kind == 'anthropic'
+               else {'Authorization': 'Bearer ' + secret})
+    # Some hosted gateways refuse Python's default client name.
+    headers.update({'Accept': 'application/json', 'User-Agent': 'Nocheh'})
+    try:
+        request = urllib.request.Request(address + '/models', headers=headers)
+        with opener.open(request, timeout=LIST_TIMEOUT) as response:
+            body = json.loads(response.read(2 * 1024 * 1024 + 1))
+    except urllib.error.HTTPError as error:
+        error.close()
+        return {'error': 'http_' + str(error.code)}
+    except ValueError:
+        return {'error': 'not_api'}
+    except OSError:
+        return {'error': 'unreachable'}
+    rows = body.get('data') if isinstance(body, dict) else None
+    models = sorted({row['id'] for row in rows or [] if isinstance(row, dict) and isinstance(row.get('id'), str)
+                     and MODEL.fullmatch(row['id'])})
+    return {'models': models[:500]}
+
+
+def list_models(values, provider, opener=None, url=None, secret=None, try_v1=False):
+    """Model IDs an external provider lists, and the address that listed them; the key
+    never leaves this process. An unsaved custom provider is listed from the address and
+    key being typed. A saved key is only sent to the saved address, so a typed address
+    needs its own key. With `try_v1`, a typed address without an API version, such as
+    https://host, that has no model list is tried again with /v1 added; the address that
+    answers is the one to save, so the owner may leave out /v1."""
     known = providers(values)
     if not isinstance(provider, str) or not ID.fullmatch(provider):
         raise ValueError('unknown_provider')
@@ -240,28 +268,24 @@ def list_models(values, provider, opener=None, url=None, secret=None):
                                or not secret.strip().isprintable()):
         return {'provider': provider, 'models': [], 'error': 'invalid_key'}
     secret = (secret or '').strip()
-    if not secret:
-        same = saved and saved['url'].rstrip('/') == url
-        secret = key(values, provider) if same else ''
-    if not secret:
-        return {'provider': provider, 'models': [], 'error': 'missing_key'}
+    addresses = [url]
+    if (try_v1 and not (saved and saved['url'] == url) and not VERSION.search(urlsplit(url).path)
+            and valid_url(url + '/v1')):
+        addresses.append(url + '/v1')
     kind = saved['kind'] if saved else 'custom'
-    # Anthropic lists models with its own key header; the others use a bearer key.
-    headers = ({'x-api-key': secret, 'anthropic-version': '2023-06-01'} if kind == 'anthropic'
-               else {'Authorization': 'Bearer ' + secret})
-    # Some hosted gateways refuse Python's default client name.
-    headers.update({'Accept': 'application/json', 'User-Agent': 'Nocheh'})
     opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies()))
-    try:
-        request = urllib.request.Request(url + '/models', headers=headers)
-        with opener.open(request, timeout=LIST_TIMEOUT) as response:
-            body = json.loads(response.read(2 * 1024 * 1024 + 1))
-    except urllib.error.HTTPError as error:
-        error.close()
-        return {'provider': provider, 'models': [], 'error': 'http_' + str(error.code)}
-    except (OSError, ValueError):
-        return {'provider': provider, 'models': [], 'error': 'unreachable'}
-    rows = body.get('data') if isinstance(body, dict) else None
-    models = sorted({row['id'] for row in rows or [] if isinstance(row, dict) and isinstance(row.get('id'), str)
-                     and MODEL.fullmatch(row['id'])})
-    return {'provider': provider, 'models': models[:500]}
+    errors = []
+    for address in addresses:
+        current = secret or (key(values, provider) if saved and saved['url'] == address else '')
+        listed = _listed(address, current, kind, opener) if current else {'error': 'missing_key'}
+        if 'error' not in listed:
+            return {'provider': provider, 'models': listed['models'], 'url': address}
+        errors.append(listed['error'])
+        # Only a missing list or key, or an answer that is no API, is worth trying at /v1.
+        if listed['error'] not in ('http_404', 'missing_key', 'not_api'):
+            break
+    # An answer from the provider, such as a refused key, says more than a missing list,
+    # and an address that was asked says more than one that had no key to ask with.
+    errors = [e for e in errors if e != 'missing_key'] or errors
+    error = next((e for e in errors if e not in ('http_404', 'not_api')), errors[0])
+    return {'provider': provider, 'models': [], 'error': 'unreachable' if error == 'not_api' else error}
