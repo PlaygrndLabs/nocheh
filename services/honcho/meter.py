@@ -5,6 +5,7 @@ import json
 import math
 import os
 import sqlite3
+import sys
 import time
 import uuid
 import urllib.error
@@ -379,6 +380,16 @@ def validate(route, payload, embedding=None):
     return payload
 
 
+def reason(route, status, error):
+    """Log why the provider refused a request: its error type and message, never the request."""
+    try: detail=json.loads(error.read(16*1024)).get('error') or {}
+    except Exception: detail={}
+    if not isinstance(detail,dict): detail={'message':detail}
+    print(json.dumps({'event':'honcho_upstream_rejected','route':route,'status':status,
+                      'type':str(detail.get('type') or detail.get('code') or '')[:80],
+                      'message':str(detail.get('message') or '')[:300]}),file=sys.stderr,flush=True)
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs): return None
 
@@ -434,6 +445,7 @@ class Egress:
             return status,kind,content
         except urllib.error.HTTPError as error:
             status=error.code;outcome='http_error'
+            reason(route,status,error)
             error.close()
             return status,'application/json',json.dumps({'error':{'message':'honcho_upstream_rejected','code':status}}).encode()
         except Exception:
