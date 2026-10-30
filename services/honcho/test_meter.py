@@ -216,6 +216,23 @@ class BudgetTests(unittest.TestCase):
             with self.assertRaisesRegex(Rejected,'reasoning_request_limit_reached'):
                 ledger.reserve('/v1/chat/completions',b'over')
 
+    def test_a_refused_request_logs_the_providers_reason_only(self):
+        class Refusing:
+            def open(self,request,timeout):
+                body={'type':'error','error':{'type':'invalid_request_error','message':'synthetic: field not supported'}}
+                raise urllib.error.HTTPError(request.full_url,400,'',{},io.BytesIO(json.dumps(body).encode()))
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite')
+            egress=Egress(ledger,'internal','temporary',Refusing(),reasoning_key='honcho-client',reasoning_url=GATEWAY)
+            payload={'model':REASONING_MODEL,'messages':[{'role':'user','content':'private words'}]}
+            with patch('sys.stderr',new=io.StringIO()) as log:
+                status,_,body=egress.send('/v1/chat/completions',payload)
+            line=json.loads(log.getvalue())
+            self.assertEqual((status,line['status'],line['type'],line['message']),
+                             (400,400,'invalid_request_error','synthetic: field not supported'))
+            self.assertNotIn('private words',log.getvalue())
+            self.assertEqual(json.loads(body)['error']['message'],'honcho_upstream_rejected')
+
     def test_monthly_cutover_is_durable_and_does_not_erase_pilot(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'budget.sqlite';ledger=Ledger(path)
