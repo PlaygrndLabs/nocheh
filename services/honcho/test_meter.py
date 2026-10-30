@@ -161,22 +161,51 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(status,502)
             self.assertEqual(Ledger(path).report()['reserved_usd'],.01)
 
-    def test_embedding_cap_and_subscription_request_bound_are_independent(self):
-        with tempfile.TemporaryDirectory() as root, patch('services.honcho.meter.REQUEST_LIMIT',2):
+    def test_embedding_cap_and_thinking_limit_are_independent(self):
+        with tempfile.TemporaryDirectory() as root:
             ledger=Ledger(Path(root)/'budget.sqlite');ledger.enable_monthly()
-            ledger.set_monthly_limit(1,0,str(uuid.uuid4()))
+            revision=ledger.set_monthly_limit(1,0,str(uuid.uuid4()))
+            ledger.set_reasoning_limit(2,revision,str(uuid.uuid4()))
             for index in range(2):ledger.reserve('/v1/chat/completions',f'reasoning-{index}'.encode())
-            with self.assertRaisesRegex(Rejected,'subscription_request_limit_exhausted'):
+            with self.assertRaisesRegex(Rejected,'reasoning_request_limit_reached'):
                 ledger.reserve('/v1/chat/completions',b'third')
             ledger.reserve('/v1/embeddings',b'paid')
             with self.assertRaisesRegex(Rejected,'monthly_budget_exhausted'):
                 ledger.reserve('/v1/embeddings',b'second-paid')
             self.assertEqual(ledger.summary()['reasoning_remaining_requests'],0)
 
-    def test_refused_reasoning_requests_do_not_use_the_allowance(self):
-        # A dead provider key answers every retry with 401; those must not use up the allowance.
-        with tempfile.TemporaryDirectory() as root, patch('services.honcho.meter.REQUEST_LIMIT',2):
+    def test_thinking_is_unlimited_until_the_owner_turns_a_limit_on(self):
+        with tempfile.TemporaryDirectory() as root:
             ledger=Ledger(Path(root)/'budget.sqlite')
+            for index in range(5):ledger.reserve('/v1/chat/completions',f'free-{index}'.encode())
+            summary=ledger.summary()
+            self.assertIsNone(summary['reasoning_request_limit'])
+            self.assertIsNone(summary['reasoning_remaining_requests'])
+            self.assertEqual(summary['reasoning_requests'],5)
+            revision=ledger.set_reasoning_limit(5,0,str(uuid.uuid4()))
+            with self.assertRaisesRegex(Rejected,'reasoning_request_limit_reached'):
+                ledger.reserve('/v1/chat/completions',b'over')
+            ledger.set_reasoning_limit(None,revision,str(uuid.uuid4()))
+            ledger.reserve('/v1/chat/completions',b'free-again')
+            for value in (0,-1,1.5,'10',True):
+                with self.assertRaisesRegex(Rejected,'invalid_reasoning_limit'):
+                    ledger.set_reasoning_limit(value,2,str(uuid.uuid4()))
+
+    def test_thinking_limit_counts_this_month_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path)
+            ledger.reserve('/v1/chat/completions',b'last-month')
+            with ledger.connect() as db:
+                db.execute('UPDATE calls SET started=?',(Ledger.month_start()-60,))
+            ledger.set_reasoning_limit(1,0,str(uuid.uuid4()))
+            ledger.reserve('/v1/chat/completions',b'this-month')
+            with self.assertRaisesRegex(Rejected,'reasoning_request_limit_reached'):
+                ledger.reserve('/v1/chat/completions',b'over')
+
+    def test_refused_reasoning_requests_do_not_use_the_limit(self):
+        # A dead provider key answers every retry with 401; those must not use up the limit.
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite');ledger.set_reasoning_limit(2,0,str(uuid.uuid4()))
             for index in range(3):
                 call=ledger.reserve('/v1/chat/completions',f'refused-{index}'.encode())
                 ledger.finish(call,401,.1,None,'http_error')
@@ -184,7 +213,7 @@ class BudgetTests(unittest.TestCase):
             ledger.finish(call,502,.1,None,'transport_error')
             self.assertEqual(ledger.summary()['reasoning_remaining_requests'],1)
             ledger.reserve('/v1/chat/completions',b'answered')
-            with self.assertRaisesRegex(Rejected,'subscription_request_limit_exhausted'):
+            with self.assertRaisesRegex(Rejected,'reasoning_request_limit_reached'):
                 ledger.reserve('/v1/chat/completions',b'over')
 
     def test_monthly_cutover_is_durable_and_does_not_erase_pilot(self):

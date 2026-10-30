@@ -27,7 +27,7 @@ type Estimate = {
   relearn: {conversations: number; sessions: number; messages: number; interpretations: number};
   replace: {saved_messages: number};
 };
-type Budget = {reasoning_remaining_requests: number};
+type Budget = {reasoning_remaining_requests: number | null};
 
 const CONFIRM_WORD = 'replace';
 const count = (value: number, one: string, many: string) => `${value.toLocaleString()} ${value === 1 ? one : many}`;
@@ -46,7 +46,10 @@ export function Rebuild({revision, attached}: {revision: number; attached: boole
   const cost = (
     <>
       Each message is learned again by the memory model. That costs money and uses this month’s memory thinking requests
-      {budget.data ? ` (${budget.data.reasoning_remaining_requests.toLocaleString()} left)` : ''}.
+      {budget.data?.reasoning_remaining_requests != null
+        ? ` (${budget.data.reasoning_remaining_requests.toLocaleString()} left)`
+        : ''}
+      .
     </>
   );
   return (
