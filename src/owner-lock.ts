@@ -26,10 +26,10 @@ const derive=(password:string,salt:Buffer,cost:{N:number;r:number;p:number})=>ne
 export const tokenId=(token:string)=>createHash('sha256').update(token).digest('hex');
 const validToken=(token:unknown):token is string=>typeof token==='string'&&/^[A-Za-z0-9_-]{43}$/.test(token);
 
-/** Checks a new password: long enough to resist guessing, short enough to hash quickly. */
+/** Checks a new password: not empty, short enough to hash quickly. */
 export function passwordProblem(password:unknown):string|null {
   if(typeof password!=='string')return 'invalid_password';
-  if([...password].length<8)return 'password_too_short';
+  if(!password)return 'password_empty';
   if(password.length>200)return 'password_too_long';
   return null;
 }

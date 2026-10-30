@@ -422,8 +422,8 @@ function Login({mode}: {mode: 'create' | 'sign_in'}) {
           : 'Wrong password.'
         : value?.error === 'sign_in_paused'
           ? `Too many wrong passwords. Try again in ${minutes(Number(value.until))}.`
-          : value?.error === 'password_too_short'
-            ? 'Use at least 8 characters.'
+          : value?.error === 'password_empty'
+            ? 'Enter a password.'
             : value?.error === 'password_too_long'
               ? 'Use at most 200 characters.'
               : value?.error === 'owner_password_already_set'
@@ -441,7 +441,7 @@ function Login({mode}: {mode: 'create' | 'sign_in'}) {
         <h1 className="text-lg font-semibold">{create ? 'Create your password' : 'Sign in'}</h1>
         <p className="mt-1 text-[13px] text-muted">
           {create
-            ? 'One password for this dashboard and the Telegram mini app. Use at least 8 characters.'
+            ? 'One password for this dashboard and the Telegram mini app.'
             : 'Your Nocheh password. This browser stays signed in for 30 days of use.'}
         </p>
       </div>
