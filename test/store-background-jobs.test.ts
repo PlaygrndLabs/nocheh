@@ -148,6 +148,16 @@ test('a background job is sized, approved on its card, runs step after step in i
     await assert.rejects(s.jobs.propose(await actor((await message('more')).id),{title:'More',instruction:'Again.'}),{code:'job_limit_reached'});
     await assert.rejects(s.jobs.propose(await actor((await message('owner-more',123)).id),{title:'Owner',instruction:'Again.'}).then(value=>{throw Object.assign(Error('ok'),{code:value.state});}),
       {code:'proposed'},'the owner has no daily limit');
+    // The owner's own job, asked in their private chat, reports there.
+    const privately=await capture('mine',{message:{message_id:901,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Read my chat'}},'123');
+    const binding=await s.guards.state(),me:Reader={admin:false,scope:null,space:'123',turnEvent:privately.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const mine=await s.jobs.propose(me,{title:'Mine',instruction:'Read my chat.'});
+    await s.jobs.decide('123',{id:mine.id,fingerprint:mine.fingerprint,decision:'approve'},privately);
+    await s.jobs.operation('job:'+mine.id,await authority());
+    await runStep(mine.id,{text:'My report.',continue:false,todo:[],cost_usd:0.1});
+    await s.jobs.operation('job:'+mine.id,await authority());
+    const report=(await stores.control.query('SELECT a.* FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1',[mine.id])).rows[0];
+    assert.deepEqual([report?.destination,report?.scope,report?.state],['123','123','approved'],'the report goes to the owner\'s private chat');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
