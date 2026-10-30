@@ -566,9 +566,11 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/spaces'){if(body.revision!==spaceRevision)throw new HttpError(409,'space_revision_conflict');spaceOverrides=body.overrides;spaceRevision++;return json(res,200,{ok:true});}
   if(route==='/memory/shares'){shares.push({id:randomUUID(),destination:body.destination,content:body.content});spaceRevision++;return json(res,200,{ok:true});}
   if(route==='/memory/recall')return json(res,200,{hits:[]});
-  if(route==='/settings/provider-models')return json(res,200,body.provider==='openai'||body.key||JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).some((p:any)=>p.id===body.provider&&p.url===body.url)
-    ?{provider:body.provider,models:body.provider==='openai'?['gpt-5.6-sol','text-embedding-3-small']:['claude-sonnet-5-5','gpt-5.6-sol']}
-    :{provider:body.provider,models:[],error:'missing_key'});
+  // Like a gateway that serves its API under /v1: the dialog's check finds an address typed without a version there.
+  if(route==='/settings/provider-models'){const typed=String(body.url??'').replace(/\/+$/,''),url=!typed||body.try_v1!==true||/(^|\/)v\d+[a-z0-9]*(\/|$)/i.test(new URL(typed).pathname)?typed:typed+'/v1';
+    return json(res,200,body.provider==='openai'||body.key||JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).some((p:any)=>p.id===body.provider&&p.url===url)
+    ?{provider:body.provider,models:body.provider==='openai'?['gpt-5.6-sol','text-embedding-3-small']:['claude-sonnet-5-5','gpt-5.6-sol'],...(url?{url}:{})}
+    :{provider:body.provider,models:[],error:'missing_key'});}
   if(route==='/memory/reviews/control')return json(res,200,{ok:true});
   // `slow-apply` restarts for a few seconds in steps like a real apply; `lost-apply` ends as a dashboard restart would leave it.
   if(route==='/settings/apply'&&['slow-apply','lost-apply'].includes(mode)){if(applying)throw new HttpError(409,'wait_for_active_jobs');

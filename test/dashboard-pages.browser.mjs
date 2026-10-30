@@ -370,16 +370,19 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('radio', {name: /Custom/}).click();
   await dialog.getByLabel('Name').fill('Example gateway');
-  await dialog.getByLabel('Address').fill('https://gateway.example.test/v1');
+  await dialog.getByLabel('Address').fill('https://gateway.example.test/');
   await dialog.getByLabel('API key').fill('synthetic-gateway-key');
   // Its models are listed from the address and key before it is added.
   await dialog
     .getByText(/\d+ models? found|Connected/)
     .first()
     .waitFor();
+  // The address works without /v1: the check finds the API there, and that address is saved.
+  await dialog.getByText('Nocheh will call https://gateway.example.test/v1').waitFor();
   await dialog.getByRole('button', {name: 'Add provider'}).click();
   await dialog.waitFor({state: 'detached'});
   await page.getByText('Example gateway').first().waitFor();
+  await page.getByText('https://gateway.example.test/v1', {exact: true}).waitFor();
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.waitFor();
   assert.equal(await bar.getByText('synthetic-gateway-key').count(), 0);
@@ -387,6 +390,15 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   await page.getByRole('status').filter({hasText: 'Saved and applied.'}).waitFor();
   await bar.getByText('No unsaved changes').waitFor();
   assert.equal(await bar.getByRole('button', {name: 'Save'}).isDisabled(), true);
+  // Leaving out /v1 when editing it keeps the saved address and its saved key.
+  await page.getByRole('button', {name: 'Edit Example gateway'}).click();
+  const edit = page.getByRole('dialog');
+  await edit.getByLabel('Address').fill('https://gateway.example.test');
+  await edit.getByText('Leave empty to keep the saved key.').waitFor();
+  await edit.getByText('Nocheh will call https://gateway.example.test/v1').waitFor();
+  await edit.getByRole('button', {name: 'Done'}).click();
+  await edit.waitFor({state: 'detached'});
+  await bar.getByText('No unsaved changes').waitFor();
   assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
   // Every model is picked from a dropdown of the provider's models, and any other name can still be typed.
   const mainModel = page.locator('#main-model');

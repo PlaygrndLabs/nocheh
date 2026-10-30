@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -99,6 +100,68 @@ class ProviderRouteTests(unittest.TestCase):
         save(self.state, {'NOCHEH_PROVIDERS': '[]', 'NOCHEH_REPLY_PROVIDER': ''}, saved['revision'])
         self.assertEqual(routes.keys(load(self.state)), {})
 
+    def test_an_address_typed_without_v1_is_checked_with_v1_and_saved_one_answers(self):
+        sent = []
+
+        class Gateway:
+            """Lists models only at the addresses it serves, as a provider would."""
+            def __init__(self, serves):
+                self.serves = serves
+
+            def open(self, request, timeout):
+                sent.append((request.full_url, request.get_header('Authorization')))
+                if request.full_url.removesuffix('/models') not in self.serves:
+                    raise urllib.error.HTTPError(request.full_url, 404, 'Not Found', {}, None)
+                body = json.dumps({'data': [{'id': 'claude-sonnet-5-5'}]}).encode()
+                return type('Response', (), {'read': lambda self, size: body, '__enter__': lambda self: self,
+                                             '__exit__': lambda self, *a: None})()
+
+        values = load(self.state)
+        values.update(NOCHEH_PROVIDERS=json.dumps([GATEWAY]), NOCHEH_PROVIDER_KEYS='{"gateway":"synthetic-gateway-key"}')
+        at_v1 = Gateway({'https://other.example.test/v1'})
+        for typed in ('https://other.example.test', 'https://other.example.test/'):
+            with self.subTest(typed=typed):
+                listed = routes.list_models(values, 'custom-2', at_v1, url=typed, secret='synthetic-typed-key', try_v1=True)
+                self.assertEqual((listed['models'], listed['url']), (['claude-sonnet-5-5'], 'https://other.example.test/v1'))
+        # An address that answers as typed is kept as typed, even without a version.
+        listed = routes.list_models(values, 'custom-2', Gateway({'https://other.example.test/inference'}),
+                                    url='https://other.example.test/inference', secret='synthetic-typed-key', try_v1=True)
+        self.assertEqual(listed['url'], 'https://other.example.test/inference')
+        # An address with a version is not tried elsewhere.
+        count = len(sent)
+        listed = routes.list_models(values, 'custom-2', at_v1, url='https://other.example.test/v1beta/openai', secret='k', try_v1=True)
+        self.assertEqual((listed['error'], len(sent)), ('http_404', count + 1))
+        # Only the provider dialog asks for /v1; a provider's own check lists exactly the address it will use.
+        count = len(sent)
+        listed = routes.list_models(values, 'custom-2', at_v1, url='https://other.example.test', secret='k')
+        self.assertEqual((listed['error'], len(sent)), ('http_404', count + 1))
+        # A refused key at the typed address is reported, not hidden behind a missing list.
+        class Refuses:
+            def open(self, request, timeout):
+                sent.append((request.full_url, request.get_header('Authorization')))
+                raise urllib.error.HTTPError(request.full_url, 401, 'Unauthorized', {}, None)
+        count = len(sent)
+        self.assertEqual(routes.list_models(values, 'custom-2', Refuses(), url='https://other.example.test', secret='k',
+                                            try_v1=True)['error'], 'http_401')
+        self.assertEqual(len(sent), count + 1)
+        # Editing the saved gateway to leave out /v1 keeps its saved key, which goes only to the saved address.
+        count = len(sent)
+        listed = routes.list_models(values, 'gateway', Gateway({GATEWAY['url']}), url='https://gateway.example.test/', try_v1=True)
+        self.assertEqual((listed['url'], sent[count:]), (GATEWAY['url'], [(GATEWAY['url'] + '/models', 'Bearer synthetic-gateway-key')]))
+        # When the saved address has no list either, that is what the check says, not that a key is missing.
+        listed = routes.list_models(values, 'gateway', Gateway(set()), url='https://gateway.example.test', try_v1=True)
+        self.assertEqual(listed['error'], 'http_404')
+        # Adding /v1 never makes an address longer than any address may be.
+        long = 'https://other.example.test/' + 'a' * 272
+        self.assertTrue(routes.valid_url(long))
+        count = len(sent)
+        routes.list_models(values, 'custom-2', at_v1, url=long, secret='k', try_v1=True)
+        self.assertEqual(len(sent), count + 1)
+        # Saved addresses are used as saved: nothing is added when a part calls the provider.
+        values.update(NOCHEH_PROVIDERS=json.dumps([{**GATEWAY, 'url': 'https://gateway.example.test/inference'}]),
+                      NOCHEH_PROVIDER='gateway', NOCHEH_MODEL='claude-sonnet-5-5')
+        self.assertEqual(routes.environment(values)['NOCHEH_REPLY_ROUTE_URL'], 'https://gateway.example.test/inference')
+
     def test_model_lists_follow_the_provider_being_edited_without_leaking_a_saved_key(self):
         sent, waits = [], []
 
@@ -121,6 +184,7 @@ class ProviderRouteTests(unittest.TestCase):
         # The saved key goes only to the saved address.
         routes.list_models(values, 'gateway', Opener(), url=GATEWAY['url'])
         self.assertEqual(sent[-1], (GATEWAY['url'] + '/models', 'Bearer synthetic-gateway-key'))
+        # The same address typed without /v1 is still the saved address.
         count = len(sent)
         moved = routes.list_models(values, 'gateway', Opener(), url='https://elsewhere.example.test/v1')
         self.assertEqual((moved['error'], len(sent)), ('missing_key', count))
