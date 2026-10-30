@@ -66,6 +66,13 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
+    async def test_a_background_job_step_runs_longer_with_its_step_count_and_reports_its_cost(self):
+        child=('import sys,json,time; body=json.load(sys.stdin); assert body["channel"]=="background"; assert body["heartbeat"] is True; '
+               'assert body["background"]=={"max_iterations":20}; assert 230<body["turn_deadline_epoch"]-time.time()<=540; '
+               'print(json.dumps({"event":"heartbeat"})); print(json.dumps({"state":"done","text":"so far","continue":True,"usage":{"cost_usd":0.25,"calls":3}}))')
+        result,events=await self.execute(child,extra={'channel':'background','background':{'max_iterations':20,'kind':'work'}})
+        self.assertEqual(events,[]);self.assertEqual((result['state'],result['continue'],result['cost_usd']),('done',True,0.25))
+        self.assertNotIn('usage',result)
     async def test_untranscribed_earlier_voice_is_named_without_entering_memory_query(self):
         check='import sys,json; body=json.load(sys.stdin); assert body["memory_query"]=="original"; print(json.dumps({"state":"done","text":body["text"]}))'
         result,_=await self.execute(check,extra={'untranscribed_voice':2})

@@ -27,7 +27,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions\/[a-f0-9]{64}|telegram\/destinations)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context|search))|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context|search))|jobs\/(size|propose|status|stop)|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
@@ -125,7 +125,7 @@ export function brokerServer(options:BrokerOptions) {
         const body=req.method==='POST'?JSON.stringify(await readJson(req,1024*1024)):undefined;
         // Context preparation and proposals have their own enforcement. Read policies
         // apply to retrieval; native memory remains writable within the owned profile.
-        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
+        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/propose','/v1/jobs/stop'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok){await response.body?.cancel();throw new HttpError(response.status,'scoped_archive_unavailable');}
         await stream(response,principal,res,file?26*1024*1024:8*1024*1024);

@@ -12,11 +12,13 @@ from .scopes import Scope,verify_capability
 
 
 class ManagedAsync:
-    def __init__(self,admin,credentials,call=None,runner=None,scheduler=None):
+    def __init__(self,admin,credentials,call=None,runner=None,scheduler=None,background_call=None):
         self.admin,self.credentials=admin,credentials
         self.root=Path(admin.root);self.directory=self.root/'nocheh-managed-runs'
         self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.call=call or self.http
+        # Background job steps have their own routes in storage.
+        self.background_call=background_call or (lambda route,body:self.http(route,body,'background'))
         self.scheduler=scheduler
         if runner is None:
             from .turn_process import run_process
@@ -24,8 +26,8 @@ class ManagedAsync:
         self.runner=runner;self.journal_lock=threading.RLock();self.sequences={}
         self.runs=AsyncRuns(self.directory,self.execute,self.reconcile)
 
-    def http(self,route,body):
-        request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/browser/'+route,
+    def http(self,route,body,family='browser'):
+        request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/'+family+'/'+route,
             data=canonical(body),headers={'Authorization':'Bearer '+self.admin.token,'Content-Type':'application/json'})
         try:
             with urlopen(request,timeout=230 if route=='prepare' else 15) as response:return json.load(response)
@@ -34,7 +36,8 @@ class ManagedAsync:
     def path(self,body,suffix):return self.directory/(identity(body)+suffix)
 
     def rpc(self,body,route,payload):
-        return self.scheduler.call(route,payload) if body.get('channel')=='scheduler' else self.call(route,payload)
+        if body.get('channel')=='scheduler':return self.scheduler.call(route,payload)
+        return self.background_call(route,payload) if body.get('channel')=='background' else self.call(route,payload)
 
     def start(self,body):
         if body.get('channel')=='scheduler' and not self.path(body,'.request').exists():
@@ -46,7 +49,7 @@ class ManagedAsync:
         if body.get('channel')=='scheduler':
             details=receipt['_schedule'];finish={key:value for key,value in receipt.items() if key!='_schedule'}
             result=self.scheduler.publish({**details,'finish':finish})
-        else:result=self.call('finish',receipt)
+        else:result=self.rpc(body,'finish',receipt)
         immutable_file(self.directory,identity(body)+'.published',b'{}')
         return result
 
@@ -93,14 +96,14 @@ class ManagedAsync:
 
     def execute(self,body,progress,cancelled):
         channel=body.get('channel')
-        if channel not in ('browser','scheduler'):raise ValueError('runtime_channel_unavailable')
+        if channel not in ('browser','scheduler','background'):raise ValueError('runtime_channel_unavailable')
         if cancelled.is_set():return {'state':'cancelled'}
         if channel=='scheduler':
             ready=self.scheduler.context(body,claim=True)
             if ready['state']!='ready':return {'state':'cancelled' if ready['state']=='cancelled' else 'ambiguous'}
             context,scope,claim=ready['context'],ready['scope'],ready['claim']
         else:
-            context=self.call('workflow-context',body)
+            context=self.rpc(body,'workflow-context',body)
             if context.get('storage_layout')=='original-only-v1':
                 # The authenticated control service supplies the admitted logical
                 # profile. Native storage identity comes only from its signed
@@ -112,7 +115,7 @@ class ManagedAsync:
             else:
                 name,_=self.admin.profile(context['profile']);scope=self.admin.binding(name)
             if scope.chat_id!=context['scope']:raise ValueError('profile_scope_denied')
-            claim=self.call('claim',context)
+            claim=self.rpc(body,'claim',context)
         immutable_file(self.directory,identity(body)+'.context',canonical(context))
         if not claim.get('claimed'):
             return {'state':claim['state'] if claim['state'] in CLOSED else 'ambiguous'}
@@ -134,6 +137,7 @@ class ManagedAsync:
                 progress('assistant')
                 native={**claim,**prepared,'channel':channel}
                 if channel=='scheduler':native.update(job_id=context['job_id'],job_preferences=context['definition'].get('preferences',{}))
+                if channel=='background':native.update(background=context['background'])
                 result=asyncio.run(self.runner(self.root,scope,native,self.admin.model,
                     self.credentials(),context['conversation'],emit=(lambda text:self.emit(body,text)) if channel=='browser' else None,cancelled=cancelled))
         except Exception:
@@ -144,6 +148,10 @@ class ManagedAsync:
         state='interrupted' if lost.is_set() else 'cancelled' if cancelled.is_set() else result['state']
         receipt={'event_id':context['event_id'],'actor':context['actor'],'state':state,'text':result.get('text',''),
             'session':result.get('session_id',context['conversation']),'error_code':result.get('error_code')}
+        if channel=='background':
+            # What the step leaves for the job: whether it goes on, its to-do list and its cost.
+            receipt.update({'continue':result.get('continue') is True,'todo':result.get('todo') if isinstance(result.get('todo'),list) else [],
+                            'cost_usd':result.get('cost_usd') if isinstance(result.get('cost_usd'),(int,float)) else None})
         if channel=='scheduler':
             from .scheduler import now
             receipt['_schedule']={'logical_profile':context['logical_profile'],'job_id':context['job_id'],'scope':context['scope'],

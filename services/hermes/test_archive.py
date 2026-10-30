@@ -170,6 +170,23 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(json.loads(archive_tools.meaning_tool({'query':' '})),{'error':'memory_search_unavailable'})
             request.assert_not_called()
 
+    def test_background_jobs_are_sized_proposed_listed_and_stopped_through_the_bound_scope(self):
+        with patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request:
+            result=json.loads(archive_tools.job_tool({'action':'propose','title':'Open tasks','instruction':'Find open tasks.','chat':'-1002','scope':'ignored','limit':5}))
+        self.assertEqual(result['state'],'proposed')
+        request.assert_called_once_with('/v1/jobs/propose',{'title':'Open tasks','instruction':'Find open tasks.','chat':'-1002'})
+        import io
+        from urllib.error import HTTPError
+        limit=HTTPError('url',409,'Conflict',{},io.BytesIO(b'{"error":"job_limit_reached"}'))
+        with patch.object(archive_tools,'request',side_effect=limit):
+            self.assertEqual(json.loads(archive_tools.job_tool({'action':'propose','title':'t','instruction':'i'})),{'error':'job_limit_reached'})
+        private=HTTPError('url',503,'Unavailable',{},io.BytesIO(b'{"error":"private storage detail"}'))
+        with patch.object(archive_tools,'request',side_effect=private):
+            self.assertEqual(json.loads(archive_tools.job_tool({'action':'status'})),{'error':'background_jobs_unavailable'})
+        with patch.object(archive_tools,'request') as request:
+            self.assertEqual(json.loads(archive_tools.job_tool({'action':'delete'})),{'error':'background_jobs_unavailable'})
+            request.assert_not_called()
+
     def test_archive_tools_require_bound_scope_and_never_accept_scope_from_model(self):
         with patch('urllib.request.urlopen') as network:
             self.assertIn('error',json.loads(archive_tools.search_tool({'query':'Friday','scope':'private'})))

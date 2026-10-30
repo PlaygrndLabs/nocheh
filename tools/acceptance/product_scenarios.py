@@ -550,6 +550,32 @@ class ProductScenarios(Scenarios):
         owner = self.page_tool({'chat': str(GROUP), 'from': since}, OWNER)
         self.gate('owner_reads_group_by_id', 'ORDERMARK2' in json.dumps(owner, ensure_ascii=False), items=len(owner.get('items', [])))
 
+    # Background jobs ------------------------------------------------------------------------------------
+
+    def background_job_runs_and_reports(self):
+        # The agent offers a job; the owner approves it on its card; the job runs in a session of its
+        # own with the archive tools, sends its report where it was asked, and its card says it is done.
+        job = {'action': 'propose', 'title': 'Open tasks JOB1', 'instruction': 'Find what is still open [[search:JOBMARK1]]'}
+        request = self.f.message(OWNER, 'کار بزرگ JOBMARK1 [[tool:nocheh_background_job '+json.dumps(job)+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        text = card['message']['text']
+        target = json.loads(card['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
+        self.gate('job_card_answers_the_request', target == request['message']['message_id'], target=target)
+        self.gate('job_card_shows_job_and_estimate', 'Open tasks JOB1' in text and 'Find what is still open' in text and '⏱' in text, card=text)
+        self.gate('job_card_two_buttons', len(self.buttons(card)) == 2, buttons=[button['text'] for button in self.buttons(card)])
+        time.sleep(3)
+        self.gate('nothing_runs_before_approval', not [row for row in self.new(before) if not self.is_card(row)])
+        answer = self.press(card, 'approve')
+        self.gate('job_press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
+        report = self.wait('job_report_sent', lambda: [row for row in self.replies(before, OWNER) if not self.is_card(row)
+                                                         and 'nocheh_archive_search' in (row['message'].get('text') or '')], 420)
+        self.gate('job_report_once', len(report) == 1, count=len(report))
+        self.gate('job_report_read_the_archive', 'JOBMARK1' in report[0]['message']['text'], report=report[0]['message']['text'][:300])
+        self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
+        jobs = [item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == 'Open tasks JOB1']
+        self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
+
     # Settings defaults ----------------------------------------------------------------------------------
 
     def defaults_keep_history_and_notion_off(self):
@@ -611,5 +637,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
+                 'background_job_runs_and_reports',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']

@@ -10,8 +10,9 @@ import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
+import type {BackgroundJobRepository} from './background-jobs.js';
 
-type ActionKind='telegram'|'controlled';
+type ActionKind='telegram'|'controlled'|'background';
 // Telegram allows 64 bytes of button data: a marker, the choice, and prefixes
 // of the action ID and of the fingerprint of its exact content.
 const buttonData=/^n([ad])([a-f0-9]{40})([a-f0-9]{16})$/;
@@ -52,7 +53,7 @@ export function telegramLink(chat:string,username:string|null,path:(string|null|
  * it was asked, where that person or the owner decides it. */
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
-    readonly call?:RuntimeCall){}
+    readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository){}
   private async approval(input:Record<string,unknown>,timeout=15000) {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
@@ -152,6 +153,7 @@ export class ActionCommandRepository {
   async offer<T extends Record<string,any>>(kind:ActionKind,result:T):Promise<T> {
     const owner=this.access.policy().owner_id;
     if(result?.state!=='proposed'||typeof result.id!=='string'||!this.call||!owner)return result;
+    if(kind==='background')return this.offerJob(result);
     try {
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions',control=this.access.stores.control;
       const row=(await control.query(`SELECT * FROM ${table} WHERE id=$1`,[result.id])).rows[0];if(!row)return result;
@@ -177,9 +179,40 @@ export class ActionCommandRepository {
         'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
+  /** Where a job's card goes: the chat and topic where it was asked, or the owner's private chat
+   * when the owner approves a member's job. */
+  private async jobPlace(row:any):Promise<{chat:string;topic?:string;here:string|null}> {
+    const owner=this.access.policy().owner_id!;
+    if(row.approver==='owner')return {chat:owner,here:null};
+    const [chat,topic]=String(row.space_id).split('/topic/'),asked=await this.asked(row.source_reference);
+    return {chat:chat!,...(topic?{topic}:{}),here:asked&&asked.chat===chat&&(asked.topic??'')===(topic??'')?asked.message??null:null};
+  }
+  /** Approve and Reject buttons on a proposed background job, for whoever approves it. */
+  private async offerJob<T extends Record<string,any>>(result:T):Promise<T> {
+    if(!this.jobs)return result;
+    try {
+      const card=await this.jobs.card(result.id),{line}=await this.texts();
+      if(card.state!=='proposed')return result;
+      const place=await this.jobPlace(card.row);
+      const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),...(place.here?{reply_to:place.here}:{}),id:result.id,
+        text:card.text,links:[],buttons:[[line.approve.slice(0,40),'na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],[line.reject.slice(0,40),'nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
+      if(sent?.state!=='done')return result;
+      return {...result,message:card.row.approver==='owner'&&card.row.requester?
+        'The owner was asked privately, with Approve and Reject buttons, to approve this job, because its cost is over what a member may start. Say so briefly with the estimate; nothing runs until the owner approves.':
+        'A card with Approve and Reject buttons for this job was posted here as the reply to the request. It shows the job, its size, time and cost, so say at most one short sentence; nothing runs until it is approved.'};
+    }catch(error){if(error instanceof HttpError)return result;throw error;}
+  }
+  /** A decided job's card keeps its text, shows where the job is and loses its buttons. */
+  private async settleJob(id:string) {
+    if(!this.jobs)return;
+    const card=await this.jobs.card(id),place=await this.jobPlace(card.row),state=card.row.cancel_requested&&card.state!=='done'?'stopped':card.state;
+    const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines.running:card.lines[state];
+    if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[]});
+  }
   /** Show the decision on a card and remove its buttons; best effort. */
   async settle(kind:ActionKind,id:string) {
     try {
+      if(kind==='background')return await this.settleJob(id);
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
       const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line):null;
@@ -197,8 +230,10 @@ export class ActionCommandRepository {
     const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),{line}=await this.texts();
     const answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:text.slice(0,200)},10000);
     const found=(await this.access.stores.control.query(`SELECT 'telegram' AS kind,id,fingerprint FROM telegram_action_requests WHERE left(id,40)=$1
-      UNION ALL SELECT 'controlled',id,fingerprint FROM controlled_actions WHERE left(id,40)=$1`,[data[2]])).rows;
+      UNION ALL SELECT 'controlled',id,fingerprint FROM controlled_actions WHERE left(id,40)=$1
+      UNION ALL SELECT 'background',id,fingerprint FROM background_jobs WHERE left(id,40)=$1`,[data[2]])).rows;
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
+    if(action?.kind==='background'&&this.jobs)return this.jobPressed(action,data[1]==='a',presser,chat,query.id,source);
     const reviewer=action?.kind==='telegram'?(await this.telegram.reviewer(action.id))?.user:undefined;
     // The owner decides any card; the person who asked decides only their own card in their group.
     if(!policy.owner_id||presser!==policy.owner_id&&!(reviewer&&presser===reviewer&&chat===(await this.place('telegram',action.id))?.chat)){
@@ -215,6 +250,20 @@ export class ActionCommandRepository {
       reply=line.decided;
     }
     await answer(reply);await this.settle(kind,action.id);return true;
+  }
+  /** Approve or Reject on a job's card: the owner, or the person who asked on their own job's card. */
+  private async jobPressed(action:{id:string;fingerprint:string},approve:boolean,presser:string,chat:string,query:string,source:SourceReference):Promise<boolean> {
+    const {line}=await this.texts(),answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query,text:text.slice(0,200)},10000);
+    if(!await this.jobs!.presser(action.id,presser,chat)){await answer(presser===this.access.policy().owner_id?line.only_owner:line.only_requester);return true;}
+    let reply:string;
+    try {
+      const result=await this.jobs!.decide(presser,{id:action.id,fingerprint:action.fingerprint,decision:approve?'approve':'deny'},source);
+      reply=result.state==='rejected'?line.rejected_action:line.approved;
+    }catch(error) {
+      if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
+      reply=line.decided;
+    }
+    await answer(reply);await this.settle('background',action.id);return true;
   }
   /** Retry failed under a problem notice: only the owner's press in their private chat retries anything. */
   private async retryPressed(query:any):Promise<boolean> {

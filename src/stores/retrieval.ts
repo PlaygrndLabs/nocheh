@@ -23,6 +23,11 @@ import {PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-pa
 import {parentSpace} from '../spaces.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
+// One chat's records in time order. Telegram gives a message's own time; an assistant reply has only the time it was saved.
+const pageRecords=`FROM (SELECT id,kind,at,(extract(epoch FROM at)*1000000)::bigint AS micros FROM (SELECT id,kind,
+  CASE WHEN occurred_at ~ '^[0-9]{1,12}$' THEN to_timestamp(occurred_at::bigint) ELSE received_at END AS at FROM events
+  WHERE scope=$1 AND origin<>'generated' AND kind NOT IN ('telegram_wire','import_manifest')) a) e
+  WHERE ($2::timestamptz IS NULL OR e.at>=$2) AND ($3::timestamptz IS NULL OR e.at<$3)`;
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
 export function scopedObservation(value:unknown):any {
@@ -231,20 +236,37 @@ export class SourceRepository {
   }
   /** A conversation in time order, one page at a time, with only what the reader may read.
    * The owner may name any chat; anyone else reads the chat they are in. */
-  async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number}) {
+  /** The chat a page or a size reads: the owner names any chat, anyone else only their own. */
+  private async conversation(principal:Reader,input:{chat:string;from:string;to:string}) {
     string(input.chat,256);
-    const from=pageDate(input.from),to=pageDate(input.to,true),after=cursor(input.after);
+    const from=pageDate(input.from),to=pageDate(input.to,true);
     const binding=principal.admin?null:await this.audience.assert(principal),owner=principal.admin||principal.scope===null;
     if(!owner&&input.chat&&input.chat!==principal.scope)throw new HttpError(403,'conversation_not_permitted');
     // A topic is read with the rest of its group, as a group reader reads it.
     const space=principal.space?parentSpace(principal.space)??principal.space:null;
     const chat=owner?input.chat||(principal.admin?'':space??this.access.policy().owner_id):principal.scope!;
     if(!chat)throw new HttpError(400,'conversation_required');
-    // Telegram gives a message's own time; an assistant reply has only the time it was saved.
-    const records=`FROM (SELECT id,kind,at,(extract(epoch FROM at)*1000000)::bigint AS micros FROM (SELECT id,kind,
-      CASE WHEN occurred_at ~ '^[0-9]{1,12}$' THEN to_timestamp(occurred_at::bigint) ELSE received_at END AS at FROM events
-      WHERE scope=$1 AND origin<>'generated' AND kind NOT IN ('telegram_wire','import_manifest')) a) e
-      WHERE ($2::timestamptz IS NULL OR e.at>=$2) AND ($3::timestamptz IS NULL OR e.at<$3)`;
+    return {chat,from,to,binding};
+  }
+  /** How much a chat, or a period of it, holds, so a big job can be sized before it starts. */
+  async size(principal:Reader,input:{chat:string;from:string;to:string}) {
+    const {chat,from,to}=await this.conversation(principal,input);
+    const totals=(await this.stores.archive.query(`SELECT count(*)::integer AS records,
+      count(*) FILTER (WHERE r.kind IN ('telegram_update','telegram_desktop_message','browser_input'))::integer AS messages,
+      coalesce(sum(octet_length(t.original_text)),0)::bigint AS characters,min(r.at) AS first,max(r.at) AS last
+      FROM (SELECT e.id,e.kind,e.at ${pageRecords}) r JOIN events t ON t.id=r.id`,[chat,from,to])).rows[0];
+    // A photo is kept in several sizes, so files are counted by the message that has them.
+    const files=(await this.stores.archive.query(`SELECT count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('document','file'))::integer AS files,
+      count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('photo','image'))::integer AS images,
+      count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('voice','audio','video_note'))::integer AS voice_notes
+      FROM (SELECT e.id ${pageRecords}) r JOIN artifacts a ON a.event_id=r.id`,[chat,from,to])).rows[0];
+    return {chat,records:totals.records,messages:totals.messages,characters:Number(totals.characters),
+      files:files.files,images:files.images,voice_notes:files.voice_notes,
+      first:totals.first?.toISOString()??null,last:totals.last?.toISOString()??null};
+  }
+  async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number}) {
+    const after=cursor(input.after),{chat,from,to,binding}=await this.conversation(principal,input);
+    const records=pageRecords;
     const rows=(await this.stores.archive.query(`SELECT id,kind,at,micros ${records} AND ($4::bigint IS NULL OR (e.micros,e.id)>($4::bigint,$5))
       ORDER BY e.micros,e.id LIMIT 201`,[chat,from,to,after?.micros??null,after?.id??''])).rows;
     const liveCopies=principal.admin?new Set<string>():await this.access.retirements?.liveCopies(rows.map(row=>row.id))??new Set<string>();

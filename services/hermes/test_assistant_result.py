@@ -1,5 +1,5 @@
 import unittest
-from services.hermes.assistant_turn import conversation_result
+from services.hermes.assistant_turn import background_limits,conversation_result,step_result
 
 
 class AssistantResultTests(unittest.TestCase):
@@ -33,3 +33,23 @@ class AssistantResultTests(unittest.TestCase):
         limited=conversation_result({'completed':True,'final_response':answer},'session',True)
         self.assertEqual(limited['state'],'done')
         self.assertTrue(limited['text'].startswith(answer+'\n\nMemory is limited;'))
+
+
+class BackgroundStepResultTests(unittest.TestCase):
+    def test_a_step_stopped_at_its_step_limit_goes_on_and_an_answer_ends_the_job(self):
+        todo=[{'content':'read April','status':'pending'}]
+        limited=step_result({'completed':False,'final_response':'Read January to March so far.','turn_exit_reason':'max_iterations_reached(20/20)'},'job_s',todo)
+        self.assertEqual(limited,{'state':'done','text':'Read January to March so far.','session_id':'job_s','continue':True,'todo':todo})
+        done=step_result({'completed':True,'final_response':'The report.','turn_exit_reason':'text_response(stop)'},'job_s',[])
+        self.assertEqual((done['state'],done['continue'],done['text']),('done',False,'The report.'))
+
+    def test_a_failed_or_empty_step_is_a_failure_the_job_can_retry(self):
+        for result in [None,{'completed':True,'final_response':''},{'completed':False,'final_response':'partial'},
+                       {'completed':True,'final_response':'x','failed':True},{'completed':True,'final_response':'x','interrupted':True}]:
+            with self.subTest(result=result):
+                self.assertEqual(step_result(result,'job_s',[]),{'state':'failed','error_code':'model_unavailable'})
+
+    def test_a_step_takes_only_a_bounded_number_of_steps(self):
+        self.assertEqual(background_limits({'background':{'max_iterations':20}}),20)
+        for body in [{},{'background':None},{'background':{'max_iterations':0}},{'background':{'max_iterations':61}},{'background':{'max_iterations':'20'}}]:
+            with self.subTest(body=body),self.assertRaises(ValueError):background_limits(body)

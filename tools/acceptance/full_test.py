@@ -73,6 +73,7 @@ TITLES = {
     'learning_reaches_honcho': 'Learning reaches Honcho', 'inbox_never_asks_about_the_owner': 'Inbox: one card per new person, none for you',
     'import_with_topics_files_and_learning': 'Telegram import with topics, files and learning',
     'tasks_from_chat_with_reminder': 'Tasks from chat, reminder, status and done', 'tasks_not_in_unrelated_group': 'Tasks stay private in groups', 'chat_is_read_in_order': 'A chat is read in order',
+    'background_job_runs_and_reports': 'A background job is approved, runs and reports',
     'defaults_keep_history_and_notion_off': 'Defaults: history kept, Notion off',
     'settings_apply_is_followed_to_the_end': 'Settings: Save and apply finish, and a reload keeps following',
     'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',

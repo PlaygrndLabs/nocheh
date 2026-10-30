@@ -18,7 +18,7 @@ CODES={'model_unavailable','assistant_runtime_unavailable','runtime_restart_duri
 
 def identity(body):
     channel=body.get('channel','telegram');event=body.get('event_id');attempt=body.get('attempt')
-    if channel not in ('telegram','browser','scheduler') or not isinstance(event,str) or not re.fullmatch('[a-f0-9]{64}',event):raise ValueError('invalid_run_identity')
+    if channel not in ('telegram','browser','scheduler','background') or not isinstance(event,str) or not re.fullmatch('[a-f0-9]{64}',event):raise ValueError('invalid_run_identity')
     if isinstance(attempt,bool) or not isinstance(attempt,(int,str)) or (isinstance(attempt,int) and attempt<1) or not re.fullmatch('[a-zA-Z0-9_-]{1,100}',str(attempt)):raise ValueError('invalid_run_attempt')
     return hashlib.sha256(canonical([channel,event,attempt])).hexdigest()
 

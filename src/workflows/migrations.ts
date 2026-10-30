@@ -82,6 +82,7 @@ export async function stageMigrationImport(pool:pg.Pool,id:string,input:unknown)
 const candidates:Record<WorkflowFamily,string>={
   // Organization has no legacy executor or implicit historical backfill.
   organization:"SELECT ''::text AS job,1 AS generation WHERE false",
+  background:"SELECT ''::text AS job,1 AS generation WHERE false",
   preparation:`SELECT e.id AS job,1 AS generation FROM events e WHERE
     EXISTS(SELECT 1 FROM artifacts a WHERE a.event_id=e.id AND (a.state<>'ready' OR NOT EXISTS(SELECT 1 FROM derived_artifacts d WHERE d.artifact_id=a.id AND d.kind IN ('transcript','extracted_text','extraction_status'))))
     OR EXISTS(SELECT 1 FROM guard_sources g,guard_state s WHERE g.event_id=e.id AND g.state<>'ready' AND s.mode='on')`,

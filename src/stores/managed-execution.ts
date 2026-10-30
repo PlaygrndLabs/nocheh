@@ -14,7 +14,7 @@ import {RuntimeProfileRepository} from './runtime-profiles.js';
 
 export const managedStorageSchema=`
 CREATE TABLE IF NOT EXISTS managed_runs (
- event_id text PRIMARY KEY,channel text NOT NULL CHECK(channel IN ('browser','scheduler')),
+ event_id text PRIMARY KEY,channel text NOT NULL CHECK(channel IN ('browser','scheduler','background')),
  source_reference jsonb NOT NULL,scope text NOT NULL,space_id text NOT NULL,logical_profile text NOT NULL,conversation_id text NOT NULL,
  binding jsonb NOT NULL,state text NOT NULL DEFAULT 'captured' CHECK(state IN ('captured','running','done','failed','cancelled','interrupted')),
  admitted boolean NOT NULL DEFAULT true,actor text,owner_epoch integer,lease_until timestamptz,
@@ -25,6 +25,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS managed_conversation_busy ON managed_runs(scop
  WHERE admitted AND state IN ('captured','running');
 CREATE INDEX IF NOT EXISTS managed_run_lease ON managed_runs(lease_until) WHERE state='running';
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS launch_requested_at timestamptz;
+-- Background job steps joined browser and scheduled runs after the first table.
+ALTER TABLE managed_runs DROP CONSTRAINT IF EXISTS managed_runs_channel_check;
+ALTER TABLE managed_runs ADD CONSTRAINT managed_runs_channel_check CHECK(channel IN ('browser','scheduler','background'));
 `;
 const closed=new Set(['done','failed','cancelled','interrupted']);
 export const managedIdentity=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_run_identity');return id;};
@@ -34,11 +37,13 @@ export type ManagedInput={principal:Reader;text:string;transcripts:string[];file
 /** Claims and receipts share one recovery protocol. Each channel provides its
  * authorized typed root and prepared input through explicit repositories. */
 export abstract class ManagedExecutionRepository {
-  protected abstract readonly channel:'browser'|'scheduler';
-  protected abstract readonly family:'browser'|'schedules';
+  protected abstract readonly channel:'browser'|'scheduler'|'background';
+  protected abstract readonly family:'browser'|'schedules'|'background';
   protected readonly rebindBeforeLaunch:boolean=false;
-  protected get resultKind(){return this.channel==='browser'?'browser_result':'scheduled_result';}
-  protected get protocol(){return this.channel==='browser'?'managed-browser-v2':'managed-scheduler-v2';}
+  // How long a run's credential lasts; a background job's step runs longest.
+  protected readonly credentialMillis:number=600000;
+  protected get resultKind():string{return this.channel==='browser'?'browser_result':'scheduled_result';}
+  protected get protocol():string{return this.channel==='browser'?'managed-browser-v2':'managed-scheduler-v2';}
   protected abstract sourceAllowed(row:any,binding:GuardBinding):Promise<void>;
   protected abstract readiness(row:any):Promise<Observation>;
   protected abstract build(row:any):Promise<{reference:DerivativeReference;input:ManagedInput}>;
@@ -121,7 +126,7 @@ export abstract class ManagedExecutionRepository {
     await this.current(row);await this.turns.binding(built.input.principal);
     return {claimed:true,event_id:row.event_id,state:'running',channel:this.channel,scope:row.scope,owner:row.scope===this.access.policy().owner_id,
       guard_mode:row.binding.mode,text:built.input.text,source_key:built.input.source_key,payload:{profile:row.logical_profile,space:row.space_id,conversation_id:row.conversation_id},
-      archive_credential:await this.turns.prepared.audience.turn(this.token,built.input.principal,row.event_id,Date.now()+600000)};
+      archive_credential:await this.turns.prepared.audience.turn(this.token,built.input.principal,row.event_id,Date.now()+this.credentialMillis)};
   }
   async prepare(input:unknown){const row=await this.scoped(input);await this.leased(row,object(input));const saved=await this.savedInput(row);
     await this.turns.binding(saved.principal);await this.current(row);return {transcripts:saved.transcripts,files:saved.files};}

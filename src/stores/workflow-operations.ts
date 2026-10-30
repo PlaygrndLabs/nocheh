@@ -155,6 +155,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     telegram:(id,authority)=>s.telegram.run(id,authority),
     browser:(id,authority)=>s.browser.run(id,authority),
     schedules:(id,authority)=>s.scheduled.operation(id,authority),
+    background:(id,authority)=>s.jobs.operation(id,authority),
     actions:async(id,authority)=>{
       const result=await s.telegramActions.run(id,authority);
       // The approval card, if any, then says the message was sent.

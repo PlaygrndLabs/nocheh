@@ -14,6 +14,8 @@ test('broker supports only explicit scoped routes and the configured reply provi
   // The agent's reading tools reach storage, which checks who may read what.
   for(const route of ['/v1/archive/page','/v1/imports/pending'])assert.equal(scopedRoute('GET',route),true);
   assert.equal(scopedRoute('POST','/v1/memory/honcho/search'),true);
+  for(const action of ['size','propose','status','stop'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),true);
+  assert.equal(scopedRoute('POST','/v1/jobs/approve'),false,'only a person approves a job, on its card');
   // Settings › Models may name one HTTPS reply provider; any other address stays denied.
   const gateway='https://gateway.example.test/v1';
   assert.throws(()=>providerTarget({base_url:'https://attacker.example',api_mode:'codex_responses'},'/v1/chat/completions',gateway),{code:'provider_route_denied'});
