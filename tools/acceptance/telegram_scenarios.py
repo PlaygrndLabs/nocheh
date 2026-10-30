@@ -892,6 +892,13 @@ def run(directory, names, scenarios_class=Scenarios):
             break
         time.sleep(5)
     lingering = turns()
+    if lingering and backlog() != '0':
+        # Reviews still queued at the time limit keep starting short turns, so a turn
+        # running now is not a leak. One still there after the launcher's own turn
+        # limit has passed is.
+        first = {row.get('ID') for row in lingering}
+        time.sleep(300)
+        lingering = [row for row in turns() if row.get('ID') in first]
     scenarios.current = {'scenario': 'no_lingering_isolated_turns', 'gates': [], 'passed': not lingering}
     scenarios.current['observed'] = {'containers': len(lingering), 'native_reviews_pending_at_end': int(pending),
                                      'native_reviews_left': int(backlog()),
