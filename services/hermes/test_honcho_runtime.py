@@ -42,6 +42,20 @@ class HonchoRuntimeTests(unittest.TestCase):
                 self.assertEqual(operate(state,'up'),0)
                 self.assertEqual(call.call_args.kwargs['env']['COMPOSE_PROJECT_NAME'],'nocheh-synthetic-owned')
 
+    def test_apply_restarts_a_container_left_on_an_older_route(self):
+        # The generated files can already match the saved routes while a container
+        # still runs an older route, after a start that failed; Compose recreates it.
+        from tools.operations.installation.settings import refresh_honcho
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            values.update(COMPOSE_PROJECT_NAME='nocheh-synthetic-owned',NOCHEH_HONCHO_ENABLED='true')
+            write_env(env_path(state),values)
+            with patch('tools.operations.memory.honcho_runtime.operate',return_value=0) as up:
+                self.assertEqual(refresh_honcho(state,values),'unchanged')
+                self.assertEqual([call.args[1] for call in up.call_args_list],['up'])
+            with patch('tools.operations.memory.honcho_runtime.operate',return_value=1):
+                self.assertEqual(refresh_honcho(state,values),'failed')
+
     def test_other_project_writers_block_and_clean_setup_uses_managed_volumes(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state);memory=state/'honcho'
