@@ -50,7 +50,8 @@ test('the owner password is kept hashed, pauses after wrong tries and signs ever
   try {
     assert.equal(await lock.check('x'.repeat(43),'phone'),'no_password','no password means locked, not open');
     await assert.rejects(lock.signIn('anything','browser'),{status:409,code:'owner_password_not_set'});
-    await assert.rejects(lock.create('short'),{status:400,code:'password_too_short'});
+    await assert.rejects(lock.create(''),{status:400,code:'password_empty'});
+    await assert.rejects(lock.create('x'.repeat(201)),{status:400,code:'password_too_long'});
     const browser=await lock.create('river-lamp-42');
     await assert.rejects(lock.create('taken-over-99'),{status:409,code:'owner_password_already_set'},'only the first visit creates it');
     assert.equal(await lock.check(browser.token,'browser'),'signed_in');

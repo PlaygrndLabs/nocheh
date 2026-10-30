@@ -40,7 +40,7 @@ export function PasswordSettings() {
         {
           wrong_password: 'The current password is wrong.',
           sign_in_paused: 'Too many wrong passwords. Try again later.',
-          password_too_short: 'Use at least 8 characters for the new password.',
+          password_empty: 'Enter a new password.',
           password_too_long: 'Use at most 200 characters for the new password.',
         }[error.message] ?? errorWords(e),
       );
@@ -120,7 +120,7 @@ export function PasswordSettings() {
               aria-label="New password"
               autoComplete="new-password"
               value={next}
-              placeholder="New password, at least 8 characters"
+              placeholder="New password"
               disabled={!!busy}
               onChange={e => setNext(e.target.value)}
             />

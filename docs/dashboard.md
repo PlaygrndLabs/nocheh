@@ -103,10 +103,9 @@ remain compatible; download-only cookies cannot administer settings.
 ## Sign-in
 
 The dashboard asks for the owner's Nocheh password; the Telegram mini app uses
-the same one. On the first visit it asks to create the password, at least 8
-characters. After that it opens on a sign-in screen, and a browser stays signed
-in until it signs out (Sign out, at the bottom of the menu) or goes 30 days
-without being used. Sign-ins survive dashboard restarts.
+the same one. On the first visit it asks to create the password. After that it
+opens on a sign-in screen, and a browser stays signed in until it signs out
+(Sign out, at the bottom of the menu) or goes 30 days without being used. Sign-ins survive dashboard restarts.
 
 Settings › Privacy & data › Password changes the password after asking for the
 current one; every other browser and phone then signs in again. Sign out
