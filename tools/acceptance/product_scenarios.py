@@ -429,6 +429,8 @@ class ProductScenarios(Scenarios):
         imported = self.f.query('nocheh_archive', "SELECT string_agg(quote_literal(id),',') FROM events WHERE origin='import' AND scope LIKE '"+str(GROUP)+"%'")
         notes = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE source_reference->>'id' IN ("+imported+")") if imported else '0'
         self.gate('imported_history_writes_no_memory_notes', notes == '0', count=notes)
+        questions = self.f.query('nocheh_control', "SELECT count(*) FROM interpretation_jobs WHERE source_reference->>'id' IN ("+imported+")") if imported else '0'
+        self.gate('imported_history_asks_no_learning_questions', questions == '0', count=questions)
 
     # Memory search model ----------------------------------------------------------------------------
 

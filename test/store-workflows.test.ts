@@ -280,5 +280,13 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal(reviews,reviewsBefore);
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id=$1",['source:'+imported.id])).rows[0].count,1,
       'imported history is still learned by long-term memory');
+    assert.equal((await advance('honcho','source:'+imported.id)).state,'waiting');
+    for(const row of (await stores.control.query("SELECT id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='pending'",[imported.id])).rows)
+      assert.equal((await advance('honcho','receipt:'+row.id)).state,'completed');
+    assert.equal((await advance('honcho','source:'+imported.id)).state,'completed');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='done'",[imported.id])).rows[0].count,1,
+      'Honcho reads the imported message');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM interpretation_jobs WHERE source_reference->>'id'=$1",[imported.id])).rows[0].count,0,
+      'no learning question is asked about each imported message');
   }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });

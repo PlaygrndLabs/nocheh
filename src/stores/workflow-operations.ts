@@ -253,7 +253,9 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         const selected=queued.find(value=>value.audience===audience);if(!selected)return observation('failed','sync');
         // Learning waits for this source's own sessions, not for the whole workspace.
         if(!await s.memory.settled(selected.receipts))return waiting('sync','prerequisite');
-        await s.learning.request(ready.source.reference,selected.workspace,selected.audience);return observation('completed','sync');
+        // Imported history is read and summarized by Honcho, without a learning question about each old message.
+        if(ready.source.origin!=='import')await s.learning.request(ready.source.reference,selected.workspace,selected.audience);
+        return observation('completed','sync');
       });
       if(kind==='projection')return fenced('honcho',authority,async()=>{await s.memory.queueProjection(id);return observation('completed','sync');});
       if(kind==='generation')return fenced('honcho',authority,async()=>{

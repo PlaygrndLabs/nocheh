@@ -3,11 +3,11 @@
 The secret check always runs at import. It checks each page of messages in shared
 calls, with each message's other text fields beside its words.
 
-Imported history is learned by long-term memory only, without memory notes. Honcho reads
-the messages in windows and summarizes them, at its own recent token counts per call or
-typical ones, and answers one learning question about each message, at typical token
-counts. Prices come from Hermes's price table for the models in Settings › Models. It
-is an estimate: real cost depends on the messages and the models.
+Imported history is learned by long-term memory only: Honcho reads the messages in windows
+and summarizes them, at its own recent token counts per call or typical ones. No memory
+notes are written and no learning question is asked about each old message. Prices come
+from Hermes's price table for the models in Settings › Models. It is an estimate: real
+cost depends on the messages and the models.
 
 Voice notes are transcribed at import when Settings › Models has a voice provider with a key,
 priced per minute of audio from the export's own durations. Each photo or image is read once
@@ -19,10 +19,8 @@ from datetime import datetime, timedelta, timezone
 from tools.operations.provider import routes as provider_routes
 from tools.operations.provider.usage import honcho_rows
 
-# Typical tokens (input, output) of one Honcho memory call, and of one message's learning answer,
-# which measured runs answer in one call.
+# Typical tokens (input, output) of one Honcho memory call.
 HONCHO_TOKENS = (2500, 400)
-LEARNING_TOKENS = (12500, 1300)
 # Honcho reads up to this much message text per call, and summarizes every 20 and every 60 messages.
 HONCHO_WINDOW = 1024
 SUMMARIES = (20, 60)
@@ -71,7 +69,7 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
     checked = 2 * characters + CHECK_FIELDS * messages; check_calls = math.ceil(checked / CHECK_CALL)
     check = row('guard', check_calls, (checked / CHARACTERS_PER_TOKEN / max(1, check_calls) + CHECK_PROMPT_TOKENS, CHECK_OUTPUT_TOKENS))
     pictures = row('image', images, IMAGE_TOKENS)
-    priced = [check, row('memory', honcho_calls, per_call), pictures, row('memory', messages, LEARNING_TOKENS)]
+    priced = [check, row('memory', honcho_calls, per_call), pictures]
     if call is None:
         from tools.operations.archive.archive import API
         call = API().call
@@ -81,8 +79,7 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
     except Exception:
         costs = [None] * len(priced)
     known_cost = lambda value: float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
-    parts = [{'part': 'memory', 'label': 'Long-term memory', 'cost_usd': known_cost(costs[1]), 'measured': calls >= HISTORY},
-             {'part': 'learning', 'label': 'Learning from each message', 'cost_usd': known_cost(costs[3]), 'measured': False}]
+    parts = [{'part': 'memory', 'label': 'Long-term memory', 'cost_usd': known_cost(costs[1]), 'measured': calls >= HISTORY}]
     total = None if any(part['cost_usd'] is None for part in parts) else round(sum(part['cost_usd'] for part in parts), 2)
     for part in parts:
         if part['cost_usd'] is not None: part['cost_usd'] = round(part['cost_usd'], 2)
