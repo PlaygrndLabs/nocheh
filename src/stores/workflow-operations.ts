@@ -190,7 +190,9 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       const kind=match[1],id=match[2]!;
       if(kind==='source')return fenced('memory_review',authority,async()=>{
         const ready=await sourceReady(id);if('state' in ready)return ready;
-        await s.reviews.queue(ready.source.reference);await s.learning.renew(ready.source.reference);
+        // Imported history is learned by long-term memory only: a memory-notes review of every old message costs far more than it adds.
+        if(ready.source.origin!=='import')await s.reviews.queue(ready.source.reference);
+        await s.learning.renew(ready.source.reference);
         // Honcho writes each source once; a later guard epoch only asks for sources it never wrote.
         if(!await s.memory.ingested(id))await submit('honcho','source:'+id,ready.binding.epoch);
         await s.guards.assertCurrent(ready.binding);return observation('completed','review');
@@ -251,7 +253,9 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         const selected=queued.find(value=>value.audience===audience);if(!selected)return observation('failed','sync');
         // Learning waits for this source's own sessions, not for the whole workspace.
         if(!await s.memory.settled(selected.receipts))return waiting('sync','prerequisite');
-        await s.learning.request(ready.source.reference,selected.workspace,selected.audience);return observation('completed','sync');
+        // Imported history is read and summarized by Honcho, without a learning question about each old message.
+        if(ready.source.origin!=='import')await s.learning.request(ready.source.reference,selected.workspace,selected.audience);
+        return observation('completed','sync');
       });
       if(kind==='projection')return fenced('honcho',authority,async()=>{await s.memory.queueProjection(id);return observation('completed','sync');});
       if(kind==='generation')return fenced('honcho',authority,async()=>{

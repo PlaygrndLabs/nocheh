@@ -3,12 +3,11 @@
 The secret check always runs at import. It checks each page of messages in shared
 calls, with each message's other text fields beside its words.
 
-Learning one message runs one memory-notes review in Hermes, and Honcho's memory
-reads the messages in windows and summarizes them. Each review costs what reviews
-cost on this installation over the last 30 days; without that history, typical
-token counts are priced. Honcho uses its own recent token counts per call, or
-typical ones. Prices come from Hermes's price table for the models in Settings ›
-Models. It is an estimate: real cost depends on the messages and the models.
+Imported history is learned by long-term memory only: Honcho reads the messages in windows
+and summarizes them, at its own recent token counts per call or typical ones. No memory
+notes are written and no learning question is asked about each old message. Prices come
+from Hermes's price table for the models in Settings › Models. It is an estimate: real
+cost depends on the messages and the models.
 
 Voice notes are transcribed at import when Settings › Models has a voice provider with a key,
 priced per minute of audio from the export's own durations. Each photo or image is read once
@@ -18,10 +17,9 @@ import math
 from datetime import datetime, timedelta, timezone
 
 from tools.operations.provider import routes as provider_routes
-from tools.operations.provider.usage import hermes_rows, honcho_rows
+from tools.operations.provider.usage import honcho_rows
 
-# Typical tokens (input, output) of one memory-notes review and of one Honcho memory call.
-REVIEW_TOKENS = (12000, 800)
+# Typical tokens (input, output) of one Honcho memory call.
 HONCHO_TOKENS = (2500, 400)
 # Honcho reads up to this much message text per call, and summarizes every 20 and every 60 messages.
 HONCHO_WINDOW = 1024
@@ -39,8 +37,7 @@ IMAGE_TOKENS = (1800, 300)
 
 def recent(state, now=None):
     today = datetime.fromtimestamp(now, timezone.utc) if now else datetime.now(timezone.utc)
-    since = (today - timedelta(days=29)).strftime('%Y-%m-%d')
-    return hermes_rows(state, since) or [], honcho_rows(state, since) or []
+    return honcho_rows(state, (today - timedelta(days=29)).strftime('%Y-%m-%d')) or []
 
 
 def voice(values, notes, seconds):
@@ -59,10 +56,7 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
         raise ValueError('invalid_learning_estimate')
     from tools.operations.installation.configuration import load
     values = load(state); known = provider_routes.providers(values)
-    hermes, honcho = recent(state, now)
-    reviews = [row for row in hermes if row['part'] == 'memory_review' and row['cost_complete'] and row['cost_usd'] is not None]
-    runs = sum(row['runs'] for row in reviews)
-    memory = [row for row in honcho if row['part'] == 'memory']
+    memory = [row for row in recent(state, now) if row['part'] == 'memory']
     calls = sum(row['calls'] - row['failed'] for row in memory)
     per_call = (sum(row['input_tokens'] for row in memory) / calls, sum(row['output_tokens'] for row in memory) / calls) \
         if calls >= HISTORY else HONCHO_TOKENS
@@ -75,7 +69,7 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
     checked = 2 * characters + CHECK_FIELDS * messages; check_calls = math.ceil(checked / CHECK_CALL)
     check = row('guard', check_calls, (checked / CHARACTERS_PER_TOKEN / max(1, check_calls) + CHECK_PROMPT_TOKENS, CHECK_OUTPUT_TOKENS))
     pictures = row('image', images, IMAGE_TOKENS)
-    priced = [check, row('memory', honcho_calls, per_call), pictures] + ([] if runs >= HISTORY else [row('reply', messages, REVIEW_TOKENS)])
+    priced = [check, row('memory', honcho_calls, per_call), pictures]
     if call is None:
         from tools.operations.archive.archive import API
         call = API().call
@@ -85,9 +79,7 @@ def estimate(state, messages, characters, call=None, now=None, voice_notes=0, vo
     except Exception:
         costs = [None] * len(priced)
     known_cost = lambda value: float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
-    review = sum(row['cost_usd'] for row in reviews) / runs * messages if runs >= HISTORY else known_cost(costs[3])
-    parts = [{'part': 'memory_review', 'label': 'Memory notes', 'cost_usd': review, 'measured': runs >= HISTORY},
-             {'part': 'memory', 'label': 'Long-term memory', 'cost_usd': known_cost(costs[1]), 'measured': calls >= HISTORY}]
+    parts = [{'part': 'memory', 'label': 'Long-term memory', 'cost_usd': known_cost(costs[1]), 'measured': calls >= HISTORY}]
     total = None if any(part['cost_usd'] is None for part in parts) else round(sum(part['cost_usd'] for part in parts), 2)
     for part in parts:
         if part['cost_usd'] is not None: part['cost_usd'] = round(part['cost_usd'], 2)
