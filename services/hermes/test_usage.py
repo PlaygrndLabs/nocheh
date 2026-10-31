@@ -133,6 +133,40 @@ class UsageTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 usage.price([{'model': 3}])
 
+    def test_claude_is_priced_from_anthropic_list_prices(self):
+        million = {'input_tokens': 1_000_000, 'output_tokens': 1_000_000, 'calls': 10}
+        self.assertAlmostEqual(usage.claude_cost('claude-sonnet-5-5', million), 12.0)
+        self.assertAlmostEqual(usage.claude_cost('anthropic/claude-opus-5.5', million), 24.0, msg='dotted and prefixed names')
+        cached = {'input_tokens': 0, 'cache_read_tokens': 1_000_000, 'cache_write_tokens': 1_000_000, 'calls': 10}
+        self.assertAlmostEqual(usage.claude_cost('claude-sonnet-5-5', cached), 0.2 + 2.5)
+        self.assertAlmostEqual(usage.claude_cost('claude-haiku-5-5', million), 0.6)
+        self.assertAlmostEqual(usage.claude_cost('claude-haiku-5-5', {**million, 'calls': 1}), 3.0, msg='a prompt over 100K tokens')
+        self.assertIsNone(usage.claude_cost('synthetic-model', million))
+
+    def test_record_prices_claude_on_the_anthropic_provider_only_when_hermes_did_not(self):
+        spent = {'input_tokens': 1_000_000, 'output_tokens': 100_000, 'calls': 4, 'model': 'claude-sonnet-5-5'}
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'usage/usage.sqlite'
+            usage.record('reply', spent, 'fallback', provider='anthropic', path=path, now=DAY)
+            usage.record('guard', {**spent, 'cost_usd': 0.5}, 'm', provider='anthropic', path=path, now=DAY)
+            usage.record('memory_review', spent, 'fallback', provider='custom-1', path=path, now=DAY)
+            usage.record('schedule', {'calls': 1}, 'claude-sonnet-5-5', provider='anthropic', path=path, now=DAY)
+            found = {row['part']: (round(row['cost_usd'], 6), row['priced_runs']) for row in usage.rows('2026-10-13', path)}
+        self.assertEqual(found['reply'], (3.0, 1))
+        self.assertEqual(found['guard'], (0.5, 1), "Hermes's own price stays")
+        self.assertEqual(found['memory_review'], (0.0, 0), 'a gateway may bill differently, so its cost stays unknown')
+        self.assertEqual(found['schedule'], (0.0, 0), 'a run without token counts stays unknown')
+
+    def test_price_falls_back_to_claude_prices_on_the_anthropic_provider(self):
+        class Cost:
+            amount_usd, status = None, 'unknown'
+
+        pricing = types.SimpleNamespace(CanonicalUsage=types.SimpleNamespace, estimate_usage_cost=lambda *a, **k: Cost())
+        row = {'model': 'claude-sonnet-5-5', 'input_tokens': 1_000_000, 'output_tokens': 1_000_000, 'calls': 2}
+        with patch.dict(sys.modules, {'agent': types.ModuleType('agent'), 'agent.usage_pricing': pricing}):
+            costs = usage.price([{**row, 'provider': 'anthropic'}, {**row, 'provider': 'custom'}, row])
+        self.assertEqual(costs, [12.0, None, None])
+
 
 if __name__ == '__main__':
     unittest.main()
