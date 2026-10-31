@@ -4,8 +4,13 @@ Hermes reports each turn's token buckets, API calls and estimated cost itself;
 the secret check reads its provider response's usage and prices it with
 Hermes's own pricing table. Nocheh keeps one row per UTC day, part, provider
 and model, never content, so the table stays small and bounded.
+
+Nocheh calls every provider through the OpenAI-compatible API, so Hermes's
+table, keyed by provider, never prices a Claude model. Nocheh prices Claude
+on the Anthropic provider itself, only where Hermes has no price.
 """
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -45,6 +50,27 @@ HERMES_REASONS = {
     'timed_out': ('timeout',),
     'provider_error': ('overloaded', 'server_error', 'upstream_blocked', 'incomplete_response', 'format_error'),
 }
+
+# Anthropic's list prices in USD per million tokens: input, output, cache read, 5-minute cache write.
+# Source: platform.claude.com/docs/en/about-claude/pricing.
+CLAUDE_PRICES = {
+    'claude-fable-5-1': (10, 50, 0.25, 12.5),
+    'claude-fable-5': (10, 50, 1, 12.5),
+    'claude-opus-5-5': (4, 20, 0.2, 5),
+    'claude-opus-5': (5, 25, 0.5, 6.25),
+    'claude-opus-4-8': (5, 25, 0.5, 6.25),
+    'claude-opus-4-7': (5, 25, 0.5, 6.25),
+    'claude-opus-4-6': (5, 25, 0.5, 6.25),
+    'claude-sonnet-5-5': (2, 10, 0.2, 2.5),
+    'claude-sonnet-5': (2, 10, 0.2, 2.5),
+    'claude-sonnet-4-6': (3, 15, 0.3, 3.75),
+    'claude-haiku-5-5': (0.1, 0.5, 0.01, 0.125),
+    'claude-haiku-4-5': (1, 5, 0.1, 1.25),
+}
+# Prices of a request whose prompt is longer than 100K tokens, where they differ.
+CLAUDE_LONG_PROMPT_PRICES = {'claude-haiku-5-5': (0.5, 2.5, 0.05, 0.625)}
+CLAUDE_LONG_PROMPT = 100_000
+CLAUDE_BUCKETS = ('input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens')
 
 
 def _count(value):
@@ -150,7 +176,8 @@ def response_usage(response, model, base_url, provider='openai'):
 
 
 def price(rows):
-    """USD cost of each {model, provider, base_url, input_tokens, output_tokens} row, or None when Hermes has no price."""
+    """USD cost of each {model, provider, base_url, calls, token buckets} row, or None when neither Hermes nor
+    Nocheh's Claude prices know it."""
     if not isinstance(rows, list) or len(rows) > 2000:
         raise ValueError('invalid_usage_rows')
     from agent.usage_pricing import CanonicalUsage, estimate_usage_cost
@@ -158,16 +185,30 @@ def price(rows):
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get('model'), str):
             raise ValueError('invalid_usage_rows')
-        usage = CanonicalUsage(input_tokens=_count(row.get('input_tokens')), output_tokens=_count(row.get('output_tokens')),
+        usage = CanonicalUsage(**{bucket: _count(row.get(bucket)) for bucket in CLAUDE_BUCKETS},
                                request_count=_count(row.get('calls')))
+        provider = str(row.get('provider') or 'openai')[:40]
         try:
-            cost = estimate_usage_cost(row['model'][:120], usage, provider=str(row.get('provider') or 'openai')[:40],
-                                       base_url=str(row.get('base_url') or '')[:300])
-            costs.append(0.0 if cost.status == 'included' else
-                         float(cost.amount_usd) if cost.amount_usd is not None and cost.status != 'unknown' else None)
+            cost = estimate_usage_cost(row['model'][:120], usage, provider=provider, base_url=str(row.get('base_url') or '')[:300])
+            found = (0.0 if cost.status == 'included' else
+                     float(cost.amount_usd) if cost.amount_usd is not None and cost.status != 'unknown' else None)
         except Exception:
-            costs.append(None)
+            found = None
+        costs.append(claude_cost(row['model'][:120], row) if found is None and provider == 'anthropic' else found)
     return costs
+
+
+def claude_cost(model, usage):
+    """USD list price of Claude usage on Anthropic's own API, or None for a model not in CLAUDE_PRICES."""
+    name = re.sub(r'(\d)\.(\d)', r'\1-\2', str(model or '').strip().lower().removeprefix('anthropic/'))
+    rates = CLAUDE_PRICES.get(name)
+    if rates is None:
+        return None
+    tokens = [_count(usage.get(bucket)) for bucket in CLAUDE_BUCKETS]
+    # Runs total their calls, so the average call's prompt picks the rate card.
+    if name in CLAUDE_LONG_PROMPT_PRICES and (tokens[0] + tokens[2] + tokens[3]) / max(1, _count(usage.get('calls'))) > CLAUDE_LONG_PROMPT:
+        rates = CLAUDE_LONG_PROMPT_PRICES[name]
+    return sum(count * rate for count, rate in zip(tokens, rates)) / 1e6
 
 
 def part_of(body):
@@ -193,9 +234,15 @@ def connect(path=None):
 def record(part, usage, model, failed=False, provider=None, path=None, now=None, refused=False, reason=None):
     """Add one run to today's totals, and a failed run's reason. Usage tracking never fails the work it measures."""
     usage = usage or {}
+    model = usage.get('model') or model
+    provider = (provider if provider is not None else os.environ.get(PROVIDERS.get(part, PROVIDERS['reply']), '')) or 'unknown'
+    if 'cost_usd' not in usage and provider == 'anthropic' and any(_count(usage.get(bucket)) for bucket in CLAUDE_BUCKETS):
+        cost = claude_cost(model, usage)
+        if cost is not None:
+            usage = {**usage, 'cost_usd': cost}
     failed = bool(failed or refused)
     reason = 'refused' if refused else reason if reason in REASONS else 'unknown'
-    _add(part, usage.get('model') or model, provider, path, now, reason if failed else None, runs=1, failed=int(failed),
+    _add(part, model, provider, path, now, reason if failed else None, runs=1, failed=int(failed),
          refused=int(reason == 'refused' and failed), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
          cost_usd=float(usage.get('cost_usd') or 0), priced_runs=int('cost_usd' in usage),
          **({'audio_seconds': float(usage.get('audio_seconds') or 0)} if part == 'transcription' else {}))

@@ -74,6 +74,21 @@ class UsageViewTests(unittest.TestCase):
         self.assertIsNone(unavailable['rows'][0]['cost_usd'])
         self.assertEqual(unavailable['sources'], {'hermes': 'empty', 'honcho': 'ok', 'pricing': 'unavailable'})
 
+    def test_runs_recorded_without_a_price_are_priced_when_read(self):
+        hermes = self.state / 'hermes/usage/usage.sqlite'
+        hermes_usage.record('reply', {'input_tokens': 100, 'output_tokens': 10, 'cache_read_tokens': 50, 'calls': 2},
+                            'synthetic-model', provider='anthropic', path=hermes, now=DAY)
+        asked = []
+
+        def call(path, body, timeout):
+            asked.append(body)
+            return {'costs': [0.125]}
+
+        result = view_usage.view(self.state, 1, call=call, now=DAY)
+        self.assertEqual(asked, [{'rows': [{'model': 'synthetic-model', 'provider': 'anthropic', 'base_url': 'https://api.anthropic.com/v1',
+                                            'calls': 2, 'input_tokens': 100, 'output_tokens': 10, 'cache_read_tokens': 50}]}])
+        self.assertEqual((result['rows'][0]['cost_usd'], result['rows'][0]['cost_complete']), (0.125, True))
+
     def test_a_fresh_installation_has_an_empty_view_and_rejects_odd_periods(self):
         result = view_usage.view(self.state, 7, call=lambda *a, **k: self.fail('nothing to price'), now=DAY)
         self.assertEqual(result['rows'], [])

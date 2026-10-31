@@ -3,8 +3,9 @@
 Hermes's turns and the secret check are counted by Hermes's own usage report
 (services/hermes/usage.py); Honcho memory and memory search are counted at
 Honcho's egress (services/honcho/meter.py). Both keep daily totals per part,
-provider and model, never content. Memory tokens are priced by Hermes's own
-pricing table; a cost Hermes cannot price stays unknown rather than zero.
+provider and model, never content. Rows recorded without a price, such as
+memory tokens, are priced by Hermes when read; a cost Hermes cannot price
+stays unknown rather than zero.
 """
 import json
 import sqlite3
@@ -86,14 +87,16 @@ def honcho_rows(state, since):
     return result
 
 
-def price_memory(rows, known, call):
-    """Ask Hermes to price memory rows; leaves costs unknown when Hermes is unavailable."""
-    wanted = [row for row in rows if row['part'] == 'memory' and (row['input_tokens'] or row['output_tokens'])]
+def price_unpriced(rows, known, call):
+    """Ask Hermes to price rows that have tokens but no cost, such as memory rows; leaves costs unknown
+    when Hermes is unavailable. Memory search is priced at Honcho's egress only."""
+    wanted = [row for row in rows if row['part'] != 'embedding' and row['cost_usd'] is None
+              and any(row[name] for name in TOKENS)]
     if not wanted:
         return 'not_needed'
     request = [{'model': row['model'], 'provider': known.get(row['provider'], {}).get('kind', 'openai'),
                 'base_url': known.get(row['provider'], {}).get('url') or '', 'calls': row['calls'],
-                'input_tokens': row['input_tokens'], 'output_tokens': row['output_tokens']} for row in wanted]
+                **{name: row[name] for name in TOKENS if row[name]}} for row in wanted]
     try:
         costs = call('/v1/runtime/usage-price', {'rows': request}, timeout=20)['costs']
     except Exception:
@@ -122,7 +125,7 @@ def view(state, days=30, call=None, now=None):
     if call is None:
         from tools.operations.archive.archive import API
         call = API().call
-    pricing = price_memory(rows, known, call)
+    pricing = price_unpriced(rows, known, call)
     for row in rows:
         label, service = PARTS.get(row['part'], (row['part'], ''))
         row.update(label=label, service=service,
