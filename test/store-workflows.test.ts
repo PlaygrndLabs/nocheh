@@ -270,5 +270,15 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal((await advance('honcho','delete:'+nextLive[0].session_id)).state,'completed');
     assert.equal((await stores.control.query('SELECT state FROM memory_session_deletions WHERE session_id=$1',[nextLive[0].session_id])).rows[0].state,'done');
     assert.equal((await stores.archive.query("SELECT count(*)::int AS count FROM events WHERE source_key LIKE $1",[key+':%'])).rows[0].count,5);
+    const imported=(await services.capture.capture({...event('imported',{message:{message_id:5,date:1600000000,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'An old imported message'}}),origin:'import'})).source.reference;
+    await stores.control.query("INSERT INTO learning_consent(event_id,enabled,reason,revision) VALUES($1,true,'owner',1)",[imported.id]);
+    assert.equal((await advance('preparation',imported.id)).state,'completed');
+    const reviewsBefore=reviews;
+    assert.equal((await advance('memory_review','source:'+imported.id)).state,'completed');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM native_review_jobs WHERE source_reference->>'id'=$1",[imported.id])).rows[0].count,0,
+      'imported history writes no memory notes');
+    assert.equal(reviews,reviewsBefore);
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id=$1",['source:'+imported.id])).rows[0].count,1,
+      'imported history is still learned by long-term memory');
   }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });

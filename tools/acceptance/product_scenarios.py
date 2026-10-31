@@ -426,6 +426,9 @@ class ProductScenarios(Scenarios):
         self.gate('file_kept', file != '0', count=file)
         self.gate('no_telegram_replies_for_history', not [row for row in self.f.sent() if 'IMPORTTOPIC' in row['message']['text']])
         self.wait('imported_messages_learned_into_honcho', lambda: self.honcho("SELECT count(*) FROM messages WHERE content LIKE '%IMPORTTOPIC1%'") not in ('', '0'), 900)
+        imported = self.f.query('nocheh_archive', "SELECT string_agg(quote_literal(id),',') FROM events WHERE origin='import' AND scope LIKE '"+str(GROUP)+"%'")
+        notes = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE source_reference->>'id' IN ("+imported+")") if imported else '0'
+        self.gate('imported_history_writes_no_memory_notes', notes == '0', count=notes)
 
     # Memory search model ----------------------------------------------------------------------------
 
