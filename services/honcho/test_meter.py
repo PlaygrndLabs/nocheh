@@ -414,6 +414,21 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(validate('/v1/chat/completions',dict(summary))['max_tokens'],6000)
         with self.assertRaises(Rejected): validate('/v1/chat/completions',{**summary,'max_tokens':8193})
 
+    def test_json_object_format_is_dropped_only_for_anthropic(self):
+        # The deriver's json_object mode carries its schema in the prompt; Anthropic refuses the format type.
+        deriver={'model':REASONING_MODEL,'messages':[],'max_tokens':100,'response_format':{'type':'json_object'}}
+        schema={'type':'json_schema','json_schema':{'name':'x','schema':{'type':'object'}}}
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite')
+            for url,format,kept in (('https://api.anthropic.com/v1',{'type':'json_object'},False),
+                                    ('https://api.anthropic.com/v1',schema,True),(GATEWAY,{'type':'json_object'},True)):
+                with self.subTest(url=url,format=format):
+                    transport=Transport()
+                    Egress(ledger,'internal','temporary',transport,reasoning_key='k',reasoning_url=url).send(
+                        '/v1/chat/completions',{**deriver,'response_format':format})
+                    sent=json.loads(transport.calls[0].data)
+                    self.assertEqual(sent.get('response_format'),format if kept else None)
+
     def test_memory_provider_from_settings_must_use_https(self):
         with tempfile.TemporaryDirectory() as root:
             transport=Transport();ledger=Ledger(Path(root)/'budget.sqlite')
