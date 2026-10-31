@@ -19,10 +19,10 @@ from datetime import datetime, timedelta, timezone
 from tools.operations.provider import routes as provider_routes
 from tools.operations.provider.usage import honcho_rows
 
-# Typical tokens (input, output) of one Honcho memory call, and of one message's learning answer
-# with all its search rounds.
+# Typical tokens (input, output) of one Honcho memory call, and of one message's learning answer,
+# which measured runs answer in one call.
 HONCHO_TOKENS = (2500, 400)
-LEARNING_TOKENS = (20000, 1500)
+LEARNING_TOKENS = (12500, 1300)
 # Honcho reads up to this much message text per call, and summarizes every 20 and every 60 messages.
 HONCHO_WINDOW = 1024
 SUMMARIES = (20, 60)

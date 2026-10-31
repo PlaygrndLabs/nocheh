@@ -39,7 +39,7 @@ class LearningEstimateTests(unittest.TestCase):
         # 90,000 characters are about 30 Honcho windows, plus a summary every 20 and every 60 messages.
         self.assertEqual((memory['model'], memory['calls']), ('memory-model', 30 + 60 + 20))
         # Imported history writes no memory notes; long-term memory answers one learning question per message.
-        self.assertEqual((learning['model'], learning['calls'], learning['input_tokens']), ('memory-model', 1200, 1200 * 20000))
+        self.assertEqual((learning['model'], learning['calls'], learning['input_tokens']), ('memory-model', 1200, 1200 * 12500))
         self.assertNotIn('reply-model', [row['model'] for row in asked[0]])
         self.assertEqual(result['cost_usd'], 39.9)
         # Each image is read once with the Images model, here the main one.
