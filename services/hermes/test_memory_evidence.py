@@ -20,13 +20,56 @@ class MemoryEvidenceTests(unittest.TestCase):
                 for field in ('messages','input'):
                     payload={'model':'unchanged-model','reasoning':{'effort':'high'},field:history}
                     result=evidence.inject(payload)
-                    entries=json.loads(result[field][1]['content'][len(evidence.PREFIX):])['entries']
+                    entries=json.loads(result[field][3]['content'][len(evidence.PREFIX):])['entries']
                     self.assertEqual([e['content'] for e in entries],native+[recalled])
-                    self.assertEqual([m for i,m in enumerate(result[field]) if i!=1],history)
+                    self.assertEqual([m for i,m in enumerate(result[field]) if i!=3],history)
                     self.assertEqual(result['model'],payload['model']);self.assertEqual(result['reasoning'],payload['reasoning'])
                 self.assertEqual(history,original)
             finally:restore()
         self.assertIs(evidence.inject({'input':history})['input'],history)
+
+    def test_evidence_rides_with_the_current_message_so_earlier_turns_stay_cached(self):
+        # The provider's prompt cache matches a request's start byte for byte. Evidence that
+        # changes every turn must come after every earlier turn, never before them.
+        def turn(memory,payload):
+            with patch.multiple(evidence,_active=True,_native=['native note'],_recalled={'memory':memory}):
+                return evidence.inject(copy.deepcopy(payload))
+        def entries(text):return json.loads(text[len(evidence.PREFIX):])['entries']
+        earlier=[{'role':'system','content':'instructions'},{'role':'user','content':'first'},{'role':'assistant','content':'answer'}]
+        first=turn('turn one',{'messages':[*earlier,{'role':'user','content':'second'}]})['messages']
+        self.assertEqual(first[:3],earlier)
+        self.assertEqual(entries(first[3]['content'])[1]['content'],{'memory':'turn one'})
+        self.assertEqual(first[4],{'role':'user','content':'second'})
+        # A tool loop keeps the evidence in the same place on every call of the turn.
+        loop=[{'role':'assistant','content':None,'tool_calls':[{'id':'c','type':'function','function':{'name':'f','arguments':'{}'}}]},
+              {'role':'tool','tool_call_id':'c','content':'result'}]
+        self.assertEqual(turn('turn one',{'messages':[*earlier,{'role':'user','content':'second'},*loop]})['messages'][:5],first)
+        later=turn('turn two',{'messages':[*earlier,{'role':'user','content':'second'},{'role':'assistant','content':'reply'},{'role':'user','content':'third'}]})['messages']
+        self.assertEqual(later[:3],earlier,'the next turn keeps every earlier turn as sent')
+        self.assertEqual(later[3:6],[{'role':'user','content':'second'},{'role':'assistant','content':'reply'},{'role':'user','content':later[5]['content']}])
+        self.assertEqual(entries(later[5]['content'])[1]['content'],{'memory':'turn two'})
+        # Anthropic's Messages API: no system messages, tool results in user messages, and
+        # the evidence is the first block of this turn's own message, so roles still alternate.
+        cached={'type':'text','text':'second','cache_control':{'type':'ephemeral'}}
+        native={'system':[{'type':'text','text':'instructions'}],'messages':[
+            {'role':'user','content':'first'},{'role':'assistant','content':[{'type':'text','text':'answer'}]},
+            {'role':'user','content':[cached]},
+            {'role':'assistant','content':[{'type':'tool_use','id':'c','name':'f','input':{}}]},
+            {'role':'user','content':[{'type':'tool_result','tool_use_id':'c','content':'result'}]}]}
+        sent=turn('turn one',native)
+        self.assertEqual(sent['system'],native['system'])
+        self.assertEqual(sent['messages'][:2],native['messages'][:2])
+        self.assertEqual([m['role'] for m in sent['messages']],['user','assistant','user','assistant','user'])
+        self.assertEqual(sent['messages'][2]['content'][1:],[cached])
+        self.assertEqual(entries(sent['messages'][2]['content'][0]['text'])[1]['content'],{'memory':'turn one'})
+        self.assertEqual(sent['messages'][3:],native['messages'][3:])
+        plain=turn('turn one',{'system':'instructions','messages':[{'role':'user','content':'only'}]})['messages']
+        self.assertEqual(plain[0]['content'][1:],[{'type':'text','text':'only'}])
+        # Without a system prompt, the request's address says which API it is.
+        with patch.multiple(evidence,_active=True,_native=['native note'],_recalled=None):
+            bare=evidence.inject({'messages':[{'role':'user','content':'only'}]},anthropic=True)['messages']
+        self.assertEqual(len(bare),1);self.assertEqual(bare[0]['content'][1:],[{'type':'text','text':'only'}])
+        self.assertEqual(native['messages'][2]['content'],[cached],'the native history is never changed')
 
     def test_native_rebuild_refreshes_evidence_and_missing_transport_fails_closed(self):
         from agent import system_prompt,context_compressor

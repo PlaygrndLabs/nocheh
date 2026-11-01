@@ -653,6 +653,8 @@ test('usage shows calls, tokens and cost, and never prices an unknown cost as fr
     .getByText(/At least \$|Unknown/)
     .first()
     .waitFor();
+  // Input counts cached tokens too, and says how much the prompt cache covered.
+  await page.getByRole('table', {name: 'Usage by part'}).getByText('67% cached').waitFor();
   await page.getByRole('radiogroup', {name: 'Period'}).getByText('Today').click();
   assert.equal(new URL(page.url()).hash, '#usage?days=1');
   assert.deepEqual(problems, []);

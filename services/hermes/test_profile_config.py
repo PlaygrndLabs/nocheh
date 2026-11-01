@@ -1,7 +1,9 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
-from .profile_config import configure_profile, read, atomic_yaml
+from unittest.mock import patch
+from .profile_config import configure_profile, read, atomic_yaml, resolved
 
 
 class ProfileConfigurationTests(unittest.TestCase):
@@ -53,6 +55,19 @@ class ProfileConfigurationTests(unittest.TestCase):
             # Owner-set skills are never archived by the native curator.
             self.assertEqual(saved['curator'], {'enabled': False})
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_anthropic_replies_use_its_messages_api_with_prompt_caching(self):
+        # Anthropic's OpenAI-compatible API has no prompt caching; isolated turns use its Messages API.
+        for runtime, route, provider in (('isolated', 'https://api.anthropic.com/v1', 'anthropic'),
+                                         ('isolated', 'https://gateway.example.test/v1', 'openai'),
+                                         ('legacy', 'https://api.anthropic.com/v1', 'openai')):
+            with self.subTest(runtime=runtime, route=route), \
+                    patch.dict(os.environ, NOCHEH_SECURITY_RUNTIME=runtime, NOCHEH_REPLY_ROUTE_URL=route):
+                config = resolved({'model': {'provider': 'untrusted'}, 'prompt_caching': {'cache_ttl': 'off'}}, 'reply-model')
+                self.assertEqual(config['model'], {'provider': provider, 'default': 'reply-model'})
+                self.assertEqual(config['prompt_caching'], {'cache_ttl': '5m'})
+                # Session search keeps the broker's chat route.
+                self.assertEqual(config['auxiliary']['session_search'], {'provider': 'openai', 'model': 'reply-model'})
 
     def test_conflicting_invalid_and_unmanaged_edits_do_not_write(self):
         with tempfile.TemporaryDirectory() as folder:

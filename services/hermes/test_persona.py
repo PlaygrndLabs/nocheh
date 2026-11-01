@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -172,6 +173,23 @@ class PersonaTurnTests(unittest.TestCase):
             self.assertTrue(persona.refresh_prompt(turn, database, 's'))
             self.assertEqual(stored()[0], None)
             self.assertFalse(persona.refresh_prompt(turn, database, 'new-session'), 'a new session builds its own prompt')
+            database.update_system_prompt('s', 'Prompt with the group role')
+            database.create_session('t', source='telegram')
+            database.update_system_prompt('t', 'Prompt of another topic')
+            self.assertTrue(persona.refresh_prompt(turn, database, 't'), 'a session never checked is rebuilt once')
+            database.update_system_prompt('t', 'Prompt of another topic')
+            for session in ('s', 't', 's', 't'):
+                self.assertFalse(persona.refresh_prompt(turn, database, session),
+                                 'sessions of one profile taking turns keep their prompts, and their prompt cache')
+            self.assertEqual(stored()[0], 'Prompt with the group role')
+            persona.save(chat, 'Newer role', [COOKING], persona.view(chat)['revision'])
+            persona.materialize(root, turn, '-20')
+            self.assertEqual([persona.refresh_prompt(turn, database, session) for session in ('s', 't', 's', 't')],
+                             [True, True, False, False], 'a role change rebuilds each session once')
+            with patch.object(persona, 'PROMPT_SESSIONS', 2):
+                for session in ('a', 'b', 'c'):
+                    persona.refresh_prompt(turn, database, session)
+                self.assertEqual(list(json.loads((turn / 'native-state' / 'persona-prompt.json').read_text())['sessions']), ['b', 'c'])
 
 if __name__ == '__main__':
     unittest.main()

@@ -7,6 +7,11 @@ import time
 
 # The security broker relays every isolated model call to the configured reply provider.
 BROKER_URL = "http://nocheh-security:8786/v1"
+# The broker's route to Anthropic's own Messages API, the only Anthropic API with prompt
+# caching. Hermes appends /v1/messages to it.
+BROKER_ANTHROPIC_URL = "http://nocheh-security:8786/anthropic"
+# Anthropic's address in Settings › Models; replies there use its Messages API.
+ANTHROPIC_URL = "https://api.anthropic.com/v1"
 # Installation rehearsals serve models from this local fixture; nothing else may use http.
 FIXTURE_URL = "http://model-fixture:8317/v1"
 # Wait before the secret check's one retry after a provider server error.
@@ -91,9 +96,11 @@ class SubscriptionCredentials:
 
     def __post_init__(self):
         allowed = {BROKER_URL} | configured_urls()
+        # Anthropic's Messages API is reached only through the broker, which sends it to Anthropic.
+        native = (self.provider, self.api_mode) == ("anthropic", "anthropic_messages") and self.base_url == BROKER_ANTHROPIC_URL
         if (not isinstance(self.access_token, str) or not self.access_token.strip()
-                or self.base_url.rstrip("/") not in allowed
-                or (self.provider, self.api_mode) != ("openai", "chat_completions")):
+                or not (native or (self.base_url.rstrip("/") in allowed
+                                   and (self.provider, self.api_mode) == ("openai", "chat_completions")))):
             raise ValueError("A configured reasoning transport is required")
 
     def runtime(self):

@@ -55,6 +55,7 @@ images read by the runtime's vision tool: [0194](0194-images-are-read-by-the-run
 a chat read in order and searched by meaning: [0195](0195-the-agent-reads-a-chat-in-order-and-searches-by-meaning.md);
 background jobs as a chain of sealed steps: [0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md);
 imported history learned by long-term memory only: [0198](0198-imported-history-is-learned-by-long-term-memory-only.md).
+Prompt caching for Anthropic replies through its Messages API: [0199](0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
 Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),
