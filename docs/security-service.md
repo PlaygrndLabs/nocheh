@@ -71,7 +71,9 @@ discards the turn filesystem on exit. Replacing it requires a trusted compatible
 implementation; arbitrary plugin installation does not confer privileges.
 
 `NOCHEH_MEMORY_CONTEXT=evidence` moves complete native memory blocks and recalled
-objects into a labelled data message on each provider attempt. It leaves native
+objects into a labelled data message on each provider attempt. Hermes reads the
+native blocks only when it builds a session's prompt, so each turn reads them itself,
+and a continuing session keeps its stored prompt. It leaves native
 history and memory files unchanged. The same evidence participates in initial
 context-size estimates; the layer does not lower limits or summarize sources.
 The pinned native compaction instruction is adjusted so it does not label memory
