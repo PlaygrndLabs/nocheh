@@ -128,6 +128,12 @@ a withheld turn's memory call wrote, checked before every turn
 ([decision](docs/adr/0129-retired-sources-leave-native-notes.md),
 [checks](services/hermes/test_retired_history.py)); an uncited paraphrase stays.
 
+Hermes native notes reach every turn. With the memory evidence on, Hermes read the
+notes only when it built a session's prompt, so the later turns of a session carried
+none. Each turn now reads them itself, and the stored prompt stays the same
+([checks](services/hermes/test_memory_evidence.py)). Pending: the same checks in the
+Hermes image on the owner's machine, and a live reply after the pull.
+
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
 corrections, and applies saved proposals atomically after foreground work finishes.
