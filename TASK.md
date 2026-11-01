@@ -543,7 +543,11 @@ not yet run on the owner's installation:
   `nocheh_notion` works only in the owner's private chat
   ([decision](docs/adr/0175-notion-through-its-mcp-server.md),
   [check](test/store-notion.test.ts), [sign-in check](services/hermes/test_notion_connection.py),
-  [browser check](test/dashboard-pages.browser.mjs)). Live check pending: the
+  [browser check](test/dashboard-pages.browser.mjs)). November 1: the
+  dashboard refused Notion's return to it as a cross-site request, so sign-in
+  could never finish; a tab opened from another site now gets a page that opens
+  the same address again from the dashboard ([check](test/management.test.ts)).
+  Live check pending: the
   owner connects Notion on the development machine and asks Nocheh to search it, then to add a
   page and approves the card.
 - Release test 4 (October 20) passed on the owner's installation. A private
