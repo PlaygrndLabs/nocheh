@@ -82,6 +82,8 @@ export class ControlledExecutionRepository {
       try {await this.actions.fence(db,row.binding);args=await this.actions.arguments(row);}
       catch(error) {
         if(!(error instanceof HttpError)||![403,409].includes(error.status))throw error;
+        // A pending publication ends soon; the next claim checks everything again.
+        if(error.code==='guard_transition_pending'){await db.query('COMMIT');return {claimed:false};}
         const result=await this.blocked(db,row,error.code);await db.query('COMMIT');return result;
       }
       // Turning Notion off stops Notion calls that were approved but have not run yet.

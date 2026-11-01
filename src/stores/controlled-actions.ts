@@ -11,7 +11,7 @@ import {evaluate,policySnapshot,recordEffect} from '../security/store.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository} from './derived.js';
-import type {GuardRepository,GuardBinding} from './guards.js';
+import {carriesForward,type GuardRepository,type GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
@@ -32,11 +32,12 @@ export class ControlledActionRepository {
   effect(row:any):Effect {return {id:row.id,kind:row.kind,scope:row.scope,profile:row.logical_profile,fingerprint:row.fingerprint,...(row.job_id?{job:row.job_id}:{})};}
   async fence(db:pg.PoolClient,binding:GuardBinding) {
     const state=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
-    if(!state||canonical({generation:state.generation,epoch:Number(state.epoch),mode:state.mode})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
+    // An action stays bound to its own epoch; only later quiet epochs carry it (ADR-0199).
+    if(!state||!await carriesForward(db,binding,{generation:state.generation,epoch:Number(state.epoch),mode:state.mode}))throw new HttpError(409,'guard_context_changed');
     if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
   async arguments(row:any,current=true) {
-    if(current)await this.guards.assertCurrent(row.binding);
+    const live=current?await this.guards.assertCarried(row.binding):null;
     const reference=row.proposal_reference,id='derived_artifacts:'+reference.id;
     const artifact=(await this.derived.pool.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
     if(artifact?.content_hash!==reference.input_hash)throw new HttpError(409,'action_proposal_changed');
@@ -46,8 +47,8 @@ export class ControlledActionRepository {
     const document=JSON.parse(saved.content.toString()),args=actionArguments(row.kind,JSON.parse(document.text));
     if(digest(canonical(args))!==row.arguments_hash||digest(canonical({binding:row.binding,scope:row.scope,profile:row.logical_profile,kind:row.kind,arguments:args,job:row.job_id}))!==row.fingerprint)
       throw new HttpError(409,'action_proposal_changed');
-    if(current) {
-      const active=await this.guards.read(id,row.binding);
+    if(live) {
+      const active=await this.guards.read(id,live);
       if(active.revision!==row.guard_revision||canonical(active.value)!==canonical(document))throw new HttpError(409,'action_proposal_changed');
     }
     return args;
@@ -96,10 +97,18 @@ export class ControlledActionRepository {
   async inspect(principal:Reader,id:unknown) {
     const row=await this.row(id);
     if(!principal.admin) {
-      const turn=await this.turns.binding(principal);
-      if(principal.space!==row.space_id||turn.profile!==row.profile)throw new HttpError(404,'action_not_found');
+      // The same chat, owner or member, purpose and profile as the asker, under the action's own epoch.
+      await this.turns.binding(principal);
+      if(principal.space!==row.space_id||this.turns.profile(principal,row.binding)!==row.profile)throw new HttpError(404,'action_not_found');
     }
-    const args=await this.arguments(row,!principal.admin);
+    let args:unknown;
+    try{args=await this.arguments(row,!principal.admin);}
+    catch(error) {
+      // What it used may have been withdrawn since, so only its state is shown. Only an action that
+      // has not run yet is stopped by that; a finished or running one keeps its own outcome.
+      if(principal.admin||!(error instanceof HttpError)||error.code!=='guard_context_changed')throw error;
+      return {id:row.id,kind:row.kind,state:row.state,error_code:row.error_code??(['proposed','approved'].includes(row.state)?error.code:null),created_at:row.created_at};
+    }
     let result:unknown=null;
     if(row.result_reference) {
       const output=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[row.result_reference.id])).rows[0];

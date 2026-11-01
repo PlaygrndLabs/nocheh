@@ -7,6 +7,7 @@ import {parentSpace,validateSpace} from '../spaces.js';
 import type {TelegramChatRepository} from './telegram-chats.js';
 import type {TelegramTopicRepository} from './telegram-topics.js';
 import type {StorePools} from './connections.js';
+import {carriesForward} from './guards.js';
 import type {ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
@@ -220,8 +221,10 @@ export class OwnerSupervisionRepository {
       detail={...row,wording:artifact.content.toString(),provenance:artifact.provenance,current_fact_revision:fact?.active_revision??null};
     }
     const guard=(await this.stores.control.query('SELECT g.epoch,g.mode,i.generation FROM guard_state g CROSS JOIN installation i WHERE g.singleton AND i.singleton')).rows[0];
+    // A controlled action still carries across later quiet epochs (ADR-0199); the other kinds need their own epoch.
+    const carried=kind==='controlled_action'&&!!guard&&!!row.binding&&await carriesForward(this.stores.control,row.binding,{generation:guard.generation,epoch:Number(guard.epoch),mode:guard.mode});
     // Organization revalidates relevant evidence at application; unrelated learning epochs do not invalidate that review.
-    const stale=changed||row.binding&&(!guard||row.binding.generation!==guard.generation||
+    const stale=changed||row.binding&&!carried&&(!guard||row.binding.generation!==guard.generation||
       (row.binding.mode!==undefined&&row.binding.mode!==guard.mode)||kind!=='knowledge'&&Number(row.binding.epoch)!==Number(guard.epoch));
     return {...this.summary({...row,kind,title:kind==='knowledge'?row.kind:row.name}),detail,observed_at:new Date().toISOString(),
       observation:stale?'stale':'current',note:'Review commands recheck the exact revision and current authorization before applying a decision.'};
@@ -267,7 +270,9 @@ export class OwnerSupervisionRepository {
         fact_grants:grants.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&factRevisions.get(row.fact_id)===row.fact_revision&&row.state==='active'&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
         sharing_releases:sharingReleases,
         note:'Only exact conversation sources and valid published sharing or fact grants can be used. Project membership is not access; stored grants are rechecked on use.'},
-      external_actions:{policy:security.rows[0]??null,permissions:permissions.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&!row.revoked_at&&row.remaining>0&&new Date(row.expires_at).getTime()>Date.now()})),
+      // A permission is used with its action's own binding, which carries across quiet epochs (ADR-0199).
+      external_actions:{policy:security.rows[0]??null,permissions:await Promise.all(permissions.rows.map(async({binding,...row})=>({...row,
+        current:await carriesForward(this.stores.control,binding,guard)&&!row.revoked_at&&row.remaining>0&&new Date(row.expires_at).getTime()>Date.now()}))),
         note:'External actions require exact approval or a matching unexpired permission, and remain subject to the security policy. Authorization is not evidence of execution.'},
       organization:{effective,delegations:delegations.rows,note:'Organization affects project context only. It grants no knowledge access, participant permission, or external-action authority.'},
       memory:{connection:{attached:connection?.attached??false,verified:connection?.verified??false,revision:connection?.revision??null},

@@ -25,9 +25,13 @@ export async function advanceReactionEpoch(db:pg.PoolClient,deferredAt?:number):
   if(await foregroundReplyActive(db,{generation:guard.generation,epoch,mode:guard.mode})) {
     await requestWorkflow(db,'memory_review','reactions:'+epoch);return false;
   }
-  await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton');
+  const next=Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);
+  // A reaction change hides no message, it only retires the earlier reaction state, so waiting
+  // approvals carry across this epoch (ADR-0199). Work that withdraws or replaces content must
+  // advance its own, unrecorded epoch.
+  await db.query("INSERT INTO guard_quiet_epochs(generation,epoch,reason) VALUES($1,$2,'reaction') ON CONFLICT DO NOTHING",[guard.generation,next]);
   // Honcho keeps earlier reactions as evidence, so a reaction change never rechecks Honcho writes.
-  await requestWorkflow(db,'memory_review','refresh',epoch+1);
+  await requestWorkflow(db,'memory_review','refresh',next);
   return true;
 }
 

@@ -27,7 +27,10 @@ candidates and applies masks. Explicitly trusted transcription may receive origi
 media. Guarding does not encrypt the archive and detection can miss secrets.
 
 Edits and mode changes retire runtime contexts and credentials. In-flight delivery
-checks reject retired contexts. New native profiles preserve preferences, with
+checks reject retired contexts. A reaction change starts a new epoch and makes only
+the earlier reaction state unreadable; it hides no message, so waiting and approved
+tool actions continue across it; every other change still stops them ([ADR-0199](adr/0199-waiting-approvals-survive-reaction-epochs.md)).
+New native profiles preserve preferences, with
 fresh MEMORY.md, USER.md and sessions; rebuilding memory is tracked in phase G6.
 Preparing an import does not grant learning consent. Honcho activation and its live
 provider checks are tracked separately in TASK.md.

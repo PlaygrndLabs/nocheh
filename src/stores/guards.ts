@@ -16,6 +16,16 @@ export type GuardReference=SourceReference|FileReference|DerivativeReference;
 export interface GuardBinding {generation:string;epoch:number;mode:'on'|'off'}
 export interface GuardRevision {source_id:string;revision:number;operation_id:string;expected_revision:number|null}
 
+/** True when `binding` is `current`, or when every later epoch up to `current` is recorded as quiet, which
+ *  only a reaction change is (ADR-0199). Any other epoch, or a generation or mode change, means it does not carry. */
+export async function carriesForward(db:Pick<pg.Pool,'query'>,binding:GuardBinding,current:GuardBinding):Promise<boolean> {
+  const from=Number(binding.epoch),to=Number(current.epoch);
+  if(current.generation!==binding.generation||current.mode!==binding.mode||!Number.isSafeInteger(from)||to<from)return false;
+  if(to===from)return true;
+  const quiet=(await db.query('SELECT count(*)::int AS n FROM guard_quiet_epochs WHERE generation=$1 AND epoch>$2 AND epoch<=$3',[binding.generation,from,to])).rows[0];
+  return quiet.n===to-from;
+}
+
 export class GuardRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository){}
 
@@ -30,6 +40,13 @@ export class GuardRepository {
   async assertCurrent(binding:GuardBinding):Promise<void> {
     const state=await this.state();
     if(canonical(state)!==canonical(binding))throw new HttpError(409,'guard_context_changed');
+  }
+
+  /** The current binding, when `binding` still carries to it; nothing is rebound. */
+  async assertCarried(binding:GuardBinding):Promise<GuardBinding> {
+    const state=await this.state();
+    if(!await carriesForward(this.stores.control,binding,state))throw new HttpError(409,'guard_context_changed');
+    return state;
   }
 
   async setMode(mode:'on'|'off'):Promise<GuardBinding> {

@@ -156,6 +156,14 @@ test('allowed members post freely in their own group; everything else waits for 
     const again=await message('again'),offered=cards.length;
     const permitted=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(again.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
     assert.equal(permitted.fingerprint,tool.fingerprint);assert.equal(cards.length,offered);assert.doesNotMatch(permitted.message,/buttons/);
+    // A reaction in another group leaves a waiting operation's Approve button working.
+    const operation=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message('before-reaction')).id,group),{kind:'shell',arguments:{command:'printf after-reaction'}}));
+    const before=(await s.guards.state()).epoch;
+    await capture('reaction',{update_id:++updates,message_reaction:{chat:{id:Number(other),type:'supergroup'},message_id:1,date:1700000100,user:{id:9},
+      old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}},other);
+    assert.equal((await s.guards.state()).epoch,before+1);
+    assert.equal(await s.actionCommands.callback(await press('after-reaction','na'+operation.id.slice(0,40)+operation.fingerprint.slice(0,16))),true);
+    assert.equal((await s.controlledActions.inspect(owner,operation.id)).state,'approved');assert.match(last('settle').text,/\n\n✅ Approved\.$/);
     // Someone not allowed in the group gets the owner's fixed reply, with no turn.
     const stranger=await message('stranger-ask',{text:'Nocheh, what is the plan?',message_thread_id:17,is_topic_message:true},8,++updates);
     await s.preparation.run(stranger.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));

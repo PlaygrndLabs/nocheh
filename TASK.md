@@ -28,6 +28,22 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
 
+Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
+build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
+task table against a group chat): long tool results are read in parts
+([check](services/hermes/test_action_results.py)). Waiting and approved tool
+actions, such as Notion calls, survive reactions in any chat, and a later turn or
+job step of the asking chat reads its own action; any other epoch change still
+stops them, and the reader then sees only the state
+([ADR-0199](docs/adr/0199-waiting-approvals-survive-reaction-epochs.md),
+[check](test/store-quiet-epochs.test.ts)). Open owner questions: should automatic
+learning revisions also leave waiting approvals and job reports valid? Until then
+they stop them. Does the owner accept, in their own words, the new SPECS line that
+a reaction change does not stop a waiting or approved proposal? It is not yet
+accepted. Next: a job's report surviving a reaction, and cards saying how
+an approved action ended. Telegram message requests keep the exact-epoch rule.
+Pending: a live check: ask for a Notion change, react in a group, then approve.
+
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for
 the dashboard): one Nocheh password for the dashboard and the mini app, created
