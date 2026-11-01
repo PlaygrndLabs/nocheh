@@ -54,7 +54,7 @@ You need Docker with Compose, Node 26 and Python 3, a model provider key, and an
 
 3. Open the dashboard at <http://127.0.0.1:8783/> and create your Nocheh password. The same password signs you in to the Telegram mini app.
 4. In **Settings › Models**, add a provider and choose the main model. Until then, replies and memory wait. If your main provider is not OpenAI, also add OpenAI, or a gateway with the same models, for **Memory search** and **Voice notes**.
-5. Connect a chat adapter. For Telegram, open **Settings › Telegram**, paste the bot token and save. Send your bot a private message, then run `./bin/nocheh discover-telegram` to see your numeric Telegram user ID. Enter it, turn Telegram on and save.
+5. Connect a chat adapter. For Telegram, open **Settings › Telegram**, paste the bot token and save. Send your bot a private message, then press **Find my ID** and choose your account. Turn Telegram on and save. Home shows a **Get started** checklist of what is still missing.
 6. Say hello in your private chat. To bring Nocheh into a group, add it there, then pick the group and who may talk to it in **Chats**.
 
 Full setup: [Telegram and the mini app](docs/telegram.md), [model providers](docs/provider.md) and [operations](docs/deploy.md).

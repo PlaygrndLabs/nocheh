@@ -3,6 +3,7 @@ import {useSettings} from '../../lib/settings';
 import {href} from '../../lib/routes';
 import {Badge, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
+import {FindIdButton, FoundPeople, useFindTelegramId} from './telegram-id';
 
 export const telegramKeys = [
   'TELEGRAM_ENABLED',
@@ -36,6 +37,10 @@ export function TelegramSettings() {
   const known = (identities.data?.groups ?? []).flatMap((g: any) => g.users ?? []).find((u: any) => u.id === owner);
   const enabled = s.value('TELEGRAM_ENABLED') === 'true';
   const token = s.field('TELEGRAM_BOT_TOKEN');
+  const finder = useFindTelegramId();
+  // Finding the ID reads the bot's messages, which only the saved token and Telegram turned off allow.
+  const savedOn = s.saved('TELEGRAM_ENABLED') === 'true';
+  const findable = !!token?.configured && !s.changed('TELEGRAM_BOT_TOKEN');
   const tunnel = s.field('CLOUDFLARE_TUNNEL_TOKEN');
   const miniApp = s.value('NOCHEH_MINI_APP_URL');
   const groups = s
@@ -166,19 +171,39 @@ export function TelegramSettings() {
             description={
               known
                 ? `This is ${known.name}${known.username ? ' (' + known.username + ')' : ''}. Only you can manage Nocheh.`
-                : 'The number for your own Telegram account. Only you can manage Nocheh.'
+                : savedOn
+                  ? 'The number for your own Telegram account. To look it up here, turn Telegram off and save. Only you can manage Nocheh.'
+                  : findable
+                    ? 'The number for your own Telegram account. Send your bot any message in Telegram, then press Find my ID. Only you can manage Nocheh.'
+                    : 'The number for your own Telegram account. Save the bot token first, then you can find it here. Only you can manage Nocheh.'
             }
             htmlFor="telegram-owner"
           >
-            <Input
-              id="telegram-owner"
-              inputMode="numeric"
-              value={owner}
-              placeholder="123456789"
-              disabled={s.busy}
-              onChange={e => s.set('TELEGRAM_OWNER_ID', e.target.value.trim())}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="telegram-owner"
+                inputMode="numeric"
+                value={owner}
+                placeholder="123456789"
+                disabled={s.busy}
+                onChange={e => s.set('TELEGRAM_OWNER_ID', e.target.value.trim())}
+              />
+              {!savedOn && (
+                <FindIdButton disabled={s.busy || !findable} busy={finder.busy} onClick={() => void finder.find()} />
+              )}
+            </div>
           </SettingRow>
+          {!savedOn && (
+            <FoundPeople
+              found={finder.found}
+              problem={finder.problem}
+              current={owner}
+              saved={s.saved('TELEGRAM_OWNER_ID')}
+              telegramOn={enabled}
+              disabled={s.busy}
+              onUse={id => s.set('TELEGRAM_OWNER_ID', id)}
+            />
+          )}
         </div>
       </Card>
 
