@@ -40,6 +40,7 @@ def install_isolated_route(credentials,model,context_length):
     context_compressor.get_model_context_length=length
     # These are scoped broker capabilities, not provider credentials. The
     # pinned generic auxiliary resolver reads OpenAI-compatible env names, and
-    # session search, pinned to that resolver, uses the broker's chat route.
+    # Hermes's helper calls (session search, titles, compression), pinned to that
+    # resolver, use the broker's chat route.
     os.environ['OPENAI_API_KEY']=credentials.access_token
     os.environ['OPENAI_BASE_URL']=BROKER+'/v1'

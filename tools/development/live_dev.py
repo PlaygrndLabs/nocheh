@@ -74,15 +74,27 @@ def prepare_runtime_images(env, root):
                                 cwd=ROOT, env=env, capture_output=True, text=True)
         return result.stdout.strip() if result.returncode == 0 else None
 
+    # The Hermes image must still pass its Dockerfile's own import checks, so a changed
+    # library list rebuilds it even when the Hermes pin stays the same.
+    import_checks = re.findall(r'^RUN python -c "([^"]+)"$', (ROOT / 'deploy/hermes.Dockerfile').read_text(), re.M)
+
+    def hermes_libraries_ready():
+        return all(subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'python',
+                                   'nocheh-hermes:local', '-c', check],
+                                  cwd=ROOT, env=env, capture_output=True).returncode == 0 for check in import_checks)
+
     def pinned_images_ready():
-        return image_revision('nocheh-hermes:local') == hermes_revision and image_revision(honcho_source) is not None
+        return (image_revision('nocheh-hermes:local') == hermes_revision and image_revision(honcho_source) is not None
+                and hermes_libraries_ready())
 
     if not pinned_images_ready():
-        # A moved pin needs the installation's own images first; this builds images only.
-        print('Building the pinned Hermes and Honcho images for the new pins', flush=True)
+        # A moved pin or library list needs the installation's own images first; this builds images only.
+        print('Building the pinned Hermes and Honcho images', flush=True)
         subprocess.run([str(root / 'bin/nocheh'), 'build'], cwd=root, check=True)
         if image_revision('nocheh-hermes:local') != hermes_revision:
             raise ValueError('Pinned runtime image nocheh-hermes:local is unavailable or has the wrong revision after ./bin/nocheh build')
+        if not hermes_libraries_ready():
+            raise ValueError('Pinned runtime image nocheh-hermes:local lacks a required library after ./bin/nocheh build')
         if image_revision(honcho_source) is None:
             raise ValueError(f'Pinned Honcho image {honcho_source} is unavailable after ./bin/nocheh build')
     # Development tags always follow the pinned images, so a moved pin replaces an older tag.

@@ -60,6 +60,15 @@ class SecurityTests(unittest.TestCase):
         for mode in ('codex_responses','bedrock'):
             with self.assertRaises(ValueError):scoped_transport('turn.capability',mode)
 
+    def test_anthropic_turns_keep_the_models_own_thinking(self):
+        # Anthropic's OpenAI-compatible API ignored the effort preference; its Messages API would
+        # apply it. Sending none keeps the thinking the model ran with before.
+        from .assistant_turn import reasoning
+        from .subscription import SubscriptionCredentials,BROKER_ANTHROPIC_URL,BROKER_URL
+        prefs={'agent.reasoning_effort':'low'}
+        self.assertIsNone(reasoning(SubscriptionCredentials('turn.capability',BROKER_ANTHROPIC_URL,'anthropic','anthropic_messages'),prefs))
+        self.assertEqual(reasoning(SubscriptionCredentials('turn.capability',BROKER_URL),prefs),{'effort':'low'})
+
     def test_pinned_auxiliary_route_and_model_context_are_preserved(self):
         from agent import auxiliary_client as aux,model_metadata,context_compressor
         from .security_transport import install_isolated_route

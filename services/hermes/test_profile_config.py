@@ -66,8 +66,9 @@ class ProfileConfigurationTests(unittest.TestCase):
                 config = resolved({'model': {'provider': 'untrusted'}, 'prompt_caching': {'cache_ttl': 'off'}}, 'reply-model')
                 self.assertEqual(config['model'], {'provider': provider, 'default': 'reply-model'})
                 self.assertEqual(config['prompt_caching'], {'cache_ttl': '5m'})
-                # Session search keeps the broker's chat route.
-                self.assertEqual(config['auxiliary']['session_search'], {'provider': 'openai', 'model': 'reply-model'})
+                # One-shot helper calls keep the broker's chat route.
+                self.assertEqual(config['auxiliary'], {task: {'provider': 'openai', 'model': 'reply-model'}
+                                                       for task in ('session_search', 'compression', 'title_generation')})
 
     def test_conflicting_invalid_and_unmanaged_edits_do_not_write(self):
         with tempfile.TemporaryDirectory() as folder:

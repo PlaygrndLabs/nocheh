@@ -19,32 +19,19 @@ def inject(payload,anthropic=None):
     value=payload[field]
     messages=value if isinstance(value,list) else [{'role':'user','content':value}]
     # Never alter or summarize a source or mutate the native conversation history.
-    # The evidence changes from turn to turn, so it goes with this turn's own message, after
-    # every earlier turn: the earlier conversation stays byte-identical and the provider's
-    # prompt cache keeps it. Anthropic's Messages API keeps its system prompt outside the
-    # messages and takes the evidence as the first block of that message.
     if anthropic is None:anthropic='system' in payload
-    current=_current(messages,anthropic)
-    if current is None:
-        split=0
-        while split<len(messages) and messages[split].get('role') in ('system','developer'):split+=1
-        return {**payload,field:[*messages[:split],{'role':'user','content':content},*messages[split:]]}
-    if anthropic:
-        message=messages[current];own=message.get('content')
+    if anthropic and messages and isinstance(messages[-1],dict) and messages[-1].get('role')=='user':
+        # Anthropic's prompt cache keeps a request's start up to Hermes's markers on the latest
+        # messages. The evidence changes from turn to turn, so it is the request's last block,
+        # after those markers: no cached part holds it, and every later call of this turn and
+        # the next turn reuse what earlier calls cached.
+        message=messages[-1];own=message.get('content')
         blocks=own if isinstance(own,list) else [{'type':'text','text':own}] if isinstance(own,str) and own else []
-        return {**payload,field:[*messages[:current],{**message,'content':[{'type':'text','text':content},*blocks]},*messages[current+1:]]}
-    return {**payload,field:[*messages[:current],{'role':'user','content':content},*messages[current:]]}
-
-def _current(messages,anthropic):
-    """This turn's own user message: the last one that is not a tool result. Anthropic's
-    Messages API returns tool results inside user messages."""
-    for index in range(len(messages)-1,-1,-1):
-        message=messages[index]
-        if not isinstance(message,dict) or message.get('role')!='user':continue
-        content=message.get('content')
-        if anthropic and isinstance(content,list) and any(isinstance(block,dict) and block.get('type')=='tool_result' for block in content):continue
-        return index
-    return None
+        return {**payload,field:[*messages[:-1],{**message,'content':[*blocks,{'type':'text','text':content}]}]}
+    # Keep any provider system messages first; put evidence before conversation turns.
+    split=0
+    while split<len(messages) and messages[split].get('role') in ('system','developer'):split+=1
+    return {**payload,field:[*messages[:split],{'role':'user','content':content},*messages[split:]]}
 
 def install(recalled=None):
     global _active,_native,_recalled

@@ -55,3 +55,24 @@ class NativeMemoryTests(unittest.TestCase):
         fork=SimpleNamespace(valid_tool_names={'memory','terminal'})
         with patch.object(native,'build_cache_parity_fork',return_value=(fork,None,False)),patch.object(native,'spawn_background_review_thread',side_effect=spawn):
             with self.assertRaises(RuntimeError):native_review(object(),'source')
+
+
+class ReviewBudgetTests(unittest.TestCase):
+    def test_a_review_budget_counts_cached_prompt_tokens_too(self):
+        # Hermes counts uncached input only; prompt caching keeps that near zero, so a review
+        # would run past Nocheh's budget. Every prompt token counts, as before caching.
+        from agent import background_review as native, conversation_loop as loop
+        original=loop._review_input_budget_exhausted;seen=[]
+        def spawn(parent,messages,**options):
+            def target():
+                fork,_,_=native.build_cache_parity_fork(parent)
+                for used in ((2000,0,0),(500,18000,3000),(100,23000,500)):
+                    fork.session_input_tokens,fork.session_cache_read_tokens,fork.session_cache_write_tokens=used
+                    seen.append(loop._review_input_budget_exhausted(fork))
+                fork.run_conversation('review')
+            return target,'native prompt'
+        fork=SimpleNamespace(valid_tool_names={'memory'},run_conversation=lambda *_:{'completed':True},_review_input_token_budget=24000)
+        with patch.object(native,'build_cache_parity_fork',return_value=(fork,None,False)),patch.object(native,'spawn_background_review_thread',side_effect=spawn):
+            self.assertEqual(native_review(object(),'source'),{'state':'done'})
+        self.assertEqual(seen,[False,False,True])
+        self.assertIs(loop._review_input_budget_exhausted,original)

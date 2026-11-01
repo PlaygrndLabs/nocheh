@@ -74,7 +74,10 @@ def resolved(config, model):
     config['fallback_models'] = []
     config.setdefault('tools', {})['tool_search'] = {'enabled': 'off'}
     config.setdefault('memory', {}).update(memory_enabled=True, user_profile_enabled=True, provider='')
-    config['auxiliary'] = {'session_search': {'provider': provider, 'model': model}}
+    # One-shot helper calls (session search, context compression, titles) keep the
+    # OpenAI-compatible route: nothing in them is reused, so caching gains nothing.
+    config['auxiliary'] = {task: {'provider': provider, 'model': model}
+                           for task in ('session_search', 'compression', 'title_generation')}
     # Skills are set by the owner only. The native curator would archive or
     # consolidate a skill that no turn loaded for its configured window.
     config['curator'] = {'enabled': False}

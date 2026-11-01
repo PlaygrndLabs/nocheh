@@ -129,6 +129,13 @@ def conversation_result(result, session_id, limited_memory=False):
     return {'state':'done','text':text,'session_id':session_id}
 
 
+def reasoning(credentials,prefs):
+    """Thinking settings for the turn. Anthropic's OpenAI-compatible API ignored the effort
+    preference, so the model ran with its own default. Its Messages API would apply it, so
+    Anthropic turns send none and keep the same thinking as before."""
+    return None if credentials.api_mode=='anthropic_messages' else {'effort':prefs['agent.reasoning_effort']}
+
+
 def background_limits(body):
     """How many tool and thinking steps one step of a background job may take."""
     limits=body.get('background')
@@ -235,7 +242,7 @@ def run(body, emit=None):
         # A job step is bounded by its step count and Nocheh's step time, not by a wrap-up notice
         # that would ask for the final answer before the job is done.
         run_budget_seconds=None if background else prefs['agent.run_budget_seconds'],
-        reasoning_config={'effort':prefs['agent.reasoning_effort']},ephemeral_system_prompt=(
+        reasoning_config=reasoning(credentials,prefs),ephemeral_system_prompt=(
             reply(body.get('prompts'),body['owner'])+long_term))
     record('agent_init',phase)
     try:
