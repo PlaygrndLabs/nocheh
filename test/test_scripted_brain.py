@@ -67,6 +67,23 @@ class ScriptedBrainTests(unittest.TestCase):
         absent=self.brain.respond(request(older,message('assistant','ok'),message('user','[[turn:UNADDR42]]')))
         self.assertEqual((present['content'],absent['content']),('[brain] turn UNADDR42 present','[brain] turn UNADDR42 absent'))
 
+    def test_memory_tool_and_notes_count_only_native_notes_the_model_sees(self):
+        saved=message('user','note it [[tool:memory {"action":"add","target":"memory","content":"NOTEMARK52 synthetic"}]]')
+        self.assertEqual(self.brain.respond(request(saved)),
+                         {'tool':'memory','arguments':{'action':'add','target':'memory','content':'NOTEMARK52 synthetic'}})
+        from services.hermes.memory_evidence import PREFIX
+        self.assertEqual(self.brain.EVIDENCE,PREFIX)
+        evidence=lambda *entries:message('user',PREFIX+json.dumps({'entries':list(entries)}))
+        native={'source':'hermes.native.memory.0','content':'MEMORY NOTEMARK52 synthetic'}
+        recalled={'source':'nocheh.memory.recall','content':{'hits':['NOTEMARK52 synthetic']}}
+        ask=message('user','[[notes:NOTEMARK52]]')
+        # The conversation quotes the note where it was saved; only the notes themselves count.
+        history=(saved,message('assistant',None),message('tool','{"success": true}'),message('assistant','saved'))
+        answers=[self.brain.respond(request(*messages))['content'] for messages in (
+            (evidence(native),*history,ask),(*history,evidence(native),ask),(message('system','notes: NOTEMARK52'),ask),
+            (*history,ask),(evidence(recalled),*history,ask),(message('user',self.brain.EVIDENCE+'not json'),ask))]
+        self.assertEqual(answers,['[brain] notes NOTEMARK52 present']*3+['[brain] notes NOTEMARK52 absent']*3)
+
     def test_raw_canary_in_scripted_turn_is_counted_and_rejected(self):
         result=self.brain.respond(request(message('system','fixture-canary'),message('user','[[search:x]]')))
         self.assertEqual(result,{'error':'unguarded_fixture_canary'})
