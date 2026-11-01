@@ -1,5 +1,6 @@
 """Native archive tools. Scope is bound by the trusted dispatcher, never an argument."""
 import contextvars
+import hashlib
 import base64
 import json
 import math
@@ -38,7 +39,7 @@ def bind_process_deadline(deadline):
     _PROCESS_DEADLINE=float(deadline)
 
 
-def request(path,body=None):
+def request(path,body=None,timeout=None):
     credential = _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()
     if not credential:
         raise RuntimeError('archive_scope_not_bound')
@@ -47,7 +48,9 @@ def request(path,body=None):
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Prepared context can include a cold guard-model pass. It is still bounded,
     # but must not share the short timeout used by ordinary archive reads.
-    timeout = 615 if path == '/v1/memory/honcho/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/honcho/search') or path.startswith('/v1/jobs/') else 15
+    # An action's proposal and its result both pass the secret check, so they get the longer timeout too.
+    timeout = timeout or (615 if path == '/v1/memory/honcho/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/honcho/search', '/v1/tools/propose')
+                          or path.startswith(('/v1/jobs/', '/v1/tools/actions/')) else 15)
     if path == '/v1/memory/honcho/recall' and _PROCESS_DEADLINE is not None:
         # Leave time for Hermes to reason and check delivery policy.
         timeout = min(timeout, _PROCESS_DEADLINE-time.time()-45)
@@ -264,15 +267,19 @@ def register(ctx):
     name='nocheh_notion';description=('The owner\'s own Notion, through Notion\'s MCP server, when the owner has connected it and turned it on. Only in the owner\'s '
         'private conversation. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
         'notion-create-pages or notion-update-page) with its input. Reads may run right away and changes may wait for the owner to approve the exact call, '
-        'as the owner set; the result says which. Nocheh\'s own task list stays the main one: use Notion when the owner asks for Notion.')
+        'as the owner set; the result says which. Ask only for what you need: for a big table, read its columns first, then query just the columns and rows '
+        'you need, with a filter or a limit. A long result comes in parts; read every part with nocheh_action_status before relying on it. '
+        'Nocheh\'s own task list stays the main one: use Notion when the owner asks for Notion.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string','maxLength':128},'input':{'type':'object'}},
             'required':['operation'],'additionalProperties':False}},handler=notion_tool)
     name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
-        'Without an id it lists this chat\'s recent Telegram message requests with their destinations and states; read one by its id for its text.')
+        'Without an id it lists this chat\'s recent Telegram message requests with their destinations and states; read one by its id for its text. '
+        'A long result comes in parts: the answer gives part and parts, and part reads another one.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
-        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'additionalProperties':False}},handler=controlled_status)
+        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'},'part':{'type':'integer','minimum':1}},
+            'additionalProperties':False}},handler=controlled_status)
 
 
 OWNER_VIEWS=('conversations','conversation-context','telegram-identities','people','projects','project-assignments','memory-map')
@@ -350,29 +357,45 @@ def notion_tool(args,**kwargs):
         deadline=time.monotonic()+60
         while time.monotonic()<deadline:
             time.sleep(1)
-            value=request('/v1/tools/actions/'+proposed['id'])
-            if value.get('state') in ('done','failed','rejected','ambiguous'):
-                result=json.dumps({key:value.get(key) for key in ('id','state','result','error_code')},ensure_ascii=False)
-                return result if len(result)<=24000 else json.dumps({'id':value['id'],'state':value['state'],'excerpt':result[:22000],'truncated':True},ensure_ascii=False)
+            try:value=request('/v1/tools/actions/'+proposed['id'],timeout=max(1,deadline-time.monotonic()))
+            except HTTPError:raise
+            except OSError:break
+            if value.get('state') in ('done','failed','rejected','ambiguous'):return in_parts(value)
         return json.dumps({'id':proposed['id'],'state':'running','note':'Still running; read it later with nocheh_action_status.'})
     except HTTPError as error:
         return json.dumps({'error':{400:'invalid_notion_call',403:'notion_only_in_owner_private_chat',409:'notion_is_off_or_changed'}.get(error.code,'notion_unavailable')})
     except Exception:return json.dumps({'error':'notion_unavailable'})
 
 
+RESULT_KEYS=('id','kind','state','result','error_code')
+PART_CHARS=20000
+
+
+def in_parts(value,part=1):
+    """An action's view, whole when it is short, otherwise one part of it; the parts joined give the whole view."""
+    full=json.dumps({key:value.get(key) for key in RESULT_KEYS},ensure_ascii=False)
+    parts=1 if len(full)<=24000 else -(-len(full)//PART_CHARS)
+    if parts==1 and part==1:return full
+    if part>parts:return json.dumps({'id':value.get('id'),'error':'no_such_part','parts':parts})
+    return json.dumps({'id':value.get('id'),'state':value.get('state'),'part':part,'parts':parts,'hash':hashlib.sha256(full.encode()).hexdigest()[:12],
+                       'text':full[(part-1)*PART_CHARS:part*PART_CHARS],
+                       'note':'A long result in parts: join the text of every part, in order, before relying on it; read the others with nocheh_action_status and part.'},
+                      ensure_ascii=False)
+
+
 def controlled_status(args,**kwargs):
     import re
     try:
         id=args.get('id') or ''
+        part=args.get('part',1)
+        if type(part) is not int or part<1:return json.dumps({'error':'invalid_part'})
         if not id:
             # This chat's recent message requests, for a later turn that no longer holds their IDs.
             keys=('id','destination','state','error_code','created_at')
             return json.dumps({'requests':[{key:item.get(key) for key in keys} for item in request('/v1/tools/actions').get('telegram',[])]},ensure_ascii=False)[:24000]
         if not re.fullmatch(r'[a-f0-9]{64}',id):raise ValueError('invalid_action')
-        value=request('/v1/tools/actions/'+id)
-        # Bound tool context; complete bytes remain in the archive and owner UI.
-        result=json.dumps({key:value.get(key) for key in ('id','kind','state','result','result_id','error_code')},ensure_ascii=False)
-        return result if len(result)<=24000 else json.dumps({'id':id,'state':value['state'],'result_id':value['result_id'],'excerpt':result[:22000],'truncated':True})
+        # A long result comes in parts; complete bytes remain in the archive and owner UI.
+        return in_parts(request('/v1/tools/actions/'+id),part)
     except Exception:return json.dumps({'error':'controlled_action_unavailable'})
 
 
