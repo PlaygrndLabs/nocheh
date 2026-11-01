@@ -26,11 +26,20 @@ until pg_isready -h 127.0.0.1 -U nocheh -d nocheh >/dev/null 2>&1; do
   sleep 1
 done
 
+# Development starts from the newest finished build when there is one: rows the
+# current code wrote can fail an older image's schema checks on restart.
+bootstrap=/app/dist/src/stores/bootstrap.js
+applied=
+if [ -n "${NOCHEH_DEV_DIST:-}" ]; then
+  applied=$(cat "$NOCHEH_DEV_DIST/.dev-ready" 2>/dev/null || true)
+  if [ -n "$applied" ]; then bootstrap=$NOCHEH_DEV_DIST/src/stores/bootstrap.js; fi
+fi
+
 # An inactive restore must expose PostgreSQL to its recovery coordinator without
 # making restored runtime roles usable or running application initialization.
 if [ ! -e /data/spool/.restore-inactive ]; then
   if ! PGHOST=127.0.0.1 PGUSER=nocheh PGDATABASE=nocheh \
-    PGPASSWORD="$POSTGRES_PASSWORD" node /app/dist/src/stores/bootstrap.js; then
+    PGPASSWORD="$POSTGRES_PASSWORD" node "$bootstrap"; then
     stop_database
     exit 1
   fi
@@ -42,7 +51,6 @@ touch "$ready"
 # rather than leaving it to fail against the old schema until an image rebuild.
 if [ -n "${NOCHEH_DEV_DIST:-}" ] && [ ! -e /data/spool/.restore-inactive ]; then
   (
-    applied=
     while :; do
       current=$(cat "$NOCHEH_DEV_DIST/.dev-ready" 2>/dev/null || true)
       if [ -n "$current" ] && [ "$current" != "$applied" ]; then
