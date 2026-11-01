@@ -2,7 +2,7 @@
 import subprocess
 import os
 from pathlib import Path
-from tools.operations.installation.configuration import load,owns_project,write_env,read_env,env_path,compose
+from tools.operations.installation.configuration import load,owns_project,write_env,read_env,env_path,compose,honcho_volumes
 
 SERVICES=('honcho-postgres','honcho-redis','honcho-provider-gateway','honcho-api','honcho-deriver')
 
@@ -36,10 +36,8 @@ def enable(state,honcho_state):
     token=(honcho_state/'internal_token').read_text().strip()
     if values.get('NOCHEH_MEMORY_TOKEN')!=token:raise ValueError('honcho_runtime_init_required')
     # Compose creates and labels these volumes, including on a fresh setup.
-    project=os.environ.get('COMPOSE_PROJECT_NAME','nocheh')
-    for kind in ('DATABASE','REDIS'):
-        key='NOCHEH_HONCHO_'+kind+'_VOLUME'
-        if not values.get(key):values[key]=project+'_honcho_'+kind.lower()
+    for key,name in honcho_volumes(os.environ.get('COMPOSE_PROJECT_NAME','nocheh')).items():
+        if not values.get(key):values[key]=name
     values.update(NOCHEH_HONCHO_ENABLED='true',NOCHEH_HONCHO_STATE_DIR=str(honcho_state))
     normalize_endpoints(honcho_state)
     write_env(env_path(state),values)

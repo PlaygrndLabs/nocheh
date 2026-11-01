@@ -49,6 +49,12 @@ def owns_project(state):
     return Path(state).resolve() == DEFAULT_STATE or bool(read_env(env_path(state)).get('COMPOSE_PROJECT_NAME'))
 
 
+def honcho_volumes(project):
+    """The Honcho volume names for `project`; for `nocheh` they equal docker-compose.yml's defaults."""
+    return {'NOCHEH_HONCHO_DATABASE_VOLUME': project + '_honcho_database',
+            'NOCHEH_HONCHO_REDIS_VOLUME': project + '_honcho_redis'}
+
+
 def development_source():
     """Where the dashboard container sees the `make dev` source checkout it runs from, if any."""
     source=os.environ.get('NOCHEH_DEV_COMPOSE_DIR','')
@@ -263,6 +269,12 @@ def initialize(state):
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))
     for name in ('POSTGRES_PASSWORD','SERVICE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD'):
         if not values[name]: values[name] = secrets.token_hex(32)
+    if values['NOCHEH_HONCHO_ENABLED']=='true' and owns_project(state):
+        # `make dev` reads Honcho's volumes from .env, so setup saves the ones Compose uses. Honcho's
+        # folder stays unsaved and follows the checkout. A state without its own project gets no
+        # names: it must never name the installation's volumes.
+        volumes=honcho_volumes(values.get('COMPOSE_PROJECT_NAME') or 'nocheh')
+        values.update({key:name for key,name in volumes.items() if not values.get(key)})
     validate(values)
     (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
     if values != existing: write_env(path, values)

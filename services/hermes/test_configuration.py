@@ -25,6 +25,34 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(initialize(state)['NOCHEH_HONCHO_ENABLED'],'false')
             self.assertEqual(compose_environment(state)['COMPOSE_PROFILES'],'')
 
+    def test_fresh_setup_saves_the_honcho_volumes_compose_uses(self):
+        from tools.operations.installation import configuration
+        volumes=('NOCHEH_HONCHO_DATABASE_VOLUME','NOCHEH_HONCHO_REDIS_VOLUME')
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve();state=root/'data/local'
+            with patch.object(configuration,'INSTALLATION_ROOT',root),patch.object(configuration,'DEFAULT_STATE',state):
+                initialize(state)
+                saved=read_env(root/'.env')
+                self.assertEqual([saved[key] for key in volumes],['nocheh_honcho_database','nocheh_honcho_redis'])
+                # Honcho's folder stays unsaved, so it follows a moved checkout.
+                self.assertNotIn('NOCHEH_HONCHO_STATE_DIR',saved)
+                self.assertEqual(compose_environment(state)['NOCHEH_HONCHO_STATE_DIR'],str(state/'honcho'))
+                # Saved names are kept: they point at the installation's existing memory.
+                saved['NOCHEH_HONCHO_DATABASE_VOLUME']='synthetic-kept-memory';write_env(root/'.env',saved)
+                self.assertEqual(initialize(state)['NOCHEH_HONCHO_DATABASE_VOLUME'],'synthetic-kept-memory')
+        with tempfile.TemporaryDirectory() as folder:
+            # A state without its own project must never name the installation's volumes.
+            state=Path(folder);values=initialize(state)
+            self.assertFalse(set(volumes)&set(read_env(env_path(state))))
+            values['COMPOSE_PROJECT_NAME']='nocheh-synthetic-owned';write_env(env_path(state),values)
+            self.assertEqual([initialize(state)[key] for key in volumes],
+                             ['nocheh-synthetic-owned_honcho_database','nocheh-synthetic-owned_honcho_redis'])
+        with tempfile.TemporaryDirectory() as folder:
+            # With Honcho off nothing is saved, so exports still skip Honcho memory.
+            state=Path(folder);write_env(state/'.env',{'COMPOSE_PROJECT_NAME':'nocheh-synthetic-owned','NOCHEH_HONCHO_ENABLED':'false'})
+            initialize(state)
+            self.assertFalse(set(volumes)&set(read_env(env_path(state))))
+
     def test_auto_migrates_to_on_and_new_configuration_has_only_two_states(self):
         from tools.operations.installation.configuration import validate
         with tempfile.TemporaryDirectory() as folder:
