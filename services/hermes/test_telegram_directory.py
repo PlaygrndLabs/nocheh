@@ -59,5 +59,62 @@ class TelegramDirectoryTests(unittest.TestCase):
         self.assertEqual(result['groups'][0]['users'], [])
 
 
+class TelegramDiscoveryTests(unittest.TestCase):
+    """"Find my Telegram ID" in the dashboard."""
+
+    def setUp(self):
+        self.values = {'TELEGRAM_BOT_TOKEN': 'fixture-secret', 'TELEGRAM_ENABLED': 'false'}
+        mocked = patch.object(directory, 'load', return_value=self.values)
+        mocked.start(); self.addCleanup(mocked.stop)
+        self.runs = 0
+
+    def run_discovery(self, found):
+        def run(state):
+            self.runs += 1
+            return found
+        return run
+
+    def test_private_senders_are_offered_by_name_and_numeric_id(self):
+        found = {'bot_username': 'aurora_helper_bot', 'messages_sent': 0, 'chats': [
+            {'chat_id': '42', 'chat_type': 'private', 'sender_id': '42', 'sender_name': '  Owner   Person ', 'sender_username': 'owner'},
+            {'chat_id': '-10042', 'chat_type': 'supergroup', 'sender_id': '73', 'sender_name': 'Mira Chen', 'sender_username': 'mira'},
+            {'chat_id': '84', 'chat_type': 'private', 'sender_id': None, 'sender_name': None, 'sender_username': None},
+            {'chat_id': '85', 'chat_type': 'private', 'sender_id': '86', 'sender_name': 'Mismatch', 'sender_username': None},
+            {'chat_id': '91', 'chat_type': 'private', 'sender_id': '91', 'sender_name': None, 'sender_username': None}]}
+        result = directory.discover(None, lambda token, method: {'id': 1}, self.run_discovery(found))
+        self.assertEqual(result, {'bot': '@aurora_helper_bot', 'more': False, 'people': [
+            {'id': '42', 'name': 'Owner Person', 'username': '@owner'},
+            {'id': '91', 'name': None, 'username': None}]})
+        # A full batch of waiting updates may hide a newer private message.
+        full = directory.discover(None, lambda token, method: {'id': 1},
+                                  self.run_discovery({'bot_username': None, 'updates_fsynced': 100, 'chats': []}))
+        self.assertEqual(full, {'bot': None, 'people': [], 'more': True})
+
+    def test_discovery_never_runs_while_telegram_is_on_or_without_a_token(self):
+        for change, code in (({'TELEGRAM_ENABLED': 'true'}, 'telegram_running'),
+                             ({'TELEGRAM_BOT_TOKEN': ''}, 'telegram_token_missing')):
+            with self.subTest(code=code), patch.dict(self.values, change):
+                with self.assertRaisesRegex(ValueError, '^' + code + '$'):
+                    directory.discover(None, lambda *args: self.fail('Telegram was called'), self.run_discovery({}))
+        self.assertEqual(self.runs, 0)
+
+    def test_refused_token_and_outage_are_named_without_provider_details(self):
+        from io import BytesIO
+        from urllib.error import HTTPError
+
+        def refused(token, method):
+            raise HTTPError('https://api.telegram.org/bot' + token + '/getMe', 401, 'Unauthorized', {}, BytesIO(b'{}'))
+
+        def offline(token, method):
+            raise TimeoutError('private network detail')
+
+        for api, code in ((refused, 'telegram_token_refused'), (offline, 'telegram_unreachable')):
+            with self.subTest(code=code), self.assertRaises(ValueError) as raised:
+                directory.discover(None, api, self.run_discovery({}))
+            self.assertEqual(str(raised.exception), code)
+            self.assertIsNone(raised.exception.__cause__)
+        self.assertEqual(self.runs, 0)
+
+
 if __name__ == '__main__':
     unittest.main()

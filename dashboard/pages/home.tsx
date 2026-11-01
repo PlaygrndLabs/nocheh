@@ -1,10 +1,12 @@
-/** Home: is Nocheh working, what needs the owner, and a few numbers for today. */
-import {AlertTriangle, ArrowRight, CheckCircle2, CircleDashed, XCircle} from 'lucide-react';
+/** Home: is Nocheh working, what needs the owner, what setup is left, and a few numbers for today. */
+import {AlertTriangle, ArrowRight, CheckCircle2, Circle, CircleDashed, XCircle} from 'lucide-react';
+import {setupSteps, type SetupStep} from '../lib/get-started';
 import {useResource} from '../lib/resource';
 import {href} from '../lib/routes';
+import {useSettings} from '../lib/settings';
 import {memoryAvailability} from '../lib/supervision';
 import {cn} from '../lib/utils';
-import {Card, CardHeader, LoadError, Skeleton, Stat, type Tone} from '../ui/core';
+import {Badge, Card, CardHeader, LoadError, Skeleton, Stat, type Tone} from '../ui/core';
 import {Page} from '../ui/page';
 
 type Item = {tone: Tone; text: string; detail?: string; link: string; action: string};
@@ -18,6 +20,10 @@ export default function Home() {
   const decisions = useResource<any>('/decisions?limit=1', 30000);
   const memory = useResource<any>('/memory/honcho', 30000);
   const usage = useResource<any>('/usage?days=1', 60000);
+  const settings = useSettings();
+  const setup = settings.data ? setupSteps(settings.data) : [];
+  // Steps still open are listed under Get started, so they aren't repeated as things that need you.
+  const open = new Set(setup.filter(step => !step.done).map(step => step.id));
 
   const m = monitoring.data;
   const counts: {state: string; count: number}[] = m?.workflows?.counts ?? [];
@@ -27,7 +33,9 @@ export default function Home() {
   const services: any[] = m?.services ?? [];
   const down = services.filter(s => s.expected_state === 'running' && !['running', 'healthy'].includes(s.state));
   const routes: any[] = m?.routes ?? [];
-  const noModel = routes.length > 0 && routes.filter(r => r.part !== 'embedding').some(r => !r.configured);
+  // Memory search and voice notes need only a key, which Get started asks for.
+  const noModel =
+    routes.length > 0 && routes.filter(r => !['embedding', 'transcription'].includes(r.part)).some(r => !r.configured);
   const telegram = m?.runtime?.status?.telegram;
   const waiting = decisions.data?.total ?? 0;
   const availability = memoryAvailability(memory.data, !!memory.error && !memory.data);
@@ -41,7 +49,7 @@ export default function Home() {
       link: href('system'),
       action: 'Check system',
     });
-  if (noModel)
+  if (noModel && !open.has('model'))
     items.push({
       tone: 'warn',
       text: 'No model is set up for every part',
@@ -75,7 +83,7 @@ export default function Home() {
       link: href('system', {view: 'work'}),
       action: 'Review',
     });
-  if (telegram === 'disabled')
+  if (telegram === 'disabled' && !open.has('telegram'))
     items.push({
       tone: 'neutral',
       text: 'Telegram is turned off',
@@ -104,7 +112,9 @@ export default function Home() {
         ? {tone: 'bad' as Tone, text: 'Something needs attention', detail: 'See below for what isn’t working.'}
         : items.length
           ? {tone: 'warn' as Tone, text: 'Nocheh is running', detail: 'A few things need you.'}
-          : {tone: 'good' as Tone, text: 'Nocheh is running', detail: 'Everything is working and nothing needs you.'};
+          : open.size
+            ? {tone: 'warn' as Tone, text: 'Nocheh is running', detail: 'Finish setting it up below.'}
+            : {tone: 'good' as Tone, text: 'Nocheh is running', detail: 'Everything is working and nothing needs you.'};
 
   const rows: any[] = usage.data?.rows ?? [];
   const cost = rows.reduce((n, r) => n + (r.cost_usd ?? 0), 0);
@@ -175,6 +185,8 @@ export default function Home() {
         )}
       </Card>
 
+      {open.size > 0 && <GetStarted steps={setup} />}
+
       <div>
         <h2 className="mb-3 text-sm font-medium text-muted">Today</h2>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -244,5 +256,58 @@ export default function Home() {
         </div>
       </Card>
     </Page>
+  );
+}
+
+/** What a new installation still needs, in order. It goes away once every step is done. */
+function GetStarted({steps}: {steps: SetupStep[]}) {
+  const done = steps.filter(step => step.done).length;
+  return (
+    <Card>
+      <CardHeader
+        id="get-started"
+        title="Get started"
+        description="A few steps to set up Nocheh. This list goes away once they’re all done."
+        action={
+          <Badge>
+            {done} of {steps.length} done
+          </Badge>
+        }
+      />
+      <ol aria-labelledby="get-started" className="mt-3 border-t border-line">
+        {steps.map(step => (
+          <li key={step.id} className="border-b border-line last:border-b-0">
+            {step.done ? (
+              <div className="flex items-center gap-3 px-5 py-3">
+                <CheckCircle2 className="size-5 shrink-0 text-good" aria-hidden />
+                <span className="text-sm text-muted">
+                  <span className="sr-only">Done: </span>
+                  {step.title}
+                </span>
+              </div>
+            ) : (
+              <a href={step.link} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-subtle">
+                {step.warning ? (
+                  <AlertTriangle className="size-5 shrink-0 text-warn" aria-hidden />
+                ) : (
+                  <Circle className="size-5 shrink-0 text-muted" aria-hidden />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    <span className="sr-only">To do: </span>
+                    {step.title}
+                  </span>
+                  <span className="block text-xs text-muted">{step.detail}</span>
+                </span>
+                <span className="hidden shrink-0 items-center gap-1 text-[13px] font-medium text-accent-text sm:flex">
+                  {step.action} <ArrowRight className="size-3.5" aria-hidden />
+                </span>
+                <ArrowRight className="size-4 shrink-0 text-muted sm:hidden" aria-hidden />
+              </a>
+            )}
+          </li>
+        ))}
+      </ol>
+    </Card>
   );
 }

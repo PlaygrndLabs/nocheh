@@ -180,6 +180,46 @@ test('home leads with what needs the owner', async () => {
   await page.close();
 });
 
+test('a new installation is guided on Home and finds its Telegram ID without a terminal', async () => {
+  writeFileSync('/tmp/nocheh-ui-scenario', 'fresh');
+  try {
+    const {page, problems} = await open('home');
+    const steps = page.getByRole('list', {name: 'Get started'});
+    await steps.getByRole('link', {name: /Add your Telegram ID/}).waitFor();
+    await page.getByText('1 of 5 done').waitFor();
+    // A missing OpenAI key is a warning that names what stops working.
+    assert.match(
+      await steps.getByRole('link', {name: /Add an OpenAI key/}).textContent(),
+      /Memory search and voice notes need it/,
+    );
+    assert.equal(
+      await steps.getByRole('link', {name: /Connect your Telegram bot/}).count(),
+      0,
+      'a done step is no link',
+    );
+    // Steps on the list aren't repeated as things that need the owner.
+    const needs = page.getByRole('list', {name: 'What needs you'});
+    assert.equal(await needs.getByText(/Telegram is turned off|No model is set up/).count(), 0);
+    await steps.getByRole('link', {name: /Add your Telegram ID/}).click();
+    await page.getByRole('tab', {name: /Telegram/, selected: true}).waitFor();
+    await page.getByRole('button', {name: 'Find my ID'}).click();
+    const found = page.getByRole('list', {name: 'Accounts that wrote to the bot'});
+    await found.getByText('Owner').waitFor();
+    await found.getByRole('button', {name: 'Use this ID'}).click();
+    assert.equal(await page.locator('#telegram-owner').inputValue(), '42');
+    await page.getByRole('region', {name: 'Save changes'}).getByText('1 unsaved change').waitFor();
+    await page.getByRole('region', {name: 'Save changes'}).getByRole('button', {name: 'Discard'}).click();
+    assert.deepEqual(problems, []);
+    await page.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  // Without a saved bot token there is nothing to look in yet.
+  const {page} = await open('settings?view=telegram');
+  assert.equal(await page.getByRole('button', {name: 'Find my ID'}).isDisabled(), true);
+  await page.close();
+});
+
 test('a settings edit survives switching tabs and Save at the top of the page saves and applies it', async () => {
   const {page, problems} = await open('settings?view=telegram');
   const tabs = page.getByRole('tablist', {name: 'Settings sections'});

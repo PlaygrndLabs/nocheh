@@ -175,6 +175,10 @@ def dispatch(body):
     if operation == 'telegram.directory':
         from tools.operations.archive.telegram_directory import directory
         return directory(state)
+    if operation == 'telegram.discover':
+        # "Find my Telegram ID": who wrote to the bot privately while Telegram is off.
+        from tools.operations.archive.telegram_directory import discover
+        return discover(state)
     if operation.startswith('import.'):
         from tools.operations.archive.import_job import inspect
         import re

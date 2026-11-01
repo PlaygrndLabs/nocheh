@@ -19,6 +19,15 @@ calls keep a reason code, and notices and Health say why they failed (owner,
 2026-10-29: "all yes" to keeping failure reasons). Pending: a live button press
 on a running installation.
 
+Get started (owner, 2026-11-01: "yes" to a small checklist on Home, a "Find my
+Telegram ID" button and a warning when the OpenAI key is missing, before the server
+install): Home lists the open setup steps from the saved settings, and
+Settings › Telegram finds the owner's ID by running `discover-telegram` inside Hermes
+([steps](test/dashboard-get-started.test.mjs),
+[discovery](services/hermes/test_telegram_directory.py),
+[browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
+clean server install.
+
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for
 the dashboard): one Nocheh password for the dashboard and the mini app, created

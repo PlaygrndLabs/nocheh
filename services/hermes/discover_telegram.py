@@ -25,7 +25,11 @@ async def main():
         rows={}
         for update in updates:
             msg=update.effective_message
-            if msg:rows[str(msg.chat.id)]={'chat_id':str(msg.chat.id),'chat_type':msg.chat.type,'sender_id':str(msg.from_user.id) if msg.from_user else None}
+            if msg:
+                sender=msg.from_user if msg.from_user and not msg.from_user.is_bot else None
+                rows[str(msg.chat.id)]={'chat_id':str(msg.chat.id),'chat_type':msg.chat.type,'sender_id':str(sender.id) if sender else None,
+                    # Names let the dashboard ask "is this you?"; the numeric ID stays the authority.
+                    'sender_name':sender.full_name if sender else None,'sender_username':sender.username if sender else None}
         print(json.dumps({'bot_username':me.username,'chats':list(rows.values()),'updates_fsynced':len(updates),'messages_sent':0},indent=2))
 
 

@@ -302,6 +302,11 @@ export async function startManagement() {
       }
       if (req.method === 'GET' && route === '/scopes') return json(res,200,await archive('/v1/scopes?after='+encodeURIComponent(url.searchParams.get('after')??'')));
       if (req.method === 'GET' && route === '/telegram/identities') return json(res,200,await python({operation:'telegram.directory'}));
+      // One look at a time, never while services restart: two readers of the bot's messages conflict.
+      if (req.method === 'POST' && route === '/telegram/discover') return exclusive('telegram-discover',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        return json(res,200,await python({operation:'telegram.discover'}));
+      });
       if (req.method === 'GET' && route === '/graph') return json(res,200,await python({operation:'graph.read',scope:url.searchParams.get('scope')??'',after:url.searchParams.get('after')??'',focus:url.searchParams.get('focus')??''}));
       const artifact=route.match(/^\/artifacts\/([a-f0-9]{64})\/download$/);
       if(req.method==='GET' && artifact?.[1]) {

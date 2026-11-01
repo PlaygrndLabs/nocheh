@@ -1,10 +1,12 @@
 """Owner-only Telegram identity hints; numeric IDs remain the authority."""
 import json
 import re
+import subprocess
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from tools.operations.installation.configuration import load
+from tools.operations.installation.configuration import load, compose
 
 GROUP = re.compile(r'-[1-9]\d{0,18}\Z')
 USER = re.compile(r'[1-9]\d{0,18}\Z')
@@ -102,3 +104,57 @@ def directory(state, archive=None, bot_api=_bot_api):
         result.append(group)
     result.sort(key=lambda group: (group['name'] or group['id']).casefold())
     return {'groups': result[:100], 'truncated': archive.get('truncated') is True or len(result) > 100 or len(selected) > 20}
+
+
+def _hermes_discovery(state):
+    """Runs `discover-telegram` inside Hermes: it saves every update it reads, confirms
+    none of them and sends no message, so nothing is lost when Telegram is turned on."""
+    command, env = compose(state)
+    try:
+        result = subprocess.run(command + ['exec', '-T', 'hermes', 'python', '-m', 'services.hermes.discover_telegram'],
+                                env=env, capture_output=True, text=True, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError('telegram_discovery_failed') from None
+    if result.returncode or len(result.stdout) > 256 * 1024:
+        raise ValueError('telegram_discovery_failed')
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        raise ValueError('telegram_discovery_failed') from None
+
+
+def discover(state, bot_api=_bot_api, run=_hermes_discovery):
+    """Who wrote to the bot privately, for "Find my Telegram ID". Works only while
+    Telegram is off, so it never competes with Nocheh reading the bot's messages."""
+    values = load(state)
+    token = values['TELEGRAM_BOT_TOKEN']
+    if not token:
+        raise ValueError('telegram_token_missing')
+    if values['TELEGRAM_ENABLED'] == 'true':
+        raise ValueError('telegram_running')
+    try:
+        bot_api(token, 'getMe')
+    except HTTPError as error:
+        error.close()
+        # Telegram answers 401 for a revoked token and 404 for one that isn't a token.
+        raise ValueError('telegram_token_refused' if error.code in (401, 404) else 'telegram_unreachable') from None
+    except Exception:
+        raise ValueError('telegram_unreachable') from None
+    found = run(state)
+    if not isinstance(found, dict):
+        raise ValueError('telegram_discovery_failed')
+    people = {}
+    for chat in found.get('chats') or []:
+        if not isinstance(chat, dict) or chat.get('chat_type') != 'private':
+            continue
+        identifier = _id(chat.get('sender_id'), USER)
+        if identifier and identifier == _id(chat.get('chat_id'), USER):
+            username = _clean(chat.get('sender_username'), 100).lstrip('@')
+            people[identifier] = {'id': identifier, 'name': _clean(chat.get('sender_name')) or None,
+                                  'username': '@' + username if username else None}
+    bot = _clean(found.get('bot_username'), 100).lstrip('@')
+    # Telegram returns at most 100 waiting updates, oldest first, and reading further would confirm
+    # them; a full batch may hide the owner's newer message, so the dashboard says so.
+    read = found.get('updates_fsynced')
+    more = isinstance(read, int) and not isinstance(read, bool) and read >= 100
+    return {'bot': '@' + bot if bot else None, 'people': list(people.values())[:20], 'more': more}

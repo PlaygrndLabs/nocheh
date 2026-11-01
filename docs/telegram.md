@@ -9,7 +9,8 @@ disabled until a token, owner ID and explicit policy are configured. No VPS is n
 2. Set `TELEGRAM_BOT_TOKEN` in `.env`, then run `./bin/nocheh up`. Keep it out of chat,
    command-line arguments and Git.
 3. Open the bot's private chat and send a message. Add it to any group you want to
-   select. Run `./bin/nocheh discover-telegram` to see numeric chat/sender IDs.
+   select. Press **Find my ID** in **Settings › Telegram** to pick your own user ID, or run
+   `./bin/nocheh discover-telegram` to see numeric chat/sender IDs.
    Discovery fsyncs observed updates and sends no messages. It runs only while
    assistant polling is disabled, so there is no competing poller.
 4. Configure the owner DM and selected groups, then apply the policy:
