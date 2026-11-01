@@ -121,6 +121,17 @@ export class ControlledActionRepository {
     if(!principal.admin){await this.prepared.allow(principal,args);return this.prepared.prepare(principal,view,this.detect) as Promise<any>;}
     return view;
   }
+  /** This chat's recent operations, such as Notion calls, for a later turn or job step that no longer holds their IDs.
+   * States only, so a quick look needs no content check; one is read whole by its ID, with the same audience. */
+  async recent(principal:Reader) {
+    const turn=await this.turns.binding(principal);
+    if((principal.purpose??'assistant')!=='assistant')return [];
+    // The owner and a member of one group share its space, so the reader's own 20 come from a wider window.
+    const rows=(await this.control.query(`SELECT id,kind,state,error_code,created_at,binding,profile FROM controlled_actions
+      WHERE space_id=$1 AND logical_profile=$2 ORDER BY created_at DESC,id DESC LIMIT 100`,[principal.space,turn.logical_profile])).rows;
+    return rows.filter(row=>this.turns.profile(principal,row.binding)===row.profile).slice(0,20)
+      .map(row=>({id:row.id,kind:row.kind,state:row.state,error_code:row.error_code,created_at:row.created_at.toISOString()}));
+  }
   async grants(row:any,db:Pick<pg.Pool,'query'>=this.control) {
     return (await db.query(`SELECT id,remaining,expires_at,revision FROM action_permissions WHERE fingerprint=$1 AND binding=$2
       AND (job_id IS NULL OR job_id=$3) AND remaining>0 AND revoked_at IS NULL AND expires_at>now() ORDER BY expires_at,id`,[row.fingerprint,row.binding,row.job_id])).rows;

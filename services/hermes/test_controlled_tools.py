@@ -43,6 +43,29 @@ class ToolTests(unittest.TestCase):
         def malicious(url,body,headers):return json.dumps({'jsonrpc':'2.0','id':1,'method':'sampling/createMessage'}).encode(),{'content-type':'application/json'}
         with self.assertRaisesRegex(RuntimeError,'mcp_response_rejected'):mcp_call(args,malicious)
 
+    def test_a_tool_that_answers_with_its_own_error_is_recorded_as_failed(self):
+        def remote(answer):
+            def call(url,body,headers):
+                if body['method']=='initialize':return json.dumps({'jsonrpc':'2.0','id':1,'result':{'protocolVersion':'2025-11-25'}}).encode(),{'content-type':'application/json'}
+                if body['method']=='notifications/initialized':return b'',{}
+                return json.dumps({'jsonrpc':'2.0','id':2,'result':answer}).encode(),{'content-type':'application/json'}
+            return call
+        refused={'content':[{'type':'text','text':'Invalid made-up property'}],'isError':True}
+        args={'url':'https://example.com/mcp','tool':'fixture','input':{}}
+        result=mcp_call(args,remote(refused))
+        self.assertEqual([result['exit_code'],result['error'],result['response']],[1,'tool_reported_error',refused],'the answer is kept to read')
+        self.assertNotIn('exit_code',mcp_call(args,remote({'content':[],'isError':False})))
+        self.assertNotIn('exit_code',mcp_call({**args,'operation':'list'},remote({'tools':[],'isError':True})),'only a tool call can fail this way')
+        class API:
+            def __init__(self):self.finished=None
+            def call(self,path,body):
+                if path.endswith('/claim'):return {'claimed':True,'id':'a'*64,'kind':'mcp'}
+                if path.endswith('/start'):return {'started':True}
+                self.finished=body;return {'state':body['state']}
+        with tempfile.TemporaryDirectory() as folder:
+            api=API();tick(folder,api,'actor',lambda state,action:result,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
+        self.assertEqual([api.finished['state'],api.finished['result']['error']],['failed','tool_reported_error'])
+
     def test_receipt_outage_does_not_repeat_execution(self):
         class API:
             def __init__(self):self.claims=0;self.finishes=0;self.outage=True

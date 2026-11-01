@@ -56,7 +56,8 @@ a chat read in order and searched by meaning: [0195](0195-the-agent-reads-a-chat
 background jobs as a chain of sealed steps: [0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md);
 imported history learned by long-term memory only: [0198](0198-imported-history-is-learned-by-long-term-memory-only.md);
 waiting approvals surviving reaction epochs: [0199](0199-waiting-approvals-survive-reaction-epochs.md);
-job reports surviving reaction epochs: [0200](0200-job-reports-survive-reaction-epochs.md).
+job reports surviving reaction epochs: [0200](0200-job-reports-survive-reaction-epochs.md);
+approved actions reporting how they ended: [0201](0201-approved-actions-report-how-they-ended.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
 Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).
 Background admission handoff: [0087](0087-live-background-admission-handoff.md),

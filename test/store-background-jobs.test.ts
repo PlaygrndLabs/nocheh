@@ -127,6 +127,13 @@ test('a background job is sized, approved on its card, runs step after step in i
     await s.jobs.steps.claim({...context,actor:context.actor});assert.equal((await step(stopped.id)).run,'running');
     const stepReader:Reader={admin:false,scope:group,space:group,turnEvent:started,logical_profile:'job-'+stopped.id.slice(0,24)};
     assert.equal(await s.jobs.steps.deliveryAllowed(stepReader),true,'a running step passes the turn policy check');
+    // An operation a step asks for waits for the owner; its card names the job, and the step goes on without it.
+    const now=await s.guards.state(),stepActor:Reader={...stepReader,generation:now.generation,guard_epoch:now.epoch,revision:now.epoch};
+    const asked=await s.actionCommands.offer('controlled',await s.controlledActions.propose(stepActor,{kind:'shell',arguments:{command:'printf made-up-check'}}));
+    assert.equal(asked.state,'proposed');assert.deepEqual([last('card').id,last('card').chat_id],[asked.id,'123']);
+    assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in the job “Stop me”\n\n\{/);assert.match(asked.message,/Do not wait for it/);
+    const shown=cards.length,long=await s.actionCommands.offer('controlled',await s.controlledActions.propose(stepActor,{kind:'shell',arguments:{command:'printf '+'x'.repeat(2300)}}));
+    assert.equal(cards.length,shown,'no card for a request too long to show');assert.match(long.message,/too long for a Telegram card[^]*dashboard Inbox/);
     await assert.rejects(s.jobs.stop(await actor((await capture('elsewhere',{message:{message_id:900,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'x'}},'123')).id),{id:stopped.id}),
       (error:any)=>error.status>=400,'a chat stops only its own jobs unless it is the owner');
     assert.equal((await s.jobs.stop(await actor((await message('stop-it')).id),{id:stopped.id})).state,'stopping');

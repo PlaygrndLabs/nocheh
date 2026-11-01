@@ -17,8 +17,11 @@ const input=(value:unknown):Record<string,unknown>&{id:string;actor:string}=>{
 
 /** One durable claim, one start, immutable derived receipt, then control completion. */
 export class ControlledExecutionRepository {
+  /** Called once an action reaches an end state; best effort and never awaited, so it cannot delay or fail a receipt. */
+  settled:(id:string)=>Promise<void>=async()=>{};
   constructor(readonly actions:ControlledActionRepository){}
   get pool(){return this.actions.control;}
+  private closed(id:string){void this.settled(id).catch(()=>{});}
   private async lease(db:pg.PoolClient,b:any) {
     // Hold the orchestration lease and owner revision until domain admission commits.
     const row=(await db.query(`SELECT w.owner_epoch FROM workflow_registry w JOIN workflow_owners o USING(family)
@@ -71,11 +74,13 @@ export class ControlledExecutionRepository {
       await db.query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema()||':controlled-operation',803322))");
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1 FOR UPDATE',[b.id])).rows[0];
       if(!row){await db.query('COMMIT');return {claimed:false};}
-      if(await this.recover(db,row)){await db.query('COMMIT');return {claimed:false};}
+      // Only a receipt not yet recorded changes the action; a recorded one is already settled.
+      const repairs=!row.result_reference;
+      if(await this.recover(db,row)){await db.query('COMMIT');if(repairs)this.closed(row.id);return {claimed:false};}
       if(row.state==='running'&&row.lease_until<=new Date()) {
         await db.query("UPDATE controlled_actions SET state='ambiguous',error_code='executor_receipt_missing',revision=revision+1,updated_at=now() WHERE id=$1",[row.id]);
         await recordEffect(db,this.actions.effect(row),'ambiguous',row.security_decision??await evaluate(db,this.actions.effect(row)),row.source_reference,row.permission_id??undefined);
-        await db.query('COMMIT');return {claimed:false};
+        await db.query('COMMIT');this.closed(row.id);return {claimed:false};
       }
       if(!['proposed','approved'].includes(row.state)){await db.query('COMMIT');return {claimed:false};}
       let args:unknown;
@@ -84,17 +89,17 @@ export class ControlledExecutionRepository {
         if(!(error instanceof HttpError)||![403,409].includes(error.status))throw error;
         // A pending publication ends soon; the next claim checks everything again.
         if(error.code==='guard_transition_pending'){await db.query('COMMIT');return {claimed:false};}
-        const result=await this.blocked(db,row,error.code);await db.query('COMMIT');return result;
+        const result=await this.blocked(db,row,error.code);await db.query('COMMIT');this.closed(row.id);return result;
       }
       // Turning Notion off stops Notion calls that were approved but have not run yet.
       if('connection' in (args as object)&&!(await db.query('SELECT enabled FROM owner_notion WHERE singleton')).rows[0]?.enabled)
-        {const result=await this.blocked(db,row,'notion_not_enabled');await db.query('COMMIT');return result;}
+        {const result=await this.blocked(db,row,'notion_not_enabled');await db.query('COMMIT');this.closed(row.id);return result;}
       if((await db.query("SELECT 1 FROM controlled_actions WHERE state='running' LIMIT 1")).rowCount){await db.query('COMMIT');return {claimed:false};}
       const grant=row.state==='proposed'?(await db.query(`SELECT id FROM action_permissions WHERE fingerprint=$1 AND binding=$2 AND (job_id IS NULL OR job_id=$3)
         AND remaining>0 AND revoked_at IS NULL AND expires_at>now() ORDER BY expires_at,id LIMIT 1 FOR UPDATE`,[row.fingerprint,row.binding,row.job_id])).rows[0]:null;
       if(row.state==='proposed'&&!grant){await db.query('COMMIT');return {claimed:false};}
       const decision=await evaluate(db,this.actions.effect(row),grant?.id??'exact_owner_approval',true);
-      if(decision.outcome!=='allow'){const result=await this.blocked(db,row,decision.rule,decision);await db.query('COMMIT');return result;}
+      if(decision.outcome!=='allow'){const result=await this.blocked(db,row,decision.rule,decision);await db.query('COMMIT');this.closed(row.id);return result;}
       if(grant)await db.query('UPDATE action_permissions SET remaining=remaining-1,revision=revision+1 WHERE id=$1',[grant.id]);
       await recordEffect(db,this.actions.effect(row),'claimed',decision,row.source_reference,grant?.id);
       await db.query(`UPDATE controlled_actions SET state='running',actor=$2,permission_id=$3,security_decision=$4,lease_until=now()+interval '120 seconds',
@@ -142,7 +147,7 @@ export class ControlledExecutionRepository {
       await this.actions.derived.record({operation_id:operation(row.id),source:row.source_reference,parents:[row.proposal_reference],
         kind:'controlled_action_result',content,producer:'nocheh',producer_version:protocol,configuration:{binding:row.binding,kind:row.kind},
         provenance:{actor:row.actor,fingerprint:row.fingerprint,permission_id:row.permission_id}});
-      const completed=await this.recover(db,row);await db.query('COMMIT');return completed;
+      const repairs=!row.result_reference,completed=await this.recover(db,row);await db.query('COMMIT');if(repairs)this.closed(row.id);return completed;
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
 }

@@ -192,6 +192,12 @@ export class BackgroundJobRepository {
     const value=object(JSON.parse(String(object(JSON.parse(saved.content.toString())).text)));
     return {title:string(value.title,100),instruction:string(value.instruction,8000)};
   }
+  /** The name of the job a step belongs to, for the card of an operation that step asked for; null for anything else. */
+  async stepJob(eventId:string):Promise<string|null> {
+    const row=(await this.control.query('SELECT j.* FROM background_steps s JOIN background_jobs j ON j.id=s.job_id WHERE s.event_id=$1',[eventId])).rows[0];
+    if(!row)return null;
+    try{return (await this.proposal(row)).title;}catch(error){if(error instanceof HttpError)return null;throw error;}
+  }
   /** The card a person approves: the exact instruction, what it reads and what it may cost. */
   async card(id:string) {
     const row=await this.row(id),shown=await this.proposal(row),prompts=await ownerPrompts(this.control),estimate=row.estimate;

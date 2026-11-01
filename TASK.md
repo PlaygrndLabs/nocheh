@@ -40,16 +40,26 @@ stops them, and the reader then sees only the state
 reactions too; any other change after its last step sends no further part of the
 report and ends the job as failed (`job_report_outdated`), and Stop sends no
 further part either ([ADR-0200](docs/adr/0200-job-reports-survive-reaction-epochs.md),
-[check](test/store-background-job-epochs.test.ts)).
+[check](test/store-background-job-epochs.test.ts)). An approved tool action's card
+now says whether it finished, failed or did not run, with a reason from fixed codes
+in the owner's texts; a tool's own error counts as failed; a card that a job asked
+for names the job, and the job's agent does not wait for it; a later turn or step
+lists its operations when it no longer holds their IDs
+([ADR-0201](docs/adr/0201-approved-actions-report-how-they-ended.md),
+[cards](test/store-approval-buttons.test.ts), [list](test/store-quiet-epochs.test.ts)).
 Open owner questions: should automatic
 learning revisions also leave waiting approvals and job reports valid? Until then
-they stop them. Does the owner accept, in their own words, the new SPECS line that
-a reaction change does not stop a waiting or approved proposal? It is not yet
-accepted. Next: cards saying how an approved action ended. Telegram message
+they stop them. Does the owner accept, in their own words, the new SPECS lines that
+a reaction change does not stop a waiting or approved proposal, and that a card
+says how an approved operation ended and which job or schedule asked? They are not
+yet accepted. Next: Notion inside owner-approved jobs, which needs the owner's
+answers on Notion reads and changes in jobs. Telegram message
 requests keep the exact-epoch rule, so a reaction in the seconds between
 staging a report part and sending it still cancels that part and fails the job.
+An owner cancel from Workflows does not edit the card yet.
 Pending: a live check: ask for a Notion change, react in a group, then approve;
-and a job whose report comes after a reaction in a group.
+a job whose report comes after a reaction in a group; and a Notion call that fails
+and one that finishes, each showing it on its card.
 
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for

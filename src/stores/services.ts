@@ -116,8 +116,10 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   },{call:options.runtime,owner:()=>options.policy().owner_id});
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs);
-  // A card edit is best effort: a job never fails because its card could not be updated.
+  const controlledExecution=new ControlledExecutionRepository(controlledActions);
+  // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
+  controlledExecution.settled=id=>actionCommands.settle('controlled',id).then(()=>{},()=>{});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
@@ -128,7 +130,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.runtime,schedules,telegramActions),
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime,browserDelivery),
-    controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),memoryAccess,memoryMap,
+    controlledActions,controlledExecution,memoryAccess,memoryMap,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),

@@ -29,5 +29,7 @@ test('approval card templates leave out a line whose value is missing and keep d
   assert.equal(fillTemplate('A {kind}\n\n\n\n{arguments} {unknown}',{kind:'shell',arguments:'{}'}),'A shell\n\n{} {unknown}');
   const lines=approvalLines('sent: Done!\nreject:\nnot a line');
   assert.equal(lines.sent,'Done!');assert.equal(lines.reject,'❌ Reject','an empty line keeps the default');assert.equal(lines.approve,'✅ Approve');
+  assert.match(approvalLines('').failed_action,/\{reason\}/);assert.match(approvalLines('').not_run,/\{reason\}/);
+  assert.equal(approvalLines('reason_sign_in: Sign in to Notion again.').reason_sign_in,'Sign in to Notion again.','the owner words why a tool did not finish');
   assert.equal(promptProblem('telegram.approval_card','No message here'),'prompt_placeholder_missing','the exact message is always shown');
 });

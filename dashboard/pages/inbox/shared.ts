@@ -141,8 +141,8 @@ export function problemText(error: unknown): string {
   if (/expired/.test(code)) return 'This request expired. Nocheh will ask again if it is still needed.';
   if (code === 'memory_fact_changed')
     return 'The fact changed after this was suggested, so it can’t be shared in this form.';
-  if (/context_changed|guard/.test(code))
-    return 'Secret checking changed after this was prepared, so it can’t be approved now.';
+  if (/context_changed/.test(code))
+    return 'Something it used changed after it was asked. It can’t be approved now. Ask again if you still want it.';
   if (code === 'action_already_started_or_closed') return 'This was already decided, or it has started.';
   if (code === 'action_delivery_denied') return 'Your security settings don’t allow sending this message.';
   if (code === 'invalid_permission_bounds') return 'Choose up to 30 days and up to 1000 uses.';
