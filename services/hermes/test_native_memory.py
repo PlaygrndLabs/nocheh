@@ -66,7 +66,7 @@ class ReviewBudgetTests(unittest.TestCase):
         def spawn(parent,messages,**options):
             def target():
                 fork,_,_=native.build_cache_parity_fork(parent)
-                for used in ((2000,0,0),(500,18000,3000),(100,23000,500)):
+                for used in ((2000,0,0),(500,18000,3000),(100,23500,500)):
                     fork.session_input_tokens,fork.session_cache_read_tokens,fork.session_cache_write_tokens=used
                     seen.append(loop._review_input_budget_exhausted(fork))
                 fork.run_conversation('review')
