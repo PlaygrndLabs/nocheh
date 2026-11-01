@@ -249,6 +249,7 @@ def run(body, emit=None):
         if agent._memory_store is not None:
             agent._memory_store.memory_char_limit=prefs['memory.memory_char_limit']
             agent._memory_store.user_char_limit=prefs['memory.user_char_limit']
+        memory_evidence.collect(agent)
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))

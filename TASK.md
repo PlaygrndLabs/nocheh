@@ -146,6 +146,12 @@ a withheld turn's memory call wrote, checked before every turn
 ([decision](docs/adr/0129-retired-sources-leave-native-notes.md),
 [checks](services/hermes/test_retired_history.py)); an uncited paraphrase stays.
 
+Hermes native notes reach every turn. With the memory evidence on, Hermes read the
+notes only when it built a session's prompt, so the later turns of a session carried
+none. Each turn now reads them itself, and the stored prompt stays the same
+([checks](services/hermes/test_memory_evidence.py)). Pending: the same checks in the
+Hermes image on the owner's machine, and a live reply after the pull.
+
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
 corrections, and applies saved proposals atomically after foreground work finishes.
@@ -561,7 +567,11 @@ not yet run on the owner's installation:
   `nocheh_notion` works only in the owner's private chat
   ([decision](docs/adr/0175-notion-through-its-mcp-server.md),
   [check](test/store-notion.test.ts), [sign-in check](services/hermes/test_notion_connection.py),
-  [browser check](test/dashboard-pages.browser.mjs)). Live check pending: the
+  [browser check](test/dashboard-pages.browser.mjs)). November 1: the
+  dashboard refused Notion's return to it as a cross-site request, so sign-in
+  could never finish; a tab opened from another site now gets a page that opens
+  the same address again from the dashboard ([check](test/management.test.ts)).
+  Live check pending: the
   owner connects Notion on the development machine and asks Nocheh to search it, then to add a
   page and approves the card.
 - Release test 4 (October 20) passed on the owner's installation. A private

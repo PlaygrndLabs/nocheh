@@ -111,6 +111,32 @@ class StorePostgresEntrypointTests(unittest.TestCase):
             # Each new build provisions once; an unchanged build does not repeat it.
             self.assertEqual(bootstraps(), ['/app/dist/src/stores/bootstrap.js', development, development])
 
+    def test_restart_provisions_with_the_finished_development_build(self):
+        # An older image's schema checks can refuse rows the current code wrote.
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary); calls = directory / 'calls'; dist = directory / 'dev-dist'
+            dist.mkdir(); (dist / '.dev-ready').write_text('7\n')
+
+            def executable(name, body):
+                path = directory / name
+                path.write_text('#!/bin/sh\n' + body + '\n')
+                path.chmod(0o700)
+
+            executable('docker-entrypoint.sh', 'trap \'exit 0\' TERM; while :; do sleep 0.1; done')
+            executable('pg_isready', 'exit 0')
+            executable('node', 'echo "$1" >> "$CALLS"; exit 0')
+            environment = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'],
+                           'CALLS': str(calls), 'POSTGRES_PASSWORD': 'synthetic', 'NOCHEH_DEV_DIST': str(dist)}
+            wrapper = subprocess.Popen(['/bin/sh', str(ENTRYPOINT), 'postgres'], env=environment)
+            try:
+                subprocess.run(['sleep', '3'])
+                wrapper.terminate(); wrapper.wait(timeout=10)
+            finally:
+                if wrapper.poll() is None: wrapper.kill()
+            bootstraps = [line for line in calls.read_text().split() if line.endswith('bootstrap.js')]
+            # The same build is not provisioned twice.
+            self.assertEqual(bootstraps, [str(dist / 'src/stores/bootstrap.js')])
+
 
 if __name__ == '__main__':
     unittest.main()
