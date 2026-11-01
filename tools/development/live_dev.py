@@ -117,10 +117,11 @@ def operating_config(root):
         raise ValueError('Operating Telegram must be enabled for live development')
     if values['NOCHEH_HONCHO_ENABLED'] != 'true':
         raise ValueError('Operating Honcho must be enabled for full-stack live development')
-    if not all(values.get(name) for name in ('NOCHEH_HONCHO_STATE_DIR',
-                                            'NOCHEH_HONCHO_DATABASE_VOLUME',
+    if not all(values.get(name) for name in ('NOCHEH_HONCHO_DATABASE_VOLUME',
                                             'NOCHEH_HONCHO_REDIS_VOLUME')):
-        raise ValueError('Operating Honcho state and volume identities are required')
+        raise ValueError('Operating Honcho volume identities are required; run ./bin/nocheh init')
+    # An unsaved Honcho folder follows the checkout, as in configuration.compose_environment.
+    values['NOCHEH_HONCHO_STATE_DIR'] = values.get('NOCHEH_HONCHO_STATE_DIR') or str(root / 'data/local/honcho')
     return values
 
 

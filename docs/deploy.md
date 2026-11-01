@@ -57,7 +57,8 @@ Docker must itself be configured to start at login/boot for unattended operation
 `make dev` combines root `docker-compose.yml` with `docker-compose.dev.yml`.
 The base file directly defines the archive, derived, control, and workflow stores.
 Compose creates owned volumes on a clean installation; normal restarts retain
-them. Development uses the configured Telegram bot, model providers, and settings
+them. `./bin/nocheh init`, which `up` also runs, saves the Honcho volume names in
+`.env`, and `make dev` refuses to start without them. Development uses the configured Telegram bot, model providers, and settings
 in the single `nocheh` project on normal localhost ports. Stop unattended services
 first and verify exclusive Telegram polling.
 The launcher refuses another running Nocheh project or

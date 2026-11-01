@@ -44,6 +44,27 @@ class LiveDevTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'volume identities are required'):
                 live_dev.operating_config(root)
 
+    def test_fresh_setup_is_ready_for_live_development_once_telegram_is_on(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            state = root / 'data/local'
+            with patch.object(configuration, 'INSTALLATION_ROOT', root), \
+                    patch.object(configuration, 'DEFAULT_STATE', state):
+                configuration.initialize(state)
+            values = configuration.read_env(root / '.env')
+            values.update(TELEGRAM_ENABLED='true', TELEGRAM_BOT_TOKEN='synthetic-token',
+                          TELEGRAM_OWNER_ID='12345')
+            configuration.write_env(root / '.env', values)
+            operating = live_dev.operating_config(root)
+            self.assertEqual(operating['NOCHEH_HONCHO_STATE_DIR'], str(state / 'honcho'))
+            self.assertEqual((operating['NOCHEH_HONCHO_DATABASE_VOLUME'],
+                              operating['NOCHEH_HONCHO_REDIS_VOLUME']),
+                             ('nocheh_honcho_database', 'nocheh_honcho_redis'))
+            # A saved folder, as `honcho runtime-up` writes it, is used as saved.
+            values['NOCHEH_HONCHO_STATE_DIR'] = '/synthetic/memory'
+            configuration.write_env(root / '.env', values)
+            self.assertEqual(live_dev.operating_config(root)['NOCHEH_HONCHO_STATE_DIR'], '/synthetic/memory')
+
     def test_main_checkout_must_have_one_operating_env(self):
         with tempfile.TemporaryDirectory() as folder:
             main = Path(folder) / 'main'
