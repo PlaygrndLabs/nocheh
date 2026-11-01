@@ -36,13 +36,20 @@ actions, such as Notion calls, survive reactions in any chat, and a later turn o
 job step of the asking chat reads its own action; any other epoch change still
 stops them, and the reader then sees only the state
 ([ADR-0199](docs/adr/0199-waiting-approvals-survive-reaction-epochs.md),
-[check](test/store-quiet-epochs.test.ts)). Open owner questions: should automatic
+[check](test/store-quiet-epochs.test.ts)). A job's report is sent after
+reactions too; any other change after its last step sends no further part of the
+report and ends the job as failed (`job_report_outdated`), and Stop sends no
+further part either ([ADR-0200](docs/adr/0200-job-reports-survive-reaction-epochs.md),
+[check](test/store-background-job-epochs.test.ts)).
+Open owner questions: should automatic
 learning revisions also leave waiting approvals and job reports valid? Until then
 they stop them. Does the owner accept, in their own words, the new SPECS line that
 a reaction change does not stop a waiting or approved proposal? It is not yet
-accepted. Next: a job's report surviving a reaction, and cards saying how
-an approved action ended. Telegram message requests keep the exact-epoch rule.
-Pending: a live check: ask for a Notion change, react in a group, then approve.
+accepted. Next: cards saying how an approved action ended. Telegram message
+requests keep the exact-epoch rule, so a reaction in the seconds between
+staging a report part and sending it still cancels that part and fails the job.
+Pending: a live check: ask for a Notion change, react in a group, then approve;
+and a job whose report comes after a reaction in a group.
 
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for

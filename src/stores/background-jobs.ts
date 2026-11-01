@@ -11,7 +11,7 @@ import {pageDate} from '../conversation-page.js';
 import type {SourceAccessRepository} from './access.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
-import type {GuardBinding} from './guards.js';
+import {carriesForward,type GuardBinding} from './guards.js';
 import {OperationRepository} from './operations.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {SourceRepository} from './retrieval.js';
@@ -259,7 +259,7 @@ export class BackgroundJobRepository {
     return {id:row.id,state:row.state==='proposed'?'stopped':'stopping'};
   }
   private async latest(id:string) {
-    return (await this.control.query(`SELECT s.*,r.state AS run_state,r.error_code AS run_error,r.result_reference FROM background_steps s
+    return (await this.control.query(`SELECT s.*,r.state AS run_state,r.error_code AS run_error,r.result_reference,r.binding AS run_binding FROM background_steps s
       JOIN managed_runs r ON r.event_id=s.event_id WHERE s.job_id=$1 ORDER BY s.step DESC,s.attempt DESC LIMIT 1`,[id])).rows[0];
   }
   /** One sealed step of a job, recorded before it runs. */
@@ -342,11 +342,11 @@ export class BackgroundJobRepository {
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
-  /** The job's audience, for the report it sends to the chat where it was asked. */
-  private audience(row:any):Reader {
+  /** The job's audience in the current epoch, for the report it sends to the chat where it was asked. */
+  private audience(row:any,binding:GuardBinding):Reader {
     const owner=this.access.policy().owner_id;
     return {admin:false,scope:row.scope===owner?null:row.scope,space:row.space_id,turnEvent:row.source_reference.id,
-      logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:Number(row.binding.epoch)};
+      logical_profile:row.logical_profile,generation:binding.generation,guard_epoch:binding.epoch};
   }
   /** Send the final answer to the chat where the job was asked, part after part. */
   private async report(row:any):Promise<Observation> {
@@ -360,9 +360,24 @@ export class BackgroundJobRepository {
     if(last&&['failed','ambiguous','cancelled','rejected'].includes(last.state))return this.finish(row,'failed','job_report_not_delivered');
     if(last&&last.state!=='done')return observation('waiting','delivery',sent.length,Date.now()+5000,'receipt_pending');
     if(sent.length>=parts.length)return this.finish(row,'done');
-    const part=sent.length+1,binding=await this.guards.state();
-    const action=await this.telegram.approvedSystem(this.audience(row),row.source_reference,binding,row.space_id,parts[part-1]!,'background-report:'+row.id+':'+part);
-    await this.control.query('INSERT INTO background_reports(job_id,part,action_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[row.id,part,action.id]);
+    // A stopped job sends no further part.
+    if(row.cancel_requested)return this.finish(row,'stopped');
+    const part=sent.length+1,binding=await this.guards.state(),step=await this.latest(row.id);
+    // The last step wrote the report in its own epoch. Only quiet epochs, such as a reaction, may
+    // have passed since (ADR-0200); any other change may have withdrawn what it read.
+    if(!step||!await carriesForward(this.control,step.run_binding,binding))return this.finish(row,'failed','job_report_outdated');
+    const prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,row.space_id,parts[part-1]!,'background-report:'+row.id+':'+part);
+    // A part's message and its record commit together under the job's lock, so neither a retry
+    // in a later epoch nor a second tick sends a part twice, and none is staged after Stop.
+    const db=await this.control.connect();
+    try {
+      await db.query('BEGIN');
+      const action=await this.telegram.stageSystem(db,prepared);
+      const job=(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
+      const saved=job.state==='reporting'&&!job.cancel_requested&&
+        (await db.query('INSERT INTO background_reports(job_id,part,action_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[row.id,part,action.id])).rowCount===1;
+      await db.query(saved?'COMMIT':'ROLLBACK');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     return observation('waiting','delivery',part,Date.now()+5000,'receipt_pending');
   }
   /** The workflow family: `job:` drives a job, `run:` one of its steps. */
