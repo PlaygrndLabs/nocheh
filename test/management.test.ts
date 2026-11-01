@@ -5,7 +5,7 @@ import {mkdtemp, mkdir, writeFile, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {spawn, spawnSync, type ChildProcess} from 'node:child_process';
-import {createServer} from 'node:http';
+import {createServer, get as httpGet} from 'node:http';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
 
@@ -73,6 +73,20 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     assert.equal((await fetch(base+'/honcho/budget',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
     assert.equal((await fetch(base+'/settings',{headers:{...headers,Origin:'https://untrusted.example'}})).status,403);
     assert.equal((await fetch(base+'/settings',{headers:{...headers,'Sec-Fetch-Site':'cross-site'}})).status,403);
+    // A tab opened from another site, such as Notion sending the browser back, gets only a page that
+    // opens the same address again from the dashboard; anything else from another site stays refused.
+    // fetch() always sends its own Sec-Fetch-Mode, so these use a plain request as a browser tab would.
+    const opened={'Sec-Fetch-Site':'cross-site','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'};
+    const open=(path:string,extra:Record<string,string>={})=>new Promise<{status:number;frame:string|undefined;body:string}>((done,fail)=>
+      httpGet({host:'127.0.0.1',port,path,headers:{...opened,...extra}},res=>{let body='';res.setEncoding('utf8');res.on('data',part=>body+=part);
+        res.on('end',()=>done({status:res.statusCode??0,frame:res.headers['x-frame-options'] as string|undefined,body}));}).on('error',fail));
+    const reopen=await open('/?connect=notion&code=c&state=s');
+    assert.equal(reopen.status,200);assert.equal(reopen.frame,'DENY');
+    assert.equal(reopen.body,'<!doctype html><meta charset="utf-8"><title>Nocheh</title><script>location.replace(location.href)</script>');
+    assert.equal((await open('/',{'Sec-Fetch-Dest':'iframe'})).status,403);
+    assert.equal((await open('/',{'Sec-Fetch-Mode':'cors'})).status,403);
+    assert.equal((await open('/api/plugins/nocheh/settings',headers)).status,403);
+    assert.equal((await open('/',{Host:'evil.example'})).status,403);
     const health=await fetch(base+'/health',{headers});assert.match(health.headers.get('set-cookie')??'',/HttpOnly; SameSite=Strict/);
     assert.equal((await fetch(base+'/settings',{headers:{Cookie:'nocheh_download='+token}})).status,401,'download cookies cannot administer settings');
     const settings=await request('/settings');assert.ok(!JSON.stringify(settings).includes('test-owner-token'));

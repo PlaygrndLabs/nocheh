@@ -214,12 +214,15 @@ export async function startManagement() {
       return json(res,error.status,{error:error.code,...(until?{until}:{}),...(tries_left!==undefined?{tries_left}:{})});
     }
   }
-  function checkOrigin(req:IncomingMessage) {
+  function checkOrigin(req:IncomingMessage,opened=false) {
     const authority = `127.0.0.1:${PORT}`;
     if (![authority, `localhost:${PORT}`].includes(req.headers.host ?? '')) throw new HttpError(403, 'invalid_host');
     if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
-    if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
+    if(!opened&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
+  /** The dashboard page opened in a tab from another site, as Notion's sign-in does when it sends the browser back. */
+  const openedFromAnotherSite=(req:IncomingMessage)=>req.method==='GET'&&req.headers['sec-fetch-site']==='cross-site'&&
+    req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&new URL(req.url??'/','http://local').pathname==='/';
   /** Starts an enumerated operation; callers hold the writer-start lock. `request` is the
    * caller's own admitted request, which a backup's drain must not wait for. */
   async function startOperation(action:string,options:unknown,request:symbol,automatic=false):Promise<Job> {
@@ -247,7 +250,13 @@ export async function startManagement() {
     const responseDone=new Promise<void>(resolve=>{res.once('finish',resolve);res.once('close',resolve);});
     void (async () => {
     const authority = `127.0.0.1:${PORT}`;
-    checkOrigin(req);
+    const opened=openedFromAnotherSite(req);checkOrigin(req,opened);
+    if(opened) {
+      // Such a tab comes without the strict session cookie and gets nothing else from here.
+      // This page opens the same address again from the dashboard itself, which sends it.
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-frame-options':'DENY','referrer-policy':'no-referrer','x-content-type-options':'nosniff'});
+      res.end('<!doctype html><meta charset="utf-8"><title>Nocheh</title><script>location.replace(location.href)</script>');return;
+    }
     const url = new URL(req.url ?? '/', `http://${authority}`), path = url.pathname;
     if(!maintenance.allows(req.method??'',path))throw new HttpError(503,'installation_maintenance');
     const prefix=path.startsWith(PRIMARY+'/')?PRIMARY:PREFIX;
