@@ -450,7 +450,8 @@ function ImportReview({job}: {job: ImportJob}) {
           <span className="text-sm">
             <span className="font-medium">Let the assistant learn from this history</span>
             <span className="mt-0.5 block text-[13px] text-muted">
-              Optional. Without it, imported messages are kept and searchable but not learned from.
+              Optional. Without it, imported messages are kept and searchable but not learned from. With it, long-term
+              memory learns from them; Assistant notes learn from live chats only.
               {resume ? ' This choice is kept when resuming.' : ''}
               {job.preview && ' ' + learningCostLabel(job.preview.learning)}
             </span>
