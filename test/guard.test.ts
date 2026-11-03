@@ -63,3 +63,18 @@ test('real PostgreSQL: guarded caches are isolated by input, destination, policy
     await guardPayload(value,policy,'https://other.example/responses',detect,pool);assert.equal(calls,4);
   } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });
+
+test("Anthropic's Messages API shape: tool call arguments are literal and masked, attachments stay uninspectable",async()=>{
+  const payload={system:[{type:'text',text:'system',cache_control:{type:'ephemeral'}}],messages:[
+    {role:'user',content:[{type:'text',text:'Aws password: planted-SECRET'}]},
+    {role:'assistant',content:[{type:'tool_use',id:'call-1',name:'mcp',input:{url:'https://tools.example',input:{type:'document',image:'planted-SECRET'}}}]},
+    {role:'user',content:[{type:'tool_result',tool_use_id:'call-1',content:[{type:'text',text:'done'}]}]},
+  ]};
+  const result=await guardPayload(payload,policy,'https://provider.example/v1/messages',async()=>['planted-SECRET']);
+  assert.equal(JSON.stringify(result.payload).includes('planted-SECRET'),false);
+  assert.equal(JSON.stringify((result.payload as typeof payload).system),JSON.stringify(payload.system));
+  for (const content of [[{type:'document',source:{type:'text',data:'raw'}}],[{type:'image',source:{type:'base64',media_type:'image/png',data:'raw'}}],
+    [{type:'tool_result',tool_use_id:'call-1',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:'raw'}}]}]]) {
+    await assert.rejects(guardPayload({messages:[{role:'user',content}]},policy,'https://provider.example/v1/messages',async()=>[]),{code:'uninspectable_model_context'});
+  }
+});

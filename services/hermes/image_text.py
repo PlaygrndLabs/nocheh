@@ -48,8 +48,12 @@ def read_image(body):
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (MEMORY, MEMORY))
     with tempfile.TemporaryDirectory(prefix='nocheh-image-') as home:
+        # Every provider is reached through its OpenAI-compatible API. Hermes would switch an
+        # Anthropic address to its Messages API now that the image has that SDK; a one-shot image
+        # read gains nothing from it.
         Path(home, 'config.yaml').write_text(json.dumps({'auxiliary': {'vision': {
-            'provider': 'custom', 'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}'}}}))
+            'provider': 'custom', 'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}',
+            'api_mode': 'chat_completions'}}}))
         environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
                        'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'],
                        **{name: os.environ[name] for name in ('HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy',

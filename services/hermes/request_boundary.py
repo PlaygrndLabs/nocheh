@@ -165,7 +165,9 @@ class Boundary:
         if not isinstance(payload,dict): raise GuardUnavailable('invalid_model_request')
         from .memory_evidence import inject
         from .timing import measure
-        with measure('model_guard'):guarded=self.transform(str(request.url),inject(clear_reasoning_sidecars(payload)))
+        # Anthropic's Messages API keeps tool results in user messages and roles alternating.
+        anthropic=urlsplit(str(request.url)).path.rstrip('/').endswith('/v1/messages')
+        with measure('model_guard'):guarded=self.transform(str(request.url),inject(clear_reasoning_sidecars(payload),anthropic))
         if not isinstance(guarded,dict): raise GuardUnavailable('invalid_guard_response')
         headers=dict(request.headers)
         headers.pop('content-length',None);headers.pop('transfer-encoding',None)

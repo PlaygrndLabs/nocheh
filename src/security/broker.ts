@@ -8,7 +8,7 @@ import {HttpError,json,readJson,object} from '../http.js';
 import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
 import {evaluate,recordEffect} from './store.js';
 import {ownerSecurityRoute} from './owner-api.js';
-import {providerPayload} from './provider-request.js';
+import {anthropicPayload,providerPayload} from './provider-request.js';
 import type {SourceReference} from '../stores/archive.js';
 import type {OperationReference} from '../stores/operations.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
@@ -39,11 +39,31 @@ export function configuredReplyUrl(value=process.env.NOCHEH_REPLY_ROUTE_URL,fixt
   try{const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)return undefined;}catch{return undefined;}
   return value.replace(/\/+$/,'');
 }
+/** Anthropic in Settings › Models. Its OpenAI-compatible API has no prompt caching, so
+ * Hermes reaches its Messages API through this route instead. */
+export const ANTHROPIC_URL='https://api.anthropic.com/v1';
+export const ANTHROPIC_MESSAGES='/anthropic/v1/messages';
+const ANTHROPIC_VERSION='2023-06-01';
+/** Hermes's beta headers. Others are dropped; the payload policy refuses what they would enable. */
+const ANTHROPIC_BETAS=new Set(['interleaved-thinking-2025-05-14','fine-grained-tool-streaming-2025-05-14']);
 export function providerTarget(transport:Record<string,unknown>,path:string,configured=configuredReplyUrl()):string {
   if(!configured)throw new HttpError(503,'provider_not_configured');
   // Only the one provider the owner configured for replies, never an address Hermes invents.
   if(transport.base_url===configured&&transport.api_mode==='chat_completions'&&path==='/v1/chat/completions')return configured+'/chat/completions';
+  if(transport.base_url===configured&&configured===ANTHROPIC_URL&&path===ANTHROPIC_MESSAGES)return configured+'/messages';
   throw new HttpError(403,'provider_route_denied');
+}
+/** Hermes sends Anthropic's key header; on this route it carries the turn's scoped credential. */
+export function anthropicCredential(req:IncomingMessage,path:string):void {
+  const key=req.headers['x-api-key'];
+  if(path!==ANTHROPIC_MESSAGES||key===undefined)return;
+  if(typeof key!=='string'||req.headers.authorization!==undefined)throw new HttpError(401,'unauthorized');
+  req.headers.authorization='Bearer '+key;delete req.headers['x-api-key'];
+}
+export function anthropicHeaders(key:string,betas:string|string[]|undefined):Record<string,string> {
+  const kept=String(betas??'').split(',').map(beta=>beta.trim()).filter(beta=>ANTHROPIC_BETAS.has(beta));
+  return {'content-type':'application/json','x-api-key':key,'anthropic-version':ANTHROPIC_VERSION,'user-agent':'Nocheh',
+    ...(kept.length?{'anthropic-beta':[...new Set(kept)].join(',')}:{})};
 }
 export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBinding> {
   if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');
@@ -75,6 +95,7 @@ export function brokerServer(options:BrokerOptions) {
     const url=new URL(req.url??'/','http://security'),path=url.pathname;
     if(req.method==='GET'&&path==='/health'){if(options.health)await options.health();else await options.pool.query('SELECT 1');return json(res,200,{ok:true,service:'security',plugin:manifest.id,api_version:1});}
     options.assertActive?.();
+    anthropicCredential(req,path);
     const principal=reader(req,options.token);
     await options.assertReady?.();
     if(principal.admin&&path==='/v1/guard'&&req.method==='POST')return json(res,200,await options.prepare(principal,await readJson(req,1024*1024)));
@@ -131,12 +152,13 @@ export function brokerServer(options:BrokerOptions) {
         await stream(response,principal,res,file?26*1024*1024:8*1024*1024);
         if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.reference??binding.event_id);trace.closed=true;}return;
       }
-      if(req.method!=='POST'||path!=='/v1/chat/completions'||url.search)throw new HttpError(403,'security_route_denied');
+      const anthropic=path===ANTHROPIC_MESSAGES;
+      if(req.method!=='POST'||(path!=='/v1/chat/completions'&&!anthropic)||url.search)throw new HttpError(403,'security_route_denied');
       // Nothing is guarded or recorded for a model call that has no provider to go to.
       if(!configuredReplyUrl())throw new HttpError(503,'provider_not_configured');
       const input=await readJson(req,1024*1024);let payload:Record<string,unknown>;
       try {
-        payload=providerPayload(input);
+        payload=anthropic?anthropicPayload(input):providerPayload(input);
         if(payload.model!==options.model)throw new HttpError(403,'model_configuration_mismatch');
       }catch(error){
         if(error instanceof HttpError){
@@ -160,7 +182,8 @@ export function brokerServer(options:BrokerOptions) {
       if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
       timings.broker_prepare_ms=elapsed(prepareStarted);
       // A gateway's bot check can refuse a client without a name, as it refused Honcho's model calls.
-      const headers:Record<string,string>={'content-type':'application/json',authorization:'Bearer '+String(transport.api_key),'user-agent':'Nocheh'};
+      const headers:Record<string,string>=anthropic?anthropicHeaders(String(transport.api_key),req.headers['anthropic-beta']):
+        {'content-type':'application/json',authorization:'Bearer '+String(transport.api_key),'user-agent':'Nocheh'};
       for(const [key,value] of Object.entries(object(transport.headers??{})))if(key.toLowerCase()==='user-agent'&&typeof value==='string')headers['user-agent']=value;
       await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.reference??binding.event_id);attempt.started=true;
       const providerStarted=performance.now();let response:Response;

@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from .subscription import BROKER_URL, DetectorContractError, SubscriptionCredentials, detect_literals, detector_reply
+from .subscription import BROKER_ANTHROPIC_URL, BROKER_URL, DetectorContractError, SubscriptionCredentials, detect_literals, detector_reply
 
 
 def response(output):
@@ -126,9 +126,15 @@ class DetectorTests(unittest.TestCase):
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),
                                   ('https://chatgpt.com/backend-api/codex','openai-codex','codex_responses'),
-                                  (BROKER_URL,'openai-codex','codex_responses')):
+                                  (BROKER_URL,'openai-codex','codex_responses'),
+                                  # Anthropic's Messages API is reached only through the broker.
+                                  ('https://api.anthropic.com/v1','anthropic','anthropic_messages'),
+                                  (BROKER_URL,'anthropic','anthropic_messages'),
+                                  (BROKER_ANTHROPIC_URL,'openai','chat_completions'),
+                                  (BROKER_ANTHROPIC_URL+'/','anthropic','anthropic_messages')):
             with self.subTest(url=url),self.assertRaises(ValueError):
                 SubscriptionCredentials('token',url,provider,mode)
+        self.assertEqual(SubscriptionCredentials('token',BROKER_ANTHROPIC_URL,'anthropic','anthropic_messages').runtime()['api_mode'],'anthropic_messages')
         self.assertNotIn('synthetic-token',repr(SubscriptionCredentials('synthetic-token')))
 
 

@@ -77,7 +77,8 @@ class ImageTextTests(unittest.TestCase):
         self.assertNotIn('SERVICE_TOKEN', seen['env'])
         self.assertEqual(seen['env'][image_text.KEY], 'synthetic-image-key')
         self.assertEqual(seen['config']['auxiliary']['vision'], {'provider': 'custom', 'model': 'vision-model',
-                         'base_url': 'https://images.example.test/v1', 'api_key': '${env:' + image_text.KEY + '}'})
+                         'base_url': 'https://images.example.test/v1', 'api_key': '${env:' + image_text.KEY + '}',
+                         'api_mode': 'chat_completions'})
         self.assertEqual(seen['hint'], {'prompt': 'Only the text, please.'})
         self.assertEqual([(row['part'], row['provider'], row['input_tokens'], row['cost_usd'], row['priced_runs']) for row in rows],
                          [('image', 'gateway', 1200, 0.004, 1)], 'a cost Hermes did not report is priced from its table')

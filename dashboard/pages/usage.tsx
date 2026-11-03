@@ -12,7 +12,15 @@ import {compact, cost, count, duration, partName} from '../lib/system-format';
 import {cn} from '../lib/utils';
 import {Card, CardHeader, Empty, LoadError, Notice, Segmented, Skeleton, Stat, Table, Td, Th} from '../ui/core';
 import {Page} from '../ui/page';
-import {addRow, emptyTotal, failures, groupRows as group, type Usage, type UsageRow} from '../lib/system-usage';
+import {
+  addRow,
+  cachedShare,
+  emptyTotal,
+  failures,
+  groupRows as group,
+  type Usage,
+  type UsageRow,
+} from '../lib/system-usage';
 import {ReplySpeed, type TimingSummary} from './usage/reply-speed';
 
 const DailyChart = lazy(() => import('./usage/daily-chart'));
@@ -74,7 +82,10 @@ export default function UsagePage() {
             <Stat
               label="Tokens"
               value={compact(all.input + all.output)}
-              hint={`${compact(all.input)} in · ${compact(all.output)} out`}
+              hint={
+                `${compact(all.input)} in · ${compact(all.output)} out` +
+                (cachedShare(all) ? ` · ${cachedShare(all)}` : '')
+              }
             />
           </>
         ) : (
@@ -218,7 +229,10 @@ function PartTable({data}: {data: Usage}) {
                   {count(total.calls)}
                   {failures(total) && <span className="block text-xs text-bad">{failures(total)}</span>}
                 </Num>
-                <Num>{compact(total.input)}</Num>
+                <Num>
+                  {compact(total.input)}
+                  {cachedShare(total) && <span className="block text-xs text-muted">{cachedShare(total)}</span>}
+                </Num>
                 <Num>{compact(total.output)}</Num>
                 <Num className={cn(total.unknown && 'text-warn')}>{cost(total)}</Num>
               </tr>
