@@ -421,16 +421,25 @@ class ProductScenarios(Scenarios):
             archive.writestr('ChatExport/files/plan.txt', 'synthetic plan IMPORTFILE\n')
         return buffer.getvalue()
 
-    def import_with_topics_files_and_learning(self):
+    def run_import(self, content, chat_to, learn, ready=False):
+        """Upload an export on the Import page, share its chat with `chat_to` (None keeps it private) and start it."""
         dashboard = self.dashboard()
         job = dashboard.post('/jobs', {})
-        dashboard.put('/jobs/'+job['id']+'/upload?name=export.zip', self.desktop_export())
+        dashboard.put('/jobs/'+job['id']+'/upload?name=export.zip', content)
         preview = dashboard.post('/jobs/'+job['id']+'/preview', {})
+        preview = preview.get('preview') or preview
+        chat = preview.get('chats', [{}])[0]
+        mapping = {str(chat.get('id')): str(chat_to)} if chat_to is not None else {}
+        dashboard.post('/jobs/'+job['id']+'/start', {'mapping': mapping, 'review_approved': learn})
+        current = lambda: next(row for row in dashboard.get('/jobs') if row['id'] == job['id'])
+        self.wait('import_finished', lambda: current() if current().get('state') in ('complete', 'failed', 'cancelled', 'interrupted') else None, 600)
+        if ready:
+            self.wait('import_ready', lambda: current().get('prepared_at') or current().get('state') != 'complete', 600)
+        return preview, current()
+
+    def import_with_topics_files_and_learning(self):
+        preview, final = self.run_import(self.desktop_export(), GROUP, True)
         self.current['observed'] = {'preview': {key: preview.get(key) for key in ('messages', 'supplied_files', 'missing_files')}}
-        chat = (preview.get('preview') or preview).get('chats', [{}])[0]
-        dashboard.post('/jobs/'+job['id']+'/start', {'mapping': {str(chat.get('id', abs(GROUP))): str(GROUP)}, 'review_approved': True})
-        self.wait('import_finished', lambda: next((row for row in dashboard.get('/jobs') if row['id'] == job['id'] and row.get('state') in ('complete', 'failed', 'cancelled', 'interrupted')), None), 600)
-        final = next(row for row in dashboard.get('/jobs') if row['id'] == job['id'])
         self.gate('import_done', final.get('state') == 'complete' and final.get('completed', 0)+final.get('duplicates', 0) >= 4, job={key: final.get(key) for key in ('state', 'error', 'result')})
         topic = self.f.query('nocheh_archive', "SELECT count(*) FROM events WHERE convert_from(original_text,'UTF8') LIKE '%IMPORTTOPIC1%' AND scope LIKE '"+str(GROUP)+"%'")
         self.gate('imported_into_mapped_group', topic != '0', count=topic)
@@ -447,6 +456,120 @@ class ProductScenarios(Scenarios):
         self.gate('imported_history_writes_no_memory_notes', notes == '0', count=notes)
         questions = self.f.query('nocheh_control', "SELECT count(*) FROM interpretation_jobs WHERE source_reference->>'id' IN ("+imported+")") if imported else '0'
         self.gate('imported_history_asks_no_learning_questions', questions == '0', count=questions)
+
+    def learning_export(self, chat_id, marker, voice=False):
+        """A small Telegram Desktop group export. Its words carry marker+'W', the word searches use, and
+        marker+'M', which nothing else ever says, so finding marker+'M' anywhere means this history reached it."""
+        base = int(time.time()) - 86400*60
+        when = lambda index: {'date': datetime.fromtimestamp(base+index*60).strftime('%Y-%m-%dT%H:%M:%S'), 'date_unixtime': str(base+index*60)}
+        person = {'from': 'Synthetic 124', 'from_id': 'user124'}
+        messages = [{'id': 601, 'type': 'message', **when(0), **person, 'text': 'قرار شد لوگو را عوض کنیم '+marker+'W '+marker+'M'},
+                    {'id': 602, 'type': 'message', **when(1), **person, 'reply_to_message_id': 601, 'text': 'فایل را هم بفرست '+marker+'M'}]
+        if voice:
+            messages.append({'id': 603, 'type': 'message', **when(2), **person, 'text': '', 'file': 'voice_messages/audio_1.ogg',
+                             'media_type': 'voice_message', 'mime_type': 'audio/ogg', 'duration_seconds': 2})
+        document = {'name': 'Synthetic Client '+marker, 'type': 'private_supergroup', 'id': chat_id, 'messages': messages}
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            archive.writestr('ChatExport/result.json', json.dumps(document, ensure_ascii=False, indent=1))
+            if voice:
+                archive.writestr('ChatExport/voice_messages/audio_1.ogg', b'OggS\x00\x02synthetic voice note\n\xff'*4+marker.encode())
+        return buffer.getvalue()
+
+    def tool_call(self, name, arguments, chat, topic=None):
+        """The scripted model calls one agent tool in `chat` and answers nothing, so no reply repeats the result."""
+        self.silent_turn(self.f.message(chat, 'ابزار [[tool:'+name+' '+json.dumps(arguments)+']] [[after:silent]]', topic=topic), chat, topic)
+        final = [event for event in self.f.brain() if event.get('tool') == name and event['phase'] == 'final'][-1]
+        try:
+            return json.loads(final['result'])
+        except ValueError:
+            return {'raw': final['result'][:500]}
+
+    def import_learning_choice(self):
+        # The Import page's learn box decides only whether long-term memory (Honcho) learns the history.
+        # Without it the messages are kept and found by their words, and a later live message is learned
+        # on its own. A chat kept private is never learned, box or not. Importing the same export again
+        # with the box ticked learns it then, without checking or transcribing anything twice.
+        off, private = 'LRNOFF'+str(self.f.ids()), 'LRNPRIV'+str(self.f.ids())
+        listed = lambda ids: ','.join("'"+value+"'" for value in ids)
+        imported = lambda marker: [value for value in self.f.query('nocheh_archive', "SELECT id FROM events WHERE origin='import' AND "
+            "(convert_from(payload,'UTF8') LIKE '%"+marker+"%') ORDER BY id").split('\n') if value]
+        in_honcho = lambda token: self.honcho("SELECT count(*) FROM messages WHERE content LIKE '%"+token+"%'")
+        receipts = lambda ids: self.f.query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE source_reference->>'id' IN ("+listed(ids)+")")
+        consent = lambda ids: self.f.query('nocheh_control', "SELECT count(*) FROM learning_consent WHERE enabled AND event_id IN ("+listed(ids)+")")
+        drained = lambda: self.honcho("SELECT count(*) FROM queue WHERE NOT processed") == '0'
+        jobs = lambda ids, what='count(*)': self.f.query('nocheh_control', "SELECT "+what+" FROM workflow_registry WHERE family IN ('memory_review','honcho') "
+            "AND job_id IN ("+listed('source:'+value for value in ids)+")")
+        settled = lambda ids: lambda: self.f.query('nocheh_control', "SELECT count(*) FROM workflow_registry WHERE family IN ('memory_review','honcho') AND job_id IN ("
+            + listed('source:'+value for value in ids)+") AND state IN ('queued','running','waiting','retryable_failed')") == '0'
+        outcomes = lambda ids: jobs(ids, "string_agg(DISTINCT family||':'||state||':'||coalesce(waiting_reason,''),',')")
+        client = self.learning_export(20043, off, voice=True)
+        observed = self.current['observed'] = {}
+
+        # 1. Box off, shared with a group.
+        preview, final = self.run_import(client, OTHER_GROUP, False, ready=True)
+        parts = [part.get('part') for part in (preview.get('learning') or {}).get('parts', [])]
+        self.gate('estimate_counts_memory_and_its_secret_check', parts == ['memory', 'guard'], learning=preview.get('learning'))
+        self.gate('off_import_ready', final.get('state') == 'complete' and bool(final.get('prepared_at')),
+                  job={key: final.get(key) for key in ('state', 'error', 'prepared', 'prepared_at')})
+        ids = imported(off)
+        self.gate('off_messages_kept', len(ids) == 3, count=len(ids))
+        self.gate('off_no_learning_choice_recorded', consent(ids) == '0', count=consent(ids))
+        voices = self.f.http('/fixture/stats')['transcriptions']
+        transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id IN ("+listed(ids)+")")
+        self.gate('off_voice_note_transcribed', transcript != '0', count=transcript)
+        found = self.tool_call('nocheh_archive_search', {'query': off+'W'}, OTHER_GROUP)
+        self.gate('off_found_by_words_in_its_group', off+'M' in json.dumps(found, ensure_ascii=False), result=str(found)[:300])
+        page = self.tool_call('nocheh_archive_page', {}, OTHER_GROUP)
+        self.gate('off_read_in_order_in_its_group', off+'M' in json.dumps(page, ensure_ascii=False), items=len(page.get('items', [])))
+        live = 'LRNLIVE'+str(self.f.ids())
+        self.turn(self.f.message(OTHER_GROUP, 'پیام تازه '+live), OTHER_GROUP)
+        self.wait('later_live_message_learned', lambda: in_honcho(live) not in ('', '0'), 600)
+        self.wait('off_reviews_settled', settled(ids), 600)
+        self.wait('honcho_queue_drained', drained, 600)
+        observed['off_review_jobs'] = outcomes(ids)
+        self.gate('off_not_in_long_term_memory', in_honcho(off+'M') == '0' and receipts(ids) == '0', honcho=in_honcho(off+'M'), receipts=receipts(ids))
+        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W'}, OTHER_GROUP)
+        self.gate('off_not_found_by_meaning', off+'M' not in json.dumps(meaning, ensure_ascii=False), result=str(meaning)[:300])
+
+        # 2. Box on, chat kept private to the owner.
+        self.run_import(self.learning_export(20044, private), None, True, ready=True)
+        kept = imported(private)
+        self.gate('private_choice_recorded', len(kept) == 2 and consent(kept) == '2', messages=len(kept), consent=consent(kept))
+        owner = self.tool_call('nocheh_archive_search', {'query': private+'W'}, OWNER)
+        self.gate('private_found_by_words_in_owner_chat', private+'M' in json.dumps(owner, ensure_ascii=False), result=str(owner)[:300])
+        later = 'LRNLIVE'+str(self.f.ids())
+        self.turn(self.f.message(OWNER, 'پیام تازه '+later), OWNER)
+        self.wait('later_private_message_learned', lambda: in_honcho(later) not in ('', '0'), 600)
+        self.wait('private_reviews_settled', settled(kept), 600)
+        self.wait('honcho_queue_drained_again', drained, 600)
+        observed['private_review_jobs'] = outcomes(kept)
+        self.gate('private_never_learned', in_honcho(private+'M') == '0' and receipts(kept) == '0', honcho=in_honcho(private+'M'), receipts=receipts(kept))
+
+        # 3. The same export again, shared with the same group, box on.
+        # The import's own secret check: the messages, their files and transcripts. Learning checks what
+        # long-term memory sends to its model (runtime_context) on its own, so that is not counted here.
+        prepared = ("FROM guard_sources g LEFT JOIN derived_artifacts d ON g.kind='derived_artifacts' AND d.id=g.source_id WHERE g.event_id IN ("+listed(ids)+") "
+                    "AND (g.kind IN ('events','artifacts') OR d.kind IN ('transcript','extracted_text','extraction_status'))")
+        revisions = lambda: self.f.query('nocheh_derived', "SELECT coalesce(sum(g.active_revision),0)||'/'||count(*) "+prepared)
+        checked, detector = revisions(), self.f.http('/fixture/stats')['detector']
+        _, again = self.run_import(client, OTHER_GROUP, True)
+        self.gate('again_keeps_nothing_twice', again.get('state') == 'complete' and again.get('duplicates') == 3 and imported(off) == ids,
+                  job={key: again.get(key) for key in ('state', 'completed', 'duplicates', 'error')})
+        self.wait('again_learned_into_long_term_memory', lambda: in_honcho(off+'M') not in ('', '0'), 900)
+        self.wait('again_reviews_settled', settled(ids), 600)
+        self.wait('honcho_queue_drained_last', drained, 600)
+        observed['again_review_jobs'] = outcomes(ids)
+        observed['again_learning_inputs'] = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='memory_input' AND event_id IN ("+listed(ids)+")")
+        observed['again_secret_check_calls'] = self.f.http('/fixture/stats')['detector']-detector
+        observed['again_learning_checks'] = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='runtime_context' AND event_id IN ("+listed(ids)+")")
+        self.gate('again_no_new_secret_checks', revisions() == checked, before=checked, after=revisions())
+        self.gate('again_no_new_transcription', self.f.http('/fixture/stats')['transcriptions'] == voices, before=voices)
+        notes = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE source_reference->>'id' IN ("+listed(ids)+")")
+        questions = self.f.query('nocheh_control', "SELECT count(*) FROM interpretation_jobs WHERE source_reference->>'id' IN ("+listed(ids)+")")
+        self.gate('again_no_notes_or_learning_questions', notes == '0' and questions == '0', notes=notes, questions=questions)
+        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W'}, OTHER_GROUP)
+        self.gate('again_found_by_meaning', off+'M' in json.dumps(meaning, ensure_ascii=False), result=str(meaning)[:300])
 
     # Memory search model ----------------------------------------------------------------------------
 
@@ -657,7 +780,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
-                 'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
+                 'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']
