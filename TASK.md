@@ -93,9 +93,7 @@ execute_code calls ran in its box, the result file never appeared in the turn, t
 report reached the owner, and the box was gone when the job was done. It passed on
 a fresh fixture, and failed as expected when the launcher had no box token. Not
 yet run with a real model.
-Open owner questions: may a job's Notion changes also follow "Nothing asks me"?
-Until then they always ask. Should link previews be off for every bot message? They are off
-until the owner answers. Does the owner accept, in their own words, the new SPECS
+Open owner questions: does the owner accept, in their own words, the new SPECS
 lines that a reaction change or a learning revision does not stop a waiting or approved proposal, that a
 card says how an approved operation ended and which job or schedule asked, that
 jobs the owner approved use Notion, that a job's changes come on list cards, and

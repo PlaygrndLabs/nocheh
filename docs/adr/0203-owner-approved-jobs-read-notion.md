@@ -3,9 +3,9 @@
 <status>
 Accepted on 2026-11-01, when the owner chose "All three, in order" to build steps
 2 to 4 so Nocheh works like a Claude Code session: a background job checks a
-Notion task table against a group chat, which takes many Notion reads. Whether a
-job's changes may also follow "Nothing asks me" is an open owner question; until
-it is answered they always ask. Extends
+Notion task table against a group chat, which takes many Notion reads. On
+2026-11-03 the owner chose "Reads free, changes ask": a job's reads follow the
+owner's setting, and its changes always ask. Extends
 [ADR-0175](0175-notion-through-its-mcp-server.md) and
 [ADR-0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md).
 </status>

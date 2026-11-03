@@ -3,9 +3,8 @@
 <status>
 Accepted on 2026-11-03, as step 3 of the steps the owner chose with "All three, in
 order" so Nocheh works like a Claude Code session: a background job runs commands,
-edits files and runs Python over a long chat with Hermes's own tools. Turning link
-previews off for every bot message is an open owner question; it is built as
-recommended until it is answered. Extends
+edits files and runs Python over a long chat with Hermes's own tools. The owner
+chose on 2026-11-03 to turn link previews off for every bot message. Extends
 [ADR-0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md),
 [ADR-0200](0200-waiting-approvals-survive-reaction-epochs.md),
 [ADR-0203](0203-owner-approved-jobs-read-notion.md) and
@@ -133,7 +132,6 @@ recommended until it is answered. Extends
 - The chat copy's pages are not kept as already checked values, so filling a box
   adds nothing to what each secret check loads, however long the chat. Box output
   that quotes `/chat` is checked again.
-- Still open: link previews wait for the owner's answer.
 - Turning the switch off removes running boxes within seconds. A step that loses
   its box mid-way gets a plain tool error, and later steps run without one.
 - The backend, the hook and the spill handling rely on Hermes internals. If an
