@@ -509,7 +509,7 @@ class ProductScenarios(Scenarios):
         # 1. Box off, shared with a group.
         preview, final = self.run_import(client, OTHER_GROUP, False, ready=True)
         parts = [part.get('part') for part in (preview.get('learning') or {}).get('parts', [])]
-        self.gate('estimate_counts_long_term_memory_only', parts == ['memory'], learning=preview.get('learning'))
+        self.gate('estimate_counts_memory_and_its_secret_check', parts == ['memory', 'guard'], learning=preview.get('learning'))
         self.gate('off_import_ready', final.get('state') == 'complete' and bool(final.get('prepared_at')),
                   job={key: final.get(key) for key in ('state', 'error', 'prepared', 'prepared_at')})
         ids = imported(off)
