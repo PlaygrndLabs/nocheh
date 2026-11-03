@@ -74,7 +74,9 @@ edits, including store schema changes, need no `make dev` rerun or Docker image
 rebuild; `make dev-build` rebuilds images after dependency or Dockerfile edits. `make dev` builds only when its development images are absent. Pinned Hermes
 and Honcho base image revisions are checked before startup; when a pin has moved,
 `make dev` first runs `./bin/nocheh build` and then points its development tags at
-the new pinned images. `make dev-stop`
+the new pinned images. The watched services also come back by themselves after
+Docker or the computer restarts; they keep running the last compiled code until
+`make dev` runs again and resumes watching. `make dev-stop`
 stops the watched project without deleting the operating volumes or state;
 `./bin/nocheh up` from the operating checkout resumes unattended operation.
 Development health does not replace live release acceptance.

@@ -190,6 +190,17 @@ class LiveDevTests(unittest.TestCase):
         self.assertIn(str(live_dev.ROOT / 'docker-compose.yml'), command)
         self.assertIn(str(root), command)
 
+    def test_development_services_come_back_after_docker_restarts(self):
+        # A Mac or Docker restart must not leave the operating bot down; make dev-stop still stops it.
+        policies, service = {}, None
+        for line in (live_dev.ROOT / 'docker-compose.dev.yml').read_text().splitlines():
+            if line.startswith('  ') and not line.startswith('   ') and line.rstrip().endswith(':'):
+                service = line.strip()[:-1]
+            elif line.strip().startswith('restart:'):
+                policies[service] = line.split(':', 1)[1].strip()
+        self.assertIn('hermes', policies)
+        self.assertEqual({name for name, policy in policies.items() if policy != 'unless-stopped'}, set())
+
     def test_rejects_occupied_development_port(self):
         with patch.object(live_dev, 'port_available', side_effect=lambda port: port != 8783), patch.object(live_dev.time, 'sleep'):
             with self.assertRaisesRegex(ValueError, '8783 is in use'):
