@@ -77,8 +77,9 @@ chose on 2026-11-03 to turn link previews off for every bot message. Extends
   fits in 8 MiB. `/chat` holds 128 MB. A part that does not fit ends the copy for
   good: the manifest says `"complete": false, "full": true`, and that box is never
   filled again.
-- A box is kept from step to step while only reactions have changed since it was
-  filled (ADR-0200). Any other change, such as a hidden message, an edited copy or
+- A box is kept from step to step while only reactions or automatic learning
+  revisions have changed since it was filled (ADR-0200). Neither changes the chat's
+  messages. Any other change, such as a hidden message, an edited copy or
   a guard change, replaces it with a new box and a fresh copy. So does a step whose
   turn did not end by itself with success: it failed or was killed, or its caller
   went away. Nothing such a step left running, such as a code cell, reaches the
