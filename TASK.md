@@ -56,17 +56,31 @@ carried, or one a job asked for, runs once approved
 Still open: a shell approval that waits past its profile's 15 idle minutes fails
 without running, and another pending publication between claim and start ends an
 action as ambiguous.
-Open owner questions: does the owner accept, in their own words, the new SPECS lines that
-a reaction change or a learning revision does not stop a waiting or approved proposal, and that a card
-says how an approved operation ended and which job or schedule asked? They are not
-yet accepted. Next: Notion inside owner-approved jobs, which needs the owner's
-answers on Notion reads and changes in jobs. Telegram message
+A step of a job the owner asked for and approved in their private chat reads
+Notion as the owner's setting allows; its changes always ask, even under "Nothing
+asks me"; group and member jobs never reach Notion; scheduled tasks ask for every
+call; the job's card says what it may read without asking; Stop stops a read that
+has not started ([ADR-0203](docs/adr/0203-owner-approved-jobs-read-notion.md),
+[check](test/store-background-job-notion.test.ts)).
+A running job's waiting operations get no card; after its report they come on as
+few cards as fit, each showing every change exactly and decided as a whole by the
+owner, and each card says how its changes ended; Stop rejects them
+([ADR-0204](docs/adr/0204-a-jobs-changes-come-on-list-cards.md),
+[check](test/store-background-job-changes.test.ts)).
+Open owner questions: may a job's Notion changes also follow "Nothing asks me"?
+Until then they always ask. Does the owner accept, in their own words, the new SPECS lines that
+a reaction change or a learning revision does not stop a waiting or approved proposal, that a card
+says how an approved operation ended and which job or schedule asked, and that
+jobs the owner approved use Notion, and that a job's changes come on list cards?
+They are not yet accepted. Next: Hermes's own file, terminal and Python tools for
+jobs in a sealed box. Telegram message
 requests keep the exact-epoch rule, so a reaction or a learning revision in the seconds between
 staging a report part and sending it still cancels that part and fails the job.
 An owner cancel from Workflows does not edit the card yet.
 Pending: a live check: ask for a Notion change, react in a group, then approve;
-a job whose report comes after a reaction in a group; and a Notion call that fails
-and one that finishes, each showing it on its card.
+a job whose report comes after a reaction in a group; a Notion call that fails
+and one that finishes, each showing it on its card; and a job in the owner's
+private chat that reads a real Notion table.
 Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
 Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
 if replies stay the same and it is not less efficient): no Anthropic call was cached,

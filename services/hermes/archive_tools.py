@@ -265,7 +265,7 @@ def register(ctx):
             'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_notion';description=('The owner\'s own Notion, through Notion\'s MCP server, when the owner has connected it and turned it on. Only in the owner\'s '
-        'private conversation. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
+        'private conversation and in background jobs the owner approved there; in a job, changes always wait for the owner. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
         'notion-create-pages or notion-update-page) with its input. Reads may run right away and changes may wait for the owner to approve the exact call, '
         'as the owner set; the result says which. Ask only for what you need: for a big table, read its columns first, then query just the columns and rows '
         'you need, with a filter or a limit. A long result comes in parts; read every part with nocheh_action_status before relying on it. '

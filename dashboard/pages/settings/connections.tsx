@@ -182,7 +182,7 @@ export function ConnectionSettings() {
       <CardHeader
         id="notion-title"
         title="Notion"
-        description="Let Nocheh search, read and change your Notion from your private chat, through Notion’s own MCP server. Groups never reach it, and Nocheh’s own task list stays the main one."
+        description="Let Nocheh search, read and change your Notion from your private chat and in background jobs you approve there, through Notion’s own MCP server. Groups never reach it, and Nocheh’s own task list stays the main one."
         action={
           status.connected ? (
             <Badge tone="good" dot>
@@ -276,7 +276,7 @@ export function ConnectionSettings() {
         <SettingRow
           title="Ask me first"
           htmlFor="notion-approval"
-          description="A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs. Deny rules still win."
+          description="A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs. Background jobs you approve read without asking unless everything asks, and their changes always ask. Scheduled tasks always ask. Deny rules still win."
         >
           <Select
             id="notion-approval"

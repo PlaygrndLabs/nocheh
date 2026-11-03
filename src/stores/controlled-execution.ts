@@ -105,6 +105,11 @@ export class ControlledExecutionRepository {
       // Turning Notion off stops Notion calls that were approved but have not run yet.
       if('connection' in (args as object)&&!(await db.query('SELECT enabled FROM owner_notion WHERE singleton')).rows[0]?.enabled)
         {const result=await this.blocked(db,row,'notion_not_enabled');await db.query('COMMIT');this.closed(row.id);return result;}
+      // Stop also stops what a job's Notion setting let run without a card but has not run yet (ADR-0203).
+      // A call the owner approved on its own card stays approved.
+      if(row.job_id&&row.state==='approved'&&canonical(row.decision_reference)===canonical(row.source_reference)&&
+        (await db.query("SELECT 1 FROM background_jobs WHERE id=$1 AND (cancel_requested OR state='stopped')",[row.job_id])).rowCount)
+        {const result=await this.blocked(db,row,'job_stopped');await db.query('COMMIT');this.closed(row.id);return result;}
       if((await db.query("SELECT 1 FROM controlled_actions WHERE state='running' LIMIT 1")).rowCount){await db.query('COMMIT');return {claimed:false};}
       const grant=row.state==='proposed'?(await db.query(`SELECT id FROM action_permissions WHERE fingerprint=$1 AND binding=$2 AND (job_id IS NULL OR job_id=$3)
         AND remaining>0 AND revoked_at IS NULL AND expires_at>now() ORDER BY expires_at,id LIMIT 1 FOR UPDATE`,[row.fingerprint,row.binding,row.job_id])).rows[0]:null;

@@ -41,16 +41,25 @@ export class NotionRepository {
 }
 
 /**
- * A Notion call may come only from the owner's own live private chat while
- * Notion is on. Returns the authority that lets it run without a card under
- * the owner's Notion setting, or null when it waits for approval.
+ * A Notion call may come only from the owner's private chat while Notion is
+ * on: a live turn there, or a step of a job the owner asked for and approved
+ * there. Returns the authority that lets it run without a card under the
+ * owner's Notion setting, or null when it waits for approval. `allowed` says
+ * the turn may use the setting at all. A job reads group text that anyone
+ * there can write, so in a job only reads skip the card (ADR-0203).
  */
 export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null},
-  args:{operation?:string;tool?:string},live:boolean):Promise<string|null> {
+  args:{operation?:string;tool?:string},allowed:boolean):Promise<string|null> {
   if(principal.admin||principal.scope!==null||!turn.owner)throw new HttpError(403,'notion_owner_private_only');
   const row=(await db.query('SELECT enabled,approval,revision FROM owner_notion WHERE singleton FOR SHARE')).rows[0];
   if(!row?.enabled)throw new HttpError(409,'notion_not_enabled');
-  if(!live||turn.job||(principal.purpose??'assistant')!=='assistant')return null;
+  if(!allowed||(principal.purpose??'assistant')!=='assistant')return null;
   const read=args.operation==='list'||notionReads(String(args.tool??''));
-  return row.approval==='nothing'||row.approval==='changes'&&read?'notion_setting:'+row.revision:null;
+  return row.approval==='nothing'&&!turn.job||row.approval!=='everything'&&read?'notion_setting:'+row.revision:null;
+}
+
+/** What an approved job may do in the owner's Notion without asking: read, or nothing when Notion is off or every call asks. */
+export async function notionJobReads(db:Pick<pg.Pool,'query'>):Promise<boolean> {
+  const row=(await db.query('SELECT enabled,approval FROM owner_notion WHERE singleton')).rows[0];
+  return !!row?.enabled&&row.approval!=='everything';
 }

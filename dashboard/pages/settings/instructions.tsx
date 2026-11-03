@@ -78,7 +78,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'telegram.approval_texts',
     title: 'Approval buttons and results',
-    hint: 'One “name: text” line each for the buttons, the result added to a decided card and its {reason}, the name of a job or schedule that asked, and the short notices after a press. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for the buttons, the result added to a decided card and its {reason}, the name of a job or schedule that asked, the card that lists a job’s changes (the lines starting with list), and the short notices after a press. A line you remove keeps its default.',
   },
   {
     key: 'tasks.reminder',
@@ -128,12 +128,12 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'background.card',
     title: 'Background job card',
-    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit} and {minutes_limit} are filled in. A line whose value is missing is left out.',
+    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit}, {minutes_limit} and {notion} are filled in. {notion} says what the job may do in your Notion without asking. A line whose value is missing is left out.',
   },
   {
     key: 'background.texts',
     title: 'Background job card answers',
-    hint: 'One “name: text” line each for what a decided job card says: running, queued, done, stopped, failed and rejected. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for what a decided job card says: running, queued, done, stopped, failed and rejected. notion_reads is the card’s Notion line. A line you remove keeps its default.',
   },
 ];
 

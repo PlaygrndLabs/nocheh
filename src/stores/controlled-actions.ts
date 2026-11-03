@@ -1,6 +1,7 @@
 import {blockingPublications} from './publications.js';
 import {ownerAutonomyGrant} from './owner-autonomy.js';
 import {notionAuthority} from './notion.js';
+import {ownerApprovedJob} from './background-jobs.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -70,6 +71,10 @@ export class ControlledActionRepository {
     const db=await this.control.connect();
     try {
       await db.query('BEGIN');await this.fence(db,binding);
+      // A stopping or ended job asks for nothing more. The lock orders this against Stop, so what commits
+      // first is ended by Stop's sweep (ADR-0204). A scheduled task's job is no background job.
+      const job=turn.job?(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR SHARE',[turn.job])).rows[0]:null;
+      if(job&&(job.state!=='running'||job.cancel_requested))throw new HttpError(409,'job_not_running');
       await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null]);
@@ -79,10 +84,13 @@ export class ControlledActionRepository {
       // The owner freedom setting lets the owner's own live private request
       // approve itself. Deny rules are evaluated first and still block it.
       // Notion is used only from the owner's private chat while it is on; the
-      // owner's Notion setting can let reads, or every call, run without a card.
-      // It replaces the owner freedom setting for Notion calls.
-      const connected='connection' in args,notion=connected?await notionAuthority(db,principal,turn,args,source.store==='archive'):null;
-      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?connected?notion:await ownerAutonomyGrant(db,principal,turn):null;
+      // owner's Notion setting can let reads, or every call, run without a card,
+      // from a live turn there or a step of a job the owner approved there
+      // (ADR-0203). It replaces the owner freedom setting for Notion calls; that
+      // setting never applies to jobs.
+      const connected='connection' in args,live=source.store==='archive';
+      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?await ownerApprovedJob(db,this.access.policy().owner_id,source,turn):live):null;
+      const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')
         await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source]);
@@ -131,6 +139,20 @@ export class ControlledActionRepository {
       WHERE space_id=$1 AND logical_profile=$2 ORDER BY created_at DESC,id DESC LIMIT 100`,[principal.space,turn.logical_profile])).rows;
     return rows.filter(row=>this.turns.profile(principal,row.binding)===row.profile).slice(0,20)
       .map(row=>({id:row.id,kind:row.kind,state:row.state,error_code:row.error_code,created_at:row.created_at.toISOString()}));
+  }
+  /** A stopped job's operations that still wait for the owner end without running (ADR-0204). */
+  async stopJob(job:string):Promise<string[]> {
+    const db=await this.control.connect();
+    try {
+      await db.query('BEGIN');
+      const rows=(await db.query("SELECT * FROM controlled_actions WHERE job_id=$1 AND state='proposed' ORDER BY id FOR UPDATE",[job])).rows;
+      for(const row of rows) {
+        const decision={...await evaluate(db,this.effect(row)),outcome:'deny' as const,origin:'mandatory' as const,rule:'job_stopped'};
+        await recordEffect(db,this.effect(row),'blocked',decision,row.source_reference);
+        await db.query("UPDATE controlled_actions SET state='rejected',security_decision=$2,error_code='job_stopped',revision=revision+1,updated_at=now() WHERE id=$1",[row.id,decision]);
+      }
+      await db.query('COMMIT');return rows.map(row=>row.id);
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   async grants(row:any,db:Pick<pg.Pool,'query'>=this.control) {
     return (await db.query(`SELECT id,remaining,expires_at,revision FROM action_permissions WHERE fingerprint=$1 AND binding=$2
