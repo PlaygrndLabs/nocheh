@@ -174,6 +174,10 @@ def materialize(root, profile, chat, project=''):
         _install(profile, value['role'], value['skills'])
 
 
+# Sessions per profile whose prompt revision is remembered.
+PROMPT_SESSIONS = 500
+
+
 def refresh_prompt(profile, database, session_id):
     """Rebuild a continuing session's system prompt after its role or skills changed.
 
@@ -185,14 +189,21 @@ def refresh_prompt(profile, database, session_id):
     current = revision(read(profile))
     marker = Path(database.db_path).parent / 'persona-prompt.json'
     try:
-        previous = json.loads(marker.read_text())
-    except (OSError, ValueError):
-        previous = {}
-    if previous == {'session': session_id, 'revision': current}:
+        built = json.loads(marker.read_text()).get('sessions')
+    except (OSError, ValueError, AttributeError):
+        built = None
+    # The revision that built each session's prompt. Sessions of one profile, such as a
+    # group's topics, take turns; each keeps its stored prompt, so the provider's prompt
+    # cache still matches it.
+    built = built if isinstance(built, dict) else {}
+    if built.get(session_id) == current:
         return False
     changed = database.get_session(session_id) is not None
     if changed:
         database.update_system_prompt(session_id, None)
         database.update_session_tool_names(session_id, None)
-    _write(marker, json.dumps({'session': session_id, 'revision': current}))
+    built.pop(session_id, None)
+    built[session_id] = current
+    # Bounded: a session dropped from the list only rebuilds its prompt once more.
+    _write(marker, json.dumps({'sessions': dict(list(built.items())[-PROMPT_SESSIONS:])}))
     return changed

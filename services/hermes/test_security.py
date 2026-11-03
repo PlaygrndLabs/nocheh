@@ -47,10 +47,27 @@ class SecurityTests(unittest.TestCase):
     def test_no_unknown_mode_or_transport_fallback(self):
         with patch.dict(os.environ,NOCHEH_SECURITY_RUNTIME='broken'):
             with self.assertRaises(ValueError):isolated_enabled()
-        self.assertEqual(scoped_transport('turn.capability','chat_completions'),{'api_key':'turn.capability',
-            'base_url':'http://nocheh-security:8786/v1','provider':'openai','api_mode':'chat_completions'})
+        native={'api_key':'turn.capability','base_url':'http://nocheh-security:8786/anthropic','provider':'anthropic','api_mode':'anthropic_messages'}
+        for route in ('','https://gateway.example.test/v1','https://api.anthropic.com.example.test/v1'):
+            with self.subTest(route=route),patch.dict(os.environ,NOCHEH_REPLY_ROUTE_URL=route):
+                self.assertEqual(scoped_transport('turn.capability','chat_completions'),{'api_key':'turn.capability',
+                    'base_url':'http://nocheh-security:8786/v1','provider':'openai','api_mode':'chat_completions'})
+                self.assertEqual(scoped_transport('turn.capability','anthropic_messages'),native)
+        # Anthropic's OpenAI-compatible API has no prompt caching, so its turns use the Messages API.
+        for route in ('https://api.anthropic.com/v1','https://api.anthropic.com/v1/'):
+            with self.subTest(route=route),patch.dict(os.environ,NOCHEH_REPLY_ROUTE_URL=route):
+                self.assertEqual(scoped_transport('turn.capability','chat_completions'),native)
         for mode in ('codex_responses','bedrock'):
             with self.assertRaises(ValueError):scoped_transport('turn.capability',mode)
+
+    def test_anthropic_turns_keep_the_models_own_thinking(self):
+        # Anthropic's OpenAI-compatible API ignored the effort preference; its Messages API would
+        # apply it. Sending none keeps the thinking the model ran with before.
+        from .assistant_turn import reasoning
+        from .subscription import SubscriptionCredentials,BROKER_ANTHROPIC_URL,BROKER_URL
+        prefs={'agent.reasoning_effort':'low'}
+        self.assertIsNone(reasoning(SubscriptionCredentials('turn.capability',BROKER_ANTHROPIC_URL,'anthropic','anthropic_messages'),prefs))
+        self.assertEqual(reasoning(SubscriptionCredentials('turn.capability',BROKER_URL),prefs),{'effort':'low'})
 
     def test_pinned_auxiliary_route_and_model_context_are_preserved(self):
         from agent import auxiliary_client as aux,model_metadata,context_compressor
@@ -64,6 +81,10 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(context_compressor.get_model_context_length('same-model'),272000)
             self.assertEqual(model_metadata.get_model_context_length('different-model'),12345)
             self.assertEqual((os.environ['OPENAI_API_KEY'],os.environ['OPENAI_BASE_URL']),(credentials.access_token,credentials.base_url))
+            # On Anthropic's Messages API, session search still uses the broker's chat route.
+            native=SubscriptionCredentials('turn.scoped.capability','http://nocheh-security:8786/anthropic','anthropic','anthropic_messages')
+            install_isolated_route(native,'same-model',272000)
+            self.assertEqual((os.environ['OPENAI_API_KEY'],os.environ['OPENAI_BASE_URL']),(native.access_token,'http://nocheh-security:8786/v1'))
         with self.assertRaises(ValueError):install_isolated_route(credentials,'same-model',None)
 
     def test_stopping_launcher_kills_running_turns(self):

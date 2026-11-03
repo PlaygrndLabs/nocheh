@@ -40,6 +40,17 @@ def install():
     CodexAppServerSession.__init__=deny
     originals.append((aux._BedrockCompletionsAdapter,'create',aux._BedrockCompletionsAdapter.create))
     aux._BedrockCompletionsAdapter.create=deny
+    # At the step limit Hermes asks for a summary without tools, but on Anthropic's Messages
+    # API it keeps the turn's tool calls, which Anthropic refuses. Build that request like
+    # every other call of the turn, as Hermes does on the chat route.
+    def anthropic_summary(agent,api_messages,api_request_id):
+        request=agent._build_api_kwargs(api_messages)
+        def attempt(retry_count):
+            response=calls._managed_summary_call(agent,api_request_id,request,agent._interruptible_api_call,retry_count=retry_count)
+            return calls._summary_text(agent,response,strip_tool_prefix=agent._is_anthropic_oauth)
+        return attempt
+    originals.append((calls,'_SUMMARY_ATTEMPT_BUILDERS',calls._SUMMARY_ATTEMPT_BUILDERS))
+    calls._SUMMARY_ATTEMPT_BUILDERS={**calls._SUMMARY_ATTEMPT_BUILDERS,'anthropic_messages':anthropic_summary}
     def restore():
         for target,name,original in reversed(originals):setattr(target,name,original)
     return restore

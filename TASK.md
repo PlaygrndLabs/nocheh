@@ -28,6 +28,24 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
 
+Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
+Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
+if replies stay the same and it is not less efficient): no Anthropic call was cached,
+because every provider was reached through its OpenAI-compatible API. Replies and
+memory-notes reviews on the Anthropic preset now use Anthropic's Messages API through
+the broker with Hermes's own cache breakpoints. They keep the same model, tools,
+thinking, review budget and step-limit summary; the memory evidence is the request's
+last block, after the cached part; a profile remembers each session's prompt; and Usage
+shows the cached share of input
+([ADR-0199](docs/adr/0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md),
+[broker](test/security-broker.test.ts), [boundary](test/security-contract.test.ts),
+[evidence](services/hermes/test_memory_evidence.py)). The secret check, privacy filter,
+image reads and Honcho's deriver are too short or one-off to cache. Pending: rebuild the
+Hermes image, then a live reply with a tool and a memory-notes review showing cache
+reads on the Usage page with no refused calls and a similar cost and reply length;
+Hermes's Python tests on the owner's machine. Next: Honcho's reasoning calls through its
+own Messages API support.
+
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for
 the dashboard): one Nocheh password for the dashboard and the mini app, created
@@ -131,8 +149,10 @@ a withheld turn's memory call wrote, checked before every turn
 Hermes native notes reach every turn. With the memory evidence on, Hermes read the
 notes only when it built a session's prompt, so the later turns of a session carried
 none. Each turn now reads them itself, and the stored prompt stays the same
-([checks](services/hermes/test_memory_evidence.py)). Pending: the same checks in the
-Hermes image on the owner's machine, and a live reply after the pull.
+([checks](services/hermes/test_memory_evidence.py)). The checks passed in the Hermes
+image on the owner's machine, and replies went through after the pull. The full tester
+saves a note and checks that the chat's next two messages still carry it
+([scenario](tools/acceptance/product_scenarios.py), [fixture model](test/test_scripted_brain.py)).
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner

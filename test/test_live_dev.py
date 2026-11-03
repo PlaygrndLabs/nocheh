@@ -241,6 +241,23 @@ class LiveDevTests(unittest.TestCase):
             live_dev.prepare_runtime_images({'PATH': '/usr/bin'}, Path('/synthetic/operating'))
         self.assertNotIn(['/synthetic/operating/bin/nocheh', 'build'], calls)
 
+    def test_a_pinned_image_missing_a_library_is_rebuilt(self):
+        honcho = 'nocheh-honcho:' + json.loads((live_dev.ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+        revisions = {}
+        pins, calls, run = self.runtime_images(revisions)
+        revisions.update({'nocheh-hermes:local': pins, honcho: ''})
+        def checked(arguments, **options):
+            if arguments[:2] == ['docker', 'run']:
+                calls.append(arguments)
+                built = ['/synthetic/operating/bin/nocheh', 'build'] in calls
+                return type('Result', (), {'returncode': 0 if built or 'anthropic' not in arguments[-1] else 1})()
+            return run(arguments, **options)
+        with patch.object(live_dev.subprocess, 'run', side_effect=checked):
+            live_dev.prepare_runtime_images({'PATH': '/usr/bin'}, Path('/synthetic/operating'))
+        self.assertIn(['/synthetic/operating/bin/nocheh', 'build'], calls)
+        checks = [arguments[-1] for arguments in calls if arguments[:2] == ['docker', 'run']]
+        self.assertTrue(any('import' in check and 'anthropic' in check for check in checks))
+
     def test_rejects_a_runtime_base_still_unpinned_after_building(self):
         revisions = {'nocheh-hermes:local': 'wrong-revision', 'after_build': {}}
         _, calls, run = self.runtime_images(revisions)

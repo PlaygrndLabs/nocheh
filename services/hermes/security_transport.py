@@ -8,7 +8,16 @@ def isolated_enabled():
     if value not in ('legacy','isolated'):raise ValueError('invalid_security_runtime')
     return value=='isolated'
 
+def anthropic_reply_route():
+    """Replies go to Anthropic itself. Its OpenAI-compatible API has no prompt caching, so
+    isolated turns use its Messages API instead, through the broker."""
+    from .subscription import ANTHROPIC_URL
+    return os.environ.get('NOCHEH_REPLY_ROUTE_URL','').strip().rstrip('/')==ANTHROPIC_URL
+
 def scoped_transport(credential,api_mode):
+    if api_mode=='anthropic_messages' or (api_mode=='chat_completions' and anthropic_reply_route()):
+        # Hermes sends the scoped credential as x-api-key; the broker reads it and sends Anthropic the provider key.
+        return dict(api_key=credential,base_url=BROKER+'/anthropic',provider='anthropic',api_mode='anthropic_messages')
     if api_mode=='chat_completions':
         return dict(api_key=credential,base_url=BROKER+'/v1',provider='openai',api_mode=api_mode)
     raise ValueError('unsupported_security_transport')
@@ -30,6 +39,8 @@ def install_isolated_route(credentials,model,context_length):
     model_metadata.get_model_context_length=length
     context_compressor.get_model_context_length=length
     # These are scoped broker capabilities, not provider credentials. The
-    # pinned generic auxiliary resolver reads OpenAI-compatible env names.
+    # pinned generic auxiliary resolver reads OpenAI-compatible env names, and
+    # Hermes's helper calls (session search, titles, compression), pinned to that
+    # resolver, use the broker's chat route.
     os.environ['OPENAI_API_KEY']=credentials.access_token
-    os.environ['OPENAI_BASE_URL']=credentials.base_url
+    os.environ['OPENAI_BASE_URL']=BROKER+'/v1'

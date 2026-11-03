@@ -60,16 +60,24 @@ def resolved(config, model):
     for key, value in values.items():
         section, field = key.split('.')
         config.setdefault(section, {})[field] = value
-    # Every model call goes to the OpenAI-compatible provider chosen in Settings › Models.
+    # Every model call goes to the provider chosen in Settings › Models: through its
+    # OpenAI-compatible API, or, for Anthropic in isolated turns, its Messages API.
+    from .security_transport import anthropic_reply_route, isolated_enabled
     provider = 'openai'
-    config['model'] = {'provider': provider, 'default': model}
+    config['model'] = {'provider': 'anthropic' if isolated_enabled() and anthropic_reply_route() else provider, 'default': model}
+    # Hermes marks the stable start of each prompt for the provider's prompt cache. Five
+    # minutes is Hermes's default and the cheapest cache write.
+    config['prompt_caching'] = {'cache_ttl': '5m'}
     # Voice notes are archived without transcription.
     config['stt'] = {'enabled': False}
     config['plugins'] = {'enabled': ['nocheh']}
     config['fallback_models'] = []
     config.setdefault('tools', {})['tool_search'] = {'enabled': 'off'}
     config.setdefault('memory', {}).update(memory_enabled=True, user_profile_enabled=True, provider='')
-    config['auxiliary'] = {'session_search': {'provider': provider, 'model': model}}
+    # One-shot helper calls (session search, context compression, titles) keep the
+    # OpenAI-compatible route: nothing in them is reused, so caching gains nothing.
+    config['auxiliary'] = {task: {'provider': provider, 'model': model}
+                           for task in ('session_search', 'compression', 'title_generation')}
     # Skills are set by the owner only. The native curator would archive or
     # consolidate a skill that no turn loaded for its configured window.
     config['curator'] = {'enabled': False}
@@ -119,7 +127,7 @@ def inspect_profile(profile, model):
     result = resolved(inherited, model)
     return {'origins': origins, 'revision': profile_revision(original, policy), 'values': preferences(result), 'schema': PREFERENCES,
             'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
-            'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider']}
+            'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching']}
 
 
 def configure_profile(profile, model, changes=None, expected=None):
@@ -150,4 +158,4 @@ def configure_profile(profile, model, changes=None, expected=None):
         if not path.exists() or result != read(path): atomic_yaml(path, result)
         return {'origins': origins, 'revision': profile_revision(result, policy), 'values': preferences(result), 'schema': PREFERENCES,
                 'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
-                'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider']}
+                'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching']}

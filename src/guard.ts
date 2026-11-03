@@ -58,18 +58,22 @@ export function mask(text:string,spans:readonly Span[]):{text:string;spans:Span[
   return {text:output+text.slice(offset),spans:merged};
 }
 
-function contentStrings(value:unknown,strings:Set<string>,depth=0):void {
+function contentStrings(value:unknown,strings:Set<string>,depth=0,literal=false):void {
   if (depth>60) throw new HttpError(413,'request_too_deep');
   if (typeof value==='string') {if(value)strings.add(value);return;}
-  if (Array.isArray(value)) {for (const item of value)contentStrings(item,strings,depth+1);return;}
+  if (Array.isArray(value)) {for (const item of value)contentStrings(item,strings,depth+1,literal);return;}
   if (value!==null && typeof value==='object') {
     const record=value as Record<string,unknown>;
     // An opaque server reference or attachment cannot be inspected as literal text.
-    for (const key of ['previous_response_id','encrypted_content','image_url','input_audio','audio_url','file_data','file_id','image','audio','document']) {
-      if (record[key]!==undefined && record[key]!==null) throw new HttpError(422,'uninspectable_model_context');
+    if (!literal) {
+      for (const key of ['previous_response_id','encrypted_content','image_url','input_audio','audio_url','file_data','file_id','image','audio','document']) {
+        if (record[key]!==undefined && record[key]!==null) throw new HttpError(422,'uninspectable_model_context');
+      }
+      if (typeof record.type==='string' && ['input_image','input_audio','input_file','image','audio','document'].includes(record.type)) throw new HttpError(422,'uninspectable_model_context');
     }
-    if (typeof record.type==='string' && ['input_image','input_audio','input_file','image','audio'].includes(record.type)) throw new HttpError(422,'uninspectable_model_context');
-    for (const [key,item] of Object.entries(record)) {strings.add(key);contentStrings(item,strings,depth+1);}
+    // A model's own tool call arguments are literal JSON. Anthropic's Messages API sends them as
+    // an object where the OpenAI-compatible API sends a string; both are still masked.
+    for (const [key,item] of Object.entries(record)) {strings.add(key);contentStrings(item,strings,depth+1,literal||(record.type==='tool_use'&&key==='input'));}
   }
 }
 export function inspectRequest(value:unknown):void {

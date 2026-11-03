@@ -25,7 +25,7 @@ COPY deploy/hermes-plugin-requirements.txt /tmp/hermes-plugin-requirements.txt
 # writer records the pinned release, so native version surfaces report it and
 # treat updates as externally managed.
 RUN test "$(cat /opt/hermes/.nocheh-source-revision)" = "$HERMES_REVISION" && cd /opt/hermes && \
-    uv sync --frozen --no-dev --no-install-project --extra messaging --python /usr/local/bin/python && \
+    uv sync --frozen --no-dev --no-install-project --extra messaging --extra anthropic --python /usr/local/bin/python && \
     uv pip install --python /opt/venv/bin/python --require-hashes --no-deps -r /tmp/hermes-plugin-requirements.txt && \
     python scripts/write_install_stamp.py --output /opt/hermes/install-stamp.json --commit "$HERMES_REVISION" \
       --base-version "$HERMES_VERSION" --distance 0 --source docker --distribution docker --update-mechanism external && \
@@ -40,7 +40,7 @@ COPY --chown=${LOCAL_UID}:${LOCAL_GID} services ./services
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} deploy/upstreams.lock.json ./deploy/upstreams.lock.json
 COPY --chown=${LOCAL_UID}:${LOCAL_GID} tools ./tools
 # Every third-party library the plugin imports must exist in the pinned environment.
-RUN python -c "import yaml, telegram, httpx, openai, starlette, uvicorn, PIL"
+RUN python -c "import yaml, telegram, httpx, openai, anthropic, starlette, uvicorn, PIL"
 USER nocheh
 CMD ["python", "-m", "services.hermes.runtime"]
 
