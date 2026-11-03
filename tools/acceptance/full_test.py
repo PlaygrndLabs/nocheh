@@ -76,6 +76,7 @@ TITLES = {
     'native_notes_reach_later_turns': 'A saved note reaches the chat\'s later messages', 'reaction_keeps_group_name': 'A reaction keeps the group name',
     'learning_reaches_honcho': 'Learning reaches Honcho', 'inbox_never_asks_about_the_owner': 'Inbox: one card per new person, none for you',
     'import_with_topics_files_and_learning': 'Telegram import with topics, files and learning',
+    'import_learning_choice': 'Import learn box: off, kept private, learned later',
     'tasks_from_chat_with_reminder': 'Tasks from chat, reminder, status and done', 'tasks_not_in_unrelated_group': 'Tasks stay private in groups', 'chat_is_read_in_order': 'A chat is read in order',
     'background_job_runs_and_reports': 'A background job is approved, runs and reports',
     'approval_waits_across_a_change_and_runs': 'An approval waits through a reaction, then runs the exact command',
