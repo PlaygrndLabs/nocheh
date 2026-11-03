@@ -597,6 +597,69 @@ class ProductScenarios(Scenarios):
         jobs = [item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == 'Open tasks JOB1']
         self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
 
+    # Approved operations ---------------------------------------------------------------------------------
+
+    def epoch(self):
+        return int(self.f.query('nocheh_control', 'SELECT epoch FROM guard_state'))
+
+    def operation(self, marker):
+        """The newest approved-operation record whose arguments name `marker`, as the owner sees it."""
+        rows = [row for row in self.f.app('/v1/tools/actions').get('actions', []) if marker in json.dumps(row.get('arguments'))]
+        return rows[0] if rows else None
+
+    def ran(self, card, marker):
+        """Approve an operation's card and follow it until it has run; return its record."""
+        answer = self.press(card, 'approve')
+        self.gate('press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
+        row = self.wait('operation_finished', lambda: (lambda row: row if row and row['state'] in ('done', 'failed', 'ambiguous', 'rejected') else None)(self.operation(marker)), 240)
+        self.current['observed'] = {'operation': {key: row.get(key) for key in ('state', 'error_code', 'kind')}}
+        self.gate('operation_ran', row['state'] == 'done', state=row['state'], error=row.get('error_code'), result=json.dumps(row.get('result'))[:500])
+        self.gate('ran_the_exact_command', marker in json.dumps(row.get('result'), ensure_ascii=False), result=json.dumps(row.get('result'))[:500])
+        edited = self.wait('card_shows_outcome', lambda: (lambda row: row if not self.buttons(row) and 'Approved and done' in row['message']['text'] else None)(self.card_message(card)), 120)
+        self.gate('outcome_on_card', marker in edited['message']['text'], card=edited['message']['text'])
+        return row
+
+    def approval_waits_across_a_change_and_runs(self):
+        # A card waits while a reaction starts a new epoch. Approve still runs the exact command:
+        # the executor checks the chat's settings, not the profile of the epoch it was asked in.
+        marker = 'CARRYMARK1'
+        request = self.f.message(OWNER, 'یک فرمان [[tool:nocheh_shell {"command":"printf '+marker+'"}]] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        self.gate('card_shows_command', marker in card['message']['text'], card=card['message']['text'])
+        asked = self.epoch()
+        number = self.f.ids()
+        update = {'update_id': number, 'message_reaction': {'chat': {'id': OWNER, 'type': 'private'}, 'message_id': request['message']['message_id'],
+                  'user': {'id': OWNER, 'is_bot': False, 'first_name': 'Synthetic '+str(OWNER)},
+                  'date': int(time.time()), 'old_reaction': [], 'new_reaction': [{'type': 'emoji', 'emoji': '👍'}]}}
+        self.f.inject(update)
+        self.captured(update)
+        now = self.wait('reaction_started_an_epoch', lambda: (lambda epoch: epoch if epoch > asked else None)(self.epoch()), 120)
+        quiet = int(self.f.query('nocheh_control', 'SELECT count(*) FROM guard_quiet_epochs WHERE epoch>%d AND epoch<=%d' % (asked, now)))
+        self.gate('every_later_epoch_is_quiet', quiet == now - asked, asked=asked, now=now, quiet=quiet)
+        self.gate('card_still_open', len(self.buttons(self.card_message(card))) == 2 and
+                  self.f.query('nocheh_control', "SELECT state FROM controlled_actions WHERE arguments_hash IS NOT NULL ORDER BY created_at DESC LIMIT 1") == 'proposed')
+        self.ran(card, marker)
+
+    def job_operation_runs_after_approval(self):
+        # A job's step asks to run a command; the owner approves it on its card after the job reported.
+        # The step's own profile is the job's, so the executor checks the job's chat settings.
+        marker = 'JOBRUNMARK1'
+        # ]] is escaped in the job's JSON so the scripted model reads the step's directive only in the step.
+        instruction = 'Check with a command [[tool:nocheh_shell {"command":"printf '+marker+'"}]]'
+        job = json.dumps({'action': 'propose', 'title': 'Command JOB2', 'instruction': instruction}).replace(']]', '\\u005d\\u005d')
+        request = self.f.message(OWNER, 'کار با فرمان JOBRUN [[tool:nocheh_background_job '+job+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        self.gate('job_card_shows_job', 'Command JOB2' in card['message']['text'], card=card['message']['text'])
+        self.press(card, 'approve')
+        # The job's own card quotes the instruction, so the operation's card is any other card naming the command.
+        operation = self.wait('operation_card_posted', lambda: [row for row in self.cards(before, OWNER) if marker in row['message']['text']
+                                                               and row['message']['message_id'] != card['message']['message_id']], 420)[0]
+        self.wait('job_done', lambda: [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
+                                       if item.get('title') == 'Command JOB2' and item.get('state') in ('done', 'failed', 'stopped')], 420)
+        self.ran(operation, marker)
+
     # Settings defaults ----------------------------------------------------------------------------------
 
     def defaults_keep_history_and_notion_off(self):
@@ -658,6 +721,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
-                 'background_job_runs_and_reports',
+                 'background_job_runs_and_reports', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']

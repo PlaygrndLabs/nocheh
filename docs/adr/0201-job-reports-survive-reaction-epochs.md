@@ -34,8 +34,10 @@ Extends [ADR-0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md) and
 
 <consequences>
 - Reactions in any chat no longer lose a job's report.
-- Learning revisions are not quiet (ADR-0200), so they still fail a report.
-- A reaction between staging a part and sending it still cancels that part, and
-  the job fails with `job_report_not_delivered`.
+- Automatic learning revisions are quiet too since 2026-11-03 (ADR-0200), so they
+  no longer fail a report before its next part is staged. A report may then quote
+  learned wording that a revision replaced after its last step.
+- A reaction or an automatic learning revision between staging a part and sending
+  it still cancels that part, and the job fails with `job_report_not_delivered`.
 - A part already staged when Stop is pressed may still arrive.
 </consequences>

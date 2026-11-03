@@ -4,7 +4,10 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import pg from 'pg';
-import {digest,type Envelope} from '../src/archive.js';
+import {canonical,digest,type Envelope} from '../src/archive.js';
+import type {Interpretation} from '../src/interpretations.js';
+import {preferenceProfile} from '../src/stores/controlled-execution.js';
+import {defaultLogicalProfile} from '../src/stores/runtime-profile.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
@@ -129,5 +132,85 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     await assert.rejects(a.decide(owner,{id:stopped.id,fingerprint:stopped.fingerprint,decision:'approve'}),{code:'guard_context_changed'});
     assert.equal((await a.inspect(reader(after),stopped.id)).arguments,undefined);
     assert.equal((await a.inspect(owner,stopped.id)).arguments.command,'printf stopped-card','the owner still reviews the exact operation');
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('the executor checks the tool settings of the chat, not of the epoch the action was proposed in',()=>{
+  const custom='profile-'+'a'.repeat(48),topic='-100555/topic/7';
+  assert.deepEqual(preferenceProfile({logical_profile:custom,space_id:'123'},'123'),{profile:custom,space:'123'},'an owner\'s own named profile keeps its settings');
+  assert.deepEqual(preferenceProfile({logical_profile:defaultLogicalProfile({admin:false,scope:'-100555',space:topic}),space_id:topic},'123'),
+    {profile:defaultLogicalProfile({admin:false,scope:'-100555',space:topic}),space:topic});
+  assert.deepEqual(preferenceProfile({logical_profile:'job-'+'b'.repeat(24),space_id:'123'},'123'),{profile:defaultLogicalProfile({admin:false,scope:null,space:'123'}),space:'123'},
+    'a job follows its chat\'s settings');
+  assert.deepEqual(preferenceProfile({logical_profile:defaultLogicalProfile({admin:false,scope:null,space:'123/topic/4'}),space_id:'123/topic/4'},'123'),
+    {profile:defaultLogicalProfile({admin:false,scope:null,space:'123'}),space:'123'},'the owner\'s private chat has no settings per topic');
+});
+
+test('automatic learning revisions are quiet; owner corrections are not; learning waits for a running action',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-learning-epochs-')),key='learning-epochs:'+Date.now(),asking='-100556';
+  const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[asking]}),
+    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no provider');}});
+  const a=s.controlledActions,x=s.controlledExecution;
+  const host=async(id:string)=>{
+    const row=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[id])).rows[0];
+    const lease=await claimHostWorkflow(stores.control,{workflow_id:row.id,dispatch:row.dispatch,family:'tools',run_id:'fixture-'+row.id});assert.equal(lease.claimed,true);
+    return {id,actor:'wf-'+row.id,workflow_id:row.id,workflow_token:lease.token};
+  };
+  const quiet=async(b:GuardBinding)=>(await stores.control.query('SELECT reason FROM guard_quiet_epochs WHERE generation=$1 AND epoch=$2',[b.generation,b.epoch])).rows;
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    const payload={update_id:1,message:{message_id:1,date:1700000001,chat:{id:Number(asking),type:'supergroup',is_forum:false},from:{id:7},text:'A green mark means a made-up task is done'}};
+    const value:Envelope={version:1,key:key+':request',origin:'live',kind:'telegram_update',bot_id:key,scope:asking,source_id:'1',revision:'1',occurred_at:null,text:payload.message.text,payload};
+    const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);
+    const reader=(b:GuardBinding)=>({admin:false,scope:asking,space:asking,turnEvent:source.id,generation:b.generation,guard_epoch:b.epoch,revision:b.epoch});
+    const entry=digest(key+':entry'),meaning:Interpretation={kind:'meaning',subject:'green mark',text:'A green mark means done.',scope:{kind:'conversation',id:asking},
+      uncertainty:'supported',evidence:[source],conflicts:[]};
+    let jobs=0;
+    // What the learning engine does: stage the versions under the job's binding, then activate them in one batch.
+    const learn=async(text:string,expected:number|null,id=entry)=>{
+      const binding=await s.guards.state(),prepared=await s.guards.read('events:'+source.id,binding),job=key+':job-'+(++jobs);
+      const dependencies=[{source_id:'events:'+source.id,revision:prepared.revision,value_hash:digest(canonical(prepared.value))}];
+      await stores.control.query(`INSERT INTO interpretation_jobs(id,source_reference,workspace,audience,input_reference,binding,context_hash,state)
+        VALUES($1,$2,'fixture','fixture',$2,$3,$4,'running')`,[job,source,binding,digest(job)]);
+      const version=await s.learned.stageAutomatic(id,{...meaning,text},expected,job+':0',dependencies,binding,'fixture',s.detect);
+      return {activate:async()=>{await s.learned.activateBatch([version],binding,job,digest(job+':result'),[id]);await s.learned.finish(version.operation_id);},version};
+    };
+    const before=await s.guards.state();await (await learn(meaning.text,null)).activate();
+    const proposed=await s.guards.state(),asker=reader(proposed),shell=(command:string)=>a.propose(asker,{kind:'shell',arguments:{command}});
+    assert.equal(proposed.epoch,before.epoch,'a first version advances no epoch, so it records none');
+    const waiting=await shell('printf learning-card'),running=await shell('printf running-action'),stopped=await shell('printf corrected-card');
+    await a.decide(owner,{id:running.id,fingerprint:running.fingerprint,decision:'approve'});
+
+    // An approved action that is running holds back a learning batch, which goes back to waiting.
+    const held=await learn('A green mark means finished.',1),rb=await host(running.id),claim=await x.claim(rb) as any;
+    assert.equal(claim.claimed,true);assert.deepEqual(claim.preference,{profile:defaultLogicalProfile(asker),space:asking});
+    await assert.rejects(held.activate(),{code:'learning_publication_pending'});
+    assert.equal((await s.guards.state()).epoch,proposed.epoch,'no epoch while it runs');
+    assert.deepEqual(await x.start(rb),{started:true});
+    await x.finish({id:running.id,actor:rb.actor,state:'done',result:{stdout:'made-up result',exit_code:0}});
+
+    // Once it has run, the revision is published, and its epoch is quiet.
+    await held.activate();const revised=await s.guards.state();assert.equal(revised.epoch,proposed.epoch+1);
+    assert.deepEqual(await quiet(revised),[{reason:'learning'}]);
+    assert.equal((await s.supervision.decision(owner,'controlled_action',waiting.id)).observation,'current','the Inbox keeps Approve open after a learning revision');
+    assert.equal((await a.decide(owner,{id:waiting.id,fingerprint:waiting.fingerprint,decision:'approve'})).state,'approved');
+    const wb=await host(waiting.id),carried=await x.claim(wb) as any;assert.equal(carried.claimed,true);assert.equal(carried.arguments.command,'printf learning-card');
+    assert.deepEqual(carried.preference,claim.preference,'the executor checks the same chat settings in the later epoch');
+    assert.notEqual(carried.profile,defaultLogicalProfile(asker));
+    assert.deepEqual(await x.start(wb),{started:true});
+    await x.finish({id:waiting.id,actor:wb.actor,state:'done',result:{stdout:'made-up later result',exit_code:0}});
+
+    // An owner correction is not quiet: the waiting action stops.
+    const corrected=await s.learned.correct(owner,entry,{expected_revision:held.version.revision,operation_id:key+':correct',text:'Here a green mark means reviewed.',retired:false},s.detect);
+    const after=await s.guards.state();assert.ok(after.epoch>revised.epoch);assert.deepEqual(await quiet(after),[]);
+    await assert.rejects(a.decide(owner,{id:stopped.id,fingerprint:stopped.fingerprint,decision:'approve'}),{code:'guard_context_changed'});
+    assert.equal(corrected.revision,held.version.revision+1);
+    // A first version of another entry advances no epoch, so the correction's epoch stays unrecorded.
+    await (await learn('A red mark means blocked.',null,digest(key+':other-entry'))).activate();
+    assert.equal((await s.guards.state()).epoch,after.epoch);assert.deepEqual(await quiet(after),[]);
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

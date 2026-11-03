@@ -369,7 +369,7 @@ export class BackgroundJobRepository {
     // A stopped job sends no further part.
     if(row.cancel_requested)return this.finish(row,'stopped');
     const part=sent.length+1,binding=await this.guards.state(),step=await this.latest(row.id);
-    // The last step wrote the report in its own epoch. Only quiet epochs, such as a reaction, may
+    // The last step wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
     // have passed since (ADR-0201); any other change may have withdrawn what it read.
     if(!step||!await carriesForward(this.control,step.run_binding,binding))return this.finish(row,'failed','job_report_outdated');
     const prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,row.space_id,parts[part-1]!,'background-report:'+row.id+':'+part);

@@ -27,8 +27,9 @@ export async function advanceReactionEpoch(db:pg.PoolClient,deferredAt?:number):
   }
   const next=Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);
   // A reaction change hides no message, it only retires the earlier reaction state, so waiting
-  // approvals carry across this epoch (ADR-0200). Work that withdraws or replaces content must
-  // advance its own, unrecorded epoch.
+  // approvals carry across this epoch (ADR-0200). An automatic learning revision is recorded the same
+  // way (learned.ts). Work that hides a message or replaces what the owner or a guard set must advance
+  // its own, unrecorded epoch.
   await db.query("INSERT INTO guard_quiet_epochs(generation,epoch,reason) VALUES($1,$2,'reaction') ON CONFLICT DO NOTHING",[guard.generation,next]);
   // Honcho keeps earlier reactions as evidence, so a reaction change never rechecks Honcho writes.
   await requestWorkflow(db,'memory_review','refresh',next);
