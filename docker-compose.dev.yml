@@ -10,7 +10,7 @@ services:
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
-    restart: "no"
+    restart: unless-stopped
     # Store provisioning runs again after each app build, so a source change
     # that adds tables needs no image rebuild. Mounted beside /app/dist so the
     # image's node_modules still resolve and the volume is not seeded from here.
@@ -31,7 +31,7 @@ services:
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
-    restart: "no"
+    restart: unless-stopped
     command: [node, tools/development/dev-app-watch.mjs]
     healthcheck:
       start_period: 180s
@@ -53,7 +53,7 @@ services:
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
-    restart: "no"
+    restart: unless-stopped
     environment:
       NOCHEH_DEV_WATCH: "1"
       # Settings › Apply recreates services with this same development setup.
@@ -80,7 +80,7 @@ services:
       args:
         LOCAL_UID: ${NOCHEH_UID:-1000}
         LOCAL_GID: ${NOCHEH_GID:-1000}
-    restart: "no"
+    restart: unless-stopped
     entrypoint: [python3, -m, tools.development.dev_reload]
     command: [--watch, /app/tools, --watch, /app/dist, --, python3, -m, tools.runtime.container_service, executor]
     volumes:
@@ -93,7 +93,7 @@ services:
     build:
       context: ${NOCHEH_DEV_SOURCE_ROOT:?}
     image: ${NOCHEH_DEV_PROJECT:?}:security
-    restart: "no"
+    restart: unless-stopped
     command: [node, --watch, dist/src/security/main.js]
     volumes:
       - dev_dist:/app/dist:ro
@@ -104,18 +104,18 @@ services:
     # The security image is the runtime image; the mini app runs the watched build.
     image: ${NOCHEH_DEV_PROJECT:?}:security
     build: !reset null
-    restart: "no"
+    restart: unless-stopped
     command: [node, --watch, dist/src/mini-app.js]
     volumes:
       - dev_dist:/app/dist:ro
       - dev_web_dist:/app/dashboard/dist:ro
   nocheh-tunnel:
-    restart: "no"
+    restart: unless-stopped
 
   hermes:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
     build: !reset null
-    restart: "no"
+    restart: unless-stopped
     environment:
       HOME: /workspace/data/local/hermes
     entrypoint: [python, -m, tools.development.dev_reload]
@@ -127,7 +127,7 @@ services:
   hermes-agent-sb:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
     build: !reset null
-    restart: "no"
+    restart: unless-stopped
     entrypoint: [python, -m, tools.development.dev_reload]
     command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.security_launcher]
     environment:
@@ -138,16 +138,16 @@ services:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
 
   inngest-redis:
-    restart: "no"
+    restart: unless-stopped
   inngest-server:
-    restart: "no"
+    restart: unless-stopped
 
   honcho-postgres:
-    restart: "no"
+    restart: unless-stopped
   honcho-redis:
-    restart: "no"
+    restart: unless-stopped
   honcho-provider-gateway:
-    restart: "no"
+    restart: unless-stopped
     command: [python, /dev_reload.py, --watch, /workspace-honcho, --watch, /workspace-provider, --, python, /workspace-honcho/meter.py]
     environment:
       PYTHONPATH: /workspace-provider
@@ -158,7 +158,7 @@ services:
   honcho-api:
     image: ${NOCHEH_DEV_HONCHO_IMAGE:?}
     build: !reset null
-    restart: "no"
+    restart: unless-stopped
     entrypoint: [sh, -c, '/app/.venv/bin/python scripts/provision_db.py && exec /app/.venv/bin/python /dev_reload.py --watch /nocheh -- /app/.venv/bin/python /nocheh/run.py api']
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools/development/dev_reload.py:/dev_reload.py:ro
@@ -166,7 +166,7 @@ services:
   honcho-deriver:
     image: ${NOCHEH_DEV_HONCHO_IMAGE:?}
     build: !reset null
-    restart: "no"
+    restart: unless-stopped
     entrypoint: [/app/.venv/bin/python, /dev_reload.py]
     command: [--watch, /nocheh, --, /app/.venv/bin/python, /nocheh/run.py, deriver]
     volumes:
