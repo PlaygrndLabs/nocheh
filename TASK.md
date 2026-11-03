@@ -149,8 +149,10 @@ a withheld turn's memory call wrote, checked before every turn
 Hermes native notes reach every turn. With the memory evidence on, Hermes read the
 notes only when it built a session's prompt, so the later turns of a session carried
 none. Each turn now reads them itself, and the stored prompt stays the same
-([checks](services/hermes/test_memory_evidence.py)). Pending: the same checks in the
-Hermes image on the owner's machine, and a live reply after the pull.
+([checks](services/hermes/test_memory_evidence.py)). The checks passed in the Hermes
+image on the owner's machine, and replies went through after the pull. The full tester
+saves a note and checks that the chat's next two messages still carry it
+([scenario](tools/acceptance/product_scenarios.py), [fixture model](test/test_scripted_brain.py)).
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner

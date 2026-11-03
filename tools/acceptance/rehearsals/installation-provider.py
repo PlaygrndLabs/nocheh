@@ -25,9 +25,12 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn)(?::([^\]]*))?\]\]')
-    # Any Nocheh tool with exact JSON arguments: [[tool:nocheh_tasks {"action":"list"}]].
-    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+)\s+(\{.*?\})\]\]', re.S)
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes)(?::([^\]]*))?\]\]')
+    # Any Nocheh tool, or Hermes's own memory tool, with exact JSON arguments:
+    # [[tool:nocheh_tasks {"action":"list"}]], [[tool:memory {"action":"add",...}]].
+    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+|memory)\s+(\{.*?\})\]\]', re.S)
+    # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
+    EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
     TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
              'owner': 'nocheh_owner_read'}
 
@@ -41,6 +44,24 @@ class ScriptedBrain:
         if isinstance(content, list):
             return '\n'.join(part.get('text', '') for part in content if isinstance(part, dict))
         return ''
+
+    def notes(self, body):
+        """The native notes the model sees: the system prompt, and the native entries of the
+        memory evidence. Never the conversation, which also quotes a note when it was saved."""
+        found = []
+        for message in body.messages:
+            text = self.text(message.content)
+            if message.role == 'system':
+                found.append(text)
+            elif text.startswith(self.EVIDENCE):
+                try:
+                    entries, _ = json.JSONDecoder().raw_decode(text[len(self.EVIDENCE):])
+                    entries = entries['entries']
+                except (ValueError, KeyError, TypeError):
+                    continue
+                found += [json.dumps(entry.get('content'), ensure_ascii=False) for entry in entries
+                          if isinstance(entry, dict) and str(entry.get('source', '')).startswith('hermes.native.memory.')]
+        return found
 
     def record(self, **event):
         self.events = (self.events + [event])[-500:]
@@ -113,6 +134,10 @@ class ScriptedBrain:
             present = bool(argument) and argument in current.replace(match[0], '')
             self.record(directive=kind, argument=argument, phase='final', present=present)
             return {'content': '[brain] turn ' + argument + (' present' if present else ' absent')}
+        if kind == 'notes':
+            present = bool(argument) and any(argument in note for note in self.notes(body))
+            self.record(directive=kind, argument=argument, phase='final', present=present)
+            return {'content': '[brain] notes ' + argument + (' present' if present else ' absent')}
         if kind == 'context':
             earlier = '\n'.join(self.text(message.content) for index, message in enumerate(body.messages)
                                 if message is not messages[users[-1]])
