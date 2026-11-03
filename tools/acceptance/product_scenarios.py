@@ -338,6 +338,22 @@ class ProductScenarios(Scenarios):
                                                                    'operation_id': 'scenario-unhide-'+hide[:16]})
         self.gate('unhidden', restored.get('retired') is False)
 
+    # Native notes ------------------------------------------------------------------------------
+
+    def native_notes_reach_later_turns(self):
+        # A note the assistant saves reaches the model on the chat's later turns. Hermes reads its
+        # native notes only when it builds a session's prompt, and later turns reuse that prompt.
+        self.turn(self.f.message(OWNER, 'این را یادداشت کن [[tool:memory {"action":"add","target":"memory","content":"NOTEMARK52: the owner keeps synthetic notes."}]]'), OWNER)
+        saved = [event for event in self.f.brain() if event.get('tool') == 'memory' and event['phase'] == 'final'][-1]
+        try:
+            result = json.loads(saved['result'])
+        except ValueError:
+            result = {'raw': saved['result'][:500]}
+        self.gate('note_saved', result.get('success') is True, result=str(result)[:300])
+        for question in ('یادداشت‌هایت را می‌بینی؟', 'و حالا؟'):
+            _, text = self.turn(self.f.message(OWNER, question+' [[notes:NOTEMARK52]]'), OWNER)
+            self.gate('note_reaches_later_turn', 'present' in text, answer=text)
+
     def reaction_keeps_group_name(self):
         # A reaction as the latest update must not lose the group's name.
         _, _ = self.turn(self.f.message(OTHER_GROUP, 'سلام از گروه دوم'), OTHER_GROUP)
@@ -640,7 +656,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
-                 'hidden_message_keeps_the_chat', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
+                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
