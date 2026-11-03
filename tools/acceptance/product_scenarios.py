@@ -529,7 +529,10 @@ class ProductScenarios(Scenarios):
         self.wait('honcho_queue_drained', drained, 600)
         observed['off_review_jobs'] = outcomes(ids)
         self.gate('off_not_in_long_term_memory', in_honcho(off+'M') == '0' and receipts(ids) == '0', honcho=in_honcho(off+'M'), receipts=receipts(ids))
-        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W'}, OTHER_GROUP)
+        # Ten results, the most a search returns: the fixture's vectors come from a hash of the text, so beside the
+        # word match, ranking by meaning is random, and a group with many earlier messages can push the export
+        # out of five. The word match keeps it within the first ten.
+        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W', 'limit': 10}, OTHER_GROUP)
         self.gate('off_not_found_by_meaning', off+'M' not in json.dumps(meaning, ensure_ascii=False), result=str(meaning)[:300])
 
         # 2. Box on, chat kept private to the owner.
@@ -568,7 +571,7 @@ class ProductScenarios(Scenarios):
         notes = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE source_reference->>'id' IN ("+listed(ids)+")")
         questions = self.f.query('nocheh_control', "SELECT count(*) FROM interpretation_jobs WHERE source_reference->>'id' IN ("+listed(ids)+")")
         self.gate('again_no_notes_or_learning_questions', notes == '0' and questions == '0', notes=notes, questions=questions)
-        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W'}, OTHER_GROUP)
+        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W', 'limit': 10}, OTHER_GROUP)
         self.gate('again_found_by_meaning', off+'M' in json.dumps(meaning, ensure_ascii=False), result=str(meaning)[:300])
 
     # Memory search model ----------------------------------------------------------------------------
