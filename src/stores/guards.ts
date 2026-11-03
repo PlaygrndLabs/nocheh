@@ -26,6 +26,17 @@ export async function carriesForward(db:Pick<pg.Pool,'query'>,binding:GuardBindi
   return quiet.n===to-from;
 }
 
+/** The earliest epoch whose context still carries to `current`: the latest epoch up to it that was not quiet.
+ *  A sealed job box filled under it may be kept until a change that is not a reaction (job-box.ts). */
+export async function validFromEpoch(db:Pick<pg.Pool,'query'>,current:GuardBinding):Promise<number> {
+  // The quiet epochs that run back from `current` without a gap; the epoch just before them is the last change.
+  const run=(await db.query(`SELECT min(epoch) AS low FROM (SELECT epoch,$2::bigint-epoch AS back,row_number() OVER (ORDER BY epoch DESC)-1 AS n
+    FROM guard_quiet_epochs WHERE generation=$1 AND epoch<=$2) q WHERE back=n`,[current.generation,current.epoch])).rows[0];
+  const from=run?.low==null?Number(current.epoch):Number(run.low)-1;
+  if(!await carriesForward(db,{...current,epoch:from},current))throw new HttpError(409,'guard_context_changed');
+  return from;
+}
+
 export class GuardRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository){}
 

@@ -331,6 +331,12 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    environment:
+      <<: *environment
+      # Only the broker and the launcher hold the sealed job box token; ./bin/nocheh init and up generate it.
+      # Without it both refuse every box route, so an older .env still starts: no new job may ask for a box, and a box
+      # job approved before the token went missing fails its next step with job_box_unavailable until it is back.
+      NOCHEH_BOX_TOKEN: ${NOCHEH_BOX_TOKEN:-}
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
     healthcheck:
@@ -359,6 +365,9 @@ services:
       NOCHEH_PARALLEL_RUNS: ${NOCHEH_PARALLEL_RUNS:-4}
       NOCHEH_UID: ${NOCHEH_UID:-1000}
       NOCHEH_GID: ${NOCHEH_GID:-1000}
+      NOCHEH_BOX_TOKEN: ${NOCHEH_BOX_TOKEN:-}
+      NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
+      NOCHEH_BOX_LIMIT: ${NOCHEH_BOX_LIMIT:-2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles:/profiles:ro

@@ -14,6 +14,7 @@ except ImportError:
     fake.InlineKeyboardButton=lambda text,callback_data=None,url=None,web_app=None:(text,callback_data or url or web_app)
     fake.InlineKeyboardMarkup=lambda rows:rows
     fake.WebAppInfo=lambda url:('web_app',url)
+    fake.LinkPreviewOptions=lambda is_disabled=None:SimpleNamespace(is_disabled=is_disabled)
     fake.error=types.ModuleType('telegram.error')
     fake.error.BadRequest=type('BadRequest',(Exception,),{})
     sys.modules['telegram.error']=fake.error
@@ -26,11 +27,16 @@ from .capture import OUTBOUND_CHECK
 
 class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
     def gateway(self,root,sent,edits=None,answers=None,groups=('-20',),access=None):
-        async def send_message(chat,text,message_thread_id=None,reply_markup=None,reply_to_message_id=None,allow_sending_without_reply=None,entities=None,parse_mode=None):
+        def previews_off(options):
+            # Every card, refusal and notice is sent and edited with link previews off; the gateway counts a refused send as not done.
+            if getattr(options,'is_disabled',None) is not True:raise ValueError('link_preview_on')
+        async def send_message(chat,text,message_thread_id=None,reply_markup=None,reply_to_message_id=None,allow_sending_without_reply=None,entities=None,parse_mode=None,link_preview_options=None):
+            previews_off(link_preview_options)
             # The bound outbound check admits only this exact chat and topic.
             OUTBOUND_CHECK.get()('sendMessage',{'chat_id':chat,'text':text,**({'message_thread_id':message_thread_id} if message_thread_id else {})})
             sent.append((chat,message_thread_id,text,reply_markup,reply_to_message_id,links(entities)));return SimpleNamespace(message_id=40+len(sent))
-        async def edit_message_text(text,chat_id,message_id,reply_markup=None,entities=None,parse_mode=None):edits.append((chat_id,message_id,text,reply_markup,links(entities)));return True
+        async def edit_message_text(text,chat_id,message_id,reply_markup=None,entities=None,parse_mode=None,link_preview_options=None):
+            previews_off(link_preview_options);edits.append((chat_id,message_id,text,reply_markup,links(entities)));return True
         links=lambda entities:[(entity.type,entity.offset,entity.length,entity.url) for entity in entities or []]
         async def answer_callback_query(query,text=None):answers.append((query,text));return True
         value=AssistantGateway(root,root/'spool',SimpleNamespace(enabled=True,owner='123',groups=list(groups),group_access=access or {}),'123456:synthetic','synthetic',lambda:None)

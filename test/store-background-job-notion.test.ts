@@ -82,7 +82,8 @@ test('a job the owner approved in their private chat reads Notion under the owne
     await saveNotion({approval:'nothing'});
     assert.equal((await notion(mine.reader,'notion-create-pages',{pages:[{properties:{title:'وظیفه ۱۴'}}]})).state,'proposed',
       'even when nothing asks, a job\'s change asks: the job reads group text anyone there can write');
-    assert.equal((await notion(mine.reader,'notion-fetch',{id:'made-up-page'})).state,'approved');
+    assert.equal((await notion(mine.reader,'notion-fetch',{id:'0123456789abcdef0123456789abcdef'})).state,'approved');
+    assert.equal((await notion(mine.reader,'notion-fetch',{id:'https://made-up.notion.site/Page'})).state,'proposed','a job fetches only by id or notion.so address without asking');
     await saveNotion({approval:'everything'});
     assert.equal((await notion(mine.reader,'notion-search',{query:'other made-up tasks'})).state,'proposed');
     await saveNotion({approval:'changes'});
@@ -98,7 +99,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
     assert.equal(await ownerApprovedJob(stores.control,'123',{store:'control',id:mine.reader.turnEvent!},{...stepTurn,logical_profile:'job-other'}),false);
 
     // Stop: a read the setting let run but that has not run yet does not run, and no new read is let through.
-    const pending=await notion(mine.reader,'notion-fetch',{id:'made-up-page-2'});assert.equal(pending.state,'approved');
+    const pending=await notion(mine.reader,'notion-fetch',{id:'https://www.notion.so/Made-up-0123456789abcdef0123456789abcde2'});assert.equal(pending.state,'approved');
     assert.equal((await s.jobs.stop(await actor((await message('123',123,'Stop it')).id,null,'123'),{id:mine.id})).state,'stopping');
     assert.equal(await ownerApprovedJob(stores.control,'123',{store:'control',id:mine.reader.turnEvent!},stepTurn),false,'a stopping job uses the setting no more');
     await notion(mine.reader,'notion-search',{query:'after stop'}).then(

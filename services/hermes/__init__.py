@@ -7,6 +7,12 @@ def register(ctx):
     from services.hermes.archive_tools import register as register_archive
     register_archive(ctx)
     import os
+    # Hermes's own terminal, file and code tools run only in a job's sealed box: the hook
+    # blocks them everywhere else, and the box backend exists only where its socket is mounted.
+    from services.hermes import job_box
+    ctx.register_hook('pre_tool_call', job_box.tool_gate)
+    if os.environ.get('NOCHEH_BOX_SOCKET'):
+        ctx.register_terminal_environment_provider(job_box.Provider())
     if os.environ.get('NOCHEH_CAPTURE_ENABLED') == '1':
         from plugins.platforms.telegram import adapter as native
         from services.hermes.capture import captured_adapter_class

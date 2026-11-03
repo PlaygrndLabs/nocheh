@@ -11,6 +11,8 @@ import {ownerSecurityRoute} from './owner-api.js';
 import {anthropicPayload,providerPayload} from './provider-request.js';
 import type {SourceReference} from '../stores/archive.js';
 import type {OperationReference} from '../stores/operations.js';
+import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
+import {RuntimeTurnRepository} from '../stores/turns.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
 
 export interface TurnBinding {
@@ -78,6 +80,16 @@ export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBin
     guard_epoch:principal.guard_epoch,revision:principal.revision,
     ...(event.managed&&event.channel==='scheduler'&&typeof payload.job_id==='string'?{job:payload.job_id}:{})};
 }
+/** What a job request may be told to correct, as services/hermes/archive_tools.py JOB_ERRORS names it; any other refusal stays opaque. */
+const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed']);
+/** The error code in a refused archive answer, read within a small bound; null when there is none. */
+async function refusalCode(response:Response,max=4096):Promise<string|null> {
+  const chunks=[];let size=0;
+  try {
+    if(response.body)for await(const part of response.body){size+=part.length;if(size>max)return null;chunks.push(Buffer.from(part));}
+    const code=object(JSON.parse(Buffer.concat(chunks).toString())).error;return typeof code==='string'?code:null;
+  }catch{return null;}
+}
 async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
   if(!response.ok){await response.body?.cancel();throw new HttpError(response.status>=400&&response.status<500?response.status:503,'security_upstream_unavailable');}
   const chunks=[];let size=0;
@@ -86,6 +98,8 @@ async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
 }
 export function brokerServer(options:BrokerOptions) {
   const call=options.fetch??fetch;
+  // Sealed job boxes follow Nocheh's own rows, so without storage no turn gets one.
+  const box=options.storage instanceof RuntimeTurnRepository?new JobBoxRepository(options.storage.access):null;
   const assertCurrent=(principal:Reader)=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal);
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
@@ -96,8 +110,19 @@ export function brokerServer(options:BrokerOptions) {
     if(req.method==='GET'&&path==='/health'){if(options.health)await options.health();else await options.pool.query('SELECT 1');return json(res,200,{ok:true,service:'security',plugin:manifest.id,api_version:1});}
     options.assertActive?.();
     anthropicCredential(req,path);
+    // The launcher's sweep: the boxes that may exist now. Only the box token reaches it.
+    if(req.method==='GET'&&path==='/v1/box/live') {
+      const authorization=req.headers.authorization??'';
+      if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
+      await options.assertReady?.();return json(res,200,await box.live());
+    }
     const principal=reader(req,options.token);
     await options.assertReady?.();
+    // The box's chat copy also needs the launcher's box token, and is never read with an owner credential.
+    const copy=path==='/v1/box/chat'&&req.method==='GET';
+    if(copy&&(principal.admin||!box||!boxTokenValid(req.headers['x-nocheh-box-token'])))throw new HttpError(403,'job_box_not_allowed');
+    // Only the job's own chat and period, from its row: the page cursor is the one key it takes.
+    if(copy&&[...url.searchParams.keys()].some(key=>key!=='cursor'))throw new HttpError(400,'invalid_box_request');
     if(principal.admin&&path==='/v1/guard'&&req.method==='POST')return json(res,200,await options.prepare(principal,await readJson(req,1024*1024)));
     if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url,{separated:!!options.storage}))return;
     const binding=await (options.storage?options.storage.binding(principal):turnBinding(options.pool,principal));
@@ -123,7 +148,8 @@ export function brokerServer(options:BrokerOptions) {
       if(path==='/v1/security/binding'&&req.method==='GET') {
         const transport=object(await rpc(options.hermes,'/internal/security/transport',{metadata:true},'Bearer '+options.token));
         if(!Number.isSafeInteger(transport.model_context_length)||Number(transport.model_context_length)<1)throw new HttpError(503,'model_context_metadata_required');
-        return json(res,200,{...binding,model:options.model,model_context_length:transport.model_context_length,plugin:manifest});
+        // Without the box token the launcher can fill no box, so no step gets one.
+        return json(res,200,{...binding,box:box&&boxTokenSet()?await box.binding(binding):null,model:options.model,model_context_length:transport.model_context_length,plugin:manifest});
       }
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
@@ -138,17 +164,27 @@ export function brokerServer(options:BrokerOptions) {
         if(!artifact)throw new HttpError(404,'turn_file_not_found');
         relay='/v1/artifacts/'+artifact+'/bytes';
       }
-      if(scopedRoute(req.method??'',relay)) {
+      if(copy&&!await box!.binding(binding))throw new HttpError(403,'job_box_not_allowed');
+      if(copy||scopedRoute(req.method??'',relay)) {
+        // Only the box route reads whole texts; no other read can ask for them.
+        if(!copy&&url.searchParams.has('full'))url.searchParams.delete('full');
         const knowledge=relay.startsWith('/v1/knowledge/')||relay.startsWith('/v1/owner/');
         // Fixed scoped routes keep runtime tools away from owner credentials.
         // Storage independently verifies a current live owner-private turn.
         if(knowledge&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
-        const body=req.method==='POST'?JSON.stringify(await readJson(req,1024*1024)):undefined;
+        const input=req.method==='POST'?await readJson(req,1024*1024):undefined,body=input===undefined?undefined:JSON.stringify(input);
+        // A job asks for the box only where one can be filled: refused now, not failed at every step.
+        if(relay==='/v1/jobs/propose'&&(input as {box?:unknown}|null)?.box===true&&!boxTokenSet())throw new HttpError(409,'job_box_not_allowed');
         // Context preparation and proposals have their own enforcement. Read policies
         // apply to retrieval; native memory remains writable within the owned profile.
         if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/propose','/v1/jobs/stop'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
-        if(!response.ok){await response.body?.cancel();throw new HttpError(response.status,'scoped_archive_unavailable');}
+        if(!response.ok) {
+          // A job request is told what to correct, such as a member's daily limit or a box it may not have.
+          const code=relay.startsWith('/v1/jobs/')&&response.status>=400&&response.status<500?await refusalCode(response):(await response.body?.cancel(),null);
+          throw new HttpError(response.status,code&&jobErrors.has(code)?code:'scoped_archive_unavailable');
+        }
+        // A box page holds at most 600,000 characters of message texts, which stays well within 8 MiB.
         await stream(response,principal,res,file?26*1024*1024:8*1024*1024);
         if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.reference??binding.event_id);trace.closed=true;}return;
       }

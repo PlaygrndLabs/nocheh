@@ -14,8 +14,23 @@ INSERT INTO owner_notion(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 export type NotionApproval='changes'|'everything'|'nothing';
 const approvals:NotionApproval[]=['changes','everything','nothing'];
 
-/** Notion MCP tools that only read: search, fetch, and the get, list and query tools. Any other tool changes something. */
-export const notionReads=(tool:string)=>/^notion-(?:search|fetch|ai-search|connector-search|(?:get|list|query)-[a-z0-9-]+)$/.test(tool);
+/** The Notion MCP tools known to only read. Any other tool, including one Notion adds later, asks first. */
+const reads=new Set(['notion-search','notion-fetch','notion-get-comments','notion-get-users','notion-get-user','notion-get-self','notion-get-teams',
+  'notion-query-data-sources','notion-query-database-view']);
+export const notionReads=(tool:string)=>reads.has(tool);
+const notionId=/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+/** What a job step may fetch without asking: a page by its raw id, a notion.so address, or a data source or
+ *  view by id. Any other address, such as a public *.notion.site page someone else runs, asks: it could carry what the job read. */
+export function notionJobFetch(input:unknown):boolean {
+  const value=input&&typeof input==='object'&&!Array.isArray(input)?input as Record<string,unknown>:null,id=value?.id;
+  if(typeof id!=='string'||Object.entries(value!).some(([key,option])=>key!=='id'&&typeof option!=='boolean'))return false;
+  if(notionId.test(id))return true;
+  const reference=id.match(/^(?:collection|view):\/\/(.+)$/);if(reference)return notionId.test(reference[1]!);
+  try {
+    const url=new URL(id);
+    return url.protocol==='https:'&&['notion.so','www.notion.so'].includes(url.hostname)&&!url.username&&!url.password&&!url.port;
+  }catch{return false;}
+}
 
 /**
  * Whether Nocheh may use the owner's Notion, and which Notion calls ask the
@@ -49,12 +64,12 @@ export class NotionRepository {
  * there can write, so in a job only reads skip the card (ADR-0203).
  */
 export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null},
-  args:{operation?:string;tool?:string},allowed:boolean):Promise<string|null> {
+  args:{operation?:string;tool?:string;input?:unknown},allowed:boolean):Promise<string|null> {
   if(principal.admin||principal.scope!==null||!turn.owner)throw new HttpError(403,'notion_owner_private_only');
   const row=(await db.query('SELECT enabled,approval,revision FROM owner_notion WHERE singleton FOR SHARE')).rows[0];
   if(!row?.enabled)throw new HttpError(409,'notion_not_enabled');
   if(!allowed||(principal.purpose??'assistant')!=='assistant')return null;
-  const read=args.operation==='list'||notionReads(String(args.tool??''));
+  const tool=String(args.tool??''),read=args.operation==='list'||notionReads(tool)&&(!turn.job||tool!=='notion-fetch'||notionJobFetch(args.input));
   return row.approval==='nothing'&&!turn.job||row.approval!=='everything'&&read?'notion_setting:'+row.revision:null;
 }
 

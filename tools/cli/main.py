@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tools.operations.installation.configuration import initialize, load, write_env, env_path, compose_environment, compose_command, DEFAULT_STATE, INSTALLATION_ROOT
+from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, DEFAULT_STATE, INSTALLATION_ROOT
 
 ROOT = REPO_ROOT
 STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
@@ -19,6 +19,18 @@ STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
 
 def bootstrap():
     initialize(STATE)
+
+
+def build_image(name, env=None):
+    # The disposable tool and sealed job box images; the launcher resolves the box image at each box it makes.
+    return subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/f'deploy/{name}.Dockerfile'),'-t',f'nocheh-{name}:local',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
+
+
+def development_box_token():
+    # make dev runs on the operating .env without initialize(), so one from before boxes gets its box token here.
+    from tools.development.live_dev import operating_root, operating_config
+    root = operating_root(); operating_config(root); path = root / '.env'; saved = read_env(path)
+    if not saved.get('NOCHEH_BOX_TOKEN'): write_env(path, generate(saved, ('NOCHEH_BOX_TOKEN',)))
 
 
 def run_isolated_tests(rest):
@@ -83,6 +95,10 @@ def main():
     if args.command in ('dev', 'dev-stop', 'dev-status'):
         sys.path.insert(0, str(ROOT))
         from tools.development.live_dev import main as live_dev
+        if args.command == 'dev':
+            development_box_token()
+            # Development boxes run this checkout's box server and writer.
+            if result := build_image('box'): return result
         return live_dev(args.command, rest)
     if args.command == 'test':
         return run_isolated_tests(rest)
@@ -250,9 +266,11 @@ def main():
         "config": ["config", "--quiet"],
         "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "services.hermes.discover_telegram"],
     }
-    result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
-    if args.command=='up' and result==0:
-        result=subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
+    # The launcher looks for the box image as it starts, so up builds it before the stack.
+    result = build_image('box', env) if args.command == 'up' else 0
+    if result == 0: result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
+    for name in {'up':('tools',),'build':('box',)}.get(args.command,()):
+        if result==0: result=build_image(name, env)
 
     return result
 

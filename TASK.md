@@ -67,20 +67,57 @@ few cards as fit, each showing every change exactly and decided as a whole by th
 owner, and each card says how its changes ended; Stop rejects them
 ([ADR-0204](docs/adr/0204-a-jobs-changes-come-on-list-cards.md),
 [check](test/store-background-job-changes.test.ts)).
+Step 3, the sealed box: a job the owner asks for in their private chat can get
+a sealed box while "Sealed box for jobs" in Settings › Assistant is on (the
+default); its card says so, and the box is part of its fingerprint. Its work steps
+run Hermes's own terminal, file and Python tools in a container with no network,
+keys or Docker socket, and a read-only copy of the job's chat that passed the
+secret check. The box is kept while only reactions change and the last step ended
+normally, and removed within 15 seconds once the job stops, the switch goes off or
+its time is up; a launcher touches only its own installation's boxes. A box
+command never outlives its step. A `/chat` that runs out of room stops for good and
+its manifest says `full`. A failed box job says `job_box_unavailable`, and a box
+request in the legacy runtime is refused. Those steps lose the approved shell, the
+browser, Hermes memory and subagents, and the tools are blocked in every other
+turn. Notion reads are an exact list of read tools, and
+a job's fetch by an address outside notion.so asks. Link previews are off for
+every message the bot sends or edits
+([ADR-0205](docs/adr/0205-owner-approved-jobs-work-in-a-sealed-box.md),
+[stores](test/store-job-box.test.ts), [launcher](services/hermes/test_box_launcher.py),
+[box server](services/hermes/test_box_server.py), [backend and hook](services/hermes/test_job_box.py),
+[previews](services/hermes/test_link_previews.py)). The end-to-end check is the
+full tester scenario `background_job_uses_sealed_box`
+([tester scenario](tools/acceptance/product_scenarios.py)). On the fake Telegram,
+with made-up group messages and a scripted model, a job's terminal, read_file and
+execute_code calls ran in its box, the result file never appeared in the turn, the
+report reached the owner, and the box was gone when the job was done. It passed on
+a fresh fixture, and failed as expected when the launcher had no box token. Not
+yet run with a real model.
 Open owner questions: may a job's Notion changes also follow "Nothing asks me"?
-Until then they always ask. Does the owner accept, in their own words, the new SPECS lines that
-a reaction change or a learning revision does not stop a waiting or approved proposal, that a card
-says how an approved operation ended and which job or schedule asked, and that
-jobs the owner approved use Notion, and that a job's changes come on list cards?
-They are not yet accepted. Next: Hermes's own file, terminal and Python tools for
-jobs in a sealed box. Telegram message
+Until then they always ask. Should link previews be off for every bot message? They are off
+until the owner answers. Does the owner accept, in their own words, the new SPECS
+lines that a reaction change or a learning revision does not stop a waiting or approved proposal, that a
+card says how an approved operation ended and which job or schedule asked, that
+jobs the owner approved use Notion, that a job's changes come on list cards, and
+that a job the owner approved can work in a sealed box? They are not yet accepted.
+Telegram message
 requests keep the exact-epoch rule, so a reaction or a learning revision in the seconds between
 staging a report part and sending it still cancels that part and fails the job.
 An owner cancel from Workflows does not edit the card yet.
+The box rests on Hermes internals, so each Hermes upgrade must run the box checks
+again: the backend and hook tests (the hook blocks the box tools elsewhere, and
+oversized results keep their preview) and the `background_job_uses_sealed_box`
+scenario (terminal, read_file and execute_code run in the box). Still open by
+design: no gVisor or user namespace remapping on the default host, one uid for the
+box server and its commands, and the secret check of box output is not counted in
+the job's cost. Follow-up, not built now: retention for `runtime_prepared_values`,
+an older gap (see Storage growth below). Nothing deletes its rows, and each secret
+check loads every row of its audience and epoch; box pages are not added to it.
 Pending: a live check: ask for a Notion change, react in a group, then approve;
 a job whose report comes after a reaction in a group; a Notion call that fails
-and one that finishes, each showing it on its card; and a job in the owner's
-private chat that reads a real Notion table.
+and one that finishes, each showing it on its card; a job in the owner's
+private chat that reads a real Notion table; a box job that checks a real Notion
+table against a group chat; and turning the box switch off while a box job runs.
 Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
 Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
 if replies stay the same and it is not less efficient): no Anthropic call was cached,

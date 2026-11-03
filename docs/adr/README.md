@@ -59,7 +59,8 @@ waiting approvals surviving reaction epochs: [0200](0200-waiting-approvals-survi
 job reports surviving reaction epochs: [0201](0201-job-reports-survive-reaction-epochs.md);
 approved actions reporting how they ended: [0202](0202-approved-actions-report-how-they-ended.md);
 jobs the owner approved reading Notion: [0203](0203-owner-approved-jobs-read-notion.md);
-a job's changes on list cards at its end: [0204](0204-a-jobs-changes-come-on-list-cards.md).
+a job's changes on list cards at its end: [0204](0204-a-jobs-changes-come-on-list-cards.md);
+jobs the owner approved working in a sealed box: [0205](0205-owner-approved-jobs-work-in-a-sealed-box.md).
 Prompt caching for Anthropic replies through its Messages API: [0199](0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
 Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).

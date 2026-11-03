@@ -329,6 +329,9 @@ def captured_adapter_class():
     class ArchivedTelegramAdapter(TelegramAdapter):
         def __init__(self, config):
             super().__init__(config)
+            # Telegram fetches an address to preview it, so no message this adapter sends shows
+            # one, whatever the profile's platform settings say.
+            self._disable_link_previews = True
             self.capture = Capture(Path(os.environ.get('NOCHEH_SPOOL_DIR', '/data/spool')), config.token.split(':',1)[0])
 
         def _instrument_polling_request(self, request):

@@ -26,9 +26,10 @@ class ScriptedBrain:
     Requests without a directive keep the deterministic mock behaviour.
     """
     DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes)(?::([^\]]*))?\]\]')
-    # Any Nocheh tool, or Hermes's own memory tool, with exact JSON arguments:
-    # [[tool:nocheh_tasks {"action":"list"}]], [[tool:memory {"action":"add",...}]].
-    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+|memory)\s+(\{.*?\})\]\]', re.S)
+    # Any Nocheh tool, Hermes's own memory tool, or a Hermes tool of a job's sealed box, with exact JSON
+    # arguments: [[tool:nocheh_tasks {"action":"list"}]], [[tool:memory {"action":"add",...}]].
+    # Several in one turn are called one after another.
+    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+|memory|terminal|read_file|write_file|search_files|patch|execute_code)\s+(\{.*?\})\]\]', re.S)
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
     TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
@@ -76,8 +77,8 @@ class ScriptedBrain:
             return None
         current = self.text(messages[users[-1]].content)
         match = self.DIRECTIVE.search(current)
-        tool = self.TOOL.search(current)
-        if not match and not tool:
+        tools = self.TOOL.findall(current)
+        if not match and not tools:
             return None
         if self.canary in '\n'.join(self.text(message.content) for message in body.messages):
             self.counts['raw_canary_outside_detector'] += 1
@@ -87,14 +88,19 @@ class ScriptedBrain:
         # [[after:silent]] makes the answer after a tool result [NO_REPLY], as
         # Nocheh asks once an approval card already answers the request.
         silent_after = '[[after:silent]]' in current
-        if tool:
-            name, results = tool[1], [message for message in later if message.role == 'tool']
-            if results:
-                result = self.text(results[-1].content)
-                self.record(directive='tool', argument=tool[2], phase='final', tool=name, result=result[:20000])
-                return {'content': '[NO_REPLY]' if silent_after else '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
-            self.record(directive='tool', argument=tool[2], phase='call', tool=name)
-            return {'tool': name, 'arguments': json.loads(tool[2])}
+        if tools:
+            results = [message for message in later if message.role == 'tool']
+            if len(results) < len(tools):
+                name, argument = tools[len(results)]
+                self.record(directive='tool', argument=argument, phase='call', tool=name)
+                return {'tool': name, 'arguments': json.loads(argument)}
+            # The answer gives each tool's actual result, one line per tool, in call order.
+            lines = []
+            for (name, argument), message in zip(tools, results[-len(tools):]):
+                result = self.text(message.content)
+                self.record(directive='tool', argument=argument, phase='final', tool=name, result=result[:20000])
+                lines.append('[brain] ' + name + ': ' + ' '.join(result.split())[:3000])
+            return {'content': '[NO_REPLY]' if silent_after else '\n'.join(lines)}
         kind, argument = match[1], (match[2] or '').strip()
         if kind in self.TOOLS:
             results = [message for message in later if message.role == 'tool']

@@ -53,6 +53,9 @@ def preferences(config):
     return result
 
 
+MANAGED = ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching', 'terminal', 'code_execution', 'tool_output']
+
+
 def resolved(config, model):
     """Keep native fields, but never delegate route/tool policy to mutable YAML."""
     config = json.loads(json.dumps(config))
@@ -81,6 +84,12 @@ def resolved(config, model):
     # Skills are set by the owner only. The native curator would archive or
     # consolidate a skill that no turn loaded for its configured window.
     config['curator'] = {'enabled': False}
+    # Hermes's terminal, file and code tools run only in a job's sealed box. A terminal section
+    # would replace the launcher's backend, possibly with local; the box's bounds are fixed.
+    config.pop('terminal', None)
+    # A code kernel left idle in a box does not stay much longer than a step.
+    config['code_execution'] = {'timeout': 120, 'max_tool_calls': 20, 'max_session_kernels': 1, 'kernel_idle_timeout': 600}
+    config['tool_output'] = {'max_bytes': 30000, 'max_lines': 400, 'max_line_length': 1000}
     return config
 
 
@@ -127,7 +136,7 @@ def inspect_profile(profile, model):
     result = resolved(inherited, model)
     return {'origins': origins, 'revision': profile_revision(original, policy), 'values': preferences(result), 'schema': PREFERENCES,
             'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
-            'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching']}
+            'managed': MANAGED}
 
 
 def configure_profile(profile, model, changes=None, expected=None):
@@ -158,4 +167,4 @@ def configure_profile(profile, model, changes=None, expected=None):
         if not path.exists() or result != read(path): atomic_yaml(path, result)
         return {'origins': origins, 'revision': profile_revision(result, policy), 'values': preferences(result), 'schema': PREFERENCES,
                 'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
-                'managed': ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching']}
+                'managed': MANAGED}

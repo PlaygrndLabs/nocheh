@@ -84,6 +84,19 @@ class ScriptedBrainTests(unittest.TestCase):
             (*history,ask),(evidence(recalled),*history,ask),(message('user',self.brain.EVIDENCE+'not json'),ask))]
         self.assertEqual(answers,['[brain] notes NOTEMARK52 present']*3+['[brain] notes NOTEMARK52 absent']*3)
 
+    def test_box_tools_run_in_order_then_answer_with_every_result(self):
+        user=message('user','box [[tool:terminal {"command":"wc -l /chat/part-00001.jsonl"}]] [[tool:read_file {"path":"/work/result.txt"}]]')
+        tools=('nocheh_archive_page','terminal','read_file')
+        self.assertEqual(self.brain.respond(request(user,tools=tools)),{'tool':'terminal','arguments':{'command':'wc -l /chat/part-00001.jsonl'}})
+        first=[user,message('assistant',None),message('tool','{"output": "3"}')]
+        self.assertEqual(self.brain.respond(request(*first,tools=tools)),{'tool':'read_file','arguments':{'path':'/work/result.txt'}})
+        final=self.brain.respond(request(*first,message('assistant',None),message('tool','{"content": "1|BOXMARKED=3"}'),tools=tools))
+        self.assertEqual(final['content'],'[brain] terminal: {"output": "3"}\n[brain] read_file: {"content": "1|BOXMARKED=3"}')
+        # A job's scripted instruction travels inside the proposal's arguments with its braces escaped.
+        nested='{"instruction":'+json.dumps('[[tool:terminal {"command":"id"}]]').replace('{','\\u007b').replace('}','\\u007d')+'}'
+        proposal=self.brain.respond(request(message('user','[[tool:nocheh_background_job '+nested+']]'),tools=('nocheh_background_job',)))
+        self.assertEqual(proposal,{'tool':'nocheh_background_job','arguments':{'instruction':'[[tool:terminal {"command":"id"}]]'}})
+
     def test_raw_canary_in_scripted_turn_is_counted_and_rejected(self):
         result=self.brain.respond(request(message('system','fixture-canary'),message('user','[[search:x]]')))
         self.assertEqual(result,{'error':'unguarded_fixture_canary'})

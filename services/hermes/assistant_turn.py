@@ -22,6 +22,11 @@ TURN_TOOLSETS=['memory','session_search','nocheh_archive','skills']
 # A background job's steps also keep Hermes's own to-do list, restored from the job's history each step.
 BACKGROUND_TOOLS=ALLOWED_TOOLS|{'todo_list'}
 BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
+# A box step runs Hermes's own terminal, file and code tools in the job's sealed box. It keeps
+# the archive tools and Notion, and loses native memory, the shell and the browser.
+BOX_STRIPPED={'nocheh_shell','nocheh_browser'}
+BOX_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
+BOX_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file','code_execution']
 
 
 class UnexpectedProfileTool(RuntimeError):
@@ -144,6 +149,18 @@ def background_limits(body):
     return iterations
 
 
+def box_step(body):
+    """Whether this turn is a job step in its sealed box. The step and the launcher's environment
+    must agree in both directions; anything else stops before the agent runs."""
+    limits=body.get('background')
+    box=limits.get('box',False) if body.get('channel')=='background' and body.get('review') is not True and isinstance(limits,dict) else False
+    if type(box) is not bool:raise ValueError('invalid_background_step')
+    socket,backend=bool(os.environ.get('NOCHEH_BOX_SOCKET')),os.environ.get('TERMINAL_ENV')=='nocheh_box'
+    if (not (os.environ.get('NOCHEH_ISOLATED_TURN')=='1' and socket and backend)) if box else (socket or backend):
+        raise ValueError('job_box_unavailable')
+    return box
+
+
 def todo_snapshot(agent):
     """The job's to-do list after a step, bounded, for the job list."""
     store=getattr(agent,'_todo_store',None)
@@ -169,6 +186,7 @@ def step_result(result, session_id, todo):
 
 
 def run(body, emit=None):
+    box=box_step(body)
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
     if body.get('review') is not True and retired_content_question(body.get('source_text',body.get('text',''))):
@@ -234,7 +252,7 @@ def run(body, emit=None):
     if placement=='evidence':long_term='\n'+prompt('memory.evidence')
     agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
         api_key=credentials.access_token,base_url=credentials.base_url,
-        enabled_toolsets=['memory'] if review else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,fallback_model=None,
+        enabled_toolsets=['memory'] if review else BOX_TOOLSETS if box else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,fallback_model=None,
         session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
         skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
@@ -253,9 +271,15 @@ def run(body, emit=None):
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
-        agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in OWNER_SET_TOOLS]
-        agent.valid_tool_names=set(agent.valid_tool_names)-OWNER_SET_TOOLS
-        verify_profile_tools(agent.valid_tool_names,BACKGROUND_TOOLS if background else ALLOWED_TOOLS)
+        removed=OWNER_SET_TOOLS|(BOX_STRIPPED if box else set())
+        agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in removed]
+        agent.valid_tool_names=set(agent.valid_tool_names)-removed
+        verify_profile_tools(agent.valid_tool_names,BOX_TOOLS if box else BACKGROUND_TOOLS if background else ALLOWED_TOOLS)
+        if box:
+            # The box tools must all be there, on the box backend; the hook then lets only this step's tools
+            # run, and none of their commands outlives the step.
+            from services.hermes import job_box
+            job_box.seal(agent.valid_tool_names,body['turn_deadline_epoch'])
         for tool in agent.tools:
             if tool['function']['name']=='session_search':
                 tool['function']['parameters']['properties'].pop('profile',None)
@@ -337,7 +361,7 @@ def main():
     except Exception as error:
         import traceback
         frames=traceback.extract_tb(error.__traceback__)
-        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','required_guard_unavailable','invalid_process_scope_binding'}
+        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable'}
         result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names
