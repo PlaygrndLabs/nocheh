@@ -32,7 +32,7 @@ export class ControlledActionRepository {
   effect(row:any):Effect {return {id:row.id,kind:row.kind,scope:row.scope,profile:row.logical_profile,fingerprint:row.fingerprint,...(row.job_id?{job:row.job_id}:{})};}
   async fence(db:pg.PoolClient,binding:GuardBinding) {
     const state=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
-    // An action stays bound to its own epoch; only later quiet epochs carry it (ADR-0199).
+    // An action stays bound to its own epoch; only later quiet epochs carry it (ADR-0200).
     if(!state||!await carriesForward(db,binding,{generation:state.generation,epoch:Number(state.epoch),mode:state.mode}))throw new HttpError(409,'guard_context_changed');
     if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }

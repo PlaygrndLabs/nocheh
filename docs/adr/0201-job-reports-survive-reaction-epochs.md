@@ -1,11 +1,11 @@
-# ADR-0200: Job reports survive reaction epochs
+# ADR-0201: Job reports survive reaction epochs
 
 <status>
 Accepted on 2026-11-01, when the owner chose "All three, in order" to build steps
 2 to 4 so Nocheh works like a Claude Code session; a background job that checks a
 Notion task table against a group chat runs long, and groups react meanwhile.
 Extends [ADR-0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md) and
-[ADR-0199](0199-waiting-approvals-survive-reaction-epochs.md).
+[ADR-0200](0200-waiting-approvals-survive-reaction-epochs.md).
 </status>
 
 <context>
@@ -20,7 +20,7 @@ Extends [ADR-0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md) and
 
 <decision>
 - Before each new part, the last step's binding must carry to the current one
-  (`carriesForward`, ADR-0199): only quiet epochs may lie between. Otherwise the
+  (`carriesForward`, ADR-0200): only quiet epochs may lie between. Otherwise the
   job ends as failed with `job_report_outdated` and no further part is sent.
   Changes before the last step do not count; that step read only what was
   visible then.
@@ -34,7 +34,7 @@ Extends [ADR-0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md) and
 
 <consequences>
 - Reactions in any chat no longer lose a job's report.
-- Learning revisions are not quiet (ADR-0199), so they still fail a report.
+- Learning revisions are not quiet (ADR-0200), so they still fail a report.
 - A reaction between staging a part and sending it still cancels that part, and
   the job fails with `job_report_not_delivered`.
 - A part already staged when Stop is pressed may still arrive.

@@ -35,17 +35,17 @@ task table against a group chat): long tool results are read in parts
 actions, such as Notion calls, survive reactions in any chat, and a later turn or
 job step of the asking chat reads its own action; any other epoch change still
 stops them, and the reader then sees only the state
-([ADR-0199](docs/adr/0199-waiting-approvals-survive-reaction-epochs.md),
+([ADR-0200](docs/adr/0200-waiting-approvals-survive-reaction-epochs.md),
 [check](test/store-quiet-epochs.test.ts)). A job's report is sent after
 reactions too; any other change after its last step sends no further part of the
 report and ends the job as failed (`job_report_outdated`), and Stop sends no
-further part either ([ADR-0200](docs/adr/0200-job-reports-survive-reaction-epochs.md),
+further part either ([ADR-0201](docs/adr/0201-job-reports-survive-reaction-epochs.md),
 [check](test/store-background-job-epochs.test.ts)). An approved tool action's card
 now says whether it finished, failed or did not run, with a reason from fixed codes
 in the owner's texts; a tool's own error counts as failed; a card that a job asked
 for names the job, and the job's agent does not wait for it; a later turn or step
 lists its operations when it no longer holds their IDs
-([ADR-0201](docs/adr/0201-approved-actions-report-how-they-ended.md),
+([ADR-0202](docs/adr/0202-approved-actions-report-how-they-ended.md),
 [cards](test/store-approval-buttons.test.ts), [list](test/store-quiet-epochs.test.ts)).
 Open owner questions: should automatic
 learning revisions also leave waiting approvals and job reports valid? Until then
@@ -60,6 +60,23 @@ An owner cancel from Workflows does not edit the card yet.
 Pending: a live check: ask for a Notion change, react in a group, then approve;
 a job whose report comes after a reaction in a group; and a Notion call that fails
 and one that finishes, each showing it on its card.
+Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
+Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
+if replies stay the same and it is not less efficient): no Anthropic call was cached,
+because every provider was reached through its OpenAI-compatible API. Replies and
+memory-notes reviews on the Anthropic preset now use Anthropic's Messages API through
+the broker with Hermes's own cache breakpoints. They keep the same model, tools,
+thinking, review budget and step-limit summary; the memory evidence is the request's
+last block, after the cached part; a profile remembers each session's prompt; and Usage
+shows the cached share of input
+([ADR-0199](docs/adr/0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md),
+[broker](test/security-broker.test.ts), [boundary](test/security-contract.test.ts),
+[evidence](services/hermes/test_memory_evidence.py)). The secret check, privacy filter,
+image reads and Honcho's deriver are too short or one-off to cache. Pending: rebuild the
+Hermes image, then a live reply with a tool and a memory-notes review showing cache
+reads on the Usage page with no refused calls and a similar cost and reply length;
+Hermes's Python tests on the owner's machine. Next: Honcho's reasoning calls through its
+own Messages API support.
 
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for
@@ -164,8 +181,10 @@ a withheld turn's memory call wrote, checked before every turn
 Hermes native notes reach every turn. With the memory evidence on, Hermes read the
 notes only when it built a session's prompt, so the later turns of a session carried
 none. Each turn now reads them itself, and the stored prompt stays the same
-([checks](services/hermes/test_memory_evidence.py)). Pending: the same checks in the
-Hermes image on the owner's machine, and a live reply after the pull.
+([checks](services/hermes/test_memory_evidence.py)). The checks passed in the Hermes
+image on the owner's machine, and replies went through after the pull. The full tester
+saves a note and checks that the chat's next two messages still carry it
+([scenario](tools/acceptance/product_scenarios.py), [fixture model](test/test_scripted_brain.py)).
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner

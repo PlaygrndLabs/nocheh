@@ -1,4 +1,4 @@
-# ADR-0201: Approved actions report how they ended
+# ADR-0202: Approved actions report how they ended
 
 <status>
 Accepted on 2026-11-01, when the owner chose "All three, in order" to build steps
@@ -46,7 +46,7 @@ Extends [ADR-0029](0029-controlled-tool-execution.md),
   card tells the agent that the owner can review it in the dashboard Inbox.
 - Without an ID, `nocheh_action_status` also lists the last 20 operations of the
   chat or job by ID, kind, state, error code and time, for the same readers as one
-  read by its ID (ADR-0199). A job's later steps are told that.
+  read by its ID (ADR-0200). A job's later steps are told that.
 </decision>
 
 <consequences>

@@ -29,8 +29,8 @@ media. Guarding does not encrypt the archive and detection can miss secrets.
 Edits and mode changes retire runtime contexts and credentials. In-flight delivery
 checks reject retired contexts. A reaction change starts a new epoch and makes only
 the earlier reaction state unreadable; it hides no message, so waiting and approved
-tool actions ([ADR-0199](adr/0199-waiting-approvals-survive-reaction-epochs.md)) and a
-background job's report ([ADR-0200](adr/0200-job-reports-survive-reaction-epochs.md))
+tool actions ([ADR-0200](adr/0200-waiting-approvals-survive-reaction-epochs.md)) and a
+background job's report ([ADR-0201](adr/0201-job-reports-survive-reaction-epochs.md))
 continue across it; every other change still stops them.
 New native profiles preserve preferences, with
 fresh MEMORY.md, USER.md and sessions; rebuilding memory is tracked in phase G6.

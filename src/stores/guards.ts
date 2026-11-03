@@ -17,7 +17,7 @@ export interface GuardBinding {generation:string;epoch:number;mode:'on'|'off'}
 export interface GuardRevision {source_id:string;revision:number;operation_id:string;expected_revision:number|null}
 
 /** True when `binding` is `current`, or when every later epoch up to `current` is recorded as quiet, which
- *  only a reaction change is (ADR-0199). Any other epoch, or a generation or mode change, means it does not carry. */
+ *  only a reaction change is (ADR-0200). Any other epoch, or a generation or mode change, means it does not carry. */
 export async function carriesForward(db:Pick<pg.Pool,'query'>,binding:GuardBinding,current:GuardBinding):Promise<boolean> {
   const from=Number(binding.epoch),to=Number(current.epoch);
   if(current.generation!==binding.generation||current.mode!==binding.mode||!Number.isSafeInteger(from)||to<from)return false;

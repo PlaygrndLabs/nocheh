@@ -1,4 +1,4 @@
-# ADR-0199: Waiting approvals survive reaction epochs
+# ADR-0200: Waiting approvals survive reaction epochs
 
 <status>
 Accepted on 2026-11-01, when the owner chose "All three, in order" to build steps
