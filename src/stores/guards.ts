@@ -40,6 +40,17 @@ export async function afterPending<T>(job:boolean,check:()=>Promise<T>):Promise<
   }
 }
 
+/** A read that takes the current binding once and then reads under it exactly (guards.read) fails when any epoch commits meanwhile,
+ *  quiet or not. For a job's run (`job`) it waits out a pending publication and runs again in full, up to 3 times: its own audience
+ *  check takes the new binding while the run carries to it and refuses once a change that is not quiet passed (ADR-0208).
+ *  Anyone else is refused at once. */
+export async function afterEpoch<T>(job:boolean,read:()=>Promise<T>):Promise<T> {
+  for(let attempt=1;;attempt++) {
+    try{return await afterPending(job,read);}
+    catch(error){if(!job||attempt>=3||!(error instanceof HttpError)||error.code!=='guard_context_changed')throw error;}
+  }
+}
+
 /** The earliest epoch whose context still carries to `current`: the latest epoch up to it that was not quiet.
  *  A sealed job box filled under it may be kept until a change that is not quiet (job-box.ts). */
 export async function validFromEpoch(db:Pick<pg.Pool,'query'>,current:GuardBinding):Promise<number> {

@@ -7,7 +7,7 @@ import {replaceValues,textValues} from '../guarded.js';
 import type {SourceReference} from './archive.js';
 import type {OperationReference} from './operations.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
-import {GuardRepository,type GuardBinding} from './guards.js';
+import {GuardRepository,afterEpoch,jobRun,type GuardBinding} from './guards.js';
 import {AudienceRepository} from './audience.js';
 import {namedProfile} from './runtime-profile.js';
 
@@ -60,7 +60,11 @@ export class PreparedContextRepository {
     await this.audience.assert(principal);
   }
 
+  /** A job run's preparation runs again when an epoch it carries across commits meanwhile (ADR-0208). */
   async prepare(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>):Promise<unknown> {
+    return afterEpoch(jobRun(principal),()=>this.prepareOnce(principal,value,detect));
+  }
+  private async prepareOnce(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>):Promise<unknown> {
     if(principal.admin||!principal.turnEvent)throw new HttpError(403,'bound_guard_context_required');
     const binding=await this.audience.assert(principal),root=await this.root(principal,binding);
     if(binding.mode==='off'){await this.audience.assert(principal);return value;}

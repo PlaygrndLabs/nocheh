@@ -12,7 +12,7 @@ import {evaluate,policySnapshot,recordEffect} from '../security/store.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository} from './derived.js';
-import {carriesForward,type GuardRepository,type GuardBinding} from './guards.js';
+import {afterEpoch,carriesForward,jobRun,type GuardRepository,type GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
@@ -54,7 +54,9 @@ export class ControlledActionRepository {
     }
     return args;
   }
-  async propose(principal:Reader,value:unknown) {
+  /** A job run's request runs again when an epoch it carries across commits meanwhile (ADR-0208); its ids come from its own binding. */
+  async propose(principal:Reader,value:unknown) {return afterEpoch(jobRun(principal),()=>this.proposeOnce(principal,value));}
+  private async proposeOnce(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
     const body=exact(value,['kind','arguments']),raw=actionArguments(body.kind,body.arguments),turn=await this.turns.binding(principal),current=await this.guards.state();
     // Bound to the asking turn's own binding: the current one, or the earlier one of a job's run that carries to it (ADR-0208).

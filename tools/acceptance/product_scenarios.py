@@ -1074,9 +1074,24 @@ class ProductScenarios(Scenarios):
         runs = self.job_runs(found['id'])
         self.gate('run_ended_stopped', [run['ended'] for run in runs] == ['stopped'] and found.get('attempts') == 1, runs=runs)
 
-    def restarted_job(self, title, react):
-        """A job whose turn is killed while its second search waits for its answer. With `react`, a reaction in the
-        owner's chat comes first, and its quiet epoch publishes while the run runs (ADR-0208)."""
+    def owner_hide(self, hide):
+        """The owner hides a message of their own private chat, a change that is not quiet: the epochs before and after it,
+        and how to undo it."""
+        asked, current = self.epoch(), self.f.app('/v1/sources/'+hide+'/retirement')
+        result = self.f.app('/v1/sources/'+hide+'/retirement', {'retired': True, 'expected_revision': current['revision'],
+                                                                 'operation_id': 'scenario-hide-'+hide[:16]})
+        self.gate('hidden', result.get('retired') is True)
+        now = self.wait('hide_started_an_epoch', lambda: (lambda epoch: epoch if epoch > asked else None)(self.epoch()), 60)
+        quiet = int(self.f.query('nocheh_control', 'SELECT count(*) FROM guard_quiet_epochs WHERE epoch>%d AND epoch<=%d' % (asked, now)))
+        self.gate('the_hide_is_not_quiet', quiet < now - asked, asked=asked, now=now, quiet=quiet)
+        return now, lambda: self.gate('unhidden', self.f.app('/v1/sources/'+hide+'/retirement', {
+            'retired': False, 'expected_revision': result['revision'], 'operation_id': 'scenario-unhide-'+hide[:16]}).get('retired') is False)
+
+    def restarted_job(self, title, change):
+        """A job whose run is ended while its second search waits for its answer. With no `change` its turn is killed. With
+        'reaction', a reaction in the owner's chat comes first, its quiet epoch publishes while the run runs (ADR-0208), and
+        the turn is killed. With 'hide', the owner hides a message of their chat, which ends the run at its next check."""
+        hide = self.turn(self.f.message(OWNER, 'این را وسط کار پنهان می‌کنم HIDE88'), OWNER)[0] if change == 'hide' else None
         nonce = str(self.f.ids())
         mark = 'RESTARTMARK'+nonce
         instruction = ('Search the marks, run '+nonce+' [[delay:20]] '+self.todo(('Search the restart marks', 'in_progress'), ('Write the report', 'pending'))
@@ -1087,19 +1102,30 @@ class ProductScenarios(Scenarios):
         self.press(card, 'approve')
         # The brain records the call before its 20 s wait, so the turn is still in that model call.
         self.wait('second_search_called', lambda: self.called(self.f.brain(), mark+'X1') is not None, 300, 1)
-        if react:
-            _, now = self.owner_reaction(request, 60)
-        turns = self.wait('one_turn_running', lambda: (lambda ids: ids if len(ids) == 1 else None)(isolated_turns('-q').split()), 15, 1)
-        killed = self.docker('kill', turns[0])
-        self.gate('turn_killed', killed.returncode == 0, error=killed.stderr[:300])
-        found = self.job_ended(title, 600)
+        undo = None
+        if change == 'hide':
+            now, undo = self.owner_hide(hide)
+        else:
+            if change == 'reaction':
+                _, now = self.owner_reaction(request, 60)
+            turns = self.wait('one_turn_running', lambda: (lambda ids: ids if len(ids) == 1 else None)(isolated_turns('-q').split()), 15, 1)
+            killed = self.docker('kill', turns[0])
+            self.gate('turn_killed', killed.returncode == 0, error=killed.stderr[:300])
+        try:
+            found = self.job_ended(title, 600)
+        finally:
+            if undo:
+                undo()
         runs, events = self.job_runs(found['id']), self.f.brain()
         self.current['observed'] = {**self.current.get('observed', {}), title: {'runs': runs, 'error': found.get('error_code')}}
         self.gate('job_done_after_a_relaunch', found['state'] == 'done' and found.get('ended') is None and 2 <= found.get('attempts', 0) <= 3,
                   state=found['state'], error=found.get('error_code'), runs=runs)
-        if react:
+        if change == 'reaction':
             # The relaunch came after the reaction's epoch and kept the run's binding, so its profile and history.
             self.gate('relaunch_kept_the_binding', len({run['epoch'] for run in runs}) == 1 and runs[-1]['epoch'] < now, runs=runs, now=now)
+        if change == 'hide':
+            # The relaunch is bound to the hide's epoch or a later one: a new profile, so Hermes has none of its history.
+            self.gate('relaunch_bound_after_the_hide', len({run['epoch'] for run in runs}) > 1 and runs[-1]['epoch'] >= now, runs=runs, now=now)
         self.gate('report_once', self.search_lines(before) == 4, lines=self.search_lines(before))
         killed_at = self.called(events, mark+'X1', first=True)
         return found, runs, events[killed_at:], self.run_input(found['id'], found['attempts'])
@@ -1107,13 +1133,20 @@ class ProductScenarios(Scenarios):
     def background_job_restart(self):
         # The killed run is relaunched, Hermes reloads its history, and the run gets the resume line and goes on from the
         # tool results it already had: (a) in the same epoch; (b) after a reaction's quiet epoch, which publishes while the
-        # run runs, because the relaunch keeps the run's binding (ADR-0208). Only a change that is not quiet restarts it fresh.
-        for title, react in (('Restart JOB5', False), ('Restart JOB6', True)):
-            found, runs, events, text = self.restarted_job(title, react)
+        # run runs, because the relaunch keeps the run's binding (ADR-0208). (c) A hide, a change that is not quiet, ends the
+        # run; the relaunch gets a new profile with none of Hermes's earlier messages, the first message again and the restart
+        # text, and starts over.
+        for title, change in (('Restart JOB5', None), ('Restart JOB6', 'reaction')):
+            found, runs, events, text = self.restarted_job(title, change)
             resumed = [event for event in events if event.get('directive') == 'resume']
             self.gate('resumed_with_its_history', 'The job was interrupted and restarted.' in text and resumed and resumed[0].get('results', 0) >= 2,
-                      resumed=resumed[:2], attempts=found.get('attempts'), reaction=react)
-            self.gate('not_restarted_fresh', not [event for event in events if event.get('directive') == 'restart'], reaction=react)
+                      resumed=resumed[:2], attempts=found.get('attempts'), change=change)
+            self.gate('not_restarted_fresh', not [event for event in events if event.get('directive') == 'restart'], change=change)
+        found, runs, events, text = self.restarted_job('Restart JOB12', 'hide')
+        restarted = [event for event in events if event.get('directive') == 'restart']
+        self.gate('restarted_fresh', 'This job restarted and its earlier work could not be kept.' in text and restarted and restarted[-1].get('earlier') == 0,
+                  restarted=restarted[-2:], attempts=found.get('attempts'))
+        self.gate('not_resumed', not [event for event in events if event.get('directive') == 'resume'])
 
     def background_job_reaction_during_run(self):
         # A reaction in the job's chat while its run runs: its quiet epoch publishes at once and the run carries across it

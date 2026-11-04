@@ -82,6 +82,15 @@ Every other change still waits for the job or ends its run, as before. Extends
   up to 4 s, and then run again in full. One still pending refuses, as before. The
   heartbeat keeps its 45 s tolerance (ADR-0207), and the supervisor waits for its next
   look instead of cancelling.
+- **An epoch during a request.** A request takes the current binding once and reads
+  under it exactly (`guards.read`), so an epoch that commits while it runs, quiet or
+  not, fails it (`guard_context_changed`). For a job's run only, the secret check's
+  preparation (each model request and each tool result), a change it asks for, and
+  the archive reads (search, memory search hits, a message, current reactions and a
+  chat page, so also the box's chat copy) wait out a pending publication and run again
+  in full, at most 3 times (`afterEpoch`). Each run starts with the audience check,
+  which takes the new binding while the run carries and refuses
+  (`audience_context_changed`) once a change that is not quiet passed.
 - **A relaunch keeps the binding.** A relaunched run gets the last run's binding while
   that carries to the current one, otherwise the current one. With the kept binding it
   has the same physical profile and session, Hermes reloads its history, and the run
@@ -122,9 +131,10 @@ Every other change still waits for the job or ends its run, as before. Extends
 - The restart text now follows only a change that is not quiet, so its to-do line,
   which needs the list's run to carry, no longer shows. The limit note still uses the
   last list.
-- Still open: a second pending publication within one tool call fails that call, and
-  the model sees a tool error. A pending publication during the run's own context,
-  claim or preparation fails its start, and the run is relaunched.
+- Still open: another tool route that reads under one binding, such as native memory,
+  shared memory or a knowledge proposal, fails its call when an epoch commits during
+  it, and the model sees a tool error. A pending publication during the run's own
+  context, claim or preparation fails its start, and the run is relaunched.
 - Every epoch source added later ends a running job run unless it records itself as
   quiet.
 </consequences>
