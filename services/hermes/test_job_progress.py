@@ -119,6 +119,20 @@ class JobProgressTests(unittest.TestCase):
         self.assertLessEqual(size,progress.LINE_BYTES);self.assertTrue(0<len(line['todo'])<50)
         self.assertEqual(progress.progress_line(line,size)['todo'],line['todo'])
 
+    def test_a_todo_item_with_a_lone_surrogate_or_nul_never_stops_the_lines(self):
+        self.bind();progress.api_request(usage=ANSWER)
+        # The model writes the escapes in todo_list's arguments; Hermes's result keeps them and json.loads gives them back.
+        progress.tool_call(tool_name='todo_list',result=json.dumps({'todos':[{'content':'a\ud800b','status':'pending'},
+            {'content':'x\x00 \U0001f600','status':'\udc00'}]},ensure_ascii=False))
+        self.assertEqual(self.lines[-1]['todo'],[{'content':'a�b','status':'pending'},{'content':'x� \U0001f600','status':'�'}])
+        for _ in range(3):progress.api_request(usage=ANSWER)
+        progress.finish({'completed':True})
+        self.assertEqual((len(self.lines),self.lines[-1]['tokens']['calls']),(6,4))
+        for line in self.lines:json.dumps(line,ensure_ascii=False).encode()
+        # Even a list that cannot be written holds back only its own line.
+        self.now[0]=100;progress._RUN.todo=[{'content':'\ud800','status':''}];progress.api_request(usage=ANSWER);progress.api_request(usage=ANSWER)
+        self.assertEqual((len(self.lines),self.lines[-1]['tokens']['calls']),(7,6))
+
     def test_a_55_minute_run_stays_far_under_the_output_cap(self):
         self.bind(rates=None,cap=None)
         for minute in range(55):

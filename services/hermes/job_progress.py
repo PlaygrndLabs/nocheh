@@ -7,6 +7,7 @@ the cost notice itself, priced the same way (runCost in src/stores/background-jo
 """
 import json
 import math
+import re
 import threading
 import time
 
@@ -56,10 +57,15 @@ def merge(a,b):
     return {field:max(_count(a.get(field)),_count(b.get(field))) for field in FIELDS}
 
 
+# JSON can carry a lone surrogate, which no UTF-8 line can, and NUL, which no jsonb can; json.loads joins every valid pair.
+_UNSAFE=re.compile('[\x00\ud800-\udfff]')
+
+
 def todo_list(items):
-    """A to-do list as a job keeps it, bounded; None when it is not a list."""
+    """A to-do list as a job keeps it, bounded and storable; None when it is not a list."""
     if not isinstance(items,list):return None
-    return [{'content':str(item.get('content',''))[:TODO_CONTENT],'status':str(item.get('status',''))[:TODO_STATUS]}
+    text=lambda value,length:_UNSAFE.sub('\ufffd',str(value))[:length]
+    return [{'content':text(item.get('content',''),TODO_CONTENT),'status':text(item.get('status',''),TODO_STATUS)}
             for item in items[:TODO_ITEMS] if isinstance(item,dict)]
 
 
@@ -92,10 +98,11 @@ class _Progress:
         """One line with the run's totals; the to-do list only when it changed, at most once a minute and at the end."""
         value={'event':'progress','tokens':dict(self.tokens),'unknown_calls':self.unknown}
         if self.todo_due(final):
-            todo=list(self.todo)
+            # Marked sent first, so a list that cannot be written never holds back the later lines' counts.
+            todo=list(self.todo);self.sent,self.sent_at=self.todo,self.clock()
             # A list of escaped characters can pass the line's size: its last items wait for the report.
             while len(json.dumps({**value,'todo':todo},ensure_ascii=False).encode())+1>LINE_BYTES:todo.pop()
-            value['todo']=todo;self.sent,self.sent_at=self.todo,self.clock()
+            value['todo']=todo
         self.emit(value)
 
     def call(self,usage):

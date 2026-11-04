@@ -31,6 +31,8 @@ test('a heartbeat\'s progress is checked strictly, and a to-do list is cut by co
   const long='a'.repeat(199)+'😀'+'b',items=todoList([{content:long,status:'in_progress_and_more_words'},...Array(60).fill({content:'Later',status:'pending'})]);
   assert.equal(items.length,50);assert.deepEqual(items[0],{content:'a'.repeat(199)+'😀',status:'in_progress_and_more'},'an emoji at the edge is kept whole');
   assert.deepEqual(todoList([{}]),[{content:'',status:''}]);
+  // jsonb refuses NUL and a lone surrogate, which a model can write as JSON escapes: each becomes U+FFFD, a valid pair stays.
+  assert.deepEqual(todoList([{content:'a\u0000b\ud800 😀',status:'\udc00done'}]),[{content:'a\ufffdb\ufffd 😀',status:'\ufffddone'}]);
   assert.deepEqual(runProgress({tokens:counts(5),unknown_calls:0,todo:[{content:'Read the chat',status:'completed'}]}).todo,[{content:'Read the chat',status:'completed'}]);
 });
 

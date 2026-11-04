@@ -132,9 +132,12 @@ export function runCost(rates:JobRates|null|undefined,tokens:RunTokens|null,unkn
     t.cache_write_tokens*(rates!.cache_write??input))/1e6+t.calls*request;
   return counted+(unknownCalls+(blind?t.calls:0))*((UNKNOWN_INPUT*input+UNKNOWN_OUTPUT*output)/1e6+request);
 }
+// NUL and a lone surrogate, which jsonb refuses; with the u flag a valid pair is one code point and never matches.
+const unstorable=/[\0\ud800-\udfff]/gu;
 const codePoints=(value:unknown,length:number)=>{if(value!==undefined&&typeof value!=='string')throw new HttpError(400,'invalid_run_progress');
-  return [...(value as string|undefined)??''].slice(0,length).join('');};
-/** A to-do list as a job keeps it: its first 50 items, each cut to 200 code points of content and 20 of status. */
+  return [...(value as string|undefined)??''].slice(0,length).join('').replace(unstorable,'\ufffd');};
+/** A to-do list as a job keeps it: its first 50 items, each cut to 200 code points of content and 20 of status, each
+ *  character jsonb refuses replaced. */
 export function todoList(value:unknown):Todo[] {
   if(!Array.isArray(value))throw new HttpError(400,'invalid_run_progress');
   return value.slice(0,50).map(item=>{if(!item||typeof item!=='object'||Array.isArray(item))throw new HttpError(400,'invalid_run_progress');
