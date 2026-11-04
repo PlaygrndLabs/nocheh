@@ -79,9 +79,9 @@ Every other change still waits for the job or ends its run, as before. Extends
   supervisor cancels it, as before.
 - **A pending publication.** For a job's run only, the broker's checks, the app
   server's check of each call and the delivery check wait for a pending publication,
-  up to 4 s, and then run again in full. One still pending refuses, as before. The
-  heartbeat keeps its 45 s tolerance (ADR-0207), and the supervisor waits for its next
-  look instead of cancelling.
+  up to 4 s from the first refusal, and then run again in full. One still pending
+  refuses, as before. The heartbeat keeps its 45 s tolerance (ADR-0207), and the
+  supervisor waits for its next look instead of cancelling.
 - **An epoch during a request.** A request takes the current binding once and reads
   under it exactly (`guards.read`), so an epoch that commits while it runs, quiet or
   not, fails it (`guard_context_changed`). For a job's run only, the secret check's

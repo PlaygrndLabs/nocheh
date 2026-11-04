@@ -229,6 +229,16 @@ test('a running job run carries across reaction and learning epochs, any other c
       assert.deepEqual([interrupted,await epoch()],[true,raced+3]);
       assert.ok(page.items.some(item=>JSON.stringify(item).includes('made-up question in the group')),'the page reads whole');
     }finally{s.guards.read=read;}
+    // A request whose check runs longer than the wait, here a slow secret check, still waits out a learning publication that
+    // is pending when the check ends: the wait counts from that refusal, and the check then runs again in full.
+    let slow:Awaited<ReturnType<typeof learn>>|undefined,slowDone:Promise<void>|undefined;
+    during=async()=>{
+      await new Promise(resolve=>setTimeout(resolve,4300));slow=await learn(false);
+      slowDone=new Promise<void>((resolve,reject)=>setTimeout(()=>s.learned.finish(slow!.operation_id).then(resolve,reject),500));
+    };
+    assert.deepEqual(await model(racing,'Made-up words first read by a slow secret check.'),[200,{ok:true}],'a slow request meets a pending learning publication');
+    await slowDone;
+    assert.deepEqual([during,await epoch()],[null,raced+4]);
     await finish(racing,'done',{text:'Report: made-up task 16 is done.',...counts(1000)});
     assert.equal((await tick(busy)).stage,'delivery');await deliver(busy);
     assert.deepEqual([(await job(busy)).state,(await job(busy)).attempts],['done',1]);

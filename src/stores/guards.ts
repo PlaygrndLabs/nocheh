@@ -31,11 +31,16 @@ export async function carriesForward(db:Pick<pg.Pool,'query'>,binding:GuardBindi
 export const jobRun=(principal:Pick<Reader,'admin'|'logical_profile'>)=>!principal.admin&&!!principal.logical_profile?.startsWith('job-');
 
 /** A pending publication, such as an automatic learning batch a job's run goes on across, refuses every reader for a moment.
- *  For a job's run (`job`) the check waits for it, up to 4 s, and then runs again in full; anyone else is refused at once. */
+ *  For a job's run (`job`) the check waits for it, up to 4 s from its first refusal, so also after a check that ran long, and
+ *  then runs again in full; anyone else is refused at once. */
 export async function afterPending<T>(job:boolean,check:()=>Promise<T>):Promise<T> {
-  for(const until=Date.now()+4000;;) {
+  let until:number|undefined;
+  for(;;) {
     try{return await check();}
-    catch(error){if(!job||!(error instanceof HttpError)||error.code!=='guard_transition_pending'||Date.now()>=until)throw error;}
+    catch(error){
+      if(!job||!(error instanceof HttpError)||error.code!=='guard_transition_pending')throw error;
+      until??=Date.now()+4000;if(Date.now()>=until)throw error;
+    }
     await new Promise(resolve=>setTimeout(resolve,200));
   }
 }
