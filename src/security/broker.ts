@@ -13,6 +13,7 @@ import type {SourceReference} from '../stores/archive.js';
 import type {OperationReference} from '../stores/operations.js';
 import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
 import {RuntimeTurnRepository} from '../stores/turns.js';
+import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
 
 export interface TurnBinding {
@@ -100,7 +101,8 @@ export function brokerServer(options:BrokerOptions) {
   const call=options.fetch??fetch;
   // Sealed job boxes follow Nocheh's own rows, so without storage no turn gets one.
   const box=options.storage instanceof RuntimeTurnRepository?new JobBoxRepository(options.storage.access):null;
-  const assertCurrent=(principal:Reader)=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal);
+  // A job's run goes on across reaction and learning epochs; each of its checks waits out a publication still pending (ADR-0208).
+  const assertCurrent=(principal:Reader)=>afterPending(jobRun(principal),async()=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal));
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
     json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'security_service_unavailable'});
@@ -116,8 +118,8 @@ export function brokerServer(options:BrokerOptions) {
       if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
       await options.assertReady?.();return json(res,200,await box.live());
     }
-    const principal=reader(req,options.token);
-    await options.assertReady?.();
+    const principal=reader(req,options.token),job=jobRun(principal);
+    await afterPending(job,async()=>options.assertReady?.());
     // The box's chat copy also needs the launcher's box token, and is never read with an owner credential.
     const copy=path==='/v1/box/chat'&&req.method==='GET';
     if(copy&&(principal.admin||!box||!boxTokenValid(req.headers['x-nocheh-box-token'])))throw new HttpError(403,'job_box_not_allowed');
@@ -125,7 +127,7 @@ export function brokerServer(options:BrokerOptions) {
     if(copy&&[...url.searchParams.keys()].some(key=>key!=='cursor'))throw new HttpError(400,'invalid_box_request');
     if(principal.admin&&path==='/v1/guard'&&req.method==='POST')return json(res,200,await options.prepare(principal,await readJson(req,1024*1024)));
     if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url,{separated:!!options.storage}))return;
-    const binding=await (options.storage?options.storage.binding(principal):turnBinding(options.pool,principal));
+    const binding=await afterPending(job,()=>options.storage?options.storage.binding(principal):turnBinding(options.pool,principal));
     const credential=req.headers.authorization!;
     // A cold Honcho recall includes multiple guarded provider calls. Keep other
     // broker operations on their shorter deadline; cancellation still aborts both.
@@ -154,7 +156,7 @@ export function brokerServer(options:BrokerOptions) {
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
         // Preparation is separate from permission to transmit. Destination is not forwarded.
-        return json(res,200,await options.prepare(principal,{destination:PREPARATION_DESTINATION,payload:body.payload}));
+        return json(res,200,await afterPending(job,()=>options.prepare(principal,{destination:PREPARATION_DESTINATION,payload:body.payload})));
       }
       let relay=path;
       const file=path.match(/^\/v1\/turn-files\/([a-f0-9]{64})$/);
@@ -210,7 +212,7 @@ export function brokerServer(options:BrokerOptions) {
       const prepareStarted=performance.now();
       const transport=object(await rpc(options.hermes,'/internal/security/transport',{},'Bearer '+options.token));
       const destination=providerTarget(transport,path);
-      const prepared=object(await options.prepare(principal,{destination,payload}));
+      const prepared=object(await afterPending(job,()=>options.prepare(principal,{destination,payload})));
       if(prepared.guarded!==true||!prepared.payload)throw new HttpError(503,'required_guard_unavailable');
       // Every attempt, including SDK retries, repeats current audience enforcement.
       await assertCurrent(principal);

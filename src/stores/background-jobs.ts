@@ -11,7 +11,7 @@ import {pageDate} from '../conversation-page.js';
 import type {SourceAccessRepository} from './access.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
-import {carriesForward,type GuardBinding} from './guards.js';
+import {afterPending,carriesForward,type GuardBinding} from './guards.js';
 import {notionJobReads} from './notion.js';
 import {OperationRepository} from './operations.js';
 import type {PreparedContextRepository} from './prepared-context.js';
@@ -424,12 +424,14 @@ export class BackgroundJobRepository {
     return (await this.control.query(`SELECT b.*,r.state AS run_state,r.error_code AS run_error,r.result_reference,r.binding AS run_binding,r.input_reference
       FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id WHERE b.job_id=$1 ORDER BY b.attempt DESC LIMIT 1`,[id])).rows[0];
   }
-  /** One run of a job, recorded with its managed run; the first also starts the job's clock. Nothing is added to a job
-   *  that was stopped or ended meanwhile: the job row is locked first. */
+  /** One run of a job, recorded with its managed run; the first also starts the job's clock. A relaunch keeps the last run's
+   *  binding while it carries to the current one, so it has that run's physical profile and history (ADR-0208); otherwise it
+   *  is bound to the current one. Nothing is added to a job that was stopped or ended meanwhile: the job row is locked first. */
   private async addRun(row:any,attempt:number):Promise<void> {
     const operation=await new OperationRepository(this.control).record({key:'background-run:'+row.id+':'+attempt,kind:'background_run',
       scope:row.space_id,input_hash:digest(canonical({job:row.id,attempt}))});
-    const binding=await this.guards.state(),db=await this.control.connect();
+    const current=await this.guards.state(),earlier=attempt>1?(await this.latest(row.id))?.run_binding:null;
+    const binding=earlier&&await carriesForward(this.control,earlier,current)?earlier:current,db=await this.control.connect();
     try {
       await db.query('BEGIN');
       const job=(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
@@ -600,8 +602,9 @@ export class BackgroundJobRepository {
     if(job.startsWith('job:'))return this.tick(managedEventId(job.slice(4)),authority);
     return observation('failed','admission');
   }
-  /** A run's message. A relaunch in an epoch where an earlier run of the job ran (same physical profile, so Hermes reloads its
-   *  history) gets the resume line; a relaunch after any other run gets the first message again with the restart note, whose
+  /** A run's message. A relaunch under the binding an earlier run of the job ran with, which it keeps while only quiet epochs
+   *  passed (same physical profile, so Hermes reloads its history), gets the resume line; a relaunch after any other run gets
+   *  the first message again with the restart note, whose
    *  to-do line is kept only while carriedTodo allows it. An earlier run ran only if it made a model call, after which Hermes
    *  has its first message: one that failed before (no box, a busy profile) left nothing to resume or restart. A box run also
    *  says what the box holds, every time: the box can be new. */
@@ -638,6 +641,7 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
   protected readonly family='background' as const;
   protected override get resultKind(){return 'background_result';}
   protected override get protocol(){return 'managed-background-v1';}
+  protected override readonly carries=true;
   constructor(readonly jobs:BackgroundJobRepository,token:string){super(jobs.access,jobs.derived,jobs.turns,token,jobs.call);}
   private async runRow(id:string){
     const run=(await this.control.query('SELECT * FROM background_runs WHERE event_id=$1',[id])).rows[0];
@@ -654,7 +658,7 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
   protected override async profile(scope:string,space:string,profile:string,binding:GuardBinding){
     const policy=this.access.policy(),job=(await this.control.query('SELECT scope,space_id FROM background_jobs WHERE logical_profile=$1',[profile])).rows[0];
     if(!job||job.scope!==scope||job.space_id!==space||scope!==policy.owner_id&&!policy.group_ids.includes(scope))throw new HttpError(403,'profile_scope_denied');
-    await this.guards.assertCurrent(binding);
+    await this.guards.assertCarried(binding);
   }
   protected async sourceAllowed(row:any,_binding:GuardBinding){
     await new OperationRepository(this.control).verify(row.source_reference);
@@ -725,11 +729,12 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
-  /** Whether a run's turn may go on: its run and job still run, for the same chat and profile. */
+  /** Whether a run's turn may go on: its run and job still run, for the same chat and profile, and its binding still carries.
+   *  A publication still pending is waited out first, so a learning batch does not fail a run at its last check. */
   async deliveryAllowed(principal:Reader):Promise<boolean> {
     const row=principal.turnEvent?await this.row(principal.turnEvent):null;
     if(!row||row.state!=='running'||row.cancel_requested||row.space_id!==principal.space||row.logical_profile!==principal.logical_profile||
       (row.scope===this.access.policy().owner_id?null:row.scope)!==principal.scope)return false;
-    try{await this.current(row);return true;}catch(error){if(error instanceof HttpError&&error.status<500)return false;throw error;}
+    try{await afterPending(true,()=>this.current(row));return true;}catch(error){if(error instanceof HttpError&&error.status<500)return false;throw error;}
   }
 }

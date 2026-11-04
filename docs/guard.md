@@ -30,8 +30,9 @@ Edits and mode changes retire runtime contexts and credentials. In-flight delive
 checks reject retired contexts. A reaction change starts a new epoch and makes only
 the earlier reaction state unreadable; an automatic learning revision starts one that
 only rewords learned text. Neither hides a message, so waiting and approved tool
-actions ([ADR-0200](adr/0200-waiting-approvals-survive-reaction-epochs.md)) and a
-background job's report ([ADR-0201](adr/0201-job-reports-survive-reaction-epochs.md))
+actions ([ADR-0200](adr/0200-waiting-approvals-survive-reaction-epochs.md)), a
+background job's running run ([ADR-0208](adr/0208-running-jobs-carry-across-quiet-epochs.md))
+and its report ([ADR-0201](adr/0201-job-reports-survive-reaction-epochs.md))
 continue across them. Owner corrections, hides, guarded-copy and selection
 replacements, project organization, schedule and knowledge changes, Honcho attach and
 mode changes still stop them.

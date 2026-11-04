@@ -26,6 +26,20 @@ export async function carriesForward(db:Pick<pg.Pool,'query'>,binding:GuardBindi
   return quiet.n===to-from;
 }
 
+/** Whether a credential is a background job run's (its signed `job-` profile): only such a run carries across quiet epochs while
+ *  it runs, and only it waits out a pending publication (ADR-0208). */
+export const jobRun=(principal:Pick<Reader,'admin'|'logical_profile'>)=>!principal.admin&&!!principal.logical_profile?.startsWith('job-');
+
+/** A pending publication, such as an automatic learning batch a job's run goes on across, refuses every reader for a moment.
+ *  For a job's run (`job`) the check waits for it, up to 4 s, and then runs again in full; anyone else is refused at once. */
+export async function afterPending<T>(job:boolean,check:()=>Promise<T>):Promise<T> {
+  for(const until=Date.now()+4000;;) {
+    try{return await check();}
+    catch(error){if(!job||!(error instanceof HttpError)||error.code!=='guard_transition_pending'||Date.now()>=until)throw error;}
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+}
+
 /** The earliest epoch whose context still carries to `current`: the latest epoch up to it that was not quiet.
  *  A sealed job box filled under it may be kept until a change that is not quiet (job-box.ts). */
 export async function validFromEpoch(db:Pick<pg.Pool,'query'>,current:GuardBinding):Promise<number> {

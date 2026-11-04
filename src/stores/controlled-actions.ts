@@ -56,8 +56,11 @@ export class ControlledActionRepository {
   }
   async propose(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
-    const body=exact(value,['kind','arguments']),raw=actionArguments(body.kind,body.arguments),turn=await this.turns.binding(principal),binding=await this.guards.state();
-    const source=await this.prepared.root(principal,binding);
+    const body=exact(value,['kind','arguments']),raw=actionArguments(body.kind,body.arguments),turn=await this.turns.binding(principal),current=await this.guards.state();
+    // Bound to the asking turn's own binding: the current one, or the earlier one of a job's run that carries to it (ADR-0208).
+    // It carries from there; its profile, the run's own, holds the run's workspace and lets the run read it back.
+    const binding={...current,generation:turn.generation??current.generation,epoch:turn.guard_epoch};
+    const source=await this.prepared.root(principal,current);
     if('connection' in raw)await notionAuthority(this.control,principal,turn,raw,false);
     if(source.store==='archive') {
       const original=await this.access.archive.verify(source),intake=(await this.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
@@ -66,7 +69,7 @@ export class ControlledActionRepository {
     const id=digest(canonical([protocol,source,binding,body.kind,raw])),proposal=await this.derived.record({operation_id:'controlled-proposal:'+id,
       source,kind:'controlled_action_request',content:Buffer.from(canonical(raw)),producer:'nocheh',producer_version:protocol,configuration:{binding,kind:body.kind}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
-    const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),args=actionArguments(body.kind,JSON.parse((representation.value as any).text));
+    const representation=await this.guards.read('derived_artifacts:'+proposal.id,current),args=actionArguments(body.kind,JSON.parse((representation.value as any).text));
     const fingerprint=digest(canonical({binding,scope:turn.scope,profile:turn.logical_profile,kind:body.kind,arguments:args,job:turn.job??null}));
     const db=await this.control.connect();
     try {
