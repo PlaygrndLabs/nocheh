@@ -599,11 +599,14 @@ export class BackgroundJobRepository {
   }
   /** A run's message. A relaunch in an epoch where an earlier run of the job ran (same physical profile, so Hermes reloads its
    *  history) gets the resume line; a relaunch after any other run gets the first message again with the restart note, whose
-   *  to-do line is kept only while carriedTodo allows it. A box run also says what the box holds, every time: the box can be new. */
+   *  to-do line is kept only while carriedTodo allows it. An earlier run ran only if it made a model call, after which Hermes
+   *  has its first message: one that failed before (no box, a busy profile) left nothing to resume or restart. A box run also
+   *  says what the box holds, every time: the box can be new. */
   async runText(job:any,run:any,binding:GuardBinding,box=false):Promise<string> {
     const prompts=await ownerPrompts(this.control),shown=await this.proposal(job);
     const ran=run.attempt>1?(await this.control.query(`SELECT r.binding FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id
-      WHERE b.job_id=$1 AND b.attempt<$2 AND r.input_reference IS NOT NULL`,[job.id,run.attempt])).rows:[];
+      WHERE b.job_id=$1 AND b.attempt<$2 AND r.input_reference IS NOT NULL AND (b.unknown_calls>0 OR coalesce((b.tokens->>'calls')::integer,0)>0)`,
+      [job.id,run.attempt])).rows:[];
     const same=ran.some(({binding:earlier})=>earlier.generation===binding.generation&&Number(earlier.epoch)===binding.epoch);
     let text=same?fillTemplate(prompts['background.resume']??backgroundResume,{title:shown.title}):await this.firstMessage(job,shown,prompts);
     if(ran.length&&!same){const todo=await this.carriedTodo(job.id,binding);

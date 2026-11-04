@@ -218,7 +218,7 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
     const shell={kind:'shell',arguments:{command:'printf made-up-check'}},asked=await s.controlledActions.propose(await ownReader(own),shell);
     const permission=await s.controlledActions.grant(owner,{action_id:asked.id,fingerprint:asked.fingerprint,uses:3,minutes:30});
     assert.equal((await s.controlledActions.grants((await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[asked.id])).rows[0])).length,1);
-    await finish(own,'failed');await tick(mine);
+    await beat(own,{tokens:counts(1000),unknown_calls:0});await finish(own,'failed');await tick(mine);
     const again=await claim(mine);
     assert.equal(again.text,resumed('Notion check'));
     assert.equal(await ownerApprovedJob(stores.control,'123',{store:'control',id:again.event},turn(again)),true);
@@ -233,5 +233,12 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
     assert.equal((await stores.control.query('SELECT remaining FROM action_permissions WHERE id=$1',[permission.id])).rows[0].remaining,3);
     await s.jobs.halt(mine);await finish(again,'cancelled');
     assert.equal((await tick(mine)).state,'cancelled');assert.equal((await latest(mine)).ended,'stopped');
+
+    // A run that failed before its first model call (no box, a busy profile) left Hermes nothing: its relaunch is a first run.
+    const unreached=await approved('Unreached check');await finish(await claim(unreached),'failed');
+    assert.equal((await tick(unreached)).state,'waiting');
+    const fresh=await claim(unreached);
+    assert.match(fresh.text,/^\[Background job: Unreached check\]\nYou are running a background job[^]*made-up task list/);
+    assert.doesNotMatch(fresh.text,/interrupted|restarted/);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
