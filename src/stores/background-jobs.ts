@@ -53,6 +53,8 @@ ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS byte_budget bigint;
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS model_bytes bigint NOT NULL DEFAULT 0;
 -- How a job ended at a limit: its run was stopped at its cost or time limit and a short note went out instead of a report.
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS ended text CHECK(ended IN ('cost','time'));
+-- How many runs a job has had (ADR-0207); a table made before it had steps instead.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 3);
 -- Each run of a job is one sealed Hermes turn of up to the job's time limit; a job has at most 3 (ADR-0207). Its counts
 -- only grow: the tokens of the calls that reported usage, the calls that did not, the cost at the job's frozen rates.
 CREATE TABLE IF NOT EXISTS background_runs (
