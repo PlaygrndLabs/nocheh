@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
+import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 
 test('allowed members post freely in their own group; everything else waits for the owner\'s button in their private chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -19,6 +20,8 @@ test('allowed members post freely in their own group; everything else waits for 
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],refusals:Record<string,any>[]=[];let updates=0;
   const other=group+'1',closed=group+'2',forum='-100'+Date.now();
   let topicMemory:'group'|'topic'='group';
+  // When set, the next card edit waits for it, after calling reached.
+  let hold:Promise<void>|null=null,reached=()=>{};
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other,closed,forum],
     group_access:{[group]:{granted:['9'],denied:[]},[other]:{granted:['9'],denied:[]},[closed]:{granted:[],denied:['9']}},topic_memory:topicMemory});
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
@@ -26,7 +29,9 @@ test('allowed members post freely in their own group; everything else waits for 
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='action.execute')return {state:'done'};
       if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}
-      assert.equal(operation,'telegram.approval');cards.push(input);
+      assert.equal(operation,'telegram.approval');
+      if(input.kind==='settle'&&hold){const wait=hold;hold=null;reached();await wait;}
+      cards.push(input);
       return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};
     },honcho:async()=>{throw Error('no memory provider');}});
   const bot=String(Date.now()).slice(-9);
@@ -156,6 +161,14 @@ test('allowed members post freely in their own group; everything else waits for 
     const again=await message('again'),offered=cards.length;
     const permitted=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(again.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
     assert.equal(permitted.fingerprint,tool.fingerprint);assert.equal(cards.length,offered);assert.doesNotMatch(permitted.message,/buttons/);
+    // A reaction in another group leaves a waiting operation's Approve button working.
+    const operation=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message('before-reaction')).id,group),{kind:'shell',arguments:{command:'printf after-reaction'}}));
+    const before=(await s.guards.state()).epoch;
+    await capture('reaction',{update_id:++updates,message_reaction:{chat:{id:Number(other),type:'supergroup'},message_id:1,date:1700000100,user:{id:9},
+      old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}},other);
+    assert.equal((await s.guards.state()).epoch,before+1);
+    assert.equal(await s.actionCommands.callback(await press('after-reaction','na'+operation.id.slice(0,40)+operation.fingerprint.slice(0,16))),true);
+    assert.equal((await s.controlledActions.inspect(owner,operation.id)).state,'approved');assert.match(last('settle').text,/\n\n✅ Approved\.$/);
     // Someone not allowed in the group gets the owner's fixed reply, with no turn.
     const stranger=await message('stranger-ask',{text:'Nocheh, what is the plan?',message_thread_id:17,is_topic_message:true},8,++updates);
     await s.preparation.run(stranger.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
@@ -185,5 +198,70 @@ test('allowed members post freely in their own group; everything else waits for 
       runtime:async(operation)=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime unavailable');},honcho:async()=>{throw Error('no memory provider');}});
     const waiting=await quiet.actionCommands.offer('telegram',await quiet.telegramActions.request(await actor(plain.id,group),{destination:'123',text:'Waits for the Inbox'}));
     assert.equal(waiting.state,'proposed');assert.match(waiting.message,/^Owner approval is required/);assert.equal(cards.length,sent);
+
+    // Once an approved operation ends, its card says how, with a reason only from fixed codes in the owner's wording.
+    await stores.control.query(`UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton`,[JSON.stringify({'telegram.approval_texts':'reason_sign_in: Sign in to Notion again in the dashboard.'})]);
+    const approvedTool=async(label:string)=>{
+      const asked=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message(label)).id,group),{kind:'shell',arguments:{command:'printf '+label}}));
+      assert.equal(await s.actionCommands.callback(await press(label+'-approve','na'+asked.id.slice(0,40)+asked.fingerprint.slice(0,16))),true);
+      return {...asked,card:cards.find(card=>card.kind==='card'&&card.id===asked.id)!.text as string};
+    };
+    /** Without start, the receipt is one the host writes when its start was refused. */
+    const ran=async(id:string,state:string,result:Record<string,unknown>,start=true)=>{
+      const row=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[id])).rows[0];
+      const lease=await claimHostWorkflow(stores.control,{workflow_id:row.id,dispatch:row.dispatch,family:'tools',run_id:'fixture-'+row.id});
+      const b={id,actor:'wf-'+row.id,workflow_id:row.id,workflow_token:lease.token};
+      assert.equal((await s.controlledExecution.claim(b)).claimed,true);if(start)assert.deepEqual(await s.controlledExecution.start(b),{started:true});
+      await s.controlledExecution.finish({...b,state,result});
+    };
+    /** The card edit runs after the receipt commits, without holding it up. */
+    const ending=async(id:string,line:string)=>{
+      for(let tries=0;tries<100&&!cards.some(card=>card.kind==='settle'&&card.id===id&&card.text.endsWith(line));tries++)await new Promise(resolve=>setTimeout(resolve,50));
+      return cards.filter(card=>card.kind==='settle'&&card.id===id).at(-1)!.text as string;
+    };
+    const finished=await approvedTool('made-up-done');await ran(finished.id,'done',{stdout:'made-up output',exit_code:0});
+    assert.equal(await ending(finished.id,'✅ Approved and done.'),finished.card+'\n\n✅ Approved and done.');
+    const signIn=await approvedTool('made-up-sign-in');await ran(signIn.id,'failed',{exit_code:1,error:'notion_reconnect_needed',text:'SECRET-RESULT'});
+    const unsentCard=await ending(signIn.id,'Sign in to Notion again in the dashboard.');
+    assert.equal(unsentCard,signIn.card+'\n\n🚫 It did not run: Sign in to Notion again in the dashboard.','nothing is sent without a sign-in');
+    assert.doesNotMatch(unsentCard,/SECRET-RESULT/);
+    const refused=await approvedTool('made-up-refused');await ran(refused.id,'failed',{exit_code:1,error:'tool_reported_error',response:{isError:true}});
+    assert.equal(await ending(refused.id,'Ask Nocheh what went wrong.'),refused.card+'\n\n⚠️ Approved, but it failed: the service answered with an error. Ask Nocheh what went wrong.');
+    const unknown=await approvedTool('made-up-unknown');await ran(unknown.id,'failed',{exit_code:1,error:'made_up_remote_text'});
+    assert.equal(await ending(unknown.id,'see the dashboard Inbox.'),unknown.card+'\n\n⚠️ Approved, but it failed: see the dashboard Inbox.','an unknown code shows no text of its own');
+    const unsure=await approvedTool('made-up-unsure');await ran(unsure.id,'ambiguous',{error:'execution_outcome_unconfirmed'});
+    const unsureLine='⚠️ Approved, but Nocheh could not confirm that it finished. Check before you ask again.';
+    assert.equal(await ending(unsure.id,unsureLine),unsure.card+'\n\n'+unsureLine);
+    const refusedStart=await approvedTool('made-up-start-refused');await ran(refusedStart.id,'failed',{exit_code:1,error:'security_start_denied'},false);
+    const changedLine='🚫 It did not run: something it used changed after it was asked. Ask again if you still want it.';
+    assert.equal(await ending(refusedStart.id,changedLine),refusedStart.card+'\n\n'+changedLine,'an operation never started did not run');
+    // Edits of one card run in order: an edit that read an earlier state never lands last.
+    const raced=await approvedTool('made-up-race');let release=()=>{};
+    const paused=new Promise<void>(resolve=>{reached=resolve;});hold=new Promise<void>(resolve=>{release=resolve;});
+    const first=s.actionCommands.settle('controlled',raced.id);await paused;
+    await ran(raced.id,'done',{exit_code:0});
+    // Unordered, the edit after the end would land in this pause, before the held one.
+    for(let tries=0;tries<20&&!cards.some(card=>card.kind==='settle'&&card.id===raced.id&&card.text.endsWith('done.'));tries++)await new Promise(resolve=>setTimeout(resolve,50));
+    release();await first;
+    assert.equal(await ending(raced.id,'✅ Approved and done.'),raced.card+'\n\n✅ Approved and done.');
+    // A card for an operation that a scheduled task asked for says so, and its agent does not wait for it.
+    const trigger=await s.operations.record({key:key+':schedule',kind:'scheduled_trigger',scope:group,input_hash:digest('made-up schedule')});
+    const current=await s.guards.state(),scheduled:Reader={admin:false,scope:group,space:group,turnEvent:trigger.id,generation:current.generation,
+      guard_epoch:current.epoch,revision:current.epoch,logical_profile:'fixture-schedule'};
+    await s.turns.register(scheduled,{logical_profile:'fixture-schedule'});
+    const fromSchedule=await s.actionCommands.offer('controlled',await s.controlledActions.propose(scheduled,{kind:'shell',arguments:{command:'printf made-up-schedule'}}));
+    assert.equal(fromSchedule.state,'proposed');assert.deepEqual([last('card').id,last('card').chat_id],[fromSchedule.id,'123']);
+    assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in a scheduled task\n\n\{/);assert.match(fromSchedule.message,/Do not wait for it/);
+    // A waiting card whose guarded copy changes before it is approved did not run, and says why.
+    const outdated=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message('made-up-outdated')).id,group),{kind:'shell',arguments:{command:'printf outdated'}}));
+    const stored=await s.controlledActions.row(outdated.id),copy=await s.guards.read('derived_artifacts:'+stored.proposal_reference.id,await s.guards.state());
+    await s.guards.edit('derived_artifacts:'+stored.proposal_reference.id,copy.revision,{...copy.value as any,text:JSON.stringify({command:'printf edited'})},key+':outdated');
+    const notRun='🚫 It did not run: something it used changed after it was asked. Ask again if you still want it.';
+    assert.equal(await s.actionCommands.callback(await press('outdated-approve','na'+outdated.id.slice(0,40)+outdated.fingerprint.slice(0,16))),true);
+    assert.equal(last('answer').text,notRun,'the press says it cannot run');
+    const row=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[outdated.id])).rows[0];
+    const lease=await claimHostWorkflow(stores.control,{workflow_id:row.id,dispatch:row.dispatch,family:'tools',run_id:'fixture-'+row.id});
+    assert.equal((await s.controlledExecution.claim({id:outdated.id,actor:'wf-'+row.id,workflow_id:row.id,workflow_token:lease.token})).claimed,false);
+    assert.equal(await ending(outdated.id,notRun),cards.find(card=>card.kind==='card'&&card.id===outdated.id)!.text+'\n\n'+notRun);
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

@@ -25,6 +25,17 @@ const controls=/[\u0001-\u0003]/g,marked=/\u0001(\d+)\u0002([^\u0001-\u0003]*)\u
 const clean=(value:unknown,length=100)=>typeof value==='string'&&value.replace(controls,'').trim()?value.replace(controls,'').replace(/\s+/g,' ').trim().slice(0,length):null;
 type Link={offset:number;length:number;url:string};
 type Mark=(label:string,url:string|null)=>string;
+/** Why an operation failed or did not run, from fixed codes only: no tool or service text reaches a card. */
+const reasons:Record<string,ApprovalText>={notion_not_connected:'reason_sign_in',notion_reconnect_needed:'reason_sign_in',notion_unavailable:'reason_unreachable',
+  notion_not_enabled:'reason_turned_off',tool_disabled_by_owner:'reason_turned_off',tool_reported_error:'reason_refused',owner_cancelled:'reason_cancelled',job_stopped:'reason_stopped',
+  guard_context_changed:'reason_changed',guard_transition_pending:'reason_changed',action_proposal_changed:'reason_changed',security_start_denied:'reason_changed',
+  permission_no_longer_valid:'reason_changed',execution_lease_expired:'reason_changed'};
+/** An approval that fails because what the operation used changed since it was asked. */
+const outdated=new Set(['guard_context_changed','action_proposal_changed']);
+/** Failures where the executor stopped before it sent anything. */
+const unsent=new Set(['tool_disabled_by_owner','tool_policy_unavailable','notion_not_connected','notion_reconnect_needed','notion_unavailable']);
+/** Card edits for one action, across every repository in this process, in the order they were asked for. */
+const editing=new Map<string,Promise<void>>();
 
 /** Plain card text with Telegram text links; offsets count UTF-16 units, as Telegram's do. */
 function linked(text:string,urls:string[]):{text:string;links:Link[]} {
@@ -121,27 +132,44 @@ export class ActionCommandRepository {
     const [chat,topic]=reviewer.space.split('/topic/');
     return {chat:chat!,...(topic?{topic}:{}),reviewer:reviewer.user};
   }
+  /** A background job's step or a scheduled task that asked for an operation, by the job's name. */
+  private async work(source:any,line:Record<ApprovalText,string>):Promise<string|null> {
+    const kind=(await this.access.stores.control.query('SELECT kind FROM content_operations WHERE id=$1',[source.id])).rows[0]?.kind;
+    if(kind==='scheduled_trigger')return line.from_schedule;
+    const title=kind==='background_step'&&this.jobs?clean(await this.jobs.stepJob(source.id)):null;
+    return title?fillTemplate(line.from_job,{title}):null;
+  }
   /** The exact content to decide on, or null when it is too long to review in Telegram. */
-  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;links:Link[];fingerprint:string;state:string;line:Record<ApprovalText,string>}|null> {
+  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;links:Link[];fingerprint:string;state:string;code:string|null;started:boolean;line:Record<ApprovalText,string>}|null> {
     const owner={admin:true,scope:null},texts=await this.texts(),urls:string[]=[];
     const line=Object.fromEntries(Object.entries(texts.line).map(([key,value])=>[key,value.replace(controls,'')])) as Record<ApprovalText,string>;
     const mark:Mark=(label,url)=>url?`\u0001${urls.push(url)-1}\u0002${label}\u0003`:label;
     // The card under a request in its own chat does not say where it was asked.
     const asked=reviewed?null:await this.asked(source);
-    const origin=asked&&asked.chat!==this.access.policy().owner_id?await this.where(asked.chat,line,mark,{topic:asked.topic,message:asked.message}):null;
+    const origin=asked&&asked.chat!==this.access.policy().owner_id?await this.where(asked.chat,line,mark,{topic:asked.topic,message:asked.message}):
+      source?.store==='control'?await this.work(source,line):null;
     if(kind==='telegram') {
       const action=await this.telegram.inspect(owner,id),[chat,topic]=String(action.arguments.destination).split('/topic/');
       const place=await this.where(chat!,line,mark,{topic,showTopic:true});
       const filled=fillTemplate(texts.card.replace(controls,''),{destination:place,origin,text:String(action.arguments.text).replace(controls,'')});
-      return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,line};
+      return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,code:null,started:true,line};
     }
     const action=await this.tools.inspect(owner,id),args=canonical(action.arguments);
     if(args.length>reviewLimit)return null;
     const filled=fillTemplate(texts.action.replace(controls,''),{kind:action.kind,origin,arguments:args.replace(controls,'')});
-    return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,line};
+    const code=action.error_code??(typeof action.result?.result?.error==='string'?action.result.result.error:null);
+    // The executor runs only after its start is recorded, so an operation never started did not run.
+    const started=!!(await this.tools.row(id)).started_at;
+    return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,code,started,line};
   }
-  private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>) {
+  private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>,code:string|null=null,started=true) {
     if(state==='proposed')return null;
+    if(kind==='controlled') {
+      const reason=line[code&&Object.hasOwn(reasons,code)?reasons[code]!:'reason_other'];
+      if(state==='rejected'&&code||['failed','ambiguous'].includes(state)&&(!started||unsent.has(code??'')))return fillTemplate(line.not_run,{reason});
+      if(state==='failed')return fillTemplate(line.failed_action,{reason});
+      if(state==='ambiguous')return line.unsure;
+    }
     if(state==='rejected')return kind==='telegram'?line.rejected:line.rejected_action;
     if(state==='cancelled')return line.cancelled;
     if(state==='done')return kind==='telegram'?line.sent:line.done;
@@ -162,6 +190,7 @@ export class ActionCommandRepository {
       const effect:Effect=kind==='telegram'?{id:row.id,kind:'telegram.send',scope:row.scope,profile:row.profile,fingerprint:row.fingerprint}:this.tools.effect(row);
       if((await evaluate(control,effect)).outcome!=='ask'||kind==='controlled'&&(await this.tools.grants(row)).length)return result;
       const place=await this.place(kind,result.id),card=place?await this.card(kind,result.id,row.source_reference,!!place.reviewer):null;
+      if(place&&!card)return {...result,message:'This request is too long for a Telegram card. The owner can review and approve it in the dashboard Inbox.'};
       if(!place||!card||card.state!=='proposed')return result;
       // In the chat and topic where it was asked, the card answers the request itself.
       const asked=await this.asked(row.source_reference);
@@ -176,6 +205,9 @@ export class ActionCommandRepository {
         'This exact message for the other group was posted here with Approve and Reject buttons for the person who asked; nothing is sent until they press Approve. Say only, briefly, that they can check and approve it; do not repeat the draft.':
         asked&&asked.chat!==owner?
         'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner; do not show the draft or details.':
+        // A job's step or a scheduled task runs on without a chat to wait in.
+        row.source_reference?.store==='control'?
+        'The owner was sent Approve and Reject buttons for this exact request in their private chat. It runs only if they approve, maybe after you finish. Do not wait for it. Say in your answer what you asked for.':
         'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
@@ -209,13 +241,19 @@ export class ActionCommandRepository {
     const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines.running:card.lines[state];
     if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[]});
   }
-  /** Show the decision on a card and remove its buttons; best effort. */
+  /** Show the decision on a card and remove its buttons; best effort. Edits of one card run one after
+   * another and each reads the state when it starts, so the last edit shows the latest state. */
   async settle(kind:ActionKind,id:string) {
+    const key=kind+':'+id,run=(editing.get(key)??Promise.resolve()).then(()=>this.edit(kind,id)),tail=run.catch(()=>{});
+    editing.set(key,tail);
+    try{await run;}finally{if(editing.get(key)===tail)editing.delete(key);}
+  }
+  private async edit(kind:ActionKind,id:string) {
     try {
       if(kind==='background')return await this.settleJob(id);
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
-      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line):null;
+      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line,card.code,card.started):null;
       if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:card.links});
     }catch(error){if(!(error instanceof HttpError))throw error;}
   }
@@ -247,7 +285,7 @@ export class ActionCommandRepository {
       reply=result.state==='rejected'?(kind==='telegram'?line.rejected:line.rejected_action):line.approved;
     }catch(error) {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
-      reply=line.decided;
+      reply=kind==='controlled'&&outdated.has(error.code)?fillTemplate(line.not_run,{reason:line.reason_changed}):line.decided;
     }
     await answer(reply);await this.settle(kind,action.id);return true;
   }
@@ -285,7 +323,7 @@ export class ActionCommandRepository {
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0],payload=JSON.parse(row.payload.toString()),text=payload.message?.text;
     const command=typeof text==='string'?text.trim().match(/^\/(actions|action|approve|deny|permissions|revoke)(?:\s+([a-f0-9]{64}))?$/):null;if(!command)return null;
     if(!conversationScope(this.access.policy(),payload,original.scope)?.owner)return 'Only the owner can review or approve actions in their private DM.';
-    const owner={admin:true,scope:null},operation_id='telegram-command:'+source.id;
+    const owner={admin:true,scope:null},operation_id='telegram-command:'+source.id;let controlled=false;
     if(command[1]==='actions') {
       const tools=(await this.tools.list(owner)).actions,telegram=await this.telegram.list(owner);
       const rows=[...tools,...telegram].filter(row=>['proposed','approved','running','ambiguous'].includes(row.state))
@@ -302,7 +340,7 @@ export class ActionCommandRepository {
         await this.tools.revoke(owner,{id:command[2],operation_id},source);
         return 'Permission revoked. Already-started operations cannot be undone.';
       }
-      const controlled=!!(await this.access.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[command[2]])).rowCount;
+      controlled=!!(await this.access.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[command[2]])).rowCount;
       const action=controlled?await this.tools.inspect(owner,command[2]):await this.telegram.inspect(owner,command[2]);
       const args=canonical(action.arguments);
       if(controlled&&args.length>2200&&['action','approve'].includes(command[1]!))return `${action.kind} · ${action.state}\nArguments are too long to review in Telegram. Open the dashboard Inbox to review and approve this action in full.\nID: ${action.id}`;
@@ -314,6 +352,7 @@ export class ActionCommandRepository {
       await this.settle(controlled?'controlled':'telegram',result.id);
       return `Action ${result.id} ${result.state}.`;
     }catch(error) {
+      if(error instanceof HttpError&&controlled&&outdated.has(error.code)){const {line}=await this.texts();return fillTemplate(line.not_run,{reason:line.reason_changed});}
       if(error instanceof HttpError&&[400,403,404,409].includes(error.status))return error.code==='action_not_found'?'Action not found.':
         error.code==='permission_not_found'?'Permission not found.':'This action or permission cannot be changed in its current state. Review it in the dashboard Inbox.';
       throw error;

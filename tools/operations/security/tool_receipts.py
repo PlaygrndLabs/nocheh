@@ -2,6 +2,7 @@
 import fcntl
 import json
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from tools.operations.security.tool_execution import bounded_execute
@@ -10,8 +11,15 @@ from tools.operations.security.tool_execution import bounded_execute
 def permitted_execute(state,action):
     from tools.operations.security.native import call
     from urllib.parse import urlencode
-    try:current=call(state,'/api/nocheh/preferences?'+urlencode({'profile':action['profile']}))
-    except Exception:return {'exit_code':1,'error':'tool_policy_unavailable'}
+    # The action's own native profile is named after the epoch it was proposed in. Its chat's stable
+    # profile still resolves after a later epoch carries the action (ADR-0200), and a job has none of its own.
+    preference=action['preference']
+    # Reading the settings changes nothing, so a new epoch or a publication mid-read is simply read again.
+    for attempt in range(3):
+        try:current=call(state,'/api/nocheh/preferences?'+urlencode({'profile':preference['profile'],'space':preference['space']}));break
+        except Exception:
+            if attempt==2:return {'exit_code':1,'error':'tool_policy_unavailable'}
+            time.sleep(1)
     if current['values'].get('nocheh_tools.'+action['kind'])!='on':return {'exit_code':1,'error':'tool_disabled_by_owner'}
     return bounded_execute(state,action)
 

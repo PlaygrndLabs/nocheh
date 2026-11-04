@@ -28,6 +28,45 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
 
+Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
+build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
+task table against a group chat): long tool results are read in parts
+([check](services/hermes/test_action_results.py)). Waiting and approved tool
+actions, such as Notion calls, survive reactions in any chat and automatic learning
+revisions (owner, 2026-11-03: "Keep them valid"), then run when approved, and a later turn or
+job step of the asking chat reads its own action; any other epoch change still
+stops them, and the reader then sees only the state
+([ADR-0200](docs/adr/0200-waiting-approvals-survive-reaction-epochs.md),
+[check](test/store-quiet-epochs.test.ts)). A job's report is sent after
+reactions too, and after learning revisions by the same quiet-epoch rule (its own check
+covers reactions only); any other change after its last step sends no further part of the
+report and ends the job as failed (`job_report_outdated`), and Stop sends no
+further part either ([ADR-0201](docs/adr/0201-job-reports-survive-reaction-epochs.md),
+[check](test/store-background-job-epochs.test.ts)). An approved tool action's card
+now says whether it finished, failed or did not run, with a reason from fixed codes
+in the owner's texts; a tool's own error counts as failed; a card that a job asked
+for names the job, and the job's agent does not wait for it; a later turn or step
+lists its operations when it no longer holds their IDs
+([ADR-0202](docs/adr/0202-approved-actions-report-how-they-ended.md),
+[cards](test/store-approval-buttons.test.ts), [list](test/store-quiet-epochs.test.ts)).
+The executor checks the tool settings of the action's chat, so an action that
+carried, or one a job asked for, runs once approved
+([check](services/hermes/test_runtime_profiles.py), [fake Telegram](tools/acceptance/product_scenarios.py):
+`approval_waits_across_a_change_and_runs`, `job_operation_runs_after_approval`).
+Still open: a shell approval that waits past its profile's 15 idle minutes fails
+without running, and another pending publication between claim and start ends an
+action as ambiguous.
+Open owner questions: does the owner accept, in their own words, the new SPECS lines that
+a reaction change or a learning revision does not stop a waiting or approved proposal, and that a card
+says how an approved operation ended and which job or schedule asked? They are not
+yet accepted. Next: Notion inside owner-approved jobs, which needs the owner's
+answers on Notion reads and changes in jobs. Telegram message
+requests keep the exact-epoch rule, so a reaction or a learning revision in the seconds between
+staging a report part and sending it still cancels that part and fails the job.
+An owner cancel from Workflows does not edit the card yet.
+Pending: a live check: ask for a Notion change, react in a group, then approve;
+a job whose report comes after a reaction in a group; and a Notion call that fails
+and one that finishes, each showing it on its card.
 Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
 Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
 if replies stay the same and it is not less efficient): no Anthropic call was cached,

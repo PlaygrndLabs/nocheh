@@ -128,6 +128,53 @@ class RuntimeProfileTests(unittest.TestCase):
         self.assertTrue((pref / 'config.yaml').exists()); self.assertTrue(old.exists())
         with self.assertRaisesRegex(ValueError, 'profile_not_found'): self.app.profile(identity)
 
+    def test_executor_reads_the_chat_settings_after_a_later_epoch(self):
+        from urllib.parse import urlencode
+        from .profile_config import configure_profile, inspect_profile
+        ask = lambda **query: self.client.get('/api/nocheh/preferences?' + urlencode(query), headers=self.headers)
+        # An action keeps the native profile of the epoch it was proposed in.
+        proposed = self.control.entry()['native_profile']
+        self.assertEqual(ask(profile=proposed).status_code, 200)
+        self.control.epoch += 1
+        self.assertEqual(ask(profile=proposed).status_code, 400, 'it no longer resolves once a later epoch carries the action')
+        # The executor asks by the chat's stable profile and its space, which a topic needs.
+        for space in ('42', '-10', '-10/topic/7'):
+            answer = ask(profile=Scopes.profile(space), space=space)
+            self.assertEqual(answer.status_code, 200, answer.text); self.assertEqual(answer.json()['values']['nocheh_tools.shell'], 'on')
+        self.assertEqual(ask(profile=Scopes.profile('-10/topic/7')).status_code, 400, 'a topic without its space is not found')
+        # The space is only a lookup that control checks.
+        for profile, space in ((Scopes.profile('42'), '-10'), (Scopes.profile('-10/topic/7'), '-10/topic/8'), (Scopes.profile('-10/topic/7'), '-999/topic/7')):
+            self.assertEqual(ask(profile=profile, space=space).status_code, 400, (profile, space))
+        self.assertEqual(ask(space='42').status_code, 400, 'a space names no profile by itself')
+        self.assertEqual(self.client.get('/api/config?' + urlencode({'profile': Scopes.profile('-10/topic/7'), 'space': '-10/topic/7'}),
+            headers=self.headers).status_code, 400, 'only the settings check takes a space')
+        # What the owner turns off on the chat is what the executor sees.
+        preference = self.root / 'profiles' / Scopes.profile('-10/topic/7'); preference.mkdir(parents=True)
+        configure_profile(preference, 'gpt-5.6-sol', {'nocheh_tools.shell': 'off'}, inspect_profile(preference, 'gpt-5.6-sol')['revision'])
+        self.assertEqual(ask(profile=Scopes.profile('-10/topic/7'), space='-10/topic/7').json()['values']['nocheh_tools.shell'], 'off')
+        self.assertEqual(ask(profile=Scopes.profile('-10'), space='-10').json()['values']['nocheh_tools.shell'], 'on')
+        # Like a turn, a topic without settings of its own follows its group, and a named profile without them the owner's chat.
+        group = self.root / 'profiles' / Scopes.profile('-10'); group.mkdir(parents=True)
+        configure_profile(group, 'gpt-5.6-sol', {'nocheh_tools.browser': 'off'}, inspect_profile(group, 'gpt-5.6-sol')['revision'])
+        self.assertEqual(ask(profile=Scopes.profile('-10/topic/9'), space='-10/topic/9').json()['values']['nocheh_tools.browser'], 'off')
+        self.assertEqual(ask(profile=Scopes.profile('-10/topic/7'), space='-10/topic/7').json()['values']['nocheh_tools.browser'], 'on',
+                         'a topic with its own settings keeps them')
+        named = self.create()['logical_profile']
+        chat = self.root / 'profiles' / Scopes.profile('42'); chat.mkdir(parents=True)
+        configure_profile(chat, 'gpt-5.6-sol', {'nocheh_tools.mcp': 'off'}, inspect_profile(chat, 'gpt-5.6-sol')['revision'])
+        self.assertEqual(ask(profile=named, space='42').json()['values']['nocheh_tools.mcp'], 'off')
+        # A new epoch between the two lookups of one check does not fail it.
+        request = self.catalog.request
+        def moving(route, body=None):
+            answer = request(route, body)
+            if route.endswith('/resolve'): self.control.epoch += 1
+            return answer
+        self.catalog.request = moving
+        try:
+            for space in ('-10', '-10/topic/9'):
+                answer = ask(profile=Scopes.profile(space), space=space); self.assertEqual(answer.status_code, 200, answer.text)
+        finally: self.catalog.request = request
+
     def test_catalog_validation_topics_and_symlinks(self):
         entry = self.control.entry('-10/topic/7'); home = self.catalog.path(entry['native_profile']); home.mkdir(parents=True)
         (home / 'space.json').write_text(json.dumps({'space': '-10/topic/7'}))

@@ -67,12 +67,20 @@ export const approvalTexts=[
   'topic: › {topic}','unnamed_topic: a topic','general_topic: General',
   'sent: ✅ Approved and sent.','sending: ⏳ Approved. Sending now.','done: ✅ Approved and done.','approved: ✅ Approved.',
   'failed: ⚠️ Approved, but it did not finish. See the dashboard Inbox.',
+  'failed_action: ⚠️ Approved, but it failed: {reason}','unsure: ⚠️ Approved, but Nocheh could not confirm that it finished. Check before you ask again.',
+  'not_run: 🚫 It did not run: {reason}',
   'rejected: ❌ Rejected. Nothing was sent.','rejected_action: ❌ Rejected. Nothing ran.','cancelled: 🚫 Cancelled. Nothing was sent.',
+  'reason_sign_in: Notion needs you to sign in again. Reconnect it in the dashboard.','reason_unreachable: Notion could not be reached. Try again later.',
+  'reason_turned_off: it is turned off in Settings.','reason_refused: the service answered with an error. Ask Nocheh what went wrong.',
+  'reason_changed: something it used changed after it was asked. Ask again if you still want it.','reason_cancelled: it was cancelled.',
+  'reason_stopped: the job was stopped.','reason_other: see the dashboard Inbox.',
+  'from_job: the job “{title}”','from_schedule: a scheduled task',
   'only_owner: Only the owner can approve or reject this.','only_requester: Only the person who asked or the owner can approve or reject this.',
   'changed: This request changed or no longer exists. Review it in the dashboard Inbox.',
   'decided: This request was already decided or can no longer change. Review it in the dashboard Inbox.'].join('\n');
 export type ApprovalText='approve'|'reject'|'private_chat'|'unnamed_group'|'topic'|'unnamed_topic'|'general_topic'|'sent'|'sending'|'done'|'approved'|'failed'|'rejected'|'rejected_action'|'cancelled'|
-  'only_owner'|'only_requester'|'changed'|'decided';
+  'failed_action'|'unsure'|'not_run'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_other'|
+  'from_job'|'from_schedule'|'only_owner'|'only_requester'|'changed'|'decided';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
   return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;
@@ -108,7 +116,7 @@ export const backgroundJob=['[Background job: {title}]',
   'Nobody answers questions during the job: say in the report what was unclear.',
   'The job stops at {limits}, whichever comes first.'].join('\n');
 /** Each later step of a background job. */
-export const backgroundContinue='[Background job: {title}]\nContinue the job where you stopped. Your to-do list and the work so far are above. When the work is done, write the final report as your answer.';
+export const backgroundContinue='[Background job: {title}]\nContinue the job where you stopped. Your to-do list and the work so far are above. Actions you asked for may have run since: nocheh_action_status lists them and reads each result. When the work is done, write the final report as your answer.';
 /** The last step when a background job reaches its cost or time limit. */
 export const backgroundWrapUp='[Background job: {title}]\nThe job reached its limit of {limit}. Stop reading now. Write the final report from what you have found, in the language of the instruction, and say what is left undone.';
 /** The Approve and Reject card for a background job. A line whose value is missing is left out. */

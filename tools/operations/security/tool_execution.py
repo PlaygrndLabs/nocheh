@@ -96,6 +96,9 @@ def mcp_call(args,request=https_request,state=None):
     rpc({'jsonrpc':'2.0','method':'notifications/initialized'},headers)
     operation={'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}} if args.get('operation')=='list' else {'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':args['tool'],'arguments':args['input']}}
     result,_=rpc(operation,headers)
+    # A tool that answers with its own error did not do what was asked; its answer is kept to read.
+    if operation['method']=='tools/call' and isinstance(result,dict) and result.get('isError') is True:
+        return {'response':result,'protocol':init['protocolVersion'],'exit_code':1,'error':'tool_reported_error'}
     return {'response':result,'protocol':init['protocolVersion']}
 
 

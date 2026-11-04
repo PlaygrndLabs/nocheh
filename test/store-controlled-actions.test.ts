@@ -90,6 +90,8 @@ test('controlled proposals and bounded permissions preserve guarded content outs
     assert.equal(await s.actionCommands.controlReply(guardedCommand),null,'editable guarded content cannot become an administrative command');
     assert.equal((await a.row(commandAction.id)).state,'approved');
     assert.equal(Number((await stores.archive.query('SELECT count(*) AS n FROM events')).rows[0].n),afterCommands,'decisions and guarded revisions add no originals');
+    assert.equal(await s.actionCommands.controlReply(await command('stale-approve','/approve '+stale.id)),
+      '🚫 It did not run: something it used changed after it was asked. Ask again if you still want it.');
     for(const table of ['controlled_actions','action_permissions']) {
       const columns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1",[table])).rows.map(r=>r.column_name);
       assert.ok(!columns.some(n=>['arguments','content','text','result','payload'].includes(n)));

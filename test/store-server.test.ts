@@ -187,6 +187,9 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/tools/start',toolIdentity)).started,true);
     assert.equal((await request('/v1/tools/start',toolIdentity)).started,false);
     await request('/v1/tools/finish',{id:tool.id,actor:toolIdentity.actor,state:'done',result:{stdout:'synthetic HTTP result'}});
+    const operations=(await request('/v1/tools/actions',undefined,200,credential)).actions;
+    assert.deepEqual(operations.filter((row:any)=>row.id===tool.id).map((row:any)=>[row.kind,row.state]),[['shell','done']],'the asking chat lists its operations');
+    assert.ok(operations.every((row:any)=>!('arguments' in row)&&!('result' in row)),'by state only');
     assert.equal((await request('/v1/workflows/host/finish',{workflow_id:toolWorkflow.id,token:toolLease.token,result:{observed:true}})).state,'completed');
     assert.equal(proposal.state,'proposed');assert.equal((await request('/v1/tools/actions/'+proposal.id,undefined,200,credential)).arguments.text,'Synthetic approval preview');
     await request('/v1/tools/telegram-decision',{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'},403,credential);
