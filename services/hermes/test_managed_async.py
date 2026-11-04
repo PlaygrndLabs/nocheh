@@ -5,6 +5,7 @@ from unittest.mock import patch
 from . import managed_async
 from .managed_async import ManagedAsync,ServiceError
 from .async_runs import identity
+from .job_progress import run_cost
 from .scopes import Scope
 
 
@@ -125,6 +126,16 @@ class ManagedAsyncTests(unittest.TestCase):
         self.body['event_id']='d'*64;self.context['event_id']='d'*64
         finished=self.background(quiet)
         self.assertEqual((finished['tokens'],finished['unknown_calls']),(None,0));self.assertNotIn('todo',finished,'no list was seen')
+        # Hermes counts its calls without usage as calls too; the relay prices them once, as unknown calls.
+        zero={'input_tokens':0,'output_tokens':0,'cache_read_tokens':0,'cache_write_tokens':0,'calls':0}
+        async def blind(root,scope,body,model,credentials,session,emit,cancelled,progress):
+            for unknown in (1,2,3):progress({'tokens':zero,'unknown_calls':unknown})
+            return {'state':'done','text':'The report.','session_id':session,'tokens':{**zero,'calls':3}}
+        self.body['event_id']='e'*64;self.context['event_id']='e'*64
+        finished=self.background(blind)
+        self.assertEqual((finished['tokens'],finished['unknown_calls']),(zero,3))
+        rates=self.context['background']['rates']
+        self.assertEqual(run_cost(rates,finished['tokens'],finished['unknown_calls']),run_cost(rates,None,3),'each call priced once')
     def test_a_heartbeat_carries_progress_once_per_change_and_the_todo_list_only_when_it_changed(self):
         step=threading.Event();sent=[]
         def heartbeat(body):

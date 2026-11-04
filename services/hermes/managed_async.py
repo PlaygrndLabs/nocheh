@@ -11,6 +11,7 @@ from .async_runs import AsyncRuns,identity,CLOSED
 from .capture import canonical,immutable_file
 from .job_progress import merge
 from .scopes import Scope,verify_capability
+from .usage import _count
 
 # A run's heartbeat every HEARTBEAT_SECONDS, each waiting at most HEARTBEAT_TIMEOUT. A background job run outlasts
 # TOLERANCE_SECONDS without an answer from storage (an app restart, a guard publication), and no more.
@@ -208,7 +209,10 @@ class ManagedAsync:
             'session':result.get('session_id',context['conversation']),'error_code':result.get('error_code')}
         if channel=='background':
             # The run's final counts, the larger of its last progress and Hermes's own, which Nocheh prices, and its last to-do list.
-            receipt.update(tokens=merge(relay.tokens,result.get('tokens') if isinstance(result.get('tokens'),dict) else None),unknown_calls=relay.unknown_calls)
+            # Hermes's calls include those without usage, which the relay already prices as unknown calls: not twice.
+            own=result.get('tokens') if isinstance(result.get('tokens'),dict) else None
+            if own is not None:own={**own,'calls':max(0,_count(own.get('calls'))-relay.unknown_calls)}
+            receipt.update(tokens=merge(relay.tokens,own),unknown_calls=relay.unknown_calls)
             if relay.todo is not None:receipt['todo']=relay.todo
         if channel=='scheduler':
             from .scheduler import now
