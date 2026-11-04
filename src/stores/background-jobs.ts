@@ -64,6 +64,8 @@ const WORK_ITERATIONS=20,WRAP_UP_ITERATIONS=4;
 const STEP_RETRIES=2;
 // Jobs that run at once; each holds one sealed agent run while it works.
 const RUNNING_JOBS=2;
+// The longest time limit a job may have.
+export const JOB_MINUTES=1440;
 // A proposal waits this long for its decision.
 const DECISION_HOURS=24;
 // The report goes to the chat in parts the Telegram sender splits further.
@@ -187,15 +189,9 @@ export class BackgroundJobRepository {
     }catch{/* An unknown price still shows the size and time. */}
     return {...size,pages:tokens.pages,tokens:tokens.read,minutes:tokens.minutes,cost_usd:cost};
   }
-  async size(principal:Reader,input:unknown) {
-    const body=object(input);if(Object.keys(body).some(key=>!['chat','from','to'].includes(key)))throw new HttpError(400,'invalid_job_request');
-    if(!principal.admin)await this.turns.binding(principal);
-    const {from,to}=this.period(body),size=await this.sources.size(principal,{chat:body.chat===undefined?'':string(body.chat,64),from,to});
-    const estimate=await this.estimate(size),settings=await this.settings();
-    return {...estimate,from:from||null,to:to||null,limits:{cost_usd:settings.cost_limit_usd,minutes:settings.minutes_limit}};
-  }
-  /** Ask to start a job. Nothing runs until whoever approves it presses Approve. */
-  async propose(principal:Reader,input:unknown) {
+  /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
+   * Nothing runs until whoever approves it presses Approve. */
+  async start(principal:Reader,input:unknown) {
     const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box'].includes(key))||
       body.box!==undefined&&typeof body.box!=='boolean')throw new HttpError(400,'invalid_job_request');
     const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim();
@@ -214,6 +210,8 @@ export class BackgroundJobRepository {
     // A member's job over the owner's limit, or with no known cost, waits for the owner instead.
     const approver=requester&&(estimate.cost_usd===null||estimate.cost_usd>settings.cost_limit_usd)?'owner':'requester';
     const costLimit=Math.max(settings.cost_limit_usd,Math.ceil((estimate.cost_usd??0)*1.5)),minutesLimit=Math.max(settings.minutes_limit,Math.ceil(estimate.minutes*1.5));
+    // Refused before the secret check spends anything: the agent narrows the period or splits the work.
+    if(minutesLimit>JOB_MINUTES)throw new HttpError(409,'job_too_long');
     const id=digest(canonical([protocol,source,binding,title,instruction,size.chat,from,to]));
     const proposal=await this.derived.record({operation_id:'background-proposal:'+id,source,kind:'background_job_request',content:Buffer.from(canonical({title,instruction})),
       producer:'nocheh',producer_version:protocol,configuration:{binding,chat:size.chat,from,to}});
@@ -252,7 +250,8 @@ export class BackgroundJobRepository {
     const values:Record<string,string|null|undefined>={title:shown.title,instruction:shown.instruction,
       size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
       cost_limit:money(Number(row.cost_limit_usd)),minutes_limit:String(row.minutes_limit),origin:null,
-      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?lines.box:null};
+      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?lines.box:null,
+      checked:[lines.checked,row.requester?lines.member_limit:null].filter(Boolean).join(' ')||null};
     // What the job may do without asking is always on its card: a saved card without the line, or whose line
     // is left out for another missing value, gets it at the end.
     const template=prompts['background.card']??backgroundCard,kept=template.split('\n').filter(line=>lineKept(line,values));
@@ -303,12 +302,14 @@ export class BackgroundJobRepository {
     }
     return {jobs};
   }
-  /** Stop a job: a proposal is withdrawn, a running job's step is cancelled and no report is sent. */
+  /** Stop a job: a proposal is withdrawn, a running job's step is cancelled and no report is sent.
+   * The card's rule: the dashboard and the owner stop any job; a member only the job they asked for,
+   * in its own chat, and a job of another chat stays unseen. A job's own turn stops none. */
   async stop(principal:Reader,input:unknown) {
-    const body=object(input),row=await this.row(body.id);
-    if(!principal.admin) {
-      await this.turns.binding(principal);
-      if(principal.scope!==null&&row.scope!==principal.scope)throw new HttpError(404,'job_not_found');
+    const body=object(input),live=principal.admin?null:await this.liveTurn(principal),row=await this.row(body.id);
+    if(live?.requester) {
+      if(row.scope!==live.turn.scope)throw new HttpError(404,'job_not_found');
+      if(row.requester!==live.requester)throw new HttpError(403,'job_not_permitted');
     }
     if(closedStates.has(row.state))throw new HttpError(409,'job_not_running');
     const changed=await this.control.query(`UPDATE background_jobs SET cancel_requested=true,state=CASE WHEN state='proposed' THEN 'stopped' ELSE state END,

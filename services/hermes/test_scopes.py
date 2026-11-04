@@ -12,8 +12,15 @@ from unittest.mock import patch
 
 from .scopes import Scopes,verify_capability
 from .assistant_gateway import AssistantGateway,prepare_profile
-from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,BACKGROUND_TOOLS,BACKGROUND_TOOLSETS,OWNER_SET_TOOLS,TURN_TOOLSETS,UnexpectedProfileTool,verify_profile_tools
+from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,BACKGROUND_TOOLS,BACKGROUND_TOOLSETS,OWNER_SET_TOOLS,TURN_TOOLSETS,UnexpectedProfileTool,turn_tools,verify_profile_tools
 from .capture import canonical,immutable_file
+
+# The exact tools of a reply turn and of a job's plain and box steps. A job's turns never have the job tool.
+REPLY_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_archive_page','nocheh_memory_search','nocheh_action_request',
+             'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall','nocheh_knowledge_inspect','nocheh_knowledge_propose',
+             'nocheh_knowledge_status','nocheh_owner_read','nocheh_telegram_destinations','nocheh_tasks','nocheh_notion','nocheh_background_job','skills_list','skill_view'}
+JOB_TOOLS=(REPLY_TOOLS-{'nocheh_background_job'})|{'todo_list'}
+JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','nocheh_shell','nocheh_browser'})|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
 
 
 class ScopeTests(unittest.TestCase):
@@ -124,7 +131,16 @@ class ScopeTests(unittest.TestCase):
                 # Hermes offers a skill-writing tool too; turns drop it because the owner sets skills.
                 self.assertEqual(names&OWNER_SET_TOOLS,OWNER_SET_TOOLS)
                 self.assertEqual(names-OWNER_SET_TOOLS,ALLOWED_TOOLS)
+                removed,allowed=turn_tools(False,False)
+                self.assertEqual(names-removed,REPLY_TOOLS);self.assertEqual(allowed,REPLY_TOOLS)
             finally:reset_hermes_home_override(token)
+
+    def test_turn_tools_are_exact_and_job_turns_have_no_job_tool(self):
+        self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
+        self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'nocheh_background_job'},JOB_TOOLS))
+        self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'nocheh_background_job','nocheh_shell','nocheh_browser'},JOB_BOX_TOOLS))
+        self.assertIn('nocheh_background_job',REPLY_TOOLS)
+        for tools in (JOB_TOOLS,JOB_BOX_TOOLS):self.assertNotIn('nocheh_background_job',tools)
 
     def test_background_job_steps_add_only_the_native_todo_list(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
@@ -137,9 +153,10 @@ class ScopeTests(unittest.TestCase):
                 discover_plugins()
                 definitions=get_tool_definitions(enabled_toolsets=BACKGROUND_TOOLSETS,quiet_mode=True)
                 names={item['function']['name'] for item in definitions}
-                self.assertEqual(names-OWNER_SET_TOOLS,BACKGROUND_TOOLS)
-                self.assertEqual(BACKGROUND_TOOLS-ALLOWED_TOOLS,{'todo_list'})
-                verify_profile_tools(names-OWNER_SET_TOOLS,BACKGROUND_TOOLS)
+                removed,allowed=turn_tools(True,False)
+                self.assertEqual(names-removed,JOB_TOOLS);self.assertEqual(allowed,JOB_TOOLS);self.assertEqual(BACKGROUND_TOOLS,JOB_TOOLS)
+                self.assertEqual(BACKGROUND_TOOLS^ALLOWED_TOOLS,{'todo_list','nocheh_background_job'})
+                verify_profile_tools(names-removed,allowed)
             finally:reset_hermes_home_override(token)
 
     def test_turn_policy_disables_native_tool_search_even_when_loader_enables_it(self):

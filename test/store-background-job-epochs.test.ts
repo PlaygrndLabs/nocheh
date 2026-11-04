@@ -53,7 +53,7 @@ test('a job report survives a reaction in another group, any other change after 
   const reports=async(id:string)=>(await stores.control.query('SELECT a.* FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1',[id])).rows;
   const requests=async()=>Number((await stores.control.query('SELECT count(*) FROM telegram_action_requests')).rows[0].count);
   const approved=async(title:string)=>{
-    const proposed=await s.jobs.propose(await actor((await message(group,'Please check the made-up task list')).id),{title,instruction:'Compare the made-up task list with this chat.'});
+    const proposed=await s.jobs.start(await actor((await message(group,'Please check the made-up task list')).id),{title,instruction:'Compare the made-up task list with this chat.'});
     await s.jobs.decide('9',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message(group,'Approve it'));
     return proposed.id;
   };

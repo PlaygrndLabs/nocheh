@@ -703,9 +703,9 @@ class ProductScenarios(Scenarios):
     # Background jobs ------------------------------------------------------------------------------------
 
     def background_job_runs_and_reports(self):
-        # The agent offers a job; the owner approves it on its card; the job runs in a session of its
+        # The agent starts a job with one call; the owner approves it on its card; the job runs in a session of its
         # own with the archive tools, sends its report where it was asked, and its card says it is done.
-        job = {'action': 'propose', 'title': 'Open tasks JOB1', 'instruction': 'Find what is still open [[search:JOBMARK1]]'}
+        job = {'action': 'start', 'title': 'Open tasks JOB1', 'instruction': 'Find what is still open [[search:JOBMARK1]]'}
         request = self.f.message(OWNER, 'کار بزرگ JOBMARK1 [[tool:nocheh_background_job '+json.dumps(job)+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
@@ -713,6 +713,7 @@ class ProductScenarios(Scenarios):
         target = json.loads(card['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
         self.gate('job_card_answers_the_request', target == request['message']['message_id'], target=target)
         self.gate('job_card_shows_job_and_estimate', 'Open tasks JOB1' in text and 'Find what is still open' in text and '⏱' in text, card=text)
+        self.gate('job_card_says_the_secret_check_ran', 'secret check' in text, card=text)
         self.gate('job_card_two_buttons', len(self.buttons(card)) == 2, buttons=[button['text'] for button in self.buttons(card)])
         time.sleep(3)
         self.gate('nothing_runs_before_approval', not [row for row in self.new(before) if not self.is_card(row)])
@@ -773,7 +774,7 @@ class ProductScenarios(Scenarios):
         instruction = 'Count the marked messages in the box. '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in steps)
         # Inside the proposal's own directive the instruction's braces are JSON escapes, so its directives stay whole.
         encoded = json.dumps(instruction).replace('{', '\\u007b').replace('}', '\\u007d')
-        proposal = '{"action": "propose", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
+        proposal = '{"action": "start", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
         request = self.f.message(OWNER, 'کار در جعبه JOBMARK2 [[tool:nocheh_background_job '+proposal+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         proposed = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
@@ -892,7 +893,7 @@ class ProductScenarios(Scenarios):
         marker = 'JOBRUNMARK1'
         # ]] is escaped in the job's JSON so the scripted model reads the step's directive only in the step.
         instruction = 'Check with a command [[tool:nocheh_shell {"command":"printf '+marker+'"}]]'
-        job = json.dumps({'action': 'propose', 'title': 'Command JOB2', 'instruction': instruction}).replace(']]', '\\u005d\\u005d')
+        job = json.dumps({'action': 'start', 'title': 'Command JOB2', 'instruction': instruction}).replace(']]', '\\u005d\\u005d')
         request = self.f.message(OWNER, 'کار با فرمان JOBRUN [[tool:nocheh_background_job '+job+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]

@@ -44,7 +44,7 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
   const states=async(ids:string[])=>(await stores.control.query('SELECT id,state,error_code FROM controlled_actions WHERE id=ANY($1) ORDER BY id',[ids])).rows;
   /** The owner's job asked for in their private chat, approved, with its first step claimed; returns the step's own reader. */
   const running=async(title:string)=>{
-    const proposed=await s.jobs.propose(await actor((await message('123',123,'Update my made-up task table')).id,null,'123'),
+    const proposed=await s.jobs.start(await actor((await message('123',123,'Update my made-up task table')).id,null,'123'),
       {title,instruction:'Update the made-up Notion task table from the group chat.',chat:group});
     await s.jobs.decide('123',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message('123',123,'Approve'));
     await tick(proposed.id);

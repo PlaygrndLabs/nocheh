@@ -327,7 +327,8 @@ class BoxStepTests(unittest.TestCase):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
         from hermes_cli.plugins import discover_plugins
         from model_tools import get_tool_definitions
-        from services.hermes.assistant_turn import BACKGROUND_TOOLS,BOX_STRIPPED,BOX_TOOLS,BOX_TOOLSETS,OWNER_SET_TOOLS,verify_profile_tools
+        from services.hermes.assistant_turn import BACKGROUND_TOOLS,BOX_TOOLS,BOX_TOOLSETS,turn_tools,verify_profile_tools
+        from services.hermes.test_scopes import JOB_BOX_TOOLS
         from services.hermes.profile_config import atomic_yaml,resolved
         self.assertNotIn('memory',BOX_TOOLSETS);self.assertEqual(BOX_TOOLS-BACKGROUND_TOOLS,job_box.TOOLS)
         self.assertEqual(BACKGROUND_TOOLS-BOX_TOOLS,{'memory','nocheh_shell','nocheh_browser'});self.assertIn('nocheh_mcp',BOX_TOOLS)
@@ -338,35 +339,36 @@ class BoxStepTests(unittest.TestCase):
             try:
                 discover_plugins()
                 names={item['function']['name'] for item in get_tool_definitions(enabled_toolsets=BOX_TOOLSETS,quiet_mode=True)}
-                self.assertEqual(names-OWNER_SET_TOOLS-BOX_STRIPPED,BOX_TOOLS)
-                verify_profile_tools(names-OWNER_SET_TOOLS-BOX_STRIPPED,BOX_TOOLS)
+                removed,allowed=turn_tools(True,True)
+                self.assertEqual(names-removed,JOB_BOX_TOOLS);self.assertEqual(allowed,JOB_BOX_TOOLS);self.assertEqual(BOX_TOOLS,JOB_BOX_TOOLS)
+                verify_profile_tools(names-removed,allowed)
             finally:reset_hermes_home_override(token)
 
     def test_a_job_proposal_asks_for_the_box_only_with_a_boolean(self):
         from services.hermes import archive_tools
         with patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request,patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'1'}):
-            archive_tools.job_tool({'action':'propose','title':'Count','instruction':'Count lines.','box':True})
-            archive_tools.job_tool({'action':'propose','title':'Count','instruction':'Count lines.','box':'yes'})
+            archive_tools.job_tool({'action':'start','title':'Count','instruction':'Count lines.','box':True})
+            archive_tools.job_tool({'action':'start','title':'Count','instruction':'Count lines.','box':'yes'})
             archive_tools.job_tool({'action':'status','box':True})
         self.assertEqual([call.args for call in request.call_args_list],[
-            ('/v1/jobs/propose',{'title':'Count','instruction':'Count lines.','box':True}),
-            ('/v1/jobs/propose',{'title':'Count','instruction':'Count lines.'}),('/v1/jobs/status',{})])
+            ('/v1/jobs/start',{'title':'Count','instruction':'Count lines.','box':True}),
+            ('/v1/jobs/start',{'title':'Count','instruction':'Count lines.'}),('/v1/jobs/status',{})])
         from urllib.error import HTTPError
         for code in ('job_box_not_allowed','job_changed'):
             refused=HTTPError('url',409,'Conflict',{},io.BytesIO(json.dumps({'error':code}).encode()))
             with self.subTest(code=code),patch.object(archive_tools,'request',side_effect=refused),patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'1'}):
-                self.assertEqual(json.loads(archive_tools.job_tool({'action':'propose','title':'t','instruction':'i','box':True})),{'error':code})
+                self.assertEqual(json.loads(archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True})),{'error':code})
 
     def test_a_box_job_is_refused_where_job_steps_have_no_box(self):
         from services.hermes import archive_tools
-        propose=lambda box:archive_tools.job_tool({'action':'propose','title':'Count','instruction':'Count lines.','box':box})
+        start=lambda box:archive_tools.job_tool({'action':'start','title':'Count','instruction':'Count lines.','box':box})
         for environment,allowed in (({},False),({'NOCHEH_SECURITY_RUNTIME':'legacy'},False),({'NOCHEH_ISOLATED_TURN':'0'},False),
                                     ({'NOCHEH_ISOLATED_TURN':'1'},True),({'NOCHEH_SECURITY_RUNTIME':'isolated'},True)):
             with self.subTest(environment=environment),patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'','NOCHEH_SECURITY_RUNTIME':'legacy',**environment}),\
                  patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request:
-                self.assertEqual(json.loads(propose(True)),{'id':'a'*64,'state':'proposed'} if allowed else {'error':'job_box_not_allowed'})
+                self.assertEqual(json.loads(start(True)),{'id':'a'*64,'state':'proposed'} if allowed else {'error':'job_box_not_allowed'})
                 self.assertEqual(request.call_count,1 if allowed else 0)
-                self.assertEqual(json.loads(propose(False))['state'],'proposed')
+                self.assertEqual(json.loads(start(False))['state'],'proposed')
 
 
 # One box step through assistant_turn.run, in its own process as in production: the real in-box
@@ -438,6 +440,7 @@ class BoxTurnTests(unittest.TestCase):
         self.assertEqual((outcome['result'].get('state'),outcome['result'].get('text')),('done','Report: done'),outcome['result'])
         steps=[payload for payload in sent if payload.get('tools')]
         self.assertEqual([{tool['function']['name'] for tool in payload['tools']} for payload in steps],[set(BOX_TOOLS)]*3)
+        self.assertNotIn('nocheh_background_job',BOX_TOOLS,'a box step has no job tool')
         self.assertEqual(outcome['step'],sorted(BOX_TOOLS))
         self.assertEqual(outcome['deadline'],body['turn_deadline_epoch'],'the box ends with this step, not later')
         page,terminal=[json.dumps(message['content']) for message in steps[-1]['messages'] if message.get('role')=='tool']

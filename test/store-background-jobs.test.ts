@@ -10,14 +10,14 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {jobTokens,reportParts} from '../src/stores/background-jobs.js';
 
-test('a background job is sized, approved on its card, runs step after step in its own session and reports to its chat',
+test('a background job is started with one call, approved on its card, runs step after step in its own session and reports to its chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
-  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-jobs-')),key='background-jobs:'+Date.now(),group='-'+Date.now();
-  const cards:Record<string,any>[]=[],runs:string[]=[];let price=1.2,updates=0;
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9','8'],denied:[]}},topic_memory:'group' as const});
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-jobs-')),key='background-jobs:'+Date.now(),group='-'+Date.now(),other='-1'+Date.now();
+  const cards:Record<string,any>[]=[],runs:string[]=[];let price:number|null=1.2,updates=0;
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9','8'],denied:[]},[other]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -37,9 +37,10 @@ test('a background job is sized, approved on its card, runs step after step in i
     chat:{id:Number(group),type:'supergroup'},from:{id:from,first_name:'Member'},text}});
   const press=(label:string,data:string,from:number)=>capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:from},chat_instance:'1',data,
     message:{message_id:5,date:1700000000,chat:{id:Number(group),type:'supergroup'}}}});
-  const actor=async(source:string):Promise<Reader>=>{
-    const binding=await s.guards.state();return {admin:false,scope:group,space:group,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+  const actor=async(source:string,scope:string|null=group,space=scope??'123'):Promise<Reader>=>{
+    const binding=await s.guards.state();return {admin:false,scope,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
   };
+  const privately=(label:string,text:string)=>capture(label,{message:{message_id:++sent,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text}},'123');
   const last=(kind:string)=>cards.filter(card=>card.kind===kind).at(-1)!;
   const authority=async()=>({owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0].epoch)});
   const job=async(id:string)=>(await stores.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
@@ -58,12 +59,12 @@ test('a background job is sized, approved on its card, runs step after step in i
     await s.guards.reconcile();await s.guards.setMode('on');
     for(let index=0;index<5;index++)await message('history-'+index,8,'Earlier message '+index);
     const ask=await message('ask');
-    const size=await s.jobs.size(await actor(ask.id),{});
-    assert.equal(size.chat,group);assert.equal(size.messages,6);assert.equal(size.cost_usd,1.2);assert.ok(size.minutes>=2);
-    await assert.rejects(s.jobs.size(await actor(ask.id),{chat:'123'}),{status:403},'a member sizes only their own group');
-    // A member proposes a job; the card answers the request in the group, for that person or the owner.
-    const proposed=await s.jobs.propose(await actor(ask.id),{title:'Open tasks',instruction:'Find every task that is still open and who owns it.'});
-    assert.equal(proposed.state,'proposed');assert.equal(proposed.approver,'requester');
+    await assert.rejects(s.jobs.start(await actor(ask.id),{title:'Elsewhere',instruction:'Read it.',chat:'123'}),{status:403},'a member reads only their own group');
+    // A member starts a job with one call: Nocheh counts and prices it, and the card answers the request in the group, for that person or the owner.
+    const proposed=await s.jobs.start(await actor(ask.id),{title:'Open tasks',instruction:'Find every task that is still open and who owns it.'});
+    assert.equal(proposed.state,'proposed');assert.equal(proposed.approver,'requester');assert.equal(proposed.message,'Nothing runs until it is approved.');
+    const estimate=proposed.estimate as any;
+    assert.equal(estimate.chat,group);assert.equal(estimate.messages,6);assert.equal(estimate.cost_usd,1.2);assert.ok(estimate.minutes>=2);
     assert.deepEqual(proposed.limits,{cost_usd:5,minutes:60});
     const offered=await s.actionCommands.offer('background',proposed);
     assert.match(offered.message,/posted here as the reply to the request/);
@@ -71,6 +72,7 @@ test('a background job is sized, approved on its card, runs step after step in i
     assert.equal(card.chat_id,group);assert.equal(card.reply_to,String(sent));
     assert.match(card.text,/Background job: Open tasks/);assert.match(card.text,/6 messages/);assert.match(card.text,/about \$1\.2/);
     assert.match(card.text,/Find every task that is still open and who owns it\./);
+    assert.match(card.text,/🔎 Starting it already used one secret check\. It counts toward the daily limit of the person who asked, unless it is rejected\./);
     const approve='na'+proposed.id.slice(0,40)+proposed.fingerprint.slice(0,16);
     assert.deepEqual(card.buttons,[['✅ Approve',approve],['❌ Reject','nd'+proposed.id.slice(0,40)+proposed.fingerprint.slice(0,16)]]);
     await s.actionCommands.callback(await press('other',approve,8));
@@ -111,7 +113,7 @@ test('a background job is sized, approved on its card, runs step after step in i
     const listed=(await s.jobs.list(await actor(ask.id))).jobs.find(item=>item.id===proposed.id)!;
     assert.deepEqual([listed.title,listed.state,listed.steps],['Open tasks','done',2]);
     // A job at its cost limit gets one short step that writes the report from what it has.
-    const capped=await s.jobs.propose(await actor((await message('capped')).id),{title:'Long read',instruction:'Read everything.'});
+    const capped=await s.jobs.start(await actor((await message('capped')).id),{title:'Long read',instruction:'Read everything.'});
     await s.jobs.decide('9',{id:capped.id,fingerprint:capped.fingerprint,decision:'approve'},(await message('approve-capped')));
     await s.jobs.operation('job:'+capped.id,await authority());
     await runStep(capped.id,{text:'Read half.',continue:true,todo:[],cost_usd:9});
@@ -120,7 +122,7 @@ test('a background job is sized, approved on its card, runs step after step in i
     const last_step=await runStep(capped.id,{text:'Partial report.',continue:false,todo:[],cost_usd:0.1});
     assert.match(String(last_step.claim.text),/reached its limit of \$5/);assert.equal(last_step.context.background.max_iterations,4);
     // Stopping a running job cancels its step and sends no report.
-    const stopped=await s.jobs.propose(await actor((await message('stopped')).id),{title:'Stop me',instruction:'Read it all.'});
+    const stopped=await s.jobs.start(await actor((await message('stopped')).id),{title:'Stop me',instruction:'Read it all.'});
     await s.jobs.decide('123',{id:stopped.id,fingerprint:stopped.fingerprint,decision:'approve'},(await message('approve-stopped',123)));
     await s.jobs.operation('job:'+stopped.id,await authority());
     const started=(await step(stopped.id)).event_id,context=await s.jobs.steps.context({event_id:started,owner_epoch:(await authority()).epoch});
@@ -133,8 +135,12 @@ test('a background job is sized, approved on its card, runs step after step in i
     assert.equal(asked.state,'proposed');assert.match(asked.message,/Kept with this job's other changes[^]*Do not wait for it/);
     const long=await s.actionCommands.offer('controlled',await s.controlledActions.propose(stepActor,{kind:'shell',arguments:{command:'printf '+'x'.repeat(2300)}}));
     assert.equal(cards.length,shown,'no card while the job runs');assert.match(long.message,/Kept with this job's other changes/);
-    await assert.rejects(s.jobs.stop(await actor((await capture('elsewhere',{message:{message_id:900,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'x'}},'123')).id),{id:stopped.id}),
-      (error:any)=>error.status>=400,'a chat stops only its own jobs unless it is the owner');
+    // Stop follows the card's rule. A job's own step stops nothing; another member may not; another chat does not see the job.
+    await assert.rejects(s.jobs.stop(stepActor,{id:stopped.id}),{status:403,code:'job_in_a_job'});
+    await assert.rejects(s.jobs.stop(await actor((await message('not-mine',8)).id),{id:stopped.id}),{status:403,code:'job_not_permitted'});
+    const elsewhere=await capture('elsewhere',{message:{message_id:++sent,date:1700000000,chat:{id:Number(other),type:'supergroup'},from:{id:9,first_name:'Member'},text:'Stop it'}},other);
+    await assert.rejects(s.jobs.stop(await actor(elsewhere.id,other),{id:stopped.id}),{status:404,code:'job_not_found'},'the person who asked, but in another chat');
+    assert.equal((await job(stopped.id)).cancel_requested,false);
     assert.equal((await s.jobs.stop(await actor((await message('stop-it')).id),{id:stopped.id})).state,'stopping');
     assert.equal((await stores.control.query('SELECT cancel_requested FROM managed_runs WHERE event_id=$1',[(await step(stopped.id)).event_id])).rows[0].cancel_requested,true);
     assert.equal(await s.jobs.steps.deliveryAllowed(stepReader),false,'a stopped step may not go on');
@@ -147,20 +153,38 @@ test('a background job is sized, approved on its card, runs step after step in i
       [{state:'rejected',error_code:'job_stopped'},{state:'rejected',error_code:'job_stopped'}],'Stop ends what the job asked for');
     // A member's job over the owner's limit waits for the owner in their private chat.
     price=40;
-    const big=await s.actionCommands.offer('background',await s.jobs.propose(await actor((await message('big',8)).id),{title:'Huge',instruction:'Read years.'}));
+    const big=await s.actionCommands.offer('background',await s.jobs.start(await actor((await message('big',8)).id),{title:'Huge',instruction:'Read years.'}));
     assert.equal(big.approver,'owner');assert.equal(last('card').chat_id,'123');assert.match(big.message,/owner was asked privately/);
     assert.equal(Number((await job(big.id)).cost_limit_usd),60,'an approved estimate sets the limit at half again');
+    // So does a member's job with no known price.
+    price=null;
+    const unpriced=await s.actionCommands.offer('background',await s.jobs.start(await actor((await message('unpriced',8)).id),{title:'Unpriced',instruction:'Read the made-up notes.'}));
+    assert.equal(unpriced.approver,'owner');assert.equal((unpriced.estimate as any).cost_usd,null);assert.match(last('card').text,/cost unknown/);
+    price=1.2;
+    // A job whose time limit would pass the longest one is refused before anything is recorded or checked.
+    const sources=s.jobs.sources,size=sources.size.bind(sources),before=Number((await stores.control.query('SELECT count(*) FROM background_jobs')).rows[0].count);
+    sources.size=async(...args:Parameters<typeof size>)=>({...await size(...args),characters:200000000});
+    try {
+      await assert.rejects(s.jobs.start(await actor((await message('too-long',8)).id),{title:'Every year',instruction:'Read every message ever sent.'}),{status:409,code:'job_too_long'});
+      await assert.rejects(s.jobs.start(await actor((await privately('too-long-owner','Read it all')).id,null),{title:'Every year',instruction:'Read it all.'}),{code:'job_too_long'},'the owner too');
+    } finally {sources.size=size;}
+    assert.equal(Number((await stores.control.query('SELECT count(*) FROM background_jobs')).rows[0].count),before);
     // Members start a few jobs a day per group; the owner sets how many.
     const settings=await s.jobs.settings();
     await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:60,member_daily_jobs:1,revision:settings.revision});
-    await assert.rejects(s.jobs.propose(await actor((await message('more')).id),{title:'More',instruction:'Again.'}),{code:'job_limit_reached'});
-    await assert.rejects(s.jobs.propose(await actor((await message('owner-more',123)).id),{title:'Owner',instruction:'Again.'}).then(value=>{throw Object.assign(Error('ok'),{code:value.state});}),
-      {code:'proposed'},'the owner has no daily limit');
+    await assert.rejects(s.jobs.start(await actor((await message('more')).id),{title:'More',instruction:'Again.'}),{code:'job_limit_reached'});
+    const ownerJob=await s.jobs.start(await actor((await message('owner-more',123)).id),{title:'Owner',instruction:'Again.'});
+    assert.equal(ownerJob.state,'proposed','the owner has no daily limit');
+    // A member may not stop the owner's job in their group; the owner stops any job, from any of their chats.
+    await assert.rejects(s.jobs.stop(await actor((await message('stop-owner',9)).id),{id:ownerJob.id}),{status:403,code:'job_not_permitted'});
+    assert.equal((await s.jobs.stop(await actor((await privately('owner-stops','Stop that one')).id,null),{id:ownerJob.id})).state,'stopped');
+    assert.equal((await s.jobs.stop(await actor((await message('owner-stops-big',123)).id),{id:big.id})).state,'stopped');
+    assert.deepEqual([(await job(ownerJob.id)).state,(await job(big.id)).state],['stopped','stopped']);
     // The owner's own job, asked in their private chat, reports there.
-    const privately=await capture('mine',{message:{message_id:901,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Read my chat'}},'123');
-    const binding=await s.guards.state(),me:Reader={admin:false,scope:null,space:'123',turnEvent:privately.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
-    const mine=await s.jobs.propose(me,{title:'Mine',instruction:'Read my chat.'});
-    await s.jobs.decide('123',{id:mine.id,fingerprint:mine.fingerprint,decision:'approve'},privately);
+    const myAsk=await privately('mine','Read my chat'),me=await actor(myAsk.id,null);
+    const mine=await s.jobs.start(me,{title:'Mine',instruction:'Read my chat.'});
+    assert.doesNotMatch((await s.jobs.card(mine.id)).text,/daily limit/,'the owner has none');
+    await s.jobs.decide('123',{id:mine.id,fingerprint:mine.fingerprint,decision:'approve'},myAsk);
     await s.jobs.operation('job:'+mine.id,await authority());
     await runStep(mine.id,{text:'My report.',continue:false,todo:[],cost_usd:0.1});
     await s.jobs.operation('job:'+mine.id,await authority());
