@@ -19,8 +19,10 @@ ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive
 # The owner sets skills; a turn may read them but never create or change one.
 OWNER_SET_TOOLS={'skill_manage'}
 TURN_TOOLSETS=['memory','session_search','nocheh_archive','skills']
+# A job's own turns never start, list or stop jobs.
+JOB_STRIPPED={'nocheh_background_job'}
 # A background job's steps also keep Hermes's own to-do list, restored from the job's history each step.
-BACKGROUND_TOOLS=ALLOWED_TOOLS|{'todo_list'}
+BACKGROUND_TOOLS=(ALLOWED_TOOLS-JOB_STRIPPED)|{'todo_list'}
 BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
 # A box step runs Hermes's own terminal, file and code tools in the job's sealed box. It keeps
 # the archive tools and Notion, and loses native memory, the shell and the browser.
@@ -45,6 +47,12 @@ def bind_profile_home(profile):
     """
     from hermes_constants import set_hermes_home_override
     set_hermes_home_override(profile)
+
+def turn_tools(background,box):
+    """The tools a turn drops from its profile's toolsets, and the exact set it then runs with."""
+    removed=OWNER_SET_TOOLS|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box else set())
+    return removed,BOX_TOOLS if box else BACKGROUND_TOOLS if background else ALLOWED_TOOLS
+
 
 def verify_profile_tools(names,allowed=ALLOWED_TOOLS):
     unexpected=set(names)-allowed
@@ -271,10 +279,10 @@ def run(body, emit=None):
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
-        removed=OWNER_SET_TOOLS|(BOX_STRIPPED if box else set())
+        removed,allowed=turn_tools(background,box)
         agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in removed]
         agent.valid_tool_names=set(agent.valid_tool_names)-removed
-        verify_profile_tools(agent.valid_tool_names,BOX_TOOLS if box else BACKGROUND_TOOLS if background else ALLOWED_TOOLS)
+        verify_profile_tools(agent.valid_tool_names,allowed)
         if box:
             # The box tools must all be there, on the box backend; the hook then lets only this step's tools
             # run, and none of their commands outlives the step.

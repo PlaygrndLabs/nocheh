@@ -36,6 +36,8 @@ export type Job = {
   steps: number;
   cost_usd: number;
   cost_limit_usd: number;
+  /** False when the reply model has no price: only the time limit applies. */
+  priced: boolean;
   minutes_limit: number;
   estimate: {minutes?: number; cost_usd?: number | null; messages?: number};
   todo: Todo[];
@@ -72,7 +74,7 @@ export function jobProgress(job: Job): string {
   return [
     job.steps === 1 ? '1 step' : `${job.steps} steps`,
     job.todo.length ? `${done} of ${job.todo.length} to-dos done` : null,
-    `${money(job.cost_usd)} of ${money(job.cost_limit_usd)}`,
+    job.priced ? `${money(job.cost_usd)} of ${money(job.cost_limit_usd)}` : 'cost can’t be measured',
   ]
     .filter(Boolean)
     .join(' · ');

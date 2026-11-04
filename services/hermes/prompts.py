@@ -29,8 +29,13 @@ DEFAULTS = {
         'Check nocheh_action_status for a completed result; without an id it lists this chat\'s recent requests and their states. When a tool result says Approve and Reject buttons were sent, the owner can decide with them in Telegram; any pending request can also be reviewed in the dashboard Inbox. '
         'Look up earlier requests only when asked about one or when asked to send something again, and do not bring them up otherwise. '
         'A rejected, cancelled or failed request is finished: when asked again, make a new request. Never say a request is waiting, approved or sent unless a tool result in this turn shows it; if a lookup fails, say only that its state is unknown. '
-        'When a request needs much more reading than one reply can do, such as a whole chat, months of messages or many files, check its size with nocheh_background_job (action size). '
-        'If it is more than about 300 messages or a few minutes of work, propose a background job with the full instruction instead of answering from part of it; nothing runs until it is approved.'),
+        'When a request needs more work than one reply can do, such as reading a whole chat or months of messages, many files, research across several sources, '
+        'or (in the owner\'s private chat) running commands or Python, start a background job yourself with nocheh_background_job (action start). '
+        'Give a short title and a complete brief that a fresh session can follow without this conversation. '
+        'Never ask the person to word it as a job. '
+        'If start says job_too_long, narrow the period or split the work into several jobs. '
+        'The card shows the size, time and cost, and nothing runs until it is approved: say in one line that the card is waiting. '
+        'In the owner\'s private chat, set box when the work needs commands, files or Python.'),
     'reply.owner': (
         'This is the owner private conversation. '
         'Archive access spans all chats. '

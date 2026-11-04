@@ -30,6 +30,8 @@ class ScriptedBrain:
     # arguments: [[tool:nocheh_tasks {"action":"list"}]], [[tool:memory {"action":"add",...}]].
     # Several in one turn are called one after another.
     TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+|memory|terminal|read_file|write_file|search_files|patch|execute_code)\s+(\{.*?\})\]\]', re.S)
+    # [[usage:N]] reports N prompt tokens for each scripted answer in that turn, so a background job's cost adds up.
+    USAGE = re.compile(r'\[\[usage:([0-9]{1,9})\]\]')
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
     TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
@@ -68,6 +70,12 @@ class ScriptedBrain:
         self.events = (self.events + [event])[-500:]
 
     def respond(self, body):
+        scripted = self.script(body)
+        users = [message for message in body.messages if message.role == 'user']
+        usage = self.USAGE.search(self.text(users[-1].content)) if scripted is not None and users else None
+        return {**scripted, 'prompt_tokens': int(usage[1])} if usage else scripted
+
+    def script(self, body):
         names = {tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)}
         if not any(isinstance(name, str) and name.startswith('nocheh_') for name in names):
             return None
@@ -164,7 +172,8 @@ class ScriptedBrain:
         if 'tool' in scripted:
             calls = [{'id': 'call_' + identity[-16:], 'type': 'function',
                       'function': {'name': scripted['tool'], 'arguments': json.dumps(scripted['arguments'], ensure_ascii=False)}}]
-        usage = {'prompt_tokens': 1, 'completion_tokens': max(1, len(content or '') // 4), 'total_tokens': 2}
+        prompt = scripted.get('prompt_tokens', 1)
+        usage = {'prompt_tokens': prompt, 'completion_tokens': max(1, len(content or '') // 4), 'total_tokens': prompt + 1}
         finish = 'tool_calls' if calls else 'stop'
         if not body.stream:
             return {'id': identity, 'object': 'chat.completion', 'created': 1577836800, 'model': model,

@@ -703,9 +703,9 @@ class ProductScenarios(Scenarios):
     # Background jobs ------------------------------------------------------------------------------------
 
     def background_job_runs_and_reports(self):
-        # The agent offers a job; the owner approves it on its card; the job runs in a session of its
+        # The agent starts a job with one call; the owner approves it on its card; the job runs in a session of its
         # own with the archive tools, sends its report where it was asked, and its card says it is done.
-        job = {'action': 'propose', 'title': 'Open tasks JOB1', 'instruction': 'Find what is still open [[search:JOBMARK1]]'}
+        job = {'action': 'start', 'title': 'Open tasks JOB1', 'instruction': 'Find what is still open [[search:JOBMARK1]]'}
         request = self.f.message(OWNER, 'کار بزرگ JOBMARK1 [[tool:nocheh_background_job '+json.dumps(job)+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
@@ -713,6 +713,7 @@ class ProductScenarios(Scenarios):
         target = json.loads(card['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
         self.gate('job_card_answers_the_request', target == request['message']['message_id'], target=target)
         self.gate('job_card_shows_job_and_estimate', 'Open tasks JOB1' in text and 'Find what is still open' in text and '⏱' in text, card=text)
+        self.gate('job_card_says_the_secret_check_ran', 'secret check' in text, card=text)
         self.gate('job_card_two_buttons', len(self.buttons(card)) == 2, buttons=[button['text'] for button in self.buttons(card)])
         time.sleep(3)
         self.gate('nothing_runs_before_approval', not [row for row in self.new(before) if not self.is_card(row)])
@@ -725,6 +726,31 @@ class ProductScenarios(Scenarios):
         self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
         jobs = [item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == 'Open tasks JOB1']
         self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
+
+    def background_job_cost_cap(self):
+        # Nocheh prices a job's tokens itself, at the rates frozen on its card (the fixture's rates, ADR-0206). Every
+        # scripted answer of the first step reports 8,000 prompt tokens, and its 24 searches pass the step's 20
+        # iterations, so the step goes on; its cost passes the job's $5 limit, so one short step writes the report.
+        searches = ' '.join('[[tool:nocheh_archive_search {"mode":"text","query":"COSTMARK%d","limit":1}]]' % index for index in range(24))
+        # ]] is escaped in the job's JSON so the scripted model reads the step's directives only in the step.
+        job = json.dumps({'action': 'start', 'title': 'Priced JOB3', 'instruction': 'Search each mark [[usage:8000]] ' + searches,
+                          'from': '2020-01-01', 'to': '2020-01-02'}).replace(']]', '\\u005d\\u005d')
+        request = self.f.message(OWNER, 'کار با هزینه JOBCOST [[tool:nocheh_background_job '+job+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        text = card['message']['text']
+        self.gate('job_card_shows_the_cost_limit', 'Priced JOB3' in text and 'Stops at $5' in text and 'not counting the secret check' in text, card=text)
+        self.press(card, 'approve')
+        jobs = self.wait('job_done', lambda: [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
+                                              if item.get('title') == 'Priced JOB3' and item.get('state') in ('done', 'failed', 'stopped')], 600)
+        found = jobs[0]
+        self.current['observed'] = {'job': {key: found.get(key) for key in ('state', 'steps', 'cost_usd', 'cost_limit_usd', 'priced', 'error_code')}}
+        self.gate('job_priced', found.get('priced') is True and found['cost_usd'] > 0, job=found)
+        self.gate('job_cost_passed_its_limit', found['cost_usd'] >= found['cost_limit_usd'], cost=found['cost_usd'], limit=found['cost_limit_usd'])
+        kinds = self.f.query('nocheh_control', "SELECT string_agg(kind,',' ORDER BY step,attempt) FROM background_steps WHERE job_id='%s'" % found['id'])
+        self.gate('job_took_its_wrap_up_step', found['state'] == 'done' and (kinds or '').split(',')[-1] == 'wrap_up', state=found['state'], kinds=kinds)
+        report = [row for row in self.replies(before, OWNER) if not self.is_card(row)]
+        self.gate('job_reported', len(report) >= 1, count=len(report))
 
     @staticmethod
     def docker(*arguments):
@@ -773,7 +799,7 @@ class ProductScenarios(Scenarios):
         instruction = 'Count the marked messages in the box. '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in steps)
         # Inside the proposal's own directive the instruction's braces are JSON escapes, so its directives stay whole.
         encoded = json.dumps(instruction).replace('{', '\\u007b').replace('}', '\\u007d')
-        proposal = '{"action": "propose", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
+        proposal = '{"action": "start", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
         request = self.f.message(OWNER, 'کار در جعبه JOBMARK2 [[tool:nocheh_background_job '+proposal+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         proposed = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
@@ -892,7 +918,7 @@ class ProductScenarios(Scenarios):
         marker = 'JOBRUNMARK1'
         # ]] is escaped in the job's JSON so the scripted model reads the step's directive only in the step.
         instruction = 'Check with a command [[tool:nocheh_shell {"command":"printf '+marker+'"}]]'
-        job = json.dumps({'action': 'propose', 'title': 'Command JOB2', 'instruction': instruction}).replace(']]', '\\u005d\\u005d')
+        job = json.dumps({'action': 'start', 'title': 'Command JOB2', 'instruction': instruction}).replace(']]', '\\u005d\\u005d')
         request = self.f.message(OWNER, 'کار با فرمان JOBRUN [[tool:nocheh_background_job '+job+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
@@ -966,6 +992,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
-                 'background_job_runs_and_reports', 'background_job_uses_sealed_box', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
+                 'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']

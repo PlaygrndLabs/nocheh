@@ -29,7 +29,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions\/[a-f0-9]{64}|telegram\/destinations)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context|search))|jobs\/(size|propose|status|stop)|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context|search))|jobs\/(start|status|stop)|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
@@ -81,7 +81,7 @@ export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBin
     ...(event.managed&&event.channel==='scheduler'&&typeof payload.job_id==='string'?{job:payload.job_id}:{})};
 }
 /** What a job request may be told to correct, as services/hermes/archive_tools.py JOB_ERRORS names it; any other refusal stays opaque. */
-const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed']);
+const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long']);
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
 async function refusalCode(response:Response,max=4096):Promise<string|null> {
   const chunks=[];let size=0;
@@ -174,10 +174,10 @@ export function brokerServer(options:BrokerOptions) {
         if(knowledge&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
         const input=req.method==='POST'?await readJson(req,1024*1024):undefined,body=input===undefined?undefined:JSON.stringify(input);
         // A job asks for the box only where one can be filled: refused now, not failed at every step.
-        if(relay==='/v1/jobs/propose'&&(input as {box?:unknown}|null)?.box===true&&!boxTokenSet())throw new HttpError(409,'job_box_not_allowed');
+        if(relay==='/v1/jobs/start'&&(input as {box?:unknown}|null)?.box===true&&!boxTokenSet())throw new HttpError(409,'job_box_not_allowed');
         // Context preparation and proposals have their own enforcement. Read policies
         // apply to retrieval; native memory remains writable within the owned profile.
-        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/propose','/v1/jobs/stop'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
+        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/start','/v1/jobs/stop'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok) {
           // A job request is told what to correct, such as a member's daily limit or a box it may not have.
@@ -216,6 +216,15 @@ export function brokerServer(options:BrokerOptions) {
       await assertCurrent(principal);
       const current=await evaluate(options.pool,attempt.effect);
       if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
+      // A background job's requests count against its byte backstop, which holds without the step's own report: the
+      // bytes add up in one statement, and once they pass the budget no further call goes out (ADR-0206). The refusal is
+      // a 409, which Hermes takes as final and never as a rejected key or a limit to retry or rotate past.
+      const sent=JSON.stringify(prepared.payload);
+      if(options.storage&&binding.job) {
+        const job=(await options.pool.query<{model_bytes:string;byte_budget:string|null}>('UPDATE background_jobs SET model_bytes=model_bytes+$2 WHERE id=$1 RETURNING model_bytes,byte_budget',
+          [binding.job,Buffer.byteLength(sent)])).rows[0];
+        if(job&&job.byte_budget!==null&&Number(job.model_bytes)>Number(job.byte_budget))throw new HttpError(409,'job_cost_limit');
+      }
       timings.broker_prepare_ms=elapsed(prepareStarted);
       // A gateway's bot check can refuse a client without a name, as it refused Honcho's model calls.
       const headers:Record<string,string>=anthropic?anthropicHeaders(String(transport.api_key),req.headers['anthropic-beta']):
@@ -223,7 +232,7 @@ export function brokerServer(options:BrokerOptions) {
       for(const [key,value] of Object.entries(object(transport.headers??{})))if(key.toLowerCase()==='user-agent'&&typeof value==='string')headers['user-agent']=value;
       await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.reference??binding.event_id);attempt.started=true;
       const providerStarted=performance.now();let response:Response;
-      try{response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});}
+      try{response=await call(destination,{method:'POST',headers,body:sent,redirect:'error',signal:controller.signal});}
       finally{timings.provider_headers_ms=elapsed(providerStarted);}
       if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.reference??binding.event_id,undefined,timings);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
       await stream(response,principal,res,8*1024*1024,timings);

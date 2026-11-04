@@ -249,7 +249,7 @@ export class ActionCommandRepository {
         text:card.text,links:[],buttons:[[line.approve.slice(0,40),'na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],[line.reject.slice(0,40),'nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
       if(sent?.state!=='done')return result;
       return {...result,message:card.row.approver==='owner'&&card.row.requester?
-        'The owner was asked privately, with Approve and Reject buttons, to approve this job, because its cost is over what a member may start. Say so briefly with the estimate; nothing runs until the owner approves.':
+        'The owner was asked privately, with Approve and Reject buttons, to approve this job, because its cost is over what a member may start or cannot be measured. Say so briefly with the estimate; nothing runs until the owner approves.':
         'A card with Approve and Reject buttons for this job was posted here as the reply to the request. It shows the job, its size, time and cost, so say at most one short sentence; nothing runs until it is approved.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }

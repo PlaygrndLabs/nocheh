@@ -289,10 +289,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
     if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
-    if(req.method==='POST'&&/^\/v1\/jobs\/(?:size|propose|status|stop)$/.test(path)) {
+    if(req.method==='POST'&&/^\/v1\/jobs\/(?:start|status|stop)$/.test(path)) {
       const body=await readJson(req),action=path.slice('/v1/jobs/'.length);
-      if(action==='size')return result(await s.jobs.size(principal,body));
-      if(action==='propose')return result(await s.actionCommands.offer('background',await s.jobs.propose(principal,body)));
+      if(action==='start')return result(await s.actionCommands.offer('background',await s.jobs.start(principal,body)));
       if(action==='status')return result(await s.jobs.list(principal));
       const stopped=await s.jobs.stop(principal,body);
       // A stopped job's card shows that it stopped.

@@ -149,9 +149,9 @@ class ManagedAsync:
         receipt={'event_id':context['event_id'],'actor':context['actor'],'state':state,'text':result.get('text',''),
             'session':result.get('session_id',context['conversation']),'error_code':result.get('error_code')}
         if channel=='background':
-            # What the step leaves for the job: whether it goes on, its to-do list and its cost.
+            # What the step leaves for the job: whether it goes on, its to-do list and its token counts, which Nocheh prices.
             receipt.update({'continue':result.get('continue') is True,'todo':result.get('todo') if isinstance(result.get('todo'),list) else [],
-                            'cost_usd':result.get('cost_usd') if isinstance(result.get('cost_usd'),(int,float)) else None})
+                            'tokens':result.get('tokens') if isinstance(result.get('tokens'),dict) else None})
         if channel=='scheduler':
             from .scheduler import now
             receipt['_schedule']={'logical_profile':context['logical_profile'],'job_id':context['job_id'],'scope':context['scope'],

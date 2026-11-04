@@ -26,6 +26,7 @@ from tools.operations.installation.configuration import initialize, write_env, c
 # Routes accept this plain-HTTP address only inside an installation fixture.
 FIXTURE_MODEL_URL = 'http://model-fixture:8317/v1'
 FIXTURE_PROVIDER = 'model-fixture'
+FIXTURE_REPLY_RATES = {'input': 50, 'output': 50, 'cache_read': 0.5, 'cache_write': 50}
 
 
 def main():
@@ -157,6 +158,11 @@ def main():
                 service['volumes'].append({'type': 'bind', 'source': str(installation), 'target': str(installation), 'read_only': True})
             if name in ('hermes', 'hermes-agent-sb'):
                 service['image'] = images['native']
+            if name == 'hermes':
+                # The scripted model has no price anywhere, so a background job's cost limit could never be reached:
+                # its rates here, USD per million tokens, are read only beside NOCHEH_INSTALLATION_FIXTURE=1 (usage.py).
+                # Cache reads stay cheap, as on real models, so the broker's byte backstop sits far above the cost limit.
+                service['environment']['NOCHEH_FIXTURE_REPLY_RATES'] = json.dumps(FIXTURE_REPLY_RATES)
             if name == 'hermes-agent-sb':
                 service['environment']['NOCHEH_TURN_IMAGE'] = images['native']
             if name in ('honcho-api', 'honcho-deriver'):

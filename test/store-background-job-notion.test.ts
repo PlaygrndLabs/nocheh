@@ -22,7 +22,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
-      if(operation==='usage.price')return {costs:[0.5]};
+      if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};
       if(operation==='run.resume')return {state:'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       assert.equal(operation,'telegram.approval');cards.push(input);return {state:'done',chat_id:input.chat_id,message_id:'5'};
@@ -40,7 +40,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
   const tick=async(id:string)=>s.jobs.operation('job:'+id,await authority());
   /** A job asked for in `chat` and approved by `by`, with its first step claimed and still running; returns the step's own reader. */
   const running=async(chat:string,from:number,by:string,title:string)=>{
-    const scope=chat==='123'?null:chat,proposed=await s.jobs.propose(await actor((await message(chat,from,'Check the made-up task table')).id,scope,chat),
+    const scope=chat==='123'?null:chat,proposed=await s.jobs.start(await actor((await message(chat,from,'Check the made-up task table')).id,scope,chat),
       {title,instruction:'Compare the made-up Notion task table with the group chat.',chat:group});
     await s.jobs.decide(by,{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message(chat,Number(by),'Approve'));
     await tick(proposed.id);
@@ -61,11 +61,11 @@ test('a job the owner approved in their private chat reads Notion under the owne
 
     // The card says what the job may do in Notion; only the owner's private job gets the line.
     const card=async(id:string)=>(await s.jobs.card(id)).text;
-    const offered=await s.jobs.propose(await actor((await message('123',123,'Check my made-up table')).id,null,'123'),{title:'Card check',instruction:'Read it.',chat:group});
+    const offered=await s.jobs.start(await actor((await message('123',123,'Check my made-up table')).id,null,'123'),{title:'Card check',instruction:'Read it.',chat:group});
     assert.doesNotMatch(await card(offered.id),/📒/,'no line while Notion is off');
     await saveNotion({enabled:true});
-    assert.match(await card(offered.id),/🛑 Stops at \$5\.0 or 60 min\n📒 It can read your Notion without asking\. Changes still ask you\./);
-    const member=await s.jobs.propose(await actor((await message(group,9,'Check it here')).id,group,group),{title:'Group card',instruction:'Read it.'});
+    assert.match(await card(offered.id),/🛑 Stops at \$5\.0 or 60 min, not counting the secret check\n🔎 Starting it already used one secret check\.\n📒 It can read your Notion without asking\. Changes still ask you\./);
+    const member=await s.jobs.start(await actor((await message(group,9,'Check it here')).id,group,group),{title:'Group card',instruction:'Read it.'});
     assert.doesNotMatch(await card(member.id),/📒/,'a group job never reaches Notion, so its card says nothing about it');
     await saveNotion({approval:'everything'});
     assert.doesNotMatch(await card(offered.id),/📒/,'when everything asks, the job reads nothing without asking');

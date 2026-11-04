@@ -94,7 +94,8 @@ class ManagedAsyncTests(unittest.TestCase):
         seen={}
         async def runner(root,scope,body,model,credentials,session,emit,cancelled):
             seen.update(body=body,emit=emit);self.count+=1
-            return {'state':'done','text':'progress so far','session_id':session,'continue':True,'todo':[{'content':'read March','status':'pending'}],'cost_usd':0.4}
+            return {'state':'done','text':'progress so far','session_id':session,'continue':True,'todo':[{'content':'read March','status':'pending'}],
+                    'tokens':{'input_tokens':900,'output_tokens':80,'cache_read_tokens':0,'cache_write_tokens':0,'calls':2}}
         self.runtime.runner=runner
         step={**self.body,'channel':'background'}
         self.runtime.runs.start(step)
@@ -103,6 +104,7 @@ class ManagedAsyncTests(unittest.TestCase):
             time.sleep(.01)
         self.assertEqual(seen['body']['background']['max_iterations'],20)
         self.assertIsNone(seen['emit'],'a job step streams nothing to a browser')
-        self.assertEqual(self.finished['continue'],True);self.assertEqual(self.finished['cost_usd'],0.4)
+        self.assertEqual(self.finished['continue'],True);self.assertNotIn('cost_usd',self.finished)
+        self.assertEqual(self.finished['tokens'],{'input_tokens':900,'output_tokens':80,'cache_read_tokens':0,'cache_write_tokens':0,'calls':2})
         self.assertEqual(self.finished['todo'],[{'content':'read March','status':'pending'}])
         self.assertEqual(routes[:3],['workflow-context','claim','prepare']);self.assertIn('finish',routes)

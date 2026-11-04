@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS background_steps (
  continues boolean,todo jsonb,cost_usd numeric,counted boolean NOT NULL DEFAULT false,
  created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(job_id,step,attempt)
 );
+-- What the job's model use costs, frozen when it is asked: the reply model's USD rates per million tokens, and the
+-- broker's byte backstop with the request bytes it has counted (ADR-0206). A step keeps the token counts it reported.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS rates jsonb;
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS byte_budget bigint;
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS model_bytes bigint NOT NULL DEFAULT 0;
+ALTER TABLE background_steps ADD COLUMN IF NOT EXISTS tokens jsonb;
 CREATE TABLE IF NOT EXISTS background_reports (
  job_id text NOT NULL REFERENCES background_jobs(id),part integer NOT NULL CHECK(part>0),action_id text NOT NULL,PRIMARY KEY(job_id,part)
 );
@@ -64,6 +70,8 @@ const WORK_ITERATIONS=20,WRAP_UP_ITERATIONS=4;
 const STEP_RETRIES=2;
 // Jobs that run at once; each holds one sealed agent run while it works.
 const RUNNING_JOBS=2;
+// The longest time limit a job may have.
+export const JOB_MINUTES=1440;
 // A proposal waits this long for its decision.
 const DECISION_HOURS=24;
 // The report goes to the chat in parts the Telegram sender splits further.
@@ -78,6 +86,45 @@ export function jobTokens(size:{records:number;characters:number;files:number;im
   const pages=Math.max(1,Math.ceil(read/7500));
   return {read,pages,input:Math.ceil(read*1.25)+pages*6000,output:pages*400+3000,calls:pages+2,minutes:Math.max(2,Math.ceil(pages*12/60)+1)};
 }
+/** The reply model's USD rates per million tokens, and per call for `request`, frozen on a job's card; null where no price is known. */
+export type JobRates={input:number|null;output:number|null;cache_read:number|null;cache_write:number|null;request:number|null};
+const RATE_NAMES=['input','output','cache_read','cache_write','request'] as const;
+const TOKEN_NAMES=['input_tokens','output_tokens','cache_read_tokens','cache_write_tokens','calls'] as const;
+/** Rates as the runtime gives them: each a number from 0 below a million, else unknown. */
+export const jobRates=(value:unknown):JobRates=>Object.fromEntries(RATE_NAMES.map(name=>{const rate=(value as any)?.[name];
+  return [name,typeof rate==='number'&&Number.isFinite(rate)&&rate>=0&&rate<1e6?rate:null];})) as JobRates;
+/** Whether a job's cost can be measured: only with known input and output rates. */
+export const jobPriced=(rates:JobRates|null|undefined)=>typeof rates?.input==='number'&&typeof rates?.output==='number';
+/** A step receipt's token counts: whole numbers from 0 below 10^12 in exactly these fields, else null. */
+export function stepTokens(value:unknown):Record<typeof TOKEN_NAMES[number],number>|null {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const body=value as Record<string,unknown>;
+  if(Object.keys(body).some(key=>!(TOKEN_NAMES as readonly string[]).includes(key))||
+    TOKEN_NAMES.some(name=>!Number.isSafeInteger(body[name])||(body[name] as number)<0||(body[name] as number)>=1e12))return null;
+  return Object.fromEntries(TOKEN_NAMES.map(name=>[name,body[name]])) as any;
+}
+// A step that reports no token counts is priced as if each of its iterations were a call this large.
+const UNKNOWN_INPUT=100000,UNKNOWN_OUTPUT=8000;
+/** A step's cost in USD at the job's frozen rates. A step without counts is priced high, never as free, and so is one
+ * whose calls read no prompt, since every model call reads one: its provider reported no usage. A cache bucket without
+ * its own rate takes the input rate, and each call adds its per-request price. Nothing is measured without a price. */
+export function stepCost(rates:JobRates|null|undefined,tokens:unknown,iterations:number):number {
+  if(!jobPriced(rates))return 0;
+  const {input,output}=rates as {input:number;output:number},request=rates!.request??0,counts=stepTokens(tokens);
+  if(!counts||counts.calls>0&&counts.input_tokens+counts.cache_read_tokens+counts.cache_write_tokens===0) {
+    const calls=Math.max(iterations,counts?.calls??0);return calls*(UNKNOWN_INPUT*input+UNKNOWN_OUTPUT*output)/1e6+calls*request;
+  }
+  return (counts.input_tokens*input+counts.output_tokens*output+counts.cache_read_tokens*(rates!.cache_read??input)+
+    counts.cache_write_tokens*(rates!.cache_write??input))/1e6+counts.calls*request;
+}
+// The bytes of a model request's JSON per input token, at most, for text: an assumption, to be measured (ADR-0206).
+const BYTES_PER_TOKEN=12;
+/** The model request bytes past which the broker refuses a job's calls: its cost limit spent at the cheapest
+ * non-zero rate a prompt token can have. None without a price, or when every prompt token is free. */
+export function byteBudget(costLimit:number,rates:JobRates):number|null {
+  const cheapest=Math.min(...[rates.input,rates.cache_read,rates.cache_write].filter((rate):rate is number=>typeof rate==='number'&&rate>0));
+  return jobPriced(rates)&&Number.isFinite(cheapest)?Math.floor(costLimit/(cheapest/1e6)*BYTES_PER_TOKEN):null;
+}
 const money=(value:number|null)=>value===null?'unknown cost':'$'+(value<1?value.toFixed(2):value.toFixed(value<10?1:0));
 const count=(value:number,one:string,many:string)=>value.toLocaleString('en-US')+' '+(value===1?one:many);
 const sizeLine=(size:any)=>[count(size.messages,'message','messages'),size.files?count(size.files,'file','files'):null,
@@ -91,6 +138,9 @@ export function reportParts(text:string,limit=REPORT_PART):string[] {
   }
   if(rest)parts.push(rest);return parts;
 }
+
+/** Whether the broker has counted a job's model requests past its byte backstop; it refuses their calls from then on. */
+const bytesSpent=(row:any)=>row.byte_budget!==null&&Number(row.model_bytes)>=Number(row.byte_budget);
 
 /** A job the owner asked for in their private chat; only its card is the owner's own to approve. */
 const privateJob=(row:any,owner:string|null|undefined)=>!!owner&&row.scope===owner&&!row.requester;
@@ -178,24 +228,16 @@ export class BackgroundJobRepository {
     const from=body.from===undefined?'':string(body.from,40),to=body.to===undefined?'':string(body.to,40);
     pageDate(from);pageDate(to,true);return {from,to};
   }
-  /** What reading the chat would take: its size, and the time and cost to read it once. */
+  /** What reading the chat would take: its size, the time, the reply model's rates, and the cost to read it once at them. */
   async estimate(size:Awaited<ReturnType<SourceRepository['size']>>) {
-    const tokens=jobTokens(size);let cost:number|null=null;
-    try {
-      const priced=await this.call('usage.price',{rows:[{part:'reply',input_tokens:tokens.input,output_tokens:tokens.output,calls:tokens.calls}]},15000);
-      const value=Array.isArray(priced.costs)?priced.costs[0]:null;if(typeof value==='number'&&Number.isFinite(value))cost=Math.round(value*100)/100;
-    }catch{/* An unknown price still shows the size and time. */}
-    return {...size,pages:tokens.pages,tokens:tokens.read,minutes:tokens.minutes,cost_usd:cost};
+    const tokens=jobTokens(size);let rates=jobRates(null);
+    try{rates=jobRates((await this.call('usage.price',{rates:'reply'},15000)).rates);}catch{/* An unknown price still shows the size and time. */}
+    const cost=jobPriced(rates)?Math.round(((tokens.input*rates.input!+tokens.output*rates.output!)/1e6+tokens.calls*(rates.request??0))*100)/100:null;
+    return {...size,pages:tokens.pages,tokens:tokens.read,minutes:tokens.minutes,cost_usd:cost,rates};
   }
-  async size(principal:Reader,input:unknown) {
-    const body=object(input);if(Object.keys(body).some(key=>!['chat','from','to'].includes(key)))throw new HttpError(400,'invalid_job_request');
-    if(!principal.admin)await this.turns.binding(principal);
-    const {from,to}=this.period(body),size=await this.sources.size(principal,{chat:body.chat===undefined?'':string(body.chat,64),from,to});
-    const estimate=await this.estimate(size),settings=await this.settings();
-    return {...estimate,from:from||null,to:to||null,limits:{cost_usd:settings.cost_limit_usd,minutes:settings.minutes_limit}};
-  }
-  /** Ask to start a job. Nothing runs until whoever approves it presses Approve. */
-  async propose(principal:Reader,input:unknown) {
+  /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
+   * Nothing runs until whoever approves it presses Approve. */
+  async start(principal:Reader,input:unknown) {
     const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box'].includes(key))||
       body.box!==undefined&&typeof body.box!=='boolean')throw new HttpError(400,'invalid_job_request');
     const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim();
@@ -211,22 +253,25 @@ export class BackgroundJobRepository {
       if(today>=settings.member_daily_jobs)throw new HttpError(409,'job_limit_reached');
     }
     const estimate=await this.estimate(size);
-    // A member's job over the owner's limit, or with no known cost, waits for the owner instead.
-    const approver=requester&&(estimate.cost_usd===null||estimate.cost_usd>settings.cost_limit_usd)?'owner':'requester';
+    // A member's job over the owner's limit, or on a model whose cost cannot be measured, waits for the owner instead.
+    const priced=jobPriced(estimate.rates),approver=requester&&(!priced||(estimate.cost_usd??0)>settings.cost_limit_usd)?'owner':'requester';
     const costLimit=Math.max(settings.cost_limit_usd,Math.ceil((estimate.cost_usd??0)*1.5)),minutesLimit=Math.max(settings.minutes_limit,Math.ceil(estimate.minutes*1.5));
+    const bytes=byteBudget(costLimit,estimate.rates);
+    // Refused before the secret check spends anything: the agent narrows the period or splits the work.
+    if(minutesLimit>JOB_MINUTES)throw new HttpError(409,'job_too_long');
     const id=digest(canonical([protocol,source,binding,title,instruction,size.chat,from,to]));
     const proposal=await this.derived.record({operation_id:'background-proposal:'+id,source,kind:'background_job_request',content:Buffer.from(canonical({title,instruction})),
       producer:'nocheh',producer_version:protocol,configuration:{binding,chat:size.chat,from,to}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),shown=object(JSON.parse(String((representation.value as any).text)));
-    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box}));
+    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes}));
     await this.control.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
-      fingerprint,estimate,cost_limit_usd,minutes_limit,box) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT DO NOTHING`,
+      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT DO NOTHING`,
       [id,source,proposal,representation.revision,binding,scope,space,size.chat,'job-'+id.slice(0,24),requester,approver,fingerprint,
-        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box]);
+        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes]);
     const row=await this.row(id);
     if(row.fingerprint!==fingerprint)throw new HttpError(409,'job_changed');
-    return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:Number(row.cost_limit_usd),minutes:row.minutes_limit},box:row.box as boolean,
+    return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:jobPriced(row.rates)?Number(row.cost_limit_usd):null,minutes:row.minutes_limit},box:row.box as boolean,
       message:row.state==='proposed'?'Nothing runs until it is approved.':'This job was already decided; its state is shown.'};
   }
   /** The exact proposal a card shows, read through the secret check of its audience. */
@@ -251,12 +296,16 @@ export class BackgroundJobRepository {
     const period=estimate.from||estimate.to?[estimate.from??'…',estimate.to??'…'].join(' – '):null;
     const values:Record<string,string|null|undefined>={title:shown.title,instruction:shown.instruction,
       size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
-      cost_limit:money(Number(row.cost_limit_usd)),minutes_limit:String(row.minutes_limit),origin:null,
-      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?lines.box:null};
+      // Without a price only the time limit applies, and the card says so instead of a cost limit.
+      cost_limit:jobPriced(row.rates)?money(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin:null,
+      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?lines.box:null,
+      checked:[lines.checked,row.requester?lines.member_limit:null].filter(Boolean).join(' ')||null};
     // What the job may do without asking is always on its card: a saved card without the line, or whose line
     // is left out for another missing value, gets it at the end.
     const template=prompts['background.card']??backgroundCard,kept=template.split('\n').filter(line=>lineKept(line,values));
-    const missing=[['notion','📒'],['box','🧰']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}');
+    // A forced cost line carries the time limit too, when a saved card left it out with the cost limit's line.
+    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}'+
+      (name==='unpriced'&&!kept.some(line=>line.includes('{minutes_limit}'))?' ({minutes_limit} min)':''));
     const text=fillTemplate(missing.length?template+'\n\n'+missing.join('\n'):template,values);
     const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
     return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines};
@@ -297,18 +346,20 @@ export class BackgroundJobRepository {
     for(const row of rows) {
       let title:string|null=null;try{title=(await this.proposal(row)).title;}catch(error){if(!(error instanceof HttpError))throw error;}
       jobs.push({id:row.id,title,state:row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.state,chat:row.target,asked_in:row.space_id,
-        steps:row.steps,cost_usd:Number(row.cost_usd),cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:row.minutes_limit,estimate:row.estimate,
+        steps:row.steps,cost_usd:Number(row.cost_usd),cost_limit_usd:Number(row.cost_limit_usd),priced:jobPriced(row.rates),minutes_limit:row.minutes_limit,estimate:row.estimate,
         todo:row.todo,started_at:row.started_at,finished_at:row.finished_at,created_at:row.created_at,error_code:row.error_code,
         ...(principal.admin?{logical_profile:row.logical_profile,approver:row.approver}:{})});
     }
     return {jobs};
   }
-  /** Stop a job: a proposal is withdrawn, a running job's step is cancelled and no report is sent. */
+  /** Stop a job: a proposal is withdrawn, a running job's step is cancelled and no report is sent.
+   * The card's rule: the dashboard and the owner stop any job; a member only the job they asked for,
+   * in its own chat, and a job of another chat stays unseen. A job's own turn stops none. */
   async stop(principal:Reader,input:unknown) {
-    const body=object(input),row=await this.row(body.id);
-    if(!principal.admin) {
-      await this.turns.binding(principal);
-      if(principal.scope!==null&&row.scope!==principal.scope)throw new HttpError(404,'job_not_found');
+    const body=object(input),live=principal.admin?null:await this.liveTurn(principal),row=await this.row(body.id);
+    if(live?.requester) {
+      if(row.scope!==live.turn.scope)throw new HttpError(404,'job_not_found');
+      if(row.requester!==live.requester)throw new HttpError(403,'job_not_permitted');
     }
     if(closedStates.has(row.state))throw new HttpError(409,'job_not_running');
     const changed=await this.control.query(`UPDATE background_jobs SET cancel_requested=true,state=CASE WHEN state='proposed' THEN 'stopped' ELSE state END,
@@ -384,25 +435,27 @@ export class BackgroundJobRepository {
         await this.control.query(`UPDATE background_jobs SET state='reporting',report_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='running'`,[id,step.result_reference]);
         return this.report({...job,state:'reporting',report_reference:step.result_reference});
       }
-      // At a limit, one last short step writes the report from what the job has found.
+      if(bytesSpent(job))return this.finish(job,'failed','job_cost_limit');
+      // At a limit, one last short step writes the report from what the job has found. Without a price only time limits it.
       const elapsed=(Date.now()-new Date(job.started_at).getTime())/60000;
-      const limited=Number(job.cost_usd)>=Number(job.cost_limit_usd)||elapsed>=job.minutes_limit;
+      const limited=jobPriced(job.rates)&&Number(job.cost_usd)>=Number(job.cost_limit_usd)||elapsed>=job.minutes_limit;
       await this.addStep(job,step.step+1,1,limited?'wrap_up':'work');
       return observation('waiting','assistant',job.steps,Date.now()+5000,'receipt_pending');
     }
     if(row.cancel_requested)return this.finish(row,'stopped');
+    if(bytesSpent(row))return this.finish(row,'failed','job_cost_limit');
     if(step.attempt<=STEP_RETRIES){await this.addStep(row,step.step,step.attempt+1,step.kind);return observation('waiting','assistant',row.steps,Date.now()+10000,'receipt_pending');}
     return this.finish(row,'failed',step.run_error??'job_step_failed');
   }
-  /** Add a finished step's cost and to-do list to its job, once. */
+  /** Add a finished step's cost, priced at the job's frozen rates from the tokens it reported, and its to-do list to its job, once. */
   private async count(row:any,step:any) {
-    const db=await this.control.connect();
+    const cost=stepCost(row.rates,step.tokens,step.kind==='wrap_up'?WRAP_UP_ITERATIONS:WORK_ITERATIONS),db=await this.control.connect();
     try {
       await db.query('BEGIN');
-      const counted=await db.query('UPDATE background_steps SET counted=true WHERE event_id=$1 AND NOT counted RETURNING cost_usd,todo',[step.event_id]);
-      // A step that kept no to-do list leaves the last one in place.
-      if(counted.rowCount)await db.query(`UPDATE background_jobs SET steps=steps+1,cost_usd=cost_usd+$2,todo=coalesce(NULLIF($3::jsonb,'[]'::jsonb),todo),revision=revision+1,updated_at=now() WHERE id=$1`,
-        [row.id,Number(counted.rows[0].cost_usd??0),counted.rows[0].todo===null?null:JSON.stringify(counted.rows[0].todo)]);
+      const counted=await db.query('UPDATE background_steps SET counted=true,cost_usd=$2 WHERE event_id=$1 AND NOT counted RETURNING todo',[step.event_id,cost]);
+      // A step that kept no to-do list leaves the last one in place. A job's cost never goes down.
+      if(counted.rowCount)await db.query(`UPDATE background_jobs SET steps=steps+1,cost_usd=GREATEST(cost_usd,cost_usd+$2),todo=coalesce(NULLIF($3::jsonb,'[]'::jsonb),todo),revision=revision+1,updated_at=now() WHERE id=$1`,
+        [row.id,cost,counted.rows[0].todo===null?null:JSON.stringify(counted.rows[0].todo)]);
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
@@ -462,12 +515,13 @@ export class BackgroundJobRepository {
     if(step.kind==='wrap_up') {
       const elapsed=(Date.now()-new Date(row.started_at).getTime())/60000;
       return fillTemplate(prompts['background.wrap_up']??backgroundWrapUp,{title:shown.title,
-        limit:elapsed>=row.minutes_limit?row.minutes_limit+' minutes':money(Number(row.cost_limit_usd))});
+        limit:elapsed>=row.minutes_limit||!jobPriced(row.rates)?row.minutes_limit+' minutes':money(Number(row.cost_limit_usd))});
     }
     if(step.step>1)return fillTemplate(prompts['background.continue']??backgroundContinue,{title:shown.title});
     return fillTemplate(prompts['background.job']??backgroundJob,{title:shown.title,instruction:shown.instruction,
       chat:row.target===owner?'your private chat with the owner (chat '+row.target+')':'chat '+row.target,period,size:sizeLine(estimate),
-      limits:money(Number(row.cost_limit_usd))+' or '+row.minutes_limit+' minutes'});
+      // Without a price only the time limit applies, so the job is not told of a dollar limit.
+      limits:jobPriced(row.rates)?money(Number(row.cost_limit_usd))+' or '+row.minutes_limit+' minutes, whichever comes first':row.minutes_limit+' minutes'});
   }
   /** A step may run only while its job runs and the person who asked may still use Nocheh there. */
   async allowed(row:any) {
@@ -521,16 +575,16 @@ export class BackgroundStepRepository extends ManagedExecutionRepository {
       configuration:{binding:row.binding,profile:row.logical_profile,job_id:row.job_id},provenance:{binding:row.binding}});
     await this.current(row);return {reference,input};
   }
-  /** A step's result also says whether the job goes on, its to-do list and what it cost. */
+  /** A step's result also says whether the job goes on, its to-do list and the tokens it used, which the job prices.
+   * Counts that are missing or not plain whole numbers are kept as none, which is priced high. */
   override async finish(input:unknown){
     const body=object(input),row=await this.row(managedEventId(body.event_id));
     if(!row?.actor||row.actor!==body.actor)throw new HttpError(403,'run_actor_mismatch');
     const todo=Array.isArray(body.todo)?body.todo.slice(0,50).map(item=>{const value=object(item);
       return {content:string(value.content??'',200),status:string(value.status??'',20)};}):[];
-    const cost=typeof body.cost_usd==='number'&&Number.isFinite(body.cost_usd)&&body.cost_usd>=0?body.cost_usd:null;
-    await this.control.query('UPDATE background_steps SET continues=$2,todo=$3,cost_usd=$4 WHERE event_id=$1 AND NOT counted',
-      [row.event_id,body.continue===true,JSON.stringify(todo),cost]);
-    const {continue:_continue,todo:_todo,cost_usd:_cost,...result}=body;
+    await this.control.query('UPDATE background_steps SET continues=$2,todo=$3,tokens=$4 WHERE event_id=$1 AND NOT counted',
+      [row.event_id,body.continue===true,JSON.stringify(todo),stepTokens(body.tokens)]);
+    const {continue:_continue,todo:_todo,tokens:_tokens,...result}=body;
     return super.finish(result);
   }
   async stop(id:string){return this.cancelRow(id);}
