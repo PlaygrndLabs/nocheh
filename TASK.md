@@ -69,15 +69,15 @@ owner, and each card says how its changes ended; Stop rejects them
 [check](test/store-background-job-changes.test.ts)).
 Step 3, the sealed box: a job the owner asks for in their private chat can get
 a sealed box while "Sealed box for jobs" in Settings › Assistant is on (the
-default); its card says so, and the box is part of its fingerprint. Its work steps
-run Hermes's own terminal, file and Python tools in a container with no network,
+default); its card says so, and the box is part of its fingerprint. Its run uses
+Hermes's own terminal, file and Python tools in a container with no network,
 keys or Docker socket, and a read-only copy of the job's chat that passed the
 secret check. The box is kept while only reactions or automatic learning change
-and the last step ended normally, and removed within 15 seconds once the job stops, the switch goes off or
+and the last run ended normally, and removed within 15 seconds once the job stops, the switch goes off or
 its time is up; a launcher touches only its own installation's boxes. A box
-command never outlives its step. A `/chat` that runs out of room stops for good and
+command never outlives its run. A `/chat` that runs out of room stops for good and
 its manifest says `full`. A failed box job says `job_box_unavailable`, and a box
-request in the legacy runtime is refused. Those steps lose the approved shell, the
+request in the legacy runtime is refused. Those runs lose the approved shell, the
 browser, Hermes memory and subagents, and the tools are blocked in every other
 turn. Notion reads are an exact list of read tools, and
 a job's fetch by an address outside notion.so asks. Link previews are off for
