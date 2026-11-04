@@ -21,6 +21,7 @@ INTERNAL_KEYS = (
     ('NOCHEH_DERIVED_PASSWORD', 'Database', 'Login for the store of transcripts and assistant copies'),
     ('NOCHEH_CONTROL_PASSWORD', 'Database', 'Login for the store of settings, approvals and work'),
     ('NOCHEH_MEMORY_TOKEN', 'Long-term memory (Honcho)', 'Lets Honcho’s model calls pass Nocheh’s secret check'),
+    ('NOCHEH_BOX_TOKEN', 'Sealed job box', 'Lets the launcher read a job’s chat copy and the live box list from the broker'),
 )
 
 

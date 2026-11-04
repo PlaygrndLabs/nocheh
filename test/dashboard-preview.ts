@@ -147,7 +147,7 @@ const backgroundJobs:any[]=[
    started_at:minutesAgo(9),finished_at:null,created_at:minutesAgo(10),error_code:null},
   {id:hx('9b'),title:'Summary of last week',state:'done',chat:'42',asked_in:'42',steps:1,cost_usd:0.12,cost_limit_usd:5,minutes_limit:60,
    estimate:{minutes:2,cost_usd:0.1,messages:180},todo:[],started_at:minutesAgo(120),finished_at:minutesAgo(118),created_at:minutesAgo(121),error_code:null}];
-let jobLimits={cost_limit_usd:5,minutes_limit:60,member_daily_jobs:3,revision:0};
+let jobLimits={cost_limit_usd:5,minutes_limit:60,member_daily_jobs:3,box_tools:true,revision:0};
 const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',revision:2}];
 const devonId=hx('d1');
 const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
@@ -528,7 +528,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');
-    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),revision:jobLimits.revision+1};return json(res,200,jobLimits);}
+    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),
+      box_tools:typeof body.box_tools==='boolean'?body.box_tools:jobLimits.box_tools,revision:jobLimits.revision+1};return json(res,200,jobLimits);}
   const jobStop=route.match(/^\/background-jobs\/([a-f0-9]{64})\/stop$/);
   if(jobStop){const job=backgroundJobs.find(row=>row.id===jobStop[1]);if(!job)throw new HttpError(404,'job_not_found');job.state='stopping';return json(res,200,{id:job.id,state:'stopping'});}
   if(route==='/tasks/archive-finished')return json(res,200,await tasks.archiveFinished(taskOwner,body));

@@ -117,7 +117,14 @@ def meaning_tool(args, **kwargs):
         return json.dumps({'error':'memory_search_unavailable'})
 
 
-JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job')
+JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed')
+
+
+def isolated_runtime():
+    """Whether job steps run in the isolated runtime, the only one with sealed boxes: this is an
+    isolated turn (its container does not carry the runtime setting), or the setting says so."""
+    from .security_transport import isolated_enabled
+    return os.environ.get('NOCHEH_ISOLATED_TURN')=='1' or isolated_enabled()
 
 
 def job_tool(args, **kwargs):
@@ -127,6 +134,8 @@ def job_tool(args, **kwargs):
         action=args.get('action')
         if action not in ('size','propose','status','stop'):raise ValueError('invalid_job_action')
         body={key:args[key] for key in ('title','instruction','chat','from','to','id') if isinstance(args.get(key),str) and args[key]}
+        if action=='propose' and type(args.get('box')) is bool:body['box']=args['box']
+        if body.get('box') and not isolated_runtime():return json.dumps({'error':'job_box_not_allowed'})
         return json.dumps(request('/v1/jobs/'+action,body),ensure_ascii=False)
     except HTTPError as error:
         # Storage says what to correct, such as a member's daily limit; other failures stay opaque.
@@ -202,7 +211,9 @@ def register(ctx):
          'written so that a fresh session can do it without this conversation; nothing runs until it is approved with buttons, and the result says who approves '
          'and what to tell the person. action=status lists this chat\'s jobs with their progress; action=stop with id stops one. Only the owner may name another chat.',
          {'action':{'type':'string','enum':['size','propose','status','stop']},'title':{'type':'string','maxLength':100},'instruction':{'type':'string','maxLength':8000},
-          'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'id':{'type':'string'}},['action'],job_tool),
+          'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'id':{'type':'string'},
+          'box':{'type':'boolean','description':'With propose: true when the job needs to run commands, work with files or run Python. '
+                 'It then gets a sealed box with no internet that holds only a checked copy of the job\'s own chat. Only for a job the owner asks for in their private chat.'}},['action'],job_tool),
         ('nocheh_telegram_destinations','In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner\'s approval.',
          {},[],destinations_tool),
     ):
@@ -265,7 +276,7 @@ def register(ctx):
             'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_notion';description=('The owner\'s own Notion, through Notion\'s MCP server, when the owner has connected it and turned it on. Only in the owner\'s '
-        'private conversation. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
+        'private conversation and in background jobs the owner approved there; in a job, changes always wait for the owner. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
         'notion-create-pages or notion-update-page) with its input. Reads may run right away and changes may wait for the owner to approve the exact call, '
         'as the owner set; the result says which. Ask only for what you need: for a big table, read its columns first, then query just the columns and rows '
         'you need, with a filter or a limit. A long result comes in parts; read every part with nocheh_action_status before relying on it. '

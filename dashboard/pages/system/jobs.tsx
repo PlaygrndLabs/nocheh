@@ -1,7 +1,8 @@
 /**
  * Background jobs: long work the agent proposed and someone approved, such as
  * reading a whole chat. Shown live with each job's to-do list, with Stop; and
- * the owner's limits for them, saved with the Save button at the top.
+ * the owner's limits and sealed box switch for them, saved with the Save
+ * button at the top.
  */
 import {useState} from 'react';
 import {Check, Circle, CircleDot, Square} from 'lucide-react';
@@ -9,7 +10,19 @@ import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
 import {refreshResources, useResource} from '../../lib/resource';
 import {ago, dateTime} from '../../lib/system-format';
-import {Badge, Button, Card, CardHeader, Field, Input, LoadError, LoadingRows, type Tone} from '../../ui/core';
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Field,
+  Input,
+  LoadError,
+  LoadingRows,
+  SettingRow,
+  Switch,
+  type Tone,
+} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {useChatNames} from '../messages/chat-names';
 
@@ -31,7 +44,13 @@ export type Job = {
   created_at: string;
   error_code: string | null;
 };
-type Limits = {cost_limit_usd: number; minutes_limit: number; member_daily_jobs: number; revision: number};
+type Limits = {
+  cost_limit_usd: number;
+  minutes_limit: number;
+  member_daily_jobs: number;
+  box_tools: boolean;
+  revision: number;
+};
 
 export const jobStates: Record<string, [string, Tone]> = {
   proposed: ['Waiting for approval', 'info'],
@@ -170,7 +189,7 @@ export function BackgroundJobs() {
 }
 
 const fields: {
-  key: keyof Omit<Limits, 'revision'>;
+  key: keyof Omit<Limits, 'revision' | 'box_tools'>;
   title: string;
   hint: string;
   min: number;
@@ -203,13 +222,15 @@ const fields: {
   },
 ];
 
+/** The job limits and the sealed box switch: one save over one revision, so neither makes the other's save stale. */
 export function BackgroundJobLimits() {
   const saved = useResource<Limits>('/background-jobs/settings');
   const [draft, setDraft] = useState<Partial<Limits>>({});
   const [revision, setRevision] = useState<number | null>(null);
   const data = saved.data;
-  const value = (key: keyof Limits) => draft[key] ?? data?.[key];
-  const edit = (key: keyof Limits, next: number) => {
+  const value = <K extends keyof Limits>(key: K) => draft[key] ?? data?.[key];
+  const box = value('box_tools') ?? true;
+  const edit = <K extends keyof Limits>(key: K, next: Limits[K]) => {
     setRevision(current => current ?? data?.revision ?? null);
     setDraft(current => {
       const changed = {...current, [key]: next};
@@ -223,13 +244,17 @@ export function BackgroundJobLimits() {
   };
   useDraftSource({
     id: 'background-job-limits',
-    labels: Object.keys(draft).length ? ['Background job limits'] : [],
+    labels: [
+      ...(fields.some(field => field.key in draft) ? ['Background job limits'] : []),
+      ...('box_tools' in draft ? ['Sealed box for jobs'] : []),
+    ],
     save: async () => {
       if (!data) return;
       const body = {
         cost_limit_usd: Number(value('cost_limit_usd')),
         minutes_limit: Number(value('minutes_limit')),
         member_daily_jobs: Number(value('member_daily_jobs')),
+        box_tools: box,
         revision: revision ?? data.revision,
       };
       if (fields.some(field => !(body[field.key] >= field.min && body[field.key] <= field.max)))
@@ -239,11 +264,12 @@ export function BackgroundJobLimits() {
         reset();
         await refreshResources();
       } catch (e) {
-        throw new Error(
-          /conflict|changed/.test((e as ApiError)?.message ?? '')
-            ? 'Job limits were changed somewhere else. Your edits are kept; check them and save again.'
-            : 'Couldn’t save the job limits.',
-        );
+        if (!/conflict|changed/.test((e as ApiError)?.message ?? ''))
+          throw new Error('Couldn’t save the job settings.');
+        // The next save goes over the current revision; the edits are kept.
+        setRevision(null);
+        await refreshResources();
+        throw new Error('Job settings were changed somewhere else. Your edits are kept; check them and save again.');
       }
     },
     discard: reset,
@@ -260,22 +286,36 @@ export function BackgroundJobLimits() {
         ) : !data ? (
           <LoadingRows rows={3} />
         ) : (
-          <div className="grid gap-4 px-5 py-4 sm:grid-cols-3">
-            {fields.map(field => (
-              <Field key={field.key} label={field.title} hint={field.hint} htmlFor={'job-' + field.key}>
-                <Input
-                  id={'job-' + field.key}
-                  type="number"
-                  inputMode="decimal"
-                  min={field.min}
-                  max={field.max}
-                  step={field.step}
-                  value={String(value(field.key) ?? '')}
-                  onChange={e => edit(field.key, Number(e.target.value))}
-                />
-              </Field>
-            ))}
-          </div>
+          <>
+            <div className="grid gap-4 px-5 py-4 sm:grid-cols-3">
+              {fields.map(field => (
+                <Field key={field.key} label={field.title} hint={field.hint} htmlFor={'job-' + field.key}>
+                  <Input
+                    id={'job-' + field.key}
+                    type="number"
+                    inputMode="decimal"
+                    min={field.min}
+                    max={field.max}
+                    step={field.step}
+                    value={String(value(field.key) ?? '')}
+                    onChange={e => edit(field.key, Number(e.target.value))}
+                  />
+                </Field>
+              ))}
+            </div>
+            <SettingRow
+              title="Sealed box for jobs"
+              htmlFor="job-box-tools"
+              description="A job you ask for in your private chat can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads. Off: no new job gets a box, and running jobs lose theirs within seconds; their later steps run without one."
+            >
+              <Switch
+                id="job-box-tools"
+                label="Sealed box for jobs"
+                checked={box}
+                onChange={next => edit('box_tools', next)}
+              />
+            </SettingRow>
+          </>
         )}
       </div>
     </Card>

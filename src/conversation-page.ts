@@ -5,11 +5,28 @@ import {sourceContentTypes} from './source-content.js';
 
 /** How a conversation is read in order: one page of messages, oldest first. */
 export const PAGE_TEXT=1500,FILE_TEXT=1000,PAGE_BUDGET=30000;
+/** A sealed job box's copy of its chat is read whole, in bigger pages (job-box.ts); one record's
+ *  text and file texts together stay within the page budget, so one message never blocks the copy. */
+export const BOX_PAGE_RECORDS=200,BOX_PAGE_BUDGET=600000,BOX_RECORD_TEXT=BOX_PAGE_BUDGET;
 export type PageEntry='message'|'edit'|'reaction'|'assistant'|'service';
 
 const object=(value:unknown):Record<string,any>=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:{};
 const identifier=(value:unknown):string|null=>typeof value==='number'&&Number.isSafeInteger(value)||typeof value==='string'&&/^-?\d{1,20}$/.test(value)?String(value):null;
 const cut=(text:string,limit:number)=>({text:text.slice(0,limit),...(text.length>limit?{truncated:true}:{})});
+/** A box record's text, then its file texts, within one budget. The first text that passes it ends with a
+ *  note of how much was cut, the note counting toward the budget, and later texts are left empty. */
+function boxTexts(texts:string[]):{text:string;truncated?:true}[] {
+  const total=texts.reduce((sum,text)=>sum+text.length,0),note=(count:number)=>'\n[… '+count.toLocaleString('en-US')+' more characters cut from this copy]';
+  if(total<=BOX_RECORD_TEXT)return texts.map(text=>({text}));
+  let left=BOX_RECORD_TEXT-note(total).length;
+  const kept=texts.map(text=>{
+    // Never half of a character that takes two.
+    let keep=Math.min(text.length,left);if(keep<text.length&&/[\uD800-\uDBFF]/.test(text[keep-1]??''))keep--;
+    left-=keep;return text.slice(0,keep);
+  });
+  const first=kept.findIndex((text,i)=>text.length<texts[i]!.length),gone=total-kept.reduce((sum,text)=>sum+text.length,0);
+  return kept.map((text,i)=>text.length<texts[i]!.length?{text:i===first?text+note(gone):text,truncated:true}:{text});
+}
 
 /** What a stored record is in a conversation; null for updates that are not part of it, such as button presses. */
 export function pageEntry(kind:string,payload:unknown):PageEntry|null {
@@ -36,8 +53,9 @@ function exportedReactions(message:Record<string,any>) {
   });
 }
 
-/** One record in the compact form the agent pages through. Reply and topic ids are Telegram message ids. */
-export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;text:string;files?:{kind:string;text:string}[]}) {
+/** One record in the compact form the agent pages through. Reply and topic ids are Telegram message ids.
+ *  `whole`, for a sealed job box's copy, keeps every file and cuts texts only past one record's budget. */
+export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;text:string;files?:{kind:string;text:string}[]},whole=false) {
   const entry=pageEntry(input.kind,input.payload)!,value=object(input.payload);
   const message=object(value.message??value.edited_message??value.channel_post??value.edited_channel_post);
   const exported=input.kind.startsWith('telegram_desktop_');
@@ -48,13 +66,15 @@ export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;te
   const id=identifier(exported?message.id:message.message_id);
   const reactions=exported?exportedReactions(message):undefined;
   const types=sourceContentTypes(input.kind,input.payload).filter(type=>type!=='reaction');
+  const files=whole?input.files??[]:input.files?.slice(0,5)??[];
+  const [text,...texts]:{text:string;truncated?:boolean}[]=whole?boxTexts([input.text,...files.map(file=>file.text)]):[cut(input.text,PAGE_TEXT),...files.map(file=>cut(file.text,FILE_TEXT))];
   return {source:'nocheh:event:'+input.id,at:input.at.toISOString(),type:entry,
     ...(id?{message_id:id}:{}),...(reply?{reply_to:reply}:{}),...(topic?{topic}:{}),
     ...(sender?{from:sender.name??(sender.username?'@'+sender.username:sender.id)}:{}),
     ...(reaction?{reaction:{change:reaction.change,by:reaction.actor,message_id:reaction.target}}:{}),
-    ...(input.text?cut(input.text,PAGE_TEXT):{}),...(types.length?{content:types}:{}),
+    ...(input.text?text:{}),...(types.length?{content:types}:{}),
     ...(reactions?.length?{reactions}:{}),
-    ...(input.files?.length?{files:input.files.slice(0,5).map(file=>({kind:file.kind,...cut(file.text,FILE_TEXT)}))}:{})};
+    ...(files.length?{files:files.map((file,i)=>({kind:file.kind,...texts[i]!}))}:{})};
 }
 
 /** A page boundary is the last record's time, in microseconds, and its id, so a page never repeats or skips one. */

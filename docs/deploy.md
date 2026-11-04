@@ -124,6 +124,8 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 `TELEGRAM_OWNER_ID` and comma-separated negative `TELEGRAM_GROUP_IDS` before enabling.
 `NOCHEH_GUARD_MODE` is `on` (default) or `off`; legacy `auto` values convert to
 `on`. See [guarded-copy operations](guard.md).
+`NOCHEH_BOX_IMAGE`, `NOCHEH_BOX_LIMIT` and the generated `NOCHEH_BOX_TOKEN` set up
+the sealed job box; see [the security service](security-service.md).
 The API binds only to loopback; PostgreSQL has no host port.
 
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.

@@ -12,7 +12,7 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
   'telegram.approval_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
-  'background.job','background.continue','background.wrap_up','background.card','background.texts'] as const;
+  'background.job','background.continue','background.wrap_up','background.card','background.texts','background.box'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -75,12 +75,17 @@ export const approvalTexts=[
   'reason_changed: something it used changed after it was asked. Ask again if you still want it.','reason_cancelled: it was cancelled.',
   'reason_stopped: the job was stopped.','reason_other: see the dashboard Inbox.',
   'from_job: the job “{title}”','from_schedule: a scheduled task',
+  'list: 📋 The job “{title}” asks to make these changes ({count}).','list_part: Card {part} of {parts}.','list_note: Approve or Reject covers exactly the changes on this card.',
+  'list_long: {count} more cannot be shown on a card. Review them in the dashboard Inbox.','list_inbox: 📋 The job “{title}” asks to make changes that cannot be shown on a card ({count}). Review them in the dashboard Inbox.','list_done: ✅ Approved and done: all {count} changes.',
+  'list_some: ⚠️ Approved: {done} of {count} changes were made. See the dashboard Inbox for the rest.',
+  'list_partly: ✅ Approved {done} of {count}. The rest changed or were already decided; see the dashboard Inbox.',
+  'list_partly_rejected: ❌ Rejected {done} of {count}. The rest were already decided; see the dashboard Inbox.',
   'only_owner: Only the owner can approve or reject this.','only_requester: Only the person who asked or the owner can approve or reject this.',
   'changed: This request changed or no longer exists. Review it in the dashboard Inbox.',
   'decided: This request was already decided or can no longer change. Review it in the dashboard Inbox.'].join('\n');
 export type ApprovalText='approve'|'reject'|'private_chat'|'unnamed_group'|'topic'|'unnamed_topic'|'general_topic'|'sent'|'sending'|'done'|'approved'|'failed'|'rejected'|'rejected_action'|'cancelled'|
   'failed_action'|'unsure'|'not_run'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_other'|
-  'from_job'|'from_schedule'|'only_owner'|'only_requester'|'changed'|'decided';
+  'from_job'|'from_schedule'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
   return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;
@@ -90,9 +95,11 @@ export function labeledLines(defaults:string,text:string|undefined):Record<strin
   const read=(value:string)=>Object.fromEntries(value.split('\n').map(line=>line.match(/^\s*([a-z_]+)\s*:\s*(.*\S)\s*$/)).filter(match=>!!match).map(match=>[match![1],match![2]]));
   return {...read(defaults),...read(text??'')};
 }
+/** Whether a template line stays when filled: none of its placeholders lacks its value. */
+export const lineKept=(line:string,values:Record<string,string|null|undefined>)=>![...line.matchAll(/\{([a-z_]+)\}/g)].some(([,name])=>name! in values&&!values[name!]);
 /** Fill a card template; a line naming a value that is missing is left out. */
 export function fillTemplate(template:string,values:Record<string,string|null|undefined>):string {
-  return template.split('\n').filter(line=>![...line.matchAll(/\{([a-z_]+)\}/g)].some(([,name])=>name! in values&&!values[name!]))
+  return template.split('\n').filter(line=>lineKept(line,values))
     .map(line=>line.replace(/\{([a-z_]+)\}/g,(whole,name)=>name in values?values[name]!:whole)).join('\n').replace(/\n{3,}/g,'\n\n').trim();
 }
 /** A task reminder in the owner's private chat. A line whose value is missing,
@@ -113,22 +120,37 @@ export const backgroundJob=['[Background job: {title}]',
   'Read what the instruction needs. nocheh_archive_page reads a chat in time order, page by page: pass next as after until complete is true. '+
   'Keep a to-do list with the todo_list tool of what is left and what you found; it is kept when this session goes on in a new step. '+
   'When the work is done, write the final report as your answer, in the language of the instruction. It is sent to the chat where the job was asked. '+
-  'Nobody answers questions during the job: say in the report what was unclear.',
+  'Nobody answers questions during the job: say in the report what was unclear. '+
+  'Changes you ask for during the job, such as Notion edits, wait until it ends; then the owner approves them together. Do not wait for them, and say in the report what you asked for.',
   'The job stops at {limits}, whichever comes first.'].join('\n');
 /** Each later step of a background job. */
 export const backgroundContinue='[Background job: {title}]\nContinue the job where you stopped. Your to-do list and the work so far are above. Actions you asked for may have run since: nocheh_action_status lists them and reads each result. When the work is done, write the final report as your answer.';
 /** The last step when a background job reaches its cost or time limit. */
 export const backgroundWrapUp='[Background job: {title}]\nThe job reached its limit of {limit}. Stop reading now. Write the final report from what you have found, in the language of the instruction, and say what is left undone.';
-/** The Approve and Reject card for a background job. A line whose value is missing is left out. */
-export const backgroundCard='🗂 Background job: {title}\n📏 {size}\n⏱ About {minutes} min, {cost}\n🛑 Stops at {cost_limit} or {minutes_limit} min\n\n{instruction}';
-/** One "name: text" line for each state shown on a decided job card. */
+/** Added to each step of a background job that runs in its sealed box. */
+export const backgroundBox=['[Sealed box]',
+  'In this step your terminal, file and execute_code tools run in a sealed box of this job. /chat holds a read-only copy of the chat the job works on: '+
+  'its messages in the job\'s period that passed the secret check, one JSON record per line in part-NNNNN.jsonl files. '+
+  'Records within a part are oldest first, but a later part can hold older records that finished their secret check later: sort by the at field when order matters. '+
+  'Reaction updates are left out; an imported message keeps the reactions it was exported with. '+
+  'A message whose text and file texts pass 600,000 characters in all is cut, with a note saying so. '+
+  '/chat/manifest.json says whether the copy is complete and how many messages were still being checked; those are added in a later step. '+
+  'When the manifest says full, /chat ran out of room: the copy stays partial for good, and your archive tools still read the rest. '+
+  '/work is yours to write in. The box has no internet and no keys. '+
+  'What is in /work is lost when the job ends, and can be lost between steps when what the job may read changes, so keep what you find in your to-do list and the report.'].join('\n');
+/** The Approve and Reject card for a background job. A line whose value is missing is left out; a saved card
+ *  without the {notion} or {box} line still shows that line, at its end. */
+export const backgroundCard='🗂 Background job: {title}\n📏 {size}\n⏱ About {minutes} min, {cost}\n🛑 Stops at {cost_limit} or {minutes_limit} min\n📒 {notion}\n🧰 {box}\n\n{instruction}';
+/** One "name: text" line for each state shown on a decided job card, and the card's Notion and sealed box lines. */
 export const backgroundTexts=['running: ⏳ Approved. It runs now and reports here when done.','queued: ⏳ Approved. It starts when a running job finishes.',
   'done: ✅ Done. The report is in the chat.','stopped: 🚫 Stopped. Nothing more runs.','failed: ⚠️ It stopped because of a problem. See Background work in the dashboard.',
-  'rejected: ❌ Rejected. Nothing ran.'].join('\n');
+  'rejected: ❌ Rejected. Nothing ran.','notion_reads: It can read your Notion without asking. Changes still ask you.',
+  'box: It can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads.'].join('\n');
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
   'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
-  'background.job':backgroundJob,'background.continue':backgroundContinue,'background.wrap_up':backgroundWrapUp,'background.card':backgroundCard,'background.texts':backgroundTexts};
+  'background.job':backgroundJob,'background.continue':backgroundContinue,'background.wrap_up':backgroundWrapUp,'background.card':backgroundCard,'background.texts':backgroundTexts,
+  'background.box':backgroundBox};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

@@ -404,6 +404,58 @@ test('discard drops unsaved edits', async () => {
   await page.close();
 });
 
+test('the sealed box switch saves with the job limits in either order, and again after a change elsewhere', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const posts = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/background-jobs/settings'))
+      posts.push(request.postDataJSON());
+  });
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  const box = page.getByRole('switch', {name: 'Sealed box for jobs'});
+  const minutes = page.locator('#job-minutes_limit');
+  const on = async () => (await box.getAttribute('aria-checked')) === 'true';
+  // One save sends the switch and the limits together, over one revision, whichever was changed first.
+  for (const order of ['switch first', 'limit first']) {
+    const wasOn = await on();
+    const next = String(Number(await minutes.inputValue()) + 5);
+    if (order === 'switch first') await box.click();
+    await minutes.fill(next);
+    if (order === 'limit first') await box.click();
+    await bar.getByText('2 unsaved changes').waitFor();
+    const sent = posts.length;
+    await bar.getByRole('button', {name: 'Save'}).click();
+    await bar.getByText('No unsaved changes').waitFor();
+    assert.equal(posts.length, sent + 1, order);
+    assert.equal(posts.at(-1).box_tools, !wasOn, order);
+    assert.equal(posts.at(-1).minutes_limit, Number(next), order);
+    assert.equal(await on(), !wasOn, order);
+    assert.equal(await minutes.inputValue(), next, order);
+  }
+  // Changed elsewhere meanwhile: the save is refused with the edit kept, and Try again saves over the new revision.
+  const other = await open('settings?view=assistant');
+  const otherBar = other.page.getByRole('region', {name: 'Save changes'});
+  const wasOn = await on();
+  const next = String(Number(await minutes.inputValue()) + 5);
+  await minutes.fill(next);
+  await other.page.getByRole('switch', {name: 'Sealed box for jobs'}).click();
+  await otherBar.getByRole('button', {name: 'Save'}).click();
+  await otherBar.getByText('No unsaved changes').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByRole('button', {name: 'Try again'}).waitFor();
+  assert.match(await bar.textContent(), /Job settings were changed somewhere else\. Your edits are kept/);
+  assert.equal(await minutes.inputValue(), next, 'the edit is kept');
+  await bar.getByRole('button', {name: 'Try again'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.reload();
+  await minutes.waitFor();
+  assert.equal(await minutes.inputValue(), next);
+  assert.equal(await on(), !wasOn, 'the switch saved elsewhere stays');
+  assert.deepEqual([...problems, ...other.problems], []);
+  await other.page.close();
+  await page.close();
+});
+
 test('a custom provider is checked, added and saved from one dialog', async () => {
   const {page, problems} = await open('settings?view=models');
   await page.getByRole('button', {name: 'Add provider'}).first().click();

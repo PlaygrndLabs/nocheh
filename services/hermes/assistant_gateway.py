@@ -90,6 +90,20 @@ def delivery_failure(requests):
     return None
 
 
+def adapter_config(token):
+    """The native adapter's settings; its own sends and replies carry no link preview."""
+    from gateway.config import PlatformConfig
+    return PlatformConfig(enabled=True,token=token,typing_indicator=False,gateway_restart_notification=False,extra={'disable_link_previews':True})
+
+
+def no_preview():
+    """Link previews off on every message Nocheh sends or edits itself. Telegram fetches
+    an address to preview it, so one placed in a card or reply would be fetched before
+    the owner has read it."""
+    from telegram import LinkPreviewOptions
+    return LinkPreviewOptions(is_disabled=True)
+
+
 def approval_links(links,length):
     """Text links on an approval card: a group's, topic's or message's t.me address over its name."""
     import re
@@ -337,10 +351,8 @@ class AssistantGateway:
 
     def _serve(self):
         async def run():
-            from gateway.config import PlatformConfig
             self.loop=asyncio.get_running_loop();self.capacity=asyncio.Semaphore(TURN_CAPACITY);self.action_lock=asyncio.Lock()
-            config=PlatformConfig(enabled=True,token=self.token,typing_indicator=False,gateway_restart_notification=False)
-            self.adapter=committed_adapter_class()(config);self.adapter.turn_typing=typing_enabled()
+            self.adapter=committed_adapter_class()(adapter_config(self.token));self.adapter.turn_typing=typing_enabled()
             async def message(event):
                 turn=TURN.get()
                 if turn is None:raise RuntimeError('uncommitted_turn')
@@ -547,7 +559,8 @@ class AssistantGateway:
                     # In the chat where it was asked, the card is the reply to the request.
                     # Links are entities over plain text, so no default formatting applies.
                     sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup([buttons]),
-                                                entities=entities,parse_mode=None,reply_to_message_id=int(reply) if reply else None,allow_sending_without_reply=True)
+                                                entities=entities,parse_mode=None,reply_to_message_id=int(reply) if reply else None,allow_sending_without_reply=True,
+                                                link_preview_options=no_preview())
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
                 except Exception:result={'state':'ambiguous'}
                 finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
@@ -562,7 +575,8 @@ class AssistantGateway:
             token=DISPATCH_KEY.set('approval-settle:'+body['id'])
             # The decided card keeps its text with the outcome and loses its buttons.
             # Telegram refuses a repeated identical edit, which changes nothing.
-            try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),entities=entities,parse_mode=None,reply_markup=None))}
+            try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),entities=entities,parse_mode=None,reply_markup=None,
+                                                                             link_preview_options=no_preview()))}
             except Exception:return {'state':'done','edited':False}
             finally:DISPATCH_KEY.reset(token)
         if body.get('kind')=='answer':
@@ -610,7 +624,7 @@ class AssistantGateway:
             check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
             try:
                 await self.adapter._bot.send_message(int(chat),reply,message_thread_id=int(topic) if topic else None,
-                                                     reply_to_message_id=int(message),allow_sending_without_reply=True)
+                                                     reply_to_message_id=int(message),allow_sending_without_reply=True,link_preview_options=no_preview())
                 result={'state':'done'}
             except Exception:result={'state':'ambiguous'}
             finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
@@ -642,12 +656,12 @@ class AssistantGateway:
             check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True))
             try:
                 from telegram.error import BadRequest
-                try:await self.adapter._bot.send_message(int(chat),text,parse_mode=None,reply_markup=markup)
+                try:await self.adapter._bot.send_message(int(chat),text,parse_mode=None,reply_markup=markup,link_preview_options=no_preview())
                 except BadRequest:
                     # Telegram refused a button, such as a dashboard address it does not accept;
                     # nothing was sent, so the notice goes without buttons.
                     if markup is None:raise
-                    await self.adapter._bot.send_message(int(chat),text,parse_mode=None)
+                    await self.adapter._bot.send_message(int(chat),text,parse_mode=None,link_preview_options=no_preview())
                 result={'state':'done'}
             except Exception:result={'state':'ambiguous'}
             finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)

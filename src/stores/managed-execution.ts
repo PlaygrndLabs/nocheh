@@ -160,7 +160,7 @@ export abstract class ManagedExecutionRepository {
   async finish(input:unknown){const body=object(input),row=await this.row(managedEventId(body.event_id));
     if(!row?.actor||row.actor!==body.actor||!row.input_reference)throw new HttpError(403,'run_actor_mismatch');
     const state=string(body.state,32);if(!closed.has(state))throw new HttpError(400,'invalid_run_state');
-    const code=body.error_code===null||body.error_code===undefined?null:['managed_execution_failed','runtime_execution_interrupted','execution_interrupted','model_unavailable','intentional_silence'].includes(String(body.error_code))?body.error_code:'managed_execution_failed';
+    const code=body.error_code===null||body.error_code===undefined?null:['managed_execution_failed','runtime_execution_interrupted','execution_interrupted','model_unavailable','intentional_silence','job_box_unavailable'].includes(String(body.error_code))?body.error_code:'managed_execution_failed';
     const result={state,text:string(body.text??'',1000000),session:managedIdentity(body.session),error_code:code};
     const reference=await this.derived.record({operation_id:this.channel+'-result:'+row.event_id,source:row.source_reference,parents:[row.input_reference],
       kind:this.resultKind,content:Buffer.from(canonical(result)),producer:'hermes',producer_version:this.protocol,configuration:{binding:row.binding},

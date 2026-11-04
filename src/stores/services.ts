@@ -119,6 +119,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
+  jobs.stopped=async id=>{await controlledActions.stopJob(id);};
   controlledExecution.settled=id=>actionCommands.settle('controlled',id).then(()=>{},()=>{});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.

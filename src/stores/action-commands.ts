@@ -1,4 +1,4 @@
-import {canonical} from '../archive.js';
+import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
@@ -12,13 +12,17 @@ import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import type {BackgroundJobRepository} from './background-jobs.js';
 
-type ActionKind='telegram'|'controlled'|'background';
+type ActionKind='telegram'|'controlled'|'background'|'list';
+/** One card of a job's waiting changes, as frozen when it was sent. */
+type ListCard={id:string;fingerprint:string;members:[string,string][];long?:number};
 // Telegram allows 64 bytes of button data: a marker, the choice, and prefixes
 // of the action ID and of the fingerprint of its exact content.
 const buttonData=/^n([ad])([a-f0-9]{40})([a-f0-9]{16})$/;
 /** The Retry failed button under a problem notice in the owner's private chat. */
 export const retryButton='nr';
 const reviewLimit=2200;
+// Telegram's message limit in UTF-16 units, less room for the outcome a decided card adds.
+const cardLimit=4096,outcomeRoom=300;
 // While a card is filled, \u0001N\u0002label\u0003 marks a label linked to the Nth
 // address. These control characters are removed from every other text first.
 const controls=/[\u0001-\u0003]/g,marked=/\u0001(\d+)\u0002([^\u0001-\u0003]*)\u0003/g;
@@ -36,6 +40,16 @@ const outdated=new Set(['guard_context_changed','action_proposal_changed']);
 const unsent=new Set(['tool_disabled_by_owner','tool_policy_unavailable','notion_not_connected','notion_reconnect_needed','notion_unavailable']);
 /** Card edits for one action, across every repository in this process, in the order they were asked for. */
 const editing=new Map<string,Promise<void>>();
+
+/** One change on a list card: its number, kind and exact arguments. */
+const entryText=(number:number,kind:string,args:string)=>`${number}. ⚙️ ${kind.replace(controls,'')}${args?'\n'+args.replace(controls,''):''}`;
+/** A list card: how many changes and from which job, which card of how many, then each change exactly. */
+function listText(line:Record<ApprovalText,string>,title:string,count:number,index:number,parts:number,long:number,items:string[]):string {
+  const fill=(text:string,values:Record<string,string>)=>fillTemplate(text.replace(controls,''),values);
+  return [fill(line.list,{count:String(count),title}),parts>1?fill(line.list_part,{part:String(index+1),parts:String(parts)}):null,
+    line.list_note.replace(controls,''),...items.flatMap(item=>['',item]),...(long?['',fill(line.list_long,{count:String(long)})]:[])]
+    .filter((value):value is string=>value!==null).join('\n');
+}
 
 /** Plain card text with Telegram text links; offsets count UTF-16 units, as Telegram's do. */
 function linked(text:string,urls:string[]):{text:string;links:Link[]} {
@@ -189,6 +203,11 @@ export class ActionCommandRepository {
       // blocks it anyway, and a standing permission runs it without a decision.
       const effect:Effect=kind==='telegram'?{id:row.id,kind:'telegram.send',scope:row.scope,profile:row.profile,fingerprint:row.fingerprint}:this.tools.effect(row);
       if((await evaluate(control,effect)).outcome!=='ask'||kind==='controlled'&&(await this.tools.grants(row)).length)return result;
+      // A running job's operations wait for its end, when the owner approves them on one card (ADR-0204).
+      if(kind==='controlled'&&row.job_id&&(await control.query("SELECT 1 FROM background_jobs WHERE id=$1 AND state IN ('approved','running') AND changes IS NULL",[row.job_id])).rowCount)
+        return {...result,message:canonical((await this.tools.inspect({admin:true,scope:null},row.id)).arguments).length>reviewLimit?
+          'Kept with this job\'s other changes. It is too long for a Telegram card, so the owner reviews it in the dashboard Inbox when the job ends. Do not wait for it. Say in your report what you asked for.':
+          'Kept with this job\'s other changes. When the job ends, the owner approves them together on one card. Do not wait for it. Say in your report what you asked for.'};
       const place=await this.place(kind,result.id),card=place?await this.card(kind,result.id,row.source_reference,!!place.reviewer):null;
       if(place&&!card)return {...result,message:'This request is too long for a Telegram card. The owner can review and approve it in the dashboard Inbox.'};
       if(!place||!card||card.state!=='proposed')return result;
@@ -240,6 +259,77 @@ export class ActionCommandRepository {
     const card=await this.jobs.card(id),place=await this.jobPlace(card.row),state=card.row.cancel_requested&&card.state!=='done'?'stopped':card.state;
     const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines.running:card.lines[state];
     if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[]});
+    if(['done','failed'].includes(state)&&!card.row.cancel_requested)await this.offerList(card.row);
+  }
+  /** The changes a job left waiting, on as few cards as Telegram allows; each card is decided as a whole.
+   * The split is frozen once, before any card is sent, so a card's text and buttons never change. */
+  private async offerList(job:any) {
+    const owner=this.access.policy().owner_id,control=this.access.stores.control;
+    if(!owner||job.changes)return;
+    const rows=(await control.query("SELECT * FROM controlled_actions WHERE job_id=$1 AND state='proposed' ORDER BY created_at,id",[job.id])).rows;
+    const {line}=await this.texts(),title=clean((await this.jobs!.proposal(job)).title)??'',cards:ListCard[]=[];
+    // Room for the card's own lines at their longest, so every card fits whatever its place.
+    const room=cardLimit-outcomeRoom-listText(line,title,999,98,99,999,[]).length;
+    let entries:[string,string][]=[],used=0,long=0;
+    const close=()=>{if(!entries.length)return;const id=digest(canonical(['action-list-v1',job.id,cards.length]));
+      cards.push({id,fingerprint:digest(canonical(['action-list-v1',id,entries])),members:entries});entries=[];used=0;};
+    for(const row of rows) {
+      if((await evaluate(control,this.tools.effect(row))).outcome!=='ask'||(await this.tools.grants(row)).length)continue;
+      const action=await this.tools.inspect({admin:true,scope:null},row.id).catch(error=>{if(error instanceof HttpError)return null;throw error;});
+      const args=action&&'arguments' in action?canonical(action.arguments):null;
+      const size=args&&args.length<=reviewLimit?entryText(999,action!.kind,args).length+2:Infinity;
+      if(size>room){long++;continue;}
+      if(used+size>room)close();
+      entries.push([row.id,action!.fingerprint]);used+=size;
+    }
+    close();
+    if(long&&cards.length)cards.at(-1)!.long=long;
+    const saved=await control.query('UPDATE background_jobs SET changes=$2 WHERE id=$1 AND changes IS NULL RETURNING id',[job.id,JSON.stringify(cards)]);
+    if(!saved.rowCount)return;
+    // Nothing fits a card: the owner is still told where the job's changes wait.
+    if(long&&!cards.length)try{await this.call!('telegram.notice',{id:digest(canonical(['action-list-inbox-v1',job.id])),chat_id:owner,
+      text:fillTemplate(line.list_inbox.replace(controls,''),{count:String(long),title})},30000);}catch{}
+    for(const [index,card] of cards.entries()) {
+      const text=listText(line,title,card.members.length,index,cards.length,card.long??0,await this.entries(card));
+      await this.approval({kind:'card',chat_id:owner,id:card.id,text,links:[],
+        buttons:[[line.approve.slice(0,40),'na'+card.id.slice(0,40)+card.fingerprint.slice(0,16)],[line.reject.slice(0,40),'nd'+card.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
+    }
+  }
+  /** A list card's changes, read again from its members, so a decided card shows what it showed before. */
+  private async entries(card:ListCard):Promise<string[]> {
+    const items=[];
+    for(const [number,[id]] of card.members.entries()) {
+      const action=await this.tools.inspect({admin:true,scope:null},id).catch(error=>{if(error instanceof HttpError)return null;throw error;});
+      items.push(entryText(number+1,action?.kind??'',action&&'arguments' in action?canonical(action.arguments):''));
+    }
+    return items;
+  }
+  /** The job and card a list card's ID names, or the card that lists an operation. */
+  private async listCard(by:{card?:string;member?:string}):Promise<{job:any;card:ListCard;index:number}|null> {
+    const rows=(await this.access.stores.control.query(by.card?`SELECT j.* FROM background_jobs j WHERE j.changes @> jsonb_build_array(jsonb_build_object('id',$1::text))`:
+      `SELECT j.* FROM background_jobs j JOIN controlled_actions a ON a.job_id=j.id WHERE a.id=$1 AND j.changes IS NOT NULL`,[by.card??by.member])).rows;
+    for(const job of rows)for(const [index,card] of (job.changes as ListCard[]).entries())
+      if(card.id===by.card||card.members.some(([id])=>id===by.member))return {job,card,index};
+    return null;
+  }
+  /** A decided list card keeps its text and says how its changes ended. */
+  private async settleList(id:string) {
+    const found=await this.listCard({card:id}),owner=this.access.policy().owner_id;if(!found||!owner)return;
+    const {line}=await this.texts(),states=(await this.access.stores.control.query('SELECT id,state,error_code FROM controlled_actions WHERE id=ANY($1)',
+      [found.card.members.map(([member])=>member)])).rows;
+    if(states.some(row=>row.state==='proposed'))return;
+    const count=String(found.card.members.length),done=states.filter(row=>row.state==='done').length;
+    // Every change ended without running: the owner rejected it, or what it used changed since.
+    const unrun=states.every(row=>row.state==='rejected'),code=states.find(row=>row.error_code)?.error_code;
+    const outcome=unrun&&states.some(row=>!row.error_code)?line.rejected_action:
+      unrun?fillTemplate(line.not_run,{reason:line[code&&Object.hasOwn(reasons,code)?reasons[code]!:'reason_other']}):
+      states.some(row=>['approved','running'].includes(row.state))?line.approved:
+      done===states.length?fillTemplate(line.list_done,{count}):fillTemplate(line.list_some,{done:String(done),count});
+    const cards=found.job.changes as ListCard[],title=clean((await this.jobs!.proposal(found.job)).title)??'';
+    const text=listText(line,title,found.card.members.length,found.index,cards.length,found.card.long??0,await this.entries(found.card));
+    // Texts edited since the card was sent can make it longer; a decided card has no buttons, so its end may be cut.
+    const room=cardLimit-outcome.length-3;
+    await this.approval({kind:'settle',chat_id:owner,id,text:`${text.length>room?text.slice(0,room-1)+'…':text}\n\n${outcome}`,links:[]});
   }
   /** Show the decision on a card and remove its buttons; best effort. Edits of one card run one after
    * another and each reads the state when it starts, so the last edit shows the latest state. */
@@ -251,6 +341,10 @@ export class ActionCommandRepository {
   private async edit(kind:ActionKind,id:string) {
     try {
       if(kind==='background')return await this.settleJob(id);
+      if(kind==='list')return await this.settleList(id);
+      // An operation on a list card shows on that card.
+      const listed=kind==='controlled'?await this.listCard({member:id}):null;
+      if(listed)return await this.settle('list',listed.card.id);
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
       const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line,card.code,card.started):null;
@@ -269,9 +363,12 @@ export class ActionCommandRepository {
     const answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:text.slice(0,200)},10000);
     const found=(await this.access.stores.control.query(`SELECT 'telegram' AS kind,id,fingerprint FROM telegram_action_requests WHERE left(id,40)=$1
       UNION ALL SELECT 'controlled',id,fingerprint FROM controlled_actions WHERE left(id,40)=$1
-      UNION ALL SELECT 'background',id,fingerprint FROM background_jobs WHERE left(id,40)=$1`,[data[2]])).rows;
+      UNION ALL SELECT 'background',id,fingerprint FROM background_jobs WHERE left(id,40)=$1
+      UNION ALL SELECT 'list',c->>'id',c->>'fingerprint' FROM background_jobs j CROSS JOIN LATERAL jsonb_array_elements(j.changes) c
+        WHERE j.changes IS NOT NULL AND left(c->>'id',40)=$1`,[data[2]])).rows;
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
     if(action?.kind==='background'&&this.jobs)return this.jobPressed(action,data[1]==='a',presser,chat,query.id,source);
+    if(action?.kind==='list'&&presser===policy.owner_id)return this.listPressed(action.id,data[1]==='a',chat,query.id,source);
     const reviewer=action?.kind==='telegram'?(await this.telegram.reviewer(action.id))?.user:undefined;
     // The owner decides any card; the person who asked decides only their own card in their group.
     if(!policy.owner_id||presser!==policy.owner_id&&!(reviewer&&presser===reviewer&&chat===(await this.place('telegram',action.id))?.chat)){
@@ -288,6 +385,27 @@ export class ActionCommandRepository {
       reply=kind==='controlled'&&outdated.has(error.code)?fillTemplate(line.not_run,{reason:line.reason_changed}):line.decided;
     }
     await answer(reply);await this.settle(kind,action.id);return true;
+  }
+  /** Approve or Reject on a list card: the owner decides each change on it, exactly as it was shown. */
+  private async listPressed(id:string,approve:boolean,chat:string,query:string,source:SourceReference):Promise<boolean> {
+    const {line}=await this.texts(),answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query,text:text.slice(0,200)},10000);
+    const found=await this.listCard({card:id});if(!found){await answer(line.changed);return true;}
+    // A change decided since, in the Inbox or by an earlier press, keeps that decision; the revision makes a
+    // decision that lands meanwhile win too.
+    const rows=new Map((await this.access.stores.control.query('SELECT id,state,revision FROM controlled_actions WHERE id=ANY($1)',
+      [found.card.members.map(([member])=>member)])).rows.map(row=>[row.id,row]));
+    let decided=0;
+    for(const [member,fingerprint] of found.card.members) {
+      const row=rows.get(member);if(row?.state!=='proposed')continue;
+      try {
+        await this.tools.decide({admin:true,scope:null},{id:member,fingerprint,decision:approve?'approve':'deny',expected_revision:row.revision,
+          operation_id:'telegram-button:'+source.id+':'+member},source);decided++;
+      }catch(error){if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;}
+    }
+    const count=String(found.card.members.length);
+    await answer(!decided?line.decided:decided<found.card.members.length?fillTemplate(approve?line.list_partly:line.list_partly_rejected,{done:String(decided),count}):
+      approve?line.approved:line.rejected_action);
+    await this.settle('list',id);return true;
   }
   /** Approve or Reject on a job's card: the owner, or the person who asked on their own job's card. */
   private async jobPressed(action:{id:string;fingerprint:string},approve:boolean,presser:string,chat:string,query:string,source:SourceReference):Promise<boolean> {

@@ -34,11 +34,12 @@ import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
+import {JobBoxRepository} from './job-box.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
 export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
-  const owner=new OwnerStorageApi(s);
+  const owner=new OwnerStorageApi(s),box=new JobBoxRepository(s.access);
   const server=createServer((req,res)=>{void(async()=>{
     const url=new URL(req.url??'/','http://local'),path=url.pathname;
     if(req.method==='GET'&&path==='/health')return json(res,200,{ok:true,service:config.service,storage_layout:'original-only-v1',
@@ -390,6 +391,13 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       if(path==='/v1/archive/page')return result(await s.sources.page(principal,{chat:url.searchParams.get('chat')??'',from:url.searchParams.get('from')??'',
         to:url.searchParams.get('to')??'',after:url.searchParams.get('after')??'',count:limit(url.searchParams.get('limit'),30,50)}),true);
+      // A sealed job box's chat copy, through the broker only, which also checks the box token. Chat and period come from the job.
+      if(path==='/v1/box/chat') {
+        if([...url.searchParams.keys()].some(key=>key!=='cursor'))throw new HttpError(400,'invalid_box_request');
+        if(principal.admin)throw new HttpError(403,'job_box_not_allowed');
+        const copy=await box.chat(principal,await s.turns.binding(principal),s.sources,url.searchParams.get('cursor')??'');
+        await s.turns.assertAudience(principal);return json(res,200,copy);
+      }
       if(path==='/v1/imports/pending') {
         const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});

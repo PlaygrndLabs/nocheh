@@ -3,7 +3,7 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {backgroundCard,backgroundContinue,backgroundJob,backgroundTexts,backgroundWrapUp,fillTemplate,labeledLines,ownerPrompts} from '../prompts.js';
+import {backgroundBox,backgroundCard,backgroundContinue,backgroundJob,backgroundTexts,backgroundWrapUp,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
@@ -12,6 +12,7 @@ import type {SourceAccessRepository} from './access.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
 import {carriesForward,type GuardBinding} from './guards.js';
+import {notionJobReads} from './notion.js';
 import {OperationRepository} from './operations.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {SourceRepository} from './retrieval.js';
@@ -40,6 +41,11 @@ CREATE TABLE IF NOT EXISTS background_jobs (
  revision integer NOT NULL DEFAULT 1,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS background_jobs_chat ON background_jobs(scope,created_at DESC);
+-- The cards that list a job's waiting changes, frozen when they are sent: [{id,fingerprint,members:[[id,fingerprint]…]}].
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS changes jsonb;
+-- The sealed job box: the owner's switch for it, and whether a job asked for one (job-box.ts).
+ALTER TABLE background_settings ADD COLUMN IF NOT EXISTS box_tools boolean NOT NULL DEFAULT true;
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS box boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS background_steps (
  event_id text PRIMARY KEY,job_id text NOT NULL REFERENCES background_jobs(id),step integer NOT NULL CHECK(step>0),
  attempt integer NOT NULL DEFAULT 1 CHECK(attempt>0),kind text NOT NULL CHECK(kind IN ('work','wrap_up')),
@@ -86,12 +92,49 @@ export function reportParts(text:string,limit=REPORT_PART):string[] {
   if(rest)parts.push(rest);return parts;
 }
 
+/** A job the owner asked for in their private chat; only its card is the owner's own to approve. */
+const privateJob=(row:any,owner:string|null|undefined)=>!!owner&&row.scope===owner&&!row.requester;
+
+/**
+ * Whether a turn is a step of a running job that the owner asked for in their
+ * private chat and approved there. Every input comes from the step's signed
+ * credential and Nocheh's own rows. The job row is locked FOR SHARE, so Stop
+ * waits for the caller's transaction and a later call sees the stop.
+ */
+export async function ownerApprovedJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
+  turn:{owner?:boolean;job?:string|null;logical_profile?:string|null}):Promise<boolean> {
+  if(!owner||!turn.owner||!turn.job||source.store!=='control')return false;
+  return !!(await db.query(`SELECT 1 FROM background_steps s JOIN background_jobs j ON j.id=s.job_id
+    WHERE s.event_id=$1 AND j.id=$2 AND j.state='running' AND NOT j.cancel_requested AND j.scope=$3 AND j.requester IS NULL
+      AND j.decided_by=$3 AND j.logical_profile=$4 FOR SHARE OF j`,[source.id,turn.job,owner,turn.logical_profile??null])).rowCount;
+}
+
+// A sealed box lasts a job's time limit and an hour more, for its last steps; later steps run without one.
+const BOX_MINUTES=60;
+/** SQL over a job row `j`: whether its box time has not passed yet. */
+export const boxOpen=`now()<j.started_at+(j.minutes_limit+${BOX_MINUTES})*interval '1 minute'`;
+/** When a job's sealed box must be gone. */
+export const boxExpires=(job:{started_at:Date;minutes_limit:number})=>new Date(new Date(job.started_at).getTime()+(Number(job.minutes_limit)+BOX_MINUTES)*60000).toISOString();
+
+/** A step's job when the step runs in the job's sealed box: a work step, never the report at a limit, of a job
+ *  that asked for the box and whose box time has not passed, that `ownerApprovedJob` lets through, while the
+ *  owner's box switch and the guard are on. Null otherwise. */
+export async function boxJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
+  turn:{owner?:boolean;job?:string|null;logical_profile?:string|null},guard:GuardBinding):Promise<any|null> {
+  if(!turn.job||guard.mode!=='on'||source.store!=='control')return null;
+  const job=(await db.query(`SELECT j.* FROM background_jobs j JOIN background_steps t ON t.job_id=j.id AND t.event_id=$2 AND t.kind='work'
+    JOIN background_settings s ON s.singleton AND s.box_tools WHERE j.id=$1 AND j.box AND ${boxOpen}`,[turn.job,source.id])).rows[0];
+  return job&&await ownerApprovedJob(db,owner,source,turn)?job:null;
+}
+
 /** Work too big for one reply runs on its own once approved, as a chain of sealed
  * steps that continue one Hermes session of its own, and reports back to its chat. */
 export class BackgroundJobRepository {
   steps:BackgroundStepRepository;
   /** Shows a job's state on its card; set by the approval cards. */
   settled:(id:string)=>Promise<void>=async()=>{};
+  /** Ends a stopped job's changes that still wait for the owner; set by the controlled actions. */
+  stopped:(id:string)=>Promise<void>=async()=>{};
   constructor(readonly access:SourceAccessRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
     readonly turns:RuntimeTurnRepository,readonly sources:SourceRepository,readonly telegram:TelegramActionRepository,
     readonly call:RuntimeCall,readonly detect:(text:string)=>Promise<unknown>,token:string){
@@ -101,15 +144,16 @@ export class BackgroundJobRepository {
   get guards(){return this.access.guards;}
   async settings(){
     const row=(await this.control.query('SELECT * FROM background_settings WHERE singleton')).rows[0];
-    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:row.minutes_limit,member_daily_jobs:row.member_daily_jobs,revision:row.revision};
+    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:row.minutes_limit,member_daily_jobs:row.member_daily_jobs,box_tools:row.box_tools as boolean,revision:row.revision};
   }
   async saveSettings(principal:Reader,input:unknown){
     admin(principal);const body=object(input);
-    if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','member_daily_jobs','revision'].includes(key))||!Number.isSafeInteger(body.revision))throw new HttpError(400,'invalid_settings');
+    if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','member_daily_jobs','box_tools','revision'].includes(key))||!Number.isSafeInteger(body.revision)||
+      body.box_tools!==undefined&&typeof body.box_tools!=='boolean')throw new HttpError(400,'invalid_settings');
     const cost=Number(body.cost_limit_usd),minutes=Number(body.minutes_limit),daily=Number(body.member_daily_jobs);
     if(!(cost>0&&cost<=1000)||!Number.isSafeInteger(minutes)||minutes<5||minutes>1440||!Number.isSafeInteger(daily)||daily<0||daily>100)throw new HttpError(400,'invalid_settings');
-    const changed=await this.control.query(`UPDATE background_settings SET cost_limit_usd=$1,minutes_limit=$2,member_daily_jobs=$3,revision=revision+1,updated_at=now()
-      WHERE singleton AND revision=$4`,[cost,minutes,daily,body.revision]);
+    const changed=await this.control.query(`UPDATE background_settings SET cost_limit_usd=$1,minutes_limit=$2,member_daily_jobs=$3,box_tools=coalesce($5,box_tools),
+      revision=revision+1,updated_at=now() WHERE singleton AND revision=$4`,[cost,minutes,daily,body.revision,body.box_tools??null]);
     if(!changed.rowCount)throw new HttpError(409,'configuration_conflict');
     return this.settings();
   }
@@ -152,12 +196,15 @@ export class BackgroundJobRepository {
   }
   /** Ask to start a job. Nothing runs until whoever approves it presses Approve. */
   async propose(principal:Reader,input:unknown) {
-    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to'].includes(key)))throw new HttpError(400,'invalid_job_request');
+    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box'].includes(key))||
+      body.box!==undefined&&typeof body.box!=='boolean')throw new HttpError(400,'invalid_job_request');
     const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim();
     if(!title||!instruction)throw new HttpError(400,'invalid_job_request');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
     const size=await this.sources.size(principal,{chat:body.chat===undefined?'':string(body.chat,64),from,to}),settings=await this.settings();
-    const owner=this.access.policy().owner_id!;
+    const owner=this.access.policy().owner_id!,space=principal.space!,scope=space.split('/topic/')[0]===owner?owner:turn.scope,box=body.box===true;
+    // Only the owner's own job, asked in their private chat, gets the sealed box, and only while the box switch is on.
+    if(box&&(!privateJob({scope,requester},owner)||!settings.box_tools))throw new HttpError(409,'job_box_not_allowed');
     if(requester) {
       const today=Number((await this.control.query(`SELECT count(*) FROM background_jobs WHERE scope=$1 AND requester=$2
         AND state<>'rejected' AND created_at>date_trunc('day',now())`,[turn.scope,requester])).rows[0].count);
@@ -172,15 +219,14 @@ export class BackgroundJobRepository {
       producer:'nocheh',producer_version:protocol,configuration:{binding,chat:size.chat,from,to}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),shown=object(JSON.parse(String((representation.value as any).text)));
-    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver}));
-    const space=principal.space!,scope=space.split('/topic/')[0]===owner?owner:turn.scope;
+    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box}));
     await this.control.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
-      fingerprint,estimate,cost_limit_usd,minutes_limit) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
+      fingerprint,estimate,cost_limit_usd,minutes_limit,box) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT DO NOTHING`,
       [id,source,proposal,representation.revision,binding,scope,space,size.chat,'job-'+id.slice(0,24),requester,approver,fingerprint,
-        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit]);
+        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box]);
     const row=await this.row(id);
     if(row.fingerprint!==fingerprint)throw new HttpError(409,'job_changed');
-    return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:Number(row.cost_limit_usd),minutes:row.minutes_limit},
+    return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:Number(row.cost_limit_usd),minutes:row.minutes_limit},box:row.box as boolean,
       message:row.state==='proposed'?'Nothing runs until it is approved.':'This job was already decided; its state is shown.'};
   }
   /** The exact proposal a card shows, read through the secret check of its audience. */
@@ -201,12 +247,19 @@ export class BackgroundJobRepository {
   /** The card a person approves: the exact instruction, what it reads and what it may cost. */
   async card(id:string) {
     const row=await this.row(id),shown=await this.proposal(row),prompts=await ownerPrompts(this.control),estimate=row.estimate;
+    const lines=labeledLines(backgroundTexts,prompts['background.texts']);
     const period=estimate.from||estimate.to?[estimate.from??'…',estimate.to??'…'].join(' – '):null;
-    const text=fillTemplate(prompts['background.card']??backgroundCard,{title:shown.title,instruction:shown.instruction,
+    const values:Record<string,string|null|undefined>={title:shown.title,instruction:shown.instruction,
       size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
-      cost_limit:money(Number(row.cost_limit_usd)),minutes_limit:String(row.minutes_limit),origin:null});
+      cost_limit:money(Number(row.cost_limit_usd)),minutes_limit:String(row.minutes_limit),origin:null,
+      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?lines.box:null};
+    // What the job may do without asking is always on its card: a saved card without the line, or whose line
+    // is left out for another missing value, gets it at the end.
+    const template=prompts['background.card']??backgroundCard,kept=template.split('\n').filter(line=>lineKept(line,values));
+    const missing=[['notion','📒'],['box','🧰']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}');
+    const text=fillTemplate(missing.length?template+'\n\n'+missing.join('\n'):template,values);
     const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
-    return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines:labeledLines(backgroundTexts,prompts['background.texts'])};
+    return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines};
   }
   /** The decision on a card, by the owner or, on their own job's card in its chat, the person who asked. */
   async decide(by:string,input:unknown,source:SourceReference) {
@@ -258,8 +311,9 @@ export class BackgroundJobRepository {
       if(principal.scope!==null&&row.scope!==principal.scope)throw new HttpError(404,'job_not_found');
     }
     if(closedStates.has(row.state))throw new HttpError(409,'job_not_running');
-    await this.control.query(`UPDATE background_jobs SET cancel_requested=true,state=CASE WHEN state='proposed' THEN 'stopped' ELSE state END,
-      finished_at=CASE WHEN state='proposed' THEN now() END,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id]);
+    const changed=await this.control.query(`UPDATE background_jobs SET cancel_requested=true,state=CASE WHEN state='proposed' THEN 'stopped' ELSE state END,
+      finished_at=CASE WHEN state='proposed' THEN now() END,revision=revision+1,updated_at=now() WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id]);
+    if(!changed.rowCount)throw new HttpError(409,'job_not_running');
     const step=await this.latest(row.id);
     if(step&&['captured','running'].includes(step.run_state))await this.steps.stop(step.event_id);
     return {id:row.id,state:row.state==='proposed'?'stopped':'stopping'};
@@ -284,6 +338,10 @@ export class BackgroundJobRepository {
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   private async finish(row:any,state:'done'|'failed'|'stopped',code:string|null=null) {
+    // After Stop, whatever the job asked for that still waits for the owner ends first, however the job
+    // ends. A failure here fails the tick, which is tried again (ADR-0204).
+    if(state==='stopped'||(await this.control.query('SELECT cancel_requested FROM background_jobs WHERE id=$1',[row.id])).rows[0]?.cancel_requested)
+      await this.stopped(row.id);
     const changed=await this.control.query(`UPDATE background_jobs SET state=$2,error_code=$3,finished_at=now(),revision=revision+1,updated_at=now()
       WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id,state,code]);
     if(changed.rowCount)await this.settled(row.id);
@@ -393,8 +451,13 @@ export class BackgroundJobRepository {
     return observation('failed','admission');
   }
   /** The step message: the instruction for the first step, then continue, then the report at a limit. */
-  async stepText(row:any,step:any):Promise<string> {
-    const prompts=await ownerPrompts(this.control),shown=await this.proposal(row),estimate=row.estimate;
+  async stepText(row:any,step:any,box=false):Promise<string> {
+    const prompts=await ownerPrompts(this.control),text=await this.stepInstruction(row,step,prompts);
+    // A step in the sealed box also says what the box holds, each time, since the box can be new.
+    return box?text+'\n\n'+(prompts['background.box']??backgroundBox):text;
+  }
+  private async stepInstruction(row:any,step:any,prompts:Awaited<ReturnType<typeof ownerPrompts>>):Promise<string> {
+    const shown=await this.proposal(row),estimate=row.estimate;
     const owner=this.access.policy().owner_id,period=estimate.from||estimate.to?[estimate.from??'the start',estimate.to??'now'].join(' to '):'the whole chat';
     if(step.kind==='wrap_up') {
       const elapsed=(Date.now()-new Date(row.started_at).getTime())/60000;
@@ -441,12 +504,17 @@ export class BackgroundStepRepository extends ManagedExecutionRepository {
   }
   protected override async contextDetails(row:any){
     const step=await this.step(row.event_id);
-    return {background:{job_id:row.job_id,step:step.step,kind:step.kind,max_iterations:step.kind==='wrap_up'?WRAP_UP_ITERATIONS:WORK_ITERATIONS}};
+    return {background:{job_id:row.job_id,step:step.step,kind:step.kind,max_iterations:step.kind==='wrap_up'?WRAP_UP_ITERATIONS:WORK_ITERATIONS,box:await this.box(row)}};
+  }
+  /** Whether a step runs in its job's sealed box: the same rule that puts the box in its binding (job-box.ts). */
+  private async box(row:any):Promise<boolean> {
+    const owner=this.access.policy().owner_id;
+    return !!await boxJob(this.control,owner,row.source_reference,{owner:row.scope===owner,job:row.job_id,logical_profile:row.logical_profile},await this.guards.state());
   }
   protected async build(row:any){
     await this.current(row);const principal=this.principal(row),job=await this.jobs.allowed(row),step=await this.step(row.event_id);
     await this.turns.register(principal,{logical_profile:row.logical_profile,job:row.job_id});
-    const input:ManagedInput={principal,text:await this.jobs.stepText(job,step),transcripts:[],files:[],source_key:'nocheh:operation:'+row.event_id};
+    const input:ManagedInput={principal,text:await this.jobs.stepText(job,step,await this.box(row)),transcripts:[],files:[],source_key:'nocheh:operation:'+row.event_id};
     await this.turns.prepared.allow(principal,input);
     const reference=await this.derived.record({operation_id:'background-input:'+row.event_id,source:row.source_reference,parents:[job.proposal_reference],
       kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:this.protocol,

@@ -119,7 +119,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         request['preferences']=scheduled_preferences(profile,body)
     if body.get('channel')=='background':
         # A job step: its step count comes from the job, and it reports now and then while it works.
-        request.update(background={'max_iterations':body['background']['max_iterations']},heartbeat=True)
+        # A box step's tools run in the job's sealed box; the turn checks the box is really there.
+        # A wrap-up step only writes the report: it is always a plain step.
+        box=body['background'].get('box',False)
+        if type(box) is not bool:raise ValueError('invalid_background_step')
+        request.update(background={'max_iterations':body['background']['max_iterations'],'box':box and body['background'].get('kind')!='wrap_up'},heartbeat=True)
     from .security_transport import isolated_enabled,scoped_transport
     isolated=isolated_enabled()
     if isolated:

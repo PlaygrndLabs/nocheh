@@ -11,6 +11,9 @@ Nocheh's plumbing, rules and effects, never model judgement.
 import base64
 import io
 import json
+import re
+import subprocess
+import threading
 import time
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -723,6 +726,122 @@ class ProductScenarios(Scenarios):
         jobs = [item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == 'Open tasks JOB1']
         self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
 
+    @staticmethod
+    def docker(*arguments):
+        return subprocess.run(['docker', *arguments], capture_output=True, text=True)
+
+    def watch_box(self, job, stop, seen):
+        """While a job runs: its box and the step turns that mount its socket, as Docker made them, and samples
+        of whether /work/result.txt is in the box and whether anything of it is in the turn."""
+        inspect = lambda name: (json.loads(self.docker('inspect', name).stdout or '[]') or [{}])[0]
+        probe = 'if [ -e /work/result.txt ]; then echo present; else echo absent; fi'
+        # A turn can write only to its tmpfs and its profile mounts; /work exists in the box alone.
+        turn_probe = 'if [ -e /work ] || [ -n "$(find /tmp /profile -name result.txt 2>/dev/null | head -n 1)" ]; then echo present; else echo absent; fi'
+        while not stop.is_set():
+            try:
+                for name in self.docker('ps', '--filter', 'label=nocheh.box.job='+job, '--format', '{{.Names}}').stdout.split():
+                    seen['boxes'].setdefault(name, inspect(name))
+                    box = self.docker('exec', name, 'sh', '-c', probe).stdout.strip()
+                    for turn in self.docker('ps', '--filter', 'volume='+name, '--filter', 'label=nocheh.role=isolated-turn', '--format', '{{.ID}}').stdout.split():
+                        seen['turns'].setdefault(turn, inspect(turn))
+                        seen['samples'].append({'box': box, 'turn': turn, 'in_turn': self.docker('exec', turn, 'sh', '-c', turn_probe).stdout.strip()})
+            except Exception as error:
+                seen['errors'].append(type(error).__name__)
+            stop.wait(0.5)
+
+    def background_job_uses_sealed_box(self):
+        # The owner asks in private for a job with the sealed box over a made-up group chat. The step's own terminal,
+        # file and code tools run in a box with no network, a read-only root and uid 65532, over the chat's checked
+        # copy in /chat; the step's turn writes nothing, the report reaches the owner, and the box is gone afterwards.
+        image = self.f.manifest['services']['hermes-agent-sb']['environment'].get('NOCHEH_BOX_IMAGE') or 'nocheh-box:local'
+        self.gate('box_image_present', self.docker('image', 'inspect', image).returncode == 0, image=image)
+        since = datetime.fromtimestamp(int(time.time())-1, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        events = []
+        for text in ('برنامه‌ی هفته BOXMARK7 یک', 'یادداشت BOXMARK7 دو', 'list BOXMARK7 three'):
+            update = self.f.message(GROUP, text, mention=False)
+            self.f.inject(update)
+            events.append(self.captured(update))
+        # The box copy leaves out messages still being checked, so the job starts once these are.
+        checked = "SELECT count(*) FROM guard_sources WHERE state='ready' AND id IN ("+','.join("'events:"+event+"'" for event in events)+')'
+        self.wait('chat_checked', lambda: self.f.query('nocheh_derived', checked) == str(len(events)), 300)
+        # The step's scripted model calls each box tool in turn; its answer, the report, quotes every result.
+        count = ('n=$(cat /chat/part-*.jsonl | wc -l); m=$(cat /chat/part-*.jsonl | grep -c BOXMARK7); echo BOXLINES=$n BOXMARKED=$m > /work/result.txt; '
+                 'echo wrote $(cat /work/result.txt) host=$(cat /etc/hostname) uid=$(id -u); cat /chat/manifest.json; sleep 5')
+        code = ("import glob\nn = 0\nfor path in sorted(glob.glob('/chat/part-*.jsonl')):\n    with open(path, encoding='utf-8') as part:\n"
+                "        n += sum('BOXMARK7' in line for line in part)\nprint('PYCOUNT=%d host=%s' % (n, open('/etc/hostname').read().strip()))")
+        steps = (('terminal', {'command': count}), ('read_file', {'path': '/work/result.txt'}), ('execute_code', {'code': code}))
+        instruction = 'Count the marked messages in the box. '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in steps)
+        # Inside the proposal's own directive the instruction's braces are JSON escapes, so its directives stay whole.
+        encoded = json.dumps(instruction).replace('{', '\\u007b').replace('}', '\\u007d')
+        proposal = '{"action": "propose", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
+        request = self.f.message(OWNER, 'کار در جعبه JOBMARK2 [[tool:nocheh_background_job '+proposal+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        proposed = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
+                    and 'Box count JOB2' in event.get('argument', '')]
+        self.gate('job_proposed_with_box', bool(proposed) and re.search(r'"box":\s*true', proposed[-1]['result']) is not None,
+                  result=proposed[-1]['result'][:300] if proposed else None)
+        card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        self.gate('job_card_shows_the_box_line', '🧰' in card['message']['text'] and 'sealed box' in card['message']['text'], card=card['message']['text'])
+        # The newest job of that title is this one; a kept fixture may hold earlier runs.
+        job = next(item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == 'Box count JOB2')['id']
+        listed = lambda: [item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item['id'] == job]
+        seen, stop = {'boxes': {}, 'turns': {}, 'samples': [], 'errors': []}, threading.Event()
+        watcher = threading.Thread(target=self.watch_box, args=(job, stop, seen), daemon=True)
+        watcher.start()
+
+        def reported():
+            rows = [row for row in self.replies(before, OWNER) if not self.is_card(row) and 'execute_code' in (row['message'].get('text') or '')]
+            state = {} if rows else listed()[0]
+            if state.get('state') in ('failed', 'stopped'):
+                self.gate('job_did_not_fail', False, state=state['state'], error=state.get('error_code'), steps=state.get('steps'))
+            return rows
+        try:
+            answer = self.press(card, 'approve')
+            self.gate('job_press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
+            report = self.wait('job_report_sent', reported, 600)
+        finally:
+            stop.set()
+            watcher.join(30)
+        self.current['observed'] = {'boxes': list(seen['boxes']), 'turns': len(seen['turns']), 'samples': len(seen['samples']), 'errors': seen['errors'][:5]}
+        self.gate('one_box_for_the_job', len(seen['boxes']) == 1, boxes=list(seen['boxes']))
+        box = next(iter(seen['boxes'].values()))
+        host, config = box.get('HostConfig') or {}, box.get('Config') or {}
+        flags = {'network': host.get('NetworkMode'), 'networks': sorted((box.get('NetworkSettings') or {}).get('Networks') or {}),
+                 'read_only': host.get('ReadonlyRootfs'), 'user': config.get('User'), 'cap_drop': host.get('CapDrop'),
+                 'security': host.get('SecurityOpt'), 'binds': host.get('Binds'), 'role': (config.get('Labels') or {}).get('nocheh.role'),
+                 'mounts': [[mount.get('Type'), mount.get('Destination'), mount.get('RW')] for mount in box.get('Mounts') or []]}
+        self.gate('box_sealed', flags['network'] == 'none' and flags['networks'] == ['none'] and flags['read_only'] is True
+                  and flags['user'] == '65532:65532' and flags['cap_drop'] == ['ALL'] and 'no-new-privileges:true' in (flags['security'] or [])
+                  and not flags['binds'] and flags['mounts'] == [['volume', '/run/box', True]] and flags['role'] == 'job-box', **flags)
+        name = box['Name'].lstrip('/')
+        sockets = [[[mount.get('Type'), mount.get('Name'), mount.get('RW')] for mount in turn.get('Mounts') or [] if mount.get('Destination') == '/box']
+                   for turn in seen['turns'].values()]
+        self.gate('step_turn_reaches_the_box_by_its_socket_only', bool(sockets) and all(mounts == [['volume', name, False]] for mounts in sockets), mounts=sockets)
+        probed = [sample for sample in seen['samples'] if sample['in_turn'] in ('present', 'absent')]
+        written = [sample for sample in probed if sample['box'] == 'present']
+        self.gate('turn_wrote_nothing', bool(written) and not [sample for sample in probed if sample['in_turn'] == 'present'],
+                  samples=len(probed), while_the_box_had_the_file=len(written))
+        self.gate('job_report_once', len(report) == 1, count=len(report))
+        text = report[0]['message']['text']
+        split = re.split(r'\[brain\] (terminal|read_file|execute_code): ', text)
+        parts, hostname = dict(zip(split[1::2], split[2::2])), config.get('Hostname') or '?'
+        terminal = parts.get('terminal', '')
+        self.gate('terminal_ran_in_the_box', 'BOXMARKED=3' in terminal and 'uid=65532' in terminal and 'host='+hostname in terminal
+                  and re.search(r'complete\\*"\s*:\s*true', terminal) is not None, terminal=terminal[:600])
+        self.gate('read_file_read_the_box_file', 'BOXMARKED=3' in parts.get('read_file', ''), read_file=parts.get('read_file', '')[:300])
+        self.gate('execute_code_read_the_chat', 'PYCOUNT=3 host='+hostname in parts.get('execute_code', ''), execute_code=parts.get('execute_code', '')[:300])
+        self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
+        jobs = listed()
+        self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
+        # The launcher's sweep removes a box and its socket volume within 15 s of its job leaving running.
+        self.wait('box_removed', lambda: not self.docker('ps', '-a', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
+                  and not self.docker('volume', 'ls', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
+                  and self.docker('volume', 'inspect', name).returncode != 0, 120)
+        mine = {item['id'] for item in self.f.app('/v1/background-jobs').get('jobs', [])}
+        left = [line.split(' ') for kind in (('ps', '-a'), ('volume', 'ls')) for line in self.docker(*kind, '--filter', 'name=nocheh-box-', '--format',
+                '{{.Names}} {{.Label "nocheh.box.job"}}' if kind[0] == 'ps' else '{{.Name}} {{.Label "nocheh.box.job"}}').stdout.splitlines()]
+        self.gate('no_box_left', not [row for row in left if row[-1] in mine], left=[row[0] for row in left])
+
     # Approved operations ---------------------------------------------------------------------------------
 
     def epoch(self):
@@ -847,6 +966,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
-                 'background_job_runs_and_reports', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
+                 'background_job_runs_and_reports', 'background_job_uses_sealed_box', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']

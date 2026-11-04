@@ -41,6 +41,9 @@ class ProfileConfigurationTests(unittest.TestCase):
             raw['plugins']['enabled'].append('unapproved')
             raw['fallback_models'] = ['untrusted']
             raw['curator'] = {'enabled': True, 'archive_after_days': 30}
+            raw['terminal'] = {'backend': 'local', 'cwd': '/workspace'}
+            raw['code_execution'] = {'timeout': 3600, 'max_tool_calls': 500}
+            raw['tool_output'] = {'max_bytes': 10**9}
             atomic_yaml(path, raw)
             configure_profile(profile, 'subscription-model')
             saved = read(path)
@@ -54,6 +57,10 @@ class ProfileConfigurationTests(unittest.TestCase):
             self.assertEqual(saved['fallback_models'], [])
             # Owner-set skills are never archived by the native curator.
             self.assertEqual(saved['curator'], {'enabled': False})
+            # Hermes's own tools run only in a job's sealed box, never on a backend the YAML names.
+            self.assertNotIn('terminal', saved)
+            self.assertEqual(saved['code_execution'], {'timeout': 120, 'max_tool_calls': 20, 'max_session_kernels': 1, 'kernel_idle_timeout': 600})
+            self.assertEqual(saved['tool_output'], {'max_bytes': 30000, 'max_lines': 400, 'max_line_length': 1000})
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_anthropic_replies_use_its_messages_api_with_prompt_caching(self):
