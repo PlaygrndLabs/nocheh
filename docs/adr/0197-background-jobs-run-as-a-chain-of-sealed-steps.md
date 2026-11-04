@@ -53,6 +53,15 @@ when work needs a job, and the person never words a request as a job.
   job, that it counts toward their daily limit unless it is rejected.
 </note>
 
+<note date="2026-11-04">
+The chain of steps is replaced by [ADR-0207](0207-a-background-job-is-one-hermes-run.md):
+a job is one Hermes run of at most 50 minutes, warned at 80% of its cost or time limit
+and stopped at the limit with a short note of what is done and left instead of a
+report; a failed run is relaunched at most twice. There is no continue or wrap-up step,
+and `job_too_long` now means a time limit past 50 minutes. Stop is also a button on a
+running job's card, by the same rule.
+</note>
+
 <consequences>
 - Any long instruction can run as a job; the instruction and the agent's own
   to-do list decide what it does.

@@ -79,6 +79,15 @@ secret check, box, Stop and delivery. Extends
   later hardening; the byte backstop is the bound until then.
 </alternatives>
 
+<note date="2026-11-04">
+Amended by [ADR-0207](0207-a-background-job-is-one-hermes-run.md): a job is one run,
+priced from per-call hooks. Auxiliary calls such as compression and titles now count,
+and each call without usage counts as an unknown call at 100,000 input and 8,000
+output tokens plus the request price. Receipts no longer price missing counts by
+iterations; a run that reports nothing is bound by the byte backstop, and a spent
+backstop now ends the job with the short limit note instead of `job_cost_limit`.
+</note>
+
 <consequences>
 - The cost limit holds with the default reply model, and a job on an unpriced model
   needs the owner's approval and is bound by its time only.

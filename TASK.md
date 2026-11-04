@@ -39,7 +39,7 @@ stops them, and the reader then sees only the state
 ([ADR-0200](docs/adr/0200-waiting-approvals-survive-reaction-epochs.md),
 [check](test/store-quiet-epochs.test.ts)). A job's report is sent after
 reactions too, and after learning revisions by the same quiet-epoch rule (its own check
-covers reactions only); any other change after its last step sends no further part of the
+covers reactions only); any other change after its run sends no further part of the
 report and ends the job as failed (`job_report_outdated`), and Stop sends no
 further part either ([ADR-0201](docs/adr/0201-job-reports-survive-reaction-epochs.md),
 [check](test/store-background-job-epochs.test.ts)). An approved tool action's card
@@ -116,6 +116,20 @@ a job whose report comes after a reaction in a group; a Notion call that fails
 and one that finishes, each showing it on its card; a job in the owner's
 private chat that reads a real Notion table; a box job that checks a real Notion
 table against a group chat; and turning the box switch off while a box job runs.
+A job as one Hermes run (owner, 2026-11-04, four choices): a job runs at most 50
+minutes in one go, and bigger work becomes several jobs that the agent splits itself;
+at 80% of its cost or time limit the agent is warned so it writes its report, and at
+the limit Nocheh stops it and sends a short note of what is done and left, from its
+last to-do list and with no model call; a running job's card has a Stop button.
+Choice 2, reactions and learning updating while a job runs, is the next piece; until
+then they wait while a run runs, at most about 55 minutes. Built in source: one
+sealed run per job with per-call cost counting, both notices, the limit note, at most
+two relaunches with a resume or restart message, and Stop on the card
+([ADR-0207](docs/adr/0207-a-background-job-is-one-hermes-run.md),
+[stores](test/store-background-job-runs.test.ts), [turn](services/hermes/test_job_progress.py),
+[fake Telegram](tools/acceptance/product_scenarios.py): `background_job_long_run`,
+`background_job_cost_cap`, `background_job_time_limit`, `background_job_stop_button`,
+`background_job_restart`). Not yet run on the fake Telegram or with a real model.
 Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
 Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
 if replies stay the same and it is not less efficient): no Anthropic call was cached,
@@ -174,8 +188,8 @@ instruction ([ADR-0194](docs/adr/0194-images-are-read-by-the-runtime-vision-tool
 checked with made-up images and a stand-in provider in the Hermes image.
 Pending: a large made-up import on a running installation, a real voice note
 and photo on the development machine, then reading a chat in order with
-project-level role and skills (part 3), background sessions on Hermes Kanban
-(part 4).
+project-level role and skills (part 3), background jobs as one Hermes run
+(part 4, [ADR-0207](docs/adr/0207-a-background-job-is-one-hermes-run.md)).
 
 Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
 chose to drop the live safety check): with the Honcho service enabled, the store

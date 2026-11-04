@@ -32,6 +32,13 @@ Extends [ADR-0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md) and
 - A job whose Stop was pressed stages no further part and ends as stopped.
 </decision>
 
+<note date="2026-11-04">
+Amended by [ADR-0207](0207-a-background-job-is-one-hermes-run.md): a job is one run,
+so the binding that must carry forward is its last run's. The short note sent instead
+of a report at a cost or time limit follows the same rule, and the member's access is
+checked again before the first part of either is staged.
+</note>
+
 <consequences>
 - Reactions in any chat no longer lose a job's report.
 - Automatic learning revisions are quiet too since 2026-11-03 (ADR-0200), so they
