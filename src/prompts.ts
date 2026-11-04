@@ -141,7 +141,7 @@ export const backgroundBox=['[Sealed box]',
 /** The Approve and Reject card for a background job. A line whose value is missing is left out, so a job on a model
  *  without a price shows the {unpriced} line instead of its cost limit; a saved card without the {unpriced}, {notion}
  *  or {box} line still shows that line, at its end. */
-export const backgroundCard='🗂 Background job: {title}\n📏 {size}\n⏱ About {minutes} min, {cost}\n🛑 Stops at {cost_limit} plus the secret check, or {minutes_limit} min\n🛑 {unpriced} ({minutes_limit} min)\n🔎 {checked}\n📒 {notion}\n🧰 {box}\n\n{instruction}';
+export const backgroundCard='🗂 Background job: {title}\n📏 {size}\n⏱ About {minutes} min, {cost}\n🛑 Stops at {cost_limit} or {minutes_limit} min, not counting the secret check\n🛑 {unpriced} ({minutes_limit} min)\n🔎 {checked}\n📒 {notion}\n🧰 {box}\n\n{instruction}';
 /** One "name: text" line for each state shown on a decided job card, and the card's secret check, unknown price, Notion and sealed box lines. */
 export const backgroundTexts=['running: ⏳ Approved. It runs now and reports here when done.','queued: ⏳ Approved. It starts when a running job finishes.',
   'done: ✅ Done. The report is in the chat.','stopped: 🚫 Stopped. Nothing more runs.','failed: ⚠️ It stopped because of a problem. See Background work in the dashboard.',

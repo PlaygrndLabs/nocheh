@@ -64,7 +64,7 @@ secret check, box, Stop and delivery. Extends
   priced limit keeps its short report step.
 - **The secret check is outside the limit.** The model-based secret check of new
   texts, such as the one a job's proposal takes, is counted under the guard's own
-  usage, not per job. The card says the limit is "plus the secret check".
+  usage, not per job. The card says the limit does not count the secret check.
 - The installation rehearsal's scripted model has no price anywhere. There, and only
   with `NOCHEH_INSTALLATION_FIXTURE=1`, `NOCHEH_FIXTURE_REPLY_RATES` gives its rates,
   and `[[usage:N]]` sets the prompt tokens its answers report, so the limit can be

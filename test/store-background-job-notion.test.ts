@@ -64,7 +64,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
     const offered=await s.jobs.start(await actor((await message('123',123,'Check my made-up table')).id,null,'123'),{title:'Card check',instruction:'Read it.',chat:group});
     assert.doesNotMatch(await card(offered.id),/📒/,'no line while Notion is off');
     await saveNotion({enabled:true});
-    assert.match(await card(offered.id),/🛑 Stops at \$5\.0 plus the secret check, or 60 min\n🔎 Starting it already used one secret check\.\n📒 It can read your Notion without asking\. Changes still ask you\./);
+    assert.match(await card(offered.id),/🛑 Stops at \$5\.0 or 60 min, not counting the secret check\n🔎 Starting it already used one secret check\.\n📒 It can read your Notion without asking\. Changes still ask you\./);
     const member=await s.jobs.start(await actor((await message(group,9,'Check it here')).id,group,group),{title:'Group card',instruction:'Read it.'});
     assert.doesNotMatch(await card(member.id),/📒/,'a group job never reaches Notion, so its card says nothing about it');
     await saveNotion({approval:'everything'});

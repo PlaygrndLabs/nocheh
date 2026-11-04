@@ -739,7 +739,7 @@ class ProductScenarios(Scenarios):
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
         text = card['message']['text']
-        self.gate('job_card_shows_the_cost_limit', 'Priced JOB3' in text and 'Stops at $5' in text and 'plus the secret check' in text, card=text)
+        self.gate('job_card_shows_the_cost_limit', 'Priced JOB3' in text and 'Stops at $5' in text and 'not counting the secret check' in text, card=text)
         self.press(card, 'approve')
         jobs = self.wait('job_done', lambda: [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
                                               if item.get('title') == 'Priced JOB3' and item.get('state') in ('done', 'failed', 'stopped')], 600)

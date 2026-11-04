@@ -83,7 +83,7 @@ test('a background job is started with one call, approved on its card, runs step
     const card=last('card');
     assert.equal(card.chat_id,group);assert.equal(card.reply_to,String(sent));
     assert.match(card.text,/Background job: Open tasks/);assert.match(card.text,/6 messages/);assert.ok(card.text.includes('about $'+priced.toFixed(2)),card.text);
-    assert.match(card.text,/🛑 Stops at \$5\.0 plus the secret check, or 60 min\n/);assert.doesNotMatch(card.text,/can't be measured/);
+    assert.match(card.text,/🛑 Stops at \$5\.0 or 60 min, not counting the secret check\n/);assert.doesNotMatch(card.text,/can't be measured/);
     assert.match(card.text,/Find every task that is still open and who owns it\./);
     assert.match(card.text,/🔎 Starting it already used one secret check\. It counts toward the daily limit of the person who asked, unless it is rejected\./);
     const approve='na'+proposed.id.slice(0,40)+proposed.fingerprint.slice(0,16);
