@@ -32,9 +32,11 @@ test('a running job run carries across reaction and learning epochs, any other c
   const native=new Set<string>();
   /** Work that runs once, inside the next secret check, as if it committed while a request was being checked. */
   let during:(()=>Promise<unknown>)|null=null;
+  /** Made-up secrets the secret check finds wherever it sees them. */
+  const flagged:string[]=[];
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
     runtime:async(operation,input)=>{
-      if(operation==='guard.detect'){const work=during;during=null;if(work)await work();return {literals:[]};}
+      if(operation==='guard.detect'){const work=during;during=null;if(work)await work();return {literals:flagged.filter(literal=>String(input.text).includes(literal))};}
       if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};
       if(operation==='run.resume')return {state:native.has(String(input.event_id))?'running':'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
@@ -239,6 +241,17 @@ test('a running job run carries across reaction and learning epochs, any other c
     assert.deepEqual(await model(racing,'Made-up words first read by a slow secret check.'),[200,{ok:true}],'a slow request meets a pending learning publication');
     await slowDone;
     assert.deepEqual([during,await epoch()],[null,raced+4]);
+    // A change whose arguments hold a value prepared only in its first epoch, where an epoch commits before the change is
+    // published: it runs again under the new epoch, where that value is checked again, and its own copy is published.
+    const secret='made-up-key-4471';
+    await s.prepared.allow(racing.principal,{text:secret});flagged.push(secret);
+    const begin=s.guards.beginPublication;let begun=false;
+    s.guards.beginPublication=async function(this:typeof s.guards,...args:Parameters<typeof begin>){if(!begun&&args[1]){begun=true;await react();}return begin.apply(this,args);};
+    try {
+      const rechecked=await s.controlledActions.propose(racing.principal,{kind:'shell',arguments:{command:'printf '+secret}});
+      assert.deepEqual([begun,await epoch()],[true,raced+5]);
+      assert.equal((await s.controlledActions.inspect(racing.principal,rechecked.id) as any).arguments.command,'printf ***','checked again in the new epoch');
+    }finally{s.guards.beginPublication=begin;}
     await finish(racing,'done',{text:'Report: made-up task 16 is done.',...counts(1000)});
     assert.equal((await tick(busy)).stage,'delivery');await deliver(busy);
     assert.deepEqual([(await job(busy)).state,(await job(busy)).attempts],['done',1]);

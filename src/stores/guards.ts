@@ -256,11 +256,17 @@ export class GuardRepository {
     const id=await this.register(reference),source=(await this.stores.derived.query('SELECT input,input_hash,active_revision FROM guard_sources WHERE id=$1',[id])).rows[0];
     if(source.active_revision!==null)return null;
     const preparationVersion=version+':authorized-context-v1',content=await contexts.prepare(principal,JSON.parse(source.input.toString()),detect);
-    const operationId=digest(canonical(['guard',id,source.input_hash,preparationVersion]));
+    // The content depends on the binding's prepared values, so an attempt under a later binding (a job's run retried after a
+    // quiet epoch, ADR-0208) stages its own revision instead of conflicting with one staged earlier and never published.
+    const operationId=digest(canonical(['guard',id,source.input_hash,preparationVersion,binding]));
     let revision:GuardRevision;
     try{revision=await this.stage(id,null,content,'automatic',preparationVersion,operationId);}
     catch(error){if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
-    await this.beginPublication(revision,binding);await this.finishPublication(operationId);return revision;
+    await this.beginPublication(revision,binding);
+    // Another attempt, under another binding, published first: its revision is the one read.
+    try{await this.finishPublication(operationId);}
+    catch(error){if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
+    return revision;
   }
 
   async restore(id:string,expected:number|null,oldRevision:number,operationId:string):Promise<GuardRevision> {
