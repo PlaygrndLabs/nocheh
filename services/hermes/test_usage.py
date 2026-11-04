@@ -167,6 +167,47 @@ class UsageTests(unittest.TestCase):
             costs = usage.price([{**row, 'provider': 'anthropic'}, {**row, 'provider': 'custom'}, row])
         self.assertEqual(costs, [12.0, None, None])
 
+    def test_reply_rates_take_the_higher_claude_card_per_bucket_on_the_anthropic_provider(self):
+        with patch.dict('os.environ', {}, clear=False):
+            self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'anthropic', ''),
+                             {'input': 2.0, 'output': 10.0, 'cache_read': 0.2, 'cache_write': 2.5})
+            self.assertEqual(usage.reply_rates('anthropic/claude-haiku-5.5', 'anthropic', ''),
+                             {'input': 0.5, 'output': 2.5, 'cache_read': 0.05, 'cache_write': 0.625}, 'the long-prompt card is higher')
+
+    def test_reply_rates_ask_hermes_with_million_token_rows_and_stay_unknown_without_a_price(self):
+        class Cost:
+            def __init__(self, amount, status): self.amount_usd, self.status = amount, status
+
+        def estimate(model, canonical, provider, base_url):
+            if model != 'priced-model':
+                return Cost(None, 'unknown')
+            # A whole prompt over 200K tokens is priced at a higher tier, output included.
+            above = canonical.input_tokens + canonical.cache_read_tokens + canonical.cache_write_tokens > 200_000
+            rates = (3, 15, 0.3, 4) if above else (1, 5, 0.1, 2)
+            return Cost(sum(getattr(canonical, bucket) * rate for bucket, rate in zip(usage.CLAUDE_BUCKETS, rates)) / 1e6, 'estimated')
+
+        pricing = types.SimpleNamespace(CanonicalUsage=types.SimpleNamespace, estimate_usage_cost=estimate)
+        with patch.dict(sys.modules, {'agent': types.ModuleType('agent'), 'agent.usage_pricing': pricing}):
+            self.assertEqual(usage.reply_rates('priced-model', 'openai', 'https://gateway.example.test/v1'),
+                             {'input': 3.0, 'output': 15.0, 'cache_read': 0.3, 'cache_write': 4.0})
+            unknown = dict.fromkeys(usage.RATES)
+            self.assertEqual(usage.reply_rates('synthetic-model', 'openai', ''), unknown)
+            self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'custom', ''), unknown, "Nocheh's Claude prices are for Anthropic's own API only")
+        with patch.dict(sys.modules, {'agent': None}):
+            self.assertEqual(usage.reply_rates('synthetic-model', 'openai', ''), dict.fromkeys(usage.RATES), 'without Hermes nothing is priced')
+
+    def test_the_fixture_rates_count_only_inside_the_installation_fixture(self):
+        given = {usage.FIXTURE_RATES: '{"input": 50, "output": 50, "cache_read": 0.5, "cache_write": "x"}'}
+        with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': '1'}):
+            self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''),
+                             {'input': 50.0, 'output': 50.0, 'cache_read': 0.5, 'cache_write': None})
+        with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': '1', usage.FIXTURE_RATES: 'not json'}):
+            self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''), dict.fromkeys(usage.RATES))
+        for flag in ('0', '', 'true'):
+            with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': flag}), patch.dict(sys.modules, {'agent': None}):
+                self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''), dict.fromkeys(usage.RATES), 'outside the fixture it does nothing')
+                self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'anthropic', '')['input'], 2.0)
+
 
 if __name__ == '__main__':
     unittest.main()

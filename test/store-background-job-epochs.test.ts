@@ -21,7 +21,7 @@ test('a job report survives a reaction in another group, any other change after 
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
-      if(operation==='usage.price')return {costs:[0.5]};
+      if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};
       if(operation==='run.resume')return {state:'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       assert.equal(operation,'telegram.approval');cards.push(input);return {state:'done',chat_id:input.chat_id,message_id:'5'};
@@ -63,7 +63,7 @@ test('a job report survives a reaction in another group, any other change after 
     await s.jobs.steps.run(current.event_id,await authority());
     const context=await s.jobs.steps.context({event_id:current.event_id,owner_epoch:(await authority()).epoch});
     await s.jobs.steps.claim({...context,actor:context.actor});await s.jobs.steps.prepare({...context,actor:context.actor});
-    await s.jobs.steps.finish({event_id:current.event_id,actor:context.actor,state:'done',session:context.conversation,error_code:null,text,continue:continues,todo:[],cost_usd:0.1});
+    await s.jobs.steps.finish({event_id:current.event_id,actor:context.actor,state:'done',session:context.conversation,error_code:null,text,continue:continues,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
   };
   try {
     await s.guards.reconcile();await s.guards.setMode('on');

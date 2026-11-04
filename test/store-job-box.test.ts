@@ -29,7 +29,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
-      if(operation==='usage.price')return {costs:[0.5]};
+      if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};
       if(operation==='run.resume')return {state:'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       if(operation.startsWith('telegram.'))return {state:'done',chat_id:input.chat_id,message_id:'5'};
@@ -308,7 +308,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
 
     // The step ends at the time limit: the report written at the limit gets no box, though the box's own time is not up.
     assert.equal((await boxes.binding(turn))?.job,boxed.id);
-    await s.jobs.steps.finish({event_id:a.step,actor:a.context.actor,state:'done',session:a.context.conversation,error_code:null,text:'Read part one.',continue:true,todo:[],cost_usd:0.1});
+    await s.jobs.steps.finish({event_id:a.step,actor:a.context.actor,state:'done',session:a.context.conversation,error_code:null,text:'Read part one.',continue:true,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     await boxTime(boxed.id,1);await tick(boxed.id);
     const wrap=await latest(boxed.id);await s.jobs.steps.run(wrap,await authority());
     const wrapContext:any=await s.jobs.steps.context({event_id:wrap,owner_epoch:(await authority()).epoch});
@@ -316,7 +316,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     const wrapClaimed:any=await s.jobs.steps.claim({...wrapContext,actor:wrapContext.actor});assert.doesNotMatch(wrapClaimed.text,/Sealed box/);
     assert.equal(await bindingBox(wrapClaimed.archive_credential),null);
     assert.deepEqual((await live()).map(box=>box.job),[boxed.id],'the box may stay until its time is up');
-    await s.jobs.steps.finish({event_id:wrap,actor:wrapContext.actor,state:'done',session:wrapContext.conversation,error_code:null,text:'Report: made-up task 3 is open.',continue:false,todo:[],cost_usd:0.1});
+    await s.jobs.steps.finish({event_id:wrap,actor:wrapContext.actor,state:'done',session:wrapContext.conversation,error_code:null,text:'Report: made-up task 3 is open.',continue:false,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     // The job reports: no box any more, and it leaves the live list.
     assert.equal((await tick(boxed.id)).stage,'delivery');
     assert.equal((await stores.control.query('SELECT state FROM background_jobs WHERE id=$1',[boxed.id])).rows[0].state,'reporting');
@@ -362,7 +362,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     // A box job whose steps find no box fails saying so, not as a managed execution failure.
     const fourth=await ask('Boxless box check',true);let failing=await start(fourth,true);
     for(let attempt=1;;attempt++) {
-      await s.jobs.steps.finish({event_id:failing.step,actor:failing.context.actor,state:'failed',session:failing.context.conversation,error_code:'job_box_unavailable',text:'',continue:false,todo:[],cost_usd:0});
+      await s.jobs.steps.finish({event_id:failing.step,actor:failing.context.actor,state:'failed',session:failing.context.conversation,error_code:'job_box_unavailable',text:'',continue:false,todo:[],tokens:null});
       await tick(fourth.id);if(attempt>2)break;failing=await run(fourth.id,true);
     }
     assert.deepEqual((await stores.control.query('SELECT state,error_code FROM background_jobs WHERE id=$1',[fourth.id])).rows[0],{state:'failed',error_code:'job_box_unavailable'});

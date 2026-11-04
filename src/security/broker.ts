@@ -216,6 +216,14 @@ export function brokerServer(options:BrokerOptions) {
       await assertCurrent(principal);
       const current=await evaluate(options.pool,attempt.effect);
       if(current.outcome!=='allow'||current.revision!==attempt.decision.revision)throw new HttpError(409,'security_policy_changed');
+      // A background job's requests count against its byte backstop, which holds without the step's own report: the
+      // bytes add up in one statement, and once they pass the budget no further call goes out (ADR-0206).
+      const sent=JSON.stringify(prepared.payload);
+      if(options.storage&&binding.job) {
+        const job=(await options.pool.query<{model_bytes:string;byte_budget:string|null}>('UPDATE background_jobs SET model_bytes=model_bytes+$2 WHERE id=$1 RETURNING model_bytes,byte_budget',
+          [binding.job,Buffer.byteLength(sent)])).rows[0];
+        if(job&&job.byte_budget!==null&&Number(job.model_bytes)>Number(job.byte_budget))throw new HttpError(403,'job_cost_limit');
+      }
       timings.broker_prepare_ms=elapsed(prepareStarted);
       // A gateway's bot check can refuse a client without a name, as it refused Honcho's model calls.
       const headers:Record<string,string>=anthropic?anthropicHeaders(String(transport.api_key),req.headers['anthropic-beta']):
@@ -223,7 +231,7 @@ export function brokerServer(options:BrokerOptions) {
       for(const [key,value] of Object.entries(object(transport.headers??{})))if(key.toLowerCase()==='user-agent'&&typeof value==='string')headers['user-agent']=value;
       await recordEffect(options.pool,attempt.effect,'started',attempt.decision,binding.reference??binding.event_id);attempt.started=true;
       const providerStarted=performance.now();let response:Response;
-      try{response=await call(destination,{method:'POST',headers,body:JSON.stringify(prepared.payload),redirect:'error',signal:controller.signal});}
+      try{response=await call(destination,{method:'POST',headers,body:sent,redirect:'error',signal:controller.signal});}
       finally{timings.provider_headers_ms=elapsed(providerStarted);}
       if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.reference??binding.event_id,undefined,timings);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
       await stream(response,principal,res,8*1024*1024,timings);

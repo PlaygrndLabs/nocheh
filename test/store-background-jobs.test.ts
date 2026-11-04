@@ -8,7 +8,9 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
-import {jobTokens,reportParts} from '../src/stores/background-jobs.js';
+import {byteBudget,jobTokens,reportParts,stepCost} from '../src/stores/background-jobs.js';
+import {brokerServer} from '../src/security/broker.js';
+import {storageGuardService} from '../src/stores/guard-service.js';
 
 test('a background job is started with one call, approved on its card, runs step after step in its own session and reports to its chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -16,12 +18,14 @@ test('a background job is started with one call, approved on its card, runs step
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-jobs-')),key='background-jobs:'+Date.now(),group='-'+Date.now(),other='-1'+Date.now();
-  const cards:Record<string,any>[]=[],runs:string[]=[];let price:number|null=1.2,updates=0;
+  // The reply model's rates in USD per million tokens, as the runtime prices it; null where it has no price.
+  const sonnet={input:2,output:10,cache_read:0.2,cache_write:2.5};
+  const cards:Record<string,any>[]=[],runs:string[]=[];let rates:Record<string,number|null>=sonnet,updates=0;
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9','8'],denied:[]},[other]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
-      if(operation==='usage.price')return {costs:[price]};
+      if(operation==='usage.price'){assert.deepEqual(input,{rates:'reply'});return {rates};}
       if(operation==='run.resume')return {state:'not_found'};
       if(operation==='run.start'||operation==='run.cancel'){runs.push(operation+':'+input.event_id);return {state:'queued'};}
       assert.equal(operation,'telegram.approval');cards.push(input);
@@ -63,14 +67,24 @@ test('a background job is started with one call, approved on its card, runs step
     // A member starts a job with one call: Nocheh counts and prices it, and the card answers the request in the group, for that person or the owner.
     const proposed=await s.jobs.start(await actor(ask.id),{title:'Open tasks',instruction:'Find every task that is still open and who owns it.'});
     assert.equal(proposed.state,'proposed');assert.equal(proposed.approver,'requester');assert.equal(proposed.message,'Nothing runs until it is approved.');
-    const estimate=proposed.estimate as any;
-    assert.equal(estimate.chat,group);assert.equal(estimate.messages,6);assert.equal(estimate.cost_usd,1.2);assert.ok(estimate.minutes>=2);
+    const estimate=proposed.estimate as any,read=jobTokens(estimate),priced=Math.round((read.input*2+read.output*10)/1e6*100)/100;
+    assert.equal(estimate.chat,group);assert.equal(estimate.messages,6);assert.ok(estimate.minutes>=2);
+    // The rates are frozen on the card, and the estimate is priced at them.
+    assert.deepEqual(estimate.rates,sonnet);assert.equal(estimate.cost_usd,priced);assert.ok(priced>0);
     assert.deepEqual(proposed.limits,{cost_usd:5,minutes:60});
+    const frozen=await job(proposed.id);assert.deepEqual(frozen.rates,sonnet);
+    assert.equal(Number(frozen.byte_budget),Math.floor(5/(0.2/1e6)*12),'the cost limit at the cheapest prompt rate, 12 bytes a token');
+    assert.equal(Number(frozen.model_bytes),0);
+    // Rates and the byte budget are in the fingerprint: the same request at another price is a changed job.
+    rates={...sonnet,cache_read:0.1};
+    await assert.rejects(s.jobs.start(await actor(ask.id),{title:'Open tasks',instruction:'Find every task that is still open and who owns it.'}),{status:409,code:'job_changed'});
+    rates=sonnet;
     const offered=await s.actionCommands.offer('background',proposed);
     assert.match(offered.message,/posted here as the reply to the request/);
     const card=last('card');
     assert.equal(card.chat_id,group);assert.equal(card.reply_to,String(sent));
-    assert.match(card.text,/Background job: Open tasks/);assert.match(card.text,/6 messages/);assert.match(card.text,/about \$1\.2/);
+    assert.match(card.text,/Background job: Open tasks/);assert.match(card.text,/6 messages/);assert.ok(card.text.includes('about $'+priced.toFixed(2)),card.text);
+    assert.match(card.text,/🛑 Stops at \$5\.0 plus the secret check, or 60 min\n/);assert.doesNotMatch(card.text,/can't be measured/);
     assert.match(card.text,/Find every task that is still open and who owns it\./);
     assert.match(card.text,/🔎 Starting it already used one secret check\. It counts toward the daily limit of the person who asked, unless it is rejected\./);
     const approve='na'+proposed.id.slice(0,40)+proposed.fingerprint.slice(0,16);
@@ -86,7 +100,9 @@ test('a background job is started with one call, approved on its card, runs step
     assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'waiting');
     const first=await step(proposed.id);
     assert.deepEqual([first.step,first.kind,first.run],[1,'work','captured']);
-    const one=await runStep(proposed.id,{text:'Read 6 of 6 records.',continue:true,todo:[{content:'Check who owns the invoice',status:'pending'}],cost_usd:0.5});
+    // A step reports its tokens, which Nocheh prices at the job's frozen rates: $0.20 + $0.10 + $0.10 + $0.10.
+    const one=await runStep(proposed.id,{text:'Read 6 of 6 records.',continue:true,todo:[{content:'Check who owns the invoice',status:'pending'}],
+      tokens:{input_tokens:100000,output_tokens:10000,cache_read_tokens:500000,cache_write_tokens:40000,calls:3}});
     assert.ok(runs.includes('run.start:'+first.event_id));
     assert.equal(one.context.profile,'job-'+proposed.id.slice(0,24));assert.equal(one.context.background.max_iterations,20);
     assert.match(String(one.claim.text),/Find every task that is still open and who owns it\./,'the first step carries the instruction');
@@ -95,13 +111,15 @@ test('a background job is started with one call, approved on its card, runs step
     await s.jobs.operation('job:'+proposed.id,await authority());
     const counted=await job(proposed.id);
     assert.deepEqual([counted.state,counted.steps,Number(counted.cost_usd),counted.todo],['running',1,0.5,[{content:'Check who owns the invoice',status:'pending'}]]);
+    const kept=(await stores.control.query('SELECT tokens,cost_usd FROM background_steps WHERE event_id=$1',[first.event_id])).rows[0];
+    assert.deepEqual([kept.tokens,Number(kept.cost_usd)],[{input_tokens:100000,output_tokens:10000,cache_read_tokens:500000,cache_write_tokens:40000,calls:3},0.5]);
     const second=await step(proposed.id);assert.deepEqual([second.step,second.kind],[2,'work']);
-    const two=await runStep(proposed.id,{text:'Report: 2 tasks are open.',continue:false,todo:[],cost_usd:0.25});
+    const two=await runStep(proposed.id,{text:'Report: 2 tasks are open.',continue:false,todo:[],tokens:{input_tokens:50000,output_tokens:5000,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     assert.match(String(two.claim.text),/Continue the job where you stopped/);
     // The answer that ends on its own is the report, sent to the group by the job's approval.
     assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).stage,'delivery');
     const reported=await job(proposed.id);
-    assert.deepEqual([reported.state,reported.steps,Number(reported.cost_usd)],['reporting',2,0.75]);
+    assert.deepEqual([reported.state,reported.steps,Number(reported.cost_usd)],['reporting',2,0.65]);
     assert.deepEqual(reported.todo,[{content:'Check who owns the invoice',status:'pending'}],'a step without a list keeps the last one');
     const action=(await stores.control.query('SELECT a.* FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1',[proposed.id])).rows[0];
     assert.deepEqual([action.destination,action.state],[group,'approved']);
@@ -116,11 +134,15 @@ test('a background job is started with one call, approved on its card, runs step
     const capped=await s.jobs.start(await actor((await message('capped')).id),{title:'Long read',instruction:'Read everything.'});
     await s.jobs.decide('9',{id:capped.id,fingerprint:capped.fingerprint,decision:'approve'},(await message('approve-capped')));
     await s.jobs.operation('job:'+capped.id,await authority());
-    await runStep(capped.id,{text:'Read half.',continue:true,todo:[],cost_usd:9});
+    await runStep(capped.id,{text:'Read half.',continue:true,todo:[],tokens:{input_tokens:3000000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     await s.jobs.operation('job:'+capped.id,await authority());
+    assert.equal(Number((await job(capped.id)).cost_usd),6);
     const wrap=await step(capped.id);assert.equal(wrap.kind,'wrap_up');
-    const last_step=await runStep(capped.id,{text:'Partial report.',continue:false,todo:[],cost_usd:0.1});
+    // A step without token counts is priced high: each of its 4 iterations a call of 100,000 input and 8,000 output tokens.
+    const last_step=await runStep(capped.id,{text:'Partial report.',continue:false,todo:[]});
     assert.match(String(last_step.claim.text),/reached its limit of \$5/);assert.equal(last_step.context.background.max_iterations,4);
+    await s.jobs.operation('job:'+capped.id,await authority());
+    assert.equal(Number((await job(capped.id)).cost_usd),7.12);
     // Stopping a running job cancels its step and sends no report.
     const stopped=await s.jobs.start(await actor((await message('stopped')).id),{title:'Stop me',instruction:'Read it all.'});
     await s.jobs.decide('123',{id:stopped.id,fingerprint:stopped.fingerprint,decision:'approve'},(await message('approve-stopped',123)));
@@ -152,15 +174,18 @@ test('a background job is started with one call, approved on its card, runs step
     assert.deepEqual((await stores.control.query('SELECT state,error_code FROM controlled_actions WHERE id=ANY($1)',[[asked.id,long.id]])).rows,
       [{state:'rejected',error_code:'job_stopped'},{state:'rejected',error_code:'job_stopped'}],'Stop ends what the job asked for');
     // A member's job over the owner's limit waits for the owner in their private chat.
-    price=40;
+    rates={input:1000,output:1000,cache_read:100,cache_write:1000};
     const big=await s.actionCommands.offer('background',await s.jobs.start(await actor((await message('big',8)).id),{title:'Huge',instruction:'Read years.'}));
     assert.equal(big.approver,'owner');assert.equal(last('card').chat_id,'123');assert.match(big.message,/owner was asked privately/);
-    assert.equal(Number((await job(big.id)).cost_limit_usd),60,'an approved estimate sets the limit at half again');
-    // So does a member's job with no known price.
-    price=null;
+    const huge=(big.estimate as any).cost_usd;assert.ok(huge>5);
+    assert.equal(Number((await job(big.id)).cost_limit_usd),Math.ceil(huge*1.5),'an approved estimate sets the limit at half again');
+    // So does a member's job on a model with no input or output price: only its time limits it, and the card says so.
+    rates={input:null,output:10,cache_read:0.2,cache_write:2.5};
     const unpriced=await s.actionCommands.offer('background',await s.jobs.start(await actor((await message('unpriced',8)).id),{title:'Unpriced',instruction:'Read the made-up notes.'}));
     assert.equal(unpriced.approver,'owner');assert.equal((unpriced.estimate as any).cost_usd,null);assert.match(last('card').text,/cost unknown/);
-    price=1.2;
+    assert.match(last('card').text,/🛑 Cost can't be measured for this model: only the time limit applies \(60 min\)/);assert.doesNotMatch(last('card').text,/Stops at/);
+    assert.equal((await job(unpriced.id)).byte_budget,null,'nor a byte budget');
+    rates=sonnet;
     // A job whose time limit would pass the longest one is refused before anything is recorded or checked.
     const sources=s.jobs.sources,size=sources.size.bind(sources),before=Number((await stores.control.query('SELECT count(*) FROM background_jobs')).rows[0].count);
     sources.size=async(...args:Parameters<typeof size>)=>({...await size(...args),characters:200000000});
@@ -180,17 +205,70 @@ test('a background job is started with one call, approved on its card, runs step
     assert.equal((await s.jobs.stop(await actor((await privately('owner-stops','Stop that one')).id,null),{id:ownerJob.id})).state,'stopped');
     assert.equal((await s.jobs.stop(await actor((await message('owner-stops-big',123)).id),{id:big.id})).state,'stopped');
     assert.deepEqual([(await job(ownerJob.id)).state,(await job(big.id)).state],['stopped','stopped']);
+    // A job without a price has no cost limit: a step of any size goes on to the next work step.
+    await s.jobs.decide('123',{id:unpriced.id,fingerprint:unpriced.fingerprint,decision:'approve'},await message('approve-unpriced',123));
+    await s.jobs.operation('job:'+unpriced.id,await authority());
+    await runStep(unpriced.id,{text:'Read some.',continue:true,todo:[],tokens:{input_tokens:900000000,output_tokens:9000000,cache_read_tokens:0,cache_write_tokens:0,calls:20}});
+    await s.jobs.operation('job:'+unpriced.id,await authority());
+    assert.deepEqual([(await step(unpriced.id)).kind,Number((await job(unpriced.id)).cost_usd)],['work',0]);
+    assert.equal((await s.jobs.list({admin:true,scope:null})).jobs.find(item=>item.id===unpriced.id)!.priced,false,'the dashboard says the cost can\'t be measured');
+    await s.jobs.stop({admin:true,scope:null},{id:unpriced.id});await s.jobs.operation('job:'+unpriced.id,await authority());
+    assert.equal((await job(unpriced.id)).state,'stopped');
+    // The broker counts a job's model request bytes in one statement and refuses past the byte budget, which holds
+    // without the step's own report; the job then ends with job_cost_limit, with no further step or report step.
+    const bytesAsk=await privately('bytes','Read it with care'),bytes=await s.jobs.start(await actor(bytesAsk.id,null),{title:'Bytes',instruction:'Read it with care.'});
+    await s.jobs.decide('123',{id:bytes.id,fingerprint:bytes.fingerprint,decision:'approve'},bytesAsk);
+    await s.jobs.operation('job:'+bytes.id,await authority());
+    const bytesStep=await step(bytes.id),bytesContext:any=await s.jobs.steps.context({event_id:bytesStep.event_id,owner_epoch:(await authority()).epoch});
+    const bytesClaim:any=await s.jobs.steps.claim({...bytesContext,actor:bytesContext.actor});await s.jobs.steps.prepare({...bytesContext,actor:bytesContext.actor});
+    const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL='https://gateway.example.test/v1';
+    const sentTo:string[]=[],broker=brokerServer({pool:stores.control,storage:s.turns,token:digest(key),archive:'http://archive',hermes:'http://hermes',model:'fixture-model',
+      prepare:storageGuardService(s),fetch:async url=>{
+        if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',api_key:'synthetic-credential',model_context_length:100000});
+        sentTo.push(String(url));return Response.json({ok:true});}});
+    await new Promise<void>(resolve=>broker.listen(0,'127.0.0.1',resolve));
+    try {
+      const model=()=>fetch('http://127.0.0.1:'+(broker.address() as {port:number}).port+'/v1/chat/completions',{method:'POST',
+        headers:{authorization:'Bearer '+bytesClaim.archive_credential,'content-type':'application/json'},body:JSON.stringify({model:'fixture-model',input:[{role:'user',content:'Made-up words to read.'}]})});
+      assert.equal((await model()).status,200);
+      const once=Number((await job(bytes.id)).model_bytes);assert.ok(once>0,'the request bytes are counted');assert.equal(sentTo.length,1);
+      await stores.control.query('UPDATE background_jobs SET byte_budget=$2 WHERE id=$1',[bytes.id,once]);
+      const refused=await model();assert.deepEqual([refused.status,await refused.json()],[403,{error:'job_cost_limit'}]);
+      assert.equal(sentTo.length,1,'nothing goes out past the budget');assert.equal(Number((await job(bytes.id)).model_bytes),2*once);
+    } finally {if(previousRoute===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previousRoute;
+      broker.closeAllConnections();await new Promise<void>(resolve=>broker.close(()=>resolve()));}
+    await s.jobs.steps.finish({event_id:bytesStep.event_id,actor:bytesContext.actor,state:'failed',session:bytesContext.conversation,error_code:'model_unavailable'});
+    assert.equal((await s.jobs.operation('job:'+bytes.id,await authority())).state,'failed');
+    const spent=await job(bytes.id);assert.deepEqual([spent.state,spent.error_code],['failed','job_cost_limit']);
+    assert.equal((await step(bytes.id)).event_id,bytesStep.event_id,'no retry once the budget is spent');
     // The owner's own job, asked in their private chat, reports there.
     const myAsk=await privately('mine','Read my chat'),me=await actor(myAsk.id,null);
     const mine=await s.jobs.start(me,{title:'Mine',instruction:'Read my chat.'});
     assert.doesNotMatch((await s.jobs.card(mine.id)).text,/daily limit/,'the owner has none');
     await s.jobs.decide('123',{id:mine.id,fingerprint:mine.fingerprint,decision:'approve'},myAsk);
     await s.jobs.operation('job:'+mine.id,await authority());
-    await runStep(mine.id,{text:'My report.',continue:false,todo:[],cost_usd:0.1});
+    // Counts that are not plain whole numbers are kept as none and priced high, so a job's cost never goes down.
+    await runStep(mine.id,{text:'My report.',continue:false,todo:[],tokens:{input_tokens:-5000000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     await s.jobs.operation('job:'+mine.id,await authority());
+    assert.equal((await stores.control.query('SELECT tokens FROM background_steps WHERE job_id=$1',[mine.id])).rows[0].tokens,null);
+    assert.equal(Number((await job(mine.id)).cost_usd),5.6);
     const report=(await stores.control.query('SELECT a.* FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1',[mine.id])).rows[0];
     assert.deepEqual([report?.destination,report?.scope,report?.state],['123','123','approved'],'the report goes to the owner\'s private chat');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a step is priced at its job\'s frozen rates, high without counts, and the byte budget follows the cheapest prompt rate',()=>{
+  const rates={input:2,output:10,cache_read:0.2,cache_write:null};
+  assert.equal(stepCost(rates,{input_tokens:1000000,output_tokens:100000,cache_read_tokens:1000000,cache_write_tokens:1000000,calls:4},20),5.2,
+    'a cache bucket without its own rate takes the input rate');
+  for(const missing of [null,undefined,{input_tokens:1},{input_tokens:1.5,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1},
+    {input_tokens:1e12,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1},{input_tokens:1,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1,cost_usd:0}])
+    assert.equal(stepCost(rates,missing,20),20*(100000*2+8000*10)/1e6,JSON.stringify(missing));
+  assert.equal(stepCost({...rates,output:null},{input_tokens:1000000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1},20),0,'nothing is measured without a price');
+  assert.equal(byteBudget(5,rates),Math.floor(5/(0.2/1e6)*12));
+  assert.equal(byteBudget(5,{input:1,output:2,cache_read:0,cache_write:null}),Math.floor(5/(1/1e6)*12),'a free cache read is not the cheapest rate');
+  assert.equal(byteBudget(5,{input:0,output:2,cache_read:0,cache_write:0}),null);
+  assert.equal(byteBudget(5,{input:null,output:2,cache_read:0.1,cache_write:1}),null);
 });
 
 test('a job estimate counts text, records and files, and a long report is split at line ends',()=>{

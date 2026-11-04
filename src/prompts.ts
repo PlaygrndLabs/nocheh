@@ -138,13 +138,14 @@ export const backgroundBox=['[Sealed box]',
   'When the manifest says full, /chat ran out of room: the copy stays partial for good, and your archive tools still read the rest. '+
   '/work is yours to write in. The box has no internet and no keys. '+
   'What is in /work is lost when the job ends, and can be lost between steps when what the job may read changes, so keep what you find in your to-do list and the report.'].join('\n');
-/** The Approve and Reject card for a background job. A line whose value is missing is left out; a saved card
- *  without the {notion} or {box} line still shows that line, at its end. */
-export const backgroundCard='🗂 Background job: {title}\n📏 {size}\n⏱ About {minutes} min, {cost}\n🛑 Stops at {cost_limit} or {minutes_limit} min\n🔎 {checked}\n📒 {notion}\n🧰 {box}\n\n{instruction}';
-/** One "name: text" line for each state shown on a decided job card, and the card's secret check, Notion and sealed box lines. */
+/** The Approve and Reject card for a background job. A line whose value is missing is left out, so a job on a model
+ *  without a price shows the {unpriced} line instead of its cost limit; a saved card without the {unpriced}, {notion}
+ *  or {box} line still shows that line, at its end. */
+export const backgroundCard='🗂 Background job: {title}\n📏 {size}\n⏱ About {minutes} min, {cost}\n🛑 Stops at {cost_limit} plus the secret check, or {minutes_limit} min\n🛑 {unpriced} ({minutes_limit} min)\n🔎 {checked}\n📒 {notion}\n🧰 {box}\n\n{instruction}';
+/** One "name: text" line for each state shown on a decided job card, and the card's secret check, unknown price, Notion and sealed box lines. */
 export const backgroundTexts=['running: ⏳ Approved. It runs now and reports here when done.','queued: ⏳ Approved. It starts when a running job finishes.',
   'done: ✅ Done. The report is in the chat.','stopped: 🚫 Stopped. Nothing more runs.','failed: ⚠️ It stopped because of a problem. See Background work in the dashboard.',
-  'rejected: ❌ Rejected. Nothing ran.','checked: Starting it already used one secret check.',
+  'rejected: ❌ Rejected. Nothing ran.','checked: Starting it already used one secret check.',"unpriced: Cost can't be measured for this model: only the time limit applies",
   'member_limit: It counts toward the daily limit of the person who asked, unless it is rejected.','notion_reads: It can read your Notion without asking. Changes still ask you.',
   'box: It can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads.'].join('\n');
 /** Texts Nocheh uses itself; the runtime never receives them. */

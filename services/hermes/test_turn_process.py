@@ -66,13 +66,21 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
-    async def test_a_background_job_step_runs_longer_with_its_step_count_and_reports_its_cost(self):
+    async def test_a_background_job_step_runs_longer_with_its_step_count_and_reports_its_tokens(self):
+        usage={"input_tokens":1200,"output_tokens":300,"cache_read_tokens":5000,"cache_write_tokens":40,"reasoning_tokens":7,"calls":3,"cost_usd":0.25,"model":"m"}
         child=('import sys,json,time; body=json.load(sys.stdin); assert body["channel"]=="background"; assert body["heartbeat"] is True; '
                'assert body["background"]=={"max_iterations":20,"box":False}; assert 230<body["turn_deadline_epoch"]-time.time()<=540; '
-               'print(json.dumps({"event":"heartbeat"})); print(json.dumps({"state":"done","text":"so far","continue":True,"usage":{"cost_usd":0.25,"calls":3}}))')
+               'print(json.dumps({"event":"heartbeat"})); print(json.dumps({"state":"done","text":"so far","continue":True,"usage":'+json.dumps(usage)+'}))')
         result,events=await self.execute(child,extra={'channel':'background','background':{'max_iterations':20,'kind':'work'}})
-        self.assertEqual(events,[]);self.assertEqual((result['state'],result['continue'],result['cost_usd']),('done',True,0.25))
-        self.assertNotIn('usage',result)
+        self.assertEqual(events,[]);self.assertEqual((result['state'],result['continue']),('done',True))
+        # Only the token buckets and calls: Nocheh prices them at the job's rates, never at Hermes's estimate.
+        self.assertEqual(result['tokens'],{'input_tokens':1200,'output_tokens':300,'cache_read_tokens':5000,'cache_write_tokens':40,'calls':3})
+        self.assertNotIn('usage',result);self.assertNotIn('cost_usd',result)
+        bare=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"so far","continue":True}))',
+                                extra={'channel':'background','background':{'max_iterations':20,'kind':'work'}})
+        self.assertIsNone(bare[0]['tokens'],'a step without usage reports no counts, which Nocheh prices high')
+        other,_=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"hello","usage":'+json.dumps(usage)+'}))')
+        self.assertEqual(other,{'state':'done','text':'hello'},'other turns are unchanged')
     async def test_a_box_step_says_so_to_the_turn_with_a_strict_boolean(self):
         child='import sys,json; body=json.load(sys.stdin); assert body["background"]=={"max_iterations":20,"box":True}; print(json.dumps({"state":"done","text":"so far"}))'
         result,_=await self.execute(child,extra={'channel':'background','background':{'max_iterations':20,'kind':'work','box':True}})

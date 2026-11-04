@@ -309,12 +309,15 @@ class Handler(BaseHTTPRequestHandler):
             return asyncio.run(read_chat())
         if self.path == "/internal/usage/price":
             # Prices Honcho's reported memory tokens with Hermes's own pricing table; counts only, no content.
-            from services.hermes.usage import price
+            from services.hermes.usage import price, reply_rates
+            reply = {"model": MODEL or "", "provider": os.environ.get("NOCHEH_REPLY_ROUTE_PROVIDER") or "openai",
+                     "base_url": os.environ.get("NOCHEH_REPLY_ROUTE_URL") or ""}
+            # A background job freezes the reply model's rates on its card and prices its steps' tokens with them.
+            if body.get("rates") == "reply":
+                return {"rates": reply_rates(reply["model"], reply["provider"], reply["base_url"])}
             rows = body.get("rows")
             if isinstance(rows, list):
-                # A row for the reply model, such as a background job's estimate, is priced as the model replies use.
-                reply = {"model": MODEL or "", "provider": os.environ.get("NOCHEH_REPLY_ROUTE_PROVIDER") or "openai",
-                         "base_url": os.environ.get("NOCHEH_REPLY_ROUTE_URL") or ""}
+                # A row for the reply model is priced as the model replies use.
                 rows = [{**row, **reply} if isinstance(row, dict) and row.get("part") == "reply" else row for row in rows]
             return {"costs": price(rows)}
         if self.path in ("/internal/chat", "/internal/detect"):

@@ -198,9 +198,14 @@ def price(rows):
     return costs
 
 
+def claude_name(model):
+    """A Claude model's name as CLAUDE_PRICES keys it: no provider prefix, dashes for dots."""
+    return re.sub(r'(\d)\.(\d)', r'\1-\2', str(model or '').strip().lower().removeprefix('anthropic/'))
+
+
 def claude_cost(model, usage):
     """USD list price of Claude usage on Anthropic's own API, or None for a model not in CLAUDE_PRICES."""
-    name = re.sub(r'(\d)\.(\d)', r'\1-\2', str(model or '').strip().lower().removeprefix('anthropic/'))
+    name = claude_name(model)
     rates = CLAUDE_PRICES.get(name)
     if rates is None:
         return None
@@ -209,6 +214,46 @@ def claude_cost(model, usage):
     if name in CLAUDE_LONG_PROMPT_PRICES and (tokens[0] + tokens[2] + tokens[3]) / max(1, _count(usage.get('calls'))) > CLAUDE_LONG_PROMPT:
         rates = CLAUDE_LONG_PROMPT_PRICES[name]
     return sum(count * rate for count, rate in zip(tokens, rates)) / 1e6
+
+
+RATES = ('input', 'output', 'cache_read', 'cache_write')
+# The installation rehearsal's scripted model has no price anywhere; there, and only there, this variable may
+# give its four rates as JSON, so a background job's cost limit can be tested.
+FIXTURE_RATES = 'NOCHEH_FIXTURE_REPLY_RATES'
+
+
+def _rate(value):
+    return float(value) if type(value) in (int, float) and 0 <= value < 10**6 else None
+
+
+def reply_rates(model, provider, base_url):
+    """USD per million tokens of the reply model's four token buckets, each None when unknown. A background job
+    freezes them at its start. Claude on the Anthropic provider takes the higher of its two cards per bucket,
+    since a job's prompts can pass the long-prompt mark; any other model takes Hermes's pricing, asked with
+    one-million-token rows."""
+    if os.environ.get('NOCHEH_INSTALLATION_FIXTURE') == '1' and os.environ.get(FIXTURE_RATES):
+        import json
+        try:
+            given = json.loads(os.environ[FIXTURE_RATES])
+        except ValueError:
+            given = None
+        return {name: _rate(given.get(name)) if isinstance(given, dict) else None for name in RATES}
+    name = claude_name(model)
+    if provider == 'anthropic' and name in CLAUDE_PRICES:
+        cards = (CLAUDE_PRICES[name], CLAUDE_LONG_PROMPT_PRICES.get(name, CLAUDE_PRICES[name]))
+        return {bucket: float(max(rates)) for bucket, rates in zip(RATES, zip(*cards))}
+    million = 1_000_000
+    rows = [{'model': str(model or ''), 'provider': provider, 'base_url': base_url, bucket: million} for bucket in CLAUDE_BUCKETS]
+    # Hermes prices a long request's whole prompt at a higher tier, so output is also asked beside a long prompt.
+    rows.append({**rows[0], 'output_tokens': million})
+    try:
+        costs = price(rows)
+    except Exception:
+        return dict.fromkeys(RATES)
+    rates = dict(zip(RATES, (_rate(cost) for cost in costs)))
+    if rates['input'] is not None and rates['output'] is not None and _rate(costs[4]) is not None:
+        rates['output'] = max(rates['output'], costs[4] - rates['input'])
+    return rates
 
 
 def part_of(body):

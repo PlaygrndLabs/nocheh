@@ -15,6 +15,13 @@ from .capture import canonical
 STEP_SECONDS=540
 
 
+def step_tokens(usage):
+    """A job step's token buckets and calls from Hermes's usage, or None when it reported none."""
+    from .usage import CLAUDE_BUCKETS,_count
+    if not isinstance(usage,dict):return None
+    return {**{bucket:_count(usage.get(bucket)) for bucket in CLAUDE_BUCKETS},'calls':_count(usage.get('calls'))}
+
+
 def scheduled_preferences(profile,body):
     from .profile_config import inherited_config,read,preferences
     from .policy_config import validate
@@ -177,8 +184,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             usage=result.pop('usage',None)
             await asyncio.to_thread(record, part_of(body), usage, model, result.get('state')!='done',
                                     reason=result.pop('failure_reason',None))
-            # A job counts what each step cost against its cost limit.
-            if body.get('channel')=='background':result['cost_usd']=usage.get('cost_usd') if isinstance(usage,dict) else None
+            # A job step reports its token counts; Nocheh prices them at the rates frozen on the job's card.
+            if body.get('channel')=='background':result['tokens']=step_tokens(usage)
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
         from .assistant_gateway import check_delivery_policy

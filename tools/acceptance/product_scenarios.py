@@ -727,6 +727,31 @@ class ProductScenarios(Scenarios):
         jobs = [item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == 'Open tasks JOB1']
         self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
 
+    def background_job_cost_cap(self):
+        # Nocheh prices a job's tokens itself, at the rates frozen on its card (the fixture's rates, ADR-0206). Every
+        # scripted answer of the first step reports 8,000 prompt tokens, and its 24 searches pass the step's 20
+        # iterations, so the step goes on; its cost passes the job's $5 limit, so one short step writes the report.
+        searches = ' '.join('[[tool:nocheh_archive_search {"mode":"text","query":"COSTMARK%d","limit":1}]]' % index for index in range(24))
+        # ]] is escaped in the job's JSON so the scripted model reads the step's directives only in the step.
+        job = json.dumps({'action': 'start', 'title': 'Priced JOB3', 'instruction': 'Search each mark [[usage:8000]] ' + searches,
+                          'from': '2020-01-01', 'to': '2020-01-02'}).replace(']]', '\\u005d\\u005d')
+        request = self.f.message(OWNER, 'کار با هزینه JOBCOST [[tool:nocheh_background_job '+job+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        text = card['message']['text']
+        self.gate('job_card_shows_the_cost_limit', 'Priced JOB3' in text and 'Stops at $5' in text and 'plus the secret check' in text, card=text)
+        self.press(card, 'approve')
+        jobs = self.wait('job_done', lambda: [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
+                                              if item.get('title') == 'Priced JOB3' and item.get('state') in ('done', 'failed', 'stopped')], 600)
+        found = jobs[0]
+        self.current['observed'] = {'job': {key: found.get(key) for key in ('state', 'steps', 'cost_usd', 'cost_limit_usd', 'priced', 'error_code')}}
+        self.gate('job_priced', found.get('priced') is True and found['cost_usd'] > 0, job=found)
+        self.gate('job_cost_passed_its_limit', found['cost_usd'] >= found['cost_limit_usd'], cost=found['cost_usd'], limit=found['cost_limit_usd'])
+        kinds = self.f.query('nocheh_control', "SELECT string_agg(kind,',' ORDER BY step,attempt) FROM background_steps WHERE job_id='%s'" % found['id'])
+        self.gate('job_took_its_wrap_up_step', found['state'] == 'done' and (kinds or '').split(',')[-1] == 'wrap_up', state=found['state'], kinds=kinds)
+        report = [row for row in self.replies(before, OWNER) if not self.is_card(row)]
+        self.gate('job_reported', len(report) >= 1, count=len(report))
+
     @staticmethod
     def docker(*arguments):
         return subprocess.run(['docker', *arguments], capture_output=True, text=True)
@@ -967,6 +992,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
-                 'background_job_runs_and_reports', 'background_job_uses_sealed_box', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
+                 'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']

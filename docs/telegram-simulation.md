@@ -160,7 +160,10 @@ appears anywhere in the request except the current turn; `[[long:n]]`,
 answer. `[[turn:marker]]` reports whether a marker appears in the current turn
 (unaddressed group messages travel there), `[[tool:nocheh_x {json}]]` calls any
 Nocheh tool with those arguments and `[[after:silent]]` makes the answer after a
-tool call `[NO_REPLY]`. Other model traffic keeps the deterministic behaviour above. The mock's
+tool call `[NO_REPLY]`. `[[usage:n]]` makes each scripted answer in that turn
+report `n` prompt tokens; the fixture's reply rates (`NOCHEH_FIXTURE_REPLY_RATES`,
+read only with `NOCHEH_INSTALLATION_FIXTURE=1`) price them, so a background
+job's cost limit can be reached. Other model traffic keeps the deterministic behaviour above. The mock's
 `sendMessage` fault may set `parameters: {"deliver": true}` with a 5xx code:
 the message is accepted but the bot observes only a gateway failure.
 Directive-driven tool use tests pipeline, isolation and effects, not model

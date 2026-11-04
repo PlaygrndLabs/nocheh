@@ -102,5 +102,19 @@ class ScriptedBrainTests(unittest.TestCase):
         self.assertEqual(result,{'error':'unguarded_fixture_canary'})
         self.assertEqual(self.counts['raw_canary_outside_detector'],1)
 
+    def test_usage_directive_sets_the_prompt_tokens_of_each_scripted_answer_in_its_turn(self):
+        user=message('user','search it [[usage:8000]] [[search:COSTMARK]]')
+        call=self.brain.respond(request(user))
+        self.assertEqual((call['tool'],call['prompt_tokens']),('nocheh_archive_search',8000))
+        final=self.brain.respond(request(user,message('assistant',None),message('tool','{"sources":[]}')))
+        self.assertEqual(final['prompt_tokens'],8000)
+        self.assertNotIn('prompt_tokens',self.brain.respond(request(message('user','[[search:COSTMARK]]'))),'one token by default')
+        self.assertIsNone(self.brain.respond(request(message('user','[[usage:8000]] alone'))),'not a directive of its own')
+        self.assertNotIn('prompt_tokens',self.brain.respond(request(message('user','[[usage:8000\\u005d\\u005d [[search:COSTMARK]]'))))
+        responses=SimpleNamespace(JSONResponse=None,StreamingResponse=None)
+        with patch.dict('sys.modules',{'fastapi':SimpleNamespace(responses=responses),'fastapi.responses':responses}):
+            rendered=self.brain.render(SimpleNamespace(model='fixture',stream=False,stream_options=None),{'content':'done','prompt_tokens':8000})
+        self.assertEqual(rendered['usage']['prompt_tokens'],8000)
+
 
 if __name__=='__main__':unittest.main()
