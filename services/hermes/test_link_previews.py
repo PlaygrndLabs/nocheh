@@ -95,7 +95,8 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
             card = {'kind': 'card', 'id': 'a' * 64, 'chat_id': '123', 'text': 'Send “Member: hello https://example.test/a” to the team?',
                     'buttons': [['Approve', 'na' + 'a' * 56], ['Reject', 'nd' + 'a' * 56]]}
             self.assertEqual((await gateway.send_approval(card))['state'], 'done')
-            self.assertEqual(await gateway.send_approval({**card, 'kind': 'settle', 'text': card['text'] + '\n\nApproved.'}), {'state': 'done', 'edited': True})
+            settle = {key: value for key, value in card.items() if key != 'buttons'}
+            self.assertEqual(await gateway.send_approval({**settle, 'kind': 'settle', 'text': card['text'] + '\n\nApproved.'}), {'state': 'done', 'edited': True})
             self.assertEqual(await gateway.send_refusal({'event_id': 'b' * 64, 'chat_id': '9', 'user_id': '9', 'message_id': '5', 'private': True,
                                                          'reply': 'Sorry, this is private. https://example.test/b'}), {'state': 'done'})
             self.assertEqual(await gateway.send_notice({'id': 'c' * 64, 'chat_id': '123', 'text': 'A problem: https://example.test/c',

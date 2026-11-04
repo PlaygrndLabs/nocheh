@@ -33,7 +33,7 @@ DEFAULTS = {
         'or (in the owner\'s private chat) running commands or Python, start a background job yourself with nocheh_background_job (action start). '
         'Give a short title and a complete brief that a fresh session can follow without this conversation. '
         'Never ask the person to word it as a job. '
-        'If start says job_too_long, narrow the period or split the work into several jobs. '
+        'A job runs at most 50 minutes: if start says job_too_long, narrow the period or split the work into several jobs. '
         'The card shows the size, time and cost, and nothing runs until it is approved: say in one line that the card is waiting. '
         'In the owner\'s private chat, set box when the work needs commands, files or Python.'),
     'reply.owner': (

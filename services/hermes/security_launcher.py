@@ -104,13 +104,13 @@ def attach(identifier,body):
             yield content
     finally:client.close()
 
-# Sealed job boxes (box contract sections 6 and 7). A box holds a job's /work across its steps
+# Sealed job boxes (box contract sections 6 and 7). A box holds a job's /work across its runs
 # and a read-only copy of the job's checked chat; it has no network, keys, binds or Docker socket.
 BOX_KEY=('job','generation','mode','valid_from')
 # Fill state of the boxes this launcher made, by container Id. Startup removes every other box of this installation.
 BOXES={}
 # Jobs whose last box turn did not end by itself with success (an error, a kill, a dropped client, a result that is
-# not done): what it started in the box, such as a code cell, may still run there, so the job's next step gets a new box.
+# not done): what it started in the box, such as a code cell, may still run there, so the job's next run gets a new box.
 ABNORMAL=set()
 # Box listing, creation and removal, and creating a turn that mounts a box, never interleave.
 BOX_LOCK=threading.Lock()
@@ -301,7 +301,7 @@ def write_part(identifier,state,until):
 
 def fill(identifier,credential,gone,until):
     """Copies the job's checked chat into /chat a page at a time until `until`, each part before the manifest that
-    counts it. A later step resumes from the manifest's next cursor; once complete with records still being checked,
+    counts it. A later run resumes from the manifest's next cursor; once complete with records still being checked,
     it reads again from the start and writes only lines the box does not have yet. A part /chat has no room for
     ends the copy for good: the manifest then says full, and this box is never filled again."""
     state=BOXES[identifier]
@@ -323,7 +323,7 @@ def fill(identifier,credential,gone,until):
             if complete:return
     except RuntimeError as error:
         if str(error)!='box_chat_full':raise
-        # Full only once the manifest says so; until then a later step reads the page again and finds no room again.
+        # Full only once the manifest says so; until then a later run reads the page again and finds no room again.
         state.update(complete=False,pending=None);put(identifier,'manifest.json',manifest({**state,'full':True}),until);state['full']=True
 
 def prepare_box(box,credential,gone,limit,until):
@@ -395,7 +395,7 @@ SLOTS=threading.BoundedSemaphore(parallel('NOCHEH_PARALLEL_RUNS',4))
 ACTIVE=set()
 ACTIVE_LOCK=threading.Lock()
 CONTAINERS=set()
-# Jobs with a turn in flight: two steps of one job never share its box.
+# Jobs with a turn in flight: two runs of one job never share its box.
 BOX_JOBS=set()
 
 def stop_active_turns(*_):

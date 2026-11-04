@@ -53,7 +53,11 @@ def preferences(config):
     return result
 
 
-MANAGED = ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching', 'terminal', 'code_execution', 'tool_output']
+MANAGED = ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching', 'terminal', 'code_execution', 'tool_output',
+           'compression.threshold_tokens']
+# Hermes compacts a conversation once its prompt passes this many tokens. A background job's run of up to 50 minutes
+# reaches it; a reply turn, of at most 16 iterations, rarely does.
+COMPRESSION_TOKENS = 100000
 
 
 def resolved(config, model):
@@ -87,9 +91,10 @@ def resolved(config, model):
     # Hermes's terminal, file and code tools run only in a job's sealed box. A terminal section
     # would replace the launcher's backend, possibly with local; the box's bounds are fixed.
     config.pop('terminal', None)
-    # A code kernel left idle in a box does not stay much longer than a step.
+    # A code kernel left idle in a box does not stay long after its last cell.
     config['code_execution'] = {'timeout': 120, 'max_tool_calls': 20, 'max_session_kernels': 1, 'kernel_idle_timeout': 600}
     config['tool_output'] = {'max_bytes': 30000, 'max_lines': 400, 'max_line_length': 1000}
+    config.setdefault('compression', {})['threshold_tokens'] = COMPRESSION_TOKENS
     return config
 
 

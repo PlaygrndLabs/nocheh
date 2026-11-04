@@ -116,5 +116,46 @@ class ScriptedBrainTests(unittest.TestCase):
             rendered=self.brain.render(SimpleNamespace(model='fixture',stream=False,stream_options=None),{'content':'done','prompt_tokens':8000})
         self.assertEqual(rendered['usage']['prompt_tokens'],8000)
 
+    def test_todo_list_and_delay_directives(self):
+        todos='{"todos":[{"id":"1","content":"Search the marks","status":"in_progress"}]}'
+        user=message('user','[[delay:6]] [[tool:todo_list '+todos+']] [[search:LONGMARK0]]')
+        call=self.brain.respond(request(user,tools=('nocheh_archive_search','todo_list')))
+        self.assertEqual(call,{'tool':'todo_list','arguments':json.loads(todos),'delay':6})
+        events=len(self.brain.events)
+        self.assertEqual(self.brain.events[-1],{'directive':'tool','argument':todos,'phase':'call','tool':'todo_list'},'recorded before the wait')
+        for given,delay in (('0',1),('200',90),('90',90)):
+            self.assertEqual(self.brain.respond(request(message('user','[[delay:'+given+']] [[search:x]]')))['delay'],delay)
+        self.assertNotIn('delay',self.brain.respond(request(message('user','[[search:x]]'))))
+        self.assertIsNone(self.brain.respond(request(message('user','[[delay:5]] alone'))),'not a directive of its own')
+        self.assertGreater(len(self.brain.events),events)
+
+    def test_a_resumed_job_run_goes_on_with_its_first_messages_directives(self):
+        first=message('user','[Background job: Long JOB4] [[usage:30000]] [[delay:3]] [[tool:nocheh_archive_search {"query":"A"}]] [[tool:nocheh_archive_search {"query":"B"}]]')
+        done=[first,message('assistant',None),message('tool','{"hits":["A"]}')]
+        resume=message('user','[Background job: Long JOB4] The job was interrupted and restarted. Your to-do list and the work so far are above.')
+        call=self.brain.respond(request(*done,resume))
+        self.assertEqual(call,{'tool':'nocheh_archive_search','arguments':{'query':'B'},'prompt_tokens':30000,'delay':3})
+        self.assertIn({'directive':'resume','phase':'seen','results':1},self.brain.events)
+        final=self.brain.respond(request(*done,resume,message('assistant',None),message('tool','{"hits":["B"]}')))
+        self.assertEqual(final['content'],'[brain] nocheh_archive_search: {"hits":["A"]}\n[brain] nocheh_archive_search: {"hits":["B"]}')
+        self.assertEqual(sum(event['directive']=='resume' for event in self.brain.events),1,'once per directive turn')
+        # A resume line with no earlier directive is an ordinary turn.
+        self.assertIsNone(self.brain.respond(request(message('user','hello'),resume)))
+
+    def test_notices_and_a_fresh_restart_are_recorded_once(self):
+        user=message('user','[[tool:nocheh_archive_search {"query":"A"}]] [[tool:nocheh_archive_search {"query":"B"}]]')
+        cost='{"hits":[]}\n\n[SYSTEM NOTICE — cost budget nearly used] This job has used about 80% of its cost limit.'
+        time='{"hits":[]}\n\n[SYSTEM NOTICE — run time budget nearly exhausted] Run time budget nearly exhausted.'
+        self.brain.respond(request(user,message('assistant',None),message('tool',cost)))
+        self.brain.respond(request(user,message('assistant',None),message('tool',cost),message('assistant',None),message('tool',time)))
+        notices=[event for event in self.brain.events if event['directive']=='notice']
+        self.assertEqual(notices,[{'directive':'notice','kind':'cost','phase':'seen'},{'directive':'notice','kind':'time','phase':'seen'}])
+        restart=message('user','[Background job: Restart JOB6] [[search:RESTARTMARK]]\n\nThis job restarted and its earlier work could not be kept.\n'
+                               'Your last to-do list was: Search (in_progress)')
+        earlier=(message('user','hello'),message('assistant','hi'))
+        self.brain.respond(request(*earlier,restart));self.brain.respond(request(*earlier,restart))
+        self.assertEqual([event for event in self.brain.events if event['directive']=='restart'],
+                         [{'directive':'restart','phase':'seen','todo':True,'earlier':2}])
+
 
 if __name__=='__main__':unittest.main()

@@ -571,11 +571,17 @@ class AssistantGateway:
             receipt=self.receipts/('approval-'+body['id']+'.result')
             card=json.loads(receipt.read_bytes()) if receipt.exists() else {}
             # Only a card this runtime sent, in the chat it was sent to, is edited.
+            # A running background job's card keeps one Stop button; every other decided card loses its buttons.
+            stop=body.get('buttons')
+            if stop is not None:
+                if (not isinstance(stop,list) or len(stop)!=1 or not isinstance(stop[0],(list,tuple)) or len(stop[0])!=2 or not isinstance(stop[0][0],str)
+                        or not 0<len(stop[0][0])<=40 or not isinstance(stop[0][1],str) or not re.fullmatch(r'ns[a-f0-9]{56}',stop[0][1])):raise ValueError('invalid_approval')
+                stop=InlineKeyboardMarkup([[InlineKeyboardButton(stop[0][0],callback_data=stop[0][1])]])
             if card.get('state')!='done' or card.get('chat_id')!=chat:return {'state':'done','edited':False}
             token=DISPATCH_KEY.set('approval-settle:'+body['id'])
-            # The decided card keeps its text with the outcome and loses its buttons.
+            # The decided card keeps its text with the outcome.
             # Telegram refuses a repeated identical edit, which changes nothing.
-            try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),entities=entities,parse_mode=None,reply_markup=None,
+            try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),entities=entities,parse_mode=None,reply_markup=stop,
                                                                              link_preview_options=no_preview()))}
             except Exception:return {'state':'done','edited':False}
             finally:DISPATCH_KEY.reset(token)

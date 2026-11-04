@@ -61,6 +61,8 @@ class ProfileConfigurationTests(unittest.TestCase):
             self.assertNotIn('terminal', saved)
             self.assertEqual(saved['code_execution'], {'timeout': 120, 'max_tool_calls': 20, 'max_session_kernels': 1, 'kernel_idle_timeout': 600})
             self.assertEqual(saved['tool_output'], {'max_bytes': 30000, 'max_lines': 400, 'max_line_length': 1000})
+            # Hermes compacts a long conversation, such as a background job's run, at Nocheh's threshold.
+            self.assertEqual(saved['compression']['threshold_tokens'], 100000)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_anthropic_replies_use_its_messages_api_with_prompt_caching(self):
@@ -70,7 +72,9 @@ class ProfileConfigurationTests(unittest.TestCase):
                                          ('legacy', 'https://api.anthropic.com/v1', 'openai')):
             with self.subTest(runtime=runtime, route=route), \
                     patch.dict(os.environ, NOCHEH_SECURITY_RUNTIME=runtime, NOCHEH_REPLY_ROUTE_URL=route):
-                config = resolved({'model': {'provider': 'untrusted'}, 'prompt_caching': {'cache_ttl': 'off'}}, 'reply-model')
+                config = resolved({'model': {'provider': 'untrusted'}, 'prompt_caching': {'cache_ttl': 'off'},
+                                   'compression': {'threshold_tokens': 5000, 'enabled': True}}, 'reply-model')
+                self.assertEqual(config['compression'], {'threshold_tokens': 100000, 'enabled': True}, 'the threshold is kept over the YAML')
                 self.assertEqual(config['model'], {'provider': provider, 'default': 'reply-model'})
                 self.assertEqual(config['prompt_caching'], {'cache_ttl': '5m'})
                 # One-shot helper calls keep the broker's chat route.

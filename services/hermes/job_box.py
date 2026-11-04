@@ -3,7 +3,7 @@
 ``nocheh_box`` is a plugin terminal backend. Each command Hermes runs for those tools goes,
 with its stdin, over one connection to the box's exec socket (tools/runtime/box_server.py);
 nothing is synced in or out. A fail-closed ``pre_tool_call`` hook blocks those tools in every
-turn that is not a sealed box step on this backend.
+turn that is not a sealed box run on this backend.
 """
 import contextlib
 import json
@@ -26,20 +26,20 @@ TOOLS=frozenset({'terminal','process_manage','read_file','write_file','patch','s
 REQUIRED=TOOLS-{'process_manage'}
 # The box caps a command's output at 8 MiB; a box that sends more is cut off.
 MAX_OUTPUT=8*1024*1024+65536
-# Set once by a sealed box step: the step's exact tool names and its absolute deadline.
+# Set once by a sealed box run: the run's exact tool names and its absolute deadline (the job's hard deadline).
 _STEP=None
 _DEADLINE=None
-# A box tool's command ends MARGIN seconds before the step does; with less than FLOOR seconds left, no box tool
+# A box tool's command ends MARGIN seconds before the run does; with less than FLOOR seconds left, no box tool
 # starts. Hermes's own commands, such as the kill of a code cell that ran out of time, reach the box until the
 # deadline itself, each cut to the time left less END seconds (one second at least).
 MARGIN=30
 FLOOR=10
 END=5
-TIME_UP="This step's time is up. Write down what you found so far; the next step continues."
+TIME_UP="The job's time is up. Write the final report now."
 
 
 def left():
-    """Seconds a box tool's command may still take in this step: none before the step is sealed."""
+    """Seconds a box tool's command may still take in this run: none before the run is sealed."""
     return _DEADLINE-time.time()-MARGIN if _DEADLINE is not None else 0
 
 
@@ -156,7 +156,7 @@ class Environment(BaseEnvironment):
         return Process(sock)
 
     def execute(self,command,cwd='',**kwargs):
-        # Hermes's own wait ends with the box command, before the step does.
+        # Hermes's own wait ends with the box command, before the run does.
         kwargs['timeout']=max(1,min(kwargs.get('timeout') or self.timeout,int(left())))
         result=super().execute(command,cwd,**kwargs)
         # The full copy of a long output stays in this turn, where the box's file tools cannot open it.
@@ -196,8 +196,8 @@ def backend():
 
 
 def seal(names,deadline):
-    """Bind this turn to one box step once its tools are known: the box tools on this backend
-    and the step's other tools run, nothing else, and no box command outlives the step's deadline."""
+    """Bind this turn to one box run once its tools are known: the box tools on this backend
+    and the run's other tools run, nothing else, and no box command outlives the run's deadline."""
     global _STEP,_DEADLINE
     names=frozenset(names)
     if (_STEP is not None or not REQUIRED<=names or 'delegate_task' in names or type(deadline) not in (int,float)
@@ -205,7 +205,7 @@ def seal(names,deadline):
     _DEADLINE=float(deadline)
     # While a task has no environment, Hermes spills an oversized tool result into this turn and
     # sends the model to a path the box cannot open. The box environment is made now, as Hermes
-    # makes it for any tool, and its idle reaper keeps it for this one-step process; such a result
+    # makes it for any tool, and its idle reaper keeps it for this one-run process; such a result
     # then keeps its inline preview.
     from tools.terminal_tool_lifecycle import ensure_task_env,get_active_env
     os.environ['TERMINAL_LIFETIME_SECONDS']='86400'
@@ -215,7 +215,7 @@ def seal(names,deadline):
     # execute_code also keeps a long output's full copy in this turn; it gives no path the box cannot open.
     from tools import code_execution_tool
     code_execution_tool._spill_full_stdout=lambda text:None
-    # A code cell ends MARGIN+FLOOR seconds before the step: room for Hermes's last poll, its wait for the
+    # A code cell ends MARGIN+FLOOR seconds before the run: room for Hermes's last poll, its wait for the
     # cell's tool calls and its kill, which all reach the box before the deadline.
     load=code_execution_tool._load_config
     def bounded():
@@ -232,11 +232,11 @@ def tool_gate(tool_name='',**_):
     try:
         if tool_name=='delegate_task' and (_STEP is not None or os.environ.get('NOCHEH_BOX_SOCKET') or os.environ.get('TERMINAL_ENV')==NAME):
             return {'action':'block','message':"Subagents are not available in a background job's sealed box."}
-        if _STEP is not None and tool_name not in _STEP:return {'action':'block','message':'This tool is not available in this job step.'}
+        if _STEP is not None and tool_name not in _STEP:return {'action':'block','message':'This tool is not available in this job.'}
         if _STEP is not None and tool_name in TOOLS and left()<FLOOR:return {'action':'block','message':TIME_UP}
         if tool_name not in TOOLS:return None
         if _STEP is not None and backend():
-            # Hermes's wait for a background command in the box is clamped by TERMINAL_TIMEOUT: it ends with the step too.
+            # Hermes's wait for a background command in the box is clamped by TERMINAL_TIMEOUT: it ends with the run too.
             os.environ['TERMINAL_TIMEOUT']=str(int(left()));return None
     except Exception:pass
     return BLOCKED

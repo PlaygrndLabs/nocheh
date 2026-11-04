@@ -200,8 +200,9 @@ class ToolGateTests(unittest.TestCase):
                 with self.subTest(name=name):self.assertFalse(self.blocked(name))
             for name in ('delegate_task','nocheh_shell','memory','web_search'):
                 with self.subTest(name=name):self.assertTrue(self.blocked(name))
-            # Once the step's time is up, its box tools say so, in ADR-0205's words; its other tools still run.
-            self.assertEqual(job_box.TIME_UP,"This step's time is up. Write down what you found so far; the next step continues.")
+            # Once the job's time is up, its box tools say so; its other tools still run.
+            self.assertEqual(job_box.TIME_UP,"The job's time is up. Write the final report now.")
+            self.assertEqual(job_box.tool_gate(tool_name='web_search',args={},task_id='t'),{'action':'block','message':'This tool is not available in this job.'})
             job_box._DEADLINE=time.time()+35
             for name in job_box.REQUIRED:
                 with self.subTest(name=name):self.assertEqual(job_box.tool_gate(tool_name=name,args={},task_id='t'),{'action':'block','message':job_box.TIME_UP})
@@ -224,7 +225,10 @@ class ToolGateTests(unittest.TestCase):
                                    (self.names,None),(self.names,True),(self.names,str(self.deadline)),(self.names,float('inf'))):
                 with self.subTest(names=names,deadline=deadline),self.assertRaisesRegex(RuntimeError,'job_box_unavailable'):job_box.seal(names,deadline)
             with patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'0'}),self.assertRaisesRegex(RuntimeError,'job_box_unavailable'):job_box.seal(self.names,self.deadline)
-            job_box.seal(self.names,self.deadline);self.assertEqual(job_box._DEADLINE,self.deadline)
+            # A job run lasts up to its job's hard deadline, 55 minutes after it started at most.
+            long=time.time()+3300
+            job_box.seal(self.names,long);self.assertEqual(job_box._DEADLINE,long)
+            self.assertAlmostEqual(job_box.left(),3300-job_box.MARGIN,delta=2)
             with self.assertRaisesRegex(RuntimeError,'job_box_unavailable'):job_box.seal(self.names,self.deadline)
             from tools import code_execution_tool
             self.assertIsNone(code_execution_tool._spill_full_stdout('Alice: hello'))
@@ -321,7 +325,7 @@ class BoxStepTests(unittest.TestCase):
                 if expected is None:
                     with self.assertRaisesRegex(ValueError,'job_box_unavailable'):box_step(body)
                 else:self.assertIs(box_step(body),expected)
-        with self.assertRaisesRegex(ValueError,'invalid_background_step'):box_step(step('true'))
+        with self.assertRaisesRegex(ValueError,'invalid_background_run'):box_step(step('true'))
 
     def test_box_toolsets_offer_exactly_the_box_tools(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
@@ -391,9 +395,10 @@ def archive(path,value=None):
 install=request_boundary.install
 with patch.object(request_boundary,'install',lambda:install(request_boundary.Boundary('on',transform=lambda url,payload:payload))),\\
      patch.object(subscription,'configured_urls',lambda:{body['base_url']}),patch.object(archive_tools,'request',archive):
-    try:result=assistant_turn.run(body)
+    lines=[]
+    try:result=assistant_turn.run(body,None,lines.append)
     except Exception as error:result={'raised':str(error)}
-(folder/'result.json').write_text(json.dumps({'result':result,'scripts':scripts,'step':sorted(job_box._STEP or []),'deadline':job_box._DEADLINE}))
+(folder/'result.json').write_text(json.dumps({'result':result,'scripts':scripts,'step':sorted(job_box._STEP or []),'deadline':job_box._DEADLINE,'lines':lines}))
 '''
 
 
@@ -429,7 +434,9 @@ class BoxTurnTests(unittest.TestCase):
                 folder=Path(folder);profile=folder/'profile';(profile/'native-state').mkdir(parents=True);(profile/'memories').mkdir();(folder/'work').mkdir()
                 atomic_yaml(profile/'config.yaml',resolved({},'synthetic'))
                 (profile/'plugins').mkdir();(profile/'plugins'/'nocheh').symlink_to(Path(job_box.__file__).parent,target_is_directory=True)
-                body={'session_id':'s','chat_id':'5','user_id':'5','owner':True,'text':'Count the lines.','channel':'background','background':{'max_iterations':5,'box':True},
+                body={'session_id':'s','chat_id':'5','user_id':'5','owner':True,'text':'Count the lines.','channel':'background',
+                      'background':{'max_iterations':5,'box':True,'soft_deadline':time.time()+100,'rates':{'input':2,'output':10,'cache_read':None,'cache_write':None,'request':None},
+                                    'cost_limit_usd':5,'prior_cost_usd':0},
                       'model':'synthetic','api_key':'synthetic','base_url':'http://127.0.0.1:%d/v1'%server.server_address[1],'provider':'openai','api_mode':'chat_completions',
                       'archive_credential':'turn.synthetic','turn_deadline_epoch':time.time()+120,'model_context_length':128000}
                 child=subprocess.run([sys.executable,'-c',TURN,json.dumps(body),str(folder)],cwd=Path(__file__).resolve().parents[2],
@@ -442,7 +449,12 @@ class BoxTurnTests(unittest.TestCase):
         self.assertEqual([{tool['function']['name'] for tool in payload['tools']} for payload in steps],[set(BOX_TOOLS)]*3)
         self.assertNotIn('nocheh_background_job',BOX_TOOLS,'a box step has no job tool')
         self.assertEqual(outcome['step'],sorted(BOX_TOOLS))
-        self.assertEqual(outcome['deadline'],body['turn_deadline_epoch'],'the box ends with this step, not later')
+        self.assertEqual(outcome['deadline'],body['turn_deadline_epoch'],'the box ends with this run, not later')
+        # Each model call of the run went out as a progress line, with the run's totals so far.
+        from services.hermes.job_progress import progress_line
+        lines=outcome['lines'];self.assertGreaterEqual(len(lines),4)
+        for line in lines:progress_line(line,len(json.dumps(line,ensure_ascii=False).encode())+1)
+        self.assertGreaterEqual(lines[-1]['tokens']['calls'],3);self.assertEqual(lines[-1]['tokens']['input_tokens'],10*lines[-1]['tokens']['calls'])
         page,terminal=[json.dumps(message['content']) for message in steps[-1]['messages'] if message.get('role')=='tool']
         # An oversized result before any box command keeps its inline preview, with no path the box cannot open.
         self.assertIn('Full output could not be saved to sandbox',page);self.assertNotIn('Full output saved to',page)

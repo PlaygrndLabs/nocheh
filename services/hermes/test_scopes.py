@@ -60,6 +60,11 @@ class ScopeTests(unittest.TestCase):
         def signed(claims):
             data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        # A background job run's credential lasts until 2 minutes after its job's hard deadline: up to 55 minutes, never past an hour.
+        long_claims={'scope':'-20','event_id':event,'audience':'nocheh-assistant'}
+        verify_capability(signed({**long_claims,'expires':time.time()*1000+55*60000}),secret,a,event)
+        for expires in (time.time()*1000+61*60000,time.time()*1000-1000):
+            with self.assertRaises(ValueError):verify_capability(signed({**long_claims,'expires':expires}),secret,a,event)
         with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
             bound=Scopes.apply_revision(a,verify_capability(signed(named_claims),secret,a,event))
             self.assertEqual(bound.logical_profile,'research')
