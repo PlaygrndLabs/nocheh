@@ -256,6 +256,20 @@ test('a running job run carries across reaction and learning epochs, any other c
     assert.equal((await tick(busy)).stage,'delivery');await deliver(busy);
     assert.deepEqual([(await job(busy)).state,(await job(busy)).attempts],['done',1]);
 
+    // A learning publication pending while a report part is checked leaves the part to the job's next tick, which checks it
+    // again in the new epoch and sends it once; the job's workflow does not close while the job still reports.
+    const reporting=await approved('Report check'),writer=await claim(reporting);
+    await finish(writer,'done',{text:'Report: made-up task 17 is done.',...counts(1000)});
+    let partLearned:Awaited<ReturnType<typeof learn>>|undefined,partDone:Promise<void>|undefined;
+    during=async()=>{
+      partLearned=await learn(false);
+      partDone=new Promise<void>((resolve,reject)=>setTimeout(()=>s.learned.finish(partLearned!.operation_id).then(resolve,reject),500));
+    };
+    const paused=await tick(reporting);await partDone;
+    assert.deepEqual([during,paused.state,paused.stage,paused.waiting_reason,(await reports(reporting)).length],[null,'waiting','delivery','guard_pending',0]);
+    assert.equal((await deliver(reporting)).state,'completed');
+    assert.deepEqual([(await job(reporting)).state,(await reports(reporting)).length],['done',1]);
+
     // Any other change after its binding ends a run at its next check, here a hidden message after a reaction; the relaunch
     // is bound to the current epoch: a new profile, the first message again and the restart text, without the to-do list.
     const hidden=await message(other,'A made-up message to hide');

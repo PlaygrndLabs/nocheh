@@ -582,18 +582,26 @@ export class BackgroundJobRepository {
     // The last run wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
     // have passed since (ADR-0201); any other change may have withdrawn what it read.
     if(!run||!await carriesForward(this.control,run.run_binding,binding))return this.finish(row,'failed','job_report_outdated');
-    const prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,row.space_id,parts[part-1]!,'background-report:'+row.id+':'+part);
-    // A part's message and its record commit together under the job's lock, so neither a retry
-    // in a later epoch nor a second tick sends a part twice, and none is staged after Stop.
-    const db=await this.control.connect();
     try {
-      await db.query('BEGIN');
-      const action=await this.telegram.stageSystem(db,prepared);
-      const job=(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
-      const saved=job.state==='reporting'&&!job.cancel_requested&&
-        (await db.query('INSERT INTO background_reports(job_id,part,action_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[row.id,part,action.id])).rowCount===1;
-      await db.query(saved?'COMMIT':'ROLLBACK');
-    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+      const prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,row.space_id,parts[part-1]!,'background-report:'+row.id+':'+part);
+      // A part's message and its record commit together under the job's lock, so neither a retry
+      // in a later epoch nor a second tick sends a part twice, and none is staged after Stop.
+      const db=await this.control.connect();
+      try {
+        await db.query('BEGIN');
+        const action=await this.telegram.stageSystem(db,prepared);
+        const job=(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
+        const saved=job.state==='reporting'&&!job.cancel_requested&&
+          (await db.query('INSERT INTO background_reports(job_id,part,action_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[row.id,part,action.id])).rowCount===1;
+        await db.query(saved?'COMMIT':'ROLLBACK');
+      }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    } catch(error) {
+      // An epoch or a publication still pending while the part was checked: nothing was staged, so the next tick checks it again
+      // under the binding then current, by the rule above, instead of the job's workflow closing with the job still reporting.
+      if(error instanceof HttpError&&['guard_transition_pending','guard_context_changed','audience_context_changed','action_context_changed'].includes(error.code))
+        return observation('waiting','delivery',sent.length,Date.now()+2000,'guard_pending');
+      throw error;
+    }
     return observation('waiting','delivery',part,Date.now()+5000,'receipt_pending');
   }
   /** The workflow family: `job:` drives a job, `run:` one of its runs. */

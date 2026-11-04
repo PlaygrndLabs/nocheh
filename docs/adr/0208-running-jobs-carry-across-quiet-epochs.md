@@ -100,9 +100,11 @@ Every other change still waits for the job or ends its run, as before. Extends
   quiet epoch Hermes resends the run's history, and it is checked again in the new
   epoch; detector results already saved are reused.
 - **Unchanged.** The report and limit note rule of ADR-0201: before each part, the
-  last run's binding must carry to the current one. The box: kept while only quiet
-  epochs passed since the last change (ADR-0205), so it stays for the whole run.
-  Python is unchanged.
+  last run's binding must carry to the current one. A part whose check an epoch or a
+  pending publication interrupts stages nothing, and the job's next tick checks it
+  again under the binding then current, by the same rule. The box: kept while only
+  quiet epochs passed since the last change (ADR-0205), so it stays for the whole
+  run. Python is unchanged.
 </decision>
 
 <alternatives>
