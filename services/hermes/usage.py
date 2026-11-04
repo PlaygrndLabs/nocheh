@@ -40,6 +40,10 @@ ADDED = {'refused': 'INTEGER NOT NULL DEFAULT 0', 'hidden': 'INTEGER NOT NULL DE
 # Why a run failed. Codes only: never the provider's message or any content.
 REASONS = ('refused', 'rate_limited', 'key_rejected', 'model_not_found', 'too_long', 'timed_out',
            'provider_error', 'interrupted', 'empty_answer', 'bad_answer', 'nocheh_error', 'unknown')
+# Runs Nocheh's own policy ended, which are not model failures: a job's model call the broker refused past its
+# byte backstop (ADR-0206), known by the broker's exact refusal body in the run's error.
+STOPS = ('job_cost_limit',)
+JOB_COST_LIMIT = '{"error":"job_cost_limit"}'
 # Hermes's classified failure reasons, by the code Nocheh keeps.
 HERMES_REASONS = {
     'refused': ('content_policy_blocked', 'provider_policy_blocked', 'data_policy_denied'),
@@ -95,10 +99,12 @@ def turn_usage(result):
 
 
 def failure_reason(results):
-    """Why a Hermes turn failed, from the run results of its process, as one of REASONS."""
+    """Why a Hermes turn failed, from the run results of its process, as one of REASONS or STOPS."""
     for result in results or []:
         if not isinstance(result, dict):
             return 'unknown'
+        if JOB_COST_LIMIT in str(result.get('error') or ''):
+            return 'job_cost_limit'
         code = str(result.get('failure_reason') or '')
         exit_reason = str(result.get('turn_exit_reason') or '')
         found = next((reason for reason, codes in HERMES_REASONS.items() if code in codes), None)
@@ -216,9 +222,9 @@ def claude_cost(model, usage):
     return sum(count * rate for count, rate in zip(tokens, rates)) / 1e6
 
 
-RATES = ('input', 'output', 'cache_read', 'cache_write')
+RATES = ('input', 'output', 'cache_read', 'cache_write', 'request')
 # The installation rehearsal's scripted model has no price anywhere; there, and only there, this variable may
-# give its four rates as JSON, so a background job's cost limit can be tested.
+# give its rates as JSON, so a background job's cost limit can be tested.
 FIXTURE_RATES = 'NOCHEH_FIXTURE_REPLY_RATES'
 
 
@@ -227,10 +233,10 @@ def _rate(value):
 
 
 def reply_rates(model, provider, base_url):
-    """USD per million tokens of the reply model's four token buckets, each None when unknown. A background job
-    freezes them at its start. Claude on the Anthropic provider takes the higher of its two cards per bucket,
-    since a job's prompts can pass the long-prompt mark; any other model takes Hermes's pricing, asked with
-    one-million-token rows."""
+    """USD per million tokens of the reply model's four token buckets, and per call as `request`, each None when
+    unknown. A background job freezes them at its start. Claude on the Anthropic provider takes the higher of its
+    two cards per bucket, since a job's prompts can pass the long-prompt mark, and has no per-call price; any other
+    model takes Hermes's pricing, asked with one-million-token rows and one row of a single call."""
     if os.environ.get('NOCHEH_INSTALLATION_FIXTURE') == '1' and os.environ.get(FIXTURE_RATES):
         import json
         try:
@@ -241,16 +247,18 @@ def reply_rates(model, provider, base_url):
     name = claude_name(model)
     if provider == 'anthropic' and name in CLAUDE_PRICES:
         cards = (CLAUDE_PRICES[name], CLAUDE_LONG_PROMPT_PRICES.get(name, CLAUDE_PRICES[name]))
-        return {bucket: float(max(rates)) for bucket, rates in zip(RATES, zip(*cards))}
+        return {**{bucket: float(max(rates)) for bucket, rates in zip(RATES, zip(*cards))}, 'request': 0.0}
     million = 1_000_000
     rows = [{'model': str(model or ''), 'provider': provider, 'base_url': base_url, bucket: million} for bucket in CLAUDE_BUCKETS]
     # Hermes prices a long request's whole prompt at a higher tier, so output is also asked beside a long prompt.
     rows.append({**rows[0], 'output_tokens': million})
+    # A per-request price, which OpenRouter and OpenAI-compatible model lists can carry, is counted per call.
+    rows.append({'model': str(model or ''), 'provider': provider, 'base_url': base_url, 'calls': 1})
     try:
         costs = price(rows)
     except Exception:
         return dict.fromkeys(RATES)
-    rates = dict(zip(RATES, (_rate(cost) for cost in costs)))
+    rates = dict(zip(RATES, (_rate(cost) for cost in costs[:4] + costs[5:6])))
     if rates['input'] is not None and rates['output'] is not None and _rate(costs[4]) is not None:
         rates['output'] = max(rates['output'], costs[4] - rates['input'])
     return rates
@@ -285,7 +293,8 @@ def record(part, usage, model, failed=False, provider=None, path=None, now=None,
         cost = claude_cost(model, usage)
         if cost is not None:
             usage = {**usage, 'cost_usd': cost}
-    failed = bool(failed or refused)
+    # A run Nocheh's own policy stopped counts as a run, not as a failure the owner is told of.
+    failed = bool(failed or refused) and reason not in STOPS
     reason = 'refused' if refused else reason if reason in REASONS else 'unknown'
     _add(part, model, provider, path, now, reason if failed else None, runs=1, failed=int(failed),
          refused=int(reason == 'refused' and failed), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},

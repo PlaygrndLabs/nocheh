@@ -16,10 +16,13 @@ STEP_SECONDS=540
 
 
 def step_tokens(usage):
-    """A job step's token buckets and calls from Hermes's usage, or None when it reported none."""
+    """A job step's token buckets and calls from Hermes's usage, or None when it reported none, so it is priced high."""
     from .usage import CLAUDE_BUCKETS,_count
     if not isinstance(usage,dict):return None
-    return {**{bucket:_count(usage.get(bucket)) for bucket in CLAUDE_BUCKETS},'calls':_count(usage.get('calls'))}
+    tokens={bucket:_count(usage.get(bucket)) for bucket in CLAUDE_BUCKETS};calls=_count(usage.get('calls'))
+    # Every model call reads a prompt, so calls without prompt tokens mean the provider reported no usage: never free.
+    if calls and not tokens['input_tokens']+tokens['cache_read_tokens']+tokens['cache_write_tokens']:return None
+    return {**tokens,'calls':calls}
 
 
 def scheduled_preferences(profile,body):

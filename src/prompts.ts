@@ -122,7 +122,7 @@ export const backgroundJob=['[Background job: {title}]',
   'When the work is done, write the final report as your answer, in the language of the instruction. It is sent to the chat where the job was asked. '+
   'Nobody answers questions during the job: say in the report what was unclear. '+
   'Changes you ask for during the job, such as Notion edits, wait until it ends; then the owner approves them together. Do not wait for them, and say in the report what you asked for.',
-  'The job stops at {limits}, whichever comes first.'].join('\n');
+  'The job stops at {limits}.'].join('\n');
 /** Each later step of a background job. */
 export const backgroundContinue='[Background job: {title}]\nContinue the job where you stopped. Your to-do list and the work so far are above. Actions you asked for may have run since: nocheh_action_status lists them and reads each result. When the work is done, write the final report as your answer.';
 /** The last step when a background job reaches its cost or time limit. */

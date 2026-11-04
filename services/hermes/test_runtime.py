@@ -145,7 +145,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             from . import runtime
             handler=object.__new__(runtime.Handler);handler.path='/internal/usage/price'
             with patch.object(runtime,'MODEL','claude-sonnet-5-5'):
-                self.assertEqual(handler.dispatch({'rates':'reply'}),{'rates':{'input':2.0,'output':10.0,'cache_read':0.2,'cache_write':2.5}})
+                self.assertEqual(handler.dispatch({'rates':'reply'}),{'rates':{'input':2.0,'output':10.0,'cache_read':0.2,'cache_write':2.5,'request':0.0}})
             with patch.object(runtime,'MODEL','claude-sonnet-5-5'),patch('services.hermes.usage.reply_rates',return_value={}) as rates:
                 handler.dispatch({'rates':'reply'})
             rates.assert_called_once_with('claude-sonnet-5-5','anthropic','https://api.anthropic.com/v1')

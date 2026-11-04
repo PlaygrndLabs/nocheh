@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
-from .turn_process import _run_process,run_process
+from .turn_process import _run_process,run_process,step_tokens
 from .scopes import Scope,Scopes
 
 class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +81,13 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(bare[0]['tokens'],'a step without usage reports no counts, which Nocheh prices high')
         other,_=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"hello","usage":'+json.dumps(usage)+'}))')
         self.assertEqual(other,{'state':'done','text':'hello'},'other turns are unchanged')
+    def test_a_step_whose_calls_read_no_prompt_reports_no_counts(self):
+        zero=dict.fromkeys(('input_tokens','output_tokens','cache_read_tokens','cache_write_tokens'),0)
+        # A provider that leaves usage out still has its calls counted: those zeros are not a free step.
+        for usage in ({'calls':3},{**zero,'calls':20},{**zero,'output_tokens':500,'calls':2},{'input_tokens':-4,'calls':1},None,[]):
+            self.assertIsNone(step_tokens(usage),usage)
+        self.assertEqual(step_tokens({**zero,'calls':0}),{**zero,'calls':0},'a step that made no call is free')
+        self.assertEqual(step_tokens({**zero,'cache_read_tokens':900,'calls':1}),{**zero,'cache_read_tokens':900,'calls':1})
     async def test_a_box_step_says_so_to_the_turn_with_a_strict_boolean(self):
         child='import sys,json; body=json.load(sys.stdin); assert body["background"]=={"max_iterations":20,"box":True}; print(json.dumps({"state":"done","text":"so far"}))'
         result,_=await self.execute(child,extra={'channel':'background','background':{'max_iterations':20,'kind':'work','box':True}})

@@ -19,7 +19,7 @@ test('a background job is started with one call, approved on its card, runs step
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-jobs-')),key='background-jobs:'+Date.now(),group='-'+Date.now(),other='-1'+Date.now();
   // The reply model's rates in USD per million tokens, as the runtime prices it; null where it has no price.
-  const sonnet={input:2,output:10,cache_read:0.2,cache_write:2.5};
+  const sonnet={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0};
   const cards:Record<string,any>[]=[],runs:string[]=[];let rates:Record<string,number|null>=sonnet,updates=0;
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9','8'],denied:[]},[other]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
@@ -78,7 +78,6 @@ test('a background job is started with one call, approved on its card, runs step
     // Rates and the byte budget are in the fingerprint: the same request at another price is a changed job.
     rates={...sonnet,cache_read:0.1};
     await assert.rejects(s.jobs.start(await actor(ask.id),{title:'Open tasks',instruction:'Find every task that is still open and who owns it.'}),{status:409,code:'job_changed'});
-    rates=sonnet;
     const offered=await s.actionCommands.offer('background',proposed);
     assert.match(offered.message,/posted here as the reply to the request/);
     const card=last('card');
@@ -185,6 +184,16 @@ test('a background job is started with one call, approved on its card, runs step
     assert.equal(unpriced.approver,'owner');assert.equal((unpriced.estimate as any).cost_usd,null);assert.match(last('card').text,/cost unknown/);
     assert.match(last('card').text,/🛑 Cost can't be measured for this model: only the time limit applies \(60 min\)/);assert.doesNotMatch(last('card').text,/Stops at/);
     assert.equal((await job(unpriced.id)).byte_budget,null,'nor a byte budget');
+    // A model's price per request is frozen too, and the estimate counts it for each call.
+    rates={...sonnet,request:0.01};
+    const perCall=(await s.jobs.start(await actor((await privately('per-call','Read it per call')).id,null),{title:'Per call',instruction:'Read it per call.'})).estimate as any,perCallTokens=jobTokens(perCall);
+    assert.equal(perCall.cost_usd,Math.round(((perCallTokens.input*2+perCallTokens.output*10)/1e6+perCallTokens.calls*0.01)*100)/100);assert.equal(perCall.rates.request,0.01);
+    assert.deepEqual(unpriced.limits,{cost_usd:null,minutes:60},'start names no dollar limit it does not keep');
+    // A saved card from before keeps the time limit in its cost line, which has no value here: the added line carries it.
+    const savedTexts=(await stores.control.query('SELECT texts FROM owner_prompts WHERE singleton')).rows[0]?.texts??{};
+    await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',[JSON.stringify({...savedTexts,'background.card':'{title}\n\n{instruction}\n🛑 Stops at {cost_limit} or {minutes_limit} min'})]);
+    try {assert.equal((await s.jobs.card(unpriced.id)).text,"Unpriced\n\nRead the made-up notes.\n\n🛑 Cost can't be measured for this model: only the time limit applies (60 min)");}
+    finally {await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',[JSON.stringify(savedTexts)]);}
     rates=sonnet;
     // A job whose time limit would pass the longest one is refused before anything is recorded or checked.
     const sources=s.jobs.sources,size=sources.size.bind(sources),before=Number((await stores.control.query('SELECT count(*) FROM background_jobs')).rows[0].count);
@@ -208,6 +217,8 @@ test('a background job is started with one call, approved on its card, runs step
     // A job without a price has no cost limit: a step of any size goes on to the next work step.
     await s.jobs.decide('123',{id:unpriced.id,fingerprint:unpriced.fingerprint,decision:'approve'},await message('approve-unpriced',123));
     await s.jobs.operation('job:'+unpriced.id,await authority());
+    const unpricedText=await s.jobs.stepText(await job(unpriced.id),await step(unpriced.id));
+    assert.match(unpricedText,/The job stops at 60 minutes\.$/);assert.doesNotMatch(unpricedText,/\$/,'the job is told of no dollar limit');
     await runStep(unpriced.id,{text:'Read some.',continue:true,todo:[],tokens:{input_tokens:900000000,output_tokens:9000000,cache_read_tokens:0,cache_write_tokens:0,calls:20}});
     await s.jobs.operation('job:'+unpriced.id,await authority());
     assert.deepEqual([(await step(unpriced.id)).kind,Number((await job(unpriced.id)).cost_usd)],['work',0]);
@@ -233,7 +244,7 @@ test('a background job is started with one call, approved on its card, runs step
       assert.equal((await model()).status,200);
       const once=Number((await job(bytes.id)).model_bytes);assert.ok(once>0,'the request bytes are counted');assert.equal(sentTo.length,1);
       await stores.control.query('UPDATE background_jobs SET byte_budget=$2 WHERE id=$1',[bytes.id,once]);
-      const refused=await model();assert.deepEqual([refused.status,await refused.json()],[403,{error:'job_cost_limit'}]);
+      const refused=await model();assert.deepEqual([refused.status,await refused.json()],[409,{error:'job_cost_limit'}],'not a 401 or 403, which Hermes reads as a rejected key');
       assert.equal(sentTo.length,1,'nothing goes out past the budget');assert.equal(Number((await job(bytes.id)).model_bytes),2*once);
     } finally {if(previousRoute===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previousRoute;
       broker.closeAllConnections();await new Promise<void>(resolve=>broker.close(()=>resolve()));}
@@ -258,17 +269,23 @@ test('a background job is started with one call, approved on its card, runs step
 });
 
 test('a step is priced at its job\'s frozen rates, high without counts, and the byte budget follows the cheapest prompt rate',()=>{
-  const rates={input:2,output:10,cache_read:0.2,cache_write:null};
+  const rates={input:2,output:10,cache_read:0.2,cache_write:null,request:null};
   assert.equal(stepCost(rates,{input_tokens:1000000,output_tokens:100000,cache_read_tokens:1000000,cache_write_tokens:1000000,calls:4},20),5.2,
     'a cache bucket without its own rate takes the input rate');
+  // A step whose calls read no prompt had no usage reported: it is priced high too, by its calls when they are more.
+  assert.equal(stepCost(rates,{input_tokens:0,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:20},20),20*(100000*2+8000*10)/1e6);
+  assert.equal(stepCost(rates,{input_tokens:0,output_tokens:900,cache_read_tokens:0,cache_write_tokens:0,calls:30},20),30*(100000*2+8000*10)/1e6);
+  assert.equal(stepCost(rates,{input_tokens:0,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:0},20),0,'no call is free');
+  assert.equal(stepCost({...rates,request:0.01},{input_tokens:1000000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:20},20),2.2,'each call adds its per-request price');
+  assert.equal(stepCost({...rates,request:0.01},null,20),20*(100000*2+8000*10)/1e6+0.2);
   for(const missing of [null,undefined,{input_tokens:1},{input_tokens:1.5,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1},
     {input_tokens:1e12,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1},{input_tokens:1,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1,cost_usd:0}])
     assert.equal(stepCost(rates,missing,20),20*(100000*2+8000*10)/1e6,JSON.stringify(missing));
   assert.equal(stepCost({...rates,output:null},{input_tokens:1000000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1},20),0,'nothing is measured without a price');
   assert.equal(byteBudget(5,rates),Math.floor(5/(0.2/1e6)*12));
-  assert.equal(byteBudget(5,{input:1,output:2,cache_read:0,cache_write:null}),Math.floor(5/(1/1e6)*12),'a free cache read is not the cheapest rate');
-  assert.equal(byteBudget(5,{input:0,output:2,cache_read:0,cache_write:0}),null);
-  assert.equal(byteBudget(5,{input:null,output:2,cache_read:0.1,cache_write:1}),null);
+  assert.equal(byteBudget(5,{input:1,output:2,cache_read:0,cache_write:null,request:null}),Math.floor(5/(1/1e6)*12),'a free cache read is not the cheapest rate');
+  assert.equal(byteBudget(5,{input:0,output:2,cache_read:0,cache_write:0,request:null}),null);
+  assert.equal(byteBudget(5,{input:null,output:2,cache_read:0.1,cache_write:1,request:null}),null);
 });
 
 test('a job estimate counts text, records and files, and a long report is split at line ends',()=>{

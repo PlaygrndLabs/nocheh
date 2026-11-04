@@ -86,9 +86,9 @@ export function jobTokens(size:{records:number;characters:number;files:number;im
   const pages=Math.max(1,Math.ceil(read/7500));
   return {read,pages,input:Math.ceil(read*1.25)+pages*6000,output:pages*400+3000,calls:pages+2,minutes:Math.max(2,Math.ceil(pages*12/60)+1)};
 }
-/** The reply model's USD rates per million tokens, frozen on a job's card; null where no price is known. */
-export type JobRates={input:number|null;output:number|null;cache_read:number|null;cache_write:number|null};
-const RATE_NAMES=['input','output','cache_read','cache_write'] as const;
+/** The reply model's USD rates per million tokens, and per call for `request`, frozen on a job's card; null where no price is known. */
+export type JobRates={input:number|null;output:number|null;cache_read:number|null;cache_write:number|null;request:number|null};
+const RATE_NAMES=['input','output','cache_read','cache_write','request'] as const;
 const TOKEN_NAMES=['input_tokens','output_tokens','cache_read_tokens','cache_write_tokens','calls'] as const;
 /** Rates as the runtime gives them: each a number from 0 below a million, else unknown. */
 export const jobRates=(value:unknown):JobRates=>Object.fromEntries(RATE_NAMES.map(name=>{const rate=(value as any)?.[name];
@@ -105,14 +105,17 @@ export function stepTokens(value:unknown):Record<typeof TOKEN_NAMES[number],numb
 }
 // A step that reports no token counts is priced as if each of its iterations were a call this large.
 const UNKNOWN_INPUT=100000,UNKNOWN_OUTPUT=8000;
-/** A step's cost in USD at the job's frozen rates. A step without counts is priced high, never as free;
- * a cache bucket without its own rate takes the input rate. Nothing is measured without a price. */
+/** A step's cost in USD at the job's frozen rates. A step without counts is priced high, never as free, and so is one
+ * whose calls read no prompt, since every model call reads one: its provider reported no usage. A cache bucket without
+ * its own rate takes the input rate, and each call adds its per-request price. Nothing is measured without a price. */
 export function stepCost(rates:JobRates|null|undefined,tokens:unknown,iterations:number):number {
   if(!jobPriced(rates))return 0;
-  const {input,output}=rates as {input:number;output:number},counts=stepTokens(tokens);
-  if(!counts)return iterations*(UNKNOWN_INPUT*input+UNKNOWN_OUTPUT*output)/1e6;
+  const {input,output}=rates as {input:number;output:number},request=rates!.request??0,counts=stepTokens(tokens);
+  if(!counts||counts.calls>0&&counts.input_tokens+counts.cache_read_tokens+counts.cache_write_tokens===0) {
+    const calls=Math.max(iterations,counts?.calls??0);return calls*(UNKNOWN_INPUT*input+UNKNOWN_OUTPUT*output)/1e6+calls*request;
+  }
   return (counts.input_tokens*input+counts.output_tokens*output+counts.cache_read_tokens*(rates!.cache_read??input)+
-    counts.cache_write_tokens*(rates!.cache_write??input))/1e6;
+    counts.cache_write_tokens*(rates!.cache_write??input))/1e6+counts.calls*request;
 }
 // The bytes of a model request's JSON per input token, at most, for text: an assumption, to be measured (ADR-0206).
 const BYTES_PER_TOKEN=12;
@@ -229,7 +232,7 @@ export class BackgroundJobRepository {
   async estimate(size:Awaited<ReturnType<SourceRepository['size']>>) {
     const tokens=jobTokens(size);let rates=jobRates(null);
     try{rates=jobRates((await this.call('usage.price',{rates:'reply'},15000)).rates);}catch{/* An unknown price still shows the size and time. */}
-    const cost=jobPriced(rates)?Math.round((tokens.input*rates.input!+tokens.output*rates.output!)/1e6*100)/100:null;
+    const cost=jobPriced(rates)?Math.round(((tokens.input*rates.input!+tokens.output*rates.output!)/1e6+tokens.calls*(rates.request??0))*100)/100:null;
     return {...size,pages:tokens.pages,tokens:tokens.read,minutes:tokens.minutes,cost_usd:cost,rates};
   }
   /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
@@ -268,7 +271,7 @@ export class BackgroundJobRepository {
         {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes]);
     const row=await this.row(id);
     if(row.fingerprint!==fingerprint)throw new HttpError(409,'job_changed');
-    return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:Number(row.cost_limit_usd),minutes:row.minutes_limit},box:row.box as boolean,
+    return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:jobPriced(row.rates)?Number(row.cost_limit_usd):null,minutes:row.minutes_limit},box:row.box as boolean,
       message:row.state==='proposed'?'Nothing runs until it is approved.':'This job was already decided; its state is shown.'};
   }
   /** The exact proposal a card shows, read through the secret check of its audience. */
@@ -300,7 +303,9 @@ export class BackgroundJobRepository {
     // What the job may do without asking is always on its card: a saved card without the line, or whose line
     // is left out for another missing value, gets it at the end.
     const template=prompts['background.card']??backgroundCard,kept=template.split('\n').filter(line=>lineKept(line,values));
-    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}');
+    // A forced cost line carries the time limit too, when a saved card left it out with the cost limit's line.
+    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}'+
+      (name==='unpriced'&&!kept.some(line=>line.includes('{minutes_limit}'))?' ({minutes_limit} min)':''));
     const text=fillTemplate(missing.length?template+'\n\n'+missing.join('\n'):template,values);
     const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
     return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines};
@@ -510,12 +515,13 @@ export class BackgroundJobRepository {
     if(step.kind==='wrap_up') {
       const elapsed=(Date.now()-new Date(row.started_at).getTime())/60000;
       return fillTemplate(prompts['background.wrap_up']??backgroundWrapUp,{title:shown.title,
-        limit:elapsed>=row.minutes_limit?row.minutes_limit+' minutes':money(Number(row.cost_limit_usd))});
+        limit:elapsed>=row.minutes_limit||!jobPriced(row.rates)?row.minutes_limit+' minutes':money(Number(row.cost_limit_usd))});
     }
     if(step.step>1)return fillTemplate(prompts['background.continue']??backgroundContinue,{title:shown.title});
     return fillTemplate(prompts['background.job']??backgroundJob,{title:shown.title,instruction:shown.instruction,
       chat:row.target===owner?'your private chat with the owner (chat '+row.target+')':'chat '+row.target,period,size:sizeLine(estimate),
-      limits:money(Number(row.cost_limit_usd))+' or '+row.minutes_limit+' minutes'});
+      // Without a price only the time limit applies, so the job is not told of a dollar limit.
+      limits:jobPriced(row.rates)?money(Number(row.cost_limit_usd))+' or '+row.minutes_limit+' minutes, whichever comes first':row.minutes_limit+' minutes'});
   }
   /** A step may run only while its job runs and the person who asked may still use Nocheh there. */
   async allowed(row:any) {

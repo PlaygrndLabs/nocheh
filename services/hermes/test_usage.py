@@ -65,8 +65,9 @@ class UsageTests(unittest.TestCase):
             for reason in ('timed_out', 'timed_out', 'refused', 'a provider message, not a code'):
                 usage.record('memory_review', {'calls': 1}, 'm', failed=True, reason=reason, provider='anthropic', path=path, now=DAY)
             usage.record('memory_review', {'calls': 1}, 'm', reason='timed_out', provider='anthropic', path=path, now=DAY)
+            usage.record('memory_review', {'calls': 1}, 'm', failed=True, reason='job_cost_limit', provider='anthropic', path=path, now=DAY)
             row = usage.rows('2026-10-13', path)[0]
-            self.assertEqual((row['failed'], row['refused']), (4, 1))
+            self.assertEqual((row['runs'], row['failed'], row['refused']), (6, 4, 1), "a run Nocheh's own limit stopped is no failure")
             self.assertEqual(row['reasons'], {'timed_out': 2, 'refused': 1, 'unknown': 1},
                              'an unknown code is kept as unknown, and a run that worked has no reason')
 
@@ -81,6 +82,8 @@ class UsageTests(unittest.TestCase):
             ([{'completed': False, 'interrupted': True}], 'interrupted'),
             ([{'completed': True, 'final_response': ' '}], 'empty_answer'),
             ([{'completed': True, 'final_response': 'fine'}, {'failed': True}], 'unknown'),
+            # The broker's refusal of a job's call past its byte backstop is Nocheh's own stop, not a rejected key.
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"job_cost_limit"}'}], 'job_cost_limit'),
             ([], 'unknown'),
         ]
         for results, reason in cases:
@@ -170,9 +173,9 @@ class UsageTests(unittest.TestCase):
     def test_reply_rates_take_the_higher_claude_card_per_bucket_on_the_anthropic_provider(self):
         with patch.dict('os.environ', {}, clear=False):
             self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'anthropic', ''),
-                             {'input': 2.0, 'output': 10.0, 'cache_read': 0.2, 'cache_write': 2.5})
+                             {'input': 2.0, 'output': 10.0, 'cache_read': 0.2, 'cache_write': 2.5, 'request': 0.0})
             self.assertEqual(usage.reply_rates('anthropic/claude-haiku-5.5', 'anthropic', ''),
-                             {'input': 0.5, 'output': 2.5, 'cache_read': 0.05, 'cache_write': 0.625}, 'the long-prompt card is higher')
+                             {'input': 0.5, 'output': 2.5, 'cache_read': 0.05, 'cache_write': 0.625, 'request': 0.0}, 'the long-prompt card is higher')
 
     def test_reply_rates_ask_hermes_with_million_token_rows_and_stay_unknown_without_a_price(self):
         class Cost:
@@ -184,12 +187,14 @@ class UsageTests(unittest.TestCase):
             # A whole prompt over 200K tokens is priced at a higher tier, output included.
             above = canonical.input_tokens + canonical.cache_read_tokens + canonical.cache_write_tokens > 200_000
             rates = (3, 15, 0.3, 4) if above else (1, 5, 0.1, 2)
-            return Cost(sum(getattr(canonical, bucket) * rate for bucket, rate in zip(usage.CLAUDE_BUCKETS, rates)) / 1e6, 'estimated')
+            # A per-request price, as a model list can carry, counts only for a row with calls.
+            return Cost(sum(getattr(canonical, bucket) * rate for bucket, rate in zip(usage.CLAUDE_BUCKETS, rates)) / 1e6
+                        + canonical.request_count * 0.005, 'estimated')
 
         pricing = types.SimpleNamespace(CanonicalUsage=types.SimpleNamespace, estimate_usage_cost=estimate)
         with patch.dict(sys.modules, {'agent': types.ModuleType('agent'), 'agent.usage_pricing': pricing}):
             self.assertEqual(usage.reply_rates('priced-model', 'openai', 'https://gateway.example.test/v1'),
-                             {'input': 3.0, 'output': 15.0, 'cache_read': 0.3, 'cache_write': 4.0})
+                             {'input': 3.0, 'output': 15.0, 'cache_read': 0.3, 'cache_write': 4.0, 'request': 0.005})
             unknown = dict.fromkeys(usage.RATES)
             self.assertEqual(usage.reply_rates('synthetic-model', 'openai', ''), unknown)
             self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'custom', ''), unknown, "Nocheh's Claude prices are for Anthropic's own API only")
@@ -200,7 +205,7 @@ class UsageTests(unittest.TestCase):
         given = {usage.FIXTURE_RATES: '{"input": 50, "output": 50, "cache_read": 0.5, "cache_write": "x"}'}
         with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': '1'}):
             self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''),
-                             {'input': 50.0, 'output': 50.0, 'cache_read': 0.5, 'cache_write': None})
+                             {'input': 50.0, 'output': 50.0, 'cache_read': 0.5, 'cache_write': None, 'request': None})
         with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': '1', usage.FIXTURE_RATES: 'not json'}):
             self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''), dict.fromkeys(usage.RATES))
         for flag in ('0', '', 'true'):
