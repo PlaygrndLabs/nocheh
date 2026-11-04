@@ -3,7 +3,7 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {backgroundBox,backgroundCard,backgroundContinue,backgroundJob,backgroundTexts,backgroundWrapUp,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
+import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
@@ -24,7 +24,7 @@ export const backgroundJobSchema=`
 CREATE TABLE IF NOT EXISTS background_settings (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  cost_limit_usd numeric NOT NULL DEFAULT 5 CHECK(cost_limit_usd>0 AND cost_limit_usd<=1000),
- minutes_limit integer NOT NULL DEFAULT 60 CHECK(minutes_limit BETWEEN 5 AND 1440),
+ minutes_limit integer NOT NULL DEFAULT 45 CHECK(minutes_limit BETWEEN 5 AND 50),
  member_daily_jobs integer NOT NULL DEFAULT 3 CHECK(member_daily_jobs BETWEEN 0 AND 100),
  revision integer NOT NULL DEFAULT 0 CHECK(revision>=0),updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -33,10 +33,10 @@ CREATE TABLE IF NOT EXISTS background_jobs (
  id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'),source_reference jsonb NOT NULL,proposal_reference jsonb NOT NULL,guard_revision integer,
  binding jsonb NOT NULL,scope text NOT NULL,space_id text NOT NULL,target text NOT NULL,logical_profile text NOT NULL UNIQUE,
  requester text,approver text NOT NULL CHECK(approver IN ('requester','owner')),fingerprint text NOT NULL,estimate jsonb NOT NULL,
- cost_limit_usd numeric NOT NULL,minutes_limit integer NOT NULL,
+ cost_limit_usd numeric NOT NULL,minutes_limit integer NOT NULL CHECK(minutes_limit BETWEEN 5 AND 50),
  state text NOT NULL DEFAULT 'proposed' CHECK(state IN ('proposed','approved','running','reporting','done','failed','stopped','rejected')),
  decision_reference jsonb,decided_by text,cancel_requested boolean NOT NULL DEFAULT false,queued boolean NOT NULL DEFAULT false,
- steps integer NOT NULL DEFAULT 0,cost_usd numeric NOT NULL DEFAULT 0,todo jsonb NOT NULL DEFAULT '[]'::jsonb,
+ attempts integer NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 3),cost_usd numeric NOT NULL DEFAULT 0,todo jsonb NOT NULL DEFAULT '[]'::jsonb,
  report_reference jsonb,error_code text,started_at timestamptz,finished_at timestamptz,
  revision integer NOT NULL DEFAULT 1,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -46,37 +46,43 @@ ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS changes jsonb;
 -- The sealed job box: the owner's switch for it, and whether a job asked for one (job-box.ts).
 ALTER TABLE background_settings ADD COLUMN IF NOT EXISTS box_tools boolean NOT NULL DEFAULT true;
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS box boolean NOT NULL DEFAULT false;
-CREATE TABLE IF NOT EXISTS background_steps (
- event_id text PRIMARY KEY,job_id text NOT NULL REFERENCES background_jobs(id),step integer NOT NULL CHECK(step>0),
- attempt integer NOT NULL DEFAULT 1 CHECK(attempt>0),kind text NOT NULL CHECK(kind IN ('work','wrap_up')),
- continues boolean,todo jsonb,cost_usd numeric,counted boolean NOT NULL DEFAULT false,
- created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(job_id,step,attempt)
-);
 -- What the job's model use costs, frozen when it is asked: the reply model's USD rates per million tokens, and the
--- broker's byte backstop with the request bytes it has counted (ADR-0206). A step keeps the token counts it reported.
+-- broker's byte backstop with the request bytes it has counted (ADR-0206).
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS rates jsonb;
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS byte_budget bigint;
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS model_bytes bigint NOT NULL DEFAULT 0;
-ALTER TABLE background_steps ADD COLUMN IF NOT EXISTS tokens jsonb;
+-- How a job ended at a limit: its run was stopped at its cost or time limit and a short note went out instead of a report.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS ended text CHECK(ended IN ('cost','time'));
+-- Each run of a job is one sealed Hermes turn of up to the job's time limit; a job has at most 3 (ADR-0207). Its counts
+-- only grow: the tokens of the calls that reported usage, the calls that did not, the cost at the job's frozen rates.
+CREATE TABLE IF NOT EXISTS background_runs (
+ event_id text PRIMARY KEY,job_id text NOT NULL REFERENCES background_jobs(id),attempt integer NOT NULL CHECK(attempt BETWEEN 1 AND 3),
+ tokens jsonb,unknown_calls integer NOT NULL DEFAULT 0 CHECK(unknown_calls>=0),cost_usd numeric NOT NULL DEFAULT 0 CHECK(cost_usd>=0),
+ todo jsonb,ended text CHECK(ended IN ('cost','time','stopped')),
+ created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),UNIQUE(job_id,attempt)
+);
 CREATE TABLE IF NOT EXISTS background_reports (
  job_id text NOT NULL REFERENCES background_jobs(id),part integer NOT NULL CHECK(part>0),action_id text NOT NULL,PRIMARY KEY(job_id,part)
 );
 `;
 
 const protocol='background-job-v1';
-// Tool and thinking steps in one step of a job, and in the step that writes the report at a limit.
-const WORK_ITERATIONS=20,WRAP_UP_ITERATIONS=4;
-// A step that fails is tried again this many times before the job stops.
-const STEP_RETRIES=2;
+// Hermes's backstop on the tool and thinking steps of one run; time and cost end a run long before it.
+export const JOB_ITERATIONS=300;
+// A job's runs: the first, and at most two relaunches after a run that did not finish.
+const JOB_RUNS=3;
+// After the time limit (soft), a run gets this long to send its report before it is stopped (hard); no run starts with
+// less than RELAUNCH_MS left to soft; its credential lasts CREDENTIAL_GRACE_MS after hard and its box BOX_GRACE_MS.
+const HARD_GRACE_MS=180000,RELAUNCH_MS=180000,CREDENTIAL_GRACE_MS=120000,BOX_GRACE_MS=300000;
 // Jobs that run at once; each holds one sealed agent run while it works.
 const RUNNING_JOBS=2;
-// The longest time limit a job may have.
-export const JOB_MINUTES=1440;
+// The longest time limit a job may have: one run, so one credential of at most an hour, covers it (ADR-0207).
+export const JOB_MINUTES=50;
 // A proposal waits this long for its decision.
 const DECISION_HOURS=24;
 // The report goes to the chat in parts the Telegram sender splits further.
 const REPORT_PART=12000;
-const closedStates=new Set(['done','failed','stopped','rejected']);
+export const closedStates=new Set(['done','failed','stopped','rejected']);
 
 /** A rough size of reading a chat once with the reply model: its text, about 50 tokens of
  * page detail for each record and some text for each file, read page by page while the
@@ -95,27 +101,61 @@ export const jobRates=(value:unknown):JobRates=>Object.fromEntries(RATE_NAMES.ma
   return [name,typeof rate==='number'&&Number.isFinite(rate)&&rate>=0&&rate<1e6?rate:null];})) as JobRates;
 /** Whether a job's cost can be measured: only with known input and output rates. */
 export const jobPriced=(rates:JobRates|null|undefined)=>typeof rates?.input==='number'&&typeof rates?.output==='number';
-/** A step receipt's token counts: whole numbers from 0 below 10^12 in exactly these fields, else null. */
-export function stepTokens(value:unknown):Record<typeof TOKEN_NAMES[number],number>|null {
+export type RunTokens=Record<typeof TOKEN_NAMES[number],number>;
+export type Todo={content:string;status:string};
+/** What a running job's turn reports on its heartbeat: cumulative counts for the run, and its to-do list when it changed. */
+export type RunProgress={tokens:RunTokens;unknown_calls:number;todo?:Todo[]};
+/** A run's token counts: whole numbers from 0 below 10^12 in exactly these fields, else null. */
+export function runTokens(value:unknown):RunTokens|null {
   if(!value||typeof value!=='object'||Array.isArray(value))return null;
   const body=value as Record<string,unknown>;
   if(Object.keys(body).some(key=>!(TOKEN_NAMES as readonly string[]).includes(key))||
     TOKEN_NAMES.some(name=>!Number.isSafeInteger(body[name])||(body[name] as number)<0||(body[name] as number)>=1e12))return null;
-  return Object.fromEntries(TOKEN_NAMES.map(name=>[name,body[name]])) as any;
+  return Object.fromEntries(TOKEN_NAMES.map(name=>[name,body[name]])) as RunTokens;
 }
-// A step that reports no token counts is priced as if each of its iterations were a call this large.
+/** Each bucket at the larger of two counts; either may be missing. */
+export function maxTokens(a:RunTokens|null,b:RunTokens|null):RunTokens|null {
+  return a&&b?Object.fromEntries(TOKEN_NAMES.map(name=>[name,Math.max(a[name],b[name])])) as RunTokens:a??b;
+}
+// A call that reports no usage is priced as if it read this many prompt tokens and wrote this many.
 const UNKNOWN_INPUT=100000,UNKNOWN_OUTPUT=8000;
-/** A step's cost in USD at the job's frozen rates. A step without counts is priced high, never as free, and so is one
- * whose calls read no prompt, since every model call reads one: its provider reported no usage. A cache bucket without
- * its own rate takes the input rate, and each call adds its per-request price. Nothing is measured without a price. */
-export function stepCost(rates:JobRates|null|undefined,tokens:unknown,iterations:number):number {
+/** A run's cost in USD at the job's frozen rates: each bucket at its rate (a cache bucket without its own rate takes the input
+ *  rate) plus each call's request price, and each call that reported no usage at U, deliberately high: a call that read 100,000
+ *  prompt tokens and wrote 8,000. Counts whose calls read no prompt at all are such calls too. Nothing is measured without a
+ *  price. Its twin in services/hermes/job_progress.py gives the same numbers (test/run-cost-examples.json). */
+export function runCost(rates:JobRates|null|undefined,tokens:RunTokens|null,unknownCalls:number):number {
   if(!jobPriced(rates))return 0;
-  const {input,output}=rates as {input:number;output:number},request=rates!.request??0,counts=stepTokens(tokens);
-  if(!counts||counts.calls>0&&counts.input_tokens+counts.cache_read_tokens+counts.cache_write_tokens===0) {
-    const calls=Math.max(iterations,counts?.calls??0);return calls*(UNKNOWN_INPUT*input+UNKNOWN_OUTPUT*output)/1e6+calls*request;
-  }
-  return (counts.input_tokens*input+counts.output_tokens*output+counts.cache_read_tokens*(rates!.cache_read??input)+
-    counts.cache_write_tokens*(rates!.cache_write??input))/1e6+counts.calls*request;
+  const {input,output}=rates as {input:number;output:number},request=rates!.request??0;
+  const t=tokens??{input_tokens:0,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:0};
+  const blind=t.calls>0&&t.input_tokens+t.cache_read_tokens+t.cache_write_tokens===0;
+  const counted=blind?0:(t.input_tokens*input+t.output_tokens*output+t.cache_read_tokens*(rates!.cache_read??input)+
+    t.cache_write_tokens*(rates!.cache_write??input))/1e6+t.calls*request;
+  return counted+(unknownCalls+(blind?t.calls:0))*((UNKNOWN_INPUT*input+UNKNOWN_OUTPUT*output)/1e6+request);
+}
+const codePoints=(value:unknown,length:number)=>{if(value!==undefined&&typeof value!=='string')throw new HttpError(400,'invalid_run_progress');
+  return [...(value as string|undefined)??''].slice(0,length).join('');};
+/** A to-do list as a job keeps it: its first 50 items, each cut to 200 code points of content and 20 of status. */
+export function todoList(value:unknown):Todo[] {
+  if(!Array.isArray(value))throw new HttpError(400,'invalid_run_progress');
+  return value.slice(0,50).map(item=>{if(!item||typeof item!=='object'||Array.isArray(item))throw new HttpError(400,'invalid_run_progress');
+    return {content:codePoints(item.content,200),status:codePoints(item.status,20)};});
+}
+/** A heartbeat's progress, strictly: the run's token counts and calls without usage, and its to-do list when it changed. */
+export function runProgress(value:unknown):RunProgress {
+  const body=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null,tokens=runTokens(body?.tokens);
+  if(!body||!tokens||Object.keys(body).some(key=>!['tokens','unknown_calls','todo'].includes(key))||!Number.isSafeInteger(body.unknown_calls)||
+    (body.unknown_calls as number)<0||(body.unknown_calls as number)>1e6)throw new HttpError(400,'invalid_run_progress');
+  return {tokens,unknown_calls:body.unknown_calls as number,...(body.todo===undefined?{}:{todo:todoList(body.todo)})};
+}
+/** A job's deadlines in epoch milliseconds, shared by all its runs: its time limit after it started (soft, when Hermes's own
+ *  run budget ends), the stop (hard), and when its runs' credential and box expire. */
+export function jobDeadlines(job:{started_at:Date|string;minutes_limit:number}) {
+  const soft=new Date(job.started_at).getTime()+Number(job.minutes_limit)*60000,hard=soft+HARD_GRACE_MS;
+  return {soft,hard,credential:hard+CREDENTIAL_GRACE_MS,box:hard+BOX_GRACE_MS};
+}
+/** Whether a turn is a relaunched run of a job (attempt > 1): it gets no autonomy, so every change it asks for waits for a card. */
+export async function relaunchedRun(db:Pick<pg.PoolClient,'query'>,eventId:string):Promise<boolean> {
+  return !!(await db.query('SELECT 1 FROM background_runs WHERE event_id=$1 AND attempt>1',[eventId])).rowCount;
 }
 // The bytes of a model request's JSON per input token, at most, for text: an assumption, to be measured (ADR-0206).
 const BYTES_PER_TOKEN=12;
@@ -146,41 +186,39 @@ const bytesSpent=(row:any)=>row.byte_budget!==null&&Number(row.model_bytes)>=Num
 const privateJob=(row:any,owner:string|null|undefined)=>!!owner&&row.scope===owner&&!row.requester;
 
 /**
- * Whether a turn is a step of a running job that the owner asked for in their
- * private chat and approved there. Every input comes from the step's signed
+ * Whether a turn is a run of a running job that the owner asked for in their
+ * private chat and approved there. Every input comes from the run's signed
  * credential and Nocheh's own rows. The job row is locked FOR SHARE, so Stop
  * waits for the caller's transaction and a later call sees the stop.
  */
 export async function ownerApprovedJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
   turn:{owner?:boolean;job?:string|null;logical_profile?:string|null}):Promise<boolean> {
   if(!owner||!turn.owner||!turn.job||source.store!=='control')return false;
-  return !!(await db.query(`SELECT 1 FROM background_steps s JOIN background_jobs j ON j.id=s.job_id
+  return !!(await db.query(`SELECT 1 FROM background_runs s JOIN background_jobs j ON j.id=s.job_id
     WHERE s.event_id=$1 AND j.id=$2 AND j.state='running' AND NOT j.cancel_requested AND j.scope=$3 AND j.requester IS NULL
       AND j.decided_by=$3 AND j.logical_profile=$4 FOR SHARE OF j`,[source.id,turn.job,owner,turn.logical_profile??null])).rowCount;
 }
 
-// A sealed box lasts a job's time limit and an hour more, for its last steps; later steps run without one.
-const BOX_MINUTES=60;
-/** SQL over a job row `j`: whether its box time has not passed yet. */
-export const boxOpen=`now()<j.started_at+(j.minutes_limit+${BOX_MINUTES})*interval '1 minute'`;
+/** SQL over a job row `j`: whether its box time has not passed yet. A box lasts until 5 minutes after the job's hard
+ *  deadline (`jobDeadlines`): its time limit and 8 minutes more. */
+export const boxOpen=`now()<j.started_at+(j.minutes_limit+8)*interval '1 minute'`;
 /** When a job's sealed box must be gone. */
-export const boxExpires=(job:{started_at:Date;minutes_limit:number})=>new Date(new Date(job.started_at).getTime()+(Number(job.minutes_limit)+BOX_MINUTES)*60000).toISOString();
+export const boxExpires=(job:{started_at:Date;minutes_limit:number})=>new Date(jobDeadlines(job).box).toISOString();
 
-/** A step's job when the step runs in the job's sealed box: a work step, never the report at a limit, of a job
- *  that asked for the box and whose box time has not passed, that `ownerApprovedJob` lets through, while the
- *  owner's box switch and the guard are on. Null otherwise. */
+/** A run's job when the run runs in the job's sealed box: a run of a job that asked for the box and whose box time
+ *  has not passed, that `ownerApprovedJob` lets through, while the owner's box switch and the guard are on. Null otherwise. */
 export async function boxJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
   turn:{owner?:boolean;job?:string|null;logical_profile?:string|null},guard:GuardBinding):Promise<any|null> {
   if(!turn.job||guard.mode!=='on'||source.store!=='control')return null;
-  const job=(await db.query(`SELECT j.* FROM background_jobs j JOIN background_steps t ON t.job_id=j.id AND t.event_id=$2 AND t.kind='work'
+  const job=(await db.query(`SELECT j.* FROM background_jobs j JOIN background_runs t ON t.job_id=j.id AND t.event_id=$2
     JOIN background_settings s ON s.singleton AND s.box_tools WHERE j.id=$1 AND j.box AND ${boxOpen}`,[turn.job,source.id])).rows[0];
   return job&&await ownerApprovedJob(db,owner,source,turn)?job:null;
 }
 
-/** Work too big for one reply runs on its own once approved, as a chain of sealed
- * steps that continue one Hermes session of its own, and reports back to its chat. */
+/** Work too big for one reply runs on its own once approved, as one sealed Hermes run of up to its time limit,
+ * relaunched at most twice when it does not finish, and reports back to its chat (ADR-0207). */
 export class BackgroundJobRepository {
-  steps:BackgroundStepRepository;
+  runs:BackgroundRunRepository;
   /** Shows a job's state on its card; set by the approval cards. */
   settled:(id:string)=>Promise<void>=async()=>{};
   /** Ends a stopped job's changes that still wait for the owner; set by the controlled actions. */
@@ -188,7 +226,7 @@ export class BackgroundJobRepository {
   constructor(readonly access:SourceAccessRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
     readonly turns:RuntimeTurnRepository,readonly sources:SourceRepository,readonly telegram:TelegramActionRepository,
     readonly call:RuntimeCall,readonly detect:(text:string)=>Promise<unknown>,token:string){
-    this.steps=new BackgroundStepRepository(this,token);
+    this.runs=new BackgroundRunRepository(this,token);
   }
   get control(){return this.access.stores.control;}
   get guards(){return this.access.guards;}
@@ -201,7 +239,7 @@ export class BackgroundJobRepository {
     if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','member_daily_jobs','box_tools','revision'].includes(key))||!Number.isSafeInteger(body.revision)||
       body.box_tools!==undefined&&typeof body.box_tools!=='boolean')throw new HttpError(400,'invalid_settings');
     const cost=Number(body.cost_limit_usd),minutes=Number(body.minutes_limit),daily=Number(body.member_daily_jobs);
-    if(!(cost>0&&cost<=1000)||!Number.isSafeInteger(minutes)||minutes<5||minutes>1440||!Number.isSafeInteger(daily)||daily<0||daily>100)throw new HttpError(400,'invalid_settings');
+    if(!(cost>0&&cost<=1000)||!Number.isSafeInteger(minutes)||minutes<5||minutes>JOB_MINUTES||!Number.isSafeInteger(daily)||daily<0||daily>100)throw new HttpError(400,'invalid_settings');
     const changed=await this.control.query(`UPDATE background_settings SET cost_limit_usd=$1,minutes_limit=$2,member_daily_jobs=$3,box_tools=coalesce($5,box_tools),
       revision=revision+1,updated_at=now() WHERE singleton AND revision=$4`,[cost,minutes,daily,body.revision,body.box_tools??null]);
     if(!changed.rowCount)throw new HttpError(409,'configuration_conflict');
@@ -211,7 +249,7 @@ export class BackgroundJobRepository {
     const row=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[managedEventId(id)])).rows[0];
     if(!row)throw new HttpError(404,'job_not_found');return row;
   }
-  /** A live Telegram turn by the owner or a person allowed in the group; never a job's own step. */
+  /** A live Telegram turn by the owner or a person allowed in the group; never a job's own run. */
   private async liveTurn(principal:Reader) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'job_not_permitted');
     const turn=await this.turns.binding(principal);if(turn.job)throw new HttpError(403,'job_in_a_job');
@@ -283,9 +321,9 @@ export class BackgroundJobRepository {
     const value=object(JSON.parse(String(object(JSON.parse(saved.content.toString())).text)));
     return {title:string(value.title,100),instruction:string(value.instruction,8000)};
   }
-  /** The name of the job a step belongs to, for the card of an operation that step asked for; null for anything else. */
-  async stepJob(eventId:string):Promise<string|null> {
-    const row=(await this.control.query('SELECT j.* FROM background_steps s JOIN background_jobs j ON j.id=s.job_id WHERE s.event_id=$1',[eventId])).rows[0];
+  /** The name of the job a run belongs to, for the card of an operation that run asked for; null for anything else. */
+  async runJob(eventId:string):Promise<string|null> {
+    const row=(await this.control.query('SELECT j.* FROM background_runs s JOIN background_jobs j ON j.id=s.job_id WHERE s.event_id=$1',[eventId])).rows[0];
     if(!row)return null;
     try{return (await this.proposal(row)).title;}catch(error){if(error instanceof HttpError)return null;throw error;}
   }
@@ -346,13 +384,13 @@ export class BackgroundJobRepository {
     for(const row of rows) {
       let title:string|null=null;try{title=(await this.proposal(row)).title;}catch(error){if(!(error instanceof HttpError))throw error;}
       jobs.push({id:row.id,title,state:row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.state,chat:row.target,asked_in:row.space_id,
-        steps:row.steps,cost_usd:Number(row.cost_usd),cost_limit_usd:Number(row.cost_limit_usd),priced:jobPriced(row.rates),minutes_limit:row.minutes_limit,estimate:row.estimate,
+        attempts:row.attempts,ended:row.ended,cost_usd:Number(row.cost_usd),cost_limit_usd:Number(row.cost_limit_usd),priced:jobPriced(row.rates),minutes_limit:row.minutes_limit,estimate:row.estimate,
         todo:row.todo,started_at:row.started_at,finished_at:row.finished_at,created_at:row.created_at,error_code:row.error_code,
         ...(principal.admin?{logical_profile:row.logical_profile,approver:row.approver}:{})});
     }
     return {jobs};
   }
-  /** Stop a job: a proposal is withdrawn, a running job's step is cancelled and no report is sent.
+  /** Stop a job: a proposal is withdrawn, a running job's run is cancelled and no report is sent.
    * The card's rule: the dashboard and the owner stop any job; a member only the job they asked for,
    * in its own chat, and a job of another chat stays unseen. A job's own turn stops none. */
   async stop(principal:Reader,input:unknown) {
@@ -361,30 +399,43 @@ export class BackgroundJobRepository {
       if(row.scope!==live.turn.scope)throw new HttpError(404,'job_not_found');
       if(row.requester!==live.requester)throw new HttpError(403,'job_not_permitted');
     }
+    return this.halt(row.id);
+  }
+  /** Stop a job that has not ended, whoever asked: the Stop of the tool, the dashboard and the job's card. Its live run
+   *  ends as stopped, which cancels it; what the job left waiting ends when the job does. */
+  async halt(id:string):Promise<{id:string;state:'stopped'|'stopping'}> {
+    const row=await this.row(id);
     if(closedStates.has(row.state))throw new HttpError(409,'job_not_running');
     const changed=await this.control.query(`UPDATE background_jobs SET cancel_requested=true,state=CASE WHEN state='proposed' THEN 'stopped' ELSE state END,
       finished_at=CASE WHEN state='proposed' THEN now() END,revision=revision+1,updated_at=now() WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id]);
     if(!changed.rowCount)throw new HttpError(409,'job_not_running');
-    const step=await this.latest(row.id);
-    if(step&&['captured','running'].includes(step.run_state))await this.steps.stop(step.event_id);
+    const run=await this.latest(row.id);
+    if(run&&['captured','running'].includes(run.run_state))await this.runs.end(run.event_id,'stopped');
     return {id:row.id,state:row.state==='proposed'?'stopped':'stopping'};
   }
+  /** A job's newest run with its managed run's state. */
   private async latest(id:string) {
-    return (await this.control.query(`SELECT s.*,r.state AS run_state,r.error_code AS run_error,r.result_reference,r.binding AS run_binding FROM background_steps s
-      JOIN managed_runs r ON r.event_id=s.event_id WHERE s.job_id=$1 ORDER BY s.step DESC,s.attempt DESC LIMIT 1`,[id])).rows[0];
+    return (await this.control.query(`SELECT b.*,r.state AS run_state,r.error_code AS run_error,r.result_reference,r.binding AS run_binding,r.input_reference
+      FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id WHERE b.job_id=$1 ORDER BY b.attempt DESC LIMIT 1`,[id])).rows[0];
   }
-  /** One sealed step of a job, recorded before it runs. */
-  private async addStep(row:any,step:number,attempt:number,kind:'work'|'wrap_up') {
-    const operation=await new OperationRepository(this.control).record({key:'background-step:'+row.id+':'+step+':'+attempt,kind:'background_step',
-      scope:row.space_id,input_hash:digest(canonical({job:row.id,step,attempt,kind}))});
+  /** One run of a job, recorded with its managed run; the first also starts the job's clock. Nothing is added to a job
+   *  that was stopped or ended meanwhile: the job row is locked first. */
+  private async addRun(row:any,attempt:number):Promise<void> {
+    const operation=await new OperationRepository(this.control).record({key:'background-run:'+row.id+':'+attempt,kind:'background_run',
+      scope:row.space_id,input_hash:digest(canonical({job:row.id,attempt}))});
     const binding=await this.guards.state(),db=await this.control.connect();
     try {
       await db.query('BEGIN');
+      const job=(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
+      if(!job||job.cancel_requested||!['approved','running'].includes(job.state)){await db.query('ROLLBACK');return;}
       const owner=(await db.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0];
-      await db.query(`INSERT INTO background_steps(event_id,job_id,step,attempt,kind) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[operation.id,row.id,step,attempt,kind]);
+      await db.query('INSERT INTO background_runs(event_id,job_id,attempt) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[operation.id,row.id,attempt]);
       await db.query(`INSERT INTO managed_runs(event_id,channel,source_reference,scope,space_id,logical_profile,conversation_id,binding,owner_epoch,job_id)
         VALUES($1,'background',$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
         [operation.id,operation,row.scope,row.space_id,row.logical_profile,'job_'+row.id.slice(0,24),binding,owner.epoch,row.id]);
+      // The job runs from its first run's commit, so the run's own claim and context see its clock.
+      await db.query(`UPDATE background_jobs SET state='running',started_at=coalesce(started_at,now()),attempts=GREATEST(attempts,$2),
+        revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,attempt]);
       await requestWorkflow(db,'background','run:'+operation.id);await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
@@ -398,7 +449,8 @@ export class BackgroundJobRepository {
     if(changed.rowCount)await this.settled(row.id);
     return observation(state==='done'?'completed':state==='stopped'?'cancelled':'failed','assistant',0,Date.now(),state==='failed'?'workflow_execution_failed':null);
   }
-  /** Drive one job: start it when a slot is free, run its steps one after another, and send its report. */
+  /** Drive one job: start its run when a slot is free, watch it, and send its report, or a short note at a limit.
+   *  A run that did not finish is relaunched at most twice, while there is time and money left and its member may still ask. */
   async tick(id:string,authority:ExecutionAuthority):Promise<Observation> {
     const row=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
     if(!row||row.state==='proposed'||row.state==='rejected')return observation('skipped','admission');
@@ -414,50 +466,87 @@ export class BackgroundJobRepository {
         await this.control.query('UPDATE background_jobs SET queued=true WHERE id=$1 AND NOT queued',[id]);
         return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
       }
-      await this.addStep(row,1,1,'work');
-      await this.control.query("UPDATE background_jobs SET state='running',started_at=now(),revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
+      await this.addRun(row,1);
       // A card that said the job waits for a free slot now says it runs.
       if(row.queued)await this.settled(id);
       return observation('waiting','assistant',0,Date.now()+5000,'receipt_pending');
     }
     if(row.state==='reporting')return this.report(row);
-    const step=await this.latest(id);
-    if(!step){await this.addStep(row,1,1,'work');return observation('waiting','assistant',0,Date.now()+5000,'receipt_pending');}
-    if(['captured','running'].includes(step.run_state)) {
-      if(row.cancel_requested)await this.steps.stop(step.event_id);
-      return observation('waiting','assistant',row.steps,Date.now()+15000,'receipt_pending');
+    const run=await this.latest(id);
+    if(!run){await this.addRun(row,1);return observation('waiting','assistant',0,Date.now()+5000,'receipt_pending');}
+    const {soft,hard}=jobDeadlines(row),now=Date.now();
+    if(['captured','running'].includes(run.run_state)) {
+      // A running run past its time is stopped by its heartbeat; one still waiting to start is stopped here.
+      if(row.cancel_requested)await this.runs.end(run.event_id,'stopped');
+      else if(run.run_state==='captured'&&now>=hard)await this.runs.end(run.event_id,'time');
+      return observation('waiting','assistant',row.attempts,now+15000,'receipt_pending');
     }
-    if(step.run_state==='done') {
-      if(!step.counted)await this.count(row,step);
-      const job=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
-      if(job.cancel_requested)return this.finish(job,'stopped');
-      if(step.kind==='wrap_up'||!step.continues) {
-        await this.control.query(`UPDATE background_jobs SET state='reporting',report_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='running'`,[id,step.result_reference]);
-        return this.report({...job,state:'reporting',report_reference:step.result_reference});
-      }
-      if(bytesSpent(job))return this.finish(job,'failed','job_cost_limit');
-      // At a limit, one last short step writes the report from what the job has found. Without a price only time limits it.
-      const elapsed=(Date.now()-new Date(job.started_at).getTime())/60000;
-      const limited=jobPriced(job.rates)&&Number(job.cost_usd)>=Number(job.cost_limit_usd)||elapsed>=job.minutes_limit;
-      await this.addStep(job,step.step+1,1,limited?'wrap_up':'work');
-      return observation('waiting','assistant',job.steps,Date.now()+5000,'receipt_pending');
-    }
+    // A stopped job sends neither its report nor a note.
     if(row.cancel_requested)return this.finish(row,'stopped');
-    if(bytesSpent(row))return this.finish(row,'failed','job_cost_limit');
-    if(step.attempt<=STEP_RETRIES){await this.addStep(row,step.step,step.attempt+1,step.kind);return observation('waiting','assistant',row.steps,Date.now()+10000,'receipt_pending');}
-    return this.finish(row,'failed',step.run_error??'job_step_failed');
+    if(run.run_state==='done') {
+      await this.control.query(`UPDATE background_jobs SET state='reporting',report_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='running'`,[id,run.result_reference]);
+      return this.report({...row,state:'reporting',report_reference:run.result_reference});
+    }
+    // A run stopped at a limit, or one that ended past its time or after the broker's byte backstop, gets no report from a model.
+    const limit=['cost','time'].includes(run.ended)?run.ended:bytesSpent(row)?'cost':['interrupted','failed'].includes(run.run_state)&&now>=hard?'time':null;
+    if(limit)return this.limitEnding(row,run,limit);
+    if(!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
+    if(run.attempt<JOB_RUNS&&soft-now>=RELAUNCH_MS&&!(jobPriced(row.rates)&&Number(row.cost_usd)>=Number(row.cost_limit_usd))) {
+      await this.addRun(row,run.attempt+1);return observation('waiting','assistant',row.attempts,now+10000,'receipt_pending');
+    }
+    return this.finish(row,'failed',run.run_error??'job_run_failed');
   }
-  /** Add a finished step's cost, priced at the job's frozen rates from the tokens it reported, and its to-do list to its job, once. */
-  private async count(row:any,step:any) {
-    const cost=stepCost(row.rates,step.tokens,step.kind==='wrap_up'?WRAP_UP_ITERATIONS:WORK_ITERATIONS),db=await this.control.connect();
+  /** A run's counts only grow. The run's cost is priced at the job's frozen rates; the job's cost is the sum of its runs' and
+   *  its to-do list the newest one, in the same transaction, so the list and the dashboard read live values. */
+  async progress(eventId:string,input:RunProgress):Promise<void> {
+    const db=await this.control.connect();
     try {
       await db.query('BEGIN');
-      const counted=await db.query('UPDATE background_steps SET counted=true,cost_usd=$2 WHERE event_id=$1 AND NOT counted RETURNING todo',[step.event_id,cost]);
-      // A step that kept no to-do list leaves the last one in place. A job's cost never goes down.
-      if(counted.rowCount)await db.query(`UPDATE background_jobs SET steps=steps+1,cost_usd=GREATEST(cost_usd,cost_usd+$2),todo=coalesce(NULLIF($3::jsonb,'[]'::jsonb),todo),revision=revision+1,updated_at=now() WHERE id=$1`,
-        [row.id,cost,counted.rows[0].todo===null?null:JSON.stringify(counted.rows[0].todo)]);
+      const run=(await db.query('SELECT b.*,j.rates FROM background_runs b JOIN background_jobs j ON j.id=b.job_id WHERE b.event_id=$1 FOR UPDATE OF b',[eventId])).rows[0];
+      if(run) {
+        const tokens=maxTokens(runTokens(run.tokens),input.tokens),unknown=Math.max(run.unknown_calls,input.unknown_calls);
+        const todo=input.todo===undefined?null:JSON.stringify(input.todo);
+        await db.query(`UPDATE background_runs SET tokens=$2,unknown_calls=$3,cost_usd=GREATEST(cost_usd,$4),todo=coalesce($5::jsonb,todo),updated_at=now() WHERE event_id=$1`,
+          [eventId,tokens,unknown,runCost(jobRates(run.rates),tokens,unknown),todo]);
+        // Every heartbeat writes here, so the job's revision, which its other changes move, stays.
+        await db.query(`UPDATE background_jobs SET cost_usd=GREATEST(cost_usd,(SELECT coalesce(sum(cost_usd),0) FROM background_runs WHERE job_id=$1)),
+          todo=coalesce($2::jsonb,todo),updated_at=now() WHERE id=$1`,[run.job_id,todo]);
+      }
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  /** Which limit a running job has reached: its cost (a priced job only, or the broker's byte backstop) or its time. */
+  async overLimit(id:string):Promise<'cost'|'time'|null> {
+    const job=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
+    if(!job)return null;
+    if(jobPriced(jobRates(job.rates))&&Number(job.cost_usd)>=Number(job.cost_limit_usd)||bytesSpent(job))return 'cost';
+    return job.started_at&&Date.now()>=jobDeadlines(job).hard?'time':null;
+  }
+  /** Whether the person who asked for a job may still use Nocheh in its chat; the owner's own job always. */
+  permitted(job:any):boolean {
+    const access=this.access.policy().group_access?.[job.scope];
+    return !job.requester||!!access?.granted.includes(job.requester)&&!access.denied.includes(job.requester);
+  }
+  /** The newest to-do list a run of the job kept, while what that run read may still be shown: its binding carries to `binding`. */
+  private async carriedTodo(id:string,binding:GuardBinding):Promise<Todo[]|null> {
+    const kept=(await this.control.query(`SELECT b.todo,r.binding FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id
+      WHERE b.job_id=$1 AND b.todo IS NOT NULL ORDER BY b.attempt DESC LIMIT 1`,[id])).rows[0];
+    return kept&&await carriesForward(this.control,kept.binding,binding)?kept.todo:null;
+  }
+  /** At a cost or time limit no model writes a report: a short note of what the last to-do list says is done and left goes out
+   *  instead, through report(), so carriesForward, the member re-check, Stop and per-part staging apply to it. */
+  private async limitEnding(row:any,run:any,limit:'cost'|'time'):Promise<Observation> {
+    const prompts=await ownerPrompts(this.control),shown=await this.proposal(row),todo=await this.carriedTodo(row.id,run.run_binding);
+    const named=(statuses:string[])=>todo!.filter(item=>statuses.includes(item.status)).map(item=>item.content).join('; ');
+    const text=fillTemplate(prompts['background.limit']??backgroundLimit,{title:shown.title,limit,
+      done:todo?.length?named(['completed'])||'nothing yet':null,left:todo?.length?named(['pending','in_progress'])||'nothing':null,
+      none:todo?.length?null:'No to-do list was kept.'});
+    const note=await this.derived.record({operation_id:'background-limit:'+row.id,source:row.source_reference,parents:[row.proposal_reference],
+      kind:'background_limit_note',content:Buffer.from(canonical({text})),producer:'nocheh',producer_version:protocol,
+      configuration:{binding:run.run_binding,job_id:row.id,limit}});
+    await this.control.query(`UPDATE background_jobs SET state='reporting',ended=$2,report_reference=$3,revision=revision+1,updated_at=now()
+      WHERE id=$1 AND state='running'`,[row.id,limit,note]);
+    return this.report({...row,state:'reporting',ended:limit,report_reference:note});
   }
   /** The job's audience in the current epoch, for the report it sends to the chat where it was asked. */
   private audience(row:any,binding:GuardBinding):Reader {
@@ -479,10 +568,12 @@ export class BackgroundJobRepository {
     if(sent.length>=parts.length)return this.finish(row,'done');
     // A stopped job sends no further part.
     if(row.cancel_requested)return this.finish(row,'stopped');
-    const part=sent.length+1,binding=await this.guards.state(),step=await this.latest(row.id);
-    // The last step wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
+    // A member removed from the chat since the job ran gets nothing sent there.
+    if(!sent.length&&!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
+    const part=sent.length+1,binding=await this.guards.state(),run=await this.latest(row.id);
+    // The last run wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
     // have passed since (ADR-0201); any other change may have withdrawn what it read.
-    if(!step||!await carriesForward(this.control,step.run_binding,binding))return this.finish(row,'failed','job_report_outdated');
+    if(!run||!await carriesForward(this.control,run.run_binding,binding))return this.finish(row,'failed','job_report_outdated');
     const prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,row.space_id,parts[part-1]!,'background-report:'+row.id+':'+part);
     // A part's message and its record commit together under the job's lock, so neither a retry
     // in a later epoch nor a second tick sends a part twice, and none is staged after Stop.
@@ -497,54 +588,58 @@ export class BackgroundJobRepository {
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     return observation('waiting','delivery',part,Date.now()+5000,'receipt_pending');
   }
-  /** The workflow family: `job:` drives a job, `run:` one of its steps. */
+  /** The workflow family: `job:` drives a job, `run:` one of its runs. */
   async operation(job:string,authority:ExecutionAuthority):Promise<Observation> {
-    if(job.startsWith('run:'))return this.steps.run(managedEventId(job.slice(4)),authority);
+    if(job.startsWith('run:'))return this.runs.run(managedEventId(job.slice(4)),authority);
     if(job.startsWith('job:'))return this.tick(managedEventId(job.slice(4)),authority);
     return observation('failed','admission');
   }
-  /** The step message: the instruction for the first step, then continue, then the report at a limit. */
-  async stepText(row:any,step:any,box=false):Promise<string> {
-    const prompts=await ownerPrompts(this.control),text=await this.stepInstruction(row,step,prompts);
-    // A step in the sealed box also says what the box holds, each time, since the box can be new.
+  /** A run's message. A relaunch in an epoch where an earlier run of the job ran (same physical profile, so Hermes reloads its
+   *  history) gets the resume line; a relaunch after any other run gets the first message again with the restart note, whose
+   *  to-do line is kept only while carriedTodo allows it. A box run also says what the box holds, every time: the box can be new. */
+  async runText(job:any,run:any,binding:GuardBinding,box=false):Promise<string> {
+    const prompts=await ownerPrompts(this.control),shown=await this.proposal(job);
+    const ran=run.attempt>1?(await this.control.query(`SELECT r.binding FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id
+      WHERE b.job_id=$1 AND b.attempt<$2 AND r.input_reference IS NOT NULL`,[job.id,run.attempt])).rows:[];
+    const same=ran.some(({binding:earlier})=>earlier.generation===binding.generation&&Number(earlier.epoch)===binding.epoch);
+    let text=same?fillTemplate(prompts['background.resume']??backgroundResume,{title:shown.title}):await this.firstMessage(job,shown,prompts);
+    if(ran.length&&!same){const todo=await this.carriedTodo(job.id,binding);
+      text+='\n\n'+fillTemplate(prompts['background.restart']??backgroundRestart,{todo:todo?.length?todo.map(item=>item.content+' ('+item.status+')').join('; '):null});}
     return box?text+'\n\n'+(prompts['background.box']??backgroundBox):text;
   }
-  private async stepInstruction(row:any,step:any,prompts:Awaited<ReturnType<typeof ownerPrompts>>):Promise<string> {
-    const shown=await this.proposal(row),estimate=row.estimate;
-    const owner=this.access.policy().owner_id,period=estimate.from||estimate.to?[estimate.from??'the start',estimate.to??'now'].join(' to '):'the whole chat';
-    if(step.kind==='wrap_up') {
-      const elapsed=(Date.now()-new Date(row.started_at).getTime())/60000;
-      return fillTemplate(prompts['background.wrap_up']??backgroundWrapUp,{title:shown.title,
-        limit:elapsed>=row.minutes_limit||!jobPriced(row.rates)?row.minutes_limit+' minutes':money(Number(row.cost_limit_usd))});
-    }
-    if(step.step>1)return fillTemplate(prompts['background.continue']??backgroundContinue,{title:shown.title});
+  private async firstMessage(job:any,shown:{title:string;instruction:string},prompts:Awaited<ReturnType<typeof ownerPrompts>>):Promise<string> {
+    const estimate=job.estimate,owner=this.access.policy().owner_id,period=estimate.from||estimate.to?[estimate.from??'the start',estimate.to??'now'].join(' to '):'the whole chat';
     return fillTemplate(prompts['background.job']??backgroundJob,{title:shown.title,instruction:shown.instruction,
-      chat:row.target===owner?'your private chat with the owner (chat '+row.target+')':'chat '+row.target,period,size:sizeLine(estimate),
+      chat:job.target===owner?'your private chat with the owner (chat '+job.target+')':'chat '+job.target,period,size:sizeLine(estimate),
       // Without a price only the time limit applies, so the job is not told of a dollar limit.
-      limits:jobPriced(row.rates)?money(Number(row.cost_limit_usd))+' or '+row.minutes_limit+' minutes, whichever comes first':row.minutes_limit+' minutes'});
+      limits:jobPriced(job.rates)?money(Number(job.cost_limit_usd))+' or '+job.minutes_limit+' minutes, whichever comes first':job.minutes_limit+' minutes'});
   }
-  /** A step may run only while its job runs and the person who asked may still use Nocheh there. */
+  /** A run may run only while its job runs and the person who asked may still use Nocheh there. */
   async allowed(row:any) {
     const job=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[row.job_id])).rows[0];
     if(!job||job.state!=='running'||job.cancel_requested||job.logical_profile!==row.logical_profile||job.space_id!==row.space_id)throw new HttpError(409,'job_not_running');
-    const policy=this.access.policy(),access=policy.group_access?.[job.scope];
-    if(job.requester&&(!access?.granted.includes(job.requester)||access.denied.includes(job.requester)))throw new HttpError(403,'job_not_permitted');
+    if(!this.permitted(job))throw new HttpError(403,'job_not_permitted');
     return job;
   }
 }
 
-/** Each step of a job is a managed run: claimed, leased, cancellable, and recorded before its result counts. */
-export class BackgroundStepRepository extends ManagedExecutionRepository {
+/** Each run of a job is a managed run: claimed, leased, cancellable, and recorded before its result counts. */
+export class BackgroundRunRepository extends ManagedExecutionRepository {
   protected readonly channel='background' as const;
   protected readonly family='background' as const;
   protected override get resultKind(){return 'background_result';}
   protected override get protocol(){return 'managed-background-v1';}
-  // A step may take minutes, so its credential outlives the longest step.
-  protected override readonly credentialMillis=900000;
   constructor(readonly jobs:BackgroundJobRepository,token:string){super(jobs.access,jobs.derived,jobs.turns,token,jobs.call);}
-  private async step(id:string){
-    const step=(await this.control.query('SELECT * FROM background_steps WHERE event_id=$1',[id])).rows[0];
-    if(!step)throw new HttpError(404,'captured_run_not_found');return step;
+  private async runRow(id:string){
+    const run=(await this.control.query('SELECT * FROM background_runs WHERE event_id=$1',[id])).rows[0];
+    if(!run)throw new HttpError(404,'captured_run_not_found');return run;
+  }
+  private async job(row:any){return (await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[row.job_id])).rows[0];}
+  /** A run's credential lasts until 2 minutes after its job's hard deadline, and never more than an hour. */
+  protected override async credentialExpiry(row:any):Promise<number> {
+    const job=await this.job(row);
+    if(!job?.started_at||jobDeadlines(job).hard<=Date.now())throw new HttpError(409,'job_not_running');
+    return Math.min(jobDeadlines(job).credential,Date.now()+3600000);
   }
   protected async readiness(_row:any){return observation('completed','preparation');}
   protected override async profile(scope:string,space:string,profile:string,binding:GuardBinding){
@@ -556,39 +651,72 @@ export class BackgroundStepRepository extends ManagedExecutionRepository {
     await new OperationRepository(this.control).verify(row.source_reference);
     await this.jobs.allowed(row);
   }
+  /** What the turn needs to run, warn and stop on its own: its iteration backstop, deadlines in epoch seconds, the job's
+   *  frozen rates, its cost limit (none without a price) and what its earlier runs cost. */
   protected override async contextDetails(row:any){
-    const step=await this.step(row.event_id);
-    return {background:{job_id:row.job_id,step:step.step,kind:step.kind,max_iterations:step.kind==='wrap_up'?WRAP_UP_ITERATIONS:WORK_ITERATIONS,box:await this.box(row)}};
+    const run=await this.runRow(row.event_id),job=await this.job(row);
+    if(!job?.started_at)throw new HttpError(409,'job_not_running');
+    const rates=jobRates(job.rates),{soft,hard}=jobDeadlines(job);
+    const prior=Number((await this.control.query('SELECT coalesce(sum(cost_usd),0) AS cost FROM background_runs WHERE job_id=$1 AND attempt<$2',[row.job_id,run.attempt])).rows[0].cost);
+    return {background:{job_id:row.job_id,attempt:run.attempt,max_iterations:JOB_ITERATIONS,box:await this.box(row),
+      soft_deadline:Math.floor(soft/1000),hard_deadline:Math.floor(hard/1000),rates,cost_limit_usd:jobPriced(rates)?Number(job.cost_limit_usd):null,prior_cost_usd:prior}};
   }
-  /** Whether a step runs in its job's sealed box: the same rule that puts the box in its binding (job-box.ts). */
+  /** Whether a run runs in its job's sealed box: the same rule that puts the box in its binding (job-box.ts). */
   private async box(row:any):Promise<boolean> {
     const owner=this.access.policy().owner_id;
     return !!await boxJob(this.control,owner,row.source_reference,{owner:row.scope===owner,job:row.job_id,logical_profile:row.logical_profile},await this.guards.state());
   }
   protected async build(row:any){
-    await this.current(row);const principal=this.principal(row),job=await this.jobs.allowed(row),step=await this.step(row.event_id);
+    await this.current(row);const principal=this.principal(row),job=await this.jobs.allowed(row),run=await this.runRow(row.event_id);
     await this.turns.register(principal,{logical_profile:row.logical_profile,job:row.job_id});
-    const input:ManagedInput={principal,text:await this.jobs.stepText(job,step,await this.box(row)),transcripts:[],files:[],source_key:'nocheh:operation:'+row.event_id};
+    const input:ManagedInput={principal,text:await this.jobs.runText(job,run,row.binding,await this.box(row)),transcripts:[],files:[],source_key:'nocheh:operation:'+row.event_id};
     await this.turns.prepared.allow(principal,input);
     const reference=await this.derived.record({operation_id:'background-input:'+row.event_id,source:row.source_reference,parents:[job.proposal_reference],
       kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:this.protocol,
       configuration:{binding:row.binding,profile:row.logical_profile,job_id:row.job_id},provenance:{binding:row.binding}});
     await this.current(row);return {reference,input};
   }
-  /** A step's result also says whether the job goes on, its to-do list and the tokens it used, which the job prices.
-   * Counts that are missing or not plain whole numbers are kept as none, which is priced high. */
+  /** The run's receipt carries its final counts (the larger of its last progress and Hermes's own) and its last to-do list.
+   *  Counts that are not plain whole numbers are ignored; the counts already kept stay. */
   override async finish(input:unknown){
     const body=object(input),row=await this.row(managedEventId(body.event_id));
     if(!row?.actor||row.actor!==body.actor)throw new HttpError(403,'run_actor_mismatch');
-    const todo=Array.isArray(body.todo)?body.todo.slice(0,50).map(item=>{const value=object(item);
-      return {content:string(value.content??'',200),status:string(value.status??'',20)};}):[];
-    await this.control.query('UPDATE background_steps SET continues=$2,todo=$3,tokens=$4 WHERE event_id=$1 AND NOT counted',
-      [row.event_id,body.continue===true,JSON.stringify(todo),stepTokens(body.tokens)]);
-    const {continue:_continue,todo:_todo,tokens:_tokens,...result}=body;
+    const tokens=runTokens(body.tokens),calls=body.unknown_calls,unknown=Number.isSafeInteger(calls)&&(calls as number)>=0&&(calls as number)<=1e6?calls as number:0;
+    let todo:Todo[]|undefined;try{todo=Array.isArray(body.todo)?todoList(body.todo):undefined;}catch(error){if(!(error instanceof HttpError))throw error;}
+    if(tokens||unknown||todo)await this.jobs.progress(row.event_id,{tokens:tokens??{input_tokens:0,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:0},
+      unknown_calls:unknown,...(todo?{todo}:{})});
+    const {tokens:_tokens,unknown_calls:_unknown,todo:_todo,...result}=body;
     return super.finish(result);
   }
-  async stop(id:string){return this.cancelRow(id);}
-  /** Whether a step's turn may go on: its run and job still run, for the same chat and profile. */
+  /** Progress counts first, even while the run is being stopped (the base answers a cancelled run before any check). A live
+   *  run past its cost or time limit is then ended, and the base answer carries cancel_requested to the turn. */
+  override async heartbeat(input:unknown){
+    const body=object(input),row=await this.scoped(body);
+    if(!row.actor||row.actor!==body.actor||row.owner_epoch!==body.owner_epoch)throw new HttpError(409,'run_lease_lost');
+    if(body.progress!==undefined)await this.jobs.progress(row.event_id,runProgress(body.progress));
+    if(row.state==='running'&&!row.cancel_requested){const limit=await this.jobs.overLimit(row.job_id);if(limit)await this.end(row.event_id,limit);}
+    const {progress:_progress,...rest}=body;
+    return super.heartbeat(rest);
+  }
+  /** A run is watched every 15 seconds while it waits or runs; its heartbeat, not this, stops it at a limit. */
+  protected override status(row:any):Observation {
+    const seen=super.status(row);return ['captured','running'].includes(row.state)?{...seen,next_attempt:Date.now()+15000}:seen;
+  }
+  /** Stop a live run for one reason: the reason and the cancel (which closes its runtime turn, so the broker refuses its next
+   *  call) commit together. A run that already closed keeps its end; the first reason wins. */
+  async end(id:string,reason:'cost'|'time'|'stopped'):Promise<void> {
+    const db=await this.control.connect();
+    try {
+      await db.query('BEGIN');
+      const run=(await db.query('SELECT state FROM managed_runs WHERE event_id=$1 FOR UPDATE',[id])).rows[0];
+      if(run&&['captured','running'].includes(run.state)) {
+        await db.query('UPDATE background_runs SET ended=coalesce(ended,$2),updated_at=now() WHERE event_id=$1',[id,reason]);
+        await this.cancelIn(db,id);
+      }
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  /** Whether a run's turn may go on: its run and job still run, for the same chat and profile. */
   async deliveryAllowed(principal:Reader):Promise<boolean> {
     const row=principal.turnEvent?await this.row(principal.turnEvent):null;
     if(!row||row.state!=='running'||row.cancel_requested||row.space_id!==principal.space||row.logical_profile!==principal.logical_profile||

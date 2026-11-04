@@ -112,18 +112,23 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   },
   {
     key: 'background.job',
-    title: 'Background job: first step',
+    title: 'Background job: first message',
     hint: 'Starts an approved background job in its own session. {instruction} is what the person asked; {title}, {chat}, {period}, {size} and {limits} are filled in.',
   },
   {
-    key: 'background.continue',
-    title: 'Background job: next steps',
-    hint: 'Sent at each later step of a job, after the work so far. {title} is the job’s name.',
+    key: 'background.resume',
+    title: 'Background job: after an interruption',
+    hint: 'Sent when a job restarts after an interruption and its work so far is still there. {title} is the job’s name.',
   },
   {
-    key: 'background.wrap_up',
-    title: 'Background job: at its limit',
-    hint: 'The last short step when a job reaches its cost or time limit. {limit} is the limit it reached.',
+    key: 'background.restart',
+    title: 'Background job: fresh restart',
+    hint: 'Added to the first message when a job restarts and its earlier work could not be kept. {todo} is its last to-do list, left out when it may no longer be shown.',
+  },
+  {
+    key: 'background.limit',
+    title: 'Background job: stopped at a limit',
+    hint: 'Sent to the chat instead of a report when a job reaches its cost or time limit. {title} and {limit} (cost or time) are filled in; {done} and {left} come from its last to-do list, and {none} is said when it kept none.',
   },
   {
     key: 'background.card',
@@ -133,12 +138,12 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'background.texts',
     title: 'Background job card answers',
-    hint: 'One “name: text” line each for what a decided job card says: running, queued, done, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for what a decided job card says: running, queued, stopping, done, limited, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. A line you remove keeps its default.',
   },
   {
     key: 'background.box',
     title: 'Background job: sealed box',
-    hint: 'Added to each step of a job that runs in its sealed box: what /chat and /work hold and in what order, that the box has no internet, and that its work is lost when the job ends.',
+    hint: 'Added to each run of a job in its sealed box: what /chat and /work hold and in what order, that the box has no internet, and that its work is lost when the job ends.',
   },
 ];
 

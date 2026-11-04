@@ -44,10 +44,10 @@ test('a job the owner approved in their private chat reads Notion under the owne
       {title,instruction:'Compare the made-up Notion task table with the group chat.',chat:group});
     await s.jobs.decide(by,{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message(chat,Number(by),'Approve'));
     await tick(proposed.id);
-    const step=(await stores.control.query('SELECT event_id FROM background_steps WHERE job_id=$1 ORDER BY step DESC,attempt DESC LIMIT 1',[proposed.id])).rows[0].event_id;
-    await s.jobs.steps.run(step,await authority());
-    const context=await s.jobs.steps.context({event_id:step,owner_epoch:(await authority()).epoch});
-    await s.jobs.steps.claim({...context,actor:context.actor});
+    const step=(await stores.control.query('SELECT event_id FROM background_runs WHERE job_id=$1 ORDER BY attempt DESC LIMIT 1',[proposed.id])).rows[0].event_id;
+    await s.jobs.runs.run(step,await authority());
+    const context=await s.jobs.runs.context({event_id:step,owner_epoch:(await authority()).epoch});
+    await s.jobs.runs.claim({...context,actor:context.actor});
     const binding=await s.guards.state(),reader:Reader={admin:false,scope,space:chat,turnEvent:step,logical_profile:'job-'+proposed.id.slice(0,24),
       generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
     return {id:proposed.id,reader};
@@ -64,7 +64,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
     const offered=await s.jobs.start(await actor((await message('123',123,'Check my made-up table')).id,null,'123'),{title:'Card check',instruction:'Read it.',chat:group});
     assert.doesNotMatch(await card(offered.id),/📒/,'no line while Notion is off');
     await saveNotion({enabled:true});
-    assert.match(await card(offered.id),/🛑 Stops at \$5\.0 or 60 min, not counting the secret check\n🔎 Starting it already used one secret check\.\n📒 It can read your Notion without asking\. Changes still ask you\./);
+    assert.match(await card(offered.id),/🛑 Stops at \$5\.0 or 45 min, not counting the secret check\n🔎 Starting it already used one secret check\.\n📒 It can read your Notion without asking\. Changes still ask you\./);
     const member=await s.jobs.start(await actor((await message(group,9,'Check it here')).id,group,group),{title:'Group card',instruction:'Read it.'});
     assert.doesNotMatch(await card(member.id),/📒/,'a group job never reaches Notion, so its card says nothing about it');
     await saveNotion({approval:'everything'});

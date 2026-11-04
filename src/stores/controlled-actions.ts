@@ -1,7 +1,7 @@
 import {blockingPublications} from './publications.js';
 import {ownerAutonomyGrant} from './owner-autonomy.js';
 import {notionAuthority} from './notion.js';
-import {ownerApprovedJob} from './background-jobs.js';
+import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -85,11 +85,12 @@ export class ControlledActionRepository {
       // approve itself. Deny rules are evaluated first and still block it.
       // Notion is used only from the owner's private chat while it is on; the
       // owner's Notion setting can let reads, or every call, run without a card,
-      // from a live turn there or a step of a job the owner approved there
+      // from a live turn there or a run of a job the owner approved there
       // (ADR-0203). It replaces the owner freedom setting for Notion calls; that
-      // setting never applies to jobs.
-      const connected='connection' in args,live=source.store==='archive';
-      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?await ownerApprovedJob(db,this.access.policy().owner_id,source,turn):live):null;
+      // setting never applies to jobs. A relaunched run of a job (attempt > 1) gets
+      // no autonomy: every change it asks for waits for a card (ADR-0207).
+      const connected='connection' in args,live=source.store==='archive',fresh=!turn.job||!await relaunchedRun(db,source.id);
+      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,this.access.policy().owner_id,source,turn):live):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')
@@ -129,7 +130,7 @@ export class ControlledActionRepository {
     if(!principal.admin){await this.prepared.allow(principal,args);return this.prepared.prepare(principal,view,this.detect) as Promise<any>;}
     return view;
   }
-  /** This chat's recent operations, such as Notion calls, for a later turn or job step that no longer holds their IDs.
+  /** This chat's recent operations, such as Notion calls, for a later turn or job run that no longer holds their IDs.
    * States only, so a quick look needs no content check; one is read whole by its ID, with the same audience. */
   async recent(principal:Reader) {
     const turn=await this.turns.binding(principal);
@@ -154,9 +155,11 @@ export class ControlledActionRepository {
       await db.query('COMMIT');return rows.map(row=>row.id);
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
+  /** Standing permissions that cover an operation; none for one a relaunched job run asked for (ADR-0207). */
   async grants(row:any,db:Pick<pg.Pool,'query'>=this.control) {
     return (await db.query(`SELECT id,remaining,expires_at,revision FROM action_permissions WHERE fingerprint=$1 AND binding=$2
-      AND (job_id IS NULL OR job_id=$3) AND remaining>0 AND revoked_at IS NULL AND expires_at>now() ORDER BY expires_at,id`,[row.fingerprint,row.binding,row.job_id])).rows;
+      AND (job_id IS NULL OR job_id=$3) AND remaining>0 AND revoked_at IS NULL AND expires_at>now()
+      AND NOT EXISTS (SELECT 1 FROM background_runs r WHERE r.event_id=$4 AND r.attempt>1) ORDER BY expires_at,id`,[row.fingerprint,row.binding,row.job_id,row.event_id])).rows;
   }
   private async command<T>(principal:Reader,body:Record<string,unknown>,request:unknown,change:(db:pg.PoolClient)=>Promise<T>,source?:SourceReference) {
     admin(principal);if(source)await this.access.archive.verify(source);

@@ -10,14 +10,14 @@ import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
-import type {BackgroundJobRepository} from './background-jobs.js';
+import {closedStates,type BackgroundJobRepository} from './background-jobs.js';
 
 type ActionKind='telegram'|'controlled'|'background'|'list';
 /** One card of a job's waiting changes, as frozen when it was sent. */
 type ListCard={id:string;fingerprint:string;members:[string,string][];long?:number};
-// Telegram allows 64 bytes of button data: a marker, the choice, and prefixes
-// of the action ID and of the fingerprint of its exact content.
-const buttonData=/^n([ad])([a-f0-9]{40})([a-f0-9]{16})$/;
+// Telegram allows 64 bytes of button data: a marker, the choice (approve, deny, or stop a job),
+// and prefixes of the action ID and of the fingerprint of its exact content.
+const buttonData=/^n([ads])([a-f0-9]{40})([a-f0-9]{16})$/;
 /** The Retry failed button under a problem notice in the owner's private chat. */
 export const retryButton='nr';
 const reviewLimit=2200;
@@ -146,11 +146,11 @@ export class ActionCommandRepository {
     const [chat,topic]=reviewer.space.split('/topic/');
     return {chat:chat!,...(topic?{topic}:{}),reviewer:reviewer.user};
   }
-  /** A background job's step or a scheduled task that asked for an operation, by the job's name. */
+  /** A background job's run or a scheduled task that asked for an operation, by the job's name. */
   private async work(source:any,line:Record<ApprovalText,string>):Promise<string|null> {
     const kind=(await this.access.stores.control.query('SELECT kind FROM content_operations WHERE id=$1',[source.id])).rows[0]?.kind;
     if(kind==='scheduled_trigger')return line.from_schedule;
-    const title=kind==='background_step'&&this.jobs?clean(await this.jobs.stepJob(source.id)):null;
+    const title=kind==='background_run'&&this.jobs?clean(await this.jobs.runJob(source.id)):null;
     return title?fillTemplate(line.from_job,{title}):null;
   }
   /** The exact content to decide on, or null when it is too long to review in Telegram. */
@@ -224,7 +224,7 @@ export class ActionCommandRepository {
         'This exact message for the other group was posted here with Approve and Reject buttons for the person who asked; nothing is sent until they press Approve. Say only, briefly, that they can check and approve it; do not repeat the draft.':
         asked&&asked.chat!==owner?
         'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner; do not show the draft or details.':
-        // A job's step or a scheduled task runs on without a chat to wait in.
+        // A job's run or a scheduled task runs on without a chat to wait in.
         row.source_reference?.store==='control'?
         'The owner was sent Approve and Reject buttons for this exact request in their private chat. It runs only if they approve, maybe after you finish. Do not wait for it. Say in your answer what you asked for.':
         'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'};
@@ -253,13 +253,17 @@ export class ActionCommandRepository {
         'A card with Approve and Reject buttons for this job was posted here as the reply to the request. It shows the job, its size, time and cost, so say at most one short sentence; nothing runs until it is approved.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
-  /** A decided job's card keeps its text, shows where the job is and loses its buttons. */
+  /** A decided job's card keeps its text and shows where the job is: Stop while it waits or runs, no button once it
+   *  stops or ends. A job that ended at a limit says a short note is in the chat. */
   private async settleJob(id:string) {
     if(!this.jobs)return;
-    const card=await this.jobs.card(id),place=await this.jobPlace(card.row),state=card.row.cancel_requested&&card.state!=='done'?'stopped':card.state;
+    const card=await this.jobs.card(id),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
+    const state=row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
+      row.state==='done'&&row.ended?'limited':row.state;
     const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines.running:card.lines[state];
-    if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[]});
-    if(['done','failed'].includes(state)&&!card.row.cancel_requested)await this.offerList(card.row);
+    const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;
+    if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{})});
+    if(['done','failed','limited'].includes(state)&&!row.cancel_requested)await this.offerList(row);
   }
   /** The changes a job left waiting, on as few cards as Telegram allows; each card is decided as a whole.
    * The split is frozen once, before any card is sent, so a card's text and buttons never change. */
@@ -367,7 +371,9 @@ export class ActionCommandRepository {
       UNION ALL SELECT 'list',c->>'id',c->>'fingerprint' FROM background_jobs j CROSS JOIN LATERAL jsonb_array_elements(j.changes) c
         WHERE j.changes IS NOT NULL AND left(c->>'id',40)=$1`,[data[2]])).rows;
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
-    if(action?.kind==='background'&&this.jobs)return this.jobPressed(action,data[1]==='a',presser,chat,query.id,source);
+    if(action?.kind==='background'&&this.jobs)return data[1]==='s'?this.stopPressed(action,presser,chat,query.id):this.jobPressed(action,data[1]==='a',presser,chat,query.id,source);
+    // Stop is only a job's button; it never decides anything else.
+    if(data[1]==='s'){await answer(line.changed);return true;}
     if(action?.kind==='list'&&presser===policy.owner_id)return this.listPressed(action.id,data[1]==='a',chat,query.id,source);
     const reviewer=action?.kind==='telegram'?(await this.telegram.reviewer(action.id))?.user:undefined;
     // The owner decides any card; the person who asked decides only their own card in their group.
@@ -418,6 +424,19 @@ export class ActionCommandRepository {
     }catch(error) {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
       reply=line.decided;
+    }
+    await answer(reply);await this.settle('background',action.id);return true;
+  }
+  /** Stop on a running job's card: the owner, or the person who asked on their own job's card, stops it as the tool's
+   *  stop does. Its card then says it is stopping and loses the button. */
+  private async stopPressed(action:{id:string;fingerprint:string},presser:string,chat:string,query:string):Promise<boolean> {
+    const {line}=await this.texts(),answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query,text:text.slice(0,200)},10000);
+    if(!await this.jobs!.presser(action.id,presser,chat)){await answer(line.only_stop);return true;}
+    let reply:string;
+    try{await this.jobs!.halt(action.id);reply=line.stopping_job;}
+    catch(error) {
+      if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
+      reply=line.job_ended;
     }
     await answer(reply);await this.settle('background',action.id);return true;
   }

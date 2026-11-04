@@ -8,11 +8,11 @@ import {boxExpires,boxJob,boxOpen} from './background-jobs.js';
 import {validFromEpoch} from './guards.js';
 import type {SourceRepository} from './retrieval.js';
 
-/** What the launcher needs for a step's sealed box: the job's chat and period from its row, the guard binding
+/** What the launcher needs for a run's sealed box: the job's chat and period from its row, the guard binding
  *  a filled copy stays good for, and when the box must be gone. */
 export interface BoxBinding {job:string;chat:string;from:string|null;to:string|null;generation:string;mode:'on';valid_from_epoch:number;expires:string}
 
-/** Whether the box token is set; without it no step gets a box and nothing reads a box copy. */
+/** Whether the box token is set; without it no run gets a box and nothing reads a box copy. */
 export const boxTokenSet=(token=process.env.NOCHEH_BOX_TOKEN):token is string=>!!token&&token.length>=32;
 /** Whether `given` is the box token that only the broker and the launcher hold. An unset or short token refuses everything. */
 export function boxTokenValid(given:unknown,token=process.env.NOCHEH_BOX_TOKEN):boolean {
@@ -24,12 +24,12 @@ export function boxTokenValid(given:unknown,token=process.env.NOCHEH_BOX_TOKEN):
 /**
  * The sealed box of a job the owner asked for and approved in their private chat: Hermes's own terminal,
  * file and code tools run there, with a read-only copy of the job's chat that passed the secret check.
- * Nocheh decides which steps get a box and what the copy holds; the launcher only follows the binding.
+ * Nocheh decides which runs get a box and what the copy holds; the launcher only follows the binding.
  */
 export class JobBoxRepository {
   constructor(readonly access:SourceAccessRepository){}
   private get control(){return this.access.stores.control;}
-  /** A turn's box: only a work step of a box job that `ownerApprovedJob` lets through, before the box's time
+  /** A turn's box: only a run of a box job that `ownerApprovedJob` lets through, before the box's time
    *  is up, while the box switch and the guard are on (`boxJob`). */
   async binding(turn:Pick<TurnBinding,'owner'|'job'|'logical_profile'|'reference'>):Promise<BoxBinding|null> {
     if(!turn.job||turn.reference?.store!=='control')return null;

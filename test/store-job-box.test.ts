@@ -73,18 +73,18 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
   };
   const authority=async()=>({owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0].epoch)});
   const tick=async(id:string)=>s.jobs.operation('job:'+id,await authority());
-  const latest=async(id:string)=>(await stores.control.query('SELECT event_id FROM background_steps WHERE job_id=$1 ORDER BY step DESC,attempt DESC LIMIT 1',[id])).rows[0].event_id as string;
+  const latest=async(id:string)=>(await stores.control.query('SELECT event_id FROM background_runs WHERE job_id=$1 ORDER BY attempt DESC LIMIT 1',[id])).rows[0].event_id as string;
   const period={chat:group,from:'2026-01-10',to:'2026-01-12'};
   const ask=async(title:string,box?:boolean)=>s.jobs.start(await actor((await message('123',123,'Read the made-up group')).id,null,'123'),
     {title,instruction:'List the made-up tasks the group agreed on.',...period,...(box===undefined?{}:{box})});
-  /** Run a job's latest step and read its context; `claim` also claims that step and returns its credential. */
+  /** Run a job's latest run and read its context; `claim` also claims that run and returns its credential. */
   const run=async(id:string,claim:boolean)=>{
-    const step=await latest(id);await s.jobs.steps.run(step,await authority());
-    const context:any=await s.jobs.steps.context({event_id:step,owner_epoch:(await authority()).epoch});
-    const claimed:any=claim?await s.jobs.steps.claim({...context,actor:context.actor}):null;
+    const step=await latest(id);await s.jobs.runs.run(step,await authority());
+    const context:any=await s.jobs.runs.context({event_id:step,owner_epoch:(await authority()).epoch});
+    const claimed:any=claim?await s.jobs.runs.claim({...context,actor:context.actor}):null;
     return {step,context,claimed,credential:String(claimed?.archive_credential??'')};
   };
-  /** Approve a job, start it, and run its first step. */
+  /** Approve a job, start it, and run its first run. */
   const start=async(job:{id:string;fingerprint:string},claim:boolean)=>{
     await s.jobs.decide('123',{id:job.id,fingerprint:job.fingerprint,decision:'approve'},await message('123',123,'Approve'));
     await tick(job.id);return run(job.id,claim);
@@ -97,7 +97,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
   const switchBox=async(on:boolean)=>s.jobs.saveSettings(owner,{...await s.jobs.settings(),box_tools:on});
   const boxTime=async(id:string,minutes:number)=>stores.control.query("UPDATE background_jobs SET started_at=now()-($2::integer+minutes_limit)*interval '1 minute' WHERE id=$1",[id,minutes]);
   const expiresOf=async(id:string)=>{const row=(await stores.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
-    return new Date(row.started_at.getTime()+(row.minutes_limit+60)*60000).toISOString();};
+    return new Date(row.started_at.getTime()+(row.minutes_limit+8)*60000).toISOString();};
   try {
     await s.guards.reconcile();await s.guards.setMode('on');await s.configuration.configure(policy,'on');
     // The group's chat in the job's period: 205 short messages, one of 5,000 characters, three of 250,000, a reaction, one still being checked
@@ -157,24 +157,24 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     await assert.rejects(s.jobs.saveSettings(owner,{...before,box_tools:false,revision:before.revision-1}),{code:'configuration_conflict'});
     const off=await switchBox(false);
     assert.equal(off.box_tools,false);assert.equal(off.revision,before.revision+1);
-    await assert.rejects(s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:60,member_daily_jobs:3,revision:before.revision}),{code:'configuration_conflict'},
+    await assert.rejects(s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,revision:before.revision}),{code:'configuration_conflict'},
       'a limits edit from before the switch changed does not save over it');
     await assert.rejects(ask('Switched off',true),{code:'job_box_not_allowed'},'never dropped without a word');
     const limits=await s.jobs.settings();
-    assert.equal((await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:60,member_daily_jobs:3,revision:limits.revision})).box_tools,false,'the limits leave the switch');
+    assert.equal((await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,revision:limits.revision})).box_tools,false,'the limits leave the switch');
     // The dashboard saves the switch with the limits: one save, one revision.
-    const both=await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:60,member_daily_jobs:4,box_tools:true,revision:limits.revision+1});
+    const both=await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:4,box_tools:true,revision:limits.revision+1});
     assert.deepEqual([both.box_tools,both.member_daily_jobs,both.revision],[true,4,limits.revision+2]);
 
-    // The box job's step: its context, step text and binding carry the box; a plain job's do not.
+    // The box job's run: its context, run text and binding carry the box; a plain job's do not.
     const a=await start(boxed,true);
-    assert.equal(a.context.background.box,true);assert.match(a.claimed!.text,/\[Sealed box\]\nIn this step your terminal, file and execute_code tools run/);
+    assert.equal(a.context.background.box,true);assert.match(a.claimed!.text,/\[Sealed box\]\nIn this job your terminal, file and execute_code tools run/);
     assert.match(a.claimed!.text,/Records within a part are oldest first, but a later part can hold older records that finished their secret check later: sort by the at field/);
     assert.match(a.claimed!.text,/Reaction updates are left out; an imported message keeps the reactions it was exported with\./);
-    assert.match(a.claimed!.text,/When the manifest says full, \/chat ran out of room: the copy stays partial for good/);
+    assert.match(a.claimed!.text,/The copy is made when the job starts, and again if it restarts\.[^]*When the manifest says full, \/chat ran out of room\. Your archive tools still read what the copy lacks\./);
     const n=await start(plain,false);
     assert.equal(n.context.background.box,false);
-    const nClaimed:any=await s.jobs.steps.claim({...n.context,actor:n.context.actor});assert.doesNotMatch(nClaimed.text,/Sealed box/);
+    const nClaimed:any=await s.jobs.runs.claim({...n.context,actor:n.context.actor});assert.doesNotMatch(nClaimed.text,/Sealed box/);
     const binding=await get(brokerBase,'/v1/security/binding',{authorization:'Bearer '+a.credential});
     assert.equal(binding.status,200);
     const state=await s.guards.state();
@@ -182,7 +182,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
       valid_from_epoch:await validFromEpoch(stores.control,state),expires:await expiresOf(boxed.id)});
     assert.equal(await bindingBox(nClaimed.archive_credential),null,'a job without the box gets none');
     await switchBox(false);
-    assert.equal(await bindingBox(a.credential),null,'switched off, a running job gets no box at its next step');
+    assert.equal(await bindingBox(a.credential),null,'switched off, a running job loses its box');
     assert.deepEqual(await live(),[]);
     assert.deepEqual(await copy(a.credential),{status:403,body:{error:'job_box_not_allowed'}});
     await switchBox(true);
@@ -197,7 +197,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     const request={title:'Made-up box job',instruction:'Count the made-up tasks.',box:true};
     for(const unset of [true,false]) {
       if(unset)delete process.env.NOCHEH_BOX_TOKEN;
-      assert.equal(await bindingBox(a.credential),null,'without the box token no step gets a box');
+      assert.equal(await bindingBox(a.credential),null,'without the box token no run gets a box');
       relayed.length=0;
       assert.deepEqual(await post('/v1/jobs/start',a.credential,request),{status:409,body:{error:'job_box_not_allowed'}},'nor may a job ask for one');
       assert.deepEqual(relayed,[]);
@@ -235,9 +235,9 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     }
     refuse=()=>null;
 
-    // The chat copy: the step's credential and the box token, never an owner credential, a plain job or a chosen chat.
+    // The chat copy: the run's credential and the box token, never an owner credential, a plain job or a chosen chat.
     assert.equal(scopedRoute('GET','/v1/box/chat'),false,'the copy is no relayed archive route');
-    assert.equal((await get(brokerBase,'/v1/box/chat',{authorization:'Bearer '+a.credential})).status,403,'the step credential alone is not enough');
+    assert.equal((await get(brokerBase,'/v1/box/chat',{authorization:'Bearer '+a.credential})).status,403,'the run credential alone is not enough');
     assert.equal((await copy(a.credential,'',{'x-nocheh-box-token':'x'.repeat(40)})).status,403);
     assert.deepEqual(await copy(token),{status:403,body:{error:'job_box_not_allowed'}},'never with the owner credential');
     relayed.length=0;
@@ -279,7 +279,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     assert.equal((await get(brokerBase,'/v1/archive/page?chat='+group+'&full=1&limit=5',{authorization:'Bearer '+a.credential})).status,200);
     assert.equal(relayed.length,1);assert.doesNotMatch(relayed[0]!,/full/);assert.match(relayed[0]!,/limit=5/);
 
-    // Notion in a job step: only the known read tools skip the card, and a fetch only by id or notion.so address.
+    // Notion in a job run: only the known read tools skip the card, and a fetch only by id or notion.so address.
     assert.ok(notionReads('notion-search')&&notionReads('notion-fetch')&&notionReads('notion-get-users'));
     assert.ok(!notionReads('notion-ai-search')&&!notionReads('notion-get-file-download-urls')&&!notionReads('notion-list-made-up'));
     const id='0123456789abcdef0123456789abcdef',uuid='01234567-89ab-cdef-0123-456789abcdef';
@@ -296,27 +296,28 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     assert.equal(await notion('notion-get-file-download-urls',{ids:[id]}),'proposed','a tool not on the read list asks');
     await saveNotion({enabled:false});
 
-    // Past the box's time, a step runs as a plain step: no box in its binding, its context or the live list.
-    const contextOf=async(step:string)=>((await s.jobs.steps.context({event_id:step,owner_epoch:(await authority()).epoch})) as any).background.box;
-    await boxTime(boxed.id,59);
-    assert.equal(await contextOf(a.step),true,'the box lasts the time limit and an hour more');assert.equal((await bindingBox(a.credential))?.job,boxed.id);
+    // Past the box's time, a run runs as a plain run: no box in its binding, its context or the live list.
+    const contextOf=async(step:string)=>((await s.jobs.runs.context({event_id:step,owner_epoch:(await authority()).epoch})) as any).background.box;
+    await boxTime(boxed.id,7);
+    assert.equal(await contextOf(a.step),true,'the box lasts until 5 minutes after the hard deadline: the time limit and 8 minutes more');
+    assert.equal((await bindingBox(a.credential))?.job,boxed.id);
     assert.equal((await live()).length,1);
-    await boxTime(boxed.id,61);
+    await boxTime(boxed.id,9);
     assert.equal(await contextOf(a.step),false);assert.equal(await bindingBox(a.credential),null);assert.deepEqual(await live(),[]);
     assert.equal(await boxes.binding(turn),null);
     await stores.control.query('UPDATE background_jobs SET started_at=now() WHERE id=$1',[boxed.id]);assert.equal(await contextOf(a.step),true);
 
-    // The step ends at the time limit: the report written at the limit gets no box, though the box's own time is not up.
+    // A run that did not finish is relaunched, in the box again: the box can be new, so its text comes again too.
     assert.equal((await boxes.binding(turn))?.job,boxed.id);
-    await s.jobs.steps.finish({event_id:a.step,actor:a.context.actor,state:'done',session:a.context.conversation,error_code:null,text:'Read part one.',continue:true,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
-    await boxTime(boxed.id,1);await tick(boxed.id);
-    const wrap=await latest(boxed.id);await s.jobs.steps.run(wrap,await authority());
-    const wrapContext:any=await s.jobs.steps.context({event_id:wrap,owner_epoch:(await authority()).epoch});
-    assert.equal(wrapContext.background.kind,'wrap_up');assert.equal(wrapContext.background.box,false,'the report at a limit is no box step');
-    const wrapClaimed:any=await s.jobs.steps.claim({...wrapContext,actor:wrapContext.actor});assert.doesNotMatch(wrapClaimed.text,/Sealed box/);
-    assert.equal(await bindingBox(wrapClaimed.archive_credential),null);
-    assert.deepEqual((await live()).map(box=>box.job),[boxed.id],'the box may stay until its time is up');
-    await s.jobs.steps.finish({event_id:wrap,actor:wrapContext.actor,state:'done',session:wrapContext.conversation,error_code:null,text:'Report: made-up task 3 is open.',continue:false,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
+    await s.jobs.runs.finish({event_id:a.step,actor:a.context.actor,state:'failed',session:a.context.conversation,error_code:'model_unavailable',text:'',todo:[],tokens:null});
+    assert.equal((await tick(boxed.id)).state,'waiting');
+    const relaunched=await run(boxed.id,true);
+    assert.notEqual(relaunched.step,a.step);assert.equal(relaunched.context.background.attempt,2);
+    assert.equal(relaunched.context.background.box,true,'a relaunched run keeps the box');assert.match(relaunched.claimed.text,/\[Sealed box\]\nIn this job/);
+    assert.equal((await bindingBox(relaunched.credential))?.job,boxed.id);
+    assert.deepEqual((await live()).map(box=>box.job),[boxed.id]);
+    await s.jobs.runs.prepare({...relaunched.context,actor:relaunched.context.actor});
+    await s.jobs.runs.finish({event_id:relaunched.step,actor:relaunched.context.actor,state:'done',session:relaunched.context.conversation,error_code:null,text:'Report: made-up task 3 is open.',todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     // The job reports: no box any more, and it leaves the live list.
     assert.equal((await tick(boxed.id)).stage,'delivery');
     assert.equal((await stores.control.query('SELECT state FROM background_jobs WHERE id=$1',[boxed.id])).rows[0].state,'reporting');
@@ -339,7 +340,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     assert.equal((await live())[0].valid_from_epoch,hidden.epoch,'a hide is no reaction: the copy is filled again');
     await react(other,otherId,13);assert.equal((await live())[0].valid_from_epoch,hidden.epoch);
 
-    // Guard off: no box and no copy anywhere, also for a box job whose step starts while it is off.
+    // Guard off: no box and no copy anywhere, also for a box job whose run starts while it is off.
     await s.guards.setMode('off');
     assert.deepEqual(await live(),[]);
     assert.equal(await boxes.binding({owner:true,job:second.id,logical_profile:'job-'+second.id.slice(0,24),reference:{store:'control',kind:'operation',id:b.step} as any}),null);
@@ -359,10 +360,10 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     assert.deepEqual(await live(),[]);
     await stores.control.query("UPDATE managed_runs SET state='cancelled' WHERE job_id=ANY($1)",[[second.id,third.id]]);await tick(second.id);await tick(third.id);
 
-    // A box job whose steps find no box fails saying so, not as a managed execution failure.
+    // A box job whose runs find no box fails saying so, not as a managed execution failure.
     const fourth=await ask('Boxless box check',true);let failing=await start(fourth,true);
     for(let attempt=1;;attempt++) {
-      await s.jobs.steps.finish({event_id:failing.step,actor:failing.context.actor,state:'failed',session:failing.context.conversation,error_code:'job_box_unavailable',text:'',continue:false,todo:[],tokens:null});
+      await s.jobs.runs.finish({event_id:failing.step,actor:failing.context.actor,state:'failed',session:failing.context.conversation,error_code:'job_box_unavailable',text:'',todo:[],tokens:null});
       await tick(fourth.id);if(attempt>2)break;failing=await run(fourth.id,true);
     }
     assert.deepEqual((await stores.control.query('SELECT state,error_code FROM background_jobs WHERE id=$1',[fourth.id])).rows[0],{state:'failed',error_code:'job_box_unavailable'});

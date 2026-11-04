@@ -418,7 +418,7 @@ test('the sealed box switch saves with the job limits in either order, and again
   // One save sends the switch and the limits together, over one revision, whichever was changed first.
   for (const order of ['switch first', 'limit first']) {
     const wasOn = await on();
-    const next = String(Number(await minutes.inputValue()) + 5);
+    const next = String(Number(await minutes.inputValue()) - 5);
     if (order === 'switch first') await box.click();
     await minutes.fill(next);
     if (order === 'limit first') await box.click();
@@ -436,7 +436,7 @@ test('the sealed box switch saves with the job limits in either order, and again
   const other = await open('settings?view=assistant');
   const otherBar = other.page.getByRole('region', {name: 'Save changes'});
   const wasOn = await on();
-  const next = String(Number(await minutes.inputValue()) + 5);
+  const next = String(Number(await minutes.inputValue()) - 5);
   await minutes.fill(next);
   await other.page.getByRole('switch', {name: 'Sealed box for jobs'}).click();
   await otherBar.getByRole('button', {name: 'Save'}).click();
