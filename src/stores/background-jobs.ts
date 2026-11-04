@@ -235,7 +235,8 @@ export class BackgroundJobRepository {
   get guards(){return this.access.guards;}
   async settings(){
     const row=(await this.control.query('SELECT * FROM background_settings WHERE singleton')).rows[0];
-    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:row.minutes_limit,member_daily_jobs:row.member_daily_jobs,box_tools:row.box_tools as boolean,revision:row.revision};
+    // A value saved before the 50-minute limit reads as the limit, so it never refuses every job.
+    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:Math.min(row.minutes_limit,JOB_MINUTES),member_daily_jobs:row.member_daily_jobs,box_tools:row.box_tools as boolean,revision:row.revision};
   }
   async saveSettings(principal:Reader,input:unknown){
     admin(principal);const body=object(input);
