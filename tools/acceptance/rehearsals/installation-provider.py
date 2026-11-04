@@ -114,7 +114,9 @@ class ScriptedBrain:
                         results=sum(1 for message in messages[index + 1:users[-1]] if message.role == 'tool'))
         if self.RESTART in current and ('restart', key) not in self.seen:
             self.seen.add(('restart', key))
-            self.record(directive='restart', phase='seen', todo='Your last to-do list was:' in current, earlier=index)
+            # Nocheh's memory evidence comes before every turn's message; it is no earlier history.
+            self.record(directive='restart', phase='seen', todo='Your last to-do list was:' in current,
+                        earlier=sum(1 for message in messages[:index] if not self.text(message.content).startswith(self.EVIDENCE)))
 
     def script(self, body):
         names = {tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)}

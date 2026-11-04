@@ -156,6 +156,11 @@ class ScriptedBrainTests(unittest.TestCase):
         self.brain.respond(request(*earlier,restart));self.brain.respond(request(*earlier,restart))
         self.assertEqual([event for event in self.brain.events if event['directive']=='restart'],
                          [{'directive':'restart','phase':'seen','todo':True,'earlier':2}])
+        # A fresh run's request starts with Nocheh's memory evidence, which is no earlier history.
+        fresh=message('user','[Background job: Restart JOB7] [[search:RESTARTMARK]]\n\nThis job restarted and its earlier work could not be kept.')
+        self.brain.respond(request(message('user',self.brain.EVIDENCE+'{"entries":[]}'),fresh))
+        self.assertEqual([event for event in self.brain.events if event['directive']=='restart'][-1],
+                         {'directive':'restart','phase':'seen','todo':False,'earlier':0})
 
 
 if __name__=='__main__':unittest.main()
