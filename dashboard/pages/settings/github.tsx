@@ -44,7 +44,7 @@ type GithubStatus = {
   expires_at: string | null;
   reconnect: boolean;
   listed: Listed[];
-  listed_at: string | null;
+  listed_at: number | null;
   copies: Copied[] | null;
 };
 

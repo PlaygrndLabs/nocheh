@@ -34,7 +34,8 @@ const notion=new NotionRepository(pool);
 let notionSignIn:{connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean}={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};
 // GitHub: made-up repositories; a key is any value shaped like a fine-grained one, and the copies live only in this preview.
 const githubListed=[{name:'example-org/gadgets',branch:'main',private:false,size_kb:900},{name:'example-org/widgets',branch:'main',private:true,size_kb:21000}];
-let githubSignIn:{connected:boolean;login:string|null;connected_at:string|null;expires_at:string|null;reconnect:boolean;listed:typeof githubListed;listed_at:string|null}=
+// As github.py keeps them: connected_at and listed_at in epoch seconds, expires_at as ISO UTC.
+let githubSignIn:{connected:boolean;login:string|null;connected_at:number|null;expires_at:string|null;reconnect:boolean;listed:typeof githubListed;listed_at:number|null}=
   {connected:false,login:null,connected_at:null,expires_at:null,reconnect:false,listed:[],listed_at:null};
 let githubCopies:Record<string,unknown>[]=[];
 const githubStatus=()=>({...githubSignIn,copies:githubCopies.map(copy=>({...copy,missing:false}))});
@@ -533,9 +534,9 @@ const server=createServer((req,res)=>{void(async()=>{
     notionSignIn={connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
   if(route==='/connections/notion/disconnect'){notionSignIn={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};return json(res,200,notionSignIn);}
   if(route==='/connections/github/token'){if(!/^github_pat_[A-Za-z0-9_]{20,255}$/.test(String(body.token??'').trim()))throw new HttpError(400,'invalid_github_token');
-    const now=new Date();githubSignIn={connected:true,login:'octo-example',connected_at:now.toISOString(),expires_at:new Date(now.getTime()+90*86400000).toISOString(),reconnect:false,
-      listed:githubListed,listed_at:now.toISOString()};return json(res,200,githubStatus());}
-  if(route==='/connections/github/list'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');githubSignIn.listed_at=new Date().toISOString();return json(res,200,githubStatus());}
+    const now=new Date();githubSignIn={connected:true,login:'octo-example',connected_at:Math.floor(now.getTime()/1000),expires_at:new Date(now.getTime()+90*86400000).toISOString(),reconnect:false,
+      listed:githubListed,listed_at:Math.floor(now.getTime()/1000)};return json(res,200,githubStatus());}
+  if(route==='/connections/github/list'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');githubSignIn.listed_at=Math.floor(Date.now()/1000);return json(res,200,githubStatus());}
   if(route==='/connections/github/copy'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
     const repo=String(body.repo??''),known=githubListed.find(row=>row.name.toLowerCase()===repo.toLowerCase());if(!known)throw new HttpError(400,'github_repo_not_readable');
     const commit=randomUUID().replace(/-/g,'').padEnd(40,'0'),copied_at=new Date().toISOString(),row={repo:known.name,branch:known.branch,commit,digest:commit.padEnd(64,'0'),
