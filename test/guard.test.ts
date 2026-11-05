@@ -78,3 +78,15 @@ test("Anthropic's Messages API shape: tool call arguments are literal and masked
     await assert.rejects(guardPayload({messages:[{role:'user',content}]},policy,'https://provider.example/v1/messages',async()=>[]),{code:'uninspectable_model_context'});
   }
 });
+
+test('GitHub tokens are masked whole, also when more word characters follow them',()=>{
+  // Built from parts, so no literal here looks like a token.
+  const fine='github_'+'pat_'+'FIXTURE'+'x'.repeat(24),classic='gh'+'p_'+'y'.repeat(36),long=fine+'z'.repeat(300),app='gh'+'s_'+'Q1'.repeat(20)+'w'.repeat(300);
+  for(const token of [fine,classic,long,app]) {
+    const text=`Made-up note: ${token} ends here.`;
+    assert.equal(mask(text,patternSpans(text)).text,'Made-up note: *** ends here.',token.slice(0,12));
+  }
+  for(const near of ['github_'+'pat_'+'short','gh'+'p_'+'y'.repeat(35),'xgh'+'p_'+'y'.repeat(36)]) {
+    const text=`Made-up note: ${near}.`;assert.equal(mask(text,patternSpans(text)).text,text,near.slice(0,12));
+  }
+});
