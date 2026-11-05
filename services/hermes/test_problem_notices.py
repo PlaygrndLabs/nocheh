@@ -124,5 +124,28 @@ class ProblemNoticeTests(unittest.TestCase):
                          'yesterday’s failures are not today’s')
 
 
+    def test_a_refused_or_expiring_github_key_gives_one_notice(self):
+        refused = {**monitoring(), 'github': {'connected': False, 'reconnect': True, 'expires_at': '2026-11-30T00:00:00Z'}}
+        self.check(NOW)
+        self.check(NOW + 120, refused)
+        self.assertEqual(self.sent[-1]['problems'],
+                         ['GitHub refused Nocheh’s key. Jobs keep the copies they have; connect again in Settings › Connections.'])
+        self.check(NOW + 4000, refused)
+        self.assertEqual(len(self.sent), 1, 'one notice for one refused key')
+        def found(expires_at, connected=True):
+            flags = {'connected': connected, 'reconnect': False, 'expires_at': expires_at}
+            return [p for p in problems.problems({**monitoring(), 'github': flags}, [], TODAY) if p['kind'] == 'github']
+        self.assertEqual(found('2026-11-05T10:00:00Z'), [], 'eight days ahead is not news yet')
+        for expires_at in ('soon', None, '2026-13-01T00:00:00Z'):
+            self.assertEqual(found(expires_at), [], expires_at)
+        self.assertEqual(found('2026-11-04T10:00:00Z', connected=False), [], 'no key, no expiry')
+        soon, = found('2026-11-04T10:00:00Z')
+        self.assertEqual((soon['key'], soon['at']), ('github:expires:2026-11-04', '2026-11-04'))
+        self.assertEqual(problems.text(soon, 1),
+                         'Your GitHub key for Nocheh expires on 2026-11-04. Make a new one and replace it in Settings › Connections.')
+        self.check(NOW + 8000, {**monitoring(), 'github': {'connected': True, 'reconnect': False, 'expires_at': '2026-11-04T10:00:00Z'}})
+        self.assertEqual(self.sent[-1]['problems'], [problems.text(soon, 1)])
+
+
 if __name__ == '__main__':
     unittest.main()
