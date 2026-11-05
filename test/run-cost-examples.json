@@ -1,0 +1,11 @@
+[
+ {"name":"buckets at their own rates","rates":{"input":2,"output":10,"cache_read":0.2,"cache_write":2.5,"request":null},"tokens":{"input_tokens":100000,"output_tokens":10000,"cache_read_tokens":500000,"cache_write_tokens":40000,"calls":3},"unknown_calls":0,"cost":0.5},
+ {"name":"two unknown calls on top","rates":{"input":2,"output":10,"cache_read":0.2,"cache_write":2.5,"request":null},"tokens":{"input_tokens":100000,"output_tokens":10000,"cache_read_tokens":500000,"cache_write_tokens":40000,"calls":3},"unknown_calls":2,"cost":1.06},
+ {"name":"cache buckets without a rate take the input rate, and a request price","rates":{"input":2,"output":10,"cache_read":null,"cache_write":null,"request":0.01},"tokens":{"input_tokens":1000,"output_tokens":500,"cache_read_tokens":2000,"cache_write_tokens":3000,"calls":2},"unknown_calls":1,"cost":0.32700000000000007},
+ {"name":"calls that read no prompt are unknown calls","rates":{"input":2,"output":10,"cache_read":0.2,"cache_write":2.5,"request":null},"tokens":{"input_tokens":0,"output_tokens":50,"cache_read_tokens":0,"cache_write_tokens":0,"calls":2},"unknown_calls":0,"cost":0.56},
+ {"name":"no counts and no unknown calls","rates":{"input":2,"output":10,"cache_read":0.2,"cache_write":2.5,"request":null},"tokens":null,"unknown_calls":0,"cost":0.0},
+ {"name":"only unknown calls","rates":{"input":2,"output":10,"cache_read":0.2,"cache_write":2.5,"request":null},"tokens":null,"unknown_calls":3,"cost":0.8400000000000001},
+ {"name":"unpriced: no output rate","rates":{"input":2,"output":null,"cache_read":0.2,"cache_write":2.5,"request":null},"tokens":{"input_tokens":1000000,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"calls":1},"unknown_calls":5,"cost":0.0},
+ {"name":"the fixture's rates, one 30,000-token answer","rates":{"input":50,"output":50,"cache_read":0.5,"cache_write":50,"request":null},"tokens":{"input_tokens":30000,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0,"calls":1},"unknown_calls":0,"cost":1.50005},
+ {"name":"the fixture's rates, four answers and a summary","rates":{"input":50,"output":50,"cache_read":0.5,"cache_write":50,"request":null},"tokens":{"input_tokens":120000,"output_tokens":40,"cache_read_tokens":0,"cache_write_tokens":0,"calls":4},"unknown_calls":1,"cost":11.402000000000001}
+]

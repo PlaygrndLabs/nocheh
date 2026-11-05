@@ -48,10 +48,10 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
       {title,instruction:'Update the made-up Notion task table from the group chat.',chat:group});
     await s.jobs.decide('123',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message('123',123,'Approve'));
     await tick(proposed.id);
-    const step=(await stores.control.query('SELECT event_id FROM background_steps WHERE job_id=$1 ORDER BY step DESC,attempt DESC LIMIT 1',[proposed.id])).rows[0].event_id;
-    await s.jobs.steps.run(step,await authority());
-    const context=await s.jobs.steps.context({event_id:step,owner_epoch:(await authority()).epoch});
-    await s.jobs.steps.claim({...context,actor:context.actor});
+    const step=(await stores.control.query('SELECT event_id FROM background_runs WHERE job_id=$1 ORDER BY attempt DESC LIMIT 1',[proposed.id])).rows[0].event_id;
+    await s.jobs.runs.run(step,await authority());
+    const context=await s.jobs.runs.context({event_id:step,owner_epoch:(await authority()).epoch});
+    await s.jobs.runs.claim({...context,actor:context.actor});
     const binding=await s.guards.state(),reader:Reader={admin:false,scope:null,space:'123',turnEvent:step,logical_profile:'job-'+proposed.id.slice(0,24),
       generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
     return {id:proposed.id,reader,step,context:context as any};
@@ -61,8 +61,8 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
     {kind:'mcp',arguments:{connection:'notion',tool:'notion-update-page',input:{page:'made-up-page',properties:{title},...(notes?{notes}:{})}}}));
   /** The step ends with its report, and the report is delivered, so the job ends done. */
   const end=async(job:{id:string;step:string;context:any},text:string)=>{
-    await s.jobs.steps.prepare({...job.context,actor:job.context.actor});
-    await s.jobs.steps.finish({event_id:job.step,actor:job.context.actor,state:'done',session:job.context.conversation,error_code:null,text,continue:false,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
+    await s.jobs.runs.prepare({...job.context,actor:job.context.actor});
+    await s.jobs.runs.finish({event_id:job.step,actor:job.context.actor,state:'done',session:job.context.conversation,error_code:null,text,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     assert.equal((await tick(job.id)).stage,'delivery');
     await stores.control.query("UPDATE telegram_action_requests SET state='done' WHERE id IN (SELECT action_id FROM background_reports WHERE job_id=$1)",[job.id]);
     return tick(job.id);
@@ -88,8 +88,8 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
     assert.deepEqual((await states([...members,unseen])).map(row=>row.state),Array(7).fill('proposed'));
 
     // The job ends: after its report, its changes come on cards that fit Telegram, in the owner's private chat.
-    await s.jobs.steps.prepare({...job.context,actor:job.context.actor});
-    await s.jobs.steps.finish({event_id:job.step,actor:job.context.actor,state:'done',session:job.context.conversation,error_code:null,text:'Report: 6 made-up changes proposed.',continue:false,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
+    await s.jobs.runs.prepare({...job.context,actor:job.context.actor});
+    await s.jobs.runs.finish({event_id:job.step,actor:job.context.actor,state:'done',session:job.context.conversation,error_code:null,text:'Report: 6 made-up changes proposed.',todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     assert.equal((await tick(job.id)).stage,'delivery');
     assert.deepEqual(listCards(),[],'the cards come after the report');
     await stores.control.query("UPDATE telegram_action_requests SET state='done' WHERE id IN (SELECT action_id FROM background_reports WHERE job_id=$1)",[job.id]);
@@ -167,8 +167,8 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
 
     // Stop while the report is on its way: the job still ends done, but what it kept ends and comes on no card.
     const late=await running('Stopped while reporting'),kept=(await change(late.reader,'Made-up task 80')).id;
-    await s.jobs.steps.prepare({...late.context,actor:late.context.actor});
-    await s.jobs.steps.finish({event_id:late.step,actor:late.context.actor,state:'done',session:late.context.conversation,error_code:null,text:'Report: one made-up change.',continue:false,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
+    await s.jobs.runs.prepare({...late.context,actor:late.context.actor});
+    await s.jobs.runs.finish({event_id:late.step,actor:late.context.actor,state:'done',session:late.context.conversation,error_code:null,text:'Report: one made-up change.',todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
     assert.equal((await tick(late.id)).stage,'delivery');
     assert.equal((await s.jobs.stop(await actor((await message('123',123,'Stop it now')).id,null,'123'),{id:late.id})).state,'stopping');
     await stores.control.query("UPDATE telegram_action_requests SET state='done' WHERE id IN (SELECT action_id FROM background_reports WHERE job_id=$1)",[late.id]);

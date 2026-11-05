@@ -73,7 +73,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
       const source=(await archive.captured(principal.turnEvent!)).reference;
       if(!await access.canRead(principal,source,binding))throw new HttpError(403,'turn_source_denied');return source;
     } catch(error) {if(!(error instanceof HttpError)||error.code!=='source_not_found')throw error;}
-    const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind IN ('scheduled_trigger','background_step')",[principal.turnEvent])).rows[0];
+    const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind IN ('scheduled_trigger','background_run')",[principal.turnEvent])).rows[0];
     if(!operation||operation.scope!==principal.space)throw new HttpError(403,'turn_source_denied');
     const reference={store:'control' as const,kind:'operation' as const,id:operation.id,generation:operation.generation,input_hash:operation.input_hash};
     await operations.verify(reference);return reference;

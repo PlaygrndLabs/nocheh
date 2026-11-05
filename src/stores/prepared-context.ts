@@ -170,7 +170,7 @@ export class PreparedContextRepository {
         const unknown=missing.filter(input=>input.literals===undefined);
         if(unknown.length) {
           const joined=unknown.map(input=>input.text).join('\n<NOCHEH_FRAGMENT>\n');
-          // Memory reviews and background job steps let replies take detector slots first.
+          // Memory reviews and background job runs let replies take detector slots first.
           await this.audience.assert(principal);const literals=await detect(joined,principal.purpose==='memory-review'||!!principal.logical_profile?.startsWith('job-'));literalSpans(joined,literals);
           if(!(literals as string[]).every(literal=>unknown.some(input=>input.text.includes(literal))))throw new HttpError(422,'guard_candidate_rejected');
           for(const input of unknown)input.literals=(literals as string[]).filter(literal=>input.text.includes(literal));

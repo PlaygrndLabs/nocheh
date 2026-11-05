@@ -7,9 +7,11 @@ import contextlib
 import io
 import json
 import logging
+import math
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_archive_page','nocheh_memory_search','nocheh_action_request',
@@ -21,10 +23,10 @@ OWNER_SET_TOOLS={'skill_manage'}
 TURN_TOOLSETS=['memory','session_search','nocheh_archive','skills']
 # A job's own turns never start, list or stop jobs.
 JOB_STRIPPED={'nocheh_background_job'}
-# A background job's steps also keep Hermes's own to-do list, restored from the job's history each step.
+# A background job's run also keeps Hermes's own to-do list.
 BACKGROUND_TOOLS=(ALLOWED_TOOLS-JOB_STRIPPED)|{'todo_list'}
 BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
-# A box step runs Hermes's own terminal, file and code tools in the job's sealed box. It keeps
+# A box run runs Hermes's own terminal, file and code tools in the job's sealed box. It keeps
 # the archive tools and Notion, and loses native memory, the shell and the browser.
 BOX_STRIPPED={'nocheh_shell','nocheh_browser'}
 BOX_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
@@ -150,50 +152,46 @@ def reasoning(credentials,prefs):
 
 
 def background_limits(body):
-    """How many tool and thinking steps one step of a background job may take."""
+    """How many tool and thinking steps a background job's run may take: Hermes's backstop, since its time limit ends it first."""
     limits=body.get('background')
-    iterations=limits.get('max_iterations') if isinstance(limits,dict) else None
-    if type(iterations) is not int or not 1<=iterations<=60:raise ValueError('invalid_background_step')
+    iterations,soft=(limits.get('max_iterations'),limits.get('soft_deadline')) if isinstance(limits,dict) else (None,None)
+    if type(iterations) is not int or not 1<=iterations<=1000 or type(soft) not in (int,float) or not math.isfinite(soft):
+        raise ValueError('invalid_background_run')
     return iterations
 
 
+def run_budget(body):
+    """A job run's seconds until the job's soft deadline: Hermes asks for the report at 80% of them; Nocheh stops the run 3 minutes after the end."""
+    return max(30,int(body['background']['soft_deadline']-time.time()))
+
+
 def box_step(body):
-    """Whether this turn is a job step in its sealed box. The step and the launcher's environment
+    """Whether this turn is a job run in its sealed box. The run and the launcher's environment
     must agree in both directions; anything else stops before the agent runs."""
     limits=body.get('background')
     box=limits.get('box',False) if body.get('channel')=='background' and body.get('review') is not True and isinstance(limits,dict) else False
-    if type(box) is not bool:raise ValueError('invalid_background_step')
+    if type(box) is not bool:raise ValueError('invalid_background_run')
     socket,backend=bool(os.environ.get('NOCHEH_BOX_SOCKET')),os.environ.get('TERMINAL_ENV')=='nocheh_box'
     if (not (os.environ.get('NOCHEH_ISOLATED_TURN')=='1' and socket and backend)) if box else (socket or backend):
         raise ValueError('job_box_unavailable')
     return box
 
 
-def todo_snapshot(agent):
-    """The job's to-do list after a step, bounded, for the job list."""
-    store=getattr(agent,'_todo_store',None)
-    try:items=store.read() if store is not None else []
-    except Exception:return []
-    return [{'content':str(item.get('content',''))[:200],'status':str(item.get('status',''))[:20]}
-            for item in items[:50] if isinstance(item,dict)]
-
-
-def step_result(result, session_id, todo):
-    """A background job step. An answer that ends on its own ends the job; a step
-    stopped at its step limit leaves Hermes's progress summary and continues next step."""
+def job_result(result, session_id):
+    """A background job's run: its final answer is the report. The summary Hermes asks for when the run's
+    iterations run out is a report too; a run that failed or was interrupted wrote none."""
     if not isinstance(result,dict) or result.get('failed') or result.get('interrupted'):
         return {'state':'failed','error_code':'model_unavailable'}
     reason=str(result.get('turn_exit_reason') or '')
-    limited=reason.startswith('max_iterations_reached') or reason=='budget_exhausted'
     text=result.get('final_response')
     text=text if isinstance(text,str) else ''
     if text.strip()=='[NO_REPLY]':text=''
-    if not limited and (result.get('completed') is not True or not text.strip()):
+    if not text.strip() or not (result.get('completed') is True or reason.startswith('max_iterations_reached') or reason=='budget_exhausted'):
         return {'state':'failed','error_code':'model_unavailable'}
-    return {'state':'done','text':text,'session_id':session_id,'continue':limited,'todo':todo}
+    return {'state':'done','text':text,'session_id':session_id}
 
 
-def run(body, emit=None):
+def run(body, emit=None, relay=None):
     box=box_step(body)
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
@@ -218,7 +216,7 @@ def run(body, emit=None):
     background = body.get('channel')=='background' and not review
     iterations = background_limits(body) if background else None
     bind_process_credential(body['archive_credential'])
-    if body.get('review') is not True:bind_process_deadline(body['turn_deadline_epoch'])
+    if body.get('review') is not True:bind_process_deadline(body['turn_deadline_epoch'],background=background)
     from .prepared_context import install as prepare_native, prepare
     prepare_native()
     from .subscription import SubscriptionCredentials
@@ -258,6 +256,10 @@ def run(body, emit=None):
     if placement not in ('legacy','evidence'):raise ValueError('invalid_memory_context')
     restore_evidence=memory_evidence.install(memory if not review else None) if placement=='evidence' else lambda:None
     if placement=='evidence':long_term='\n'+prompt('memory.evidence')
+    if background:
+        # Each model call of the run, and its to-do list, go out as progress lines; the cost notice comes from them too.
+        from services.hermes import job_progress
+        job_progress.bind(relay or (lambda event:None),body['background'])
     agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
         api_key=credentials.access_token,base_url=credentials.base_url,
         enabled_toolsets=['memory'] if review else BOX_TOOLSETS if box else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,fallback_model=None,
@@ -265,9 +267,8 @@ def run(body, emit=None):
         user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
         skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
         quiet_mode=True,save_trajectories=False,max_iterations=iterations or prefs['agent.max_iterations'],
-        # A job step is bounded by its step count and Nocheh's step time, not by a wrap-up notice
-        # that would ask for the final answer before the job is done.
-        run_budget_seconds=None if background else prefs['agent.run_budget_seconds'],
+        # A job run's budget ends at the job's soft deadline; Hermes's own notice at 80% of it asks for the report.
+        run_budget_seconds=run_budget(body) if background else prefs['agent.run_budget_seconds'],
         reasoning_config=reasoning(credentials,prefs),ephemeral_system_prompt=(
             reply(body.get('prompts'),body['owner'])+long_term))
     record('agent_init',phase)
@@ -284,8 +285,8 @@ def run(body, emit=None):
         agent.valid_tool_names=set(agent.valid_tool_names)-removed
         verify_profile_tools(agent.valid_tool_names,allowed)
         if box:
-            # The box tools must all be there, on the box backend; the hook then lets only this step's tools
-            # run, and none of their commands outlives the step.
+            # The box tools must all be there, on the box backend; the hook then lets only this run's tools
+            # run, and none of their commands outlives the run.
             from services.hermes import job_box
             job_box.seal(agent.valid_tool_names,body['turn_deadline_epoch'])
         for tool in agent.tools:
@@ -317,7 +318,9 @@ def run(body, emit=None):
         from .timing import measure
         with measure('conversation'):result=agent.run_conversation(message,**options)
         RUNS.append(result)
-        if background:return step_result(result,agent.session_id,todo_snapshot(agent))
+        if background:
+            job_progress.finish(result)
+            return job_result(result,agent.session_id)
         return conversation_result(result,agent.session_id,memory.get('limited_memory',False))
     finally:
         agent.close();database.close();restore_evidence()
@@ -361,10 +364,10 @@ def main():
                 def emit(event):
                     with lock:output.write(json.dumps(event,ensure_ascii=False)+'\n');output.flush()
                 def heartbeat():
-                    # A long job step sends a line now and then so the bridge does not take silence for a lost turn.
+                    # A job run sends a line now and then, even during a long model call, so the bridge does not take silence for a lost turn.
                     while not finished.wait(20):emit({'event':'heartbeat'})
                 if body.get('heartbeat') is True:threading.Thread(target=heartbeat,daemon=True).start()
-                try:result=run(body, emit if body.get('stream') else None)
+                try:result=run(body, emit if body.get('stream') else None, emit if body.get('channel')=='background' else None)
                 finally:finished.set()
     except Exception as error:
         import traceback

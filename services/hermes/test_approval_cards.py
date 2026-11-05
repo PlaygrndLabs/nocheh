@@ -71,6 +71,18 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(edits,[(123,41,'Done',None,[])],'the decided card loses its buttons')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'e'*64,'chat_id':'-20','text':group['text']+'\n\nSent.','links':group['links']}),{'state':'done','edited':True})
             self.assertEqual(edits[-1][4],sent[1][5],'and keeps its links')
+            # A running background job's card keeps one Stop button, and only that.
+            stop=['🛑 Stop','ns'+'a'*56]
+            self.assertEqual(await gateway.send_approval({'kind':'settle','id':'a'*64,'chat_id':'123','text':'Running','buttons':[stop]}),{'state':'done','edited':True})
+            from telegram import InlineKeyboardButton,InlineKeyboardMarkup
+            self.assertEqual(edits[-1][:3],(123,41,'Running'))
+            self.assertEqual(edits[-1][3],InlineKeyboardMarkup([[InlineKeyboardButton('🛑 Stop',callback_data='ns'+'a'*56)]]))
+            for buttons in ([['Approve','na'+'a'*56]],[stop,stop],[['x'*41,stop[1]]],[['',stop[1]]],[[stop[0],'ns'+'a'*55]],[stop[0]],'ns',[]):
+                with self.subTest(buttons=buttons),self.assertRaisesRegex(ValueError,'invalid_approval'):
+                    await gateway.send_approval({'kind':'settle','id':'a'*64,'chat_id':'123','text':'Running','buttons':buttons})
+            self.assertEqual(len(edits),3,'a refused settle edits nothing')
+            self.assertEqual(await gateway.send_approval({'kind':'settle','id':'a'*64,'chat_id':'123','text':'Done'}),{'state':'done','edited':True})
+            self.assertIsNone(edits[-1][3],'a settle without buttons removes them')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'c'*64,'chat_id':'123','text':'Done'}),{'state':'done','edited':False},
                              'only a card this runtime sent is edited')
             self.assertEqual(await gateway.send_approval({'kind':'answer','chat_id':'123','callback_query_id':'q1','text':'Approved.'}),{'state':'done','answered':True})

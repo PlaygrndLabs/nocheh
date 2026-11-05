@@ -1,5 +1,7 @@
+import time
 import unittest
-from services.hermes.assistant_turn import background_limits,conversation_result,step_result
+from unittest.mock import patch
+from services.hermes.assistant_turn import background_limits,conversation_result,job_result,run_budget
 
 
 class AssistantResultTests(unittest.TestCase):
@@ -35,21 +37,48 @@ class AssistantResultTests(unittest.TestCase):
         self.assertTrue(limited['text'].startswith(answer+'\n\nMemory is limited;'))
 
 
-class BackgroundStepResultTests(unittest.TestCase):
-    def test_a_step_stopped_at_its_step_limit_goes_on_and_an_answer_ends_the_job(self):
-        todo=[{'content':'read April','status':'pending'}]
-        limited=step_result({'completed':False,'final_response':'Read January to March so far.','turn_exit_reason':'max_iterations_reached(20/20)'},'job_s',todo)
-        self.assertEqual(limited,{'state':'done','text':'Read January to March so far.','session_id':'job_s','continue':True,'todo':todo})
-        done=step_result({'completed':True,'final_response':'The report.','turn_exit_reason':'text_response(stop)'},'job_s',[])
-        self.assertEqual((done['state'],done['continue'],done['text']),('done',False,'The report.'))
+class JobResultTests(unittest.TestCase):
+    def test_the_final_answer_is_the_report_and_so_is_hermess_summary_at_a_limit(self):
+        done=job_result({'completed':True,'final_response':'The report.','turn_exit_reason':'text_response(stop)'},'job_s')
+        self.assertEqual(done,{'state':'done','text':'The report.','session_id':'job_s'})
+        for reason in ('max_iterations_reached(300/300)','budget_exhausted'):
+            with self.subTest(reason=reason):
+                self.assertEqual(job_result({'completed':False,'final_response':'Read January to March.','turn_exit_reason':reason},'job_s'),
+                                 {'state':'done','text':'Read January to March.','session_id':'job_s'})
 
-    def test_a_failed_or_empty_step_is_a_failure_the_job_can_retry(self):
-        for result in [None,{'completed':True,'final_response':''},{'completed':False,'final_response':'partial'},
+    def test_a_failed_interrupted_or_empty_run_wrote_no_report(self):
+        for result in [None,[],{'completed':True,'final_response':''},{'completed':True,'final_response':' [NO_REPLY] '},{'completed':True,'final_response':None},
+                       {'completed':False,'final_response':'partial'},{'completed':False,'final_response':'partial','turn_exit_reason':'interrupted'},
+                       {'completed':False,'final_response':'','turn_exit_reason':'max_iterations_reached(300/300)'},
                        {'completed':True,'final_response':'x','failed':True},{'completed':True,'final_response':'x','interrupted':True}]:
             with self.subTest(result=result):
-                self.assertEqual(step_result(result,'job_s',[]),{'state':'failed','error_code':'model_unavailable'})
+                self.assertEqual(job_result(result,'job_s'),{'state':'failed','error_code':'model_unavailable'})
 
-    def test_a_step_takes_only_a_bounded_number_of_steps(self):
-        self.assertEqual(background_limits({'background':{'max_iterations':20}}),20)
-        for body in [{},{'background':None},{'background':{'max_iterations':0}},{'background':{'max_iterations':61}},{'background':{'max_iterations':'20'}}]:
-            with self.subTest(body=body),self.assertRaises(ValueError):background_limits(body)
+    def test_the_cap_summary_is_built_like_the_turns_other_calls_on_anthropic(self):
+        from agent import chat_completion_helpers as calls
+        from services.hermes.compatibility_patch import install
+        restore=install()
+        try:self.assertEqual(calls._SUMMARY_ATTEMPT_BUILDERS['anthropic_messages'].__name__,'anthropic_summary')
+        finally:restore()
+
+    def test_a_run_takes_a_bounded_number_of_iterations_and_its_budget_runs_to_the_soft_deadline(self):
+        soft=1793796300
+        self.assertEqual(background_limits({'background':{'max_iterations':300,'soft_deadline':soft}}),300)
+        for body in [{},{'background':None},{'background':{'max_iterations':0,'soft_deadline':soft}},{'background':{'max_iterations':1001,'soft_deadline':soft}},
+                     {'background':{'max_iterations':'20','soft_deadline':soft}},{'background':{'max_iterations':300}},
+                     {'background':{'max_iterations':300,'soft_deadline':float('nan')}},{'background':{'max_iterations':300,'soft_deadline':True}}]:
+            with self.subTest(body=body),self.assertRaisesRegex(ValueError,'invalid_background_run'):background_limits(body)
+        # Launched at 12:00:05 for a soft deadline at 12:45:00; Hermes's own notice then comes at 80% of it.
+        with patch('services.hermes.assistant_turn.time.time',return_value=soft-2695):self.assertEqual(run_budget({'background':{'soft_deadline':soft}}),2695)
+        with patch('services.hermes.assistant_turn.time.time',return_value=soft+5):self.assertEqual(run_budget({'background':{'soft_deadline':soft}}),30)
+
+    def test_only_a_background_run_may_bind_a_deadline_past_ten_minutes(self):
+        from services.hermes import archive_tools
+        self.addCleanup(setattr,archive_tools,'_PROCESS_DEADLINE',None)
+        for deadline,background,accepted in ((time.time()+3000,False,False),(time.time()+3000,True,True),(time.time()+3700,False,False),
+                                             (time.time()+3700,True,False),(time.time()+500,False,True)):
+            with self.subTest(deadline=deadline,background=background):
+                archive_tools._PROCESS_DEADLINE=None
+                if accepted:archive_tools.bind_process_deadline(deadline,background=background);self.assertEqual(archive_tools._PROCESS_DEADLINE,deadline)
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'invalid_process_deadline'):archive_tools.bind_process_deadline(deadline,background=background)

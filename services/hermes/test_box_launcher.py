@@ -557,6 +557,11 @@ class HandlerTests(unittest.TestCase):
             outputs={'failed':[b'{"event":"heartbeat"}\n',b'{"state":"failed","error_code":"model_unavailable"}\n'],'silent':[b'{"event":"heartbeat"}\n'],
                      'split':[b'{"event":"heartbeat"}\n{"sta',b'te":"done","text":"Report: done"}',b'\n'],
                      'framed':[b'{"event":"heartbeat"}\n',b'{"state":"done","text":"Report: done"}\n']}
+            if credential=='long':
+                # A job run that outlasts its box's fill and reports its progress as it goes.
+                for _ in range(3):
+                    time.sleep(.15);yield b'{"event":"progress","tokens":{"input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0,"calls":1},"unknown_calls":0}\n'
+                yield b'{"state":"done","text":"Report: done"}\n';return
             yield from outputs.get(credential,[b'{"state":"done"}\n'])
             if credential=='broken':raise RuntimeError('container_output_limit')
         def exit_code(identifier):self.order.append('wait');return lambda:self.code
@@ -615,6 +620,17 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual((entry,credential,limit),(box(),'first',2));self.assertTrue(0<remaining<=launcher.FILL_SECONDS)
         self.assertEqual(self.checked,[('box-id',True)],'the box is checked under the box lock, just before the turn is made')
 
+    def test_a_box_run_longer_than_its_fill_keeps_its_box_and_a_killed_one_does_not(self):
+        with patch.object(launcher,'FILL_SECONDS',.1):
+            launcher.ABNORMAL.add(JOB);self.bind('long',entry=box())
+            status,output=self.turn('long');self.settled()
+            self.assertEqual(status,200);self.assertEqual(output.count(b'"event":"progress"'),3)
+            self.assertTrue(output.endswith(b'{"state":"done","text":"Report: done"}\n'))
+            (*_,remaining,_),=self.prepared;self.assertLessEqual(remaining,.1,'only the copy into /chat is bounded by the fill time')
+            self.assertEqual(launcher.ABNORMAL,set(),'the box outlives its fill and stays for a relaunch')
+            self.code=137;self.turn('long');self.settled()
+            self.assertEqual(launcher.ABNORMAL,{JOB},'a killed run marks its box, so a relaunch gets a new one')
+
     def test_the_fill_deadline_counts_from_the_request_start(self):
         # The binding fetch may take up to 120 s itself: counted from later, the fill would run past security_client's 235 s.
         self.bind('first',entry=box());self.security.delay=.3;began=time.monotonic()
@@ -629,7 +645,7 @@ class HandlerTests(unittest.TestCase):
             self.bind('first',entry=box())
             self.assertEqual(self.turn('first')[0],200,failure);self.settled()
             self.assertEqual(self.turn_specs(),[self.plain()],failure)
-        # Steps of a job without a box, wrap-up steps and late steps have no box in their binding: no box is touched.
+        # Runs of a job without a box, and late runs, have no box in their binding: no box is touched.
         self.docker.calls.clear();self.prepared.clear();self.bind('first',entry=None)
         self.assertEqual(self.turn('first')[0],200);self.settled()
         self.assertEqual((self.turn_specs(),self.prepared),([self.plain()],[]))

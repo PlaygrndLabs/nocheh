@@ -206,15 +206,15 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/background/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/background/'.length),steps=s.jobs.steps;
-      if(operation==='finish')return json(res,200,await steps.finish(body));
-      if(operation==='cancel')return json(res,200,await steps.cancel(body));
-      if(operation==='observe')return json(res,200,await steps.observe(body));
+      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/background/'.length),runs=s.jobs.runs;
+      if(operation==='finish')return json(res,200,await runs.finish(body));
+      if(operation==='cancel')return json(res,200,await runs.cancel(body));
+      if(operation==='observe')return json(res,200,await runs.observe(body));
       await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='workflow-context')return json(res,200,await steps.context(body));
-      if(operation==='claim')return json(res,200,await steps.claim(body));
-      if(operation==='prepare')return json(res,200,await steps.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await steps.heartbeat(body));
+      if(operation==='workflow-context')return json(res,200,await runs.context(body));
+      if(operation==='claim')return json(res,200,await runs.claim(body));
+      if(operation==='prepare')return json(res,200,await runs.prepare(body));
+      if(operation==='heartbeat')return json(res,200,await runs.heartbeat(body));
       throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
@@ -330,8 +330,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/memory/check'&&req.method==='GET'){
       const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
-      // Schedule fires and job steps are control operations, never archived; the admitted run is their authority.
-      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)||await s.jobs.steps.deliveryAllowed(principal)});
+      // Schedule fires and job runs are control operations, never archived; the admitted run is their authority.
+      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)||await s.jobs.runs.deliveryAllowed(principal)});
       const retired=principal.turnEvent?await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference):false;
       return json(res,200,{valid:principal.admin||!retired&&telegramDeliveryAllowed(s.access.policy(),principal,source)});
     }

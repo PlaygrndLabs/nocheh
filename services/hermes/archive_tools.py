@@ -29,12 +29,13 @@ def bind_process_credential(credential):
     _PROCESS_CREDENTIAL=credential
 
 
-def bind_process_deadline(deadline):
-    """Bound a foreground memory call to the trusted parent turn lifetime (a background job step is the longest)."""
+def bind_process_deadline(deadline, background=False):
+    """Bound a foreground memory call to the trusted parent turn lifetime. A background job run, up to its job's
+    hard deadline, is the only one that may last longer than ten minutes, and never longer than its credential's hour."""
     global _PROCESS_DEADLINE
     if (_PROCESS_DEADLINE is not None or isinstance(deadline,bool) or
             not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or
-            deadline > time.time()+600):
+            deadline > time.time()+(3600 if background else 600)):
         raise RuntimeError('invalid_process_deadline')
     _PROCESS_DEADLINE=float(deadline)
 
@@ -121,7 +122,7 @@ JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit
 
 
 def isolated_runtime():
-    """Whether job steps run in the isolated runtime, the only one with sealed boxes: this is an
+    """Whether job runs run in the isolated runtime, the only one with sealed boxes: this is an
     isolated turn (its container does not carry the runtime setting), or the setting says so."""
     from .security_transport import isolated_enabled
     return os.environ.get('NOCHEH_ISOLATED_TURN')=='1' or isolated_enabled()

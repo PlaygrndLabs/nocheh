@@ -273,8 +273,8 @@ that an empty selected group list still permits owner private messages.
 Under the background job limits, **Sealed box for jobs** (on by default) lets a
 job the owner asks for in their private chat run commands and Python in a sealed
 box ([ADR-0205](adr/0205-owner-approved-jobs-work-in-a-sealed-box.md)). Off: no
-new job gets a box, a running job loses its box within seconds, and its later steps
-run without one. It saves over the job settings' revision, like the limits.
+new job gets a box, a running job loses its box within seconds, and any relaunch
+runs without one. It saves over the job settings' revision, like the limits.
 Job preference overrides can be stored via CLI; scheduler execution is P6 work.
 Broader tool and approval policy controls are P5 work, not active capabilities yet.
 

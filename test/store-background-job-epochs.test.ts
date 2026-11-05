@@ -10,7 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {carriesForward} from '../src/stores/guards.js';
 import {storageServices} from '../src/stores/services.js';
 
-test('a job report survives a reaction in another group, any other change after the last step ends the job without a report, and Stop sends no further part',
+test('a job report survives a reaction in another group, any other change after its run ends the job without a report, and Stop sends no further part',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -57,19 +57,19 @@ test('a job report survives a reaction in another group, any other change after 
     await s.jobs.decide('9',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message(group,'Approve it'));
     return proposed.id;
   };
-  /** What Hermes does with a job's latest step: read its context, claim it, then report what it left. */
-  const runStep=async(id:string,text:string,continues=false)=>{
-    const current=(await stores.control.query('SELECT event_id FROM background_steps WHERE job_id=$1 ORDER BY step DESC,attempt DESC LIMIT 1',[id])).rows[0];
-    await s.jobs.steps.run(current.event_id,await authority());
-    const context=await s.jobs.steps.context({event_id:current.event_id,owner_epoch:(await authority()).epoch});
-    await s.jobs.steps.claim({...context,actor:context.actor});await s.jobs.steps.prepare({...context,actor:context.actor});
-    await s.jobs.steps.finish({event_id:current.event_id,actor:context.actor,state:'done',session:context.conversation,error_code:null,text,continue:continues,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
+  /** What Hermes does with a job's latest run: read its context, claim it, then report what it left. */
+  const runStep=async(id:string,text:string)=>{
+    const current=(await stores.control.query('SELECT event_id FROM background_runs WHERE job_id=$1 ORDER BY attempt DESC LIMIT 1',[id])).rows[0];
+    await s.jobs.runs.run(current.event_id,await authority());
+    const context=await s.jobs.runs.context({event_id:current.event_id,owner_epoch:(await authority()).epoch});
+    await s.jobs.runs.claim({...context,actor:context.actor});await s.jobs.runs.prepare({...context,actor:context.actor});
+    await s.jobs.runs.finish({event_id:current.event_id,actor:context.actor,state:'done',session:context.conversation,error_code:null,text,todo:[],tokens:{input_tokens:50000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1}});
   };
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
-    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:60,member_daily_jobs:10,revision:(await s.jobs.settings()).revision});
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:(await s.jobs.settings()).revision});
     const note=await message(other,'A made-up note in the other group');noted=sent;
-    // A reaction while the job waits to start, and another after its last step, before the report.
+    // A reaction while the job waits to start, and another after its run, before the report.
     const kept=await approved('Task check');
     const asked=Number((await job(kept)).binding.epoch);
     await react();
@@ -98,14 +98,12 @@ test('a job report survives a reaction in another group, any other change after 
     // A later reaction does not bring the report back.
     await react();assert.equal((await tick(outdated)).state,'failed');assert.equal(await requests(),before);
 
-    // An edit before the last step is not a change after it: the report is sent from the last step's
+    // An edit before the run starts is not a change after it: the report is sent from the run's
     // epoch, and a reaction between its two parts still lets the second part go.
     const long=await approved('Long task check');
-    await tick(long);
-    await runStep(long,'Made-up notes so far.',true);
     const copy=await s.guards.read('events:'+note.id,await s.guards.state());
     await s.guards.edit('events:'+note.id,copy.revision,{...copy.value as any,text:'A made-up note, edited again'},key+':edit-again');
-    assert.equal((await tick(long)).state,'waiting','the job goes on to its last step');
+    assert.equal((await tick(long)).state,'waiting','the job starts its run');
     await runStep(long,'Part one: made-up task 12 is open. '+'x'.repeat(7000)+'\n\nPart two: made-up task 14 is done. '+'y'.repeat(7000));
     await react();
     assert.equal(await carriesForward(stores.control,(await job(long)).binding,await s.guards.state()),false,'the edit came after the job was asked');

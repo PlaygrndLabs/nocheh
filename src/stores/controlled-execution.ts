@@ -111,8 +111,10 @@ export class ControlledExecutionRepository {
         (await db.query("SELECT 1 FROM background_jobs WHERE id=$1 AND (cancel_requested OR state='stopped')",[row.job_id])).rowCount)
         {const result=await this.blocked(db,row,'job_stopped');await db.query('COMMIT');this.closed(row.id);return result;}
       if((await db.query("SELECT 1 FROM controlled_actions WHERE state='running' LIMIT 1")).rowCount){await db.query('COMMIT');return {claimed:false};}
+      // A relaunched job run's operations use no standing permission (ADR-0207).
       const grant=row.state==='proposed'?(await db.query(`SELECT id FROM action_permissions WHERE fingerprint=$1 AND binding=$2 AND (job_id IS NULL OR job_id=$3)
-        AND remaining>0 AND revoked_at IS NULL AND expires_at>now() ORDER BY expires_at,id LIMIT 1 FOR UPDATE`,[row.fingerprint,row.binding,row.job_id])).rows[0]:null;
+        AND remaining>0 AND revoked_at IS NULL AND expires_at>now() AND NOT EXISTS (SELECT 1 FROM background_runs r WHERE r.event_id=$4 AND r.attempt>1)
+        ORDER BY expires_at,id LIMIT 1 FOR UPDATE`,[row.fingerprint,row.binding,row.job_id,row.event_id])).rows[0]:null;
       if(row.state==='proposed'&&!grant){await db.query('COMMIT');return {claimed:false};}
       const decision=await evaluate(db,this.actions.effect(row),grant?.id??'exact_owner_approval',true);
       if(decision.outcome!=='allow'){const result=await this.blocked(db,row,decision.rule,decision);await db.query('COMMIT');this.closed(row.id);return result;}

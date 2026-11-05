@@ -19,7 +19,7 @@ const reads=new Set(['notion-search','notion-fetch','notion-get-comments','notio
   'notion-query-data-sources','notion-query-database-view']);
 export const notionReads=(tool:string)=>reads.has(tool);
 const notionId=/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-/** What a job step may fetch without asking: a page by its raw id, a notion.so address, or a data source or
+/** What a job run may fetch without asking: a page by its raw id, a notion.so address, or a data source or
  *  view by id. Any other address, such as a public *.notion.site page someone else runs, asks: it could carry what the job read. */
 export function notionJobFetch(input:unknown):boolean {
   const value=input&&typeof input==='object'&&!Array.isArray(input)?input as Record<string,unknown>:null,id=value?.id;
@@ -57,7 +57,7 @@ export class NotionRepository {
 
 /**
  * A Notion call may come only from the owner's private chat while Notion is
- * on: a live turn there, or a step of a job the owner asked for and approved
+ * on: a live turn there, or a run of a job the owner asked for and approved
  * there. Returns the authority that lets it run without a card under the
  * owner's Notion setting, or null when it waits for approval. `allowed` says
  * the turn may use the setting at all. A job reads group text that anyone

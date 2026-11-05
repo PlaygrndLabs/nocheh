@@ -6,6 +6,7 @@ scripted fixture answers and do not measure model accuracy or semantic recall.
 With NOCHEH_FIXTURE_UPSTREAM set by the real-model rehearsal, the same service
 instead relays chat, model lists and embeddings to owner-authorized providers.
 """
+import asyncio
 import hashlib
 import json
 import os
@@ -22,23 +23,31 @@ class ScriptedBrain:
 
     A directive such as ``[[search:query]]`` in the current user turn makes the
     model request one tool; the tool result then becomes the scripted answer.
+    A background job's resumed run keeps the directives of its first message.
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
     DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes)(?::([^\]]*))?\]\]')
-    # Any Nocheh tool, Hermes's own memory tool, or a Hermes tool of a job's sealed box, with exact JSON
+    # Any Nocheh tool, Hermes's own memory or to-do tool, or a Hermes tool of a job's sealed box, with exact JSON
     # arguments: [[tool:nocheh_tasks {"action":"list"}]], [[tool:memory {"action":"add",...}]].
     # Several in one turn are called one after another.
-    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+|memory|terminal|read_file|write_file|search_files|patch|execute_code)\s+(\{.*?\})\]\]', re.S)
+    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+|memory|todo_list|terminal|read_file|write_file|search_files|patch|execute_code)\s+(\{.*?\})\]\]', re.S)
     # [[usage:N]] reports N prompt tokens for each scripted answer in that turn, so a background job's cost adds up.
     USAGE = re.compile(r'\[\[usage:([0-9]{1,9})\]\]')
+    # [[delay:S]] makes each scripted answer in that turn wait S seconds (1 to 90, under the broker's request deadline),
+    # so a scenario can act while a job runs. The answer's event is recorded before the wait.
+    DELAY = re.compile(r'\[\[delay:([0-9]{1,3})\]\]')
+    # Nocheh's texts for a job's relaunched run (src/prompts.ts) and the notices a run gets near its limits.
+    RESUME = 'The job was interrupted and restarted.'
+    RESTART = 'This job restarted and its earlier work could not be kept.'
+    NOTICES = {'cost': '[SYSTEM NOTICE — cost budget nearly used]', 'time': '[SYSTEM NOTICE — run time budget nearly exhausted]'}
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
     TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
              'owner': 'nocheh_owner_read'}
 
     def __init__(self, counts, canary):
-        self.counts, self.canary, self.events, self.emptied = counts, canary, [], set()
+        self.counts, self.canary, self.events, self.emptied, self.seen = counts, canary, [], set(), set()
 
     @staticmethod
     def text(content):
@@ -71,9 +80,43 @@ class ScriptedBrain:
 
     def respond(self, body):
         scripted = self.script(body)
-        users = [message for message in body.messages if message.role == 'user']
-        usage = self.USAGE.search(self.text(users[-1].content)) if scripted is not None and users else None
-        return {**scripted, 'prompt_tokens': int(usage[1])} if usage else scripted
+        if scripted is None:
+            return None
+        messages = [message for message in body.messages if message.role != 'system']
+        _, current = self.turn(messages, [index for index, message in enumerate(messages) if message.role == 'user'])
+        usage, delay = self.USAGE.search(current), self.DELAY.search(current)
+        if usage:
+            scripted = {**scripted, 'prompt_tokens': int(usage[1])}
+        return {**scripted, 'delay': min(90, max(1, int(delay[1])))} if delay and 'error' not in scripted else scripted
+
+    def turn(self, messages, users):
+        """The directive turn and its text: the current user message, or, when that is a job's resume line, the newest
+        earlier user message with a directive, which is the job's first message reloaded from the run's history."""
+        current = self.text(messages[users[-1]].content)
+        if self.RESUME in current:
+            for index in reversed(users[:-1]):
+                text = self.text(messages[index].content)
+                if self.DIRECTIVE.search(text) or self.TOOL.search(text):
+                    return index, text
+        return users[-1], current
+
+    def observe(self, messages, users, index, current):
+        """What a job's run saw, each once per directive turn: a notice in its tool results, a resume, a fresh restart."""
+        key = hashlib.sha256(current.encode()).hexdigest()
+        results = [self.text(message.content) for message in messages[index + 1:] if message.role == 'tool']
+        for kind, marker in self.NOTICES.items():
+            if (kind, key) not in self.seen and any(marker in result for result in results):
+                self.seen.add((kind, key))
+                self.record(directive='notice', kind=kind, phase='seen')
+        if index != users[-1] and ('resume', key) not in self.seen:
+            self.seen.add(('resume', key))
+            self.record(directive='resume', phase='seen',
+                        results=sum(1 for message in messages[index + 1:users[-1]] if message.role == 'tool'))
+        if self.RESTART in current and ('restart', key) not in self.seen:
+            self.seen.add(('restart', key))
+            # Nocheh's memory evidence comes before every turn's message; it is no earlier history.
+            self.record(directive='restart', phase='seen', todo='Your last to-do list was:' in current,
+                        earlier=sum(1 for message in messages[:index] if not self.text(message.content).startswith(self.EVIDENCE)))
 
     def script(self, body):
         names = {tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)}
@@ -83,7 +126,7 @@ class ScriptedBrain:
         users = [index for index, message in enumerate(messages) if message.role == 'user']
         if not users:
             return None
-        current = self.text(messages[users[-1]].content)
+        index, current = self.turn(messages, users)
         match = self.DIRECTIVE.search(current)
         tools = self.TOOL.findall(current)
         if not match and not tools:
@@ -92,7 +135,8 @@ class ScriptedBrain:
             self.counts['raw_canary_outside_detector'] += 1
             return {'error': 'unguarded_fixture_canary'}
         self.counts['chat'] += 1
-        later = messages[users[-1] + 1:]
+        self.observe(messages, users, index, current)
+        later = messages[index + 1:]
         # [[after:silent]] makes the answer after a tool result [NO_REPLY], as
         # Nocheh asks once an approval card already answers the request.
         silent_after = '[[after:silent]]' in current
@@ -153,8 +197,8 @@ class ScriptedBrain:
             self.record(directive=kind, argument=argument, phase='final', present=present)
             return {'content': '[brain] notes ' + argument + (' present' if present else ' absent')}
         if kind == 'context':
-            earlier = '\n'.join(self.text(message.content) for index, message in enumerate(body.messages)
-                                if message is not messages[users[-1]])
+            earlier = '\n'.join(self.text(message.content) for message in body.messages
+                                if message is not messages[index])
             present = bool(argument) and argument in earlier
             self.record(directive=kind, argument=argument, phase='final', present=present)
             return {'content': '[brain] context ' + argument + (' present' if present else ' absent')}
@@ -274,6 +318,9 @@ def provider():
             scripted = brain.respond(body)
             if scripted is None:
                 return await chat.chat_completions(body)
+            delay = scripted.pop('delay', None)
+            if delay:
+                await asyncio.sleep(delay)
             return brain.render(body, scripted)
 
     if not upstream:

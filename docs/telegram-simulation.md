@@ -159,11 +159,23 @@ appears anywhere in the request except the current turn; `[[long:n]]`,
 `[[silent]]` and `[[empty-once:key]]` produce long, `[NO_REPLY]` and one blank
 answer. `[[turn:marker]]` reports whether a marker appears in the current turn
 (unaddressed group messages travel there), `[[tool:nocheh_x {json}]]` calls any
-Nocheh tool with those arguments and `[[after:silent]]` makes the answer after a
+Nocheh tool with those arguments (also `memory`, `todo_list` and a job box's
+Hermes tools) and `[[after:silent]]` makes the answer after a
 tool call `[NO_REPLY]`. `[[usage:n]]` makes each scripted answer in that turn
 report `n` prompt tokens; the fixture's reply rates (`NOCHEH_FIXTURE_REPLY_RATES`,
 read only with `NOCHEH_INSTALLATION_FIXTURE=1`) price them, so a background
-job's cost limit can be reached. Other model traffic keeps the deterministic behaviour above. The mock's
+job's cost limit can be reached. `[[delay:s]]` makes each scripted answer in that
+turn wait `s` seconds (1 to 90), so a scenario can act while a job runs; the
+answer's event is recorded before the wait. When the current turn is a job's
+resume line (`The job was interrupted and restarted.`), the directives come from
+the newest earlier user message that has one, the job's first message, and its
+tool results so far count, so the resumed run goes on where it was. The brain
+also records, once each, `{"directive":"notice","kind":"cost"|"time"}` when a
+tool result of the directive turn carries a cost or time notice,
+`{"directive":"resume","results":n}` for a resumed run (`n` tool results before
+the resume line) and `{"directive":"restart","todo":bool,"earlier":n}` for a
+fresh restart (whether it names the last to-do list, and the messages before it).
+Other model traffic keeps the deterministic behaviour above. The mock's
 `sendMessage` fault may set `parameters: {"deliver": true}` with a 5xx code:
 the message is accepted but the bot observes only a gateway failure.
 Directive-driven tool use tests pipeline, isolation and effects, not model

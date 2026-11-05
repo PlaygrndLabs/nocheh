@@ -118,6 +118,15 @@ chose on 2026-11-03 to turn link previews off for every bot message. Extends
 - Link previews are off for every message the bot sends or edits.
 </decision>
 
+<note date="2026-11-04">
+Amended by [ADR-0207](0207-a-background-job-is-one-hermes-run.md): the box, the
+deadline of its commands and the /chat copy belong to each run of a job, not each
+step, and there is no wrap-up step to leave out. Box commands end at the job's hard
+deadline, three minutes after its time limit, and the box expires five minutes after
+that. /chat is filled once, when a run starts; a run after one that ended abnormally
+gets a new box.
+</note>
+
 <consequences>
 - A job can search and compute over a whole chat without a card for each command.
   Group text can steer those commands, but they run with no internet and no keys,

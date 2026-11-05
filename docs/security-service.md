@@ -99,13 +99,13 @@ receipts.
 The launcher also makes the sealed boxes of jobs the owner approved
 ([ADR-0205](adr/0205-owner-approved-jobs-work-in-a-sealed-box.md)). A box has no
 network, keys, binds or Docker socket, and the job's turn reaches it only through
-one socket mounted read-only. The broker decides which steps get a box; the
-launcher follows the step's binding and removes every box the broker stops listing.
+one socket mounted read-only. The broker decides which runs get a box; the
+launcher follows the run's binding and removes every box the broker stops listing.
 Each box and its socket volume carry the label
 `nocheh.box.network=<NOCHEH_AGENT_NETWORK>`, and the launcher lists, counts and
 removes only boxes with its own network's label, so two copies of Nocheh on one
-Docker never remove each other's boxes. After a step that did not end by itself
-with success, the launcher replaces that job's box at its next step.
+Docker never remove each other's boxes. After a run that did not end by itself
+with success, the launcher replaces that job's box at its next run.
 
 | Variable | Purpose |
 | --- | --- |
@@ -113,11 +113,11 @@ with success, the launcher replaces that job's box at its next step.
 | `NOCHEH_BOX_LIMIT` | Boxes that may exist at once, 2 to 8, default 2, since two jobs can run at once. The launcher does not start with less |
 | `NOCHEH_BOX_TOKEN` | Lets the launcher ask the broker which boxes may exist and read a box's chat copy. Only `nocheh-security` and `hermes-agent-sb` receive it. `./bin/nocheh init`, `up` and `make dev` generate it when it is missing; it has at least 32 characters, differs from `SERVICE_TOKEN`, and Settings never shows it |
 
-Without the token, no step gets a box and a job that asks for one is refused with
+Without the token, no run gets a box and a job that asks for one is refused with
 `job_box_not_allowed`. A box job approved before the token went missing does not
-run as a plain job: its next step stops with `job_box_unavailable`. So does a box
-job's step when the image is missing, the box limit is reached or the box cannot be
-made. After two retries the job fails with `job_box_unavailable`, which System ›
+run as a plain job: its next run stops with `job_box_unavailable`. So does a box
+job's run when the image is missing, the box limit is reached or the box cannot be
+made. After two relaunches the job fails with `job_box_unavailable`, which System ›
 Background work shows as "job box unavailable". The launcher logs one line at
 startup that names a missing token or image, never the token. The owner turns
 boxes off with **Sealed box for jobs** in Settings › Assistant.
@@ -126,8 +126,8 @@ To return to the previous execution mode, set `NOCHEH_SECURITY_RUNTIME=legacy`
 and `NOCHEH_MEMORY_CONTEXT=legacy` and restart Hermes with this version's image.
 Sealed boxes need the isolated runtime. In legacy mode a job that asks for a box
 is refused with `job_box_not_allowed`, and a box job approved before the change
-fails at its next step with `job_box_unavailable`. Turn **Sealed box for jobs** off
-first, so such a job's later steps run without a box.
+fails at its next run with `job_box_unavailable`. Turn **Sealed box for jobs** off
+first, so such a job's later runs go without a box.
 The converted history remains readable. An older image that predates this layout
 requires an offline reverse conversion; do not start it against converted profiles.
 There is no automatic fallback when a required security service is unavailable.

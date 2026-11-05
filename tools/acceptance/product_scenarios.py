@@ -18,7 +18,7 @@ import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 
-from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Scenarios, synthetic_pdf
+from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Scenarios, isolated_turns, synthetic_pdf
 
 # 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
 MEMBER, GUEST = 778, 779
@@ -50,8 +50,9 @@ class ProductScenarios(Scenarios):
                     and item['message']['message_id'] == row['message']['message_id'])
 
     def press(self, row, choice, presser=OWNER):
-        """A tap on Approve or Reject, delivered like Telegram's callback_query."""
-        data = next(button['callback_data'] for button in self.buttons(row) if button['callback_data'].startswith('na' if choice == 'approve' else 'nd'))
+        """A tap on Approve, Reject or a job's Stop, delivered like Telegram's callback_query."""
+        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns'}[choice]
+        data = next(button['callback_data'] for button in self.buttons(row) if button['callback_data'].startswith(prefix))
         number = self.f.ids()
         query = {'id': 'cb'+str(number), 'from': {'id': presser, 'is_bot': False, 'first_name': 'Synthetic '+str(presser)},
                  'chat_instance': 'instance-'+str(row['message']['chat']['id']), 'data': data, 'message': row['message']}
@@ -702,11 +703,86 @@ class ProductScenarios(Scenarios):
 
     # Background jobs ------------------------------------------------------------------------------------
 
+    def job_request(self, text, job):
+        """The owner's message asking for a job. ]] is escaped in the job's JSON, so the scripted model reads the
+        job's directives only in the job's own run."""
+        encoded = json.dumps({'action': 'start', **job}).replace(']]', '\\u005d\\u005d')
+        return self.f.message(OWNER, text+' [[tool:nocheh_background_job '+encoded+']] [[after:silent]]')
+
+    @staticmethod
+    def hidden(word):
+        """A word with its first letter as a JSON escape: the tool's arguments still say it, but the request, the job's
+        card and its message do not, so an archive search for it finds nothing and its result stays short."""
+        return '\\u%04x' % ord(word[0]) + word[1:]
+
+    @staticmethod
+    def todo(*items):
+        """A todo_list directive that keeps these (content, status) items."""
+        todos = [{'id': str(index+1), 'content': content, 'status': status} for index, (content, status) in enumerate(items)]
+        return '[[tool:todo_list '+json.dumps({'todos': todos})+']]'
+
+    def searches(self, mark, count):
+        """Archive searches for mark+'X0' to mark+'X<count-1>', none of which any message says."""
+        return ' '.join('[[tool:nocheh_archive_search {"mode":"text","query":"%s","limit":1}]]' % self.hidden(mark+'X'+str(index))
+                        for index in range(count))
+
+    @staticmethod
+    def called(events, word, first=False):
+        """The index of the last (or first) brain event that called the search for `word`, or None."""
+        found = [index for index, event in enumerate(events) if event.get('phase') == 'call' and event.get('tool') == 'nocheh_archive_search'
+                 and word[1:]+'"' in (event.get('argument') or '')]
+        return (found[0] if first else found[-1]) if found else None
+
+    def job_named(self, title):
+        """The newest job of that title; a kept fixture may hold earlier runs."""
+        return next(item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == title)
+
+    def job_ended(self, title, seconds):
+        return self.wait('job_ended', lambda: (lambda job: job if job['state'] in ('done', 'failed', 'stopped') else None)(self.job_named(title)), seconds)
+
+    def job_runs(self, job):
+        """The job's runs, oldest first: attempt, how it was stopped, its managed run's state and how long that lasted."""
+        return json.loads(self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('attempt',b.attempt,'ended',b.ended,'state',r.state,"
+            "'seconds',round(extract(epoch FROM r.updated_at-r.created_at))) ORDER BY b.attempt),'[]') FROM background_runs b "
+            "JOIN managed_runs r ON r.event_id=b.event_id WHERE b.job_id='%s'" % job))
+
+    def run_input(self, job, attempt):
+        """The message a run of the job was given, as Nocheh recorded it."""
+        reference = self.f.query('nocheh_control', "SELECT r.input_reference->>'id' FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id "
+                                 "WHERE b.job_id='%s' AND b.attempt=%d" % (job, attempt))
+        return self.f.query('nocheh_derived', "SELECT convert_from(content,'UTF8')::jsonb->>'text' FROM derived_artifacts WHERE id='%s'" % reference) if reference else ''
+
+    def job_replies(self, before):
+        return [row for row in self.replies(before, OWNER) if not self.is_card(row)]
+
+    def search_lines(self, before):
+        """How many search results the job's report quotes, over every part it was sent in."""
+        return sum((row['message'].get('text') or '').count('[brain] nocheh_archive_search:') for row in self.job_replies(before))
+
+    def stop_button(self, card):
+        """The card's buttons while it shows exactly one: the job's Stop."""
+        buttons = self.buttons(self.card_message(card))
+        return buttons if len(buttons) == 1 and buttons[0]['callback_data'].startswith('ns') else None
+
+    def limit_ending(self, title, limit, before, card, found, runs):
+        """A job stopped at its cost or time limit: its run says why, a short note replaces the report, its card says so."""
+        self.gate('job_ended_at_its_'+limit+'_limit', found['state'] == 'done' and found.get('ended') == limit and [run['ended'] for run in runs] == [limit]
+                  and found.get('attempts') == 1, state=found['state'], ended=found.get('ended'), runs=runs)
+        note = self.wait('limit_note_sent', lambda: [row for row in self.job_replies(before)
+                                                     if '⏱ '+title+': the job stopped at its '+limit+' limit' in (row['message'].get('text') or '')], 120)
+        text = note[0]['message']['text']
+        left = next((line for line in text.split('\n') if line.startswith('⏳ Left:')), '')
+        self.gate('one_note_of_what_is_done_and_left', len(note) == 1 and '✅ Done:' in text and 'Search the' in left, count=len(note), note=text[:400])
+        self.gate('no_report', not [row for row in self.job_replies(before) if '[brain]' in (row['message'].get('text') or '')])
+        self.wait('card_says_stopped_at_its_limit', lambda: 'Stopped at its limit' in self.card_message(card)['message']['text']
+                  and not self.buttons(self.card_message(card)), 120)
+
     def background_job_runs_and_reports(self):
         # The agent starts a job with one call; the owner approves it on its card; the job runs in a session of its
-        # own with the archive tools, sends its report where it was asked, and its card says it is done.
-        job = {'action': 'start', 'title': 'Open tasks JOB1', 'instruction': 'Find what is still open [[search:JOBMARK1]]'}
-        request = self.f.message(OWNER, 'کار بزرگ JOBMARK1 [[tool:nocheh_background_job '+json.dumps(job)+']] [[after:silent]]')
+        # own with the archive tools, sends its report where it was asked, and its card says it is done. While it runs,
+        # its card has one Stop button. Each scripted answer waits 5 s, so the card is seen running.
+        job = {'title': 'Open tasks JOB1', 'instruction': 'Find what is still open [[search:JOBMARK1]] [[delay:5]]'}
+        request = self.job_request('کار بزرگ JOBMARK1', job)
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         text = card['message']['text']
@@ -719,45 +795,49 @@ class ProductScenarios(Scenarios):
         self.gate('nothing_runs_before_approval', not [row for row in self.new(before) if not self.is_card(row)])
         answer = self.press(card, 'approve')
         self.gate('job_press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
-        report = self.wait('job_report_sent', lambda: [row for row in self.replies(before, OWNER) if not self.is_card(row)
-                                                         and 'nocheh_archive_search' in (row['message'].get('text') or '')], 420)
+        stop = self.wait('job_card_has_stop_button', lambda: self.stop_button(card), 60, 1)
+        self.gate('stop_button_named', stop[0]['text'] == '🛑 Stop', button=stop[0]['text'])
+        report = self.wait('job_report_sent', lambda: [row for row in self.job_replies(before) if 'nocheh_archive_search' in (row['message'].get('text') or '')], 420)
         self.gate('job_report_once', len(report) == 1, count=len(report))
         self.gate('job_report_read_the_archive', 'JOBMARK1' in report[0]['message']['text'], report=report[0]['message']['text'][:300])
         self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
         jobs = [item for item in self.f.app('/v1/background-jobs').get('jobs', []) if item.get('title') == 'Open tasks JOB1']
-        self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
+        self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['attempts'] == 1 and jobs[0]['ended'] is None, jobs=jobs)
+        runs = self.job_runs(jobs[0]['id'])
+        self.gate('one_run', len(runs) == 1 and runs[0]['state'] == 'done', runs=runs)
 
     def background_job_cost_cap(self):
-        # Nocheh prices a job's tokens itself, at the rates frozen on its card (the fixture's rates, ADR-0206). Every
-        # scripted answer of the first step reports 8,000 prompt tokens, and its 24 searches pass the step's 20
-        # iterations, so the step goes on; its cost passes the job's $5 limit, so one short step writes the report.
-        searches = ' '.join('[[tool:nocheh_archive_search {"mode":"text","query":"COSTMARK%d","limit":1}]]' % index for index in range(24))
-        # ]] is escaped in the job's JSON so the scripted model reads the step's directives only in the step.
-        job = json.dumps({'action': 'start', 'title': 'Priced JOB3', 'instruction': 'Search each mark [[usage:8000]] ' + searches,
-                          'from': '2020-01-01', 'to': '2020-01-02'}).replace(']]', '\\u005d\\u005d')
-        request = self.f.message(OWNER, 'کار با هزینه JOBCOST [[tool:nocheh_background_job '+job+']] [[after:silent]]')
+        # Nocheh prices a job's tokens itself, at the rates frozen on its card (the fixture's rates, ADR-0206). Each
+        # scripted answer reports 30,000 prompt tokens, $1.50005 at those rates. After the third the run has used 80% of
+        # the job's $5 limit, so the next tool result carries the cost notice; the fourth passes the limit, so the run's
+        # heartbeat stops it and Nocheh sends a short note from its to-do list instead of a report (ADR-0207).
+        nonce = str(self.f.ids())
+        instruction = ('Search each mark, run '+nonce+' [[usage:30000]] [[delay:6]] '+self.todo(('Search the marks', 'in_progress'), ('Write the report', 'pending'))
+                       +' '+self.searches('COSTMARK'+nonce, 6))
+        request = self.job_request('کار با هزینه JOBCOST', {'title': 'Priced JOB3', 'instruction': instruction, 'from': '2020-01-01', 'to': '2020-01-02'})
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
         text = card['message']['text']
         self.gate('job_card_shows_the_cost_limit', 'Priced JOB3' in text and 'Stops at $5' in text and 'not counting the secret check' in text, card=text)
         self.press(card, 'approve')
-        jobs = self.wait('job_done', lambda: [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
-                                              if item.get('title') == 'Priced JOB3' and item.get('state') in ('done', 'failed', 'stopped')], 600)
-        found = jobs[0]
-        self.current['observed'] = {'job': {key: found.get(key) for key in ('state', 'steps', 'cost_usd', 'cost_limit_usd', 'priced', 'error_code')}}
+        found = self.job_ended('Priced JOB3', 600)
+        runs = self.job_runs(found['id'])
+        self.current['observed'] = {'job': {key: found.get(key) for key in ('state', 'attempts', 'ended', 'cost_usd', 'cost_limit_usd', 'priced', 'error_code')}, 'runs': runs}
         self.gate('job_priced', found.get('priced') is True and found['cost_usd'] > 0, job=found)
-        self.gate('job_cost_passed_its_limit', found['cost_usd'] >= found['cost_limit_usd'], cost=found['cost_usd'], limit=found['cost_limit_usd'])
-        kinds = self.f.query('nocheh_control', "SELECT string_agg(kind,',' ORDER BY step,attempt) FROM background_steps WHERE job_id='%s'" % found['id'])
-        self.gate('job_took_its_wrap_up_step', found['state'] == 'done' and (kinds or '').split(',')[-1] == 'wrap_up', state=found['state'], kinds=kinds)
-        report = [row for row in self.replies(before, OWNER) if not self.is_card(row)]
-        self.gate('job_reported', len(report) >= 1, count=len(report))
+        self.gate('job_cost_reached_its_limit', found['cost_usd'] >= found['cost_limit_usd'], cost=found['cost_usd'], limit=found['cost_limit_usd'])
+        # The notice comes on the result of the tool the third answer called, so the fourth answer's request has it.
+        events = self.f.brain()
+        third, fourth = self.called(events, 'COSTMARK'+nonce+'X1'), self.called(events, 'COSTMARK'+nonce+'X2')
+        self.gate('cost_notice_seen', third is not None and fourth is not None and
+                  any(event.get('directive') == 'notice' and event.get('kind') == 'cost' for event in events[third:fourth]), third=third, fourth=fourth)
+        self.limit_ending('Priced JOB3', 'cost', before, card, found, runs)
 
     @staticmethod
     def docker(*arguments):
         return subprocess.run(['docker', *arguments], capture_output=True, text=True)
 
     def watch_box(self, job, stop, seen):
-        """While a job runs: its box and the step turns that mount its socket, as Docker made them, and samples
+        """While a job runs: its box and the run's turns that mount its socket, as Docker made them, and samples
         of whether /work/result.txt is in the box and whether anything of it is in the turn."""
         inspect = lambda name: (json.loads(self.docker('inspect', name).stdout or '[]') or [{}])[0]
         probe = 'if [ -e /work/result.txt ]; then echo present; else echo absent; fi'
@@ -776,9 +856,9 @@ class ProductScenarios(Scenarios):
             stop.wait(0.5)
 
     def background_job_uses_sealed_box(self):
-        # The owner asks in private for a job with the sealed box over a made-up group chat. The step's own terminal,
+        # The owner asks in private for a job with the sealed box over a made-up group chat. The run's own terminal,
         # file and code tools run in a box with no network, a read-only root and uid 65532, over the chat's checked
-        # copy in /chat; the step's turn writes nothing, the report reaches the owner, and the box is gone afterwards.
+        # copy in /chat; the run's turn writes nothing, the report reaches the owner, and the box is gone afterwards.
         image = self.f.manifest['services']['hermes-agent-sb']['environment'].get('NOCHEH_BOX_IMAGE') or 'nocheh-box:local'
         self.gate('box_image_present', self.docker('image', 'inspect', image).returncode == 0, image=image)
         since = datetime.fromtimestamp(int(time.time())-1, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -790,13 +870,13 @@ class ProductScenarios(Scenarios):
         # The box copy leaves out messages still being checked, so the job starts once these are.
         checked = "SELECT count(*) FROM guard_sources WHERE state='ready' AND id IN ("+','.join("'events:"+event+"'" for event in events)+')'
         self.wait('chat_checked', lambda: self.f.query('nocheh_derived', checked) == str(len(events)), 300)
-        # The step's scripted model calls each box tool in turn; its answer, the report, quotes every result.
+        # The run's scripted model calls each box tool in turn; its answer, the report, quotes every result.
         count = ('n=$(cat /chat/part-*.jsonl | wc -l); m=$(cat /chat/part-*.jsonl | grep -c BOXMARK7); echo BOXLINES=$n BOXMARKED=$m > /work/result.txt; '
                  'echo wrote $(cat /work/result.txt) host=$(cat /etc/hostname) uid=$(id -u); cat /chat/manifest.json; sleep 5')
         code = ("import glob\nn = 0\nfor path in sorted(glob.glob('/chat/part-*.jsonl')):\n    with open(path, encoding='utf-8') as part:\n"
                 "        n += sum('BOXMARK7' in line for line in part)\nprint('PYCOUNT=%d host=%s' % (n, open('/etc/hostname').read().strip()))")
-        steps = (('terminal', {'command': count}), ('read_file', {'path': '/work/result.txt'}), ('execute_code', {'code': code}))
-        instruction = 'Count the marked messages in the box. '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in steps)
+        calls = (('terminal', {'command': count}), ('read_file', {'path': '/work/result.txt'}), ('execute_code', {'code': code}))
+        instruction = 'Count the marked messages in the box. '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in calls)
         # Inside the proposal's own directive the instruction's braces are JSON escapes, so its directives stay whole.
         encoded = json.dumps(instruction).replace('{', '\\u007b').replace('}', '\\u007d')
         proposal = '{"action": "start", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
@@ -819,7 +899,7 @@ class ProductScenarios(Scenarios):
             rows = [row for row in self.replies(before, OWNER) if not self.is_card(row) and 'execute_code' in (row['message'].get('text') or '')]
             state = {} if rows else listed()[0]
             if state.get('state') in ('failed', 'stopped'):
-                self.gate('job_did_not_fail', False, state=state['state'], error=state.get('error_code'), steps=state.get('steps'))
+                self.gate('job_did_not_fail', False, state=state['state'], error=state.get('error_code'), attempts=state.get('attempts'))
             return rows
         try:
             answer = self.press(card, 'approve')
@@ -842,7 +922,7 @@ class ProductScenarios(Scenarios):
         name = box['Name'].lstrip('/')
         sockets = [[[mount.get('Type'), mount.get('Name'), mount.get('RW')] for mount in turn.get('Mounts') or [] if mount.get('Destination') == '/box']
                    for turn in seen['turns'].values()]
-        self.gate('step_turn_reaches_the_box_by_its_socket_only', bool(sockets) and all(mounts == [['volume', name, False]] for mounts in sockets), mounts=sockets)
+        self.gate('run_turn_reaches_the_box_by_its_socket_only', bool(sockets) and all(mounts == [['volume', name, False]] for mounts in sockets), mounts=sockets)
         probed = [sample for sample in seen['samples'] if sample['in_turn'] in ('present', 'absent')]
         written = [sample for sample in probed if sample['box'] == 'present']
         self.gate('turn_wrote_nothing', bool(written) and not [sample for sample in probed if sample['in_turn'] == 'present'],
@@ -858,7 +938,9 @@ class ProductScenarios(Scenarios):
         self.gate('execute_code_read_the_chat', 'PYCOUNT=3 host='+hostname in parts.get('execute_code', ''), execute_code=parts.get('execute_code', '')[:300])
         self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
         jobs = listed()
-        self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['steps'] == 1, jobs=jobs)
+        self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['attempts'] == 1, jobs=jobs)
+        self.gate('one_run', len(self.job_runs(job)) == 1, runs=self.job_runs(job))
+        self.gate('run_told_about_the_box', 'In this job your terminal' in self.run_input(job, 1))
         # The launcher's sweep removes a box and its socket volume within 15 s of its job leaving running.
         self.wait('box_removed', lambda: not self.docker('ps', '-a', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
                   and not self.docker('volume', 'ls', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
@@ -913,13 +995,10 @@ class ProductScenarios(Scenarios):
         self.ran(card, marker)
 
     def job_operation_runs_after_approval(self):
-        # A job's step asks to run a command; the owner approves it on its card after the job reported.
-        # The step's own profile is the job's, so the executor checks the job's chat settings.
+        # A job's run asks to run a command; the owner approves it on its card after the job reported.
+        # The run's own profile is the job's, so the executor checks the job's chat settings.
         marker = 'JOBRUNMARK1'
-        # ]] is escaped in the job's JSON so the scripted model reads the step's directive only in the step.
-        instruction = 'Check with a command [[tool:nocheh_shell {"command":"printf '+marker+'"}]]'
-        job = json.dumps({'action': 'start', 'title': 'Command JOB2', 'instruction': instruction}).replace(']]', '\\u005d\\u005d')
-        request = self.f.message(OWNER, 'کار با فرمان JOBRUN [[tool:nocheh_background_job '+job+']] [[after:silent]]')
+        request = self.job_request('کار با فرمان JOBRUN', {'title': 'Command JOB2', 'instruction': 'Check with a command [[tool:nocheh_shell {"command":"printf '+marker+'"}]]'})
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('job_card_shows_job', 'Command JOB2' in card['message']['text'], card=card['message']['text'])
@@ -930,6 +1009,145 @@ class ProductScenarios(Scenarios):
         self.wait('job_done', lambda: [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
                                        if item.get('title') == 'Command JOB2' and item.get('state') in ('done', 'failed', 'stopped')], 420)
         self.ran(operation, marker)
+
+    # One run per job -------------------------------------------------------------------------------------
+    # Jobs on an empty two-day period, so their estimate stays far below the 50-minute limit (ADR-0207).
+    EMPTY = {'from': '2020-01-01', 'to': '2020-01-02'}
+
+    def background_job_long_run(self):
+        # A job of more than twenty tool calls is one Hermes run, past the nine minutes a step had before ADR-0207:
+        # each scripted answer waits 30 s. Its cost and to-do list show while it runs, and one report comes at the end.
+        nonce = str(self.f.ids())
+        mark = 'LONGMARK'+nonce
+        instruction = ('Search every mark, run '+nonce+' [[delay:30]] '+self.todo(('Search the long marks', 'in_progress'), ('Write the report', 'pending'))
+                       +' '+self.searches(mark, 20)+' '+self.todo(('Search the long marks', 'completed'), ('Write the report', 'completed')))
+        _, before = self.silent_turn(self.job_request('کار طولانی JOBLONG', {'title': 'Long JOB4', 'instruction': instruction, **self.EMPTY}), OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        self.press(card, 'approve')
+        live = self.wait('live_progress_seen', lambda: (lambda job: job if job['state'] == 'running' and job['cost_usd'] > 0
+                                                       and len(job.get('todo') or []) == 2 else None)(self.job_named('Long JOB4')), 300)
+        self.current['observed'] = {'live': {key: live.get(key) for key in ('cost_usd', 'todo', 'attempts')}}
+        found = self.job_ended('Long JOB4', 1500)
+        runs = self.job_runs(found['id'])
+        self.current['observed']['runs'] = runs
+        self.gate('job_done', found['state'] == 'done' and found.get('ended') is None, state=found['state'], error=found.get('error_code'))
+        self.gate('one_run', len(runs) == 1 and found.get('attempts') == 1, runs=runs)
+        self.gate('ran_past_the_old_step_limit', runs[0]['seconds'] > 540, seconds=runs[0]['seconds'])
+        self.gate('report_once', self.search_lines(before) == 20, lines=self.search_lines(before))
+        self.gate('last_todo_kept', [item.get('status') for item in found.get('todo') or []] == ['completed', 'completed'], todo=found.get('todo'))
+        self.gate('no_continue_text', 'Continue the job' not in self.run_input(found['id'], 1))
+
+    def background_job_stop_button(self):
+        # Stop on a running job's card: someone who neither asked nor owns it is refused; the owner's press stops the run,
+        # no report is sent, the card says it stopped and loses the button, and the change the job asked for is rejected.
+        nonce = str(self.f.ids())
+        marker = 'STOPMARK'+nonce
+        instruction = ('Check, then search, run '+nonce+' [[delay:60]] [[tool:nocheh_shell {"command":"printf '+marker+'"}]] '
+                       +self.searches('STOPSEARCH'+nonce, 1))
+        _, before = self.silent_turn(self.job_request('کار با توقف JOBSTOP', {'title': 'Stoppable JOB10', 'instruction': instruction, **self.EMPTY}), OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        self.press(card, 'approve')
+        # Every answer waits 60 s, so the run is still between its first and second answer here.
+        self.wait('change_asked_for', lambda: (lambda row: row if row and row['state'] == 'proposed' else None)(self.operation(marker)), 300)
+        self.wait('job_card_has_stop_button', lambda: self.stop_button(card), 30, 1)
+        shown = self.card_message(card)
+        stranger = self.press(shown, 'stop', presser=GUEST)
+        self.gate('stranger_cannot_stop', stranger.get('text') == 'Only the person who asked or the owner can stop this job.', answer=stranger.get('text'))
+        self.gate('job_still_running', self.job_named('Stoppable JOB10')['state'] == 'running')
+        owner = self.press(shown, 'stop')
+        self.gate('owner_press_stops_it', 'Stopping the job' in (owner.get('text') or ''), answer=owner.get('text'))
+        found = self.job_ended('Stoppable JOB10', 180)
+        self.gate('job_stopped', found['state'] == 'stopped', state=found['state'], error=found.get('error_code'))
+        final = self.wait('card_says_stopped', lambda: (lambda row: row if '🚫 Stopped. Nothing more runs.' in row['message']['text']
+                                                       and not self.buttons(row) else None)(self.card_message(card)), 120)
+        self.gate('card_said_stopping', any('Stopping. Nothing more runs.' in (edit['parameters'].get('text') or '') for edit in final.get('edits', [])))
+        time.sleep(10)
+        self.gate('no_report', not [row for row in self.job_replies(before) if '[brain]' in (row['message'].get('text') or '')])
+        change = self.operation(marker)
+        self.gate('change_rejected', change['state'] == 'rejected' and change.get('error_code') == 'job_stopped', state=change['state'], error=change.get('error_code'))
+        runs = self.job_runs(found['id'])
+        self.gate('run_ended_stopped', [run['ended'] for run in runs] == ['stopped'] and found.get('attempts') == 1, runs=runs)
+
+    def restarted_job(self, title, react):
+        """A job whose turn is killed while its second search waits for its answer. With `react`, a reaction in the
+        owner's chat comes first; it waits while the run runs and starts a new epoch once the run ends."""
+        nonce = str(self.f.ids())
+        mark = 'RESTARTMARK'+nonce
+        instruction = ('Search the marks, run '+nonce+' [[delay:20]] '+self.todo(('Search the restart marks', 'in_progress'), ('Write the report', 'pending'))
+                       +' '+self.searches(mark, 4))
+        request = self.job_request('کار با راه‌اندازی دوباره JOBRESTART', {'title': title, 'instruction': instruction, **self.EMPTY})
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        self.press(card, 'approve')
+        # The brain records the call before its 20 s wait, so the turn is still in that model call.
+        self.wait('second_search_called', lambda: self.called(self.f.brain(), mark+'X1') is not None, 300, 1)
+        if react:
+            asked = self.epoch()
+            update = {'update_id': self.f.ids(), 'message_reaction': {'chat': {'id': OWNER, 'type': 'private'}, 'message_id': request['message']['message_id'],
+                      'user': {'id': OWNER, 'is_bot': False, 'first_name': 'Synthetic '+str(OWNER)},
+                      'date': int(time.time()), 'old_reaction': [], 'new_reaction': [{'type': 'emoji', 'emoji': '👍'}]}}
+            self.f.inject(update)
+            self.captured(update)
+        turns = self.wait('one_turn_running', lambda: (lambda ids: ids if len(ids) == 1 else None)(isolated_turns('-q').split()), 15, 1)
+        killed = self.docker('kill', turns[0])
+        self.gate('turn_killed', killed.returncode == 0, error=killed.stderr[:300])
+        if react:
+            now = self.wait('reaction_started_an_epoch', lambda: (lambda epoch: epoch if epoch > asked else None)(self.epoch()), 180)
+            quiet = int(self.f.query('nocheh_control', 'SELECT count(*) FROM guard_quiet_epochs WHERE epoch>%d AND epoch<=%d' % (asked, now)))
+            self.gate('every_later_epoch_is_quiet', quiet == now - asked, asked=asked, now=now, quiet=quiet)
+        found = self.job_ended(title, 600)
+        runs, events = self.job_runs(found['id']), self.f.brain()
+        self.current['observed'] = {**self.current.get('observed', {}), title: {'runs': runs, 'error': found.get('error_code')}}
+        self.gate('job_done_after_a_relaunch', found['state'] == 'done' and found.get('ended') is None and 2 <= found.get('attempts', 0) <= 3,
+                  state=found['state'], error=found.get('error_code'), runs=runs)
+        self.gate('report_once', self.search_lines(before) == 4, lines=self.search_lines(before))
+        killed_at = self.called(events, mark+'X1', first=True)
+        return found, runs, events[killed_at:], self.run_input(found['id'], found['attempts'])
+
+    def background_job_restart(self):
+        # (a) The killed run is relaunched in the same epoch: Hermes reloads its history, the run gets the resume line
+        # and goes on from the tool results it already had. (b) After a reaction's new epoch, the earlier work cannot
+        # be kept: the run gets the first message again, the restart line and its last to-do list, and starts over.
+        found, runs, events, text = self.restarted_job('Restart JOB5', False)
+        resumed = [event for event in events if event.get('directive') == 'resume']
+        self.gate('resumed_with_its_history', 'The job was interrupted and restarted.' in text and resumed and resumed[0].get('results', 0) >= 2,
+                  resumed=resumed[:2], attempts=found.get('attempts'))
+        self.gate('not_restarted_fresh', not [event for event in events if event.get('directive') == 'restart'])
+        found, runs, events, text = self.restarted_job('Restart JOB6', True)
+        restarted = [event for event in events if event.get('directive') == 'restart']
+        self.gate('restarted_with_its_todo', 'This job restarted and its earlier work could not be kept.' in text and 'Your last to-do list was:' in text
+                  and restarted and restarted[-1].get('todo') is True and restarted[-1].get('earlier') == 0, restarted=restarted[-2:], attempts=found.get('attempts'))
+
+    def background_job_time_limit(self):
+        # With a 5-minute limit, Hermes is told at 80% of its run time to write the report (its own notice), and at the
+        # hard deadline, three minutes after the limit, the run's heartbeat stops it and a short note goes out instead.
+        settings = self.f.app('/v1/background-jobs/settings')
+
+        def limit(minutes):
+            current = self.f.app('/v1/background-jobs/settings')
+            return self.f.app('/v1/background-jobs/settings', {'cost_limit_usd': current['cost_limit_usd'], 'minutes_limit': minutes,
+                                                               'member_daily_jobs': current['member_daily_jobs'], 'revision': current['revision']})
+        self.gate('limit_set', limit(5)['minutes_limit'] == 5)
+        try:
+            nonce = str(self.f.ids())
+            mark = 'TIMEMARK'+nonce
+            # 16 answers of 40 s each outlast the hard deadline at 8 minutes.
+            instruction = ('Search slowly, run '+nonce+' [[delay:40]] '+self.todo(('Search the timed marks', 'in_progress'), ('Write the report', 'pending'))
+                           +' '+self.searches(mark, 14))
+            _, before = self.silent_turn(self.job_request('کار با زمان کم JOBTIME', {'title': 'Timed JOB9', 'instruction': instruction, **self.EMPTY}), OWNER)
+            card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+            self.gate('job_card_shows_the_time_limit', 'or 5 min' in card['message']['text'], card=card['message']['text'])
+            self.press(card, 'approve')
+            found = self.job_ended('Timed JOB9', 900)
+        finally:
+            limit(settings['minutes_limit'])
+        runs = self.job_runs(found['id'])
+        self.current['observed'] = {'job': {key: found.get(key) for key in ('state', 'attempts', 'ended', 'minutes_limit', 'error_code')}, 'runs': runs}
+        self.gate('stopped_by_its_hard_deadline', runs and runs[0]['seconds'] < 9*60+30, runs=runs)
+        self.limit_ending('Timed JOB9', 'time', before, card, found, runs)
+        events = self.f.brain()
+        first = self.called(events, mark+'X0', first=True)
+        self.gate('time_notice_seen', first is not None and any(event.get('directive') == 'notice' and event.get('kind') == 'time' for event in events[first:]))
 
     # Settings defaults ----------------------------------------------------------------------------------
 
@@ -993,5 +1211,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
+                 'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_time_limit',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']

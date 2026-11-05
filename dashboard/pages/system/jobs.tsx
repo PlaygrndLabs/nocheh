@@ -33,7 +33,9 @@ export type Job = {
   state: string;
   chat: string;
   asked_in: string;
-  steps: number;
+  attempts: number;
+  /** Set when the job was stopped at its cost or time limit and a short note went out instead of a report. */
+  ended: 'cost' | 'time' | null;
   cost_usd: number;
   cost_limit_usd: number;
   /** False when the reply model has no price: only the time limit applies. */
@@ -72,9 +74,10 @@ const money = (value: number) => '$' + (value < 10 ? value.toFixed(2) : value.to
 export function jobProgress(job: Job): string {
   const done = job.todo.filter(item => item.status === 'completed').length;
   return [
-    job.steps === 1 ? '1 step' : `${job.steps} steps`,
+    job.attempts === 1 ? '1 attempt' : `${job.attempts} attempts`,
     job.todo.length ? `${done} of ${job.todo.length} to-dos done` : null,
     job.priced ? `${money(job.cost_usd)} of ${money(job.cost_limit_usd)}` : 'cost can’t be measured',
+    job.state === 'done' && job.ended ? `stopped at its ${job.ended} limit` : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -111,7 +114,7 @@ export function BackgroundJobs() {
   const stop = async (job: Job) => {
     const ok = await confirm({
       title: 'Stop this job?',
-      body: 'The step that is running is cancelled and no report is sent. What it already spent stays spent.',
+      body: 'The running job is cancelled and no report is sent. What it already spent stays spent.',
       confirm: 'Stop',
       danger: true,
     });
@@ -201,7 +204,7 @@ const fields: {
   {
     key: 'cost_limit_usd',
     title: 'Cost limit per job (US dollars)',
-    hint: 'A job stops and reports at this cost. A member’s job estimated above it waits for your approval.',
+    hint: 'A job is told to write its report at 80% of this cost and stopped at it. A member’s job estimated above it waits for your approval.',
     min: 0.5,
     max: 1000,
     step: 0.5,
@@ -209,9 +212,9 @@ const fields: {
   {
     key: 'minutes_limit',
     title: 'Time limit per job (minutes)',
-    hint: 'A job stops and reports after this long.',
+    hint: 'A job is told to write its report at 80% of this time and stopped when it runs out. A job estimated to take longer gets more, up to 50 minutes.',
     min: 5,
-    max: 1440,
+    max: 50,
     step: 5,
   },
   {
@@ -308,7 +311,7 @@ export function BackgroundJobLimits() {
             <SettingRow
               title="Sealed box for jobs"
               htmlFor="job-box-tools"
-              description="A job you ask for in your private chat can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads. Off: no new job gets a box, and running jobs lose theirs within seconds; their later steps run without one."
+              description="A job you ask for in your private chat can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads. Off: no new job gets a box, and running jobs lose theirs within seconds."
             >
               <Switch
                 id="job-box-tools"

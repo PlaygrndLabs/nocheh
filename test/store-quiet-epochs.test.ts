@@ -54,7 +54,7 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     await a.decide(owner,{id:early.id,fingerprint:early.fingerprint,decision:'approve'});
     // A job step proposes under the job's named profile.
     const step=async(label:string,profile='fixture-job')=>{
-      const operation=await s.operations.record({key:key+':'+label,kind:'background_step',scope:asking,input_hash:digest(label)});
+      const operation=await s.operations.record({key:key+':'+label,kind:'background_run',scope:asking,input_hash:digest(label)});
       const actor={...reader(await s.guards.state(),operation.id),logical_profile:profile};await s.turns.register(actor,{logical_profile:profile,job:'fixture-job'});return actor;
     };
     const job=await a.propose(await step('step-1'),{kind:'shell',arguments:{command:'printf job-step'}});
