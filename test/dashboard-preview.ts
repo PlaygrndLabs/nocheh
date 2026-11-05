@@ -32,6 +32,12 @@ for(const [id,name] of [['1'.repeat(64),'Mira Chen'],['d1'.repeat(32),'Devon']])
 const notion=new NotionRepository(pool);
 // Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
 let notionSignIn:{connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean}={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};
+// GitHub: made-up repositories; a key is any value shaped like a fine-grained one, and the copies live only in this preview.
+const githubListed=[{name:'example-org/gadgets',branch:'main',private:false,size_kb:900},{name:'example-org/widgets',branch:'main',private:true,size_kb:21000}];
+let githubSignIn:{connected:boolean;login:string|null;connected_at:string|null;expires_at:string|null;reconnect:boolean;listed:typeof githubListed;listed_at:string|null}=
+  {connected:false,login:null,connected_at:null,expires_at:null,reconnect:false,listed:[],listed_at:null};
+let githubCopies:Record<string,unknown>[]=[];
+const githubStatus=()=>({...githubSignIn,copies:githubCopies.map(copy=>({...copy,missing:false}))});
 const tasks=new TaskRepository(pool,async()=>{throw new HttpError(403,'owner_private_turn_required');}),taskOwner={admin:true,scope:null};
 await tasks.create(taskOwner,{operation_id:'preview-1',title:'Book the Iceland flights',notes:'Window seats if possible.',group:'-10042/topic/7',tags:['Travel'],due_on:new Date(Date.now()+3*864e5).toISOString().slice(0,10)});
 await tasks.create(taskOwner,{operation_id:'preview-2',title:'Send the garden supplier the measurements',scope:garden,tags:['Suppliers'],people:['1'.repeat(64)]});
@@ -473,6 +479,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
   if(route==='/notion')return json(res,200,await notion.get(taskOwner));
   if(route==='/connections/notion')return json(res,200,notionSignIn);
+  if(route==='/connections/github')return json(res,200,githubStatus());
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
   if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs});
@@ -525,6 +532,18 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
     notionSignIn={connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
   if(route==='/connections/notion/disconnect'){notionSignIn={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};return json(res,200,notionSignIn);}
+  if(route==='/connections/github/token'){if(!/^github_pat_[A-Za-z0-9_]{20,255}$/.test(String(body.token??'').trim()))throw new HttpError(400,'invalid_github_token');
+    const now=new Date();githubSignIn={connected:true,login:'octo-example',connected_at:now.toISOString(),expires_at:new Date(now.getTime()+90*86400000).toISOString(),reconnect:false,
+      listed:githubListed,listed_at:now.toISOString()};return json(res,200,githubStatus());}
+  if(route==='/connections/github/list'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');githubSignIn.listed_at=new Date().toISOString();return json(res,200,githubStatus());}
+  if(route==='/connections/github/copy'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
+    const repo=String(body.repo??''),known=githubListed.find(row=>row.name.toLowerCase()===repo.toLowerCase());if(!known)throw new HttpError(400,'github_repo_not_readable');
+    const commit=randomUUID().replace(/-/g,'').padEnd(40,'0'),copied_at=new Date().toISOString(),row={repo:known.name,branch:known.branch,commit,digest:commit.padEnd(64,'0'),
+      bytes:known.size_kb*1000,need:known.size_kb*3000,files:1204,previous_digest:null,copied_at};
+    githubCopies=[...githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==repo.toLowerCase()),row].sort((a,b)=>String(a.repo).localeCompare(String(b.repo)));
+    return json(res,200,{state:'copied',repo:row.repo,branch:row.branch,commit,copied_at,bytes:row.bytes,files:row.files});}
+  if(route==='/connections/github/remove'){githubCopies=githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==String(body.repo??'').toLowerCase());return json(res,200,githubStatus());}
+  if(route==='/connections/github/disconnect'){githubSignIn={connected:false,login:null,connected_at:null,expires_at:null,reconnect:false,listed:[],listed_at:null};githubCopies=[];return json(res,200,githubStatus());}
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');

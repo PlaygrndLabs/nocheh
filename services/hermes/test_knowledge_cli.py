@@ -69,6 +69,13 @@ class KnowledgeCliTests(unittest.TestCase):
         for path in ['https://example.com/v1/projects','//example.com/v1/projects','/v1/projects/../tools/execute','/v1/tools/execute','/v1/projects#fragment']:
             self.assertFalse(allowed_path(path),path)
 
+    def test_owner_proxy_agrees_with_the_shared_path_fixture(self):
+        # The dashboard forwards ownerStoragePath's routes here; test/store-owner-api.test.ts reads the same list.
+        fixture=json.loads((Path(__file__).resolve().parents[2]/'test/fixtures/owner-storage-paths.json').read_text())
+        for row in fixture['paths']:
+            self.assertEqual(allowed_path(row['path']),row['allowed_path'],row['path'])
+        self.assertFalse(allowed_path('/v1/background-jobs/copies'),'only management writes a copy')
+
     def test_sharing_approval_binds_preview_guard_and_text(self):
         preview='a'*64
         path,body=self.invoke('sharing',['approve',preview,'--revision','2','--guard-revision','3','--text-hash','b'*64,'--operation-id','approve-1'])

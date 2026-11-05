@@ -133,17 +133,22 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'background.card',
     title: 'Background job card',
-    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit}, {minutes_limit}, {checked}, {unpriced}, {notion} and {box} are filled in. {cost_limit} is missing on a model without a price, and {unpriced} then says only the time limit applies; {notion} says what the job may do in your Notion without asking; {box} says that it runs in a sealed box. A line whose value is missing is left out; a card without {unpriced}, {notion} or {box} still shows that line, at its end.',
+    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit}, {minutes_limit}, {checked}, {unpriced}, {notion}, {box} and {repo} are filled in. {cost_limit} is missing on a model without a price, and {unpriced} then says only the time limit applies; {notion} says what the job may do in your Notion without asking; {box} says that it runs in a sealed box; {repo} names the GitHub copy it reads. A line whose value is missing is left out; a card without {unpriced}, {notion}, {box} or {repo} still shows that line, at its end.',
   },
   {
     key: 'background.texts',
     title: 'Background job card answers',
-    hint: 'One “name: text” line each for what a decided job card says: running, queued, stopping, done, limited, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for what a decided job card says: running, queued, stopping, done, limited, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. box_repo is the sealed box line of a job that reads a GitHub copy, repo its copy line with {repo_name}, {repo_branch}, {repo_commit}, {repo_copied} and {repo_size}, and repo_removed what a card says when Remove withdrew it. A line you remove keeps its default.',
   },
   {
     key: 'background.box',
     title: 'Background job: sealed box',
     hint: 'Added to each run of a job in its sealed box: what /chat and /work hold and in what order, that the box has no internet, and that its work is lost when the job ends.',
+  },
+  {
+    key: 'background.repo',
+    title: 'Background job: GitHub copy',
+    hint: 'Added after the sealed box text to each run of a job that reads a GitHub copy: where the copy is, how to read it, and when to run its code. {repo}, {branch}, {commit} and {copied} are filled in.',
   },
 ];
 

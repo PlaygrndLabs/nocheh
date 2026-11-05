@@ -4,13 +4,15 @@ import {HttpError} from '../http.js';
 import {BOX_PAGE_RECORDS,pageDate} from '../conversation-page.js';
 import type {TurnBinding} from '../security/broker.js';
 import type {SourceAccessRepository} from './access.js';
-import {boxExpires,boxJob,boxOpen} from './background-jobs.js';
+import {boxExpires,boxJob,boxOpen,repoKept} from './background-jobs.js';
 import {validFromEpoch} from './guards.js';
 import type {SourceRepository} from './retrieval.js';
 
 /** What the launcher needs for a run's sealed box: the job's chat and period from its row, the guard binding
- *  a filled copy stays good for, and when the box must be gone. */
-export interface BoxBinding {job:string;chat:string;from:string|null;to:string|null;generation:string;mode:'on';valid_from_epoch:number;expires:string}
+ *  a filled copy stays good for, and when the box must be gone. A job that pinned a GitHub copy also names that copy:
+ *  every run of the job reads the same pin (ADR-0209). */
+export interface BoxBinding {job:string;chat:string;from:string|null;to:string|null;generation:string;mode:'on';valid_from_epoch:number;expires:string;
+  repo?:{name:string;branch:string;commit:string;digest:string;bytes:number;need:number}}
 
 /** Whether the box token is set; without it no run gets a box and nothing reads a box copy. */
 export const boxTokenSet=(token=process.env.NOCHEH_BOX_TOKEN):token is string=>!!token&&token.length>=32;
@@ -37,14 +39,15 @@ export class JobBoxRepository {
     if(!job)return null;
     const from=pageDate(job.estimate.from??''),to=pageDate(job.estimate.to??'',true);
     return {job:job.id,chat:job.target,from:from?.toISOString()??null,to:to?.toISOString()??null,generation:guard.generation,mode:'on',
-      valid_from_epoch:await validFromEpoch(this.control,guard),expires:boxExpires(job)};
+      valid_from_epoch:await validFromEpoch(this.control,guard),expires:boxExpires(job),
+      ...(job.repo?{repo:{name:job.repo.name,branch:job.repo.branch,commit:job.repo.commit,digest:job.repo.digest,bytes:job.repo.bytes,need:job.repo.need}}:{})};
   }
   /** The boxes that may exist now; the launcher removes every other one. */
   async live() {
     const guard=await this.access.guards.state(),owner=this.access.policy().owner_id;
     if(guard.mode!=='on'||!owner)return {boxes:[]};
     const jobs=(await this.control.query(`SELECT j.id,j.started_at,j.minutes_limit FROM background_jobs j JOIN background_settings s ON s.singleton AND s.box_tools
-      WHERE j.box AND j.state='running' AND NOT j.cancel_requested AND j.scope=$1 AND j.requester IS NULL AND j.decided_by=$1 AND ${boxOpen} ORDER BY j.id`,[owner])).rows;
+      WHERE j.box AND j.state='running' AND NOT j.cancel_requested AND j.scope=$1 AND j.requester IS NULL AND j.decided_by=$1 AND ${boxOpen} AND ${repoKept} ORDER BY j.id`,[owner])).rows;
     const from=jobs.length?await validFromEpoch(this.control,guard):guard.epoch;
     return {boxes:jobs.map(job=>({job:job.id,generation:guard.generation,mode:guard.mode,valid_from_epoch:from,expires:boxExpires(job)}))};
   }

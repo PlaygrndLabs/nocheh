@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {uploadName} from '../src/management.js';
-import {mkdtemp, mkdir, writeFile, readFile, rm} from 'node:fs/promises';
+import {operationBlocked,uploadName} from '../src/management.js';
+import {mkdtemp, mkdir, writeFile, readFile, rm, chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {spawn, spawnSync, type ChildProcess} from 'node:child_process';
@@ -184,4 +184,58 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     await wait(async()=>(await request('/jobs/'+invalid.id)).state==='failed');
     assert.equal((await request('/jobs/'+invalid.id)).error,'invalid_operation_id');
   } finally {await stop();await new Promise<void>(r=>archive.close(()=>r()));await rm(state,{recursive:true,force:true});}
+});
+
+test('a backup, restore or restart waits for a GitHub copy or refresh, and nothing else blocks on it',()=>{
+  const free={busy:false,active:0,locked:new Set<string>()};
+  assert.equal(operationBlocked(free),false);
+  assert.equal(operationBlocked({...free,locked:new Set(['writer-start','notion-connection'])}),false);
+  assert.equal(operationBlocked({...free,locked:new Set(['github-connection'])}),true);
+  assert.equal(operationBlocked({...free,busy:true}),true);assert.equal(operationBlocked({...free,active:1}),true);
+});
+
+test('owner HTTP: GitHub copies run one at a time, Remove and Disconnect never wait for one, and a backup waits',{timeout:60000},async()=>{
+  const state=await mkdtemp(join(tmpdir(),'nocheh-management-github-')),token='test-owner-token-'.repeat(4);
+  const probe=createServer();probe.listen(0,'127.0.0.1');await once(probe,'listening');
+  const port=(probe.address() as {port:number}).port;await new Promise<void>(r=>probe.close(()=>r()));
+  // The stub interpreter holds a copy until the test lets it go; every other operation goes to the real management module.
+  const stub=join(state,'python-stub'),release=join(state,'release'),seen=join(state,'seen');
+  await writeFile(stub,['#!/usr/bin/env python3','import json, os, subprocess, sys, time',
+    'raw=sys.stdin.buffer.read();operation=json.loads(raw).get("operation")',
+    `with open(${JSON.stringify(seen)},"a") as log: log.write(str(operation)+"\\n")`,
+    'if operation=="github.copy":',
+    `    while not os.path.exists(${JSON.stringify(release)}): time.sleep(0.05)`,
+    '    print(json.dumps({"result":{"state":"current"}}),flush=True);sys.exit(0)',
+    'sys.exit(subprocess.run(["python3","-m","tools.runtime.management"],input=raw).returncode)',''].join('\n'));
+  await chmod(stub,0o700);
+  let child:ChildProcess|undefined;
+  const base=`http://127.0.0.1:${port}/api/plugins/nocheh`,headers={'X-Hermes-Session-Token':token,'Content-Type':'application/json'};
+  const post=async(path:string,body:unknown={})=>{const response=await fetch(base+path,{method:'POST',headers,body:JSON.stringify(body)});
+    return {status:response.status,body:await response.json() as any};};
+  const operations=async()=>(await readFile(seen,'utf8').catch(()=>'')).split('\n').filter(Boolean);
+  try {
+    const setup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from tools.operations.installation.configuration import initialize,write_env,env_path; s=Path(sys.argv[1]); v=initialize(s); write_env(env_path(s),v)",state],{cwd:resolve('.')});
+    assert.equal(setup.status,0,setup.stderr.toString());
+    await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),token);
+    child=spawn(process.execPath,[resolve('dist/src/management.js')],{env:{...process.env,NOCHEH_STATE_DIR:state,NOCHEH_DASHBOARD_PORT:String(port),NOCHEH_PYTHON:stub},stdio:'ignore'});
+    for(let i=0;;i++){try{if((await fetch(base+'/health',{headers})).ok)break;}catch{}if(i>300)throw Error('timed out');await new Promise(r=>setTimeout(r,30));}
+    const copying=post('/connections/github/copy',{repo:'example-org/widgets'});
+    for(let i=0;!(await operations()).includes('github.copy');i++){if(i>300)throw Error('the copy never started');await new Promise(r=>setTimeout(r,30));}
+    assert.deepEqual(await post('/connections/github/copy',{repo:'example-org/widgets'}),{status:409,body:{error:'job_busy'}},'one copy at a time');
+    assert.deepEqual(await post('/connections/github/list'),{status:409,body:{error:'job_busy'}});
+    // Remove and Disconnect reach github.py at once, whatever it answers here.
+    for(const action of ['remove','disconnect']) {
+      const answer=await post('/connections/github/'+action,action==='remove'?{repo:'example-org/widgets'}:{});
+      assert.ok(!['job_busy','wait_for_active_jobs'].includes(answer.body.error),action+': '+JSON.stringify(answer));
+      assert.ok((await operations()).includes('github.'+action),action);
+    }
+    assert.deepEqual(await post('/operations',{action:'backup'}),{status:409,body:{error:'wait_for_active_jobs'}},'no backup stops the app under a copy');
+    assert.ok(!(await operations()).includes('operations.run'));
+    await writeFile(release,'');
+    assert.deepEqual(await copying,{status:200,body:{state:'current'}});
+    assert.notEqual((await post('/connections/github/token',{token:'not-a-github-key'})).body.error,'job_busy','the lock is free again');
+  } finally {
+    if(child&&child.exitCode===null){const done=once(child,'exit');child.kill('SIGTERM');await done;}
+    await rm(state,{recursive:true,force:true});
+  }
 });

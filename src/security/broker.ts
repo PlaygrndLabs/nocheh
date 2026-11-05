@@ -82,7 +82,7 @@ export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBin
     ...(event.managed&&event.channel==='scheduler'&&typeof payload.job_id==='string'?{job:payload.job_id}:{})};
 }
 /** What a job request may be told to correct, as services/hermes/archive_tools.py JOB_ERRORS names it; any other refusal stays opaque. */
-const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long']);
+export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed']);
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
 async function refusalCode(response:Response,max=4096):Promise<string|null> {
   const chunks=[];let size=0;
