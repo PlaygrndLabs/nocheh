@@ -22,7 +22,8 @@ export async function advanceReactionEpoch(db:pg.PoolClient,deferredAt?:number):
   const epoch=Number(guard.epoch);
   // Any later epoch already invalidated what this reaction changed.
   if(deferredAt!==undefined&&epoch>deferredAt)return true;
-  if(await foregroundReplyActive(db,{generation:guard.generation,epoch,mode:guard.mode})) {
+  // A background job's run goes on across it (ADR-0208), so only replies, browser and scheduled runs hold it.
+  if(await foregroundReplyActive(db,{generation:guard.generation,epoch,mode:guard.mode},true)) {
     await requestWorkflow(db,'memory_review','reactions:'+epoch);return false;
   }
   const next=Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);

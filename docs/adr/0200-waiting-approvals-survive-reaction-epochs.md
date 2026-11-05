@@ -78,6 +78,15 @@ and an approved action that carries now also runs.
   so a new epoch during the check does not fail the action.
 </decision>
 
+<note date="2026-11-04">
+Extended by [ADR-0208](0208-running-jobs-carry-across-quiet-epochs.md): a background
+job's running run carries across quiet epochs too, by the same `carriesForward`, at
+the broker, the app server, its heartbeat, its delivery check and its receipt, and
+reactions and automatic learning no longer wait for it. An action such a run asks for
+is bound to the run's own binding and profile. Replies, browser and scheduled runs
+keep the exact binding.
+</note>
+
 <consequences>
 - Reactions in any chat and automatic learning no longer cancel waiting or approved
   actions, and an approved action then runs. The owner still approves the exact

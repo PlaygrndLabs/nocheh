@@ -12,7 +12,7 @@ import {AudienceRepository} from './audience.js';
 import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
 import type {SourceReference} from './archive.js';
-import type {GuardBinding} from './guards.js';
+import {afterEpoch,jobRun,type GuardBinding} from './guards.js';
 import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel} from '../graph-labels.js';
 import {ProjectRepository} from './projects.js';
 import type {RelationshipAudience} from './relationships.js';
@@ -77,7 +77,8 @@ export class SourceRepository {
     return {sources,complete:false as const};
   }
   /** Discover observed current reactions without guessing the target's words or ID. */
-  async currentReactions(principal:Reader,count=5) {
+  async currentReactions(principal:Reader,count=5){return afterEpoch(jobRun(principal),()=>this.currentReactionsOnce(principal,count));}
+  private async currentReactionsOnce(principal:Reader,count:number) {
     limit(count,5,10);
     const binding=principal.admin?null:await this.audience.assert(principal);
     const rows=(await this.stores.control.query(`SELECT event_id FROM reaction_states
@@ -124,7 +125,9 @@ export class SourceRepository {
     }
     return texts;
   }
-  async read(principal:Reader,id:string) {
+  // A job run's read runs again when an epoch it carries across commits meanwhile (ADR-0208).
+  async read(principal:Reader,id:string){return afterEpoch(jobRun(principal),()=>this.readOnce(principal,id));}
+  private async readOnce(principal:Reader,id:string) {
     const binding=principal.admin?null:await this.audience.assert(principal),reference=await this.permitted(principal,id,binding);
     const row=(await this.stores.archive.query('SELECT * FROM events WHERE id=$1',[id])).rows[0];
     let content:any={text:row.original_text?.toString()??null,payload:JSON.parse(row.payload.toString())},guardedRevision:number|null=null;
@@ -167,7 +170,8 @@ export class SourceRepository {
   }
 
   /** Archive search deliberately excludes transcripts, contexts and learned results. */
-  async search(principal:Reader,query:string,count=20,filters:ArchiveFilters={kind:'',scope:'',reply:''}) {
+  async search(principal:Reader,query:string,count=20,filters:ArchiveFilters={kind:'',scope:'',reply:''}){return afterEpoch(jobRun(principal),()=>this.searchOnce(principal,query,count,filters));}
+  private async searchOnce(principal:Reader,query:string,count:number,filters:ArchiveFilters) {
     string(query,2000);limit(count);if(!query.trim())throw new HttpError(400,'empty_query');
     const binding=principal.admin?null:await this.audience.assert(principal);
     const rows=await (binding?.mode==='on'?this.stores.derived.query(`SELECT s.event_id AS id,r.content FROM guard_sources s
@@ -213,7 +217,8 @@ export class SourceRepository {
     await this.allowPrepared(principal,hits);return hits;
   }
   /** Messages another index found, such as memory search by meaning, read back through the reader's own access. */
-  async found(principal:Reader,ids:string[],count:number) {
+  async found(principal:Reader,ids:string[],count:number){return afterEpoch(jobRun(principal),()=>this.foundOnce(principal,ids,count));}
+  private async foundOnce(principal:Reader,ids:string[],count:number) {
     const binding=principal.admin?null:await this.audience.assert(principal);
     const liveCopies=await this.access.retirements?.liveCopies(ids)??new Set<string>();
     const hits:{source:string;scope:string;kind:string;occurred_at:string|null;text:string;truncated?:true}[]=[];
@@ -266,7 +271,8 @@ export class SourceRepository {
   }
   /** `whole` reads a sealed job box's copy (job-box.ts): checked text only, without the page cuts, in bigger pages,
    *  without reaction updates; a message still being checked is left out and counted in `checking`. */
-  async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number;whole?:boolean}) {
+  async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number;whole?:boolean}){return afterEpoch(jobRun(principal),()=>this.pageOnce(principal,input));}
+  private async pageOnce(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number;whole?:boolean}) {
     const after=cursor(input.after),{chat,from,to,binding}=await this.conversation(principal,input),whole=!!input.whole;
     if(whole&&binding?.mode!=='on')throw new HttpError(409,'job_box_guard_off');
     const records=pageRecords,budget=whole?BOX_PAGE_BUDGET:PAGE_BUDGET;

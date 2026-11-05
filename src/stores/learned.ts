@@ -129,8 +129,9 @@ export class LearnedMemoryRepository {
       const changed=versions.some(v=>v.expected_revision!==null);
       // Automatic reinterpretation can wait until an admitted reply finishes, and until a running
       // approved action has run: its start and its executor's checks refuse while a publication is pending.
+      // A background job's run goes on across it and waits out the publication (ADR-0208).
       // Owner corrections and source/privacy revocations use their immediate paths.
-      if(versions.length&&(await foregroundReplyActive(db,binding)||
+      if(versions.length&&(await foregroundReplyActive(db,binding,true)||
         (await db.query("SELECT 1 FROM controlled_actions WHERE state='running' AND lease_until>now() LIMIT 1")).rowCount))
         throw new HttpError(409,'learning_publication_pending');
       const epoch=changed?Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch):Number(state.epoch);

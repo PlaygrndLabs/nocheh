@@ -127,6 +127,13 @@ that. /chat is filled once, when a run starts; a run after one that ended abnorm
 gets a new box.
 </note>
 
+<note date="2026-11-04">
+Extended by [ADR-0208](0208-running-jobs-carry-across-quiet-epochs.md): a job's run
+goes on across reaction epochs and automatic learning revisions, which no longer wait
+for it, so its box stays for the whole run under the same rule. Any other change
+still ends the run, and its box with it.
+</note>
+
 <consequences>
 - A job can search and compute over a whole chat without a card for each command.
   Group text can steer those commands, but they run with no internet and no keys,

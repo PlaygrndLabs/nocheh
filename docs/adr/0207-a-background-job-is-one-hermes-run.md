@@ -130,6 +130,16 @@ model call; a running job's card has a Stop button. Supersedes the chain of step
   tester can drive long runs, Stop, a killed turn and both limits.
 </decision>
 
+<note date="2026-11-04">
+Amended by [ADR-0208](0208-running-jobs-carry-across-quiet-epochs.md): a running job
+run carries across reaction epochs and automatic learning revisions, and they no
+longer wait for it. Approved knowledge changes, deferred owner commands that carry a
+binding and memory sharing grants still wait, and any other epoch still ends the run.
+A relaunch keeps the last run's binding while it carries to the current one, so after
+only quiet epochs it also reloads its history and gets the resume line. The restart
+text now follows only a change that is not quiet, so it no longer shows the to-do list.
+</note>
+
 <alternatives>
 - **Hermes Kanban.** Rejected for now. Its stock worker runs the agent in Hermes's
   own container, which ADR-0029 forbids; its start hook is a parameter, not a

@@ -182,7 +182,8 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
     assert.equal(Number((await stores.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count),0,'the slots are free');
 
     // After a change that is not quiet, a relaunch starts over with the first message and no to-do list; after quiet epochs
-    // only, it gets the last one. A job is relaunched at most twice.
+    // only, it keeps the earlier run's binding, so Hermes reloads its history, and gets the resume line (ADR-0208). A job is
+    // relaunched at most twice.
     const restarted=await approved('Restart check'),first=await claim(restarted);
     await beat(first,{tokens:counts(1000),unknown_calls:0,todo});await finish(first,'failed');
     const copy=await s.guards.read('events:'+note.id,await s.guards.state());
@@ -195,7 +196,8 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
     await react();
     await tick(restarted);
     const third=await claim(restarted);
-    assert.match(third.text,/\n\nThis job restarted and its earlier work could not be kept\.\nYour last to-do list was: Check the made-up invoice \(pending\)$/);
+    assert.equal(third.text,resumed('Restart check'));
+    assert.deepEqual([third.context.revision,third.context.generation],[second.context.revision,second.context.generation],'the binding of the run before');
     await finish(third,'failed');
     assert.equal((await tick(restarted)).state,'failed');
     assert.deepEqual([(await job(restarted)).error_code,(await job(restarted)).attempts],['model_unavailable',3]);

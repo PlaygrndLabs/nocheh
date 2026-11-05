@@ -121,15 +121,24 @@ minutes in one go, and bigger work becomes several jobs that the agent splits it
 at 80% of its cost or time limit the agent is warned so it writes its report, and at
 the limit Nocheh stops it and sends a short note of what is done and left, from its
 last to-do list and with no model call; a running job's card has a Stop button.
-Choice 2, reactions and learning updating while a job runs, is the next piece; until
-then they wait while a run runs, at most about 55 minutes. Built in source: one
+Choice 2 (owner, 2026-11-04): reactions and automatic learning keep updating while a
+job runs, and its run carries across them; other changes still wait for the run or
+end it, and a relaunch after only quiet epochs keeps its history
+([ADR-0208](docs/adr/0208-running-jobs-carry-across-quiet-epochs.md),
+[stores](test/store-background-job-carry.test.ts), fake Telegram:
+`background_job_reaction_during_run` and `background_job_restart`, whose case (b) now
+resumes and whose case (c) restarts after a hide). Pending for choice 2: run both
+scenarios on the fake Telegram, and measure on the owner's installation, with a long
+job in a busy group, the secret-check cost of re-checking a carried run's resent
+history in each new epoch (ADR-0208). Built in source: one
 sealed run per job with per-call cost counting, both notices, the limit note, at most
 two relaunches with a resume or restart message, and Stop on the card
 ([ADR-0207](docs/adr/0207-a-background-job-is-one-hermes-run.md),
 [stores](test/store-background-job-runs.test.ts), [turn](services/hermes/test_job_progress.py),
 [fake Telegram](tools/acceptance/product_scenarios.py): `background_job_long_run`,
 `background_job_cost_cap`, `background_job_time_limit`, `background_job_stop_button`,
-`background_job_restart`). Not yet run on the fake Telegram or with a real model.
+`background_job_restart`). Neither ADR-0207's nor ADR-0208's scenarios have been run
+on the fake Telegram or with a real model yet.
 Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
 Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
 if replies stay the same and it is not less efficient): no Anthropic call was cached,

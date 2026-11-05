@@ -35,6 +35,7 @@ import {telegramDirectory} from './telegram-directory.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
+import {afterPending,jobRun} from './guards.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -131,7 +132,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     // Owners can inspect and repair incomplete guard changes; scoped callers
     // must observe the complete current authorization generation on every call.
-    if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
+    // A job's run waits out a publication still pending first (ADR-0208).
+    if(!principal.admin)await afterPending(jobRun(principal),async()=>{await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);});
     if(req.method==='GET'&&path==='/v1/entities')return json(res,200,await s.entities.list(principal,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
       after:url.searchParams.get('after')??'',state:url.searchParams.get('state')??'active'}));
     const entityHistory=path.match(/^\/v1\/entities\/claims\/([a-f0-9]{64})\/history$/);
