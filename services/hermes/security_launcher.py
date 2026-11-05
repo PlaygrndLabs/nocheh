@@ -4,12 +4,14 @@ import hashlib
 import hmac
 import http.client
 import json
+import math
 import os
 import re
 import secrets
 import select
 import signal
 import socket
+import stat
 import sys
 import threading
 import time
@@ -114,8 +116,8 @@ BOXES={}
 ABNORMAL=set()
 # Box listing, creation and removal, and creating a turn that mounts a box, never interleave.
 BOX_LOCK=threading.Lock()
-# Seconds from a turn request to its box being made and /chat filled; the turn starts then even if the copy
-# is incomplete, so the binding, the box and the fill stay well within security_client's 235 s wait for headers.
+# Seconds from a turn request to its box being made, /chat filled and the wait for /repo; the turn starts then even if
+# either copy is incomplete, so the binding, the box and the fill stay well within security_client's 235 s wait for headers.
 FILL_SECONDS=120
 # The end of that time is kept for writing the last page read, so the manifest a turn reads counts every part.
 WRITE_SECONDS=10
@@ -123,6 +125,34 @@ WRITE_SECONDS=10
 RUNNING_JOBS=2
 # The broker's own cap on a /v1/box/chat page.
 PAGE_BYTES=8*1024*1024
+# A job's GitHub copy in its box's /repo (ADR-0209). Same numbers and patterns as github.py, repo_fetch.py, box_repo.py
+# and background-jobs.ts; a parity test reads them.
+MAX_BUNDLE=64*1024**2
+REPO_ROOM=256*1024**2
+REPO_INODES=65536
+# A repo box's extra memory: /repo's pages, its inodes, and the writer's git beside the job's commands.
+REPO_MEMORY=512*1024**2
+REPO_UID=65531
+# The most a writer may take; its writer time ends REPO_MARGIN before the run's hard deadline, so a copy lands while
+# box tools still start (job_box.py's MARGIN+FLOOR). With less than REPO_FLOOR of it, no bundle is sent.
+WRITER_SECONDS=600
+REPO_MARGIN=60
+REPO_FLOOR=60
+# How long past the writer time the launcher waits for the writer's exec to end.
+REPO_GRACE=15
+# Sends of the bundle into one box, within one copy thread.
+REPO_TRIES=2
+REPO_NAME=re.compile(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}')
+REPO_BRANCH=re.compile(r'[A-Za-z0-9._/-]{1,255}')
+COMMIT=re.compile(r'[a-f0-9]{40}')
+DIGEST=re.compile(r'[a-f0-9]{64}')
+REPO_KEYS=frozenset({'name','branch','commit','digest','bytes','need'})
+# The pinned bundles, read-only; the launcher opens only the one a binding names.
+REPO_COPIES='/repo-copies'
+REPO_TMPFS=f'rw,noexec,nosuid,nodev,size={REPO_ROOM//1024**2}m,nr_inodes={REPO_INODES},uid={REPO_UID},gid={REPO_UID},mode=0755'
+REPO_WRITER=['python3','-I','/opt/box/box_repo.py']
+# Guards each box's repo entry: its state, its sends and its copy thread.
+REPO_LOCK=threading.Lock()
 
 def box_limit():
     limit=parallel('NOCHEH_BOX_LIMIT',2)
@@ -159,11 +189,28 @@ def box_labels(box):
     return {'nocheh.role':'job-box','nocheh.box.network':agent_network(),'nocheh.box.job':job,'nocheh.box.generation':generation,'nocheh.box.mode':mode,
             'nocheh.box.valid_from':str(epoch),'nocheh.box.expires':expires}
 
-def box_spec(image,gid,name,labels):
+def repo_name(value):
+    return type(value) is str and bool(REPO_NAME.fullmatch(value)) and value.split('/')[1] not in ('.','..') and not value.endswith('.git')
+
+def repo_branch(value):
+    # '@{' needs no check: neither character is in the class.
+    return type(value) is str and bool(REPO_BRANCH.fullmatch(value)) and not re.search(r'\.\.|//|^[-/.]|[/.]$|\.lock$',value)
+
+def box_repo(box):
+    """The GitHub copy a binding's box holds, or None; a malformed one means no box."""
+    if 'repo' not in box:return None
+    repo=box['repo']
+    if not (isinstance(repo,dict) and set(repo)==REPO_KEYS and repo_name(repo['name']) and repo_branch(repo['branch'])
+            and type(repo['commit']) is str and COMMIT.fullmatch(repo['commit']) and type(repo['digest']) is str and DIGEST.fullmatch(repo['digest'])
+            and type(repo['bytes']) is int and 0<repo['bytes']<=MAX_BUNDLE and type(repo['need']) is int and 0<repo['need']<=REPO_ROOM):
+        raise ValueError('invalid_job_box')
+    return repo
+
+def box_spec(image,gid,name,labels,repo=False):
     if not re.fullmatch(r'sha256:[a-f0-9]{64}',image):raise ValueError('pinned_box_image_required')
     if not BOX_NAME.fullmatch(name):raise ValueError('invalid_job_box')
     if not (type(gid) is int and gid>0):raise ValueError('unprivileged_identity_required')
-    return {'Image':image,'User':'65532:65532','Cmd':['python3','-I','/opt/box/box_server.py'],
+    spec={'Image':image,'User':'65532:65532','Cmd':['python3','-I','/opt/box/box_server.py'],
       'Env':[f'NOCHEH_BOX_GID={gid}','PATH=/usr/local/bin:/usr/bin:/bin','LANG=C.UTF-8','HOME=/work'],'Labels':labels,
       'HostConfig':{'NetworkMode':'none','ReadonlyRootfs':True,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],
         'GroupAdd':[str(gid)],'Init':True,'PidsLimit':128,'Memory':1024**3,'MemorySwap':1024**3,'NanoCpus':10**9,
@@ -178,6 +225,12 @@ def box_spec(image,gid,name,labels):
                  '/chat':'rw,noexec,nosuid,nodev,size=128m,uid=65533,gid=65533,mode=0755'},
         # The socket volume is the box's only mount: turns, as NOCHEH_GID, reach the socket and nothing else.
         'Mounts':[{'Type':'volume','Source':name,'Target':'/run/box','ReadOnly':False}]}}
+    if repo:
+        # The copy belongs to the writer's uid 65531: box commands can read it but never change it. Its pages and
+        # inodes count against the box's memory, which grows by REPO_MEMORY.
+        spec['HostConfig']['Tmpfs']['/repo']=REPO_TMPFS
+        spec['HostConfig']['Memory']=spec['HostConfig']['MemorySwap']=1024**3+REPO_MEMORY
+    return spec
 
 def volume_spec(name,gid,labels):
     # Box commands own the volume's root, so nothing they put there may run, be a device or carry setuid in the turn.
@@ -243,37 +296,52 @@ def sweeper(interval=15,outage=120,stopped=None):
     while not stopped.wait(interval):
         with contextlib.suppress(Exception):sweep(live)
 
+def exec_stdin(identifier,command,user,source,until):
+    """Runs a fixed command in a box as `user` with no added environment and `source` (bytes, or a binary file sent
+    in 1 MiB chunks) only on stdin. Returns its exit code once it ended by `until`, else None; never kills it."""
+    execution=docker('POST','/containers/'+identifier+'/exec',{'User':user,'WorkingDir':'/','Env':[],'Cmd':command,
+        'AttachStdin':True,'AttachStdout':True,'AttachStderr':True,'Tty':False})['Id']
+    client=DockerConnection();client.timeout=max(.1,until-time.monotonic());writer=None;sane=True
+    try:
+        client.request('POST','/v1.41/exec/'+execution+'/start',body=json.dumps({'Detach':False,'Tty':False}),
+                       headers={'Content-Type':'application/json','Connection':'Upgrade','Upgrade':'tcp'})
+        response=client.getresponse()
+        if response.status!=101:raise RuntimeError('box_exec_failed')
+        def write():
+            # From a thread: the command may stop reading early, and a blocked send must not hold the stream.
+            with contextlib.suppress(OSError):
+                if isinstance(source,bytes):client.sock.sendall(source)
+                else:
+                    while chunk:=source.read(1<<20):client.sock.sendall(chunk)
+                client.sock.shutdown(socket.SHUT_WR)
+        writer=threading.Thread(target=write,daemon=True);writer.start();size=0
+        try:
+            while header:=response.fp.read(8):
+                if len(header)!=8 or header[0] not in (1,2):sane=False;break
+                length=int.from_bytes(header[4:8],'big');size+=length
+                if size>64*1024 or len(response.fp.read(length))!=length:sane=False;break
+        except OSError:pass  # The stream ended; the exec's own state says how the command ended.
+    finally:
+        with contextlib.suppress(Exception):client.sock.shutdown(socket.SHUT_RDWR)
+        client.close()
+        if writer:writer.join(5)
+    # Output that is not the command's own framing, or more of it than these commands write, gives no exit code.
+    if not sane:return None
+    state=docker('GET','/exec/'+execution+'/json')
+    while state.get('Running') and time.monotonic()<until:
+        time.sleep(.05);state=docker('GET','/exec/'+execution+'/json')
+    return None if state.get('Running') else state.get('ExitCode')
+
 def put(identifier,name,data,until):
     """Writes one /chat file through box_put: a fixed command as uid 65533 with no added environment,
     the chat bytes only on stdin, and the file kept only if box_put saw every byte. Never runs past until."""
     if time.monotonic()>=until:raise RuntimeError('box_fill_failed')
     command=['python3','-I','/opt/box/box_put.py',name,str(len(data)),hashlib.sha256(data).hexdigest()]
-    execution=docker('POST','/containers/'+identifier+'/exec',{'User':'65533:65533','WorkingDir':'/','Env':[],'Cmd':command,
-        'AttachStdin':True,'AttachStdout':True,'AttachStderr':True,'Tty':False})['Id']
-    client=DockerConnection();client.timeout=max(.1,until-time.monotonic());writer=None
-    try:
-        client.request('POST','/v1.41/exec/'+execution+'/start',body=json.dumps({'Detach':False,'Tty':False}),
-                       headers={'Content-Type':'application/json','Connection':'Upgrade','Upgrade':'tcp'})
-        response=client.getresponse()
-        if response.status!=101:raise RuntimeError('box_fill_failed')
-        def write():
-            # From a thread: box_put may stop reading early, and a blocked send must not hold the fill.
-            with contextlib.suppress(OSError):client.sock.sendall(data);client.sock.shutdown(socket.SHUT_WR)
-        writer=threading.Thread(target=write,daemon=True);writer.start();size=0
-        while header:=response.fp.read(8):
-            if len(header)!=8 or header[0] not in (1,2):raise RuntimeError('box_fill_failed')
-            length=int.from_bytes(header[4:8],'big');size+=length
-            if size>64*1024 or len(response.fp.read(length))!=length:raise RuntimeError('box_fill_failed')
-    finally:
-        with contextlib.suppress(Exception):client.sock.shutdown(socket.SHUT_RDWR)
-        client.close()
-        if writer:writer.join(5)
-    state=docker('GET','/exec/'+execution+'/json')
-    while state.get('Running') and time.monotonic()<until:
-        time.sleep(.05);state=docker('GET','/exec/'+execution+'/json')
+    try:code=exec_stdin(identifier,command,'65533:65533',data,until)
+    except RuntimeError:raise RuntimeError('box_fill_failed') from None
     # box_put's FULL: /chat has no room for the file.
-    if not state.get('Running') and state.get('ExitCode')==4:raise RuntimeError('box_chat_full')
-    if state.get('Running') or state.get('ExitCode')!=0:raise RuntimeError('box_fill_failed')
+    if code==4:raise RuntimeError('box_chat_full')
+    if code!=0:raise RuntimeError('box_fill_failed')
 
 def manifest(state):
     return json.dumps({k:state[k] for k in ('complete','next','parts','records','checking','full')}).encode()
@@ -326,10 +394,72 @@ def fill(identifier,credential,gone,until):
         # Full only once the manifest says so; until then a later run reads the page again and finds no room again.
         state.update(complete=False,pending=None);put(identifier,'manifest.json',manifest({**state,'full':True}),until);state['full']=True
 
-def prepare_box(box,credential,gone,limit,until):
+def repo_deadline(deadline,labels):
+    """The run's hard deadline in epoch seconds, from the trusted turn request, capped at the box's expiry."""
+    end=expiry(labels['nocheh.box.expires'])
+    return min(deadline if type(deadline) in (int,float) and math.isfinite(deadline) else end,end)
+
+def repo_state(identifier,state=None):
+    """A box's repo state, set to `state` when given; None once the box is gone."""
+    with REPO_LOCK:
+        entry=(BOXES.get(identifier) or {}).get('repo')
+        if entry is None:return None
+        if state is not None:entry['state']=state
+        return entry['state']
+
+def fill_repo(identifier,repo,hard):
+    """Copies the pinned bundle into the box's /repo through box_repo, as uid 65531. Runs in its own thread beside
+    the /chat fill, and may finish beside the run: its writer time ends REPO_MARGIN before the run's hard deadline."""
+    fixed=[repo['name'],repo['branch'],repo['commit']];bundle=None
+    def fail(reason):exec_stdin(identifier,[*REPO_WRITER,'fail',*fixed,reason],f'{REPO_UID}:{REPO_UID}',b'',time.monotonic()+REPO_GRACE)
+    try:
+        while True:
+            seconds=min(WRITER_SECONDS,int(hard-time.time())-REPO_MARGIN)
+            if seconds<REPO_FLOOR:fail('timeout');repo_state(identifier,'failed');return
+            if bundle is None:
+                try:
+                    bundle=open(os.open(os.path.join(REPO_COPIES,repo['digest']+'.bundle'),os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC),'rb')
+                    status=os.fstat(bundle.fileno())
+                    kept=stat.S_ISREG(status.st_mode) and status.st_size==repo['bytes']
+                except OSError:kept=False
+                # Removed, restored without its file, or never mounted: the job reads that the copy is missing.
+                if not kept:fail('missing');repo_state(identifier,'failed');return
+            else:bundle.seek(0)
+            code=exec_stdin(identifier,[*REPO_WRITER,'copy',*fixed,str(repo['bytes']),str(repo['need']),repo['digest'],str(seconds)],
+                            f'{REPO_UID}:{REPO_UID}',bundle,time.monotonic()+seconds+REPO_GRACE)
+            # An earlier writer still holds the lock and ends by its own writer time; a later request may retry.
+            if code==5:repo_state(identifier,'pending');return
+            with REPO_LOCK:
+                entry=(BOXES.get(identifier) or {}).get('repo')
+                if entry is None:return
+                entry['tries']+=1;tries=entry['tries']
+            if code==0:repo_state(identifier,'ready');return
+            if code==3 and tries<REPO_TRIES:continue
+            if code in (2,4,6,7):repo_state(identifier,'failed');return
+            fail('bytes' if code==3 else 'timeout');repo_state(identifier,'failed');return
+    except Exception:pass  # The manifest says how the copy ended.
+    finally:
+        if bundle:bundle.close()
+        # Nothing retries a copy within this run, so one that ended without a verdict failed.
+        if repo_state(identifier)=='copying':
+            with contextlib.suppress(Exception):fail('timeout')
+            repo_state(identifier,'failed')
+
+def start_repo(identifier,repo,hard):
+    """Starts the box's copy thread unless the copy already ran or runs; returns the thread to wait for, or None."""
+    with REPO_LOCK:
+        entry=(BOXES.get(identifier) or {}).get('repo')
+        if entry is None:return None
+        if entry['state']=='copying' and entry['thread'] and entry['thread'].is_alive():return entry['thread']
+        if entry['state']!='pending':return None
+        entry['state']='copying';entry['thread']=threading.Thread(target=fill_repo,args=(identifier,repo,hard),daemon=True)
+        entry['thread'].start();return entry['thread']
+
+def prepare_box(box,credential,gone,limit,until,deadline=None):
     """Reuses the job's box when this launcher filled it under the binding's guard state, else replaces it; then
-    fills /chat. All of it ends by `until`. Returns the box's container Id and name (also its socket volume's name)."""
-    labels=box_labels(box);box_token()
+    starts the copy of its GitHub copy, if any, and fills /chat. All of it ends by `until`; a longer copy goes on
+    beside the run. Returns the box's container Id and name (also its socket volume's name)."""
+    labels=box_labels(box);repo=box_repo(box);box_token()
     if expiry(labels['nocheh.box.expires'])<=time.time():raise ValueError('job_box_expired')
     with BOX_LOCK:
         found,_=boxes();mine=[c for c in found if c['Labels'].get('nocheh.box.job')==labels['nocheh.box.job']]
@@ -350,19 +480,25 @@ def prepare_box(box,credential,gone,limit,until):
             # The image is resolved at every create, so a box never runs a tag that moved since startup.
             image=docker('GET','/images/'+box_image()+'/json')['Id']
             name='nocheh-box-'+secrets.token_hex(12);gid=int(os.environ['NOCHEH_GID']);identifier=None
-            spec=box_spec(image,gid,name,labels)
+            spec=box_spec(image,gid,name,labels,repo=repo is not None)
             docker('POST','/volumes/create',volume_spec(name,gid,labels))
             try:
                 identifier=docker('POST','/containers/create?name='+name,spec)['Id']
                 docker('POST','/containers/'+identifier+'/start')
             except Exception:
                 remove_box(identifier or name,name);raise
-            BOXES[identifier]={'complete':False,'next':None,'parts':0,'records':0,'checking':0,'full':False,'seen':set(),'pending':None}
+            BOXES[identifier]={'complete':False,'next':None,'parts':0,'records':0,'checking':0,'full':False,'seen':set(),'pending':None,
+                               'repo':{'state':'pending','tries':0,'thread':None} if repo else None}
             ABNORMAL.discard(labels['nocheh.box.job'])
+    copying=None
+    if repo:
+        with contextlib.suppress(Exception):copying=start_repo(identifier,repo,repo_deadline(deadline,labels))
     try:
         if not reuse:put(identifier,'manifest.json',manifest(BOXES[identifier]),until)
         fill(identifier,credential,gone,until)
     except Exception:pass  # The manifest says how much of the copy arrived.
+    # The turn starts once /chat and /repo are both done, or at `until`; /repo/manifest.json says copying until then.
+    if copying and not gone():copying.join(max(0,until-time.monotonic()))
     return identifier,name
 
 def exit_code(identifier):
@@ -449,7 +585,8 @@ class Handler(BaseHTTPRequestHandler):
             if boxed:
                 # Without its box the turn stops with job_box_unavailable before its agent runs.
                 with contextlib.suppress(Exception):
-                    box=prepare_box(binding['box'],credential,lambda:peer_closed(self.connection),self.server.box_limit,started+FILL_SECONDS)
+                    box=prepare_box(binding['box'],credential,lambda:peer_closed(self.connection),self.server.box_limit,started+FILL_SECONDS,
+                                    body.get('turn_deadline_epoch'))
             with BOX_LOCK if box else contextlib.nullcontext():
                 # A box the sweep removed meanwhile is not mounted; Docker would recreate its volume empty.
                 if box and not running(box[0]):box=None
@@ -497,6 +634,11 @@ def box_problems():
     except Exception:problems.append(f'the image {box_image()} is missing (./bin/nocheh up, ./bin/nocheh build or make dev builds it)')
     return problems
 
+def repo_problems(mounted):
+    """What stops GitHub copies in boxes, for one startup line; boxes without a copy still work."""
+    if any(m.get('Destination')==REPO_COPIES for m in mounted):return []
+    return ['the GitHub copies folder is not mounted at '+REPO_COPIES+' (./bin/nocheh up adds it)']
+
 def main():
     network=agent_network();limit=box_limit()
     description=docker('GET','/networks/'+network)
@@ -505,12 +647,15 @@ def main():
     mounted=docker('GET','/containers/'+socket.gethostname()+'/json')['Mounts']
     inventory=next((m for m in mounted if m['Destination']=='/profiles' and m['Type']=='bind' and not m['RW']),None)
     if not inventory:raise RuntimeError('readonly_profile_inventory_required')
+    copies=next((m for m in mounted if m['Destination']==REPO_COPIES),None)
+    if copies and not (copies['Type']=='bind' and not copies['RW']):raise RuntimeError('readonly_repo_copies_required')
     # Remove orphaned turns from a previous launcher instance. Never restart them.
     for container in docker('GET','/containers/json?all=true'):
         if container.get('Labels',{}).get('nocheh.role')=='isolated-turn' and network in container.get('NetworkSettings',{}).get('Networks',{}):docker('DELETE','/containers/'+container['Id']+'?force=true')
     # This installation's boxes from a previous instance too: their fill state is gone with it.
     sweep(lambda:{})
     if problems:=box_problems():print('security-launcher: no sealed job boxes: '+'; '.join(problems),file=sys.stderr,flush=True)
+    if problems:=repo_problems(mounted):print('security-launcher: no GitHub copies in boxes: '+'; '.join(problems),file=sys.stderr,flush=True)
     server=ThreadingHTTPServer(('0.0.0.0',8787),Handler);server.image=image;server.network=network;server.host_profiles=inventory['Source']
     server.box_limit=limit
     threading.Thread(target=sweeper,daemon=True).start()
