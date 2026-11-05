@@ -7,6 +7,7 @@
 import {useState} from 'react';
 import {Copy, ExternalLink, RefreshCw, Trash2, Unplug} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
+import {offersDisconnect} from '../../lib/github';
 import {refreshResources, useResource} from '../../lib/resource';
 import {ago, dateTime} from '../../lib/system-format';
 import {
@@ -273,7 +274,7 @@ export function GithubConnection() {
                     <ExternalLink aria-hidden /> Open GitHub
                   </a>
                 </Button>
-                {data.reconnect && (
+                {offersDisconnect(data) && (
                   <Button variant="ghost" busy={busy === 'disconnect'} onClick={() => void disconnect()}>
                     <Unplug aria-hidden /> Disconnect
                   </Button>
