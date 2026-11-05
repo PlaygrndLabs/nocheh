@@ -7,7 +7,7 @@
 import {useState} from 'react';
 import {Copy, ExternalLink, RefreshCw, Trash2, Unplug} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
-import {offersDisconnect} from '../../lib/github';
+import {copyingRow, offersDisconnect} from '../../lib/github';
 import {refreshResources, useResource} from '../../lib/resource';
 import {ago, dateTime} from '../../lib/system-format';
 import {
@@ -216,6 +216,12 @@ export function GithubConnection() {
     named.set(key, {...(named.get(key) ?? {name: copy.repo}), copy});
   }
   const rows = [...named.values()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  // A Copy of a name with no row yet shows its progress by the field it was typed in.
+  const copyingName = copyingRow(
+    copying,
+    rows.map(row => row.name),
+  );
+  const copyingElsewhere = copying !== null && copyingName === null;
   const connectedAt = isoOf(data.connected_at);
 
   return (
@@ -320,7 +326,7 @@ export function GithubConnection() {
                         )}
                       </p>
                       <p className="text-[13px] text-muted">
-                        {copying === row.name
+                        {copyingName === row.name
                           ? 'Copying… this can take a few minutes'
                           : !saved
                             ? 'Not copied'
@@ -334,7 +340,7 @@ export function GithubConnection() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          busy={copying === row.name}
+                          busy={copyingName === row.name}
                           disabled={!!copying}
                           onClick={() => void copy(row.name, !!saved?.missing)}
                         >
@@ -378,10 +384,13 @@ export function GithubConnection() {
                   className="min-w-0 flex-1 basis-48"
                   onChange={event => setOther(event.target.value)}
                 />
-                <Button type="submit" variant="secondary" disabled={!other.trim() || !!copying}>
+                <Button type="submit" variant="secondary" busy={copyingElsewhere} disabled={!other.trim() || !!copying}>
                   Copy
                 </Button>
               </form>
+              {copyingElsewhere && (
+                <p className="basis-full text-right text-[13px] text-muted">Copying… this can take a few minutes</p>
+              )}
             </div>
           )}
         </div>
