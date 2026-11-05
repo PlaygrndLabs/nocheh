@@ -62,9 +62,11 @@ export class DerivedRepository {
     }
     const id=digest(`derivative:${input.operation_id}`),contentHash=digest(input.content),configurationHash=digest(canonical(input.configuration));
     const provenance={...input.provenance,source:input.source,...(input.file?{file:input.file}:{}),...(input.parents?{parents:input.parents}:{}),configuration:input.configuration};
+    // The id derives from the operation id, so two concurrent writes of one operation meet on both unique keys. A conflict
+    // target would turn the primary key's conflict into an error, so any conflict is left to the identity check below.
     await db.query(`INSERT INTO derived_artifacts(id,event_id,artifact_id,kind,content,content_hash,provenance,
       source_revision,input_hash,producer,producer_version,configuration_hash,operation_id,search_text,operation_reference)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT(operation_id) DO NOTHING`,
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
     [id,original?.id??null,input.file?.id??null,input.kind,input.content,contentHash,JSON.stringify(provenance),original?.revision??'0',
       inputHash,input.producer,input.producer_version,configurationHash,input.operation_id,input.content.toString('utf8').replaceAll('\0',''),
       original?null:JSON.stringify(input.source)]);
