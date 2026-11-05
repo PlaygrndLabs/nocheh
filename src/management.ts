@@ -121,6 +121,11 @@ async function exclusive<T>(id: string, run: () => Promise<T>): Promise<T> {
   if (locked.has(id)) throw new HttpError(409, 'job_busy');
   locked.add(id); try { return await run(); } finally { locked.delete(id); }
 }
+/** Whether a backup, restore or restart must wait: one already runs, a child process works for an import or an apply,
+ *  or a GitHub copy or refresh runs, whose fetcher a stopped app would leave behind (ADR-0209). */
+export function operationBlocked(state:{busy:boolean;active:number;locked:ReadonlySet<string>}):boolean {
+  return state.busy||state.active>0||state.locked.has('github-connection');
+}
 const runningTasks = new Set<Promise<void>>();
 const maintenance=new ManagementMaintenance();
 function launch(job: Job, body: Record<string, unknown>, coordinator?:string) {
@@ -226,7 +231,7 @@ export async function startManagement() {
   /** Starts an enumerated operation; callers hold the writer-start lock. `request` is the
    * caller's own admitted request, which a backup's drain must not wait for. */
   async function startOperation(action:string,options:unknown,request:symbol,automatic=false):Promise<Job> {
-    if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
+    if(operationBlocked({busy:operationBusy,active:active.size,locked}))throw new HttpError(409,'wait_for_active_jobs');
     operationBusy=true;
     let coordinator:string|undefined,job:Job|undefined;
     try {job=await newJob('operations.'+action);job.state='running';if(automatic)job.automatic=true;await putJob(job);
@@ -343,6 +348,16 @@ export async function startManagement() {
       if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
+      // The owner's GitHub key and the copies background jobs may read (ADR-0209). The key travels only in a POST body
+      // and never comes back. A key, a copy, a list and the hourly check run one at a time. Remove and Disconnect never
+      // wait for them: github.py's short file lock and the store order them with a copy that is still running.
+      if(req.method==='GET'&&route==='/connections/github')return json(res,200,await python({operation:'github.status'}));
+      const github=route.match(/^\/connections\/github\/(token|copy|list|remove|disconnect)$/)?.[1];
+      if(req.method==='POST'&&github){
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        const run=async()=>json(res,200,await python({operation:'github.'+github,request:object(await readJson(req))}));
+        return github==='remove'||github==='disconnect'?run():exclusive('github-connection',run);
+      }
       // The mini app's password. The owner sets it here; the mini app service signs in and
       // checks its sessions through the same routes.
       // The owner's password, from a signed-in browser only.
@@ -518,9 +533,10 @@ export async function startManagement() {
   // waits for the next check; the schedule records each start, so a failure is not retried
   // until the next day.
   const automaticBackup=async()=>{
-    if(stopping||operationBusy||active.size||maintenance.active||locked.has('writer-start'))return;
+    const blocked=()=>operationBlocked({busy:operationBusy,active:active.size,locked});
+    if(stopping||maintenance.active||locked.has('writer-start')||blocked())return;
     if(object(await python({operation:'backups.due'})).due!==true)return;
-    await exclusive('writer-start',async()=>{if(!stopping&&!operationBusy&&!active.size)await startOperation('backup',{},Symbol('schedule'),true);});
+    await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('backup',{},Symbol('schedule'),true);});
   };
   const schedule=setInterval(()=>void automaticBackup().catch(()=>{}),5*60*1000);schedule.unref();
   // Every two minutes, new or worse problems go to the owner's private chat. Backups, restores
@@ -531,8 +547,14 @@ export async function startManagement() {
     checkingProblems=true;
     void python({operation:'problems.check'}).catch(()=>{}).finally(()=>{checkingProblems=false;});
   },2*60*1000);problemCheck.unref();
+  // Every hour, each GitHub copy is copied again when its branch moved (owner decision D1). A key, copy or check still
+  // running, a backup, a restore or an apply skips the hour.
+  const githubCheck=setInterval(()=>{
+    if(stopping||operationBusy||maintenance.active||locked.has('github-connection'))return;
+    void exclusive('github-connection',()=>python({operation:'github.refresh'})).catch(()=>{});
+  },60*60*1000);githubCheck.unref();
   const stop = () => {
-    if(stopping)return;stopping=true;clearInterval(schedule);clearInterval(problemCheck);
+    if(stopping)return;stopping=true;clearInterval(schedule);clearInterval(problemCheck);clearInterval(githubCheck);
     live.closeAll();
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
