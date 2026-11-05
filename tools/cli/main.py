@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, DEFAULT_STATE, INSTALLATION_ROOT
+from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, DEFAULT_STATE, INSTALLATION_ROOT
 
 ROOT = REPO_ROOT
 STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
@@ -31,6 +31,8 @@ def development_box_token():
     from tools.development.live_dev import operating_root, operating_config
     root = operating_root(); operating_config(root); path = root / '.env'; saved = read_env(path)
     if not saved.get('NOCHEH_BOX_TOKEN'): write_env(path, generate(saved, ('NOCHEH_BOX_TOKEN',)))
+    # The launcher's read-only bind of the GitHub copies: made here at 0700, so Docker never makes it as root.
+    (root / 'data/local').mkdir(parents=True, exist_ok=True, mode=0o700); github_folders(root / 'data/local')
 
 
 def run_isolated_tests(rest):

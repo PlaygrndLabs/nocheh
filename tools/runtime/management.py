@@ -172,6 +172,18 @@ def dispatch(body):
         if operation == 'notion.finish': return notion.finish(state, request.get('code'), request.get('state'))
         if operation == 'notion.token': return notion.save_token(state, request.get('token'))
         if operation == 'notion.disconnect': return notion.disconnect(state)
+    if operation.startswith('github.'):
+        # The owner's GitHub key and the copies box jobs may read; no answer ever carries the key.
+        from tools.operations.connections import github
+        request = body.get('request') or {}
+        if operation == 'github.status': return github.status(state)
+        if operation == 'github.token': return github.save_token(state, request.get('token'))
+        if operation == 'github.copy': return github.copy(state, request.get('repo'))
+        if operation == 'github.remove': return github.remove(state, request.get('repo'))
+        if operation == 'github.list': return github.list_repos(state)
+        if operation == 'github.disconnect': return github.disconnect(state)
+        if operation == 'github.refresh': return github.refresh(state)
+        if operation == 'github.cleanup': return github.cleanup(state)
     if operation == 'telegram.directory':
         from tools.operations.archive.telegram_directory import directory
         return directory(state)

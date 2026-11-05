@@ -118,7 +118,7 @@ def meaning_tool(args, **kwargs):
         return json.dumps({'error':'memory_search_unavailable'})
 
 
-JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long')
+JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed')
 
 
 def isolated_runtime():
@@ -136,6 +136,7 @@ def job_tool(args, **kwargs):
         if action not in ('start','status','stop'):raise ValueError('invalid_job_action')
         body={key:args[key] for key in ('title','instruction','chat','from','to','id') if isinstance(args.get(key),str) and args[key]}
         if action=='start' and type(args.get('box')) is bool:body['box']=args['box']
+        if action=='start' and isinstance(args.get('repo'),str) and args['repo']:body['repo']=args['repo']
         if body.get('box') and not isolated_runtime():return json.dumps({'error':'job_box_not_allowed'})
         return json.dumps(request('/v1/jobs/'+action,body),ensure_ascii=False)
     except HTTPError as error:
@@ -209,11 +210,15 @@ def register(ctx):
         ('nocheh_background_job','Background jobs: work too big for one reply runs in a session of its own and reports back here. '
          'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD) and box. '
          'Nocheh counts and prices it and posts an Approve card; nothing runs until it is approved, and the result says who approves. '
-         'action=status lists this chat\'s jobs with progress and cost. action=stop with id stops a job you may stop. Only the owner may name another chat.',
+         'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos). '
+         'action=stop with id stops a job you may stop. Only the owner may name another chat.',
          {'action':{'type':'string','enum':['start','status','stop']},'title':{'type':'string','maxLength':100},'instruction':{'type':'string','maxLength':8000},
           'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'id':{'type':'string'},
           'box':{'type':'boolean','description':'With start: true when the job needs to run commands, work with files or run Python. '
-                 'It then gets a sealed box with no internet that holds only a checked copy of the job\'s own chat. Only for a job the owner asks for in their private chat.'}},['action'],job_tool),
+                 'It then gets a sealed box with no internet that holds a checked copy of the job\'s own chat and, with repo, a read-only copy of that GitHub repository. '
+                 'Only for a job the owner asks for in their private chat.'},
+          'repo':{'type':'string','maxLength':140,'description':'With start and box=true, for a job the owner asks for in their private chat: a GitHub repository '
+                  'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'}},['action'],job_tool),
         ('nocheh_telegram_destinations','In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner\'s approval.',
          {},[],destinations_tool),
     ):

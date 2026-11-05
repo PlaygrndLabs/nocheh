@@ -273,9 +273,16 @@ def generate(values, names=GENERATED):
     return values
 
 
+def github_folders(state):
+    """The GitHub copies folder (ADR-0209), one level at a time: mkdir(parents=True) would give `github` the default mode."""
+    (Path(state) / 'github').mkdir(exist_ok=True, mode=0o700)
+    (Path(state) / 'github/copies').mkdir(exist_ok=True, mode=0o700)
+
+
 def initialize(state):
     state = Path(state).resolve()
     for name in ('files', 'spool', 'hermes', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
+    github_folders(state)
     path = env_path(state); existing = read_env(path)
     values = dict(DEFAULTS)
     values.update(existing)
