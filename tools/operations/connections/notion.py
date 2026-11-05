@@ -9,17 +9,15 @@ Access tokens are refreshed under one lock, and each new refresh token is saved
 before it is used, as Notion requires.
 """
 import base64
-import fcntl
 import hashlib
 import json
-import os
 import secrets
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from contextlib import contextmanager
-from pathlib import Path
+
+from tools.operations.connections import secret_file
 
 ISSUER = 'https://mcp.notion.com'
 MCP_URL = ISSUER + '/mcp'
@@ -29,30 +27,10 @@ VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26')
 PENDING_SECONDS = 600
 
 
-def path(state):
-    return Path(state) / 'admin/connections/notion.json'
-
-
-@contextmanager
-def locked(state):
-    folder = path(state).parent
-    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (folder / 'notion.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
-
-
-def read(state):
-    file = path(state)
-    if file.is_symlink(): raise ValueError('notion_connection_path_denied')
-    return json.loads(file.read_text()) if file.exists() else {}
-
-
-def write(state, value):
-    file = path(state); temporary = file.with_suffix('.tmp')
-    with open(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
-        json.dump(value, handle); handle.flush(); os.fsync(handle.fileno())
-    temporary.replace(file)
+def path(state): return secret_file.path(state, 'notion')
+def locked(state): return secret_file.locked(state, 'notion')
+def read(state): return secret_file.read(state, 'notion')
+def write(state, value): return secret_file.write(state, 'notion', value)
 
 
 def post(url, body, form=True, opener=None):

@@ -85,6 +85,8 @@ x-management: &management
     NOCHEH_STATE_DIR: ${NOCHEH_STATE_DIR:-${PWD}/data/local}
     NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
     COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-nocheh}
+    # The GitHub fetcher runs the launcher's box image (ADR-0209).
+    NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${NOCHEH_INSTALLATION_ROOT:-${PWD}}:${NOCHEH_INSTALLATION_ROOT:-${PWD}}
@@ -371,6 +373,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles:/profiles:ro
+      # The GitHub copies jobs pin; the launcher opens only the one a binding names (ADR-0209).
+      - ${NOCHEH_STATE_DIR:-./data/local}/github/copies:/repo-copies:ro
     depends_on:
       nocheh-security: {condition: service_healthy}
     healthcheck:

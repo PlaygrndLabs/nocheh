@@ -194,6 +194,32 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(json.loads(archive_tools.job_tool({'action':action,'title':'t','instruction':'i'})),{'error':'background_jobs_unavailable'})
             request.assert_not_called()
 
+    def test_a_repo_is_forwarded_only_with_start_and_a_name(self):
+        with patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request,\
+                patch.object(archive_tools,'isolated_runtime',return_value=True):
+            archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True,'repo':'example-org/widgets'})
+            for repo in ('',None,7,['example-org/widgets']):
+                archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True,'repo':repo})
+            archive_tools.job_tool({'action':'status','repo':'example-org/widgets'})
+            archive_tools.job_tool({'action':'stop','id':'b'*64,'repo':'example-org/widgets'})
+        self.assertEqual([call.args for call in request.call_args_list],[
+            ('/v1/jobs/start',{'title':'t','instruction':'i','box':True,'repo':'example-org/widgets'}),
+            *[('/v1/jobs/start',{'title':'t','instruction':'i','box':True})]*4,('/v1/jobs/status',{}),('/v1/jobs/stop',{'id':'b'*64})])
+        import io
+        from urllib.error import HTTPError
+        refused=HTTPError('url',409,'Conflict',{},io.BytesIO(json.dumps({'error':'job_repo_not_allowed'}).encode()))
+        with patch.object(archive_tools,'request',side_effect=refused),patch.object(archive_tools,'isolated_runtime',return_value=True):
+            self.assertEqual(json.loads(archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True,'repo':'example-org/widgets'})),
+                             {'error':'job_repo_not_allowed'})
+        tools={}
+        class Context:
+            def register_tool(self,**kwargs):tools[kwargs['name']]=kwargs['schema']
+        archive_tools.register(Context())
+        schema=tools['nocheh_background_job'];repo=schema['parameters']['properties']['repo']
+        self.assertEqual((repo['type'],repo['maxLength']),('string',140));self.assertTrue(repo['description'].startswith('With start and box=true'))
+        self.assertIn('/repo/code',repo['description']);self.assertIn('GitHub copies',schema['description'])
+        self.assertNotIn('repo',schema['parameters']['required'])
+
     def test_the_job_tool_offers_start_status_and_stop_only(self):
         tools={}
         class Context:
