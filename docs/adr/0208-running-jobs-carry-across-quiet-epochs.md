@@ -90,7 +90,9 @@ Every other change still waits for the job or ends its run, as before. Extends
   chat page, so also the box's chat copy) wait out a pending publication and run again
   in full, at most 3 times (`afterEpoch`). Each run starts with the audience check,
   which takes the new binding while the run carries and refuses
-  (`audience_context_changed`) once a change that is not quiet passed.
+  (`audience_context_changed`) once a change that is not quiet passed. A change's
+  guarded copy is staged per binding for a job's run only, so a retry in a new epoch
+  stages and publishes its own copy; anyone else keeps one staging per source.
 - **A relaunch keeps the binding.** A relaunched run gets the last run's binding while
   that carries to the current one, otherwise the current one. With the kept binding it
   has the same physical profile and session, Hermes reloads its history, and the run
