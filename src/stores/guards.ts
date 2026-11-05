@@ -256,14 +256,15 @@ export class GuardRepository {
     const id=await this.register(reference),source=(await this.stores.derived.query('SELECT input,input_hash,active_revision FROM guard_sources WHERE id=$1',[id])).rows[0];
     if(source.active_revision!==null)return null;
     const preparationVersion=version+':authorized-context-v1',content=await contexts.prepare(principal,JSON.parse(source.input.toString()),detect);
-    // The content depends on the binding's prepared values, so an attempt under a later binding (a job's run retried after a
-    // quiet epoch, ADR-0208) stages its own revision instead of conflicting with one staged earlier and never published.
-    const operationId=digest(canonical(['guard',id,source.input_hash,preparationVersion,binding]));
+    // The content depends on the binding's prepared values, so a job's run retried after a quiet epoch (ADR-0208) stages its
+    // own revision under the later binding instead of conflicting with one staged earlier and never published. Anyone else
+    // keeps one operation per source, so concurrent retries across an epoch still share it.
+    const operationId=digest(canonical(['guard',id,source.input_hash,preparationVersion,...(jobRun(principal)?[binding]:[])]));
     let revision:GuardRevision;
     try{revision=await this.stage(id,null,content,'automatic',preparationVersion,operationId);}
     catch(error){if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
     await this.beginPublication(revision,binding);
-    // Another attempt, under another binding, published first: its revision is the one read.
+    // Another attempt of a job's run, under another binding, published first: its revision is the one read.
     try{await this.finishPublication(operationId);}
     catch(error){if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
     return revision;
