@@ -93,6 +93,32 @@ execute_code calls ran in its box, the result file never appeared in the turn, t
 report reached the owner, and the box was gone when the job was done. It passed on
 a fresh fixture, and failed as expected when the launcher had no box token. Not
 yet run with a real model.
+Step 4, GitHub copies: the owner pastes a fine-grained GitHub key once in Settings ›
+Connections › GitHub and copies a repository there. A box job the owner asks for in
+their private chat can read one copy. Its card names the repository, branch, commit
+and size, and every run of the job, relaunches too, finds that commit read-only in
+`/repo/code` in its box, with git and rg. Only a fresh fetcher container's fetch step
+holds the key; it never reaches the box, the launcher, Hermes, a turn, the database
+or a log. Remove and Disconnect answer at once: they withdraw waiting cards, stop
+jobs that have not started and remove running jobs' boxes. Nocheh checks for new
+commits every hour, and a refused key, or one that expires within 7 days, raises one
+problem notice
+([ADR-0209](docs/adr/0209-owner-approved-jobs-read-a-github-copy-in-their-box.md),
+[stores](test/store-job-repo.test.ts), [sign-in and copies](services/hermes/test_github_connection.py),
+[fetcher](services/hermes/test_repo_fetch.py), [writer](services/hermes/test_box_repo.py),
+[launcher](services/hermes/test_box_launcher.py)). The end-to-end check is the full
+tester scenario `background_job_reads_a_repo_copy`
+([tester scenario](tools/acceptance/product_scenarios.py),
+[fake GitHub](tools/acceptance/github_mock.py)). On a fake GitHub with a made-up
+repository, the Settings routes connected and copied it, a job read the history with
+git, searched and read files in its box, and a key committed in the repository came
+back masked (Hermes's own redaction masked it first, keeping 6 and 4 characters). The
+GitHub key was found nowhere in the box, the launcher, the job and copy rows or any
+request but GitHub's, and a relaunch got a new box at the same commit. Remove, Copy again, a refused key and
+Disconnect each did what the card says. It passed together with
+`background_job_uses_sealed_box` on a fresh fixture. Not yet run against real GitHub or
+with a real model. Open owner questions D1 to D4 are in ADR-0209; Nocheh is built as
+recommended until they are answered.
 Open owner questions: does the owner accept, in their own words, the new SPECS
 lines that a reaction change or a learning revision does not stop a waiting or approved proposal, that a
 card says how an approved operation ended and which job or schedule asked, that

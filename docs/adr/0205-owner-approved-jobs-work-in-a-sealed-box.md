@@ -134,6 +134,13 @@ for it, so its box stays for the whole run under the same rule. Any other change
 still ends the run, and its box with it.
 </note>
 
+<note date="2026-11-05">
+Extended by [ADR-0209](0209-owner-approved-jobs-read-a-github-copy-in-their-box.md):
+a box can also hold `/repo`, a read-only copy of a GitHub repository the job pinned
+when it was asked for. A repo box gets a 256 MiB `/repo` tmpfs and 512 MiB more
+memory, and the box image has git. The box still has no network and no keys.
+</note>
+
 <consequences>
 - A job can search and compute over a whole chat without a card for each command.
   Group text can steer those commands, but they run with no internet and no keys,
