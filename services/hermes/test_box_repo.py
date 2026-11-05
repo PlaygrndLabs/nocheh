@@ -280,7 +280,7 @@ class ParityTests(unittest.TestCase):
     def test_the_store_has_the_same_numbers_and_patterns(self):
         source=(ROOT/'src/stores/background-jobs.ts').read_text()
         numbers=re.search(r'export const MAX_REPOS=(\d+),MAX_BUNDLE=(\d+),MAX_FILES=(\d+),REPO_ROOM=(\d+);',source)
-        if numbers is None:self.skipTest('the store side of ADR-0209 is not in this checkout yet')
+        self.assertIsNotNone(numbers,'the store constants are not where the parity test reads them (background-jobs.ts)')
         self.assertEqual(tuple(map(int,numbers.groups())),(github.MAX_REPOS,github.MAX_BUNDLE,github.MAX_FILES,github.REPO_ROOM))
         patterns=dict(re.findall(r'\b(REPO_NAME|COMMIT|DIGEST|COPY_ID)=/\^(.+?)\$/',source))
         self.assertEqual({key:value.replace('\\/','/') for key,value in patterns.items()},
