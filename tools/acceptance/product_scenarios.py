@@ -1005,11 +1005,15 @@ class ProductScenarios(Scenarios):
             if manifest:
                 seen['manifests'][name] = manifest
             if name not in seen['searched'] and '"ready"' in manifest:
-                found = subprocess.run(['docker', 'exec', '-i', '-u', '65532:65532', name, 'grep', '-rlsF', '-f', '/dev/stdin',
-                                        '/repo', '/chat', '/work', '/etc', '/opt'], input=token, capture_output=True, text=True)
-                # grep answers 0 when it found the key and 1 when it did not; anything else is tried again next round.
-                if found.returncode in (0, 1):
-                    seen['searched'][name] = found.stdout.split()
+                # grep answers 0 when it found the key, 1 when it did not, and 2 when it also met files the box user cannot
+                # read, as in /etc; a box command cannot read those either. Docker's own errors also exit 1, so only a
+                # search that printed its own exit line counts; anything else is tried again next round.
+                found = subprocess.run(['docker', 'exec', '-i', '-u', '65532:65532', name, 'sh', '-c',
+                                        'grep -rlsF -f /dev/stdin /repo /chat /work /etc /opt; echo "searched=$?"'],
+                                       input=token, capture_output=True, text=True)
+                lines = [line for line in found.stdout.split('\n') if line.strip()]
+                if found.returncode == 0 and lines and lines[-1] in ('searched=0', 'searched=1', 'searched=2'):
+                    seen['searched'][name] = lines[:-1]
         return probe
 
     def watched_run(self, job, card, token, until):
