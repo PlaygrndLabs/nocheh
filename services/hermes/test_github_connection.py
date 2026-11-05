@@ -63,8 +63,9 @@ class GitHub:
 
 
 class Store:
-    """The app's copies route with the store's rules (ADR-0209 §3); `fail` makes a kind unreachable, `lose` loses its answer."""
-    def __init__(self):self.rows=[];self.pinned=[];self.calls=[];self.fail=set();self.lose=set();self.hooks={}
+    """The app's copies route with the store's rules (ADR-0209 §3); `fail` makes a kind unreachable, `lose` loses its answer.
+    Each Remove is numbered, also one that finds no row, and a new copy that read an earlier number is refused."""
+    def __init__(self):self.rows=[];self.pinned=[];self.calls=[];self.fail=set();self.lose=set();self.hooks={};self.removal=0;self.removals={}
     def __call__(self,path,body=None):
         assert path==github.COPIES
         kind='get' if body is None else next(iter(body))
@@ -72,16 +73,18 @@ class Store:
         if kind in self.hooks:self.hooks[kind]()
         if kind in self.fail:raise urllib.error.URLError('store down')
         if kind=='set':self.set(body['set'])
-        elif kind=='remove':self.rows=[row for row in self.rows if row['repo'].lower()!=body['remove'].lower()]
+        elif kind=='remove':
+            self.rows=[row for row in self.rows if row['repo'].lower()!=body['remove'].lower()]
+            self.removal+=1;self.removals[body['remove'].lower()]=self.removal
         elif kind=='clear':self.rows=[]
         if kind in self.lose:raise urllib.error.URLError('answer lost')
-        return {'copies':deep.deepcopy(self.rows),'pinned':list(self.pinned)}
+        return {'copies':deep.deepcopy(self.rows),'pinned':list(self.pinned),'removal':self.removal}
     def set(self,value):
         row=next((row for row in self.rows if row['repo'].lower()==value['repo'].lower()),None)
         if time.time()>value['not_after']:raise conflict('github_copy_cancelled')
         fields={key:value[key] for key in ('repo','branch','commit','digest','bytes','need','files')}
         if value['copy_id'] is None:
-            if row:raise conflict('github_copy_cancelled')
+            if row or self.removals.get(value['repo'].lower(),0)>value['removal']:raise conflict('github_copy_cancelled')
             if len(self.rows)>=github.MAX_REPOS:raise conflict('github_repo_limit')
             self.rows.append({'copy_id':secrets.token_hex(16),**fields,'previous_digest':None,'copied_at':stamp()})
         else:
@@ -313,7 +316,7 @@ class GitHubTests(unittest.TestCase):
         sent,=self.store.sets();meta=self.meta('c'*40)
         self.assertEqual({key:value for key,value in sent.items() if key!='not_after'},
                          {'repo':REPO,'branch':'main','commit':'c'*40,'digest':digest,'bytes':len(data),'files':5,'copy_id':None,
-                          'need':github.need(len(data),meta['pages'],meta['index'],meta['objects'])})
+                          'removal':0,'need':github.need(len(data),meta['pages'],meta['index'],meta['objects'])})
         self.assertNotIn(self.token[:16],json.dumps(self.store.calls))
         self.assertEqual({key:answer[key] for key in ('state','repo','branch','commit','bytes','files')},
                          {'state':'copied','repo':REPO,'branch':'main','commit':'c'*40,'bytes':len(data),'files':5})
@@ -475,6 +478,32 @@ class GitHubTests(unittest.TestCase):
         self.docker.script=self.served();self.copied()
         self.assertNotEqual(self.store.rows[0]['copy_id'],old,'a later Copy is a new copy')
 
+    def test_a_remove_while_a_refresh_asks_github_keeps_the_copy_removed(self):
+        self.connect();self.copied();old=self.store.rows[0]['copy_id'];self.remote.commit='d'*40
+        # The owner's Remove lands during the refresh's first GitHub call.
+        self.remote.hooks['/repos/'+REPO]=lambda:github.remove(self.state,REPO,**self.hooks)
+        github.refresh(self.state,**self.hooks)
+        self.assertNotIn(None,[body['copy_id'] for body in self.store.sets()[1:]],'the refresh sends only the copy_id it saw')
+        self.assertEqual((self.store.rows,self.files()),([],[]))
+
+    def test_a_refresh_changes_only_the_copy_it_saw(self):
+        self.connect();self.copied();old=self.store.rows[0]['copy_id'];self.remote.commit='d'*40
+        calls,sets=len(self.remote.calls),len(self.store.sets())
+        self.failing('github_copy_cancelled',lambda:github.copy(self.state,REPO,expected_id='0'*32,**self.hooks))
+        github.remove(self.state,REPO,**self.hooks)
+        self.failing('github_copy_cancelled',lambda:github.copy(self.state,REPO,expected_id=old,**self.hooks))
+        self.assertEqual((self.remote.calls[calls:],self.store.sets()[sets:],self.docker.created()[1:]),([],[],[]),'nothing is asked or saved')
+
+    def test_a_remove_during_a_copy_again_of_a_missing_copy_keeps_it_removed(self):
+        self.connect();self.copied()
+        for path in (self.state/'github/copies').iterdir():path.unlink()
+        # Copy again removes the missing copy first; the owner's Remove, still offered on the card, comes after it.
+        self.docker.script=self.served(during=lambda:github.remove(self.state,REPO,**self.hooks))
+        self.failing('github_copy_cancelled')
+        (body,)=self.store.sets()[1:]
+        self.assertEqual((body['copy_id'],body['removal'],self.store.removal),(None,1,2),'the set names its own Remove, not the owner\'s')
+        self.assertEqual((self.store.rows,self.files()),([],[]))
+
     def test_the_set_carries_not_after_and_a_failed_set_keeps_only_what_the_store_may_name(self):
         self.connect();self.copied()
         (_,body,received),=[call for call in self.store.calls if call[0]=='set']
@@ -537,7 +566,7 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(len(self.docker.created()),1)
         calls=len(self.store.calls);self.copied()
         self.assertEqual([kind for kind,_,_ in self.store.calls[calls:]][:3],['get','remove','set'])
-        self.assertIsNone(self.store.sets()[-1]['copy_id'])
+        self.assertEqual((self.store.sets()[-1]['copy_id'],self.store.sets()[-1]['removal']),(None,self.store.removal))
         self.assertNotEqual(self.store.rows[0]['copy_id'],old)
 
     def test_refresh_copies_a_moved_branch_and_stops_at_a_refused_key(self):

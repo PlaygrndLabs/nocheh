@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS github_copies (
  previous_digest text CHECK(previous_digest ~ '^[a-f0-9]{64}$'),
  copied_at timestamptz NOT NULL DEFAULT now());
 CREATE UNIQUE INDEX IF NOT EXISTS github_copies_repo ON github_copies(lower(repo));
+-- Each name's latest Remove, numbered in order. A new copy sends the number it read before it asked GitHub, so a Remove
+-- of that name after it refuses the copy, also a Remove that found no row (ADR-0209).
+CREATE TABLE IF NOT EXISTS github_removals (repo text PRIMARY KEY CHECK(repo=lower(repo)),removal integer NOT NULL CHECK(removal>0));
 -- The GitHub copy a box job reads, pinned when it is asked (ADR-0209).
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS repo jsonb CHECK(repo IS NULL OR box);
 `;
@@ -463,15 +466,18 @@ export class BackgroundJobRepository {
    *  every bundle these name and deletes the rest. Only management, with the service token, reaches this (owner-api.ts). */
   async copies(principal:Reader) {
     admin(principal);
+    // Read first: a Remove that commits while the rows are read then still counts as after it.
+    const removal=Number((await this.control.query('SELECT COALESCE(max(removal),0) AS removal FROM github_removals')).rows[0].removal);
     const copies=(await this.control.query(`SELECT copy_id,repo,branch,commit_id AS commit,digest,bytes,need,files,previous_digest,copied_at
       FROM github_copies ORDER BY lower(repo)`)).rows;
     const pinned=(await this.control.query(`SELECT DISTINCT j.repo->>'digest' AS digest FROM background_jobs j JOIN github_copies c ON c.copy_id=j.repo->>'copy_id'
       WHERE NOT j.cancel_requested AND (j.state='approved' OR (j.state='running' AND ${boxOpen})
         OR (j.state='proposed' AND j.created_at>now()-${DECISION_HOURS}*interval '1 hour'))`)).rows.map(row=>row.digest as string);
-    return {copies,pinned};
+    return {copies,pinned,removal};
   }
   /** Save a finished copy, or remove copies. A set names the copy_id it started from: null makes a new copy with a new id,
-   *  an id updates that same copy, and anything removed or replaced meanwhile refuses. A set past its not_after refuses
+   *  an id updates that same copy, and anything removed or replaced meanwhile refuses. A new copy also names the last
+   *  removal it read, and a Remove of its name since then refuses it. A set past its not_after refuses
    *  too, so a copy github.py gave up on can never outlive a later Disconnect. A Remove or Disconnect withdraws every job
    *  that pinned the copy and has not started, in the same transaction; a running one loses its box (repoKept). */
   async changeCopies(principal:Reader,input:unknown) {
@@ -480,18 +486,22 @@ export class BackgroundJobRepository {
     const invalid=new HttpError(400,'invalid_github_copy'),within=(value:unknown,low:number,high:number)=>Number.isSafeInteger(value)&&(value as number)>=low&&(value as number)<=high;
     if(keys.length===1&&keys[0]==='set') {
       const set=body.set&&typeof body.set==='object'&&!Array.isArray(body.set)?body.set as Record<string,unknown>:null;
-      const fields=['repo','branch','commit','digest','bytes','need','files','copy_id','not_after'];
+      const fields=['repo','branch','commit','digest','bytes','need','files','copy_id','removal','not_after'];
       if(!set||Object.keys(set).length!==fields.length||!fields.every(key=>key in set)||!repoName(set.repo)||!repoBranch(set.branch)||!matches(COMMIT,set.commit)||
         !matches(DIGEST,set.digest)||!within(set.bytes,1,MAX_BUNDLE)||!within(set.need,1,REPO_ROOM)||!within(set.files,0,MAX_FILES)||
-        set.copy_id!==null&&!matches(COPY_ID,set.copy_id)||!within(set.not_after,1,Math.floor(Date.now()/1000)+60))throw invalid;
+        set.copy_id!==null&&!matches(COPY_ID,set.copy_id)||!within(set.removal,0,2147483647)||!within(set.not_after,1,Math.floor(Date.now()/1000)+60))throw invalid;
       const values=[set.repo,set.branch,set.commit,set.digest,set.bytes,set.need,set.files],db=await this.control.connect();
       try {
         await db.query('BEGIN');
         let saved;
         if(set.copy_id===null) {
-          // New copies wait for each other, so the limit holds.
+          // New copies and Removes take turns, so the limit holds and a new copy sees every Remove before it.
           await db.query('SELECT pg_advisory_xact_lock(803362)');
           if((await db.query('SELECT 1 FROM github_copies WHERE lower(repo)=lower($1)',[set.repo])).rowCount)throw new HttpError(409,'github_copy_cancelled');
+          // Removed after the copy began: the owner's Remove is final, also when a Copy again of a missing copy had
+          // already removed the row itself.
+          if((await db.query('SELECT 1 FROM github_removals WHERE repo=lower($1) AND removal>$2',[set.repo,set.removal])).rowCount)
+            throw new HttpError(409,'github_copy_cancelled');
           if(Number((await db.query('SELECT count(*) FROM github_copies')).rows[0].count)>=MAX_REPOS)throw new HttpError(409,'github_repo_limit');
           saved=await db.query(`INSERT INTO github_copies(copy_id,repo,branch,commit_id,digest,bytes,need,files) VALUES($8,$1,$2,$3,$4,$5,$6,$7)
             ON CONFLICT ((lower(repo))) DO NOTHING`,[...values,randomBytes(16).toString('hex')]);
@@ -508,6 +518,12 @@ export class BackgroundJobRepository {
     const db=await this.control.connect();let withdrawn:string[];
     try {
       await db.query('BEGIN');
+      // A Remove is numbered even when it finds no row, so a new copy of that name still running is refused.
+      if(remove) {
+        await db.query('SELECT pg_advisory_xact_lock(803362)');
+        await db.query(`INSERT INTO github_removals(repo,removal) SELECT lower($1),COALESCE(max(removal),0)+1 FROM github_removals
+          ON CONFLICT(repo) DO UPDATE SET removal=EXCLUDED.removal`,[body.remove]);
+      }
       // Copy rows first, then job rows: start and decide lock in the same order.
       const removed=(await db.query(`DELETE FROM github_copies${remove?' WHERE lower(repo)=lower($1)':''} RETURNING copy_id`,remove?[body.remove]:[])).rows.map(row=>row.copy_id);
       withdrawn=(await db.query(`UPDATE background_jobs SET state='stopped',cancel_requested=true,error_code='job_repo_removed',finished_at=now(),revision=revision+1,updated_at=now()

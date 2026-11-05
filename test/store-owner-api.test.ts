@@ -55,9 +55,9 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal(unauthorized.status,403,'owner authority is checked before body parsing');
     assert.equal((await fetch(base+'/v1/projects')).status,401);
     // The GitHub copies: the service token only, and a body the store checks itself.
-    assert.deepEqual(await request('/v1/background-jobs/copies'),{copies:[],pinned:[]});
+    assert.deepEqual(await request('/v1/background-jobs/copies'),{copies:[],pinned:[],removal:0});
     assert.deepEqual(await request('/v1/background-jobs/copies',{remove:'example-org/widgets.git'},400),{error:'invalid_github_copy'});
-    assert.deepEqual(await request('/v1/background-jobs/copies',{clear:true}),{copies:[],pinned:[]});
+    assert.deepEqual(await request('/v1/background-jobs/copies',{clear:true}),{copies:[],pinned:[],removal:0});
     assert.equal((await fetch(base+'/v1/background-jobs/copies',{headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}})).status,403);
     const transferTypes=await request('/v1/exports/derivatives/types');assert.ok(transferTypes.types.includes('guard_revisions'));
     await request('/v1/exports/derivatives?type=workflow_registry',undefined,400);

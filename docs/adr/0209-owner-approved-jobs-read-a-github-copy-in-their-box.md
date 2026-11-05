@@ -74,7 +74,11 @@ they are answered:
   and never wait for a copy or the hourly check. They withdraw cards not yet approved,
   stop approved jobs that have not started, and remove running jobs' boxes within about
   15 s. The store decides atomically whether a finished copy may still be saved: a
-  copy saved after its `not_after`, or for a removed `copy_id`, is refused.
+  copy saved after its `not_after`, or for a removed `copy_id`, is refused. A copy
+  reads its row before it asks GitHub, and the hourly check updates only the
+  `copy_id` it saw. The store numbers every Remove, also one that finds no row, and a
+  new copy names the last number it read, so a Remove of its name after that refuses
+  it.
 - **The launcher** reads only the digest the binding names, from the read-only
   `/repo-copies` mount, and checks the file's size. The writer checks its sha256 as it
   receives it.

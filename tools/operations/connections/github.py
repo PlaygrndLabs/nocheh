@@ -233,6 +233,7 @@ def kept(place,digest):
 
 def checked(value):
     if not (isinstance(value,dict) and isinstance(value.get('copies'),list) and isinstance(value.get('pinned'),list)
+            and type(value.get('removal')) is int and value['removal']>=0
             and all(isinstance(row,dict) and repo_name(row.get('repo')) and type(row.get('digest')) is str and DIGEST.fullmatch(row['digest'])
                     for row in value['copies'])):
         raise ValueError('github_unavailable')
@@ -455,8 +456,9 @@ def list_repos(state,**hooks):
     return status(state,**hooks)
 
 
-def copy(state,name,**hooks):
-    """Copies a repository's default branch at the commit GitHub's API names (ADR-0209 §1)."""
+def copy(state,name,expected_id=None,**hooks):
+    """Copies a repository's default branch at the commit GitHub's API names (ADR-0209 §1). A refresh passes the
+    copy_id it saw as `expected_id`, so it only ever updates that copy and never makes a removed one new again."""
     t=tools(**hooks)
     # 1. Connected, and a name GitHub could have.
     with secret_file.locked(state,'github'):token=(read(state).get('grant') or {}).get('token')
@@ -464,22 +466,28 @@ def copy(state,name,**hooks):
     if not repo_name(name):raise ValueError('invalid_github_repo')
     expected=fingerprint(token);del token
     def get(path,accept=JSON):return keyed(state,t,expected,path,'github_repo_not_readable',accept)
-    # 2. The repository as GitHub names it, before anything is downloaded.
-    repository=decoded(get('/repos/'+name)[0])
-    full,branch,size=repository.get('full_name'),repository.get('default_branch'),repository.get('size')
-    if not (repo_name(full) and repo_branch(branch) and type(size) is int and size>=0):raise ValueError('github_copy_refused')
-    if full.lower()!=name.lower():raise ValueError('github_repo_not_readable')
-    if size*1024>2*MAX_BUNDLE:raise ValueError('github_repo_too_large')
     place=folder(state)
-    # 3. The copy this replaces; a copy whose bundle is missing counts as removed, so this one gets a new copy_id.
-    known=copies(t);row=next((r for r in known['copies'] if r['repo'].lower()==full.lower()),None)
+    # 3, before GitHub is asked, so a Remove during the copy finds it pinned: the copy this replaces. Step 2 requires
+    # GitHub's name to equal this one in any case. A copy whose bundle is missing counts as removed, so this one gets a
+    # new copy_id.
+    known=copies(t);row=next((r for r in known['copies'] if r['repo'].lower()==name.lower()),None)
+    if expected_id is not None and not (row and row.get('copy_id')==expected_id and kept(place,row['digest'])):
+        raise ValueError('github_copy_cancelled')
     if row and not kept(place,row['digest']):
         known,code=change(t,{'remove':row['repo']})
         if code:raise ValueError('github_unavailable')
         row=None
     previous=row['copy_id'] if row else None
     if previous is not None and not (type(previous) is str and COPY_ID.fullmatch(previous)):raise ValueError('github_unavailable')
-    if previous is None and sum(r['repo'].lower()!=full.lower() for r in known['copies'])>=MAX_REPOS:raise ValueError('github_repo_limit')
+    if previous is None and sum(r['repo'].lower()!=name.lower() for r in known['copies'])>=MAX_REPOS:raise ValueError('github_repo_limit')
+    # The last Remove the store numbered, this copy's own included: the store refuses a new copy after a later one.
+    removal=known['removal']
+    # 2. The repository as GitHub names it, before anything is downloaded.
+    repository=decoded(get('/repos/'+name)[0])
+    full,branch,size=repository.get('full_name'),repository.get('default_branch'),repository.get('size')
+    if not (repo_name(full) and repo_branch(branch) and type(size) is int and size>=0):raise ValueError('github_copy_refused')
+    if full.lower()!=name.lower():raise ValueError('github_repo_not_readable')
+    if size*1024>2*MAX_BUNDLE:raise ValueError('github_repo_too_large')
     # 4. The API commit: the row's commit, and the card's, is GitHub's own answer.
     commit=get('/repos/%s/commits/%s'%(full,branch),'application/vnd.github.sha')[0].strip().decode('ascii','replace')
     if not COMMIT.fullmatch(commit):raise ValueError('github_copy_refused')
@@ -523,7 +531,7 @@ def copy(state,name,**hooks):
             held(state,expected)
             final=place/(digest+'.bundle');os.replace(incoming,final);incoming=None
             answer,code=change(t,{'set':{'repo':full,'branch':branch,'commit':commit,'digest':digest,'bytes':count,'need':room,
-                                         'files':meta['files'],'copy_id':previous,'not_after':int(time.time())+NOT_AFTER_SECONDS}})
+                                         'files':meta['files'],'copy_id':previous,'removal':removal,'not_after':int(time.time())+NOT_AFTER_SECONDS}})
             if code:
                 if not named(t,digest):final.unlink(missing_ok=True)
                 raise ValueError(code)
@@ -597,7 +605,8 @@ def refresh(state,**hooks):
         except ValueError:break
         # Gone, or missing: a missing copy waits for the owner's Copy again, which makes it a new copy.
         if not row or not kept(place,row['digest']):continue
-        try:copy(state,row['repo'],**hooks)
+        # Only the copy it saw: one removed meanwhile, or removed and copied afresh, is not this refresh's to change.
+        try:copy(state,row['repo'],expected_id=row['copy_id'],**hooks)
         except ValueError as error:
             if str(error) in ('github_token_refused','github_not_connected'):break
     return status(state,**hooks)

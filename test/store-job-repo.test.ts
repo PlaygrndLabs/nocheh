@@ -94,9 +94,10 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
   const period={chat:group,from:'2026-01-10',to:'2026-01-12'};
   const name='example-org/widgets',gadgets='example-org/gadgets';
   const commitOf=(n:number)=>digest('commit '+n).slice(0,40),digestOf=(n:number)=>digest('bundle '+n);
-  /** What github.py saves after a verified fetch: a new copy with copy_id null, or Copy again with the row's copy_id. */
-  const set=(repo:string,copy_id:string|null,n:number,extra:Record<string,unknown>={})=>s.jobs.changeCopies(owner,{set:{repo,branch:'main',commit:commitOf(n),
-    digest:digestOf(n),bytes:18000000,need:60000000,files:1204,copy_id,not_after:Math.floor(Date.now()/1000)+10,...extra}});
+  /** What github.py saves after a verified fetch: a new copy with copy_id null, or Copy again with the row's copy_id,
+   *  and the last removal it read before it asked GitHub. */
+  const set=async(repo:string,copy_id:string|null,n:number,extra:Record<string,unknown>={})=>s.jobs.changeCopies(owner,{set:{repo,branch:'main',commit:commitOf(n),
+    digest:digestOf(n),bytes:18000000,need:60000000,files:1204,copy_id,removal:(await s.jobs.copies(owner)).removal,not_after:Math.floor(Date.now()/1000)+10,...extra}});
   const copyOf=async(repo:string)=>(await s.jobs.copies(owner)).copies.find((row:any)=>row.repo.toLowerCase()===repo.toLowerCase());
   const copyAgain=async(repo:string,n:number)=>set(repo,(await copyOf(repo)).copy_id,n);
   const remove=(repo:string)=>s.jobs.changeCopies(owner,{remove:repo});
@@ -140,12 +141,12 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
     const member:Reader={admin:false,scope:null};
     await assert.rejects(s.jobs.copies(member),{code:'owner_required'});
     await assert.rejects(s.jobs.changeCopies(member,{clear:true}),{code:'owner_required'});
-    assert.deepEqual(await s.jobs.copies(owner),{copies:[],pinned:[]});
-    const good={repo:name,branch:'main',commit:commitOf(1),digest:digestOf(1),bytes:18000000,need:60000000,files:1204,copy_id:null,not_after:Math.floor(Date.now()/1000)+10};
+    assert.deepEqual(await s.jobs.copies(owner),{copies:[],pinned:[],removal:0});
+    const good={repo:name,branch:'main',commit:commitOf(1),digest:digestOf(1),bytes:18000000,need:60000000,files:1204,copy_id:null,removal:0,not_after:Math.floor(Date.now()/1000)+10};
     const bad=[{repo:'example-org/widgets.git'},{repo:'example-org/..'},{repo:'-example/widgets'},{repo:'example-org/widgets/more'},{branch:'-main'},{branch:'a..b'},
       {branch:'main.lock'},{branch:'a//b'},{branch:'main/'},{branch:'.main'},{branch:'x'.repeat(256)},{commit:commitOf(1).slice(1)},{commit:commitOf(1).toUpperCase()},
       {digest:digestOf(1).slice(1)},{bytes:0},{bytes:67108865},{bytes:1.5},{need:268435457},{files:-1},{files:50001},{copy_id:'f'.repeat(31)},{copy_id:7},
-      {not_after:Math.floor(Date.now()/1000)+70},{not_after:String(good.not_after)},{extra:true}];
+      {removal:-1},{removal:1.5},{removal:'0'},{removal:null},{not_after:Math.floor(Date.now()/1000)+70},{not_after:String(good.not_after)},{extra:true}];
     for(const change of bad)await assert.rejects(s.jobs.changeCopies(owner,{set:{...good,...change}}),{status:400,code:'invalid_github_copy'},JSON.stringify(change).slice(0,60));
     const {files:_files,...short}=good;
     for(const body of [{set:short},{set:good,clear:true},{remove:'widgets'},{remove:'example-org/widgets.git'},{clear:false},{},[],null,{set:[good]}])
@@ -170,6 +171,16 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
     await assert.rejects(set(name,first.copy_id,3,{not_after:Math.floor(Date.now()/1000)-1}),{code:'github_copy_cancelled'});
     await assert.rejects(set(gadgets,null,3,{not_after:Math.floor(Date.now()/1000)-1}),{code:'github_copy_cancelled'});
     assert.deepEqual((await s.jobs.copies(owner)).copies.map((row:any)=>[row.repo,row.digest]),[[name,digestOf(2)]]);
+    // A Remove after a new copy began refuses it, also a Remove that found no row, as when Copy again of a missing copy
+    // removed the row itself; a Remove of another name does not.
+    const began=(await s.jobs.copies(owner)).removal;
+    await remove(gadgets);
+    const removal=(await s.jobs.copies(owner)).removal;assert.ok(removal>began,'a Remove that found no row is numbered too');
+    await assert.rejects(set('Example-Org/Gadgets',null,4,{removal:began}),{status:409,code:'github_copy_cancelled'});
+    await remove('example-org/other');
+    await set(gadgets,null,4,{removal});
+    assert.deepEqual((await s.jobs.copies(owner)).copies.map((row:any)=>row.repo),[gadgets,name]);
+    await remove(gadgets);
     const holder=await stores.control.connect();
     try {
       await holder.query('BEGIN');await holder.query('SELECT 1 FROM github_copies WHERE copy_id=$1 FOR UPDATE',[first.copy_id]);
@@ -315,7 +326,7 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
     // clear withdraws the jobs of every copy.
     await set(name,null,103);
     const one=await ask('Cleared widgets'),two=await ask('Cleared gadgets',{repo:gadgets});
-    assert.deepEqual(await s.jobs.changeCopies(owner,{clear:true}),{copies:[],pinned:[]});
+    const cleared=await s.jobs.changeCopies(owner,{clear:true});assert.deepEqual([cleared.copies,cleared.pinned],[[],[]]);
     for(const cleared of [one,two])assert.deepEqual([(await job(cleared.id)).state,(await job(cleared.id)).error_code],['stopped','job_repo_removed']);
 
     // Lock order: start and decide lock the copy row before the job row, as Remove does, so a Remove meanwhile waits and then withdraws.
