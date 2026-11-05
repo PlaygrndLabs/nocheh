@@ -340,6 +340,10 @@ def provider():
     if os.environ.get('NOCHEH_TELEGRAM_FIXTURE_STATE'):
         from tools.acceptance.telegram_mock import TelegramMock
         TelegramMock(os.environ['NOCHEH_TELEGRAM_FIXTURE_STATE']).install(app)
+    # The fake GitHub that the GitHub copy scenario copies from (tools/acceptance/github_mock.py).
+    if os.environ.get('NOCHEH_GITHUB_FIXTURE_ROOT'):
+        from tools.acceptance.github_mock import GithubMock
+        GithubMock(os.environ['NOCHEH_GITHUB_FIXTURE_ROOT']).install(app)
 
     @app.middleware('http')
     async def audit(request: Request, call_next):

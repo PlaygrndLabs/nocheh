@@ -21,12 +21,15 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.operations.installation.configuration import initialize, write_env, compose_command, compose_environment
+from tools.acceptance.github_mock import prepare as prepare_github
 
 # The deterministic model service, configured as an ordinary custom provider.
 # Routes accept this plain-HTTP address only inside an installation fixture.
 FIXTURE_MODEL_URL = 'http://model-fixture:8317/v1'
 FIXTURE_PROVIDER = 'model-fixture'
 FIXTURE_REPLY_RATES = {'input': 50, 'output': 50, 'cache_read': 0.5, 'cache_write': 50}
+# The fake GitHub on the model fixture; github.py accepts this plain-HTTP address only inside an installation fixture.
+FIXTURE_GITHUB_URL = 'http://model-fixture:8317/github'
 
 
 def main():
@@ -37,6 +40,7 @@ def main():
     parser.add_argument('--postgres-image', required=True)
     parser.add_argument('--native-image', required=True)
     parser.add_argument('--honcho-image', required=True)
+    parser.add_argument('--box-image', required=True, help="The sealed job box image; the GitHub fetcher runs it too")
     parser.add_argument('--keep', action='store_true', help='Retain only this synthetic installation for diagnosis/preview')
     parser.add_argument('--prepare-only', action='store_true', help='Keep a reviewed synthetic manifest and owned state without starting services')
     parser.add_argument('--preview-port', type=int, help='Publish only the owner dashboard on this available localhost port')
@@ -60,6 +64,8 @@ def main():
     shutil.copyfile(root / 'deploy/upstreams.lock.json', installation / 'deploy/upstreams.lock.json')
     project = 'nocheh-installation-' + uuid.uuid4().hex[:12]
     config = initialize(state)
+    # The made-up repository the fake GitHub serves, and its fixture token in a 0600 file (ADR-0209).
+    prepare_github(directory / 'github')
     token = secrets.token_hex(32)
     config.update(NOCHEH_STORAGE_LAYOUT='original-only-v1', NOCHEH_HONCHO_ENABLED='true',
         NOCHEH_HONCHO_STATE_DIR=str(state / 'honcho'), NOCHEH_MEMORY_TOKEN=token,
@@ -119,7 +125,8 @@ def main():
     try:
         images = {}
         for role, value in [('services', args.services_image), ('management', args.management_image),
-                            ('postgres', args.postgres_image), ('native', args.native_image), ('honcho', args.honcho_image)]:
+                            ('postgres', args.postgres_image), ('native', args.native_image), ('honcho', args.honcho_image),
+                            ('box', args.box_image)]:
             images[role] = json.loads(subprocess.check_output(['docker', 'image', 'inspect', value], text=True))[0]['Id']
         for key in ('NOCHEH_HONCHO_DATABASE_VOLUME', 'NOCHEH_HONCHO_REDIS_VOLUME'):
             volume = config[key]
@@ -156,6 +163,9 @@ def main():
                 service['environment']['NOCHEH_INSTALLATION_ROOT'] = str(installation)
                 service['volumes'] = [mount for mount in service['volumes'] if mount.get('source') != str(root)]
                 service['volumes'].append({'type': 'bind', 'source': str(installation), 'target': str(installation), 'read_only': True})
+                # The GitHub fetcher runs the box image, and copies come from the fake GitHub on the fixture's internal network.
+                service['environment'].update(NOCHEH_BOX_IMAGE=images['box'], NOCHEH_GITHUB_URL=FIXTURE_GITHUB_URL,
+                                              NOCHEH_GITHUB_FIXTURE_NETWORK=rendered['networks']['default']['name'])
             if name in ('hermes', 'hermes-agent-sb'):
                 service['image'] = images['native']
             if name == 'hermes':
@@ -165,6 +175,7 @@ def main():
                 service['environment']['NOCHEH_FIXTURE_REPLY_RATES'] = json.dumps(FIXTURE_REPLY_RATES)
             if name == 'hermes-agent-sb':
                 service['environment']['NOCHEH_TURN_IMAGE'] = images['native']
+                service['environment']['NOCHEH_BOX_IMAGE'] = images['box']
             if name in ('honcho-api', 'honcho-deriver'):
                 service['image'] = images['honcho']
             if name in ('nocheh-db', 'honcho-postgres'):
@@ -174,9 +185,13 @@ def main():
         rendered['services']['model-fixture'] = {'image': images['honcho'], 'user': '0:0', 'init': True, 'restart': 'no',
             'read_only': True, 'tmpfs': ['/tmp'], 'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'],
             'entrypoint': ['/app/.venv/bin/python'], 'command': ['/fixture/provider.py', 'provider'],
-            'environment': {'NOCHEH_INSTALLATION_FIXTURE': '1', 'PYTHONPATH': '/app'},
+            'environment': {'NOCHEH_INSTALLATION_FIXTURE': '1', 'PYTHONPATH': '/app', 'NOCHEH_GITHUB_FIXTURE_ROOT': '/fixture-github'},
             'networks': {'default': None, 'memory': None},
-            'volumes': [{'type': 'bind', 'source': str(root / 'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True}],
+            'volumes': [{'type': 'bind', 'source': str(root / 'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True},
+                        # The fake GitHub, mounted as the Telegram mock is (telegram_rehearsal.py); its token stays in the file.
+                        {'type': 'bind', 'source': str(directory / 'github'), 'target': '/fixture-github', 'read_only': True},
+                        {'type': 'bind', 'source': str(root / 'tools/__init__.py'), 'target': '/fixture/tools/__init__.py', 'read_only': True},
+                        {'type': 'bind', 'source': str(root / 'tools/acceptance/github_mock.py'), 'target': '/fixture/tools/acceptance/github_mock.py', 'read_only': True}],
             'healthcheck': {'test': ['CMD', '/app/.venv/bin/python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8317/healthz')"], 'interval': '3s', 'retries': 30}}
         meter = rendered['services']['honcho-provider-gateway']
         meter['command'] = ['python', '/fixture/provider.py', 'meter']
