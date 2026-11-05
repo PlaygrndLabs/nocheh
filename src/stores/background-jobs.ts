@@ -437,12 +437,14 @@ export class BackgroundJobRepository {
   /** Jobs this chat can see: its own, or every job for the owner. A live turn in the owner's private chat also sees the
    *  GitHub copies a box job may read, while the box switch is on. */
   async list(principal:Reader) {
-    let rows,repos:{name:string;branch:string;commit:string;copied_at:Date}[]|undefined;
+    let rows,repos:{name:string;branch:string;commit:string;copied_at:string}[]|undefined;
     if(principal.admin)rows=(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 50')).rows;
     else {
       const turn=await this.turns.binding(principal);
       if(turn.owner&&!turn.job&&principal.scope===null&&(principal.purpose??'assistant')==='assistant'&&(await this.settings()).box_tools)
-        repos=(await this.control.query('SELECT repo AS name,branch,left(commit_id,12) AS commit,copied_at FROM github_copies ORDER BY lower(repo)')).rows;
+        // copied_at as ISO text, as in the pin: a turn's answer is rebuilt from its texts for the secret check, so a Date would become {}.
+        repos=(await this.control.query('SELECT repo AS name,branch,left(commit_id,12) AS commit,copied_at FROM github_copies ORDER BY lower(repo)')).rows
+          .map(row=>({...row,copied_at:new Date(row.copied_at).toISOString()}));
       rows=principal.scope===null?(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 20')).rows:
         (await this.control.query('SELECT * FROM background_jobs WHERE scope=$1 ORDER BY created_at DESC LIMIT 20',[principal.scope])).rows;
     }

@@ -246,7 +246,7 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
     try{await assert.rejects(ask('Every year with code'),{status:409,code:'job_too_long'});}finally{sources.size=size;}
 
     // status: the copies show only in the owner's private live turn, while the box switch is on.
-    const repos=async(principal:Reader)=>{const listed:any=await s.jobs.list(principal);return 'repos' in listed?listed.repos.map((row:any)=>({...row,copied_at:row.copied_at.toISOString()})):undefined;};
+    const repos=async(principal:Reader)=>{const listed:any=await s.jobs.list(principal);return 'repos' in listed?listed.repos:undefined;};
     const latestCopies=(await s.jobs.copies(owner)).copies;
     assert.deepEqual(await repos(await privately('What can a job read?')),latestCopies.map((row:any)=>({name:row.repo,branch:'main',commit:row.commit.slice(0,12),copied_at:row.copied_at.toISOString()})));
     assert.deepEqual((await repos(await privately('Again'))).map((row:any)=>row.name),[gadgets,name],'ordered by name');
