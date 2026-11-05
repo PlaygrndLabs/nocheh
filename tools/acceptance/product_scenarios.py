@@ -837,24 +837,56 @@ class ProductScenarios(Scenarios):
     def docker(*arguments):
         return subprocess.run(['docker', *arguments], capture_output=True, text=True)
 
-    def watch_box(self, job, stop, seen):
+    def watch_box(self, job, stop, seen, probe=None):
         """While a job runs: its box and the run's turns that mount its socket, as Docker made them, and samples
-        of whether /work/result.txt is in the box and whether anything of it is in the turn."""
+        of whether /work/result.txt is in the box and whether anything of it is in the turn. `probe` also looks into
+        each box, every round."""
         inspect = lambda name: (json.loads(self.docker('inspect', name).stdout or '[]') or [{}])[0]
-        probe = 'if [ -e /work/result.txt ]; then echo present; else echo absent; fi'
+        result_probe = 'if [ -e /work/result.txt ]; then echo present; else echo absent; fi'
         # A turn can write only to its tmpfs and its profile mounts; /work exists in the box alone.
         turn_probe = 'if [ -e /work ] || [ -n "$(find /tmp /profile -name result.txt 2>/dev/null | head -n 1)" ]; then echo present; else echo absent; fi'
         while not stop.is_set():
             try:
                 for name in self.docker('ps', '--filter', 'label=nocheh.box.job='+job, '--format', '{{.Names}}').stdout.split():
                     seen['boxes'].setdefault(name, inspect(name))
-                    box = self.docker('exec', name, 'sh', '-c', probe).stdout.strip()
+                    if probe:
+                        probe(name)
+                    box = self.docker('exec', name, 'sh', '-c', result_probe).stdout.strip()
                     for turn in self.docker('ps', '--filter', 'volume='+name, '--filter', 'label=nocheh.role=isolated-turn', '--format', '{{.ID}}').stdout.split():
                         seen['turns'].setdefault(turn, inspect(turn))
                         seen['samples'].append({'box': box, 'turn': turn, 'in_turn': self.docker('exec', turn, 'sh', '-c', turn_probe).stdout.strip()})
             except Exception as error:
                 seen['errors'].append(type(error).__name__)
             stop.wait(0.5)
+
+    def sealed(self, box):
+        """The box_sealed gate on a box's inspect: no network, a read-only root, uid 65532, no capabilities and only its
+        socket volume. Returns its HostConfig and Config."""
+        host, config = box.get('HostConfig') or {}, box.get('Config') or {}
+        flags = {'network': host.get('NetworkMode'), 'networks': sorted((box.get('NetworkSettings') or {}).get('Networks') or {}),
+                 'read_only': host.get('ReadonlyRootfs'), 'user': config.get('User'), 'cap_drop': host.get('CapDrop'),
+                 'security': host.get('SecurityOpt'), 'binds': host.get('Binds'), 'role': (config.get('Labels') or {}).get('nocheh.role'),
+                 'mounts': [[mount.get('Type'), mount.get('Destination'), mount.get('RW')] for mount in box.get('Mounts') or []]}
+        self.gate('box_sealed', flags['network'] == 'none' and flags['networks'] == ['none'] and flags['read_only'] is True
+                  and flags['user'] == '65532:65532' and flags['cap_drop'] == ['ALL'] and 'no-new-privileges:true' in (flags['security'] or [])
+                  and not flags['binds'] and flags['mounts'] == [['volume', '/run/box', True]] and flags['role'] == 'job-box', **flags)
+        return host, config
+
+    def socket_only(self, seen, name):
+        """Every turn the watcher saw mounts the box's socket volume, read-only, and nothing else of it."""
+        sockets = [[[mount.get('Type'), mount.get('Name'), mount.get('RW')] for mount in turn.get('Mounts') or [] if mount.get('Destination') == '/box']
+                   for turn in seen['turns'].values()]
+        self.gate('run_turn_reaches_the_box_by_its_socket_only', bool(sockets) and all(mounts == [['volume', name, False]] for mounts in sockets), mounts=sockets)
+
+    def box_removed(self, job, names):
+        """The launcher's sweep removes a job's boxes and their socket volumes within 15 s of the job leaving running."""
+        self.wait('box_removed', lambda: not self.docker('ps', '-a', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
+                  and not self.docker('volume', 'ls', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
+                  and all(self.docker('volume', 'inspect', name).returncode != 0 for name in names), 120)
+        mine = {item['id'] for item in self.f.app('/v1/background-jobs').get('jobs', [])}
+        left = [line.split(' ') for kind in (('ps', '-a'), ('volume', 'ls')) for line in self.docker(*kind, '--filter', 'name=nocheh-box-', '--format',
+                '{{.Names}} {{.Label "nocheh.box.job"}}' if kind[0] == 'ps' else '{{.Name}} {{.Label "nocheh.box.job"}}').stdout.splitlines()]
+        self.gate('no_box_left', not [row for row in left if row[-1] in mine], left=[row[0] for row in left])
 
     def background_job_uses_sealed_box(self):
         # The owner asks in private for a job with the sealed box over a made-up group chat. The run's own terminal,
@@ -912,18 +944,9 @@ class ProductScenarios(Scenarios):
         self.current['observed'] = {'boxes': list(seen['boxes']), 'turns': len(seen['turns']), 'samples': len(seen['samples']), 'errors': seen['errors'][:5]}
         self.gate('one_box_for_the_job', len(seen['boxes']) == 1, boxes=list(seen['boxes']))
         box = next(iter(seen['boxes'].values()))
-        host, config = box.get('HostConfig') or {}, box.get('Config') or {}
-        flags = {'network': host.get('NetworkMode'), 'networks': sorted((box.get('NetworkSettings') or {}).get('Networks') or {}),
-                 'read_only': host.get('ReadonlyRootfs'), 'user': config.get('User'), 'cap_drop': host.get('CapDrop'),
-                 'security': host.get('SecurityOpt'), 'binds': host.get('Binds'), 'role': (config.get('Labels') or {}).get('nocheh.role'),
-                 'mounts': [[mount.get('Type'), mount.get('Destination'), mount.get('RW')] for mount in box.get('Mounts') or []]}
-        self.gate('box_sealed', flags['network'] == 'none' and flags['networks'] == ['none'] and flags['read_only'] is True
-                  and flags['user'] == '65532:65532' and flags['cap_drop'] == ['ALL'] and 'no-new-privileges:true' in (flags['security'] or [])
-                  and not flags['binds'] and flags['mounts'] == [['volume', '/run/box', True]] and flags['role'] == 'job-box', **flags)
+        host, config = self.sealed(box)
         name = box['Name'].lstrip('/')
-        sockets = [[[mount.get('Type'), mount.get('Name'), mount.get('RW')] for mount in turn.get('Mounts') or [] if mount.get('Destination') == '/box']
-                   for turn in seen['turns'].values()]
-        self.gate('run_turn_reaches_the_box_by_its_socket_only', bool(sockets) and all(mounts == [['volume', name, False]] for mounts in sockets), mounts=sockets)
+        self.socket_only(seen, name)
         probed = [sample for sample in seen['samples'] if sample['in_turn'] in ('present', 'absent')]
         written = [sample for sample in probed if sample['box'] == 'present']
         self.gate('turn_wrote_nothing', bool(written) and not [sample for sample in probed if sample['in_turn'] == 'present'],
@@ -942,14 +965,222 @@ class ProductScenarios(Scenarios):
         self.gate('job_listed_as_done', len(jobs) == 1 and jobs[0]['state'] == 'done' and jobs[0]['attempts'] == 1, jobs=jobs)
         self.gate('one_run', len(self.job_runs(job)) == 1, runs=self.job_runs(job))
         self.gate('run_told_about_the_box', 'In this job your terminal' in self.run_input(job, 1))
-        # The launcher's sweep removes a box and its socket volume within 15 s of its job leaving running.
-        self.wait('box_removed', lambda: not self.docker('ps', '-a', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
-                  and not self.docker('volume', 'ls', '-q', '--filter', 'label=nocheh.box.job='+job).stdout.split()
-                  and self.docker('volume', 'inspect', name).returncode != 0, 120)
-        mine = {item['id'] for item in self.f.app('/v1/background-jobs').get('jobs', [])}
-        left = [line.split(' ') for kind in (('ps', '-a'), ('volume', 'ls')) for line in self.docker(*kind, '--filter', 'name=nocheh-box-', '--format',
-                '{{.Names}} {{.Label "nocheh.box.job"}}' if kind[0] == 'ps' else '{{.Name}} {{.Label "nocheh.box.job"}}').stdout.splitlines()]
-        self.gate('no_box_left', not [row for row in left if row[-1] in mine], left=[row[0] for row in left])
+        self.box_removed(job, [name])
+
+    # GitHub copies ---------------------------------------------------------------------------------------
+
+    # The fake GitHub's made-up repository (tools/acceptance/github_mock.py).
+    REPO = 'example-org/widgets'
+    # A repo box's /repo and memory, exactly as the launcher makes them (ADR-0209).
+    REPO_TMPFS = 'rw,noexec,nosuid,nodev,size=256m,nr_inodes=65536,uid=65531,gid=65531,mode=0755'
+    REPO_MEMORY = 1024**3+512*1024**2
+    # Waits up to 3 minutes for the copy; it may still land beside the run.
+    REPO_WAIT = 'for i in $(seq 90); do grep -q ready /repo/manifest.json 2>/dev/null && break; sleep 2; done; cat /repo/manifest.json; echo'
+    WITHDRAWN = '🚫 Withdrawn: its GitHub copy was removed. Nothing runs.'
+
+    def repo_job(self, title, instruction, extra=None):
+        """The owner asks for a box job that reads the GitHub copy; returns its card, its id and the sent count before."""
+        _, before = self.silent_turn(self.job_request('کار با کد '+title, {'title': title, 'instruction': instruction, 'box': True,
+                                                                           'repo': self.REPO, **(extra or self.EMPTY)}), OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        return card, self.job_named(title)['id'], before
+
+    def pinned_copy(self, job):
+        return self.f.query('nocheh_control', "SELECT repo->>'copy_id' FROM background_jobs WHERE id='%s'" % job)
+
+    def withdrawn(self, card, title):
+        """A card withdrawn by Remove or Disconnect: it says why, has no buttons, and its job is stopped with job_repo_removed."""
+        self.wait('card_withdrawn', lambda: (lambda row: row if self.WITHDRAWN in row['message']['text'] and not self.buttons(row) else None)(
+            self.card_message(card)), 120)
+        found = self.job_named(title)
+        self.gate('job_withdrawn', found['state'] == 'stopped' and found.get('error_code') == 'job_repo_removed', state=found['state'], error=found.get('error_code'))
+
+    def repo_watch(self, token, seen):
+        """A watch_box probe: each box's /repo/manifest.json, and once the copy is ready, a search of the box for the key
+        as a box command would run it. The key goes on stdin, never in a command line."""
+        def probe(name):
+            manifest = self.docker('exec', name, 'cat', '/repo/manifest.json').stdout.strip()
+            if manifest:
+                seen['manifests'][name] = manifest
+            if name not in seen['searched'] and '"ready"' in manifest:
+                found = subprocess.run(['docker', 'exec', '-i', '-u', '65532:65532', name, 'grep', '-rlsF', '-f', '/dev/stdin',
+                                        '/repo', '/chat', '/work', '/etc', '/opt'], input=token, capture_output=True, text=True)
+                seen['searched'][name] = found.stdout.split()
+        return probe
+
+    def watched_run(self, job, card, token, until):
+        """Approves a job and watches its boxes until `until` returns something; returns that and what was seen."""
+        seen, stop = {'boxes': {}, 'turns': {}, 'samples': [], 'errors': [], 'manifests': {}, 'searched': {}}, threading.Event()
+        watcher = threading.Thread(target=self.watch_box, args=(job, stop, seen, self.repo_watch(token, seen)), daemon=True)
+        watcher.start()
+        try:
+            answer = self.press(card, 'approve')
+            self.gate('job_press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
+            value = until()
+        finally:
+            stop.set()
+            watcher.join(30)
+        return value, seen
+
+    def background_job_reads_a_repo_copy(self):
+        # The owner connects a made-up GitHub key and copies a made-up repository on the dashboard. A box job pinned to
+        # that copy reads it in /repo/code with git, rg and its file tools, and every run, a relaunch's new box included,
+        # gets the same commit. The key never reaches the box, a turn, the launcher, the database, the model or Telegram.
+        # Remove and Disconnect withdraw jobs that have not started, and a later Copy makes a new copy.
+        image = self.f.manifest['services']['hermes-agent-sb']['environment'].get('NOCHEH_BOX_IMAGE') or 'nocheh-box:local'
+        version = self.docker('run', '--rm', '--network=none', '--read-only', '--user', '65532:65532', '--entrypoint', 'git', image, '--version')
+        self.gate('box_image_has_git', version.returncode == 0 and version.stdout.startswith('git version'), version=version.stdout.strip(), image=image)
+        github = self.f.directory/'github'
+        token = (github/'token').read_text().strip()
+        commit = subprocess.run(['git', '--git-dir', str(github/'git'/(self.REPO+'.git')), 'rev-parse', 'refs/heads/main'],
+                                capture_output=True, text=True, check=True).stdout.strip()
+        copies = self.f.directory/'state/github/copies'
+        dashboard, answers = self.dashboard(), []
+
+        def call(path, body=None, allow_error=False):
+            """One dashboard call; one that meets the hourly check holding the GitHub lock waits for it."""
+            for _ in range(20):
+                answer = dashboard.call('GET' if body is None else 'POST', path, body, allow_error=True)
+                if not (answer['status'] == 409 and (answer['body'] or {}).get('error') == 'job_busy'):
+                    break
+                time.sleep(3)
+            answers.append(answer)
+            if allow_error:
+                return answer
+            if answer['status'] != 200:
+                raise AssertionError('dashboard_http_'+str(answer['status'])+':'+path+':'+json.dumps(answer['body'])[:300])
+            return answer['body']
+        try:
+            # 2. The key, once: no answer carries it, and the list shows what it can read.
+            connected = call('/connections/github/token', {'token': token})
+            self.gate('github_connected', connected.get('connected') is True and connected.get('login') == 'octo-example' and
+                      [row['name'] for row in connected.get('listed') or []] == [self.REPO] and token not in json.dumps(connected),
+                      status={k: connected.get(k) for k in ('connected', 'login', 'listed')})
+            # 3. A copy at the commit GitHub names; the fetcher leaves nothing behind.
+            copied = call('/connections/github/copy', {'repo': self.REPO})
+            status = call('/connections/github')
+            row = next((item for item in status.get('copies') or [] if item['repo'] == self.REPO), {})
+            self.gate('copied_at_the_host_commit', copied.get('state') in ('copied', 'current') and row.get('commit') == commit and not row.get('missing'),
+                      copied=copied, commit=commit, row=row)
+            self.gate('bundle_kept', (copies/(row['digest']+'.bundle')).is_file(), digest=row.get('digest'))
+            fetchers = self.docker('ps', '-a', '-q', '--filter', 'name=nocheh-repo-fetch-', '--filter', 'label=nocheh.repo-fetch.project='+self.f.project).stdout.split()
+            self.gate('no_fetcher_left', not fetchers, fetchers=fetchers)
+            # The agent sees the copy in the job tool's status, in the owner's private chat.
+            self.silent_turn(self.f.message(OWNER, 'کپی‌ها REPOSTATUS [[tool:nocheh_background_job {"action":"status"}]] [[after:silent]]'), OWNER)
+            listed = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
+                      and '"status"' in event.get('argument', '')][-1]
+            repos = json.loads(listed['result']).get('repos') or []
+            self.gate('status_lists_the_copy', [item.get('name') for item in repos] == [self.REPO] and repos[0].get('commit') == commit[:12]
+                      and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z', str(repos[0].get('copied_at'))) is not None, repos=repos)
+            # 4-9. A job reads the copy; its run waits for /repo/manifest.json, then reads the copy with git, rg and its file tools.
+            command = (self.REPO_WAIT+'; git -C /repo/code log --format=%s; rg -n REPOMARK1 /repo/code; echo ESCAPE=$(stat -c "%u %F" /repo/code/escape); '
+                       'echo REMOTES=$(git -C /repo/code config --list --local | grep -c "^remote[.]"); echo STATUS=$(git -C /repo/code status --short | wc -l); '
+                       'touch /repo/code/x 2>/dev/null || echo READONLY; git clone -q --shared /repo/code /work/code && echo CLONED; cat /repo/code/notes.txt')
+            calls = (('terminal', {'command': command}), ('search_files', {'pattern': 'REPOMARK1', 'path': '/repo/code', 'target': 'content'}),
+                     ('read_file', {'path': '/repo/code/src/widget.py'}))
+            instruction = 'Read the copy. [[delay:8]] '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in calls)
+            today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            card, job, before = self.repo_job('Repo JOB13', instruction, {'chat': str(GROUP), 'from': today})
+            text = card['message']['text']
+            self.gate('job_card_shows_the_copy', '📦' in text and self.REPO in text and 'main at '+commit[:7] in text and 'GitHub copy below' in text, card=text)
+
+            def reported():
+                rows = [row for row in self.job_replies(before) if '[brain] read_file:' in (row['message'].get('text') or '')]
+                state = {} if rows else self.job_named('Repo JOB13')
+                if state.get('state') in ('failed', 'stopped'):
+                    self.gate('job_did_not_fail', False, state=state['state'], error=state.get('error_code'), attempts=state.get('attempts'))
+                return rows
+            report, seen = self.watched_run(job, card, token, lambda: self.wait('job_report_sent', reported, 600))
+            self.current['observed'] = {'boxes': list(seen['boxes']), 'manifests': seen['manifests'], 'searched': seen['searched'], 'errors': seen['errors'][:5]}
+            self.gate('one_box_for_the_job', len(seen['boxes']) == 1, boxes=list(seen['boxes']))
+            name, box = next(iter(seen['boxes'].items()))
+            host, config = self.sealed(box)
+            self.socket_only(seen, name)
+            self.gate('box_has_repo', (host.get('Tmpfs') or {}).get('/repo') == self.REPO_TMPFS and host.get('Memory') == host.get('MemorySwap') == self.REPO_MEMORY,
+                      tmpfs=(host.get('Tmpfs') or {}).get('/repo'), memory=host.get('Memory'), swap=host.get('MemorySwap'))
+            self.gate('job_report_once', len(report) == 1, count=len(report))
+            text = report[0]['message']['text']
+            split = re.split(r'\[brain\] (terminal|search_files|read_file): ', text)
+            parts = dict(zip(split[1::2], split[2::2]))
+            terminal = parts.get('terminal', '')
+            self.gate('git_read_the_history', 'REPOMARK2: vendor the lib' in terminal and 'REPOMARK1: the widget' in terminal, terminal=terminal[:800])
+            self.gate('copy_ready_at_the_commit', re.search(r'state\\*"\s*:\s*\\*"ready', terminal) is not None and commit in terminal, terminal=terminal[:400])
+            self.gate('copy_is_read_only_and_plain', 'ESCAPE=65531 regular file' in terminal and 'REMOTES=0' in terminal and 'STATUS=0' in terminal
+                      and 'READONLY' in terminal and 'CLONED' in terminal, terminal=terminal[:800])
+            # Hermes's own redaction may mask the committed key first, keeping its first 6 and last 4 characters; the guard
+            # masks any that is left whole. The model and Telegram never see it whole (key_only_sent_to_github).
+            masked = re.search(r'NOTESMARK (\*\*\*|'+re.escape('gh'+'p_yy...yyyy')+')', terminal)
+            self.gate('key_in_the_code_masked', masked is not None and 'gh'+'p_'+'y'*36 not in text, notes=masked and masked.group(0), terminal=terminal[-300:])
+            self.gate('file_tools_read_the_copy', 'REPOMARK1' in parts.get('search_files', '') and 'REPOMARK1: the widget' in parts.get('read_file', ''),
+                      search_files=parts.get('search_files', '')[:300], read_file=parts.get('read_file', '')[:300])
+            first = self.run_input(job, 1)
+            self.gate('run_told_about_the_copy', '[GitHub copy]' in first and '/repo/code is a read-only copy of the GitHub repository '+self.REPO in first
+                      and 'commit '+commit in first and 'never copy the repository into /work itself' in first)
+            # 8. The key appears nowhere a job, a turn, the launcher, the database, the model or Telegram can see.
+            self.gate('box_searched_for_the_key', name in seen['searched'] and not seen['searched'][name], found=seen['searched'].get(name))
+            self.gate('key_not_in_the_box_or_its_turns', token not in json.dumps(box) and all(token not in json.dumps(turn) for turn in seen['turns'].values()))
+            launcher = self.docker('ps', '-q', '--filter', 'label=com.docker.compose.project='+self.f.project,
+                                   '--filter', 'label=com.docker.compose.service=hermes-agent-sb').stdout.split()
+            self.gate('key_not_in_the_launcher', len(launcher) == 1 and token not in self.docker('inspect', launcher[0]).stdout, launcher=launcher)
+            rows = '\n'.join(self.f.query('nocheh_control', "SELECT coalesce(string_agg(t::text, E'\\n'), '') FROM %s t" % table)
+                             for table in ('github_copies', 'background_jobs', 'background_runs'))
+            self.gate('key_not_in_the_store', token not in rows and self.REPO in rows)
+            fake = self.f.http('/fixture/github')
+            self.gate('key_only_sent_to_github', fake['elsewhere'] == 0 and fake['committed'] == 0 and any(item['authorized'] for item in fake['requests'])
+                      and all(item['path'].startswith('/github/') for item in fake['requests']), elsewhere=fake['elsewhere'], committed=fake['committed'],
+                      requests=len(fake['requests']))
+            # 9.
+            self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
+            found = self.job_named('Repo JOB13')
+            self.gate('job_listed_as_done', found['state'] == 'done' and found['attempts'] == 1, job=found)
+            self.gate('one_run', len(self.job_runs(job)) == 1, runs=self.job_runs(job))
+            self.box_removed(job, [name])
+            # 10. A relaunch gets a new box and the same commit in it.
+            mark = 'REPORESTART'+str(self.f.ids())
+            card, job, before = self.repo_job('Repo JOB14', '[[tool:terminal '+json.dumps({'command': self.REPO_WAIT})+']] [[delay:20]] '+self.searches(mark, 2))
+
+            def relaunched():
+                self.wait('first_search_called', lambda: self.called(self.f.brain(), mark+'X0') is not None, 300, 1)
+                self.kill_turn()
+                return self.job_ended('Repo JOB14', 600)
+            found, seen = self.watched_run(job, card, token, relaunched)
+            runs = self.job_runs(job)
+            self.current['observed'] = {**self.current['observed'], 'relaunch': {'boxes': list(seen['boxes']), 'manifests': seen['manifests'], 'runs': runs}}
+            self.gate('relaunched_job_done', found['state'] == 'done' and found.get('attempts') == 2, state=found['state'], error=found.get('error_code'), runs=runs)
+            self.gate('a_new_box_for_the_relaunch', len(seen['boxes']) == 2, boxes=list(seen['boxes']))
+            ready = [json.loads(seen['manifests'].get(name) or '{}') for name in seen['boxes']]
+            self.gate('each_box_got_the_same_commit', all(item.get('state') == 'ready' and item.get('commit') == commit for item in ready), manifests=ready)
+            self.gate('relaunch_told_about_the_copy', '[GitHub copy]' in self.run_input(job, 2))
+            self.box_removed(job, list(seen['boxes']))
+            # 11. Only a copied repository.
+            refused = {'action': 'start', 'title': 'Repo JOB17', 'instruction': 'Read another copy.', 'box': True, 'repo': 'example-org/other', **self.EMPTY}
+            self.silent_turn(self.f.message(OWNER, 'کپی دیگر [[tool:nocheh_background_job '+json.dumps(refused)+']] [[after:silent]]'), OWNER)
+            result = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
+                      and 'Repo JOB17' in event.get('argument', '')][-1]['result']
+            self.gate('other_repo_not_allowed', 'job_repo_not_allowed' in result, result=result[:300])
+            # 12. Remove withdraws a waiting card and deletes the file; a later Copy is a new copy that old jobs never get.
+            waiting, job, _ = self.repo_job('Repo JOB15', 'Read the copy later.')
+            old = self.pinned_copy(job)
+            removed = call('/connections/github/remove', {'repo': self.REPO})
+            self.gate('copy_removed', not removed.get('copies') and not (copies/(row['digest']+'.bundle')).exists(), copies=removed.get('copies'))
+            self.withdrawn(waiting, 'Repo JOB15')
+            call('/connections/github/copy', {'repo': self.REPO})
+            waiting, job, _ = self.repo_job('Repo JOB16', 'Read the new copy later.')
+            self.gate('new_copy_pinned', self.pinned_copy(job) not in ('', old), old=old, new=self.pinned_copy(job))
+            # 13. A refused key is dropped, and the card asks to connect again.
+            self.f.http('/fixture/github', {'revoked': True})
+            again = call('/connections/github/copy', {'repo': self.REPO}, allow_error=True)
+            status = call('/connections/github')
+            self.gate('refused_key_dropped', again['status'] == 400 and (again['body'] or {}).get('error') == 'github_token_refused'
+                      and status.get('reconnect') is True and status.get('connected') is False, answer=again, reconnect=status.get('reconnect'))
+            # 14. Disconnect deletes every copy and withdraws the last waiting card.
+            gone = call('/connections/github/disconnect', {})
+            self.gate('disconnected', gone.get('connected') is False and not gone.get('copies') and not list(copies.iterdir()),
+                      left=[path.name for path in copies.iterdir()])
+            self.withdrawn(waiting, 'Repo JOB16')
+            self.gate('no_answer_holds_the_key', all(token not in json.dumps(answer) for answer in answers))
+        finally:
+            self.f.http('/fixture/github', {'revoked': False})
 
     # Approved operations ---------------------------------------------------------------------------------
 
@@ -1074,6 +1305,12 @@ class ProductScenarios(Scenarios):
         runs = self.job_runs(found['id'])
         self.gate('run_ended_stopped', [run['ended'] for run in runs] == ['stopped'] and found.get('attempts') == 1, runs=runs)
 
+    def kill_turn(self):
+        """Kills the one isolated turn running now; its run ends abnormally and is relaunched."""
+        turns = self.wait('one_turn_running', lambda: (lambda ids: ids if len(ids) == 1 else None)(isolated_turns('-q').split()), 15, 1)
+        killed = self.docker('kill', turns[0])
+        self.gate('turn_killed', killed.returncode == 0, error=killed.stderr[:300])
+
     def owner_hide(self, hide):
         """The owner hides a message of their own private chat, a change that is not quiet: the epochs before and after it,
         and how to undo it."""
@@ -1108,9 +1345,7 @@ class ProductScenarios(Scenarios):
         else:
             if change == 'reaction':
                 _, now = self.owner_reaction(request, 60)
-            turns = self.wait('one_turn_running', lambda: (lambda ids: ids if len(ids) == 1 else None)(isolated_turns('-q').split()), 15, 1)
-            killed = self.docker('kill', turns[0])
-            self.gate('turn_killed', killed.returncode == 0, error=killed.stderr[:300])
+            self.kill_turn()
         try:
             found = self.job_ended(title, 600)
         finally:
@@ -1263,7 +1498,8 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
-                 'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
+                 'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
+                 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
