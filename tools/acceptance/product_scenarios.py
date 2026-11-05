@@ -999,13 +999,17 @@ class ProductScenarios(Scenarios):
         """A watch_box probe: each box's /repo/manifest.json, and once the copy is ready, a search of the box for the key
         as a box command would run it. The key goes on stdin, never in a command line."""
         def probe(name):
-            manifest = self.docker('exec', name, 'cat', '/repo/manifest.json').stdout.strip()
+            # A box being removed can answer an exec with Docker's own error text, so only a successful exec counts.
+            read = self.docker('exec', name, 'cat', '/repo/manifest.json')
+            manifest = read.stdout.strip() if read.returncode == 0 else ''
             if manifest:
                 seen['manifests'][name] = manifest
             if name not in seen['searched'] and '"ready"' in manifest:
                 found = subprocess.run(['docker', 'exec', '-i', '-u', '65532:65532', name, 'grep', '-rlsF', '-f', '/dev/stdin',
                                         '/repo', '/chat', '/work', '/etc', '/opt'], input=token, capture_output=True, text=True)
-                seen['searched'][name] = found.stdout.split()
+                # grep answers 0 when it found the key and 1 when it did not; anything else is tried again next round.
+                if found.returncode in (0, 1):
+                    seen['searched'][name] = found.stdout.split()
         return probe
 
     def watched_run(self, job, card, token, until):
