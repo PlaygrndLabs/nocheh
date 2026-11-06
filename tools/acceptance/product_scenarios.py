@@ -9,15 +9,18 @@ The scripted model acts only on explicit directives, so these scenarios test
 Nocheh's plumbing, rules and effects, never model judgement.
 """
 import base64
+import http.client
 import io
 import json
 import re
 import subprocess
 import threading
 import time
+import urllib.parse
 import zipfile
 from datetime import datetime, timedelta, timezone
 
+from tools.acceptance.github_mock import key_line
 from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Scenarios, isolated_turns, synthetic_pdf
 
 # 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
@@ -969,8 +972,10 @@ class ProductScenarios(Scenarios):
 
     # GitHub copies ---------------------------------------------------------------------------------------
 
-    # The fake GitHub's made-up repository (tools/acceptance/github_mock.py).
+    # The fake GitHub's made-up repository (tools/acceptance/github_mock.py), and where the model fixture serves it.
     REPO = 'example-org/widgets'
+    GITHUB_HOST = 'http://model-fixture:8317'
+    GITHUB = GITHUB_HOST+'/github'
     # A repo box's /repo and memory, exactly as the launcher makes them (ADR-0209).
     REPO_TMPFS = 'rw,noexec,nosuid,nodev,size=256m,nr_inodes=65536,uid=65531,gid=65531,mode=0755'
     REPO_MEMORY = 1024**3+512*1024**2
@@ -995,9 +1000,9 @@ class ProductScenarios(Scenarios):
         found = self.job_named(title)
         self.gate('job_withdrawn', found['state'] == 'stopped' and found.get('error_code') == 'job_repo_removed', state=found['state'], error=found.get('error_code'))
 
-    def repo_watch(self, token, seen):
-        """A watch_box probe: each box's /repo/manifest.json, and once the copy is ready, a search of the box for the key
-        as a box command would run it. The key goes on stdin, never in a command line."""
+    def repo_watch(self, keys, seen):
+        """A watch_box probe: each box's /repo/manifest.json, and once the copy is ready, a search of the box for the keys
+        as a box command would run it. The keys go on stdin, one a line, never in a command line."""
         def probe(name):
             # A box being removed can answer an exec with Docker's own error text, so only a successful exec counts.
             read = self.docker('exec', name, 'cat', '/repo/manifest.json')
@@ -1005,21 +1010,21 @@ class ProductScenarios(Scenarios):
             if manifest:
                 seen['manifests'][name] = manifest
             if name not in seen['searched'] and '"ready"' in manifest:
-                # grep answers 0 when it found the key, 1 when it did not, and 2 when it also met files the box user cannot
+                # grep answers 0 when it found a key, 1 when it did not, and 2 when it also met files the box user cannot
                 # read, as in /etc; a box command cannot read those either. Docker's own errors also exit 1, so only a
                 # search that printed its own exit line counts; anything else is tried again next round.
                 found = subprocess.run(['docker', 'exec', '-i', '-u', '65532:65532', name, 'sh', '-c',
                                         'grep -rlsF -f /dev/stdin /repo /chat /work /etc /opt; echo "searched=$?"'],
-                                       input=token, capture_output=True, text=True)
+                                       input='\n'.join(keys), capture_output=True, text=True)
                 lines = [line for line in found.stdout.split('\n') if line.strip()]
                 if found.returncode == 0 and lines and lines[-1] in ('searched=0', 'searched=1', 'searched=2'):
                     seen['searched'][name] = lines[:-1]
         return probe
 
-    def watched_run(self, job, card, token, until):
+    def watched_run(self, job, card, keys, until):
         """Approves a job and watches its boxes until `until` returns something; returns that and what was seen."""
         seen, stop = {'boxes': {}, 'turns': {}, 'samples': [], 'errors': [], 'manifests': {}, 'searched': {}}, threading.Event()
-        watcher = threading.Thread(target=self.watch_box, args=(job, stop, seen, self.repo_watch(token, seen)), daemon=True)
+        watcher = threading.Thread(target=self.watch_box, args=(job, stop, seen, self.repo_watch(keys, seen)), daemon=True)
         watcher.start()
         try:
             answer = self.press(card, 'approve')
@@ -1030,20 +1035,45 @@ class ProductScenarios(Scenarios):
             watcher.join(30)
         return value, seen
 
+    def github_returned(self, dashboard, address, step):
+        """GitHub sends the browser back to the dashboard's /connect/github, which sends it on to the card with only what
+        the card needs. Answers what the card got."""
+        self.gate('github_returned_to_the_dashboard_'+step, address.startswith(dashboard.origin+'/connect/github?'), address=address)
+        parsed = urllib.parse.urlsplit(address)
+        connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=60)
+        try:
+            connection.request('GET', parsed.path+'?'+parsed.query)
+            response = connection.getresponse()
+            location = response.getheader('location') or ''
+            response.read()
+        finally:
+            connection.close()
+        self.gate('github_return_sent_to_the_card_'+step, response.status == 302 and location.startswith('/?connect=github&'),
+                  status=response.status, location=location)
+        return dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(location).query))
+
     def background_job_reads_a_repo_copy(self):
-        # The owner connects a made-up GitHub key and copies a made-up repository on the dashboard. A box job pinned to
-        # that copy reads it in /repo/code with git, rg and its file tools, and every run, a relaunch's new box included,
-        # gets the same commit. The key never reaches the box, a turn, the launcher, the database, the model or Telegram.
-        # Remove and Disconnect withdraw jobs that have not started, and a later Copy makes a new copy.
+        # The owner connects GitHub on the dashboard: GitHub makes Nocheh's own made-up app, the owner installs it on a
+        # made-up repository and copies it. A box job pinned to that copy reads it in /repo/code with git, rg and its file
+        # tools, and every run, a relaunch's new box included, gets the same commit. Neither the app's key nor a short
+        # repo key reaches the box, a turn, the launcher, the database, the model or Telegram. Remove and Disconnect
+        # withdraw jobs that have not started, and a later Copy makes a new copy.
         image = self.f.manifest['services']['hermes-agent-sb']['environment'].get('NOCHEH_BOX_IMAGE') or 'nocheh-box:local'
         version = self.docker('run', '--rm', '--network=none', '--read-only', '--user', '65532:65532', '--entrypoint', 'git', image, '--version')
         self.gate('box_image_has_git', version.returncode == 0 and version.stdout.startswith('git version'), version=version.stdout.strip(), image=image)
         github = self.f.directory/'github'
-        token = (github/'token').read_text().strip()
+        pem = key_line((github/'app.pem').read_text())
         commit = subprocess.run(['git', '--git-dir', str(github/'git'/(self.REPO+'.git')), 'rev-parse', 'refs/heads/main'],
                                 capture_output=True, text=True, check=True).stdout.strip()
         copies = self.f.directory/'state/github/copies'
         dashboard, answers = self.dashboard(), []
+
+        def keys():
+            """A line of the app's key and every short repo key the fake GitHub has made so far."""
+            return [pem]+[row['token'] for row in self.f.http('/fixture/github')['issued']]
+
+        def leaked(text, found):
+            return [value for value in found if value in text]
 
         def call(path, body=None, allow_error=False):
             """One dashboard call; one that meets the hourly check holding the GitHub lock waits for it."""
@@ -1059,11 +1089,28 @@ class ProductScenarios(Scenarios):
                 raise AssertionError('dashboard_http_'+str(answer['status'])+':'+path+':'+json.dumps(answer['body'])[:300])
             return answer['body']
         try:
-            # 2. The key, once: no answer carries it, and the list shows what it can read.
-            connected = call('/connections/github/token', {'token': token})
-            self.gate('github_connected', connected.get('connected') is True and connected.get('login') == 'octo-example' and
-                      [row['name'] for row in connected.get('listed') or []] == [self.REPO] and token not in json.dumps(connected),
-                      status={k: connected.get(k) for k in ('connected', 'login', 'listed')})
+            # 2. Connect GitHub: GitHub makes the app from Nocheh's manifest, which reads code and nothing else, and hands
+            # its key over once. The owner installs it on the repositories it may read, and the list shows them.
+            started = call('/connections/github/start', {'redirect': dashboard.origin+'/connect/github'})
+            manifest = json.loads(started['manifest'])
+            self.gate('app_reads_code_only', started['action'].startswith(self.GITHUB+'/web/settings/apps/new?state=')
+                      and manifest['default_permissions'] == {'contents': 'read', 'metadata': 'read'} and manifest['default_events'] == []
+                      and manifest['public'] is False and manifest['redirect_url'] == manifest['setup_url'] == dashboard.origin+'/connect/github',
+                      action=started['action'], manifest=manifest)
+            created = self.f.http(started['action'][len(self.GITHUB_HOST):], {'manifest': started['manifest']})
+            sent = self.github_returned(dashboard, created['redirect'], 'created')
+            finished = call('/connections/github/finish', {'code': sent.get('code'), 'state': sent.get('state')})
+            self.gate('github_app_made', finished.get('connected') is True and (finished.get('app') or {}).get('account') == 'octo-example'
+                      and finished.get('listed') == [] and finished.get('install_url', '').startswith(self.GITHUB+'/web/apps/nocheh-')
+                      and not leaked(json.dumps(finished), keys()), app=finished.get('app'), install_url=finished.get('install_url'))
+            again = call('/connections/github/finish', {'code': sent.get('code'), 'state': sent.get('state')}, allow_error=True)
+            self.gate('sign_in_used_once', again['status'] == 400 and (again['body'] or {}).get('error') == 'github_sign_in_expired', answer=again)
+            installed = self.f.http(finished['install_url'][len(self.GITHUB_HOST):], {})
+            sent = self.github_returned(dashboard, installed['redirect'], 'installed')
+            self.gate('github_app_installed', sent == {'connect': 'github', 'installation_id': '2002', 'setup_action': 'install'}, sent=sent)
+            connected = call('/connections/github/list', {})
+            self.gate('github_connected', connected.get('connected') is True and [row['name'] for row in connected.get('listed') or []] == [self.REPO]
+                      and not leaked(json.dumps(connected), keys()), status={k: connected.get(k) for k in ('connected', 'app', 'listed')})
             # 3. A copy at the commit GitHub names; the fetcher leaves nothing behind.
             copied = call('/connections/github/copy', {'repo': self.REPO})
             status = call('/connections/github')
@@ -1098,7 +1145,8 @@ class ProductScenarios(Scenarios):
                 if state.get('state') in ('failed', 'stopped'):
                     self.gate('job_did_not_fail', False, state=state['state'], error=state.get('error_code'), attempts=state.get('attempts'))
                 return rows
-            report, seen = self.watched_run(job, card, token, lambda: self.wait('job_report_sent', reported, 600))
+            found = keys()
+            report, seen = self.watched_run(job, card, found, lambda: self.wait('job_report_sent', reported, 600))
             self.current['observed'] = {'boxes': list(seen['boxes']), 'manifests': seen['manifests'], 'searched': seen['searched'], 'errors': seen['errors'][:5]}
             self.gate('one_box_for_the_job', len(seen['boxes']) == 1, boxes=list(seen['boxes']))
             name, box = next(iter(seen['boxes'].items()))
@@ -1124,17 +1172,18 @@ class ProductScenarios(Scenarios):
             first = self.run_input(job, 1)
             self.gate('run_told_about_the_copy', '[GitHub copy]' in first and '/repo/code is a read-only copy of the GitHub repository '+self.REPO in first
                       and 'commit '+commit in first and 'never copy the repository into /work itself' in first)
-            # 8. The key appears nowhere a job, a turn, the launcher, the database, the model or Telegram can see.
-            self.gate('box_searched_for_the_key', name in seen['searched'] and not seen['searched'][name], found=seen['searched'].get(name))
-            self.gate('key_not_in_the_box_or_its_turns', token not in json.dumps(box) and all(token not in json.dumps(turn) for turn in seen['turns'].values()))
+            # 8. No key appears where a job, a turn, the launcher, the database, the model or Telegram can see it.
+            self.gate('box_searched_for_the_keys', name in seen['searched'] and not seen['searched'][name] and len(found) > 1,
+                      found=seen['searched'].get(name), keys=len(found))
+            self.gate('keys_not_in_the_box_or_its_turns', not leaked(json.dumps(box), found) and not any(leaked(json.dumps(turn), found) for turn in seen['turns'].values()))
             launcher = self.docker('ps', '-q', '--filter', 'label=com.docker.compose.project='+self.f.project,
                                    '--filter', 'label=com.docker.compose.service=hermes-agent-sb').stdout.split()
-            self.gate('key_not_in_the_launcher', len(launcher) == 1 and token not in self.docker('inspect', launcher[0]).stdout, launcher=launcher)
+            self.gate('keys_not_in_the_launcher', len(launcher) == 1 and not leaked(self.docker('inspect', launcher[0]).stdout, found), launcher=launcher)
             rows = '\n'.join(self.f.query('nocheh_control', "SELECT coalesce(string_agg(t::text, E'\\n'), '') FROM %s t" % table)
                              for table in ('github_copies', 'background_jobs', 'background_runs'))
-            self.gate('key_not_in_the_store', token not in rows and self.REPO in rows)
+            self.gate('keys_not_in_the_store', not leaked(rows, keys()) and self.REPO in rows)
             fake = self.f.http('/fixture/github')
-            self.gate('key_only_sent_to_github', fake['elsewhere'] == 0 and fake['committed'] == 0 and any(item['authorized'] for item in fake['requests'])
+            self.gate('keys_only_sent_to_github', fake['elsewhere'] == 0 and fake['committed'] == 0 and any(item['authorized'] for item in fake['requests'])
                       and all(item['path'].startswith('/github/') for item in fake['requests']), elsewhere=fake['elsewhere'], committed=fake['committed'],
                       requests=len(fake['requests']))
             # 9.
@@ -1151,7 +1200,7 @@ class ProductScenarios(Scenarios):
                 self.wait('first_search_called', lambda: self.called(self.f.brain(), mark+'X0') is not None, 300, 1)
                 self.kill_turn()
                 return self.job_ended('Repo JOB14', 600)
-            found, seen = self.watched_run(job, card, token, relaunched)
+            found, seen = self.watched_run(job, card, keys(), relaunched)
             runs = self.job_runs(job)
             self.current['observed'] = {**self.current['observed'], 'relaunch': {'boxes': list(seen['boxes']), 'manifests': seen['manifests'], 'runs': runs}}
             self.gate('relaunched_job_done', found['state'] == 'done' and found.get('attempts') == 2, state=found['state'], error=found.get('error_code'), runs=runs)
@@ -1175,18 +1224,19 @@ class ProductScenarios(Scenarios):
             call('/connections/github/copy', {'repo': self.REPO})
             waiting, job, _ = self.repo_job('Repo JOB16', 'Read the new copy later.')
             self.gate('new_copy_pinned', self.pinned_copy(job) not in ('', old), old=old, new=self.pinned_copy(job))
-            # 13. A refused key is dropped, and the card asks to connect again.
+            # 13. When GitHub refuses the app, as after the owner deletes it, the card asks to connect again.
             self.f.http('/fixture/github', {'revoked': True})
             again = call('/connections/github/copy', {'repo': self.REPO}, allow_error=True)
             status = call('/connections/github')
-            self.gate('refused_key_dropped', again['status'] == 400 and (again['body'] or {}).get('error') == 'github_token_refused'
+            self.gate('refused_app_asks_to_connect_again', again['status'] == 400 and (again['body'] or {}).get('error') == 'github_app_refused'
                       and status.get('reconnect') is True and status.get('connected') is False, answer=again, reconnect=status.get('reconnect'))
             # 14. Disconnect deletes every copy and withdraws the last waiting card.
             gone = call('/connections/github/disconnect', {})
             self.gate('disconnected', gone.get('connected') is False and not gone.get('copies') and not list(copies.iterdir()),
                       left=[path.name for path in copies.iterdir()])
             self.withdrawn(waiting, 'Repo JOB16')
-            self.gate('no_answer_holds_the_key', all(token not in json.dumps(answer) for answer in answers))
+            found = keys()
+            self.gate('no_answer_holds_a_key', not any(leaked(json.dumps(answer), found) for answer in answers))
         finally:
             self.f.http('/fixture/github', {'revoked': False})
 

@@ -8,6 +8,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {DashboardSessions} from '../src/dashboard-auth.js';
 import {HttpError,json,readJson} from '../src/http.js';
+import {githubReturn} from '../src/github-return.js';
 import {OwnerLock} from '../src/owner-lock.js';
 import {tmpdir} from 'node:os';
 import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
@@ -32,11 +33,13 @@ for(const [id,name] of [['1'.repeat(64),'Mira Chen'],['d1'.repeat(32),'Devon']])
 const notion=new NotionRepository(pool);
 // Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
 let notionSignIn:{connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean}={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};
-// GitHub: made-up repositories; a key is any value shaped like a fine-grained one, and the copies live only in this preview.
+// GitHub: the preview stands in for GitHub's create and install pages and returns at once; made-up repositories, and the
+// copies live only in this preview.
 const githubListed=[{name:'example-org/gadgets',branch:'main',private:false,size_kb:900},{name:'example-org/widgets',branch:'main',private:true,size_kb:21000}];
-// As github.py keeps them: connected_at and listed_at in epoch seconds, expires_at as ISO UTC.
-let githubSignIn:{connected:boolean;login:string|null;connected_at:number|null;expires_at:string|null;reconnect:boolean;listed:typeof githubListed;listed_at:number|null}=
-  {connected:false,login:null,connected_at:null,expires_at:null,reconnect:false,listed:[],listed_at:null};
+const githubApp={name:'Nocheh-a1b2c3',account:'octo-example',install_url:'/__preview/github/install',settings_url:'https://github.com/settings/apps/nocheh-a1b2c3'};
+// As github.py keeps them: connected_at and listed_at in epoch seconds.
+let githubSignIn:{connected:boolean;app:typeof githubApp|null;connected_at:number|null;reconnect:boolean;listed:typeof githubListed;listed_at:number|null}=
+  {connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};
 let githubCopies:Record<string,unknown>[]=[];
 const githubStatus=()=>({...githubSignIn,copies:githubCopies.map(copy=>({...copy,missing:false}))});
 const tasks=new TaskRepository(pool,async()=>{throw new HttpError(403,'owner_private_turn_required');}),taskOwner={admin:true,scope:null};
@@ -338,6 +341,14 @@ const server=createServer((req,res)=>{void(async()=>{
   const session=sessions.page(req);res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/`);
   res.setHeader('content-type','text/html');res.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;
  }
+ // GitHub's create page takes the manifest form and sends the browser back with a code; its install page sends it back
+ // with the installation. The dashboard's return page then opens the dashboard on them, as management.ts does.
+ if(req.method==='POST'&&path==='/__preview/github/new'){let raw='';for await(const part of req)raw+=part;
+  const manifest=JSON.parse(new URLSearchParams(raw).get('manifest')??'{}');
+  if(JSON.stringify(manifest.default_permissions)!==JSON.stringify({contents:'read',metadata:'read'})||manifest.public!==false)throw new HttpError(400,'manifest_not_read_only');
+  res.writeHead(302,{location:'/connect/github?code=preview-code&state='+encodeURIComponent(url.searchParams.get('state')??'')});res.end();return;}
+ if(req.method==='GET'&&path==='/__preview/github/install'){res.writeHead(302,{location:'/connect/github?installation_id=1&setup_action=install'});res.end();return;}
+ if(req.method==='GET'&&path==='/connect/github'){res.writeHead(302,{location:githubReturn(url.searchParams)});res.end();return;}
  if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;}
  // The mini app's phones sign in with the preview's synthetic password and send their session instead of a cookie.
  const phoneRoute=path.match(/^\/api\/nocheh\/mini-app\/(sign-in|check|sign-out)$/)?.[1];
@@ -533,10 +544,16 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
     notionSignIn={connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
   if(route==='/connections/notion/disconnect'){notionSignIn={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};return json(res,200,notionSignIn);}
-  if(route==='/connections/github/token'){if(!/^github_pat_[A-Za-z0-9_]{20,255}$/.test(String(body.token??'').trim()))throw new HttpError(400,'invalid_github_token');
-    const now=new Date();githubSignIn={connected:true,login:'octo-example',connected_at:Math.floor(now.getTime()/1000),expires_at:new Date(now.getTime()+90*86400000).toISOString(),reconnect:false,
-      listed:githubListed,listed_at:Math.floor(now.getTime()/1000)};return json(res,200,githubStatus());}
-  if(route==='/connections/github/list'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');githubSignIn.listed_at=Math.floor(Date.now()/1000);return json(res,200,githubStatus());}
+  if(route==='/connections/github/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/connect/github')throw new HttpError(400,'invalid_github_redirect');
+    return json(res,200,{action:'/__preview/github/new?state=fixture-state',manifest:JSON.stringify({name:'Nocheh-a1b2c3',url:new URL(String(body.redirect)).origin,
+      redirect_url:body.redirect,setup_url:body.redirect,setup_on_update:true,public:false,default_permissions:{contents:'read',metadata:'read'},default_events:[]})});}
+  // A code from a sign-in that came back while Nocheh was busy: the real route refuses it before github.py sees it.
+  if(route==='/connections/github/finish'&&body.code==='preview-busy')throw new HttpError(409,'wait_for_active_jobs');
+  if(route==='/connections/github/finish'){if(body.state!=='fixture-state'||body.code!=='preview-code')throw new HttpError(400,'github_sign_in_expired');
+    githubSignIn={connected:true,app:githubApp,connected_at:Math.floor(Date.now()/1000),reconnect:false,listed:[],listed_at:null};
+    return json(res,200,{...githubStatus(),install_url:githubApp.install_url});}
+  if(route==='/connections/github/list'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
+    githubSignIn.listed=githubListed;githubSignIn.listed_at=Math.floor(Date.now()/1000);return json(res,200,githubStatus());}
   if(route==='/connections/github/copy'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
     const repo=String(body.repo??''),known=githubListed.find(row=>row.name.toLowerCase()===repo.toLowerCase());if(!known)throw new HttpError(400,'github_repo_not_readable');
     const commit=randomUUID().replace(/-/g,'').padEnd(40,'0'),copied_at=new Date().toISOString(),row={repo:known.name,branch:known.branch,commit,digest:commit.padEnd(64,'0'),
@@ -544,7 +561,7 @@ const server=createServer((req,res)=>{void(async()=>{
     githubCopies=[...githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==repo.toLowerCase()),row].sort((a,b)=>String(a.repo).localeCompare(String(b.repo)));
     return json(res,200,{state:'copied',repo:row.repo,branch:row.branch,commit,copied_at,bytes:row.bytes,files:row.files});}
   if(route==='/connections/github/remove'){githubCopies=githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==String(body.repo??'').toLowerCase());return json(res,200,githubStatus());}
-  if(route==='/connections/github/disconnect'){githubSignIn={connected:false,login:null,connected_at:null,expires_at:null,reconnect:false,listed:[],listed_at:null};githubCopies=[];return json(res,200,githubStatus());}
+  if(route==='/connections/github/disconnect'){githubSignIn={connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};githubCopies=[];return json(res,200,githubStatus());}
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');

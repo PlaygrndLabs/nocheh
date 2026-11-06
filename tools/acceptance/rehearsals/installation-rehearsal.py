@@ -64,7 +64,7 @@ def main():
     shutil.copyfile(root / 'deploy/upstreams.lock.json', installation / 'deploy/upstreams.lock.json')
     project = 'nocheh-installation-' + uuid.uuid4().hex[:12]
     config = initialize(state)
-    # The made-up repository the fake GitHub serves, and its fixture token in a 0600 file (ADR-0209).
+    # The made-up repository the fake GitHub serves, and its made-up app key in a 0600 file (ADR-0209, ADR-0210).
     prepare_github(directory / 'github')
     token = secrets.token_hex(32)
     config.update(NOCHEH_STORAGE_LAYOUT='original-only-v1', NOCHEH_HONCHO_ENABLED='true',
@@ -188,7 +188,7 @@ def main():
             'environment': {'NOCHEH_INSTALLATION_FIXTURE': '1', 'PYTHONPATH': '/app', 'NOCHEH_GITHUB_FIXTURE_ROOT': '/fixture-github'},
             'networks': {'default': None, 'memory': None},
             'volumes': [{'type': 'bind', 'source': str(root / 'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True},
-                        # The fake GitHub, mounted as the Telegram mock is (telegram_rehearsal.py); its token stays in the file.
+                        # The fake GitHub, mounted as the Telegram mock is (telegram_rehearsal.py); its app key stays in the file.
                         {'type': 'bind', 'source': str(directory / 'github'), 'target': '/fixture-github', 'read_only': True},
                         {'type': 'bind', 'source': str(root / 'tools/__init__.py'), 'target': '/fixture/tools/__init__.py', 'read_only': True},
                         {'type': 'bind', 'source': str(root / 'tools/acceptance/github_mock.py'), 'target': '/fixture/tools/acceptance/github_mock.py', 'read_only': True}],

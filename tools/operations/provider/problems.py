@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 RECORD = 'admin/problem-notices.json'
@@ -20,8 +20,6 @@ STEADY = ('application', 'service', 'workers', 'work_unchecked')
 # Counts kept forever, so only their growth is news.
 TOTALS = ('failed:', 'uncertain:')
 MAX_LINES = 20
-# A GitHub key that expires within this many days gets a notice.
-GITHUB_DAYS = 7
 # Background work families, as System › Work names them.
 FAMILIES = {
     'telegram': 'Telegram replies', 'preparation': 'Preparing messages', 'browser': 'Browser chat',
@@ -99,18 +97,9 @@ def problems(monitoring, usage_rows, today):
         add(f"model:{today}:{row['part']}:{row['provider']}:{row['model']}", (row.get('failed') or 0) + hidden, 'model',
             label=row.get('label') or row['part'], model=row['model'], failed=row.get('failed') or 0,
             refused=row.get('refused') or 0, hidden=hidden, reasons=row.get('reasons') or {})
-    # The GitHub key: one key per state, so each gives one notice.
-    flags = monitoring.get('github') or {}
-    if flags.get('reconnect'):
+    # Nocheh's GitHub app: its key never expires, so only a refused one gives a notice.
+    if (monitoring.get('github') or {}).get('reconnect'):
         add('github', 1, 'github', reason='reconnect')
-    elif flags.get('connected') and isinstance(flags.get('expires_at'), str):
-        try:
-            day = date.fromisoformat(flags['expires_at'][:10])
-            soon = (day - date.fromisoformat(today)).days <= GITHUB_DAYS
-        except ValueError:
-            soon = False
-        if soon:
-            add('github:expires:' + day.isoformat(), 1, 'github', reason='expires', at=day.isoformat())
     return found
 
 
@@ -155,9 +144,7 @@ def text(problem, new):
         reason = TELEGRAM_REASONS.get(problem.get('reason'), 'the connection failed')
         return f"Telegram stopped working at {problem['at'][:16].replace('T', ' ')} UTC: {reason}."
     if kind == 'github':
-        if problem.get('reason') == 'reconnect':
-            return 'GitHub refused Nocheh’s key. Jobs keep the copies they have; connect again in Settings › Connections.'
-        return f"Your GitHub key for Nocheh expires on {problem['at']}. Make a new one and replace it in Settings › Connections."
+        return 'GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Settings › Connections.'
     parts = []
     if problem['failed']:
         reasons = why(problem)

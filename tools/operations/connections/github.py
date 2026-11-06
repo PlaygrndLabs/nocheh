@@ -1,11 +1,17 @@
-"""The owner's GitHub key, and the repository copies that box jobs the owner approves may read (ADR-0209).
+"""Nocheh's own GitHub App, and the repository copies that box jobs the owner approves may read (ADR-0209, ADR-0210).
 
-The owner pastes a fine-grained token once. It is kept in the installation's admin folder with the other keys
-(ADR-0175), and no view returns it. A copy is made only on the owner's press or by the hourly check: a fresh fetcher
-container from the box image, with its own uid, no mounts and no environment, fetches the default branch with the
-key and sends back a git bundle (tools/runtime/repo_fetch.py). Nothing here runs git on repository data; this file
-only calls GitHub's API, docker and the store. A bundle is kept by its sha256 in <state>/github/copies only at the
-commit GitHub's API named, and the store records it; a job pins it when it is asked for.
+The owner connects GitHub once from the dashboard: GitHub creates a private app for Nocheh from a manifest that asks
+only to read code, then the owner picks the repositories it may read on GitHub's install page. The app's private key
+is kept in the installation's admin folder with the other keys (ADR-0175), and no view returns it. For each call
+Nocheh signs a short app token with that key, and asks GitHub for an installation key that expires within an hour:
+one that reads only the repository being copied, or one that only lists what the app may read.
+
+A copy is made only on the owner's press or by the hourly check: a fresh fetcher container from the box image, with
+its own uid, no mounts and no environment, fetches the default branch with that one-repository key and sends back a
+git bundle (tools/runtime/repo_fetch.py). The app's private key never leaves this process. Nothing here runs git on
+repository data; this file only calls GitHub's API, docker and the store. A bundle is kept by its sha256 in
+<state>/github/copies only at the commit GitHub's API named, and the store records it; a job pins it when it is asked
+for.
 
 github.json's flock guards the file and the copies folder. It is held only for short steps, such as a grant check
 and a fetcher's `docker create`, never across a GitHub call or a fetcher's run. Remove and Disconnect never wait for
@@ -23,6 +29,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,9 +55,16 @@ COMMIT=re.compile(r'[a-f0-9]{40}')
 DIGEST=re.compile(r'[a-f0-9]{64}')
 COPY_ID=re.compile(r'[a-f0-9]{32}')
 PROJECT=re.compile(r'[a-z0-9][a-z0-9_-]{0,62}')
-# Only fine-grained tokens; classic ghp_ tokens are refused.
-TOKEN=re.compile(r'github_pat_[A-Za-z0-9_]{20,255}')
-LOGIN=re.compile(r'[A-Za-z0-9-]{1,39}')
+LOGIN=re.compile(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})')
+# What GitHub sends back after creating the app, and what it names the app and its keys.
+CODE=re.compile(r'[A-Za-z0-9_.-]{1,200}')
+SLUG=re.compile(r'[a-z0-9][a-z0-9_-]{0,99}')
+INSTALLATION_TOKEN=re.compile(r'[A-Za-z0-9_]{20,255}')
+# Where GitHub sends the browser back: the dashboard's own return page (management.ts).
+RETURN_PATH='/connect/github'
+# How long a started Connect GitHub may take to come back; GitHub's own code lasts an hour.
+PENDING_SECONDS=1800
+MAX_INSTALLATIONS=10
 
 API_URL='https://api.github.com'
 GIT_URL='https://github.com'
@@ -87,7 +101,9 @@ def need(bundle,pages,index,objects):
     return bundle+max(bundle,pages+index)+4096+32*objects+REPO_RESERVE
 
 
-def fingerprint(token):return hashlib.sha256(token.encode()).hexdigest()
+def fingerprint(app):
+    """The app's identity in a grant check: its id and private key, never shown."""
+    return hashlib.sha256(('%s:%s'%(app.get('id'),app.get('pem'))).encode()).hexdigest()
 
 
 def fixture():
@@ -100,18 +116,24 @@ def api_base():return FIXTURE_GITHUB_URL+'/api' if fixture() else API_URL
 def git_base():return FIXTURE_GITHUB_URL+'/git' if fixture() else GIT_URL
 
 
+def web_base():return FIXTURE_GITHUB_URL+'/web' if fixture() else GIT_URL
+
+
 class Refuse(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):return None
 
 
 def request(url,body=None,headers=None):
-    """One GitHub API request: tool_execution's pinned public HTTPS, or the fixture's plain http without proxies or
-    redirects. Answers (content, lowercased headers); raises RuntimeError('remote_unauthorized') on 401."""
+    """One GitHub API request, a GET or, with a body, a JSON POST: tool_execution's pinned public HTTPS, or the
+    fixture's plain http without proxies or redirects. Answers (content, lowercased headers); raises
+    RuntimeError('remote_unauthorized') on 401."""
     if not fixture():
         from tools.operations.security.tool_execution import https_request
         return https_request(url,body,headers)
+    data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+    sent={**(headers or {}),**({} if data is None else {'Content-Type':'application/json'})}
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({}),Refuse).open(urllib.request.Request(url,headers=headers or {}),timeout=15) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}),Refuse).open(urllib.request.Request(url,data=data,headers=sent),timeout=15) as response:
             content=response.read(2*1024*1024+1)
             if len(content)>2*1024*1024:raise RuntimeError('remote_response_limit')
             return content,{key.lower():value for key,value in response.getheaders()}
@@ -138,60 +160,123 @@ def tools(request=None,run=None,popen=None,api=None,resolve=None):
                            api=api or store,resolve=resolve or module['resolve'])
 
 
-# The sign-in file.
+# The app's file.
 
 def read(state):return secret_file.read(state,'github')
 
 
-def held(state,expected):
-    """The key, while github.json still holds the one whose sha256 is `expected`. Call under the flock."""
-    token=(read(state).get('grant') or {}).get('token')
-    if not (isinstance(token,str) and secrets.compare_digest(fingerprint(token),expected)):raise ValueError('github_not_connected')
-    return token
+def connected(app):
+    return isinstance(app,dict) and type(app.get('id')) is int and isinstance(app.get('pem'),str)
 
 
-def granted(state,expected):
-    """The grant check before each GitHub call: the same key is still connected."""
-    with secret_file.locked(state,'github'):return held(state,expected)
+def held(state,expected,again=False):
+    """The app, while github.json still holds the one whose fingerprint is `expected`. Call under the flock. A refused
+    app is not connected, except for the hourly check's one call that tries it `again`."""
+    saved=read(state);app=saved.get('app')
+    if saved.get('reconnect') and not again or not (connected(app) and secrets.compare_digest(fingerprint(app),expected)):
+        raise ValueError('github_not_connected')
+    return app
+
+
+def granted(state,expected,again=False):
+    """The grant check before each GitHub call: the same app is still connected."""
+    with secret_file.locked(state,'github'):return held(state,expected,again)
+
+
+def current(state,again=False):
+    """The connected app's fingerprint, read under the flock; the key itself is not kept."""
+    with secret_file.locked(state,'github'):
+        saved=read(state);app=saved.get('app')
+        if saved.get('reconnect') and not again or not connected(app):raise ValueError('github_not_connected')
+        return fingerprint(app)
 
 
 def refused(state,expected):
-    """GitHub refused the key: it is dropped and the owner asked to connect again; existing copies stay usable."""
+    """GitHub refused the app's key: the owner is asked to connect again, and existing copies stay usable. The key is
+    kept, so the hourly check can try it again: a refusal that was only this computer's clock ends by itself."""
     with secret_file.locked(state,'github'):
-        saved=read(state);grant=saved.get('grant') or {}
-        if isinstance(grant.get('token'),str) and fingerprint(grant['token'])==expected:
-            saved['grant']={key:grant.get(key) for key in ('login','connected_at','expires_at')};saved['reconnect']=True
-            secret_file.write(state,'github',saved)
+        saved=read(state);app=saved.get('app')
+        if connected(app) and fingerprint(app)==expected and not saved.get('reconnect'):
+            saved['reconnect']=True;secret_file.write(state,'github',saved)
 
 
-def github(t,token,path,rejected,accept=JSON):
-    """One GitHub API call with this key. A non-2xx answer raises `rejected`, a 401 github_token_refused."""
-    headers={'Authorization':'Bearer '+token,'Accept':accept,'X-GitHub-Api-Version':API_VERSION}
-    try:return t.request(api_base()+path,None,headers)
+def accepted_again(state,t):
+    """The hourly check tries a refused app once; when GitHub takes it again, it is connected again."""
+    expected=current(state,again=True)
+    as_app(state,t,expected,'/app/installations?per_page=100','github_unavailable',again=True)
+    with secret_file.locked(state,'github'):
+        saved=read(state);held(state,expected,again=True);saved['reconnect']=False;secret_file.write(state,'github',saved)
+
+
+def b64url(data):return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
+
+
+def signing():
+    """The library that reads the app's key and signs with it; an image built before the app needs a rebuild."""
+    try:
+        from cryptography.hazmat.primitives import hashes,serialization
+        from cryptography.hazmat.primitives.asymmetric import padding,rsa
+    except ImportError:
+        raise ValueError('github_rebuild_needed') from None
+    return hashes,serialization,padding,rsa
+
+
+def private_key(pem):
+    """The app's RSA private key; GitHub hands it over as PEM when it creates the app."""
+    _,serialization,_,rsa=signing()
+    try:key=serialization.load_pem_private_key(pem.encode(),password=None)
+    except (TypeError,ValueError):raise ValueError('github_app_not_created') from None
+    if not isinstance(key,rsa.RSAPrivateKey) or key.key_size<2048:raise ValueError('github_app_not_created')
+    return key
+
+
+def app_token(app,now=None):
+    """The app's own short token: an RS256 JWT, valid from a minute ago for nine minutes, as GitHub asks."""
+    hashes,_,padding,_=signing()
+    now=int(time.time()) if now is None else int(now)
+    head=b64url(json.dumps({'alg':'RS256','typ':'JWT'},separators=(',',':')).encode())
+    claims=b64url(json.dumps({'iat':now-60,'exp':now+540,'iss':str(app['id'])},separators=(',',':')).encode())
+    signed=head+'.'+claims
+    return signed+'.'+b64url(private_key(app['pem']).sign(signed.encode(),padding.PKCS1v15(),hashes.SHA256()))
+
+
+def github(t,authorization,path,rejected,accept=JSON,body=None):
+    """One GitHub API call. A non-2xx answer raises `rejected`, a 401 github_app_refused."""
+    headers={'Authorization':authorization,'Accept':accept,'X-GitHub-Api-Version':API_VERSION}
+    try:return t.request(api_base()+path,body,headers)
     except RuntimeError as error:
-        if str(error)=='remote_unauthorized':raise ValueError('github_token_refused') from None
+        if str(error)=='remote_unauthorized':raise ValueError('github_app_refused') from None
         raise ValueError(rejected if str(error)=='remote_response_rejected' else 'github_unavailable') from None
     except Exception:
         raise ValueError('github_unavailable') from None
 
 
-def keyed(state,t,expected,path,rejected,accept=JSON):
-    """A GitHub call right after the grant check; a 401 drops the key."""
-    token=granted(state,expected)
-    try:return github(t,token,path,rejected,accept)
+def as_app(state,t,expected,path,rejected,body=None,again=False):
+    """A call as the app itself, right after the grant check; a 401 asks the owner to connect again."""
+    authorization='Bearer '+app_token(granted(state,expected,again))
+    try:return github(t,authorization,path,rejected,body=body)
     except ValueError as error:
-        if str(error)=='github_token_refused':refused(state,expected)
+        if str(error)=='github_app_refused':refused(state,expected)
         raise
 
 
-def expiry(value):
-    """GitHub's token expiry header as ISO UTC, or None."""
-    if not isinstance(value,str):return None
-    for form in ('%Y-%m-%d %H:%M:%S %Z','%Y-%m-%d %H:%M:%S %z','%Y-%m-%dT%H:%M:%S%z'):
-        try:moment=datetime.strptime(value.strip(),form)
-        except ValueError:continue
-        return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    return None
+def installation_key(state,t,expected,installation,rejected,repo=None):
+    """A key GitHub makes for one installation, expiring within an hour: read-only code of `repo` alone, or, with no
+    repo, only the list of what the installation may read."""
+    if not (type(installation) is int and installation>0):raise ValueError(rejected)
+    body={'repositories':[repo],'permissions':{'contents':'read','metadata':'read'}} if repo else {'permissions':{'metadata':'read'}}
+    answer=decoded(as_app(state,t,expected,'/app/installations/%d/access_tokens'%installation,rejected,body)[0])
+    token=answer.get('token')
+    if not (isinstance(token,str) and INSTALLATION_TOKEN.fullmatch(token)):raise ValueError('github_unavailable')
+    return token
+
+
+def as_installation(t,token,path,rejected,accept=JSON):
+    """A call with an installation key. Its 401 says nothing of the app's own key, so it only fails this call."""
+    try:return github(t,'Bearer '+token,path,rejected,accept)
+    except ValueError as error:
+        if str(error)=='github_app_refused':raise ValueError(rejected) from None
+        raise
 
 
 def decoded(content,kind=dict):
@@ -201,17 +286,118 @@ def decoded(content,kind=dict):
     return value
 
 
-def repositories(get):
-    """The repositories the key can read, as GitHub lists them; malformed entries are skipped."""
+def listed_row(row):
+    """A repository as the list keeps it, or None for a malformed one."""
+    if isinstance(row,dict) and repo_name(row.get('full_name')) and repo_branch(row.get('default_branch')) \
+            and type(row.get('private')) is bool and type(row.get('size')) is int and row['size']>=0:
+        return {'name':row['full_name'],'branch':row['default_branch'],'private':row['private'],'size_kb':row['size']}
+    return None
+
+
+def repositories(state,t,expected):
+    """Every repository the app's installations may read, as GitHub lists them; malformed entries are skipped."""
+    installations=decoded(as_app(state,t,expected,'/app/installations?per_page=100','github_unavailable')[0],list)
     listed={}
-    for page in range(1,LIST_PAGES+1):
-        rows=decoded(get('/user/repos?per_page=100&sort=full_name&page=%d'%page)[0],list)
-        for row in rows:
-            if isinstance(row,dict) and repo_name(row.get('full_name')) and repo_branch(row.get('default_branch')) \
-                    and type(row.get('private')) is bool and type(row.get('size')) is int and row['size']>=0:
-                listed[row['full_name'].lower()]={'name':row['full_name'],'branch':row['default_branch'],'private':row['private'],'size_kb':row['size']}
-        if len(rows)<100:break
+    for found in installations[:MAX_INSTALLATIONS]:
+        if not (isinstance(found,dict) and type(found.get('id')) is int and found['id']>0) or found.get('suspended_at'):continue
+        token=installation_key(state,t,expected,found['id'],'github_unavailable')
+        for page in range(1,LIST_PAGES+1):
+            rows=decoded(as_installation(t,token,'/installation/repositories?per_page=100&page=%d'%page,'github_unavailable')[0]).get('repositories')
+            if not isinstance(rows,list):raise ValueError('github_unavailable')
+            for row in rows:
+                if kept_row:=listed_row(row):listed[kept_row['name'].lower()]=kept_row
+            if len(rows)<100:break
+        del token
     return sorted(listed.values(),key=lambda row:row['name'].lower())
+
+
+def redirect(address):
+    """The dashboard page GitHub returns to: this computer's dashboard, or an https address."""
+    parsed=urllib.parse.urlsplit(address if isinstance(address,str) else '')
+    try:port=parsed.port
+    except ValueError:port=-1
+    local=parsed.scheme=='http' and parsed.hostname in ('127.0.0.1','localhost')
+    if not (local or parsed.scheme=='https') or not parsed.hostname or port==-1 or parsed.username or parsed.password \
+            or parsed.fragment or parsed.query or parsed.path!=RETURN_PATH:
+        raise ValueError('invalid_github_redirect')
+    return address
+
+
+def manifest(address):
+    """The app GitHub creates: private, reading code and nothing else, with no webhook."""
+    origin=address[:-len(RETURN_PATH)]
+    return {'name':'Nocheh-'+secrets.token_hex(3),'url':origin,'description':'Reads the repositories you choose, so your Nocheh can copy them for background jobs you approve.',
+            'redirect_url':address,'setup_url':address,'setup_on_update':True,'public':False,
+            'default_permissions':{'contents':'read','metadata':'read'},'default_events':[]}
+
+
+def install_url(app):return web_base()+'/apps/'+app['slug']+'/installations/new'
+
+
+def settings_url(app):
+    """Where the owner deletes the app on GitHub."""
+    if app.get('account_type')=='Organization':return web_base()+'/organizations/'+app['account']+'/settings/apps/'+app['slug']
+    return web_base()+'/settings/apps/'+app['slug']
+
+
+def app_from(value):
+    """The app GitHub created, as github.json keeps it: no client or webhook secret, which Nocheh never uses."""
+    owner=value.get('owner') if isinstance(value.get('owner'),dict) else {}
+    app={'id':value.get('id'),'slug':value.get('slug'),'name':value.get('name'),'account':owner.get('login'),'account_type':owner.get('type'),'pem':value.get('pem')}
+    if not (type(app['id']) is int and app['id']>0 and isinstance(app['slug'],str) and SLUG.fullmatch(app['slug'])
+            and isinstance(app['name'],str) and 0<len(app['name'])<=100 and isinstance(app['account'],str) and LOGIN.fullmatch(app['account'])
+            and app['account_type'] in ('User','Organization') and isinstance(app['pem'],str) and len(app['pem'])<=16384):
+        raise ValueError('github_app_not_created')
+    private_key(app['pem'])
+    return app
+
+
+def start(state,address,organization=None):
+    """Starts Connect GitHub: the form the dashboard posts to GitHub, which creates the app from the manifest for the
+    owner's account, or for an organization they run."""
+    address=redirect(address)
+    organization=organization.strip() if isinstance(organization,str) else organization
+    if organization in (None,''):organization=None
+    elif not (isinstance(organization,str) and LOGIN.fullmatch(organization)):raise ValueError('invalid_github_organization')
+    # Checked before GitHub makes an app whose key Nocheh could not use.
+    signing()
+    nonce=secrets.token_urlsafe(24)
+    with secret_file.locked(state,'github'):
+        saved=read(state);saved['pending']={'state':nonce,'expires':time.time()+PENDING_SECONDS};secret_file.write(state,'github',saved)
+    path='/organizations/'+organization+'/settings/apps/new' if organization else '/settings/apps/new'
+    return {'action':web_base()+path+'?'+urllib.parse.urlencode({'state':nonce}),'manifest':json.dumps(manifest(address),separators=(',',':'))}
+
+
+def finish(state,code,nonce,**hooks):
+    """GitHub created the app and sent back a code: Nocheh trades it for the app's id and key, once, and keeps them.
+    Answers the card's view and the page where the owner picks the repositories."""
+    t=tools(**hooks)
+    if not (type(code) is str and CODE.fullmatch(code) and type(nonce) is str and 0<len(nonce)<=200):raise ValueError('invalid_github_sign_in')
+    # The sign-in is used up at once. What takes its place marks the trade as running, so a Disconnect or a new
+    # Connect meanwhile wins and the app is never kept after it.
+    converting={'converting':hashlib.sha256(nonce.encode()).hexdigest()}
+    with secret_file.locked(state,'github'):
+        saved=read(state);pending=saved.get('pending') or {}
+        if not (isinstance(pending.get('state'),str) and secrets.compare_digest(pending['state'],nonce)) or not pending.get('expires',0)>time.time():
+            raise ValueError('github_sign_in_expired')
+        saved['pending']=converting;secret_file.write(state,'github',saved)
+    app=None
+    try:
+        try:content=t.request(api_base()+'/app-manifests/'+code+'/conversions',{},{'Accept':JSON,'X-GitHub-Api-Version':API_VERSION})[0]
+        except RuntimeError as error:
+            raise ValueError('github_unavailable' if str(error) not in ('remote_unauthorized','remote_response_rejected') else 'github_app_not_created') from None
+        except Exception:
+            raise ValueError('github_unavailable') from None
+        app=app_from(decoded(content))
+    finally:
+        with secret_file.locked(state,'github'):
+            saved=read(state);ours=saved.get('pending')==converting
+            if ours:
+                saved.pop('pending')
+                if app:saved.update(app={**app,'connected_at':int(time.time())},reconnect=False,listed=[],listed_at=None)
+                secret_file.write(state,'github',saved)
+    if not ours:raise ValueError('github_sign_in_expired')
+    return {**status(state,**hooks),'install_url':install_url(app)}
 
 
 # The copies folder.
@@ -347,8 +533,9 @@ def fetcher_command(name,owner,net,identity):
             '--ulimit','core=0:0','--log-driver=none','--entrypoint','python3',identity,'-I','/opt/box/repo_fetch.py']
 
 
-# The fetcher's exit codes (repo_fetch.py), as the card's codes.
-EXITS={10:'github_token_refused',11:'github_repo_not_readable',12:'github_repo_too_large',13:'github_copy_refused',15:'github_copy_cancelled'}
+# The fetcher's exit codes (repo_fetch.py), as the card's codes. Git refusing the one-repository key that GitHub just
+# made says the app lost that repository, not that the app's own key is bad.
+EXITS={10:'github_repo_not_readable',11:'github_repo_not_readable',12:'github_repo_too_large',13:'github_copy_refused',15:'github_copy_cancelled'}
 
 
 def read_exact(stream,size):
@@ -412,45 +599,28 @@ def metadata(raw):
 # What the card and the timer call.
 
 def status(state,**hooks):
-    """The card's view: who is connected, what the key lists and what is copied. Never the key."""
-    t=tools(**hooks);saved=read(state);grant=saved.get('grant') or {}
+    """The card's view: which app is connected, what it lists and what is copied. Never the app's key."""
+    t=tools(**hooks);saved=read(state);app=saved.get('app') or {}
     try:
         place=folder(state)
         view=[{**{key:value for key,value in row.items() if key!='copy_id'},'missing':not kept(place,row['digest'])} for row in copies(t)['copies']]
     except Exception:view=None
-    return {'connected':bool(grant.get('token')),'login':grant.get('login'),'connected_at':grant.get('connected_at'),
-            'expires_at':grant.get('expires_at'),'reconnect':bool(saved.get('reconnect')),'listed':saved.get('listed') or [],
-            'listed_at':saved.get('listed_at'),'copies':view}
+    shown={'name':app['name'],'account':app['account'],'install_url':install_url(app),'settings_url':settings_url(app)} \
+        if isinstance(app.get('slug'),str) and SLUG.fullmatch(app['slug']) and isinstance(app.get('account'),str) and LOGIN.fullmatch(app['account']) else None
+    return {'connected':connected(app) and not saved.get('reconnect'),'app':shown,'connected_at':app.get('connected_at'),
+            'reconnect':bool(saved.get('reconnect')),'listed':saved.get('listed') or [],'listed_at':saved.get('listed_at'),'copies':view}
 
 
 def flags(state):
     """What problem notices need: the file only, with no network, no lock and no key."""
-    saved=read(state);grant=saved.get('grant') or {}
-    return {'connected':bool(grant.get('token')),'reconnect':bool(saved.get('reconnect')),'expires_at':grant.get('expires_at')}
-
-
-def save_token(state,value,**hooks):
-    """Checks a fine-grained token once with GitHub, lists what it can read and saves it."""
-    t=tools(**hooks);token=value.strip() if isinstance(value,str) else ''
-    if not TOKEN.fullmatch(token):raise ValueError('invalid_github_token')
-    content,received=github(t,token,'/user','github_unavailable')
-    login=decoded(content).get('login')
-    if not (type(login) is str and LOGIN.fullmatch(login)):raise ValueError('github_unavailable')
-    listed=repositories(lambda path:github(t,token,path,'github_unavailable'))
-    with secret_file.locked(state,'github'):
-        saved=read(state);now=int(time.time())
-        saved.update(grant={'token':token,'login':login,'connected_at':now,'expires_at':expiry(received.get('github-authentication-token-expiration'))},
-                     reconnect=False,listed=listed,listed_at=now)
-        secret_file.write(state,'github',saved)
-    return status(state,**hooks)
+    saved=read(state)
+    return {'connected':connected(saved.get('app')) and not saved.get('reconnect'),'reconnect':bool(saved.get('reconnect'))}
 
 
 def list_repos(state,**hooks):
-    t=tools(**hooks)
-    with secret_file.locked(state,'github'):token=(read(state).get('grant') or {}).get('token')
-    if not isinstance(token,str):raise ValueError('github_not_connected')
-    expected=fingerprint(token);del token
-    listed=repositories(lambda path:keyed(state,t,expected,path,'github_unavailable'))
+    """Asks GitHub again what the app may read; the owner changes that on GitHub's install page."""
+    t=tools(**hooks);expected=current(state)
+    listed=repositories(state,t,expected)
     with secret_file.locked(state,'github'):
         held(state,expected);saved=read(state);saved.update(listed=listed,listed_at=int(time.time()));secret_file.write(state,'github',saved)
     return status(state,**hooks)
@@ -461,11 +631,8 @@ def copy(state,name,expected_id=None,**hooks):
     copy_id it saw as `expected_id`, so it only ever updates that copy and never makes a removed one new again."""
     t=tools(**hooks)
     # 1. Connected, and a name GitHub could have.
-    with secret_file.locked(state,'github'):token=(read(state).get('grant') or {}).get('token')
-    if not isinstance(token,str):raise ValueError('github_not_connected')
+    expected=current(state)
     if not repo_name(name):raise ValueError('invalid_github_repo')
-    expected=fingerprint(token);del token
-    def get(path,accept=JSON):return keyed(state,t,expected,path,'github_repo_not_readable',accept)
     place=folder(state)
     # 3, before GitHub is asked, so a Remove during the copy finds it pinned: the copy this replaces. Step 2 requires
     # GitHub's name to equal this one in any case. A copy whose bundle is missing counts as removed, so this one gets a
@@ -482,7 +649,12 @@ def copy(state,name,expected_id=None,**hooks):
     if previous is None and sum(r['repo'].lower()!=name.lower() for r in known['copies'])>=MAX_REPOS:raise ValueError('github_repo_limit')
     # The last Remove the store numbered, this copy's own included: the store refuses a new copy after a later one.
     removal=known['removal']
-    # 2. The repository as GitHub names it, before anything is downloaded.
+    # 2. The installation that may read the repository, and a key GitHub makes for it that reads only its code and
+    # expires within an hour; the app's own key never leaves this process. Then the repository as GitHub names it,
+    # before anything is downloaded.
+    found=decoded(as_app(state,t,expected,'/repos/'+name+'/installation','github_repo_not_readable')[0])
+    token=installation_key(state,t,expected,found.get('id'),'github_repo_not_readable',name.split('/')[1])
+    def get(path,accept=JSON):return as_installation(t,token,path,'github_repo_not_readable',accept)
     repository=decoded(get('/repos/'+name)[0])
     full,branch,size=repository.get('full_name'),repository.get('default_branch'),repository.get('size')
     if not (repo_name(full) and repo_branch(branch) and type(size) is int and size>=0):raise ValueError('github_copy_refused')
@@ -503,7 +675,7 @@ def copy(state,name,expected_id=None,**hooks):
     # comes first and no fetcher exists.
     container='nocheh-repo-fetch-'+secrets.token_hex(12)
     with secret_file.locked(state,'github'):
-        token=held(state,expected)
+        held(state,expected)
         made=docker(t,*fetcher_command(container,owner,net,identity)[1:],timeout=60)
         if not made or made.returncode:raise ValueError('github_copy_unavailable')
     body={'repo':full,'branch':branch,'commit':commit,'authorization':base64.b64encode(('x-access-token:'+token).encode()).decode(),
@@ -514,7 +686,6 @@ def copy(state,name,expected_id=None,**hooks):
     try:
         # 8-9. The bundle, then the fetcher's verdict, then the header and the bounds, checked here without git.
         code,raw,count,digest=fetch(t,container,body,incoming);body=None
-        if code=='github_token_refused':refused(state,expected)
         if code:raise ValueError(code)
         meta=metadata(raw)
         # A Disconnect's cleanup may have deleted the incoming file meanwhile.
@@ -526,7 +697,7 @@ def copy(state,name,expected_id=None,**hooks):
         room=need(count,meta['pages'],meta['index'],meta['objects'])
         if room>REPO_ROOM or meta['files']>MAX_FILES or meta['largest']>MAX_FILE or meta['files']+meta['dirs']+1024>REPO_INODES:
             raise ValueError('github_repo_too_large')
-        # 10. Saved only while the same key is connected, and recorded only if the store still allows it.
+        # 10. Saved only while the same app is connected, and recorded only if the store still allows it.
         with secret_file.locked(state,'github'):
             held(state,expected)
             final=place/(digest+'.bundle');os.replace(incoming,final);incoming=None
@@ -557,17 +728,18 @@ def remove(state,name,**hooks):
 
 
 def disconnect(state,**hooks):
-    """Forgets the key first, removes this installation's fetchers, then every copy. Never waits for a copy."""
+    """Forgets the app and its key first, removes this installation's fetchers, then every copy. Never waits for a
+    copy. The app itself stays on GitHub until the owner deletes it there; without its key it can do nothing."""
     t=tools(**hooks)
     with secret_file.locked(state,'github'):
         saved=read(state)
-        for key in ('grant','listed','listed_at','reconnect'):saved.pop(key,None)
+        for key in ('app','pending','listed','listed_at','reconnect'):saved.pop(key,None)
         secret_file.write(state,'github',saved)
     owner=project()
     for name,_ in fetchers(t,owner) if owner else []:docker(t,'rm','-f',name)
     _,code=change(t,{'clear':True})
     if code:raise ValueError('github_unavailable')
-    # After the key left the file, no copy can save what it is receiving.
+    # After the app left the file, no copy can save what it is receiving.
     cleanup(state,every=True,**hooks)
     return status(state,**hooks)
 
@@ -597,7 +769,10 @@ def refresh(state,**hooks):
     t=tools(**hooks);started=time.monotonic()
     cleanup(state,**hooks)
     saved=read(state)
-    if not (saved.get('grant') or {}).get('token') or saved.get('reconnect'):return status(state,**hooks)
+    if not connected(saved.get('app')):return status(state,**hooks)
+    if saved.get('reconnect'):
+        try:accepted_again(state,t)
+        except ValueError:return status(state,**hooks)
     place=folder(state)
     for name in [row['repo'] for row in sorted(copies(t)['copies'],key=lambda row:str(row.get('copied_at') or ''))]:
         if time.monotonic()-started>REFRESH_SECONDS:break
@@ -608,5 +783,5 @@ def refresh(state,**hooks):
         # Only the copy it saw: one removed meanwhile, or removed and copied afresh, is not this refresh's to change.
         try:copy(state,row['repo'],expected_id=row['copy_id'],**hooks)
         except ValueError as error:
-            if str(error) in ('github_token_refused','github_not_connected'):break
+            if str(error) in ('github_app_refused','github_not_connected','github_rebuild_needed'):break
     return status(state,**hooks)

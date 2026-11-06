@@ -173,11 +173,12 @@ def dispatch(body):
         if operation == 'notion.token': return notion.save_token(state, request.get('token'))
         if operation == 'notion.disconnect': return notion.disconnect(state)
     if operation.startswith('github.'):
-        # The owner's GitHub key and the copies box jobs may read; no answer ever carries the key.
+        # Nocheh's GitHub App and the copies box jobs may read; no answer ever carries the app's key.
         from tools.operations.connections import github
         request = body.get('request') or {}
         if operation == 'github.status': return github.status(state)
-        if operation == 'github.token': return github.save_token(state, request.get('token'))
+        if operation == 'github.start': return github.start(state, request.get('redirect'), request.get('organization'))
+        if operation == 'github.finish': return github.finish(state, request.get('code'), request.get('state'))
         if operation == 'github.copy': return github.copy(state, request.get('repo'))
         if operation == 'github.remove': return github.remove(state, request.get('repo'))
         if operation == 'github.list': return github.list_repos(state)

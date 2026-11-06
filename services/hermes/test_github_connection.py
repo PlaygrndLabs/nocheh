@@ -1,4 +1,5 @@
-"""The owner's GitHub key and its repository copies (ADR-0209): github.py against fakes of GitHub's API, docker and the store."""
+"""Nocheh's GitHub App and its repository copies (ADR-0209, ADR-0210): github.py against fakes of GitHub's API, docker
+and the store."""
 import base64
 import copy as deep
 import hashlib
@@ -8,14 +9,20 @@ import os
 import secrets
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
 from tools.operations.connections import github, secret_file
 
@@ -24,12 +31,36 @@ LOGIN='octo-example'
 PROJECT='example'
 IMAGE='sha256:'+'ab'*32
 ADDRESS='1.2.3.4'
+RETURN='http://localhost:8783/connect/github'
+APP_ID=4242
+INSTALLATION=77
 LIMITS={'bundle':64*1024**2,'files':50000,'file':64*1024**2,'room':256*1024**2,'inodes':65536}
 
 
-def made_token(mark='OWNER'):
+def pem_of(key):
+    """A private key as GitHub hands one over: PKCS#1 PEM."""
+    return key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.TraditionalOpenSSL,serialization.NoEncryption()).decode()
+
+
+# One made-up app key for every test; making one takes a moment.
+KEY=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+PEM=pem_of(KEY)
+# The part of the key that must never leave github.py's process.
+SECRET=PEM.splitlines()[5]
+
+
+def unpadded(text):return base64.urlsafe_b64decode(text+'='*(-len(text)%4))
+
+
+def installation_token(n):
     # Built at run time from parts, so no literal in the repository looks like a token.
-    return 'github_'+'pat_'+mark+'x'*24
+    return 'gh'+'s_'+'%036d'%n
+
+
+def app_json(**changes):
+    """GitHub's answer to the manifest conversion, client and webhook secrets included, as GitHub sends them."""
+    return {'id':APP_ID,'slug':'nocheh-a1b2c3','name':'Nocheh-a1b2c3','owner':{'login':LOGIN,'type':'User'},'html_url':'https://github.com/apps/nocheh-a1b2c3',
+            'client_id':'Iv1.example','client_secret':'CLIENTSECRET'+'x'*20,'webhook_secret':'WEBHOOKSECRET'+'x'*20,'pem':PEM,**changes}
 
 
 def stamp():return datetime.now(timezone.utc).isoformat()
@@ -43,23 +74,63 @@ def bundle_header(commit,branch='main'):return b'# v2 git bundle\n'+commit.encod
 
 
 class GitHub:
-    """GitHub's API for one key: the user, the repositories it lists, one repository and its branch's commit."""
-    def __init__(self,token):
-        self.token=token;self.commit='c'*40;self.full=REPO;self.branch='main';self.size=12;self.repos=[];self.calls=[];self.hooks={}
-        self.expires='2026-12-01 10:00:00 UTC'
+    """GitHub's API for one app: the manifest conversion, the app's own calls under its signed token, the installation
+    keys it makes, an installation's repositories, and one repository and its branch's commit."""
+    def __init__(self):
+        self.commit='c'*40;self.full=REPO;self.branch='main';self.size=12;self.repos=[];self.calls=[];self.hooks={}
+        self.revoked=False;self.conversions={};self.issued={};self.public=KEY.public_key()
+        self.installations=[{'id':INSTALLATION,'account':{'login':'example-org','type':'Organization'}}]
+        # Which installation reaches which repository, by lowercased name.
+        self.reach={REPO.lower():INSTALLATION}
     def __call__(self,url,body=None,headers=None):
-        assert url.startswith(github.api_base()+'/') and body is None,url
-        path=url[len(github.api_base()):];self.calls.append((path,dict(headers)))
-        if headers.get('Authorization')!='Bearer '+self.token:raise RuntimeError('remote_unauthorized')
+        assert url.startswith(github.api_base()+'/'),url
+        path=url[len(github.api_base()):];self.calls.append((path,dict(headers),deep.deepcopy(body)))
         if path in self.hooks:self.hooks.pop(path)()
-        if path=='/user':return json.dumps({'login':LOGIN}).encode(),{'github-authentication-token-expiration':self.expires} if self.expires else {}
-        if path.startswith('/user/repos?per_page=100&sort=full_name&page='):
-            page=int(path.rsplit('=',1)[1]);return json.dumps(self.repos[(page-1)*100:page*100]).encode(),{}
+        authorization=headers.get('Authorization','')
+        if path.startswith('/app-manifests/'):
+            assert path.endswith('/conversions') and body=={} and not authorization,(path,body)
+            app=self.conversions.pop(path.split('/')[2],None)
+            if app is None:raise RuntimeError('remote_response_rejected')
+            return json.dumps(app).encode(),{}
+        if path.startswith('/app/') or path.startswith('/repos/') and path.endswith('/installation'):
+            self.signed(authorization);assert headers['Accept']=='application/vnd.github+json'
+            return self.as_app(path,body)
+        assert body is None,path
+        issued=self.issued.get(authorization.removeprefix('Bearer '))
+        if not authorization.startswith('Bearer ') or issued is None:raise RuntimeError('remote_unauthorized')
+        if path.startswith('/installation/repositories?per_page=100&page='):
+            page=int(path.rsplit('=',1)[1]);return json.dumps({'total_count':len(self.repos),'repositories':self.repos[(page-1)*100:page*100]}).encode(),{}
+        name=path[len('/repos/'):].split('/commits/')[0]
+        if issued['repositories'] is not None and name.split('/')[-1].lower() not in issued['repositories']:raise RuntimeError('remote_response_rejected')
         if path.lower()=='/repos/'+REPO.lower():
             return json.dumps({'full_name':self.full,'default_branch':self.branch,'size':self.size,'private':True}).encode(),{}
         if path=='/repos/%s/commits/%s'%(self.full,self.branch):
-            assert headers['Accept']=='application/vnd.github.sha';return self.commit.encode(),{}
+            assert headers['Accept']=='application/vnd.github.sha' and issued['permissions'].get('contents')=='read'
+            return self.commit.encode(),{}
         raise RuntimeError('remote_response_rejected')
+    def signed(self,authorization):
+        """GitHub's check of the app's own token: RS256 by the app's key, for at most ten minutes."""
+        if self.revoked or not authorization.startswith('Bearer '):raise RuntimeError('remote_unauthorized')
+        head,claims,signature=authorization[7:].split('.')
+        try:self.public.verify(unpadded(signature),(head+'.'+claims).encode(),padding.PKCS1v15(),hashes.SHA256())
+        except InvalidSignature:raise RuntimeError('remote_unauthorized') from None
+        claims=json.loads(unpadded(claims))
+        assert json.loads(unpadded(head))=={'alg':'RS256','typ':'JWT'} and claims['iss']==str(APP_ID) and claims['exp']-claims['iat']==600,claims
+        assert abs(claims['iat']+60-time.time())<5,claims
+    def as_app(self,path,body):
+        if path=='/app/installations?per_page=100':return json.dumps(self.installations).encode(),{}
+        if path.startswith('/repos/'):
+            found=self.reach.get(path[len('/repos/'):-len('/installation')].lower())
+            if found is None:raise RuntimeError('remote_response_rejected')
+            return json.dumps({'id':found,'account':{'login':'example-org'}}).encode(),{}
+        installation=int(path.split('/')[3]);assert path=='/app/installations/%d/access_tokens'%installation,path
+        if installation not in [row.get('id') for row in self.installations if isinstance(row,dict)]:raise RuntimeError('remote_response_rejected')
+        wanted=body.get('repositories')
+        if wanted is not None and any(self.reach.get('example-org/'+name.lower())!=installation for name in wanted):raise RuntimeError('remote_response_rejected')
+        token=installation_token(len(self.issued)+1)
+        self.issued[token]={'installation':installation,'repositories':None if wanted is None else [name.lower() for name in wanted],'permissions':body['permissions']}
+        return json.dumps({'token':token,'expires_at':'2026-12-01T10:00:00Z','permissions':body['permissions']}).encode(),{}
+    def keys(self):return [body for path,_,body in self.calls if path.endswith('/access_tokens')]
 
 
 class Store:
@@ -177,7 +248,7 @@ class GitHubTests(unittest.TestCase):
         folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup);self.state=Path(folder.name)
         environment=patch.dict(os.environ,{'COMPOSE_PROJECT_NAME':PROJECT,'NOCHEH_BOX_IMAGE':'nocheh-box:local'});environment.start();self.addCleanup(environment.stop)
         for key in ('NOCHEH_INSTALLATION_FIXTURE','NOCHEH_GITHUB_URL','NOCHEH_GITHUB_FIXTURE_NETWORK'):os.environ.pop(key,None)
-        self.token=made_token();self.remote=GitHub(self.token);self.store=Store();self.docker=Docker();self.docker.script=self.served()
+        self.remote=GitHub();self.store=Store();self.docker=Docker();self.docker.script=self.served()
         self.resolved=0
         def resolve():self.resolved+=1;return ADDRESS
         self.hooks={'request':self.remote,'run':self.docker.run,'popen':self.docker.popen,'api':self.store,'resolve':resolve}
@@ -203,7 +274,18 @@ class GitHubTests(unittest.TestCase):
         def script(process):return code
         return script
 
-    def connect(self):return github.save_token(self.state,self.token,**self.hooks)
+    def connect(self,**changes):
+        """Connect GitHub as the dashboard does it: start, GitHub creates the app, finish with its code."""
+        started=github.start(self.state,RETURN)
+        nonce=urllib.parse.parse_qs(urllib.parse.urlsplit(started['action']).query)['state'][0]
+        code='code'+secrets.token_hex(4);self.remote.conversions[code]=app_json(**changes)
+        return github.finish(self.state,code,nonce,**self.hooks)
+
+    def shown(self,*values):
+        """No key of the app, and no secret GitHub sent with it, is in any of these."""
+        for value in values:
+            text=json.dumps(value)
+            for secret in (SECRET,'CLIENTSECRET','WEBHOOKSECRET'):self.assertNotIn(secret,text)
 
     def copied(self,name=REPO):return github.copy(self.state,name,**self.hooks)
 
@@ -215,62 +297,140 @@ class GitHubTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:(call or self.copied)()
         self.assertEqual(str(caught.exception),code)
 
-    # The key.
+    # The app.
 
-    def test_only_a_fine_grained_key_is_checked_once_saved_at_0600_and_never_shown(self):
-        for bad in ('ghp_'+'x'*36,'github_'+'pat_'+'short','github_'+'pat_'+'x'*24+' extra','',None,7):
-            with self.subTest(bad=bad):self.failing('invalid_github_token',lambda:github.save_token(self.state,bad,**self.hooks))
-        self.assertEqual(self.remote.calls,[],'nothing is sent with a malformed key')
-        self.remote.repos=[{'full_name':REPO,'default_branch':'main','private':True,'size':12}]
-        view=github.save_token(self.state,'  '+self.token+'\n',**self.hooks)
-        self.assertEqual({key:view[key] for key in ('connected','login','expires_at','reconnect','listed','copies')},
-                         {'connected':True,'login':LOGIN,'expires_at':'2026-12-01T10:00:00Z','reconnect':False,
-                          'listed':[{'name':REPO,'branch':'main','private':True,'size_kb':12}],'copies':[]})
-        self.assertEqual((type(view['connected_at']),type(view['listed_at'])),(int,int))
-        self.assertEqual([path for path,_ in self.remote.calls],['/user','/user/repos?per_page=100&sort=full_name&page=1'])
-        self.assertEqual({(headers['Authorization'],headers['Accept'],headers['X-GitHub-Api-Version']) for _,headers in self.remote.calls},
-                         {('Bearer '+self.token,'application/vnd.github+json','2022-11-28')})
+    def test_connect_github_asks_github_for_a_private_read_only_app_from_this_dashboard(self):
+        for bad in ('http://example.com/connect/github','https://example.com/connect/github?next=1','https://example.com/other',
+                    'https://user:pass@example.com/connect/github','https://example.com/connect/github#x','http://localhost:x/connect/github',
+                    'javascript:alert(1)','',None,7):
+            with self.subTest(redirect=bad):self.failing('invalid_github_redirect',lambda:github.start(self.state,bad))
+        for bad in ('-bad','a'*40,'a b','example/org',7):
+            with self.subTest(organization=bad):self.failing('invalid_github_organization',lambda:github.start(self.state,RETURN,bad))
+        self.assertFalse(secret_file.path(self.state,'github').exists(),'nothing is kept for a refused start')
+        started=github.start(self.state,RETURN)
+        nonce=self.saved()['pending']['state']
+        self.assertEqual(started['action'],'https://github.com/settings/apps/new?state='+nonce)
+        manifest=json.loads(started['manifest'])
+        self.assertRegex(manifest.pop('name'),r'^Nocheh-[a-f0-9]{6}$')
+        self.assertTrue(manifest.pop('description'))
+        self.assertEqual(manifest,{'url':'http://localhost:8783','redirect_url':RETURN,'setup_url':RETURN,'setup_on_update':True,'public':False,
+                                   'default_permissions':{'contents':'read','metadata':'read'},'default_events':[]})
+        self.assertEqual(github.start(self.state,'https://nocheh.example/connect/github','  example-org ')['action'],
+                         'https://github.com/organizations/example-org/settings/apps/new?state='+self.saved()['pending']['state'])
+        self.assertNotEqual(self.saved()['pending']['state'],nonce,'a new start replaces the one before')
+
+    def test_finish_trades_the_code_once_and_keeps_only_the_app_and_its_key_at_0600(self):
+        view=self.connect()
+        self.assertEqual({key:view[key] for key in ('connected','app','reconnect','listed','copies','install_url')},
+                         {'connected':True,'reconnect':False,'listed':[],'copies':[],'install_url':'https://github.com/apps/nocheh-a1b2c3/installations/new',
+                          'app':{'name':'Nocheh-a1b2c3','account':LOGIN,'install_url':'https://github.com/apps/nocheh-a1b2c3/installations/new',
+                                 'settings_url':'https://github.com/settings/apps/nocheh-a1b2c3'}})
+        self.assertIs(type(view['connected_at']),int)
+        conversion,=self.remote.calls
+        self.assertEqual((conversion[0],conversion[1].get('Authorization')),(conversion[0],None))
+        self.assertRegex(conversion[0],r'^/app-manifests/code[a-f0-9]{8}/conversions$')
+        saved=self.saved()
+        self.assertEqual(saved['app'],{'id':APP_ID,'slug':'nocheh-a1b2c3','name':'Nocheh-a1b2c3','account':LOGIN,'account_type':'User','pem':PEM,
+                                       'connected_at':view['connected_at']})
+        self.assertNotIn('pending',saved)
         self.assertEqual(stat.S_IMODE(secret_file.path(self.state,'github').stat().st_mode),0o600)
         self.assertEqual(stat.S_IMODE(secret_file.path(self.state,'github').parent.stat().st_mode),0o700)
-        self.assertEqual(self.saved()['grant']['token'],self.token)
-        for shown in (view,github.status(self.state,**self.hooks),github.flags(self.state)):
-            self.assertNotIn(self.token[:16],json.dumps(shown))
-        self.assertEqual(github.flags(self.state),{'connected':True,'reconnect':False,'expires_at':'2026-12-01T10:00:00Z'})
-        # GitHub refuses another key: nothing changes.
-        self.failing('github_token_refused',lambda:github.save_token(self.state,made_token('OTHER'),**self.hooks))
-        self.assertEqual(self.saved()['grant']['token'],self.token)
+        self.shown(view,github.status(self.state,**self.hooks),github.flags(self.state))
+        self.assertEqual(github.flags(self.state),{'connected':True,'reconnect':False})
+        # An organization's app is deleted in the organization's settings.
+        self.connect(owner={'login':'example-org','type':'Organization'})
+        self.assertEqual(github.status(self.state,**self.hooks)['app']['settings_url'],'https://github.com/organizations/example-org/settings/apps/nocheh-a1b2c3')
 
-    def test_a_refused_key_is_dropped_and_the_owner_asked_to_connect_again(self):
-        self.connect();before=self.saved()['grant'];self.remote.token=made_token('ROTATED')
-        self.failing('github_token_refused',lambda:github.list_repos(self.state,**self.hooks))
+    def test_a_code_is_taken_once_only_for_its_own_start_and_a_bad_app_is_not_kept(self):
+        started=github.start(self.state,RETURN);nonce=self.saved()['pending']['state']
+        for code,state in (('a/b',nonce),('',nonce),(None,nonce),('x'*201,nonce),('code',None),('code','')):
+            with self.subTest(code=code,state=state):self.failing('invalid_github_sign_in',lambda:github.finish(self.state,code,state,**self.hooks))
+        self.failing('github_sign_in_expired',lambda:github.finish(self.state,'code','other',**self.hooks))
+        self.remote.conversions['code']=app_json()
+        github.finish(self.state,'code',nonce,**self.hooks)
+        self.remote.conversions['code']=app_json()
+        self.failing('github_sign_in_expired',lambda:github.finish(self.state,'code',nonce,**self.hooks))
+        self.assertEqual(len(self.remote.calls),1,'a used start sends nothing')
+        # A start older than PENDING_SECONDS has expired.
+        github.start(self.state,RETURN);nonce=self.saved()['pending']['state']
+        with patch.object(github.time,'time',return_value=time.time()+github.PENDING_SECONDS+1):
+            self.failing('github_sign_in_expired',lambda:github.finish(self.state,'code',nonce,**self.hooks))
+        # GitHub refuses the code, or answers with an app Nocheh does not accept: nothing is kept, and the start is spent.
+        small=pem_of(rsa.generate_private_key(public_exponent=65537,key_size=1024))
+        curve=ec.generate_private_key(ec.SECP256R1()).private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()).decode()
+        for label,answer in (('refused',None),('no key',app_json(pem=None)),('a bad slug',app_json(slug='../x')),('no owner',app_json(owner=None)),
+                             ('a bad id',app_json(id='7')),('not a key',app_json(pem='-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----')),
+                             ('a small key',app_json(pem=small)),('not RSA',app_json(pem=curve)),('a long name',app_json(name='x'*101))):
+            with self.subTest(label):
+                github.disconnect(self.state,**self.hooks);github.start(self.state,RETURN);nonce=self.saved()['pending']['state'];self.remote.conversions={}
+                if answer is not None:self.remote.conversions['code']=answer
+                self.failing('github_app_not_created',lambda:github.finish(self.state,'code',nonce,**self.hooks))
+                self.assertEqual(self.saved(),{})
+
+    def test_the_app_token_is_rs256_from_a_minute_ago_for_nine_minutes(self):
+        token=github.app_token({'id':APP_ID,'pem':PEM},now=1_800_000_000)
+        head,claims,signature=token.split('.')
+        KEY.public_key().verify(unpadded(signature),(head+'.'+claims).encode(),padding.PKCS1v15(),hashes.SHA256())
+        self.assertEqual((json.loads(unpadded(head)),json.loads(unpadded(claims))),
+                         ({'alg':'RS256','typ':'JWT'},{'iat':1_800_000_000-60,'exp':1_800_000_000+540,'iss':str(APP_ID)}))
+        self.assertNotIn('=',token)
+
+    def test_without_the_crypto_library_github_asks_for_a_rebuild(self):
+        # Before GitHub makes an app whose key Nocheh could not use.
+        with patch.dict(sys.modules,{'cryptography.hazmat.primitives':None}):
+            self.failing('github_rebuild_needed',lambda:github.start(self.state,RETURN))
+        self.assertFalse(secret_file.path(self.state,'github').exists())
+        github.start(self.state,RETURN);nonce=self.saved()['pending']['state'];self.remote.conversions['code']=app_json()
+        with patch.dict(sys.modules,{'cryptography.hazmat.primitives':None}):
+            self.failing('github_rebuild_needed',lambda:github.finish(self.state,'code',nonce,**self.hooks))
+        self.assertEqual(self.saved(),{})
+
+    def test_disconnect_or_a_new_connect_while_github_hands_over_the_app_keeps_nothing(self):
+        for label,meanwhile in (('disconnect',lambda:github.disconnect(self.state,**self.hooks)),('a new connect',lambda:github.start(self.state,RETURN))):
+            with self.subTest(label):
+                github.disconnect(self.state,**self.hooks)
+                started=github.start(self.state,RETURN);nonce=self.saved()['pending']['state']
+                self.remote.conversions['code']=app_json();self.remote.hooks['/app-manifests/code/conversions']=meanwhile
+                self.failing('github_sign_in_expired',lambda:github.finish(self.state,'code',nonce,**self.hooks))
+                saved=self.saved()
+                self.assertNotIn('app',saved);self.assertEqual(github.flags(self.state),{'connected':False,'reconnect':False})
+                if label=='a new connect':self.assertNotEqual(saved['pending'].get('state'),nonce,'the newer sign-in is kept')
+
+    def test_a_refused_app_asks_to_connect_again_and_the_hourly_check_tries_it_again(self):
+        self.connect();self.copied();before=self.saved()['app'];self.remote.revoked=True;self.remote.commit='d'*40
+        self.failing('github_app_refused',lambda:github.list_repos(self.state,**self.hooks))
         saved=self.saved()
-        self.assertEqual(saved['grant'],{key:before[key] for key in ('login','connected_at','expires_at')})
+        self.assertEqual(saved['app'],before,'the key is kept: a wrong clock also makes GitHub refuse it')
         self.assertTrue(saved['reconnect'])
-        self.assertEqual(github.flags(self.state),{'connected':False,'reconnect':True,'expires_at':'2026-12-01T10:00:00Z'})
+        self.assertEqual(github.flags(self.state),{'connected':False,'reconnect':True})
+        view=github.status(self.state,**self.hooks)
+        self.assertEqual((view['connected'],view['reconnect'],view['app']['name']),(False,True,'Nocheh-a1b2c3'))
+        self.shown(view)
         self.failing('github_not_connected',lambda:github.list_repos(self.state,**self.hooks))
         self.failing('github_not_connected')
-        # A refresh starts no copy while the owner is asked to connect again.
-        calls=len(self.remote.calls);github.refresh(self.state,**self.hooks);self.assertEqual(len(self.remote.calls),calls)
-        self.remote.token=made_token('ROTATED');self.token=self.remote.token
-        self.assertFalse(self.connect()['reconnect'])
-
-    def test_the_expiry_header_is_read_as_utc(self):
-        for value,expected in (('2026-12-01 10:00:00 UTC','2026-12-01T10:00:00Z'),('2026-12-01 10:00:00 +0100','2026-12-01T09:00:00Z'),
-                               ('2026-12-01T10:00:00+00:00','2026-12-01T10:00:00Z'),('soon',None),('',None),(None,None)):
-            with self.subTest(value=value):self.assertEqual(github.expiry(value),expected)
-        self.remote.expires=None
-        self.assertIsNone(self.connect()['expires_at'],'a key without an expiry has none')
+        # The hourly check tries the app once, and copies nothing while GitHub still refuses it.
+        calls=len(self.remote.calls);github.refresh(self.state,**self.hooks)
+        self.assertEqual([path for path,_,_ in self.remote.calls[calls:]],['/app/installations?per_page=100'])
+        self.assertEqual((self.saved()['reconnect'],len(self.docker.started)),(True,1))
+        # Once GitHub takes it again, it is connected again and the check goes on.
+        self.remote.revoked=False;github.refresh(self.state,**self.hooks)
+        self.assertEqual((self.saved()['reconnect'],github.flags(self.state),self.store.rows[0]['commit']),(False,{'connected':True,'reconnect':False},'d'*40))
+        # Connect again replaces a refused app.
+        self.remote.revoked=True
+        self.failing('github_app_refused',lambda:github.list_repos(self.state,**self.hooks))
+        self.remote.revoked=False
+        self.assertEqual((self.connect()['reconnect'],self.saved()['reconnect']),(False,False))
 
     def test_a_linked_sign_in_file_or_copies_folder_is_refused(self):
-        outside=self.state/'outside.json';outside.write_text(json.dumps({'grant':{'token':self.token}}))
+        outside=self.state/'outside.json';outside.write_text(json.dumps({'app':{'id':APP_ID,'pem':PEM}}))
         file=secret_file.path(self.state,'github');file.parent.mkdir(parents=True,mode=0o700);file.symlink_to(outside)
-        for call in (lambda:github.status(self.state,**self.hooks),lambda:github.flags(self.state),self.copied):
+        for call in (lambda:github.status(self.state,**self.hooks),lambda:github.flags(self.state),self.copied,lambda:github.start(self.state,RETURN)):
             self.failing('github_connection_path_denied',call)
         file.unlink();(self.state/'elsewhere').mkdir();(self.state/'github').symlink_to(self.state/'elsewhere')
         self.failing('github_connection_path_denied',lambda:github.folder(self.state))
         self.assertIsNone(github.status(self.state,**self.hooks)['copies'])
 
-    def test_the_list_skips_malformed_rows_and_reads_three_pages_at_most(self):
+    def test_the_list_reads_every_installation_with_list_only_keys_and_skips_malformed_rows(self):
         good=[{'full_name':'example-org/r%03d'%n,'default_branch':'main','private':n%2==0,'size':n} for n in range(300)]
         bad=[{'full_name':'example-org/..','default_branch':'main','private':True,'size':1},{'full_name':'example-org/x.git','default_branch':'main','private':True,'size':1},
              {'full_name':'example-org/a','default_branch':'-x','private':True,'size':1},{'full_name':'example-org/b','default_branch':'main','private':'yes','size':1},
@@ -278,17 +438,26 @@ class GitHubTests(unittest.TestCase):
              {'full_name':'example-org/e','default_branch':'main','private':True,'size':True},'not a row',
              {'full_name':'Example-Org/R000','default_branch':'main','private':True,'size':0}]
         self.remote.repos=bad+good[:91]+good[91:]+[{'full_name':'example-org/zz','default_branch':'main','private':True,'size':1}]
-        listed=self.connect()['listed']
-        self.assertEqual([path.rsplit('=',1)[1] for path,_ in self.remote.calls[1:]],['1','2','3'])
+        self.remote.installations+=[{'id':78,'account':{'login':'octo-example','type':'User'},'suspended_at':'2026-11-01T00:00:00Z'},'not a row',{'id':'79'}]
+        self.connect();calls=len(self.remote.calls)
+        listed=github.list_repos(self.state,**self.hooks)['listed']
+        self.assertEqual([path for path,_,_ in self.remote.calls[calls:]],
+                         ['/app/installations?per_page=100','/app/installations/77/access_tokens']+['/installation/repositories?per_page=100&page=%d'%n for n in (1,2,3)])
+        self.assertEqual(self.remote.keys(),[{'permissions':{'metadata':'read'}}],'a key that can only list, for the one usable installation')
         names=[row['name'] for row in listed]
         self.assertEqual(names,sorted(names,key=str.lower))
         self.assertFalse({'example-org/..','example-org/x.git','example-org/a','example-org/b','example-org/c','example-org/d','example-org/e','example-org/zz'}&set(names))
         self.assertEqual(len(names),291,'one row per name, whatever its case')
+        self.assertEqual(self.saved()['listed'],listed);self.assertIs(type(self.saved()['listed_at']),int)
+        self.shown(listed,self.remote.calls[1:])
 
     # A copy.
 
-    def test_a_copy_creates_the_fixed_fetcher_sends_the_key_only_on_stdin_and_keeps_the_bundle(self):
+    def test_a_copy_creates_the_fixed_fetcher_sends_a_one_repository_key_only_on_stdin_and_keeps_the_bundle(self):
         self.connect();answer=self.copied()
+        # GitHub makes a key for the installation that reads this repository's code and nothing else.
+        self.assertEqual(self.remote.keys(),[{'repositories':['widgets'],'permissions':{'contents':'read','metadata':'read'}}])
+        token,=self.remote.issued
         created=self.docker.created();self.assertEqual(len(created),1);name=created[0][created[0].index('--name')+1]
         self.assertRegex(name,r'nocheh-repo-fetch-[a-f0-9]{24}')
         self.assertEqual(created[0],['docker','create','--pull=never','--rm','-i','--name',name,'--label','nocheh.role=repo-fetch',
@@ -302,12 +471,14 @@ class GitHubTests(unittest.TestCase):
         self.assertIn(['docker','network','create','--driver','bridge','--label','nocheh.role=repo-fetch','--opt',
                        'com.docker.network.bridge.enable_icc=false','nocheh-repo-fetch'],self.docker.calls)
         self.assertEqual(self.docker.calls[-1][:3],['docker','rm','-f'],'a fetcher that never ended is removed')
-        authorization=base64.b64encode(('x-access-token:'+self.token).encode()).decode()
-        for argv in self.docker.calls:self.assertFalse(any(self.token[:16] in part or authorization in part for part in argv),argv)
-        # The key reaches the fetcher only on stdin, with the API commit and the §0 limits.
+        authorization=base64.b64encode(('x-access-token:'+token).encode()).decode()
+        for argv in self.docker.calls:self.assertFalse(any(token in part or authorization in part or SECRET in part for part in argv),argv)
+        # The one-repository key reaches the fetcher only on stdin, with the API commit and the §0 limits; the app's own
+        # key never does.
         self.assertEqual(json.loads(self.docker.processes[0].stdin.data),
                          {'repo':REPO,'branch':'main','commit':'c'*40,'authorization':authorization,'ip':ADDRESS,'limits':LIMITS})
         self.assertEqual(self.docker.processes[0].stdin.data.count(b'\n'),1)
+        self.shown(self.docker.processes[0].stdin.data.decode())
         # The bundle is kept by its sha256 at 0600, and the store records it without the key.
         data=bundle_header('c'*40)+b'PACK'+b'\1'*64;digest=hashlib.sha256(data).hexdigest()
         self.assertEqual(self.files(),[digest+'.bundle'])
@@ -317,7 +488,7 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual({key:value for key,value in sent.items() if key!='not_after'},
                          {'repo':REPO,'branch':'main','commit':'c'*40,'digest':digest,'bytes':len(data),'files':5,'copy_id':None,
                           'removal':0,'need':github.need(len(data),meta['pages'],meta['index'],meta['objects'])})
-        self.assertNotIn(self.token[:16],json.dumps(self.store.calls))
+        self.assertNotIn(token,json.dumps(self.store.calls));self.shown(self.store.calls,answer)
         self.assertEqual({key:answer[key] for key in ('state','repo','branch','commit','bytes','files')},
                          {'state':'copied','repo':REPO,'branch':'main','commit':'c'*40,'bytes':len(data),'files':5})
         self.assertEqual(answer['copied_at'],self.store.rows[0]['copied_at'])
@@ -396,13 +567,14 @@ class GitHubTests(unittest.TestCase):
                ('exit 11',self.silent(11),'github_repo_not_readable'),('exit 12',self.served(code=12),'github_repo_too_large'),
                ('exit 13',self.silent(13),'github_copy_refused'),('exit 15',self.silent(15),'github_copy_cancelled'),
                ('exit 14',self.silent(14),'github_unavailable'),('exit 1',self.silent(1),'github_unavailable'),
-               ('exit 0 without output',self.silent(0),'github_copy_refused'),('exit 10',self.silent(10),'github_token_refused'))
+               ('exit 0 without output',self.silent(0),'github_copy_refused'),('exit 10',self.silent(10),'github_repo_not_readable'))
         for label,script,code in cases:
             with self.subTest(label):
                 self.connect();self.docker.script=script;self.failing(code)
                 self.assertEqual((self.files(),self.store.rows,self.store.sets()),([],[],[]))
                 self.assertFalse(self.docker.containers,'no fetcher is left')
-        self.assertTrue(self.saved()['reconnect'],'exit 10 drops the key');self.assertNotIn('token',self.saved()['grant'])
+        # Git refusing the one-repository key says nothing of the app's own key, which stays.
+        self.assertEqual((self.saved()['reconnect'],self.saved()['app']['pem']),(False,PEM))
 
     def test_the_watchdog_and_the_bundle_cap_stop_a_fetcher(self):
         self.connect();self.docker.script=self.served(pause=True)
@@ -437,13 +609,13 @@ class GitHubTests(unittest.TestCase):
     def check_disconnect_during_a_refresh(self,immortal):
         self.connect();self.copied();self.remote.commit='d'*40
         self.docker.script=self.served(pause=True);self.docker.immortal=immortal
-        held=[];self.store.hooks['clear']=lambda:held.append(self.saved().get('grant'))
+        held=[];self.store.hooks['clear']=lambda:held.append(self.saved().get('app'))
         ended=[];refresh=threading.Thread(target=lambda:ended.append(github.refresh(self.state,**self.hooks)),daemon=True);refresh.start()
         deadline=time.monotonic()+10
         while len(self.docker.processes)<2 and time.monotonic()<deadline:time.sleep(0.01)
         process=self.docker.processes[-1];self.assertTrue(process.waiting.wait(10))
         started=time.monotonic();view=github.disconnect(self.state,**self.hooks);self.assertLess(time.monotonic()-started,5)
-        self.assertEqual(held,[None],'the key left the file before the store call')
+        self.assertEqual(held,[None],'the app left the file before the store call')
         self.assertIn(['docker','rm','-f',self.docker.started[-1]],self.docker.calls)
         self.assertEqual((view['connected'],view['copies']),(False,[]))
         process.wake.set();refresh.join(20);self.assertFalse(refresh.is_alive());self.assertTrue(ended)
@@ -530,7 +702,7 @@ class GitHubTests(unittest.TestCase):
         for call in (lambda:github.remove(self.state,REPO,**self.hooks),lambda:github.cleanup(self.state,**self.hooks),
                      lambda:github.disconnect(self.state,**self.hooks)):
             self.failing('github_unavailable',call);self.assertEqual(self.files(),files)
-        self.assertNotIn('grant',self.saved(),'Disconnect forgets the key first')
+        self.assertNotIn('app',self.saved(),'Disconnect forgets the app first')
         self.assertIsNone(github.status(self.state,**self.hooks)['copies'])
 
     def test_cleanup_keeps_current_previous_and_pinned_bundles(self):
@@ -553,7 +725,7 @@ class GitHubTests(unittest.TestCase):
         self.copied();self.assertEqual(len(self.files()),2)
         view=github.disconnect(self.state,**self.hooks)
         self.assertEqual((self.saved(),self.store.rows,self.files()),({},[],[]))
-        self.assertEqual({key:view[key] for key in ('connected','login','listed','copies')},{'connected':False,'login':None,'listed':[],'copies':[]})
+        self.assertEqual({key:view[key] for key in ('connected','app','listed','copies')},{'connected':False,'app':None,'listed':[],'copies':[]})
         self.failing('github_not_connected')
 
     def test_a_restored_copy_whose_bundle_is_missing_is_skipped_and_copied_again_as_a_new_copy(self):
@@ -569,13 +741,22 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual((self.store.sets()[-1]['copy_id'],self.store.sets()[-1]['removal']),(None,self.store.removal))
         self.assertNotEqual(self.store.rows[0]['copy_id'],old)
 
-    def test_refresh_copies_a_moved_branch_and_stops_at_a_refused_key(self):
+    def test_refresh_copies_a_moved_branch_and_stops_at_a_refused_app(self):
         self.connect();self.copied();self.remote.commit='d'*40
         github.refresh(self.state,**self.hooks)
         self.assertEqual((self.store.rows[0]['commit'],len(self.docker.started)),('d'*40,2))
         github.refresh(self.state,**self.hooks);self.assertEqual(len(self.docker.started),2,'a current copy is not fetched again')
-        self.remote.commit='e'*40;self.remote.token=made_token('ROTATED');github.refresh(self.state,**self.hooks)
+        self.remote.commit='e'*40;self.remote.revoked=True;github.refresh(self.state,**self.hooks)
         self.assertTrue(self.saved()['reconnect']);self.assertEqual(self.store.rows[0]['commit'],'d'*40)
+
+    def test_a_repository_the_app_cannot_read_is_refused_before_anything_is_fetched(self):
+        self.connect()
+        # No installation reaches it.
+        self.remote.reach={};self.failing('github_repo_not_readable')
+        # GitHub will not make a key for it.
+        self.remote.reach={REPO.lower():INSTALLATION+1};self.failing('github_repo_not_readable')
+        self.assertEqual((self.docker.created(),self.remote.issued),([],{}))
+        self.assertEqual((self.saved()['reconnect'],self.saved()['app']['pem']),(False,PEM),'the app stays connected')
 
 
 if __name__=='__main__':unittest.main()

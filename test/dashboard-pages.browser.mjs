@@ -648,6 +648,42 @@ test('Notion is connected through its sign-in, turned on with an approval choice
   await page.close();
 });
 
+test('GitHub is connected through its own app, lists the chosen repositories, copies one and is disconnected', async () => {
+  const {page, problems} = await open('settings?view=connections');
+  const card = page.getByRole('region', {name: 'GitHub'});
+  await card.getByText('Not connected').waitFor();
+  // A sign-in that comes back while Nocheh is busy keeps its code in the address, so a reload can finish it.
+  await page.goto(origin + '/?connect=github&code=preview-busy&state=fixture-state');
+  await card.getByText('Reload this page in a minute to finish.', {exact: false}).waitFor();
+  assert.equal(new URL(page.url()).search, '?connect=github&code=preview-busy&state=fixture-state');
+  problems.splice(0, problems.length, ...problems.filter(problem => !/409/.test(problem)));
+  await page.goto(origin + '/#settings?view=connections');
+  await card.getByText('Not connected').waitFor();
+  // GitHub creates the app, then asks which repositories it may read, and each time sends the browser back here.
+  await card.getByRole('button', {name: 'Connect GitHub'}).click();
+  await page.getByRole('status').filter({hasText: 'GitHub is connected.'}).waitFor();
+  await card.getByText('Connected', {exact: true}).waitFor();
+  await card.getByText('Nocheh reads through its app Nocheh-a1b2c3 on octo-example', {exact: false}).waitFor();
+  assert.equal(new URL(page.url()).search, '');
+  assert.match(page.url(), /#settings\?view=connections$/);
+  const widgets = card
+    .getByRole('list', {name: 'Repositories'})
+    .getByRole('listitem')
+    .filter({hasText: 'example-org/widgets'});
+  await widgets.getByRole('button', {name: 'Copy'}).click();
+  await page.getByRole('status').filter({hasText: 'example-org/widgets is copied.'}).waitFor();
+  await card.getByRole('button', {name: 'Disconnect'}).click();
+  await page.getByRole('dialog', {name: 'Disconnect GitHub?'}).getByRole('button', {name: 'Disconnect'}).click();
+  await card.getByText('Not connected').waitFor();
+  // The app stays on GitHub until the owner deletes it there.
+  assert.equal(
+    await card.getByRole('link', {name: 'Open it on GitHub'}).getAttribute('href'),
+    'https://github.com/settings/apps/nocheh-a1b2c3',
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('personal tasks and each project keep separate lists, with tags, a group and people on a task', async () => {
   const {page, problems} = await open('tasks');
   const lists = page.getByRole('radiogroup', {name: 'List'});
