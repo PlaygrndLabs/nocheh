@@ -1,9 +1,10 @@
+import {randomBytes} from 'node:crypto';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
+import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
@@ -66,6 +67,25 @@ CREATE TABLE IF NOT EXISTS background_runs (
 CREATE TABLE IF NOT EXISTS background_reports (
  job_id text NOT NULL REFERENCES background_jobs(id),part integer NOT NULL CHECK(part>0),action_id text NOT NULL,PRIMARY KEY(job_id,part)
 );
+-- The GitHub copies a box job may read (ADR-0209): one row a repository, made from Settings › Connections only. A row's
+-- copy_id is random and never comes back once the row is removed, so a later copy of the same name is a new copy.
+CREATE TABLE IF NOT EXISTS github_copies (
+ copy_id text PRIMARY KEY CHECK(copy_id ~ '^[a-f0-9]{32}$'),
+ repo text NOT NULL CHECK(repo ~ '^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$'),
+ branch text NOT NULL CHECK(length(branch) BETWEEN 1 AND 255),
+ commit_id text NOT NULL CHECK(commit_id ~ '^[a-f0-9]{40}$'),
+ digest text NOT NULL CHECK(digest ~ '^[a-f0-9]{64}$'),
+ bytes integer NOT NULL CHECK(bytes BETWEEN 1 AND 67108864),
+ need integer NOT NULL CHECK(need BETWEEN 1 AND 268435456),
+ files integer NOT NULL CHECK(files BETWEEN 0 AND 50000),
+ previous_digest text CHECK(previous_digest ~ '^[a-f0-9]{64}$'),
+ copied_at timestamptz NOT NULL DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS github_copies_repo ON github_copies(lower(repo));
+-- Each name's latest Remove, numbered in order. A new copy sends the number it read before it asked GitHub, so a Remove
+-- of that name after it refuses the copy, also a Remove that found no row (ADR-0209).
+CREATE TABLE IF NOT EXISTS github_removals (repo text PRIMARY KEY CHECK(repo=lower(repo)),removal integer NOT NULL CHECK(removal>0));
+-- The GitHub copy a box job reads, pinned when it is asked (ADR-0209).
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS repo jsonb CHECK(repo IS NULL OR box);
 `;
 
 const protocol='background-job-v1';
@@ -85,6 +105,13 @@ const DECISION_HOURS=24;
 // The report goes to the chat in parts the Telegram sender splits further.
 const REPORT_PART=12000;
 export const closedStates=new Set(['done','failed','stopped','rejected']);
+// A GitHub copy a job's box may hold (ADR-0209). Same numbers and patterns as github.py, repo_fetch.py,
+// box_repo.py and security_launcher.py; a parity test reads them.
+export const MAX_REPOS=10,MAX_BUNDLE=67108864,MAX_FILES=50000,REPO_ROOM=268435456;
+const REPO_NAME=/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/,COMMIT=/^[a-f0-9]{40}$/,DIGEST=/^[a-f0-9]{64}$/,COPY_ID=/^[a-f0-9]{32}$/;
+export const repoName=(v:unknown):v is string=>typeof v==='string'&&REPO_NAME.test(v)&&!['.','..'].includes(v.split('/')[1]!)&&!v.endsWith('.git');
+export const repoBranch=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9._\/-]{1,255}$/.test(v)&&!/\.\.|\/\/|^[-\/.]|[\/.]$|\.lock$/.test(v);
+const matches=(pattern:RegExp,v:unknown):v is string=>typeof v==='string'&&pattern.test(v);
 
 /** A rough size of reading a chat once with the reply model: its text, about 50 tokens of
  * page detail for each record and some text for each file, read page by page while the
@@ -209,14 +236,23 @@ export async function ownerApprovedJob(db:Pick<pg.PoolClient,'query'>,owner:stri
 export const boxOpen=`now()<j.started_at+(j.minutes_limit+8)*interval '1 minute'`;
 /** When a job's sealed box must be gone. */
 export const boxExpires=(job:{started_at:Date;minutes_limit:number})=>new Date(jobDeadlines(job).box).toISOString();
+/** The GitHub copy a box job reads, pinned from its github_copies row when the job is asked (ADR-0209). Every run of the
+ *  job reads this pin, never the row, so a later Copy again changes nothing for it. */
+export type PinnedRepo={copy_id:string;name:string;branch:string;commit:string;digest:string;bytes:number;need:number;files:number;copied_at:string};
+// copied_at is a string: canonical() would turn a Date into {}.
+export const pinnedRepo=(row:any):PinnedRepo=>({copy_id:String(row.copy_id),name:String(row.repo),branch:String(row.branch),commit:String(row.commit_id),
+  digest:String(row.digest),bytes:Number(row.bytes),need:Number(row.need),files:Number(row.files),copied_at:new Date(row.copied_at).toISOString()});
+/** SQL over a job row `j`: whether the copy it pinned still exists. Remove and Disconnect delete the row for good. */
+export const repoKept="(j.repo IS NULL OR EXISTS (SELECT 1 FROM github_copies c WHERE c.copy_id=j.repo->>'copy_id'))";
 
 /** A run's job when the run runs in the job's sealed box: a run of a job that asked for the box and whose box time
- *  has not passed, that `ownerApprovedJob` lets through, while the owner's box switch and the guard are on. Null otherwise. */
+ *  has not passed, that `ownerApprovedJob` lets through, while the owner's box switch and the guard are on, and whose
+ *  GitHub copy, if it pinned one, was not removed. Null otherwise. */
 export async function boxJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
   turn:{owner?:boolean;job?:string|null;logical_profile?:string|null},guard:GuardBinding):Promise<any|null> {
   if(!turn.job||guard.mode!=='on'||source.store!=='control')return null;
   const job=(await db.query(`SELECT j.* FROM background_jobs j JOIN background_runs t ON t.job_id=j.id AND t.event_id=$2
-    JOIN background_settings s ON s.singleton AND s.box_tools WHERE j.id=$1 AND j.box AND ${boxOpen}`,[turn.job,source.id])).rows[0];
+    JOIN background_settings s ON s.singleton AND s.box_tools WHERE j.id=$1 AND j.box AND ${boxOpen} AND ${repoKept}`,[turn.job,source.id])).rows[0];
   return job&&await ownerApprovedJob(db,owner,source,turn)?job:null;
 }
 
@@ -282,8 +318,9 @@ export class BackgroundJobRepository {
   /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
    * Nothing runs until whoever approves it presses Approve. */
   async start(principal:Reader,input:unknown) {
-    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box'].includes(key))||
-      body.box!==undefined&&typeof body.box!=='boolean')throw new HttpError(400,'invalid_job_request');
+    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box','repo'].includes(key))||
+      body.box!==undefined&&typeof body.box!=='boolean'||body.repo!==undefined&&(typeof body.repo!=='string'||!body.repo||body.repo.length>140))
+      throw new HttpError(400,'invalid_job_request');
     const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim();
     if(!title||!instruction)throw new HttpError(400,'invalid_job_request');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
@@ -291,6 +328,10 @@ export class BackgroundJobRepository {
     const owner=this.access.policy().owner_id!,space=principal.space!,scope=space.split('/topic/')[0]===owner?owner:turn.scope,box=body.box===true;
     // Only the owner's own job, asked in their private chat, gets the sealed box, and only while the box switch is on.
     if(box&&(!privateJob({scope,requester},owner)||!settings.box_tools))throw new HttpError(409,'job_box_not_allowed');
+    // A GitHub copy only in the box, and only one the owner copied: refused before anything is spent.
+    const pin=body.repo===undefined?null:box&&repoName(body.repo)?(await this.control.query('SELECT * FROM github_copies WHERE lower(repo)=lower($1)',[body.repo])).rows[0]??null:null;
+    if(body.repo!==undefined&&!pin)throw new HttpError(409,'job_repo_not_allowed');
+    const repo=pin?pinnedRepo(pin):null;
     if(requester) {
       const today=Number((await this.control.query(`SELECT count(*) FROM background_jobs WHERE scope=$1 AND requester=$2
         AND state<>'rejected' AND created_at>date_trunc('day',now())`,[turn.scope,requester])).rows[0].count);
@@ -308,14 +349,27 @@ export class BackgroundJobRepository {
       producer:'nocheh',producer_version:protocol,configuration:{binding,chat:size.chat,from,to}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),shown=object(JSON.parse(String((representation.value as any).text)));
-    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes}));
-    await this.control.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
-      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT DO NOTHING`,
+    // The pinned copy is part of what is approved; a job without one keeps the fingerprint it had before copies existed.
+    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes,...(repo?{repo}:{})}));
+    const insert=(db:Pick<pg.PoolClient,'query'>)=>db.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
+      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT DO NOTHING`,
       [id,source,proposal,representation.revision,binding,scope,space,size.chat,'job-'+id.slice(0,24),requester,approver,fingerprint,
-        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes]);
+        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo]);
+    if(!repo)await insert(this.control);
+    else {
+      // The copy row is locked before the job row exists, the order Remove takes them in: Remove waits for this short
+      // transaction and then withdraws the new job, or removed the copy first and nothing is recorded.
+      const db=await this.control.connect();
+      try {
+        await db.query('BEGIN');
+        if(!(await db.query('SELECT 1 FROM github_copies WHERE copy_id=$1 FOR SHARE',[repo.copy_id])).rowCount)throw new HttpError(409,'job_repo_not_allowed');
+        await insert(db);await db.query('COMMIT');
+      }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    }
     const row=await this.row(id);
     if(row.fingerprint!==fingerprint)throw new HttpError(409,'job_changed');
     return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:jobPriced(row.rates)?Number(row.cost_limit_usd):null,minutes:row.minutes_limit},box:row.box as boolean,
+      repo:row.repo?{name:row.repo.name,branch:row.repo.branch,commit:row.repo.commit,copied_at:row.repo.copied_at}:null,
       message:row.state==='proposed'?'Nothing runs until it is approved.':'This job was already decided; its state is shown.'};
   }
   /** The exact proposal a card shows, read through the secret check of its audience. */
@@ -342,13 +396,16 @@ export class BackgroundJobRepository {
       size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
       // Without a price only the time limit applies, and the card says so instead of a cost limit.
       cost_limit:jobPriced(row.rates)?money(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin:null,
-      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?lines.box:null,
+      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?(row.repo?lines.box_repo:lines.box):null,
+      // From the job's own pin, so a card settled after Remove still shows what was asked.
+      repo:row.repo?fillTemplate(lines.repo!,{repo_name:row.repo.name,repo_branch:row.repo.branch,repo_commit:row.repo.commit.slice(0,7),
+        repo_copied:row.repo.copied_at.slice(0,16).replace('T',' ')+' UTC',repo_size:Math.ceil(row.repo.bytes/1e6)+' MB, '+count(row.repo.files,'file','files')}):null,
       checked:[lines.checked,row.requester?lines.member_limit:null].filter(Boolean).join(' ')||null};
     // What the job may do without asking is always on its card: a saved card without the line, or whose line
     // is left out for another missing value, gets it at the end.
     const template=prompts['background.card']??backgroundCard,kept=template.split('\n').filter(line=>lineKept(line,values));
     // A forced cost line carries the time limit too, when a saved card left it out with the cost limit's line.
-    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}'+
+    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰'],['repo','📦']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}'+
       (name==='unpriced'&&!kept.some(line=>line.includes('{minutes_limit}'))?' ({minutes_limit} min)':''));
     const text=fillTemplate(missing.length?template+'\n\n'+missing.join('\n'):template,values);
     const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
@@ -362,6 +419,9 @@ export class BackgroundJobRepository {
     const db=await this.control.connect();
     try {
       await db.query('BEGIN');
+      // The copy row first, as Remove takes it: a removed copy approves nothing, and a Remove that comes after this
+      // waits and then stops the approved job.
+      if(body.decision==='approve'&&row.repo&&!(await db.query('SELECT 1 FROM github_copies WHERE copy_id=$1 FOR SHARE',[row.repo.copy_id])).rowCount)throw new HttpError(409,'job_changed');
       const current=(await db.query('SELECT * FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
       if(current.state!=='proposed'||current.created_at<new Date(Date.now()-DECISION_HOURS*3600000))throw new HttpError(409,'job_already_decided');
       const approve=body.decision==='approve';
@@ -377,12 +437,17 @@ export class BackgroundJobRepository {
     if(user===owner)return true;
     return row.approver==='requester'&&!!row.requester&&row.requester===user&&row.scope===chat;
   }
-  /** Jobs this chat can see: its own, or every job for the owner. */
+  /** Jobs this chat can see: its own, or every job for the owner. A live turn in the owner's private chat also sees the
+   *  GitHub copies a box job may read, while the box switch is on. */
   async list(principal:Reader) {
-    let rows;
+    let rows,repos:{name:string;branch:string;commit:string;copied_at:string}[]|undefined;
     if(principal.admin)rows=(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 50')).rows;
     else {
-      await this.turns.binding(principal);
+      const turn=await this.turns.binding(principal);
+      if(turn.owner&&!turn.job&&principal.scope===null&&(principal.purpose??'assistant')==='assistant'&&(await this.settings()).box_tools)
+        // copied_at as ISO text, as in the pin: a turn's answer is rebuilt from its texts for the secret check, so a Date would become {}.
+        repos=(await this.control.query('SELECT repo AS name,branch,left(commit_id,12) AS commit,copied_at FROM github_copies ORDER BY lower(repo)')).rows
+          .map(row=>({...row,copied_at:new Date(row.copied_at).toISOString()}));
       rows=principal.scope===null?(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 20')).rows:
         (await this.control.query('SELECT * FROM background_jobs WHERE scope=$1 ORDER BY created_at DESC LIMIT 20',[principal.scope])).rows;
     }
@@ -394,7 +459,80 @@ export class BackgroundJobRepository {
         todo:row.todo,started_at:row.started_at,finished_at:row.finished_at,created_at:row.created_at,error_code:row.error_code,
         ...(principal.admin?{logical_profile:row.logical_profile,approver:row.approver}:{})});
     }
-    return {jobs};
+    return {jobs,...(repos?{repos}:{})};
+  }
+  /** The GitHub copies a box job may read, and the digests jobs still pin: an approved job, a running job within its box
+   *  time and a proposal still waiting for its decision, none stopped and none whose copy was removed. github.py keeps
+   *  every bundle these name and deletes the rest. Only management, with the service token, reaches this (owner-api.ts). */
+  async copies(principal:Reader) {
+    admin(principal);
+    // Read first: a Remove that commits while the rows are read then still counts as after it.
+    const removal=Number((await this.control.query('SELECT COALESCE(max(removal),0) AS removal FROM github_removals')).rows[0].removal);
+    const copies=(await this.control.query(`SELECT copy_id,repo,branch,commit_id AS commit,digest,bytes,need,files,previous_digest,copied_at
+      FROM github_copies ORDER BY lower(repo)`)).rows;
+    const pinned=(await this.control.query(`SELECT DISTINCT j.repo->>'digest' AS digest FROM background_jobs j JOIN github_copies c ON c.copy_id=j.repo->>'copy_id'
+      WHERE NOT j.cancel_requested AND (j.state='approved' OR (j.state='running' AND ${boxOpen})
+        OR (j.state='proposed' AND j.created_at>now()-${DECISION_HOURS}*interval '1 hour'))`)).rows.map(row=>row.digest as string);
+    return {copies,pinned,removal};
+  }
+  /** Save a finished copy, or remove copies. A set names the copy_id it started from: null makes a new copy with a new id,
+   *  an id updates that same copy, and anything removed or replaced meanwhile refuses. A new copy also names the last
+   *  removal it read, and a Remove of its name since then refuses it. A set past its not_after refuses
+   *  too, so a copy github.py gave up on can never outlive a later Disconnect. A Remove or Disconnect withdraws every job
+   *  that pinned the copy and has not started, in the same transaction; a running one loses its box (repoKept). */
+  async changeCopies(principal:Reader,input:unknown) {
+    admin(principal);
+    const body=input&&typeof input==='object'&&!Array.isArray(input)?input as Record<string,unknown>:{},keys=Object.keys(body);
+    const invalid=new HttpError(400,'invalid_github_copy'),within=(value:unknown,low:number,high:number)=>Number.isSafeInteger(value)&&(value as number)>=low&&(value as number)<=high;
+    if(keys.length===1&&keys[0]==='set') {
+      const set=body.set&&typeof body.set==='object'&&!Array.isArray(body.set)?body.set as Record<string,unknown>:null;
+      const fields=['repo','branch','commit','digest','bytes','need','files','copy_id','removal','not_after'];
+      if(!set||Object.keys(set).length!==fields.length||!fields.every(key=>key in set)||!repoName(set.repo)||!repoBranch(set.branch)||!matches(COMMIT,set.commit)||
+        !matches(DIGEST,set.digest)||!within(set.bytes,1,MAX_BUNDLE)||!within(set.need,1,REPO_ROOM)||!within(set.files,0,MAX_FILES)||
+        set.copy_id!==null&&!matches(COPY_ID,set.copy_id)||!within(set.removal,0,2147483647)||!within(set.not_after,1,Math.floor(Date.now()/1000)+60))throw invalid;
+      const values=[set.repo,set.branch,set.commit,set.digest,set.bytes,set.need,set.files],db=await this.control.connect();
+      try {
+        await db.query('BEGIN');
+        let saved;
+        if(set.copy_id===null) {
+          // New copies and Removes take turns, so the limit holds and a new copy sees every Remove before it.
+          await db.query('SELECT pg_advisory_xact_lock(803362)');
+          if((await db.query('SELECT 1 FROM github_copies WHERE lower(repo)=lower($1)',[set.repo])).rowCount)throw new HttpError(409,'github_copy_cancelled');
+          // Removed after the copy began: the owner's Remove is final, also when a Copy again of a missing copy had
+          // already removed the row itself.
+          if((await db.query('SELECT 1 FROM github_removals WHERE repo=lower($1) AND removal>$2',[set.repo,set.removal])).rowCount)
+            throw new HttpError(409,'github_copy_cancelled');
+          if(Number((await db.query('SELECT count(*) FROM github_copies')).rows[0].count)>=MAX_REPOS)throw new HttpError(409,'github_repo_limit');
+          saved=await db.query(`INSERT INTO github_copies(copy_id,repo,branch,commit_id,digest,bytes,need,files) VALUES($8,$1,$2,$3,$4,$5,$6,$7)
+            ON CONFLICT ((lower(repo))) DO NOTHING`,[...values,randomBytes(16).toString('hex')]);
+        } else saved=await db.query(`UPDATE github_copies SET branch=$2,commit_id=$3,digest=$4,bytes=$5,need=$6,files=$7,
+            previous_digest=CASE WHEN digest<>$4 THEN digest ELSE previous_digest END,copied_at=now() WHERE copy_id=$8 AND lower(repo)=lower($1)`,[...values,set.copy_id]);
+        // Checked after the write, so a set that waited on a row lock past its time is refused too.
+        if(!saved.rowCount||Date.now()/1000>(set.not_after as number))throw new HttpError(409,'github_copy_cancelled');
+        await db.query('COMMIT');
+      }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+      return this.copies(principal);
+    }
+    const remove=keys.length===1&&keys[0]==='remove'&&repoName(body.remove);
+    if(!remove&&!(keys.length===1&&body.clear===true))throw invalid;
+    const db=await this.control.connect();let withdrawn:string[];
+    try {
+      await db.query('BEGIN');
+      // A Remove is numbered even when it finds no row, so a new copy of that name still running is refused.
+      if(remove) {
+        await db.query('SELECT pg_advisory_xact_lock(803362)');
+        await db.query(`INSERT INTO github_removals(repo,removal) SELECT lower($1),COALESCE(max(removal),0)+1 FROM github_removals
+          ON CONFLICT(repo) DO UPDATE SET removal=EXCLUDED.removal`,[body.remove]);
+      }
+      // Copy rows first, then job rows: start and decide lock in the same order.
+      const removed=(await db.query(`DELETE FROM github_copies${remove?' WHERE lower(repo)=lower($1)':''} RETURNING copy_id`,remove?[body.remove]:[])).rows.map(row=>row.copy_id);
+      withdrawn=(await db.query(`UPDATE background_jobs SET state='stopped',cancel_requested=true,error_code='job_repo_removed',finished_at=now(),revision=revision+1,updated_at=now()
+        WHERE state IN ('proposed','approved') AND repo->>'copy_id'=ANY($1::text[]) RETURNING id`,[removed])).rows.map(row=>row.id);
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    // The cards say why, without holding up the answer.
+    void Promise.all(withdrawn.map(id=>this.settled(id))).catch(()=>{});
+    return this.copies(principal);
   }
   /** Stop a job: a proposal is withdrawn, a running job's run is cancelled and no report is sent.
    * The card's rule: the dashboard and the owner stop any job; a member only the job they asked for,
@@ -615,7 +753,7 @@ export class BackgroundJobRepository {
    *  the first message again with the restart note, whose
    *  to-do line is kept only while carriedTodo allows it. An earlier run ran only if it made a model call, after which Hermes
    *  has its first message: one that failed before (no box, a busy profile) left nothing to resume or restart. A box run also
-   *  says what the box holds, every time: the box can be new. */
+   *  says what the box holds, every time: the box can be new; so does the GitHub copy it pinned. */
   async runText(job:any,run:any,binding:GuardBinding,box=false):Promise<string> {
     const prompts=await ownerPrompts(this.control),shown=await this.proposal(job);
     const ran=run.attempt>1?(await this.control.query(`SELECT r.binding FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id
@@ -625,7 +763,8 @@ export class BackgroundJobRepository {
     let text=same?fillTemplate(prompts['background.resume']??backgroundResume,{title:shown.title}):await this.firstMessage(job,shown,prompts);
     if(ran.length&&!same){const todo=await this.carriedTodo(job.id,binding);
       text+='\n\n'+fillTemplate(prompts['background.restart']??backgroundRestart,{todo:todo?.length?todo.map(item=>item.content+' ('+item.status+')').join('; '):null});}
-    return box?text+'\n\n'+(prompts['background.box']??backgroundBox):text;
+    return box?text+'\n\n'+(prompts['background.box']??backgroundBox)+(job.repo?'\n\n'+fillTemplate(prompts['background.repo']??backgroundRepo,{repo:job.repo.name,
+      branch:job.repo.branch,commit:job.repo.commit,copied:job.repo.copied_at.slice(0,16).replace('T',' ')+' UTC'}):''):text;
   }
   private async firstMessage(job:any,shown:{title:string;instruction:string},prompts:Awaited<ReturnType<typeof ownerPrompts>>):Promise<string> {
     const estimate=job.estimate,owner=this.access.policy().owner_id,period=estimate.from||estimate.to?[estimate.from??'the start',estimate.to??'now'].join(' to '):'the whole chat';

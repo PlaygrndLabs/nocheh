@@ -37,7 +37,7 @@ from tools.acceptance.owner_dashboard import FIXTURE_PASSWORD
 from tools.paths import ROOT
 
 IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
-          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:a92650bc'}
+          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:a92650bc', 'box': 'nocheh-box:local'}
 BROWSER_IMAGE = 'nocheh-tester-browser:local'
 
 # Plain-English names for the report, by scenario.
@@ -81,6 +81,7 @@ TITLES = {
     'background_job_runs_and_reports': 'A background job is approved, runs and reports',
     'background_job_cost_cap': 'A background job at its cost limit stops with a short note',
     'background_job_uses_sealed_box': 'A background job runs its commands in the sealed box',
+    'background_job_reads_a_repo_copy': 'A background job reads a GitHub copy in its sealed box',
     'approval_waits_across_a_change_and_runs': 'An approval waits through a reaction, then runs the exact command',
     'job_operation_runs_after_approval': 'A job\'s command runs once you approve it',
     'background_job_long_run': 'A background job runs past the old step limit as one run',
@@ -101,7 +102,9 @@ BUILDS = [('services', 'nocheh-services:tester', ['--target', 'runtime']),
           ('management', 'nocheh-management:tester', ['--target', 'management']),
           ('postgres', 'nocheh-store-postgres:tester', ['--target', 'store-postgres']),
           ('native', 'nocheh-hermes:tester', ['-f', 'deploy/hermes.Dockerfile',
-                                               '--build-context', 'hermes_source=data/compat/upstreams/hermes-agent'])]
+                                               '--build-context', 'hermes_source=data/compat/upstreams/hermes-agent']),
+          # The sealed job box, which the GitHub fetcher runs too; it uses no build arguments.
+          ('box', 'nocheh-box:tester', ['-f', 'deploy/box.Dockerfile'])]
 
 
 def build_images(log):

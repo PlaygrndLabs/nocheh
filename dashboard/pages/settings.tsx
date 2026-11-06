@@ -11,6 +11,7 @@ import {PrivacySettings, privacyKeys} from './settings/privacy';
 import {AssistantSettings} from './settings/assistant';
 import {TaskSettingsPanel} from './settings/tasks';
 import {ConnectionSettings} from './settings/connections';
+import {GithubConnection} from './settings/github';
 import {AdvancedSettings, advancedKeys} from './settings/advanced';
 import {loadSettings} from '../lib/settings';
 
@@ -42,7 +43,13 @@ export default function Settings() {
   let body: React.ReactNode;
   if (view === 'assistant') body = <AssistantSettings />;
   else if (view === 'tasks') body = <TaskSettingsPanel />;
-  else if (view === 'connections') body = <ConnectionSettings />;
+  else if (view === 'connections')
+    body = (
+      <>
+        <ConnectionSettings />
+        <GithubConnection />
+      </>
+    );
   else if (!settings.data)
     body = settings.error ? (
       <LoadError what="settings" onRetry={() => void loadSettings()} />

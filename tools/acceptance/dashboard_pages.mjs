@@ -32,7 +32,7 @@ const routes = [
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm', 'facts'].map(view => ['memory?view=' + view, 'Memory']),
   ...['work', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'advanced'].map(view => ['settings?view=' + view, 'Settings']),
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'advanced'].map(view => ['settings?view=' + view, 'Settings']),
 ];
 
 const relay = net
@@ -72,7 +72,7 @@ for (const [route, title] of routes) {
     heading = (await page.locator('main h1').first().textContent()).trim();
     const alerts = await page.getByRole('alert').allTextContents();
     for (const text of alerts) if (text.trim()) problems.push('alert: ' + text.trim().slice(0, 200));
-    if (!route.includes('?')) await page.screenshot({path: `${out}/${route}.png`});
+    await page.screenshot({path: `${out}/${route.replace(/\?view=|[?=]/g, '-')}.png`});
   } catch (error) {
     problems.push('did not open: ' + String(error.message).split('\n')[0]);
   }

@@ -7,6 +7,22 @@ from tools.operations.provider import monitoring
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_github_flags_come_from_the_sign_in_file_without_the_key(self):
+        from tools.operations.connections import secret_file
+        token='github_'+'pat_'+'MONITOR'+'x'*24
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)
+            with secret_file.locked(state,'github'):
+                secret_file.write(state,'github',{'grant':{'token':token,'login':'octo-example','connected_at':1,'expires_at':'2026-12-01T10:00:00Z'},
+                                                  'reconnect':False,'listed':[],'listed_at':1})
+            with patch.object(monitoring,'load',return_value={}),patch.object(monitoring,'compose',return_value=(['docker'],{})),\
+                 patch.object(monitoring.subprocess,'check_output',return_value=''),patch.object(monitoring.API,'call',side_effect=ConnectionError('down')):
+                result=monitoring.status(state)
+            self.assertEqual(result['github'],{'connected':True,'reconnect':False,'expires_at':'2026-12-01T10:00:00Z'})
+            self.assertNotIn(token[:16],json.dumps(result))
+            secret_file.path(state,'github').unlink()
+            self.assertEqual(monitoring.github_flags(state),{'connected':False,'reconnect':False,'expires_at':None})
+
     def test_partial_outage_retains_model_routes_and_safe_telegram_incident(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);(state/'hermes').mkdir()

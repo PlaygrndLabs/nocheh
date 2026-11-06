@@ -33,6 +33,10 @@ export function patternSpans(text:string):Span[] {
     /\b(?<secret>AKIA[A-Z0-9]{16})\b/g,
     /(?<secret>-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]{1,16000}?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)/g,
     /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s:/]+:(?<secret>[^\s@/]+)@/gi,
+    // GitHub tokens: fine-grained, then classic and app tokens. No upper bound and no trailing \b, so one that runs
+    // into more word characters is masked whole; each match starts at a fixed literal, so matching stays linear.
+    /\b(?<secret>github_pat_[A-Za-z0-9_]{20,})/g,
+    /\b(?<secret>gh[pousr]_[A-Za-z0-9]{36,})/g,
   ];
   const spans:Span[]=[];
   for (const pattern of patterns) for (const match of text.matchAll(pattern)) {

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {HttpError} from '../src/http.js';
-import {backgroundLimit,backgroundRestart,fillTemplate,promptKeys} from '../src/prompts.js';
+import {backgroundLimit,backgroundRepo,backgroundRestart,backgroundTexts,fillTemplate,labeledLines,promptKeys,promptPlaceholders,promptProblem} from '../src/prompts.js';
 import {jobDeadlines,maxTokens,runCost,runProgress,runTokens,todoList} from '../src/stores/background-jobs.js';
 
 const examples=JSON.parse(readFileSync(new URL('../../test/run-cost-examples.json',import.meta.url),'utf8')) as {name:string;rates:any;tokens:any;unknown_calls:number;cost:number}[];
@@ -50,6 +50,18 @@ test('the limit note says what the to-do list has done and left, and the restart
     '⏱ Made-up job: the job stopped at its time limit before it wrote a report.\nNo to-do list was kept.');
   assert.equal(fillTemplate(backgroundRestart,{todo:null}),'This job restarted and its earlier work could not be kept.');
   assert.equal(fillTemplate(backgroundRestart,{todo:'Read the chat (completed)'}),'This job restarted and its earlier work could not be kept.\nYour last to-do list was: Read the chat (completed)');
-  for(const key of ['background.resume','background.restart','background.limit'])assert.ok((promptKeys as readonly string[]).includes(key),key);
+  for(const key of ['background.resume','background.restart','background.limit','background.repo'])assert.ok((promptKeys as readonly string[]).includes(key),key);
   for(const key of ['background.continue','background.wrap_up'])assert.ok(!(promptKeys as readonly string[]).includes(key),key);
+});
+
+test('a run that reads a GitHub copy is told where it is, that it may still arrive, and to clone it beside /work, never into it',()=>{
+  assert.equal(promptPlaceholders['background.repo'],undefined,'no value is required');assert.equal(promptProblem('background.repo','Read /repo/code.'),null);
+  const text=fillTemplate(backgroundRepo,{repo:'example-org/widgets',branch:'main',commit:'3f2a91c'+'0'.repeat(33),copied:'2026-11-04 10:12 UTC'});
+  assert.match(text,/^\[GitHub copy\]\n\/repo\/code is a read-only copy of the GitHub repository example-org\/widgets, branch main at commit 3f2a91c0{33}, copied 2026-11-04 10:12 UTC,/);
+  assert.match(text,/git clone -q --shared \/repo\/code \/work\/code/);assert.match(text,/never copy the repository into \/work itself/);
+  assert.match(text,/if it says failed, or is still not there after a few minutes, the copy will not arrive in this run/);
+  assert.doesNotMatch(text,/next step|\{/);
+  const lines=labeledLines(backgroundTexts,undefined);
+  for(const name of ['box_repo','repo','repo_removed'])assert.ok(lines[name],name);
+  assert.match(lines.repo!,/\{repo_name\}, \{repo_branch\} at \{repo_commit\}, copied \{repo_copied\} \(\{repo_size\}\)/);
 });

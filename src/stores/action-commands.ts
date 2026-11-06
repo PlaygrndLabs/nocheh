@@ -248,6 +248,8 @@ export class ActionCommandRepository {
       const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),...(place.here?{reply_to:place.here}:{}),id:result.id,
         text:card.text,links:[],buttons:[[line.approve.slice(0,40),'na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],[line.reject.slice(0,40),'nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
       if(sent?.state!=='done')return result;
+      // A Remove that withdrew the job while its card was being posted settled a card that did not exist yet.
+      if((await this.jobs.card(result.id)).state!=='proposed')await this.settle('background',result.id);
       return {...result,message:card.row.approver==='owner'&&card.row.requester?
         'The owner was asked privately, with Approve and Reject buttons, to approve this job, because its cost is over what a member may start or cannot be measured. Say so briefly with the estimate; nothing runs until the owner approves.':
         'A card with Approve and Reject buttons for this job was posted here as the reply to the request. It shows the job, its size, time and cost, so say at most one short sentence; nothing runs until it is approved.'};
@@ -258,7 +260,7 @@ export class ActionCommandRepository {
   private async settleJob(id:string) {
     if(!this.jobs)return;
     const card=await this.jobs.card(id),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
-    const state=row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
+    const state=row.error_code==='job_repo_removed'?'repo_removed':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
       row.state==='done'&&row.ended?'limited':row.state;
     const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines.running:card.lines[state];
     const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;

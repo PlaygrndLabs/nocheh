@@ -180,7 +180,9 @@ export function BackgroundJobs() {
                   </div>
                   <p className="mt-1 text-[13px] text-muted" title={dateTime(job.created_at)}>
                     {jobProgress(job)}
-                    {job.state === 'failed' && job.error_code ? ` · ${job.error_code.replaceAll('_', ' ')}` : ''}
+                    {(job.state === 'failed' || job.state === 'stopped') && job.error_code
+                      ? ` · ${job.error_code.replaceAll('_', ' ')}`
+                      : ''}
                   </p>
                   {(open.has(job.state) || job.state === 'stopping') && <TodoList items={job.todo} />}
                 </li>

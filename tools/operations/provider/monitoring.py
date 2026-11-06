@@ -47,6 +47,7 @@ def status(state):
     result['services']=describe(result['containers'],config,result['hosts']) if isinstance(result['containers'],list) else None
     result['routes']=attempt(lambda:routes(config))
     result['model_problems']=attempt(lambda:model_problems(state))
+    result['github']=attempt(lambda:github_flags(state))
     result['keys']=internal_keys(config)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
@@ -64,6 +65,12 @@ def status(state):
                 'error_code':code if code in ('telegram_network_error','telegram_polling_conflict','telegram_adapter_failed','invalid_token','missing_credentials') else 'telegram_adapter_failed'}
     except (OSError,ValueError,TypeError):pass
     return result
+
+
+def github_flags(state):
+    """Whether GitHub refused the key and when it expires: the sign-in file only, never the key."""
+    from tools.operations.connections import github
+    return github.flags(state)
 
 
 def routes(config):

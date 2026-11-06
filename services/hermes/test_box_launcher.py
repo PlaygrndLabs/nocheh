@@ -1,4 +1,5 @@
 """Sealed job box: launcher logic without Docker, the in-box writer, and the box token's wiring."""
+import contextlib
 import errno
 import hashlib
 import http.client
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -510,6 +512,173 @@ class BoxPutExecTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'box_fill_failed'):self.put(docker,until=began+.3)
         self.assertLess(time.monotonic()-began,1.5)
 
+REPO={'name':'example-org/widgets','branch':'main','commit':'c'*40,'digest':'d'*64,'bytes':3*1024**2+5,'need':40*1024**2}
+
+def expires_at(epoch):return datetime.fromtimestamp(epoch,timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+
+class Writer:
+    """box_repo's execs as exec_stdin returns them. Each copy waits for `gate`, then answers the next of `codes` (an
+    exception is raised); a fail answers 0, or raises with `failing`. `during` runs inside each copy."""
+    def __init__(self,codes=(0,),gate=None,failing=False,during=None):
+        self.codes=list(codes);self.gate=gate;self.failing=failing;self.during=during;self.calls=[]
+    def __call__(self,identifier,command,user,source,until):
+        self.calls.append((identifier,command,user,source if isinstance(source,bytes) else source.read(),until-time.monotonic()))
+        if command[3]=='fail':
+            if self.failing:raise RuntimeError('box_exec_failed')
+            return 0
+        if self.during:self.during()
+        if self.gate:self.gate.wait(10)
+        code=self.codes.pop(0)
+        if isinstance(code,Exception):raise code
+        return code
+    def steps(self):return [(command[3],command[-1]) for _,command,*_ in self.calls]
+
+class RepoBoxTests(unittest.TestCase):
+    """A job's GitHub copy in its box (ADR-0209): the spec, the binding's repo, box_repo's execs and the copy's state."""
+    def setUp(self):
+        launcher.BOXES.clear();launcher.ABNORMAL.clear();self.addCleanup(launcher.BOXES.clear);self.addCleanup(launcher.ABNORMAL.clear)
+        os.environ.pop('NOCHEH_AGENT_NETWORK',None)
+        folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup);self.copies=Path(folder.name)
+        self.data=os.urandom(REPO['bytes']);self.bundle=self.copies/(REPO['digest']+'.bundle');self.bundle.write_bytes(self.data)
+        patcher=patch.object(launcher,'REPO_COPIES',str(self.copies));patcher.start();self.addCleanup(patcher.stop)
+
+    def fill(self,writer,hard=None):
+        launcher.BOXES['box']={'repo':{'state':'copying','tries':0,'thread':None}}
+        with patch.object(launcher,'exec_stdin',writer):launcher.fill_repo('box',REPO,hard or time.time()+3600)
+        return (launcher.BOXES.get('box') or {}).get('repo')
+
+    @contextlib.contextmanager
+    def boxed(self,docker,chat,writer):
+        with patch.object(launcher,'docker',docker),patch.object(launcher,'security',chat.security),patch.object(launcher,'put',chat.put),\
+                patch.object(launcher,'exec_stdin',writer),patch.dict(os.environ,ENV):yield
+
+    def prepare(self,until=None,**changes):
+        return launcher.prepare_box(box(repo=REPO,**changes),'step.credential',lambda:False,2,until or later(),time.time()+3600)
+
+    def test_a_repo_box_differs_only_by_its_repo_tmpfs_and_memory(self):
+        labels=launcher.box_labels(box(repo=REPO));arguments=('sha256:'+'e'*64,1000,'nocheh-box-'+'c'*24,labels)
+        plain=launcher.box_spec(*arguments);repo=launcher.box_spec(*arguments,repo=True)
+        self.assertEqual(labels,launcher.box_labels(box()),'the copy is not a label')
+        self.assertEqual(repo['HostConfig']['Tmpfs'],{**plain['HostConfig']['Tmpfs'],
+                         '/repo':'rw,noexec,nosuid,nodev,size=256m,nr_inodes=65536,uid=65531,gid=65531,mode=0755'})
+        self.assertEqual((repo['HostConfig']['Memory'],repo['HostConfig']['MemorySwap']),(1024**3+512*1024**2,)*2)
+        def rest(spec):return {**spec,'HostConfig':{k:v for k,v in spec['HostConfig'].items() if k not in ('Tmpfs','Memory','MemorySwap')}}
+        self.assertEqual(rest(repo),rest(plain))
+        self.assertEqual(plain,launcher.box_spec(*arguments,repo=False))
+
+    def test_a_malformed_repo_names_no_box(self):
+        self.assertIsNone(launcher.box_repo(box()));self.assertEqual(launcher.box_repo(box(repo=REPO)),REPO)
+        docker=FakeDocker()
+        bad=[{k:v for k,v in REPO.items() if k!='need'},{**REPO,'copy_id':'a'*32},{**REPO,'name':'example-org/..'},{**REPO,'name':'example-org/widgets.git'},
+             {**REPO,'branch':'-x'},{**REPO,'branch':'a..b'},{**REPO,'commit':'C'*40},{**REPO,'digest':'d'*63},{**REPO,'bytes':True},{**REPO,'bytes':0},
+             {**REPO,'bytes':'5'},{**REPO,'need':launcher.REPO_ROOM+1},{**REPO,'bytes':launcher.MAX_BUNDLE+1},None,[],'example-org/widgets']
+        with patch.object(launcher,'docker',docker),patch.dict(os.environ,ENV):
+            for repo in bad:
+                with self.subTest(repo=repo),self.assertRaisesRegex(ValueError,'invalid_job_box'):
+                    launcher.prepare_box(box(repo=repo),'step.credential',lambda:False,2,later())
+        self.assertEqual(docker.calls,[])
+
+    def test_the_writer_runs_as_65531_with_the_bundle_only_on_stdin(self):
+        docker=ExecDocker(frames=[frame(2,b'')]);launcher.BOXES['box']={'repo':{'state':'copying','tries':0,'thread':None}}
+        with patch.object(launcher,'docker',docker),patch.object(launcher,'DockerConnection',docker.connection()):
+            launcher.fill_repo('box',REPO,time.time()+3600)
+        self.assertEqual(docker.calls[0],('POST','/containers/box/exec',{'User':'65531:65531','WorkingDir':'/','Env':[],
+            'Cmd':['python3','-I','/opt/box/box_repo.py','copy','example-org/widgets','main','c'*40,str(REPO['bytes']),str(REPO['need']),'d'*64,'600'],
+            'AttachStdin':True,'AttachStdout':True,'AttachStderr':True,'Tty':False}))
+        self.assertEqual(docker.stdin,self.data)
+        self.assertEqual(launcher.BOXES['box']['repo'],{'state':'ready','tries':1,'thread':None})
+
+    def test_a_missing_bundle_runs_only_fail_missing(self):
+        for case in ('absent','link','size','folder'):
+            with self.subTest(case=case):
+                self.bundle.unlink(missing_ok=True)
+                if self.bundle.is_dir():self.bundle.rmdir()
+                if case=='link':(self.copies/'elsewhere').write_bytes(self.data);self.bundle.symlink_to(self.copies/'elsewhere')
+                if case=='size':self.bundle.write_bytes(self.data[:-1])
+                if case=='folder':self.bundle.mkdir()
+                writer=Writer();self.assertEqual(self.fill(writer)['state'],'failed')
+                self.assertEqual(writer.steps(),[('fail','missing')]);self.assertEqual(writer.calls[0][1][:7],launcher.REPO_WRITER+['fail',REPO['name'],REPO['branch'],REPO['commit']])
+                self.assertEqual((writer.calls[0][2],writer.calls[0][3]),('65531:65531',b''))
+
+    def test_each_writer_code_gives_its_state_and_the_bundle_is_sent_at_most_twice(self):
+        copy=('copy','600')
+        for codes,steps,state,tries in (([0],[copy],'ready',1),([2],[copy],'failed',1),([4],[copy],'failed',1),([6],[copy],'failed',1),
+                                        ([7],[copy],'failed',1),([5],[copy],'pending',0),([3,0],[copy,copy],'ready',2),
+                                        ([3,3],[copy,copy,('fail','bytes')],'failed',2),([None],[copy,('fail','timeout')],'failed',1),
+                                        ([1],[copy,('fail','timeout')],'failed',1),([RuntimeError('box_exec_failed')],[copy,('fail','timeout')],'failed',0)):
+            with self.subTest(codes=codes):
+                writer=Writer(codes);entry=self.fill(writer)
+                self.assertEqual(writer.steps(),steps);self.assertEqual((entry['state'],entry['tries']),(state,tries))
+                self.assertEqual({sent for _,command,_,sent,_ in writer.calls if command[3]=='copy'},{self.data},'each send is the whole bundle')
+                self.assertEqual({sent for _,command,_,sent,_ in writer.calls if command[3]=='fail'},{b''} if len(steps)>len([s for s in steps if s==copy]) else set())
+
+    def test_a_failing_exec_still_ends_failed_and_a_removed_box_gets_no_fail(self):
+        for codes in ([RuntimeError('box_exec_failed')],[None]):
+            with self.subTest(codes=codes):
+                writer=Writer(codes,failing=True);self.assertEqual(self.fill(writer)['state'],'failed')
+        for codes in ([0],[None],[RuntimeError('box_exec_failed')]):
+            with self.subTest(removed=codes):
+                writer=Writer(codes,during=lambda:launcher.BOXES.pop('box'))
+                self.assertIsNone(self.fill(writer));self.assertEqual(writer.steps(),[('copy','600')])
+
+    def test_writer_time_ends_a_minute_before_the_hard_deadline_and_the_box_expiry(self):
+        writer=Writer();self.fill(writer,hard=time.time()+300.5)
+        (_,_,_,_,remaining),=writer.calls;self.assertEqual(writer.steps(),[('copy','240')])
+        self.assertAlmostEqual(remaining,240+launcher.REPO_GRACE,delta=1)
+        # Under REPO_FLOOR of writer time: no bundle is sent.
+        writer=Writer();self.assertEqual(self.fill(writer,hard=time.time()+100)['state'],'failed')
+        self.assertEqual(writer.steps(),[('fail','timeout')]);self.assertEqual(writer.calls[0][3],b'')
+        self.assertAlmostEqual(writer.calls[0][4],launcher.REPO_GRACE,delta=1)
+        # The hard deadline comes from the turn request and never passes the box's expiry.
+        end=time.time()+7200;labels=launcher.box_labels(box(expires=expires_at(end)))
+        self.assertAlmostEqual(launcher.repo_deadline(end+10**6,labels),end,delta=1)
+        self.assertEqual(launcher.repo_deadline(end-100.5,labels),end-100.5)
+        for missing in (None,True,float('nan'),float('inf'),'soon'):
+            with self.subTest(deadline=missing):self.assertAlmostEqual(launcher.repo_deadline(missing,labels),end,delta=1)
+
+    def test_prepare_box_returns_by_its_until_while_a_slow_copy_goes_on(self):
+        docker=FakeDocker();chat=Chat({None:page(['1'])});gate=threading.Event();writer=Writer(gate=gate)
+        with self.boxed(docker,chat,writer),patch.object(launcher,'WRITE_SECONDS',.1):
+            until=later(.4);identifier,name=self.prepare(until)
+            self.assertGreaterEqual(time.monotonic(),until-.05);self.assertLess(time.monotonic(),until+.5)
+            entry=launcher.BOXES[identifier]['repo'];self.assertEqual(entry['state'],'copying')
+            self.assertEqual(chat.deadlines,[until]*3,'/chat keeps its own deadline')
+            created=next(body for method,path,body in docker.calls if path.startswith('/containers/create'))
+            self.assertEqual(created,launcher.box_spec(docker.image,1000,name,launcher.box_labels(box()),repo=True))
+            gate.set();entry['thread'].join(5);self.assertEqual(entry['state'],'ready')
+            # A fast writer is ready before prepare_box returns; a new box after an abnormal end gets the bundle again.
+            launcher.ABNORMAL.add(JOB);fast=Writer()
+            with patch.object(launcher,'exec_stdin',fast):second,_=self.prepare(later(5))
+            self.assertNotEqual(second,identifier);self.assertEqual(launcher.BOXES[second]['repo']['state'],'ready')
+            self.assertEqual(fast.steps(),[('copy','600')])
+
+    def test_a_reused_box_keeps_its_copy_state(self):
+        docker=FakeDocker();chat=Chat({None:page([])});writer=Writer([0,0])
+        with self.boxed(docker,chat,writer):
+            first,_=self.prepare();entry=launcher.BOXES[first]['repo']
+            self.assertEqual((entry['state'],len(writer.calls)),('ready',1))
+            for state in ('ready','failed'):
+                entry['state']=state;self.assertEqual(self.prepare()[0],first);self.assertEqual(len(writer.calls),1,state)
+            # A copy still running starts no second writer.
+            busy=threading.Event();thread=threading.Thread(target=busy.wait,args=(5,),daemon=True);thread.start()
+            entry.update(state='copying',thread=thread);self.assertEqual(self.prepare(later(.2))[0],first)
+            self.assertEqual(len(writer.calls),1);busy.set();thread.join(5)
+            # An earlier writer held the lock: a later request retries.
+            entry['state']='pending';self.prepare();self.assertEqual((entry['state'],len(writer.calls)),('ready',2))
+
+    def test_remove_box_during_a_copy_ends_its_thread(self):
+        gate=threading.Event();writer=Writer(gate=gate);errors=[]
+        launcher.BOXES['box']={'repo':{'state':'pending','tries':0,'thread':None}}
+        with patch.object(launcher,'exec_stdin',writer),patch.object(launcher,'docker',FakeDocker()),\
+                patch.object(threading,'excepthook',lambda arguments:errors.append(arguments.exc_type)):
+            thread=launcher.start_repo('box',REPO,time.time()+3600);self.assertEqual(launcher.repo_state('box'),'copying')
+            for _ in range(500):
+                if writer.calls:break
+                time.sleep(.01)
+            launcher.remove_box('box');gate.set();thread.join(5)
+        self.assertFalse(thread.is_alive());self.assertEqual(errors,[]);self.assertEqual(writer.steps(),[('copy','600')])
+        self.assertIsNone(launcher.start_repo('box',REPO,time.time()+3600))
+
 class WaitDocker(ExecDocker):
     """The Docker side of a turn's exit wait: the headers once the wait is set, the body once the turn exited."""
     def __init__(self,status=200,code=0):self.status=status;self.code=code;self.request=b'';self.exited=threading.Event()
@@ -535,10 +704,10 @@ class ExitCodeTests(unittest.TestCase):
 
 class HandlerTests(unittest.TestCase):
     """The launcher's /v1/turn with a box binding, against fake Docker and a fake nocheh-security."""
-    PROFILE='nocheh-'+'a'*24;IMAGE='sha256:'+'b'*64;BOX='nocheh-box-'+'c'*24
+    PROFILE='nocheh-'+'a'*24;IMAGE='sha256:'+'b'*64;BOX='nocheh-box-'+'c'*24;DEADLINE=4102444800.5
     def setUp(self):
         self.security=Security();self.addCleanup(self.security.close)
-        self.docker=FakeDocker();self.prepared=[];self.checked=[];self.attached=[];self.release=threading.Event();self.release.set()
+        self.docker=FakeDocker();self.prepared=[];self.deadlines=[];self.checked=[];self.attached=[];self.release=threading.Event();self.release.set()
         self.order=[];self.code=0;launcher.ABNORMAL.clear();self.addCleanup(launcher.ABNORMAL.clear)
         self.server=ThreadingHTTPServer(('127.0.0.1',0),launcher.Handler)
         self.server.image=self.IMAGE;self.server.network='nocheh-agent';self.server.host_profiles='/owned/profiles';self.server.box_limit=2
@@ -565,8 +734,8 @@ class HandlerTests(unittest.TestCase):
             yield from outputs.get(credential,[b'{"state":"done"}\n'])
             if credential=='broken':raise RuntimeError('container_output_limit')
         def exit_code(identifier):self.order.append('wait');return lambda:self.code
-        def prepare_box(entry,credential,gone,limit,until):
-            self.prepared.append((entry,credential,limit,until-time.monotonic(),until))
+        def prepare_box(entry,credential,gone,limit,until,deadline=None):
+            self.prepared.append((entry,credential,limit,until-time.monotonic(),until));self.deadlines.append(deadline)
             if isinstance(self.box,Exception):raise self.box
             return self.box
         def running(identifier):self.checked.append((identifier,launcher.BOX_LOCK.locked()));return self.running
@@ -582,7 +751,8 @@ class HandlerTests(unittest.TestCase):
                                             'model_context_length':1000,'box':entry}
 
     def body(self,credential):
-        return json.dumps({'archive_credential':credential,'model':'model-1','owner':'owner-1','chat_id':'chat-1','api_mode':'chat_completions'}).encode()
+        return json.dumps({'archive_credential':credential,'model':'model-1','owner':'owner-1','chat_id':'chat-1','api_mode':'chat_completions',
+                           'turn_deadline_epoch':self.DEADLINE}).encode()
 
     def turn(self,credential,results=None):
         connection=http.client.HTTPConnection('127.0.0.1',self.server.server_address[1],timeout=10)
@@ -618,6 +788,7 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(self.turn_specs(),[launcher.container_spec(self.PROFILE,'/owned/profiles',self.IMAGE,'nocheh-agent',1000,1000,None,self.BOX)])
         (entry,credential,limit,remaining,_),=self.prepared
         self.assertEqual((entry,credential,limit),(box(),'first',2));self.assertTrue(0<remaining<=launcher.FILL_SECONDS)
+        self.assertEqual(self.deadlines,[self.DEADLINE],'a copy into /repo ends by the run\'s own hard deadline')
         self.assertEqual(self.checked,[('box-id',True)],'the box is checked under the box lock, just before the turn is made')
 
     def test_a_box_run_longer_than_its_fill_keeps_its_box_and_a_killed_one_does_not(self):
@@ -707,7 +878,8 @@ class HandlerTests(unittest.TestCase):
 
 class StartupDocker(FakeDocker):
     """What main() asks Docker before serving: the internal network, the turn image, its own mounts."""
-    def __init__(self,images):super().__init__();self.images=images
+    COPIES={'Destination':'/repo-copies','Type':'bind','RW':False,'Source':'/owned/copies'}
+    def __init__(self,images,copies=COPIES):super().__init__();self.images=images;self.copies=copies
     def __call__(self,method,path,body=None):
         if method=='GET' and path.startswith('/networks/'):self.calls.append((method,path,body));return {'Internal':True}
         if method=='GET' and path.startswith('/images/'):
@@ -715,7 +887,8 @@ class StartupDocker(FakeDocker):
             if path.split('/')[2] not in self.images:raise RuntimeError('container_operation_failed')
             return {'Id':'sha256:'+'b'*64}
         if method=='GET' and path=='/containers/'+socket.gethostname()+'/json':
-            self.calls.append((method,path,body));return {'Mounts':[{'Destination':'/profiles','Type':'bind','RW':False,'Source':'/owned/profiles'}]}
+            self.calls.append((method,path,body))
+            return {'Mounts':[{'Destination':'/profiles','Type':'bind','RW':False,'Source':'/owned/profiles'},*([self.copies] if self.copies else [])]}
         return super().__call__(method,path,body)
 
 class FakeServer:
@@ -741,6 +914,16 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(said.count('\n'),1);self.assertNotIn('NOCHEH_BOX_TOKEN',said);self.assertIn('nocheh-box:local',said)
         self.assertEqual(FakeServer.made.box_limit,8)
         self.assertEqual(self.start(StartupDocker({'nocheh-hermes:local','nocheh-box:local'}),{'NOCHEH_BOX_TOKEN':'t'*40}),'')
+
+    def test_startup_says_when_no_box_can_hold_a_github_copy_and_refuses_writable_copies(self):
+        said=self.start(StartupDocker({'nocheh-hermes:local','nocheh-box:local'},copies=None),{'NOCHEH_BOX_TOKEN':'t'*40})
+        self.assertEqual(said,'security-launcher: no GitHub copies in boxes: the GitHub copies folder is not mounted at /repo-copies (./bin/nocheh up adds it)\n')
+        said=self.start(StartupDocker({'nocheh-hermes:local'},copies=None),{'NOCHEH_BOX_TOKEN':'t'*40})
+        self.assertEqual(said.count('\n'),2);self.assertTrue(said.startswith('security-launcher: no sealed job boxes: '))
+        for copies in ({**StartupDocker.COPIES,'RW':True},{**StartupDocker.COPIES,'Type':'volume'}):
+            docker=StartupDocker({'nocheh-hermes:local','nocheh-box:local'},copies=copies)
+            with self.assertRaisesRegex(RuntimeError,'readonly_repo_copies_required'):self.start(docker,{'NOCHEH_BOX_TOKEN':'t'*40})
+            self.assertFalse([c for c in docker.calls if c[0]!='GET'],'nothing is removed before the mounts are checked')
 
     def test_startup_refuses_a_box_limit_below_the_jobs_that_run_at_once(self):
         for value in ('1','0','9','two'):
@@ -851,6 +1034,41 @@ class BoxWiringTests(unittest.TestCase):
         text=(ROOT/'deploy/box.Dockerfile').read_text();final=text.rsplit('\nFROM ',1)[1]
         self.assertEqual(final.splitlines()[:2],['scratch','COPY --from=box / /']);self.assertNotRegex(text,r'(?m)^\s*ENV\b')
         self.assertIn('test -z "$(find / -xdev -type f -perm /6000)"',text)
+
+    def test_only_the_launcher_mounts_the_github_copies_and_no_service_holds_a_github_key(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT
+        text=(ROOT/'docker-compose.yml').read_text();compose=yaml.safe_load(text)
+        def volumes(service):return [str(v) for v in service.get('volumes') or []]
+        mounting={name for name,service in compose['services'].items() if any('github' in v for v in volumes(service))}
+        self.assertEqual(mounting,{'hermes-agent-sb'})
+        self.assertEqual([v for v in volumes(compose['services']['hermes-agent-sb']) if 'github' in v],['${NOCHEH_STATE_DIR:-./data/local}/github/copies:/repo-copies:ro'])
+        for name,service in [*compose['services'].items(),*((k,v) for k,v in compose.items() if k.startswith('x-') and isinstance(v,dict))]:
+            environment=service.get('environment') or {}
+            keys=set(environment) if isinstance(environment,dict) else {str(item).split('=',1)[0] for item in environment}
+            self.assertFalse(keys&{'GH_TOKEN','GITHUB_TOKEN','COPILOT_GITHUB_TOKEN'},name)
+        self.assertNotIn('github_'+'pat',text)
+        # The fetcher runs the launcher's box image; management starts it.
+        self.assertEqual(compose['x-management']['environment']['NOCHEH_BOX_IMAGE'],'${NOCHEH_BOX_IMAGE:-nocheh-box:local}')
+        root='${NOCHEH_STATE_DIR:-${PWD}/data/local}:${NOCHEH_STATE_DIR:-${PWD}/data/local}'
+        self.assertEqual({name for name,service in compose['services'].items() if root in volumes(service)},{'nocheh-dashboard','nocheh-executor'})
+        self.assertIn(root,volumes(compose['x-management']))
+
+    def test_the_box_image_holds_git_for_reading_copies_and_the_writer_and_fetcher(self):
+        from tools.operations.installation.configuration import ROOT
+        text=(ROOT/'deploy/box.Dockerfile').read_text();build=text.rsplit('\nFROM ',1)[0]
+        install=re.search(r'apt-get install -y --no-install-recommends ([^&]+)&&',build).group(1).split()
+        self.assertTrue({'git','ca-certificates'}<=set(install),install)
+        settings=re.findall(r'git config --system (--add )?(\S+) (\S+)',build)
+        self.assertEqual([(key,value) for _,key,value in settings if key=='safe.directory'],[('safe.directory','/repo/code'),('safe.directory','/repo/code/.git')])
+        config={key:value for _,key,value in settings}
+        self.assertEqual({key:config.get(key) for key in ('core.symlinks','core.hooksPath','core.fsmonitor','protocol.allow','pack.threads','index.threads',
+                                                          'checkout.workers','core.deltaBaseCacheLimit')},
+                         {'core.symlinks':'false','core.hooksPath':'/dev/null','core.fsmonitor':'false','protocol.allow':'never','pack.threads':'1',
+                          'index.threads':'1','checkout.workers':'1','core.deltaBaseCacheLimit':'32m'})
+        self.assertLess(build.index('git config --system'),build.index('find / -xdev -type f -perm /6000 -exec'),'the setuid sweep runs last')
+        self.assertIn('COPY tools/runtime/box_server.py tools/runtime/box_put.py tools/runtime/box_repo.py tools/runtime/repo_fetch.py /opt/box/',build)
+        self.assertNotRegex(text,r'(?m)^\s*ENV\b');self.assertIn('test -z "$(find / -xdev -type f -perm /6000)"',text)
 
     def test_installer_generates_a_separate_box_token(self):
         from tools.operations.installation.configuration import initialize,validate
