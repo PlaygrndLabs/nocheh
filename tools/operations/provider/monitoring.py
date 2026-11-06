@@ -68,7 +68,7 @@ def status(state):
 
 
 def github_flags(state):
-    """Whether GitHub refused the key and when it expires: the sign-in file only, never the key."""
+    """Whether Nocheh's GitHub app is connected or GitHub refused it: the app's file only, never its key."""
     from tools.operations.connections import github
     return github.flags(state)
 

@@ -38,3 +38,15 @@ test('live invalidation refreshes only visible selected resources and keeps thei
  assert.equal(archive.snapshot.data.path,'/data?scope=one');assert.equal(rows.snapshot.data.path,'/database-browser?action=rows&offset=50');
  assert.equal(hidden.snapshot.data,null);stopArchive();stopRows();stopGuard();
 });
+
+test('a refresh while a request runs asks again once it ends, so a change is never hidden by an older answer',async()=>{
+ const answers=[];const store=createResourceStore(()=>new Promise(resolve=>answers.push(resolve)));
+ const entry=store.get('/connections/github'),stop=store.subscribe(entry,()=>{});
+ const first=store.update(entry);const refreshed=store.refresh(),again=store.refresh();
+ await flush();assert.equal(answers.length,1,'one request at a time');
+ answers[0]({listed:[]});await first;await flush();await flush();
+ assert.equal(answers.length,2,'the refreshes share one new request');
+ answers[1]({listed:['example-org/widgets']});await refreshed;await again;
+ assert.deepEqual(entry.snapshot.data,{listed:['example-org/widgets']});
+ const last=store.update(entry);assert.equal(answers.length,3,'a plain update asks when nothing runs');answers[2]({listed:[]});await last;stop();
+});

@@ -83,6 +83,10 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     const reopen=await open('/?connect=notion&code=c&state=s');
     assert.equal(reopen.status,200);assert.equal(reopen.frame,'DENY');
     assert.equal(reopen.body,'<!doctype html><meta charset="utf-8"><title>Nocheh</title><script>location.replace(location.href)</script>');
+    // GitHub sends the browser back to its own return page, which opens the same way.
+    const github=await open('/connect/github?code=c&state=s');
+    assert.equal(github.status,200);assert.equal(github.body,reopen.body);
+    assert.equal((await open('/connect/other')).status,403);
     assert.equal((await open('/',{'Sec-Fetch-Dest':'iframe'})).status,403);
     assert.equal((await open('/',{'Sec-Fetch-Mode':'cors'})).status,403);
     assert.equal((await open('/api/plugins/nocheh/settings',headers)).status,403);
@@ -194,7 +198,7 @@ test('a backup, restore or restart waits for a GitHub copy or refresh, and nothi
   assert.equal(operationBlocked({...free,busy:true}),true);assert.equal(operationBlocked({...free,active:1}),true);
 });
 
-test('owner HTTP: GitHub copies run one at a time, Remove and Disconnect never wait for one, and a backup waits',{timeout:60000},async()=>{
+test('owner HTTP: GitHub copies run one at a time, Connect, Remove and Disconnect never wait for one, and a backup waits',{timeout:60000},async()=>{
   const state=await mkdtemp(join(tmpdir(),'nocheh-management-github-')),token='test-owner-token-'.repeat(4);
   const probe=createServer();probe.listen(0,'127.0.0.1');await once(probe,'listening');
   const port=(probe.address() as {port:number}).port;await new Promise<void>(r=>probe.close(()=>r()));
@@ -223,9 +227,10 @@ test('owner HTTP: GitHub copies run one at a time, Remove and Disconnect never w
     for(let i=0;!(await operations()).includes('github.copy');i++){if(i>300)throw Error('the copy never started');await new Promise(r=>setTimeout(r,30));}
     assert.deepEqual(await post('/connections/github/copy',{repo:'example-org/widgets'}),{status:409,body:{error:'job_busy'}},'one copy at a time');
     assert.deepEqual(await post('/connections/github/list'),{status:409,body:{error:'job_busy'}});
-    // Remove and Disconnect reach github.py at once, whatever it answers here.
-    for(const action of ['remove','disconnect']) {
-      const answer=await post('/connections/github/'+action,action==='remove'?{repo:'example-org/widgets'}:{});
+    // Connecting, Remove and Disconnect reach github.py at once, whatever it answers here.
+    const bodies:Record<string,unknown>={start:{redirect:'http://localhost:'+port+'/connect/github'},finish:{code:'code',state:'state'},remove:{repo:'example-org/widgets'},disconnect:{}};
+    for(const action of ['start','finish','remove','disconnect']) {
+      const answer=await post('/connections/github/'+action,bodies[action]);
       assert.ok(!['job_busy','wait_for_active_jobs'].includes(answer.body.error),action+': '+JSON.stringify(answer));
       assert.ok((await operations()).includes('github.'+action),action);
     }
@@ -233,7 +238,13 @@ test('owner HTTP: GitHub copies run one at a time, Remove and Disconnect never w
     assert.ok(!(await operations()).includes('operations.run'));
     await writeFile(release,'');
     assert.deepEqual(await copying,{status:200,body:{state:'current'}});
-    assert.notEqual((await post('/connections/github/token',{token:'not-a-github-key'})).body.error,'job_busy','the lock is free again');
+    assert.notEqual((await post('/connections/github/list')).body.error,'job_busy','the lock is free again');
+    // GitHub's way back keeps only its own values, in their own shapes, and needs no session.
+    const back=await fetch(`http://127.0.0.1:${port}/connect/github?code=abc123&state=s-1_x&installation_id=77&setup_action=install&next=https://elsewhere.example`,{redirect:'manual'});
+    assert.equal(back.status,302);
+    assert.equal(back.headers.get('location'),'/?connect=github&code=abc123&state=s-1_x&installation_id=77&setup_action=install');
+    const odd=await fetch(`http://127.0.0.1:${port}/connect/github?code=a%2Fb&setup_action=delete&installation_id=x`,{redirect:'manual'});
+    assert.equal(odd.headers.get('location'),'/?connect=github');
   } finally {
     if(child&&child.exitCode===null){const done=once(child,'exit');child.kill('SIGTERM');await done;}
     await rm(state,{recursive:true,force:true});

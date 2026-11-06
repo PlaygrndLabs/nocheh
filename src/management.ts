@@ -16,6 +16,7 @@ import {ManagementMaintenance} from './management-maintenance.js';
 import {DashboardLiveUpdates} from './dashboard-live.js';
 import {OwnerLock} from './owner-lock.js';
 import {miniAppRoute} from './mini-app.js';
+import {githubReturn} from './github-return.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -225,9 +226,9 @@ export async function startManagement() {
     if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
     if(!opened&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
-  /** The dashboard page opened in a tab from another site, as Notion's sign-in does when it sends the browser back. */
+  /** The dashboard page opened in a tab from another site, as Notion's and GitHub's sign-ins do when they send the browser back. */
   const openedFromAnotherSite=(req:IncomingMessage)=>req.method==='GET'&&req.headers['sec-fetch-site']==='cross-site'&&
-    req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&new URL(req.url??'/','http://local').pathname==='/';
+    req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&['/','/connect/github'].includes(new URL(req.url??'/','http://local').pathname);
   /** Starts an enumerated operation; callers hold the writer-start lock. `request` is the
    * caller's own admitted request, which a backup's drain must not wait for. */
   async function startOperation(action:string,options:unknown,request:symbol,automatic=false):Promise<Job> {
@@ -348,15 +349,15 @@ export async function startManagement() {
       if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
-      // The owner's GitHub key and the copies background jobs may read (ADR-0209). The key travels only in a POST body
-      // and never comes back. A key, a copy, a list and the hourly check run one at a time. Remove and Disconnect never
-      // wait for them: github.py's short file lock and the store order them with a copy that is still running.
+      // Nocheh's GitHub App and the copies background jobs may read (ADR-0209, ADR-0210). The app's key never comes
+      // back. A copy, a list and the hourly check run one at a time. Connecting, Remove and Disconnect never wait for
+      // them: github.py's short file lock and the store order them with a copy that is still running.
       if(req.method==='GET'&&route==='/connections/github')return json(res,200,await python({operation:'github.status'}));
-      const github=route.match(/^\/connections\/github\/(token|copy|list|remove|disconnect)$/)?.[1];
+      const github=route.match(/^\/connections\/github\/(start|finish|copy|list|remove|disconnect)$/)?.[1];
       if(req.method==='POST'&&github){
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         const run=async()=>json(res,200,await python({operation:'github.'+github,request:object(await readJson(req))}));
-        return github==='remove'||github==='disconnect'?run():exclusive('github-connection',run);
+        return ['start','finish','remove','disconnect'].includes(github)?run():exclusive('github-connection',run);
       }
       // The mini app's password. The owner sets it here; the mini app service signs in and
       // checks its sessions through the same routes.
@@ -476,6 +477,8 @@ export async function startManagement() {
     res.setHeader('x-frame-options','DENY');res.setHeader('referrer-policy','no-referrer');res.setHeader('x-content-type-options','nosniff');
     if(req.method==='GET'&&(path==='/nocheh'||path==='/nocheh/')){res.writeHead(308,{location:'/'+url.search});res.end();return;}
     if(req.method==='GET'&&path==='/hermes'){res.writeHead(308,{location:'/hermes/'+url.search});res.end();return;}
+    // GitHub's way back after it created Nocheh's app or installed it; the page finishes it (ADR-0210).
+    if(req.method==='GET'&&path==='/connect/github'){res.writeHead(302,{location:githubReturn(url.searchParams),'cache-control':'no-store'});res.end();return;}
     if(process.env.NOCHEH_DEV_WATCH==='1'&&req.method==='GET'&&path==='/__dev/revision') {
       const revision=await readFile(join(ROOT,'dashboard/dist/.dev-revision'),'utf8').catch(()=>'');
       res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});res.end(revision);return;

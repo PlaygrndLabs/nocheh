@@ -64,7 +64,8 @@ jobs the owner approved working in a sealed box: [0205](0205-owner-approved-jobs
 Nocheh pricing a job's model use itself: [0206](0206-nocheh-prices-a-jobs-model-use-itself.md);
 background jobs as one Hermes run: [0207](0207-a-background-job-is-one-hermes-run.md);
 running jobs carrying across quiet epochs: [0208](0208-running-jobs-carry-across-quiet-epochs.md);
-jobs the owner approved reading a GitHub copy in their box: [0209](0209-owner-approved-jobs-read-a-github-copy-in-their-box.md).
+jobs the owner approved reading a GitHub copy in their box: [0209](0209-owner-approved-jobs-read-a-github-copy-in-their-box.md);
+GitHub access through Nocheh's own GitHub App: [0210](0210-github-access-goes-through-nochehs-own-github-app.md).
 Prompt caching for Anthropic replies through its Messages API: [0199](0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md).
 Provider model lists passing the privacy guard: [0172](0172-provider-model-lists-pass-the-guard.md), with a numeric page size in [0179](0179-anthropic-model-list-page-size-passes-the-guard.md).
 Strangers who write to the bot: [0182](0182-strangers-cost-nothing-and-reach-no-model.md).

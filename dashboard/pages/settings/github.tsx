@@ -1,10 +1,12 @@
 /**
- * Settings › Connections › GitHub: the owner's fine-grained key and the repository copies
- * that background jobs approved in the private chat may read in their sealed box (ADR-0209).
- * Every control acts at once. The key is pasted once and never comes back; it never reaches
- * a box. Copy has its own busy state, and Remove and Disconnect never wait for a copy.
+ * Settings › Connections › GitHub: Nocheh's own GitHub App and the repository copies that
+ * background jobs approved in the private chat may read in their sealed box (ADR-0209, ADR-0210).
+ * Connect GitHub sends the owner to GitHub, which creates the app and then asks which repositories
+ * it may read, and brings them back here. The app's key never comes back and never reaches a box.
+ * Every control acts at once. Copy has its own busy state, and Remove and Disconnect never wait
+ * for a copy.
  */
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {Copy, ExternalLink, RefreshCw, Trash2, Unplug} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {copyingRow, offersDisconnect} from '../../lib/github';
@@ -38,11 +40,11 @@ type Copied = {
   copied_at: string;
   missing: boolean;
 };
+type GithubApp = {name: string; account: string; install_url: string; settings_url: string};
 type GithubStatus = {
   connected: boolean;
-  login: string | null;
-  connected_at: string | number | null;
-  expires_at: string | null;
+  app: GithubApp | null;
+  connected_at: number | null;
   reconnect: boolean;
   listed: Listed[];
   listed_at: number | null;
@@ -50,11 +52,18 @@ type GithubStatus = {
 };
 
 const failures: Record<string, string> = {
-  invalid_github_token: 'Paste a fine-grained token; it starts with github_pat_.',
-  github_token_refused: 'GitHub refused the key. Make a new one and paste it.',
+  github_app_refused: 'GitHub refused Nocheh’s app. It may have been deleted on GitHub. Connect GitHub again.',
+  github_sign_in_expired: 'That GitHub sign-in took too long or was started elsewhere. Press Connect GitHub again.',
+  invalid_github_sign_in: 'GitHub sent you back without what Nocheh needs. Press Connect GitHub again.',
+  github_app_not_created: 'GitHub did not hand over the new app. Press Connect GitHub again.',
+  invalid_github_redirect:
+    'Open the dashboard on this computer (localhost) or at its https address, then connect GitHub.',
+  invalid_github_organization: 'That is not a GitHub organization name.',
+  github_rebuild_needed: 'Nocheh needs a rebuild of its images before it can use a GitHub app.',
   github_unavailable: 'Nocheh could not reach GitHub or its own store. Try again in a minute.',
   invalid_github_repo: 'Write it as owner/name.',
-  github_repo_not_readable: 'The key cannot read this repository. Give it Contents: Read-only, or check the name.',
+  github_repo_not_readable:
+    'Nocheh’s GitHub app cannot read this repository. Add it with Choose repositories, or check the name.',
   github_repo_too_large:
     'This repository is too big for a job’s box. Its packed history and its files must fit in 256 MB, with at most 64 MB packed, 50,000 files, and about 64,000 files and folders together.',
   github_repo_limit: 'Nocheh keeps at most 10 copies. Remove one first.',
@@ -71,48 +80,87 @@ const failures: Record<string, string> = {
 };
 const failureWords = (e: unknown) => failures[(e as ApiError)?.message ?? ''] ?? errorWords(e);
 
-const keyHelp =
-  'Make a fine-grained token in GitHub. Under Repository access, pick Only select repositories and choose the ones jobs may read. Under Permissions, set Contents to Read-only and leave the rest at No access. Nocheh only reads, but it cannot check what else a key allows, so give it nothing more. Paste it here. Nocheh checks it once and never shows it again.';
+const connectHelp =
+  'Nocheh makes its own GitHub app. GitHub asks you to create it, then which repositories it may read, and brings you back here. The app can only read code, and its key stays with Nocheh.';
+const reconnectHelp =
+  'GitHub refused Nocheh’s app. It may have been deleted on GitHub, or this computer’s clock may be wrong. Nocheh tries it again every hour, and jobs keep the copies they have. Connect again to make a new app.';
 const disconnectText =
-  'Nocheh forgets the key and deletes its copies on this computer. Cards still waiting for approval are withdrawn, jobs waiting to start are stopped, and running jobs lose their box within a minute. What jobs already read from a copy stays in their records, their history and backups; Disconnect does not erase it. Delete the key in GitHub too.';
+  'Nocheh forgets its GitHub app and the app’s key, and deletes its copies on this computer. Cards still waiting for approval are withdrawn, jobs waiting to start are stopped, and running jobs lose their box within a minute. What jobs already read from a copy stays in their records, their history and backups; Disconnect does not erase it. Then delete the app on GitHub too.';
 const removeText =
   'Cards still waiting for your approval are withdrawn and jobs waiting to start are stopped. Running jobs lose their box within a minute and go on without it. Copying it again later does not give it back to them. What jobs already read from it stays in their records, their history and backups; Remove does not erase it.';
 const missingText =
   'Nocheh makes a new copy. Cards still waiting for the missing one are withdrawn, jobs waiting to start are stopped, and jobs that read it never get the new one.';
 
-/** A time github.py wrote: ISO text, or epoch seconds. */
-const isoOf = (value: string | number | null) =>
-  value === null ? null : typeof value === 'number' ? new Date(value * 1000).toISOString() : value;
-const daysLeft = (expires: string | null) =>
-  expires ? Math.ceil((new Date(expires).getTime() - Date.now()) / 86400000) : null;
+/** A time github.py wrote, in epoch seconds. */
+const isoOf = (value: number | null) => (value === null ? null : new Date(value * 1000).toISOString());
 const megabytes = (bytes: number) => Math.max(1, Math.ceil(bytes / 1e6)).toLocaleString('en-US');
 
-/** The key field: Save posts it once, and the field is cleared after Nocheh took it. */
-function KeyForm({busy, onSave}: {busy: boolean; onSave: (token: string) => Promise<boolean>}) {
-  const [token, setToken] = useState('');
-  return (
-    <form
-      className="flex flex-wrap gap-2"
-      onSubmit={event => {
-        event.preventDefault();
-        void onSave(token).then(saved => saved && setToken(''));
-      }}
-    >
-      <Input
-        type="password"
-        aria-label="GitHub key"
-        autoComplete="off"
-        placeholder="github_pat_…"
-        value={token}
-        maxLength={300}
-        className="min-w-0 flex-1 basis-64"
-        onChange={event => setToken(event.target.value)}
-      />
-      <Button type="submit" busy={busy} disabled={!token.trim() || busy}>
-        Save
-      </Button>
-    </form>
-  );
+/** GitHub's form: it creates the app from Nocheh's manifest, then returns to /connect/github. */
+function postToGithub(action: string, manifest: string) {
+  const form = document.createElement('form');
+  form.method = 'post';
+  form.action = action;
+  const field = document.createElement('input');
+  field.type = 'hidden';
+  field.name = 'manifest';
+  field.value = manifest;
+  form.append(field);
+  document.body.append(form);
+  form.submit();
+}
+
+/**
+ * GitHub sends the browser back to `/?connect=github…`: with a code once it created the app, which
+ * is traded for the app and leads on to GitHub's page for picking repositories; then with the
+ * installation, after which the list is read again. The address is cleaned, except when Nocheh was
+ * busy or did not answer: the code still works then, and reloading the page finishes the sign-in.
+ */
+function useGithubReturn(onDone: (message: string, failed?: boolean) => void) {
+  const handled = useRef(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (handled.current || params.get('connect') !== 'github') return;
+    handled.current = true;
+    const clean = () => window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    const code = params.get('code'),
+      state = params.get('state'),
+      setup = params.get('setup_action');
+    if (code && state) {
+      apiPost<{install_url: string}>('/connections/github/finish', {code, state}).then(
+        ({install_url}) => {
+          clean();
+          window.location.assign(install_url);
+        },
+        e => {
+          const error = e as ApiError;
+          if (error?.message === 'wait_for_active_jobs' || error?.status === undefined) {
+            onDone('Nocheh could not finish connecting GitHub yet. Reload this page in a minute to finish.', true);
+            return;
+          }
+          clean();
+          onDone(failureWords(e), true);
+        },
+      );
+      return;
+    }
+    clean();
+    if (setup === 'request') {
+      onDone('GitHub asked the organization’s owners to approve Nocheh’s app. Refresh the list once they do.');
+      return;
+    }
+    if (setup || params.get('installation_id')) {
+      apiPost('/connections/github/list', {}).then(
+        () => {
+          onDone('GitHub is connected. Copy a repository below.');
+          void refreshResources();
+        },
+        e => onDone(failureWords(e), true),
+      );
+      return;
+    }
+    onDone('GitHub sign-in did not finish. Press Connect GitHub again.', true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }
 
 export function GithubConnection() {
@@ -123,6 +171,10 @@ export function GithubConnection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [other, setOther] = useState('');
+  const [organization, setOrganization] = useState('');
+  // The app Disconnect forgot, so the card can point to where it is deleted on GitHub.
+  const [forgotten, setForgotten] = useState<GithubApp | null>(null);
+  useGithubReturn((message, failed) => (failed ? setProblem(message) : feedback.toast(message)));
 
   const act = async (name: string, work: () => Promise<void>) => {
     setBusy(name);
@@ -138,10 +190,13 @@ export function GithubConnection() {
       await refreshResources().catch(() => {});
     }
   };
-  const saveKey = (token: string) =>
-    act('token', async () => {
-      await apiPost('/connections/github/token', {token: token.trim()});
-      feedback.toast('GitHub key saved.');
+  const connect = () =>
+    act('connect', async () => {
+      const {action, manifest} = await apiPost<{action: string; manifest: string}>('/connections/github/start', {
+        redirect: window.location.origin + '/connect/github',
+        organization: organization.trim() || null,
+      });
+      postToGithub(action, manifest);
     });
   const copy = async (repo: string, missing = false) => {
     if (
@@ -188,9 +243,11 @@ export function GithubConnection() {
       }))
     )
       return;
+    // Kept first: Disconnect may forget the app and still fail afterwards. The notice shows only once the app is gone.
+    setForgotten(status.data?.app ?? null);
     await act('disconnect', async () => {
       await apiPost('/connections/github/disconnect', {});
-      feedback.toast('GitHub disconnected. Delete the key in GitHub too.');
+      feedback.toast('GitHub disconnected.');
     });
   };
   const refreshList = () =>
@@ -207,7 +264,6 @@ export function GithubConnection() {
       </Card>
     );
   const data = status.data;
-  const left = data.connected ? daysLeft(data.expires_at) : null;
   const copies = data.copies ?? [];
   const named = new Map<string, {name: string; listed?: Listed; copy?: Copied}>();
   for (const listed of data.listed) named.set(listed.name.toLowerCase(), {name: listed.name, listed});
@@ -229,19 +285,15 @@ export function GithubConnection() {
       <CardHeader
         id="github-title"
         title="GitHub"
-        description="Let background jobs you approve in your private chat read a copy of a repository and its history. The copy goes into the job’s sealed box; your GitHub key never does."
+        description="Let background jobs you approve in your private chat read a copy of a repository and its history. The copy goes into the job’s sealed box; no GitHub key ever does."
         action={
           data.reconnect ? (
             <Badge tone="warn" dot>
               Connect again
             </Badge>
-          ) : data.connected && left !== null && left <= 7 ? (
-            <Badge tone="warn" dot>
-              Expires in {left} {left === 1 ? 'day' : 'days'}
-            </Badge>
           ) : data.connected ? (
             <Badge tone="good" dot>
-              Connected as {data.login}
+              Connected
             </Badge>
           ) : (
             <Badge dot>Not connected</Badge>
@@ -254,20 +306,40 @@ export function GithubConnection() {
             <Notice tone="bad">{problem}</Notice>
           </div>
         )}
+        {forgotten && !data.app && (
+          <div className="px-5 pt-4">
+            <Notice tone="warn">
+              Delete {forgotten.name} on GitHub too. Without its key it can do nothing, but it still has the
+              repositories you gave it.{' '}
+              <a className="underline" href={forgotten.settings_url} target="_blank" rel="noreferrer">
+                Open it on GitHub
+              </a>
+            </Notice>
+          </div>
+        )}
         <SettingRow
-          title="GitHub key"
+          title="GitHub app"
           stack={!data.connected}
           description={
-            data.connected
-              ? 'Connected as ' +
-                data.login +
-                (connectedAt ? ' on ' + dateTime(connectedAt) : '') +
-                (data.expires_at ? ' · expires ' + dateTime(data.expires_at) : '')
-              : keyHelp
+            data.connected && data.app
+              ? 'Nocheh reads through its app ' +
+                data.app.name +
+                ' on ' +
+                data.app.account +
+                (connectedAt ? ', made ' + dateTime(connectedAt) : '') +
+                '. Choose which repositories it may read on GitHub.'
+              : data.reconnect
+                ? reconnectHelp
+                : connectHelp
           }
         >
-          {data.connected ? (
+          {data.connected && data.app ? (
             <div className="flex flex-wrap gap-2 sm:justify-end">
+              <Button variant="secondary" asChild>
+                <a href={data.app.install_url}>
+                  <ExternalLink aria-hidden /> Choose repositories
+                </a>
+              </Button>
               <Button variant="ghost" busy={busy === 'disconnect'} onClick={() => void disconnect()}>
                 <Unplug aria-hidden /> Disconnect
               </Button>
@@ -275,28 +347,39 @@ export function GithubConnection() {
           ) : (
             <div className="grid gap-3">
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" asChild>
-                  <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">
-                    <ExternalLink aria-hidden /> Open GitHub
-                  </a>
+                <Button busy={busy === 'connect'} disabled={!!busy} onClick={() => void connect()}>
+                  <ExternalLink aria-hidden /> Connect GitHub
                 </Button>
+                {data.reconnect && data.app && (
+                  <Button variant="ghost" asChild>
+                    <a href={data.app.settings_url} target="_blank" rel="noreferrer">
+                      <ExternalLink aria-hidden /> Open {data.app.name} on GitHub
+                    </a>
+                  </Button>
+                )}
                 {offersDisconnect(data) && (
                   <Button variant="ghost" busy={busy === 'disconnect'} onClick={() => void disconnect()}>
                     <Unplug aria-hidden /> Disconnect
                   </Button>
                 )}
               </div>
-              <KeyForm busy={busy === 'token'} onSave={saveKey} />
+              <Details summary="Repositories in an organization you run">
+                <label className="grid gap-1 text-[13px] text-muted">
+                  GitHub makes the app for this organization instead of your own account. Leave it empty for your own
+                  repositories.
+                  <Input
+                    aria-label="GitHub organization"
+                    placeholder="organization-name"
+                    autoComplete="off"
+                    value={organization}
+                    maxLength={39}
+                    onChange={event => setOrganization(event.target.value)}
+                  />
+                </label>
+              </Details>
             </div>
           )}
         </SettingRow>
-        {data.connected && (
-          <div className="border-t border-line px-5 py-4">
-            <Details summary="Replace key">
-              <KeyForm busy={busy === 'token'} onSave={saveKey} />
-            </Details>
-          </div>
-        )}
         <div className="border-t border-line px-5 py-4">
           <h3 className="text-sm font-medium">Repositories</h3>
           {data.copies === null && (
@@ -307,8 +390,8 @@ export function GithubConnection() {
           {!rows.length ? (
             <p className="mt-2 text-[13px] text-muted">
               {data.connected
-                ? 'The key reads no repository yet. Refresh the list, or copy one by its name below.'
-                : 'Connect GitHub to list the repositories its key reads.'}
+                ? 'The app reads no repository yet. Choose repositories on GitHub, then refresh the list.'
+                : 'Connect GitHub to list the repositories its app reads.'}
             </p>
           ) : (
             <ul className="mt-2 divide-y divide-line" aria-label="Repositories">

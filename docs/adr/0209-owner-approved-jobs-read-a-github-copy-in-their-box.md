@@ -98,6 +98,14 @@ they are answered:
   clones the copy with `git clone -q --shared /repo/code /work/code`.
 </decision>
 
+<note date="2026-11-06">
+Amended by [ADR-0210](0210-github-access-goes-through-nochehs-own-github-app.md): the
+pasted key is gone. Connect GitHub makes Nocheh's own private GitHub App, which reads
+code and nothing else, on the repositories the owner picks on GitHub. Each copy uses a
+key that lasts one hour and reads only that repository, in the fetcher's step 2 as
+before. A refused app raises one problem notice; there is no expiry notice.
+</note>
+
 <note date="2026-11-05">
 The spike ran on the built box image, on a Linux host with Docker 29.9.2 and cgroup
 v1, with made-up data. It changed no constant.
