@@ -93,7 +93,7 @@ class DetectorTests(unittest.TestCase):
         refused=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=''),finish_reason='content_filter')])
         for separator in ('\n<NOCHEH_FRAGMENT>\n','\n⟪NOCHEH_FIELD_BOUNDARY⟫\n'):
             marker=separator.strip()
-            def answer(credentials,model,messages):
+            def answer(credentials,model,messages,response_format=None):
                 text=messages[1]['content']
                 if text.count(marker)==3:return refused
                 return response({'literals':[value for value in ('juniper-ONLY-7642','kite-99') if value in text]})
@@ -101,7 +101,7 @@ class DetectorTests(unittest.TestCase):
                 with patch('services.hermes.subscription._call_subscription',side_effect=answer) as call:
                     self.assertEqual(detect_literals(separator.join(texts),credentials,'model'),['juniper-ONLY-7642','kite-99'])
                 self.assertEqual(call.call_count,4,'the batch twice, then each half')
-                def hello(credentials,model,messages):
+                def hello(credentials,model,messages,response_format=None):
                     text=messages[1]['content']
                     return refused if 'hello' in text else response({'literals':[value for value in ('juniper-ONLY-7642','kite-99') if value in text]})
                 with patch('services.hermes.subscription._call_subscription',side_effect=hello) as call:

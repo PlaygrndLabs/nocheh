@@ -55,7 +55,30 @@ class PromptTests(unittest.TestCase):
             _call_subscription(SubscriptionCredentials('synthetic-token'), 'model',
                                [{'role': 'user', 'content': 'hello'}])
         self.assertNotIn('tools', sent)
+        self.assertNotIn('response_format', sent, 'a call without a format asks for none, as the group filter does')
         self.assertEqual(sent['messages'], [{'role': 'user', 'content': 'hello'}])
+        from .subscription import LITERALS_FORMAT
+        with patch.dict(sys.modules, fakes):
+            _call_subscription(SubscriptionCredentials('synthetic-token'), 'model', [{'role': 'user', 'content': 'hello'}], LITERALS_FORMAT)
+        self.assertEqual(sent['response_format'], LITERALS_FORMAT)
+
+    def test_secret_check_asks_anthropic_for_the_literals_schema_only(self):
+        import os
+        from .subscription import LITERALS_FORMAT, detector_format
+        # Anthropic's OpenAI-compatible endpoint takes only a strict json_schema; it holds the answer to the contract.
+        self.assertEqual(LITERALS_FORMAT['type'], 'json_schema')
+        self.assertIs(LITERALS_FORMAT['json_schema']['strict'], True)
+        self.assertEqual(LITERALS_FORMAT['json_schema']['schema']['required'], ['literals'])
+        self.assertIs(LITERALS_FORMAT['json_schema']['schema']['additionalProperties'], False)
+        self.assertEqual(detector_format('https://api.anthropic.com/v1'), LITERALS_FORMAT)
+        for other in ('https://api.openai.com/v1', 'https://api.anthropic.com.example/v1', 'http://nocheh-security:8786/v1'):
+            self.assertIsNone(detector_format(other), other)
+        with patch.dict(os.environ, {'NOCHEH_GUARD_ROUTE_URL': 'https://api.anthropic.com/v1'}):
+            credentials = SubscriptionCredentials('synthetic-token', 'https://api.anthropic.com/v1')
+            with patch('services.hermes.subscription._call_subscription', return_value=reply({'literals': []})) as call, \
+                    patch('services.hermes.usage.record'):
+                self.assertEqual(detect_literals('Password: kite', credentials, 'model'), [])
+        self.assertEqual(call.call_args.args[3], LITERALS_FORMAT)
 
     def test_secret_check_uses_the_owner_text_and_keeps_its_contract(self):
         credentials, mine = SubscriptionCredentials('synthetic-token'), {'guard.secret_check': 'Find only passwords. Return {"literals":[]}.'}
