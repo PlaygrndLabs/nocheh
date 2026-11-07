@@ -33,11 +33,11 @@ type Mark=(label:string,url:string|null)=>string;
 const reasons:Record<string,ApprovalText>={notion_not_connected:'reason_sign_in',notion_reconnect_needed:'reason_sign_in',notion_unavailable:'reason_unreachable',
   notion_not_enabled:'reason_turned_off',tool_disabled_by_owner:'reason_turned_off',tool_reported_error:'reason_refused',owner_cancelled:'reason_cancelled',job_stopped:'reason_stopped',
   guard_context_changed:'reason_changed',guard_transition_pending:'reason_changed',action_proposal_changed:'reason_changed',security_start_denied:'reason_changed',
-  permission_no_longer_valid:'reason_changed',execution_lease_expired:'reason_changed'};
+  permission_no_longer_valid:'reason_changed',execution_lease_expired:'reason_changed',tool_sandbox_missing:'reason_sandbox'};
 /** An approval that fails because what the operation used changed since it was asked. */
 const outdated=new Set(['guard_context_changed','action_proposal_changed']);
 /** Failures where the executor stopped before it sent anything. */
-const unsent=new Set(['tool_disabled_by_owner','tool_policy_unavailable','notion_not_connected','notion_reconnect_needed','notion_unavailable']);
+const unsent=new Set(['tool_disabled_by_owner','tool_policy_unavailable','tool_sandbox_missing','notion_not_connected','notion_reconnect_needed','notion_unavailable']);
 /** Card edits for one action, across every repository in this process, in the order they were asked for. */
 const editing=new Map<string,Promise<void>>();
 
