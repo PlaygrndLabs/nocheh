@@ -15,7 +15,7 @@ import urllib.request
 from tools.acceptance.model_rehearsal import read_upstream
 from tools.paths import ROOT
 from services.hermes.prompts import DEFAULTS
-from services.hermes.subscription import DetectorContractError, detector_reply
+from services.hermes.subscription import DetectorContractError, detector_format, detector_reply
 
 DETECTOR_INSTRUCTIONS = DEFAULTS['guard.secret_check']
 
@@ -62,6 +62,8 @@ def check(url, key, model, effort, text, timeout):
     body = {'model': model, 'messages': [{'role': 'system', 'content': DETECTOR_INSTRUCTIONS}, {'role': 'user', 'content': text}]}
     if effort != 'omit':
         body['reasoning_effort'] = effort
+    if answer_format := detector_format(url):
+        body['response_format'] = answer_format
     request = urllib.request.Request(url.rstrip('/') + '/chat/completions', data=json.dumps(body, ensure_ascii=False).encode(),
                                      headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json',
                                               'User-Agent': 'nocheh-detector-eval/1'})

@@ -17,6 +17,28 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+# The disposable image approved shell commands and page reads run in; `nocheh up` and `make dev` build it.
+TOOLS_IMAGE='nocheh-tools:local'
+# Why an approved tool failed, as a fixed code a receipt may keep: never remote, command or page content.
+FAILURES=frozenset({'public_https_required','private_destination_denied','remote_unreachable','remote_unauthorized',
+    'remote_response_rejected','encoded_response_denied','remote_response_limit','browser_html_required',
+    'sandbox_timed_out','sandbox_execution_failed','tool_process_failed','tool_deadline','tool_result_limit'})
+
+
+def failure(error):
+    """The fixed code of an approved tool's failure, or the generic one."""
+    if str(error) in FAILURES:return str(error)
+    if isinstance(error,subprocess.TimeoutExpired):return 'sandbox_timed_out'
+    # DNS, connection, TLS and socket timeouts; any other OS error is the tool's own.
+    if isinstance(error,(socket.gaierror,ConnectionError,ssl.SSLError,TimeoutError)):return 'remote_unreachable'
+    return 'tool_process_failed'
+
+
+def sandbox_ready(run=subprocess.run):
+    """Whether Docker has the sandbox image; asked before anything is sent."""
+    try:return run(['docker','image','inspect','--format','{{.Id}}',TOOLS_IMAGE],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15).returncode==0
+    except (OSError,subprocess.SubprocessError):return False
+
 
 def public_target(address,resolver=socket.getaddrinfo):
     url=urlsplit(address)
@@ -114,12 +136,15 @@ def workspace(state,profile):
 
 
 def sandbox_command(state,action,name):
+    # Chromium starts a thread pool sized by the host's cores, and threads count as processes: under
+    # 128 it cannot start its threads and hangs until its time limit. A shell command keeps 128.
+    processes=512 if action['kind']=='browser' else 128
     command=['docker','run','--pull=never','--rm','-i','--name',name,'--network=none','--read-only','--cap-drop=ALL',
-        '--security-opt=no-new-privileges','--pids-limit=128','--memory=768m','--cpus=1',
+        '--security-opt=no-new-privileges',f'--pids-limit={processes}','--memory=768m','--cpus=1',
         '--user',str(os.getuid())+':'+str(os.getgid()),'--tmpfs','/tmp:rw,nosuid,nodev,size=256m,mode=1777',
         '--ulimit','fsize=10485760:10485760','--log-driver=none']
     if action['kind']=='shell':command+=['--mount','type=bind,src='+str(workspace(state,action['profile']))+',dst=/workspace']
-    return command+['nocheh-tools:local']
+    return command+[TOOLS_IMAGE]
 
 
 def execute(state,action,request=https_request,run=subprocess.run,container_name=None):
@@ -163,7 +188,11 @@ def bounded_execute(state,action):
                 if not data:selector.unregister(key.fd);continue
                 output.extend(data)
                 if len(output)>1024*1024:raise RuntimeError('tool_result_limit')
-        if process.wait(timeout=2):raise RuntimeError('tool_process_failed')
+        if process.wait(timeout=2):
+            # The helper prints only a fixed code when it fails.
+            try:code=json.loads(output).get('failure')
+            except (ValueError,AttributeError):code=None
+            raise RuntimeError(code if code in FAILURES else 'tool_process_failed')
         return json.loads(output)
     finally:
         if process.poll() is None:os.killpg(process.pid,signal.SIGKILL);process.wait()
@@ -177,4 +206,5 @@ if __name__=='__main__':
     try:
         body=json.loads(sys.stdin.buffer.read(128*1024))
         print(json.dumps(execute(body['state'],body['action'],container_name=body['container_name']),ensure_ascii=False))
-    except Exception:raise SystemExit(1)
+    except Exception as error:
+        print(json.dumps({'failure':failure(error)}));raise SystemExit(1)

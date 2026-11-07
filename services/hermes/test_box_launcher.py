@@ -1105,24 +1105,27 @@ class BoxWiringTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'symlink'):cli.development_box_token()
             self.assertNotIn('NOCHEH_BOX_TOKEN',read_env(root/'target.env'));self.assertTrue(path.is_symlink())
 
-    def test_up_build_and_dev_build_the_box_image(self):
+    def test_up_build_and_dev_build_the_box_and_tool_images(self):
         import tools.cli.main as cli
         box_build=['docker','build','-f',str(cli.INSTALLATION_ROOT/'deploy/box.Dockerfile'),'-t','nocheh-box:local',str(cli.INSTALLATION_ROOT)]
-        def run(command,code=0):
+        tools_build=['docker','build','-f',str(cli.INSTALLATION_ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(cli.INSTALLATION_ROOT)]
+        def run(command,failing=None):
             calls=[]
             with patch.object(sys,'argv',['nocheh',command]),patch.object(cli,'bootstrap'),patch.object(cli,'compose_environment',return_value={'NOCHEH_HONCHO_ENABLED':'false'}),\
                     patch.object(cli,'compose_command',return_value=['docker','compose']),patch('tools.acceptance.subscription.setup.checkout'),\
                     patch('tools.development.live_dev.main',side_effect=lambda *args:calls.append(['live_dev',*args]) or 0),\
                     patch.object(cli,'development_box_token',side_effect=lambda:calls.append(['box_token'])),\
-                    patch.object(cli.subprocess,'call',side_effect=lambda arguments,**_:calls.append(arguments) or (code if arguments[:2]==['docker','build'] else 0)):
+                    patch.object(cli.subprocess,'call',side_effect=lambda arguments,**_:calls.append(arguments) or int(arguments[:2]==['docker','build'] and failing in arguments)):
                 return cli.main(),calls
         # The launcher looks for its image as it starts, so up builds the box image before the stack.
-        self.assertEqual(run('up'),(0,[box_build,['docker','compose','up','-d','--build','--wait','--wait-timeout','180'],
-            ['docker','build','-f',str(cli.INSTALLATION_ROOT/'deploy/tools.Dockerfile'),'-t','nocheh-tools:local',str(cli.INSTALLATION_ROOT)]]))
-        self.assertEqual(run('up',code=1),(1,[box_build]),'a box image that does not build stops up before the stack starts')
-        self.assertEqual(run('build'),(0,[['docker','compose','build'],box_build]))
-        self.assertEqual(run('dev'),(0,[['box_token'],box_build,['live_dev','dev',[]]]))
-        self.assertEqual(run('dev',code=1),(1,[['box_token'],box_build]),'a box image that does not build stops make dev')
+        self.assertEqual(run('up'),(0,[box_build,['docker','compose','up','-d','--build','--wait','--wait-timeout','180'],tools_build]))
+        self.assertEqual(run('up',failing='nocheh-box:local'),(1,[box_build]),'a box image that does not build stops up before the stack starts')
+        self.assertEqual(run('build'),(0,[['docker','compose','build'],box_build,tools_build]))
+        # Approved shell commands and page reads run in the tool image, so make dev builds it too.
+        self.assertEqual(run('dev'),(0,[['box_token'],box_build,tools_build,['live_dev','dev',[]]]))
+        self.assertEqual(run('dev',failing='nocheh-box:local'),(1,[['box_token'],box_build]),'a box image that does not build stops make dev')
+        self.assertEqual(run('dev',failing='nocheh-tools:local'),(1,[['box_token'],box_build,tools_build]),'so does a tool image')
+        self.assertEqual(run('build',failing='nocheh-tools:local'),(1,[['docker','compose','build'],box_build,tools_build]))
         self.assertEqual(run('dev-stop'),(0,[['live_dev','dev-stop',[]]]))
 
 if __name__=='__main__':unittest.main()

@@ -229,6 +229,9 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(await ending(refused.id,'Ask Nocheh what went wrong.'),refused.card+'\n\n⚠️ Approved, but it failed: the service answered with an error. Ask Nocheh what went wrong.');
     const unknown=await approvedTool('made-up-unknown');await ran(unknown.id,'failed',{exit_code:1,error:'made_up_remote_text'});
     assert.equal(await ending(unknown.id,'see the dashboard Inbox.'),unknown.card+'\n\n⚠️ Approved, but it failed: see the dashboard Inbox.','an unknown code shows no text of its own');
+    const noSandbox=await approvedTool('made-up-no-sandbox');await ran(noSandbox.id,'failed',{exit_code:1,error:'tool_sandbox_missing'});
+    const sandboxLine='🚫 It did not run: the tool sandbox is not installed on this computer. Run ./bin/nocheh up, or start make dev again, to install it.';
+    assert.equal(await ending(noSandbox.id,sandboxLine),noSandbox.card+'\n\n'+sandboxLine,'without the sandbox image nothing was sent');
     const unsure=await approvedTool('made-up-unsure');await ran(unsure.id,'ambiguous',{error:'execution_outcome_unconfirmed'});
     const unsureLine='⚠️ Approved, but Nocheh could not confirm that it finished. Check before you ask again.';
     assert.equal(await ending(unsure.id,unsureLine),unsure.card+'\n\n'+unsureLine);
