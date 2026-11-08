@@ -2,7 +2,7 @@
 
 Only Telegram's transport and the model answer are scripted. Native formatting,
 batching, scope resolution, durable capture, dispatch and receipts are real.
-Contract: https://core.telegram.org/bots/api#getupdates and #sendmessage.
+Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage and #setmessagereaction.
 """
 import asyncio
 import base64
@@ -22,7 +22,7 @@ from plugins.platforms.telegram.update_admission import TelegramApplication
 from telegram.ext import Application, ExtBot
 from telegram.request import BaseRequest
 
-from services.hermes.assistant_gateway import AssistantGateway, TURN, committed_adapter_class, typing_enabled
+from services.hermes.assistant_gateway import AssistantGateway, TURN, committed_adapter_class, reaction_check, reactions_enabled, typing_enabled
 from services.hermes.capture import canonical, digest, instrument_request
 from services.hermes.scopes import Scopes
 
@@ -72,7 +72,7 @@ class TelegramSimulationRequest(BaseRequest):
                       'chat': {'id': int(data['chat_id']), 'type': 'supergroup'}, 'text': data['text']}
             if 'message_thread_id' in data:
                 result['message_thread_id'] = data['message_thread_id']
-        elif operation == 'sendChatAction':
+        elif operation in ('sendChatAction', 'setMessageReaction'):
             result = True
         else:
             raise AssertionError('Unmodeled Telegram method: ' + operation)
@@ -390,6 +390,102 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(Exception, 'telegram_chat_action_unbound'):
             await self.bot.send_chat_action(chat_id=-20, action='typing', message_thread_id=17)
         self.assertEqual(self.chat_actions(), [])
+
+    def reactions(self):
+        return [(str(data['chat_id']), data['message_id'], [item['emoji'] for item in data.get('reaction', [])])
+                for operation, data in self.request.calls if operation == 'setMessageReaction']
+
+    async def test_working_turn_reacts_on_its_own_message_around_the_reply(self):
+        self.adapter.turn_reactions = True
+        self.slow_answer(0.05)
+        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+        self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, ['\U0001f44d'])])
+        operations = [operation for operation, _ in self.request.calls if operation in ('setMessageReaction', 'sendMessage')]
+        self.assertEqual(operations, ['setMessageReaction', 'sendMessage', 'setMessageReaction'], '👀 before the reply, 👍 after it')
+        journal = b''.join(path.read_bytes() for path in (self.root / 'spool/outbound').glob('*'))
+        self.assertNotIn(b'setMessageReaction', journal, 'working reactions add no delivery records')
+
+    async def test_a_failed_turn_shows_thumbs_down_and_its_retry_works_again(self):
+        self.adapter.turn_reactions = True
+        self.slow_answer(0.01, result={'state': 'failed', 'error_code': 'model_unavailable'})
+        self.assertEqual((await self.gateway.dispatch(self.envelope()))['state'], 'failed')
+        self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, ['\U0001f44e'])])
+        # The retry's 👀 is the same request as the first one; it is sent, not answered from the journal.
+        self.slow_answer(0.01)
+        retry = {**self.envelope(), 'attempt': 2}
+        self.assertEqual(await self.gateway.dispatch(retry), {'state': 'done'})
+        self.assertEqual(self.reactions()[2:], [('-20', 1, ['\U0001f440']), ('-20', 1, ['\U0001f44d'])])
+        self.assertEqual(len(self.request.delivered), 1)
+
+    async def test_silence_and_cancellation_clear_the_working_reaction(self):
+        self.adapter.turn_reactions = True
+        async def silent(event):
+            TURN.get()['agent_result'] = {'state': 'done', 'text': '', 'session_id': 'synthetic'}
+            return None
+        self.adapter.set_message_handler(silent)
+        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'suppressed', 'error_code': 'intentional_silence'})
+        self.slow_answer(0.01, result={'state': 'cancelled'})
+        self.assertEqual(await self.gateway.dispatch(self.envelope(identifier=2)), {'state': 'cancelled'})
+        self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, []), ('-20', 2, ['\U0001f440']), ('-20', 2, [])])
+        self.assertEqual(self.request.delivered, [])
+
+    async def test_an_uncertain_delivery_clears_the_working_reaction(self):
+        # Telegram may have shown the reply even though its answer was lost, so no 👎.
+        self.adapter.turn_reactions = True
+        self.slow_answer(0.01)
+        self.request.respond = lambda data: (502, b'Bad Gateway')
+        result = await self.gateway.dispatch(self.envelope())
+        self.assertEqual(result['state'], 'ambiguous')
+        self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, [])])
+
+    async def test_no_reaction_when_switched_off_unaddressed_a_fixed_reply_or_revoked(self):
+        self.slow_answer(0.01)
+        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+        self.adapter.turn_reactions = True
+        unaddressed = self.envelope(identifier=2)
+        unaddressed['group_addressing'] = {'direct': False, 'handles': []}
+        self.assertEqual(await self.gateway.dispatch(unaddressed), {'state': 'suppressed', 'error_code': 'not_addressed'})
+        fixed = self.envelope(identifier=3)
+        fixed['control_reply'] = 'Synthetic fixed reply'
+        self.assertEqual(await self.gateway.dispatch(fixed), {'state': 'done'})
+        self.allowed = False
+        self.assertNotEqual((await self.gateway.dispatch(self.envelope(identifier=4)))['state'], 'done')
+        self.assertEqual(self.reactions(), [], 'a revoked space gets no reaction either')
+        self.assertEqual(len(self.request.delivered), 2)
+
+    async def test_a_reaction_outside_a_turn_is_refused_before_any_request(self):
+        with self.assertRaisesRegex(Exception, 'telegram_reaction_unbound'):
+            await self.bot.set_message_reaction(chat_id=-20, message_id=1, reaction='\U0001f440')
+        self.assertEqual(self.reactions(), [])
+
+    def test_reaction_check_binds_the_exact_message_and_the_working_emoji(self):
+        allowed = [True]
+        check = reaction_check(-20, 7, lambda: allowed[0])
+        emoji = lambda value: [{'type': 'emoji', 'emoji': value}]
+        for reaction in ('\U0001f440', '\U0001f44d', '\U0001f44e'):
+            check('setMessageReaction', {'chat_id': -20, 'message_id': 7, 'reaction': emoji(reaction)})
+        check('setMessageReaction', {'chat_id': '-20', 'message_id': 7})
+        for method, parameters in (
+                ('setMessageReaction', {'chat_id': -20, 'message_id': 8, 'reaction': emoji('\U0001f44d')}),
+                ('setMessageReaction', {'chat_id': -21, 'message_id': 7, 'reaction': emoji('\U0001f44d')}),
+                ('setMessageReaction', {'chat_id': -20, 'message_id': 7, 'reaction': emoji('\U0001f525')}),
+                ('setMessageReaction', {'chat_id': -20, 'message_id': 7, 'reaction': emoji('\U0001f44d') * 2}),
+                ('setMessageReaction', {'chat_id': -20, 'message_id': 7, 'reaction': emoji('\U0001f44d'), 'is_big': True}),
+                ('setMessageReaction', {'chat_id': -20, 'message_id': 7, 'reaction': [{'type': 'custom_emoji', 'custom_emoji_id': '1'}]}),
+                ('sendMessage', {'chat_id': -20, 'text': 'x'})):
+            with self.assertRaisesRegex(RuntimeError, 'audience_changed', msg=str(parameters)):
+                check(method, parameters)
+        allowed[0] = False
+        with self.assertRaisesRegex(RuntimeError, 'authority_revoked'):
+            check('setMessageReaction', {'chat_id': -20, 'message_id': 7})
+
+    def test_reaction_setting_defaults_on_and_rejects_malformed_values(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(reactions_enabled())
+        with patch.dict(os.environ, {'TELEGRAM_REACTIONS': 'false'}):
+            self.assertFalse(reactions_enabled())
+        with patch.dict(os.environ, {'TELEGRAM_REACTIONS': 'off'}), self.assertRaises(ValueError):
+            reactions_enabled()
 
 
 if __name__ == '__main__':

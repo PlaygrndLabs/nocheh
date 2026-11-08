@@ -147,6 +147,33 @@ class ProductScenarios(Scenarios):
         self.turn(self.f.message(GROUP, 'فقط برای بقیه TYPING42', sender=MEMBER, mention=False, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC, expect_reply=False)
         self.gate('no_typing_when_not_addressed', not [call for call in calls(started, GROUP) if call['method'] == 'sendChatAction'])
 
+    def reactions_show_while_working(self):
+        # Hermes's own working reactions: 👀 on the message while Nocheh works on it, then 👍 once it answered.
+        def calls(since, chat, method, number=None):
+            return [call for call in self.f.telegram()['calls'] if call['at'] >= since and call['method'] == method
+                    and str(call['parameters'].get('chat_id')) == str(chat)
+                    and (number is None or str(call['parameters'].get('message_id')) == str(number))]
+        def emoji(call):
+            value = call['parameters'].get('reaction') or []
+            return [item.get('emoji') for item in (json.loads(value) if isinstance(value, str) else value)]
+        for chat, topic, name in ((OWNER, None, 'private'), (GROUP, TEAM_TOPIC, 'topic')):
+            started = time.time()
+            update = self.f.message(chat, 'یک سؤال کوتاه دیگر دارم', topic=topic)
+            number = update['message']['message_id']
+            self.turn(update, chat, topic)
+            self.wait(name+'_thumbs_up_once_answered',
+                      lambda: self.f.telegram().get('reactions', {}).get(f'{chat}:{number}') == ['\U0001f44d'], 30)
+            seen = calls(started, chat, 'setMessageReaction', number)
+            reply = min(call['at'] for call in calls(started, chat, 'sendMessage'))
+            self.gate(name+'_eyes_while_working', seen and emoji(seen[0]) == ['\U0001f440'] and seen[0]['at'] <= reply,
+                      reactions=[emoji(call) for call in seen])
+            self.gate(name+'_thumbs_up_after_the_reply', emoji(seen[-1]) == ['\U0001f44d'] and seen[-1]['at'] >= reply)
+        # A group message nobody addressed to Nocheh starts no work, so it gets no reaction.
+        started = time.time()
+        update = self.f.message(GROUP, 'فقط برای بقیه REACT42', sender=MEMBER, mention=False, topic=TEAM_TOPIC)
+        self.turn(update, GROUP, TEAM_TOPIC, expect_reply=False)
+        self.gate('no_reaction_when_not_addressed', not calls(started, GROUP, 'setMessageReaction', update['message']['message_id']))
+
     def not_allowed_person_gets_fixed_reply(self):
         # Someone not allowed who addresses Nocheh gets the owner's fixed text once; no model runs.
         brain = len(self.f.brain())
@@ -1550,7 +1577,7 @@ class ProductScenarios(Scenarios):
 
 
 PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
-                 'not_allowed_person_gets_fixed_reply',
+                 'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
