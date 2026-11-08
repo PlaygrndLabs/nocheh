@@ -12,6 +12,9 @@ test('controlled arguments reject ambient capabilities and unsafe URL syntax',()
   assert.throws(()=>actionArguments('shell',{command:'pwd',cwd:'/private'}));
   assert.throws(()=>actionArguments('mcp',{url:'https://example.com',tool:'x',input:{},command:'python'}));
   assert.deepEqual(actionArguments('shell',{command:'printf "a\r\nb"'}),{command:'printf "a\r\nb"'});
+  // A new proposal needs a plain host; a saved one is still read, so its card and its run keep working (ADR-0214).
+  assert.throws(()=>actionArguments('browser',{url:'https://api.example.com:443/x'}),{code:'plain_host_required'});
+  assert.deepEqual(actionArguments('browser',{url:'https://api.example.com:443/x'},true),{url:'https://api.example.com:443/x'});
 });
 test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants and crash receipts',{skip:!process.env.PGHOST},async()=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:settings().databasePassword};

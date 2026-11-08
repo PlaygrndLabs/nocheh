@@ -5,7 +5,7 @@ import {evaluate,recordEffect} from '../security/store.js';
 import type {Decision} from '../security/contract.js';
 import {enterFamily,leaveFamily,releaseOperation} from '../workflows/store.js';
 import {hostActionAuthority} from '../workflows/host-tools.js';
-import type {ControlledActionRepository} from './controlled-actions.js';
+import {covers,type ControlledActionRepository} from './controlled-actions.js';
 import {defaultLogicalProfile} from './runtime-profile.js';
 import {parentSpace} from '../spaces.js';
 
@@ -114,13 +114,18 @@ export class ControlledExecutionRepository {
         {const result=await this.blocked(db,row,'job_stopped');await db.query('COMMIT');this.closed(row.id);return result;}
       if((await db.query("SELECT 1 FROM controlled_actions WHERE state='running' LIMIT 1")).rowCount){await db.query('COMMIT');return {claimed:false};}
       // A relaunched job run's operations use no standing permission (ADR-0207).
-      const grant=row.state==='proposed'?(await db.query(`SELECT id FROM action_permissions WHERE fingerprint=$1 AND binding=$2 AND (job_id IS NULL OR job_id=$3)
-        AND remaining>0 AND revoked_at IS NULL AND expires_at>now() AND NOT EXISTS (SELECT 1 FROM background_runs r WHERE r.event_id=$4 AND r.attempt>1)
-        ORDER BY expires_at,id LIMIT 1 FOR UPDATE`,[row.fingerprint,row.binding,row.job_id,row.event_id])).rows[0]:null;
-      if(row.state==='proposed'&&!grant){await db.query('COMMIT');return {claimed:false};}
+      const grant=row.state==='proposed'?(await this.actions.grants(row,db,true))[0]:null;
+      if(row.state==='proposed'&&!grant) {
+        // One a permission let in got no card. If that permission ended before it ran, it is closed, so its chat hears
+        // that it did not run, rather than left waiting where nobody sees it.
+        if((await db.query("SELECT 1 FROM security_events WHERE effect_id=$1 AND state='allowed' AND permission_id IS NOT NULL",[this.actions.effect(row).id])).rowCount)
+          {const result=await this.blocked(db,row,'permission_no_longer_valid');await db.query('COMMIT');this.closed(row.id);return result;}
+        await db.query('COMMIT');return {claimed:false};
+      }
       const decision=await evaluate(db,this.actions.effect(row),grant?.id??'exact_owner_approval',true);
       if(decision.outcome!=='allow'){const result=await this.blocked(db,row,decision.rule,decision);await db.query('COMMIT');this.closed(row.id);return result;}
-      if(grant)await db.query('UPDATE action_permissions SET remaining=remaining-1,revision=revision+1 WHERE id=$1',[grant.id]);
+      // A use is counted, not a change to what it allows, so a Revoke sent with the shown revision still applies.
+      if(grant)await db.query('UPDATE action_permissions SET remaining=remaining-1 WHERE id=$1',[grant.id]);
       await recordEffect(db,this.actions.effect(row),'claimed',decision,row.source_reference,grant?.id);
       await db.query(`UPDATE controlled_actions SET state='running',actor=$2,permission_id=$3,security_decision=$4,lease_until=now()+interval '120 seconds',
         execution_owner='inngest',owner_epoch=$5,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,b.actor,grant?.id??null,decision,authority.epoch]);
@@ -142,7 +147,7 @@ export class ControlledExecutionRepository {
       if(row.lease_until<=new Date())blocked='execution_lease_expired';
       if(row.permission_id) {
         const grant=(await db.query('SELECT * FROM action_permissions WHERE id=$1 FOR SHARE',[row.permission_id])).rows[0];
-        if(!grant||grant.revoked_at||grant.expires_at<=new Date()||grant.fingerprint!==row.fingerprint||canonical(grant.binding)!==canonical(row.binding))blocked='permission_no_longer_valid';
+        if(!grant||grant.revoked_at||grant.expires_at<=new Date()||!covers(grant,row))blocked='permission_no_longer_valid';
       }
       const decision=await evaluate(db,this.actions.effect(row),row.permission_id??'exact_owner_approval',true);
       if(blocked||decision.outcome!=='allow') {

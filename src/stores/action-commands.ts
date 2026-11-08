@@ -16,9 +16,14 @@ import {closedStates,type BackgroundJobRepository} from './background-jobs.js';
 type ActionKind='telegram'|'controlled'|'background'|'list';
 /** One card of a job's waiting changes, as frozen when it was sent. */
 type ListCard={id:string;fingerprint:string;members:[string,string][];long?:number};
-// Telegram allows 64 bytes of button data: a marker, the choice (approve, deny, or stop a job),
-// and prefixes of the action ID and of the fingerprint of its exact content.
-const buttonData=/^n([ads])([a-f0-9]{40})([a-f0-9]{16})$/;
+// Telegram allows 64 bytes of button data: a marker, the choice (approve, deny, stop a job, or approve and
+// allow here for a session or always, ADR-0214), and prefixes of the action ID and of the fingerprint of its exact content.
+const buttonData=/^n([adscw])([a-f0-9]{40})([a-f0-9]{16})$/;
+/** An operation's buttons: a web read can be allowed here for a session or always, an exact command always;
+ * the rest, and a job's operations, are approved one by one. */
+const ruleButtons:Record<string,[ApprovalText,string][]>={
+  browser:[['allow_once','a'],['allow_here','c'],['allow_always','w'],['reject','d']],
+  shell:[['allow_once','a'],['allow_command','w'],['reject','d']]};
 /** The Retry failed button under a problem notice in the owner's private chat. */
 export const retryButton='nr';
 const reviewLimit=2200;
@@ -221,9 +226,9 @@ export class ActionCommandRepository {
       // In the chat and topic where it was asked, the card answers the request itself.
       const asked=await this.asked(row.source_reference);
       const here=asked&&asked.chat===place.chat&&(asked.topic??'')===(place.topic??'')?asked.message??null:null;
+      const choices:[ApprovalText,string][]=(kind==='controlled'&&!row.job_id&&row.match_key&&ruleButtons[row.kind])||[['approve','a'],['reject','d']];
       const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),...(here?{reply_to:here}:{}),id:result.id,
-        text:card.text,links:card.links,
-        buttons:[[card.line.approve.slice(0,40),'na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],[card.line.reject.slice(0,40),'nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
+        text:card.text,links:card.links,buttons:choices.map(([label,choice])=>[card.line[label].slice(0,40),'n'+choice+result.id.slice(0,40)+card.fingerprint.slice(0,16)])});
       if(sent?.state!=='done')return result;
       // Only an operation answers later in the chat that asked, at most three times per asking message (ADR-0212); a message is simply sent.
       const follows=kind==='controlled'&&!!asked&&await followUpLeft(control,row.event_id);
@@ -387,6 +392,8 @@ export class ActionCommandRepository {
     // Telegram fills in the pressed message; only one that carries this very button names this card's message.
     const carries=(query.message?.reply_markup?.inline_keyboard??[]).flat().some((button:any)=>button?.callback_data===query.data);
     const message=String(query.message?.message_id??''),seen:Seen=carries&&chat&&/^[1-9]\d{0,15}$/.test(message)?{chat,message}:undefined;
+    // Allow here and Always allow are only an operation's buttons, and only the owner's (ADR-0214).
+    if(['c','w'].includes(data[1]!)&&action&&action.kind!=='controlled'){await answer(line.changed);return true;}
     if(action?.kind==='background'&&this.jobs)return data[1]==='s'?this.stopPressed(action,presser,chat,query.id,seen):this.jobPressed(action,data[1]==='a',presser,chat,query.id,source,seen);
     // Stop is only a job's button; it never decides anything else.
     if(data[1]==='s'){await answer(line.changed);return true;}
@@ -396,12 +403,13 @@ export class ActionCommandRepository {
     if(!policy.owner_id||presser!==policy.owner_id&&!(reviewer&&presser===reviewer&&chat===(await this.place('telegram',action.id))?.chat)){
       await answer(reviewer?line.only_requester:line.only_owner);return true;}
     if(!action){await answer(line.changed);return true;}
-    const kind=action.kind as ActionKind,decision=data[1]==='a'?'approve':'deny',owner={admin:true,scope:null};
-    const body={id:action.id,fingerprint:action.fingerprint,decision,operation_id:'telegram-button:'+source.id};
+    const kind=action.kind as ActionKind,decision=data[1]==='d'?'deny':'approve',owner={admin:true,scope:null};
+    const allow=data[1]==='c'?'here':data[1]==='w'?'always':undefined;
+    const body={id:action.id,fingerprint:action.fingerprint,decision,operation_id:'telegram-button:'+source.id,...(allow?{allow}:{})};
     let reply:string;
     try {
       const result=kind==='telegram'?await this.telegram.decide(owner,body,source):await this.tools.decide(owner,body,source);
-      reply=result.state==='rejected'?(kind==='telegram'?line.rejected:line.rejected_action):line.approved;
+      reply=result.state==='rejected'?(kind==='telegram'?line.rejected:line.rejected_action):allow==='here'?line.allowed_here:allow?line.allowed_always:line.approved;
     }catch(error) {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
       reply=kind==='controlled'&&outdated.has(error.code)?fillTemplate(line.not_run,{reason:line.reason_changed}):line.decided;

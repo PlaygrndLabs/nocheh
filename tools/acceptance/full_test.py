@@ -85,6 +85,7 @@ TITLES = {
     'background_job_reads_a_repo_copy': 'A background job reads a GitHub copy in its sealed box',
     'approval_waits_across_a_change_and_runs': 'An approval waits through a reaction, then runs the exact command',
     'group_operation_answers_in_topic': 'A member\'s command, approved privately, is answered in its group topic',
+    'allowed_command_runs_without_a_card': 'Always allow on a card lets the same command run in that topic without asking',
     'job_operation_runs_after_approval': 'A job\'s command runs once you approve it',
     'background_job_long_run': 'A background job runs past the old step limit as one run',
     'background_job_stop_button': 'Stop on a running job\'s card stops it',

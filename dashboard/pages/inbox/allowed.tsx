@@ -1,4 +1,4 @@
-/** Standing permissions: exact actions Nocheh may repeat without asking, and revoking them. */
+/** Standing permissions: exact actions, and sites or commands allowed in one chat, that Nocheh may run without asking; and revoking them. */
 import {useState} from 'react';
 import {ShieldCheck} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
@@ -6,12 +6,12 @@ import {Badge, Button, Card, CardHeader, Details, Empty, LoadError, LoadingRows,
 import {useFeedback} from '../../ui/overlay';
 import {
   actionName,
-  actionSummary,
   fromNow,
   fullTime,
   useChatNames,
   useCommand,
   type ActionQueue,
+  permissionSummary,
   type Permission,
 } from './shared';
 
@@ -28,7 +28,7 @@ export function Allowed() {
       <Card>
         <CardHeader
           title="Allowed actions"
-          description="Nocheh may repeat these exact actions without asking until they run out or end."
+          description="Nocheh may run these without asking until they run out or end: exact actions, and sites or commands you allowed in one chat from a Telegram card."
         />
         <div className="pt-3">
           {!queue.data ? (
@@ -39,7 +39,8 @@ export function Allowed() {
             )
           ) : active.length === 0 ? (
             <Empty icon={ShieldCheck} title="Every action asks you first">
-              To skip asking for one exact action, turn on “Allow this exact action again” when you approve it.
+              To skip asking for one exact action, turn on “Allow this exact action again” when you approve it. On a
+              Telegram card, “Allow where asked” and “Always allow” do the same for a site or command in that chat.
             </Empty>
           ) : (
             <ul className="divide-y divide-line border-t border-line">
@@ -99,12 +100,16 @@ function PermissionRow({permission: p, disabled}: {permission: Permission; disab
         <p className="text-sm font-medium">{actionName(p.kind)}</p>
         <p
           className="mt-1 line-clamp-2 rounded bg-subtle px-2 py-1 font-mono text-xs break-all"
-          title={actionSummary(p)}
+          title={permissionSummary(p)}
         >
-          {actionSummary(p) || 'Exact details unavailable'}
+          {permissionSummary(p) || 'Exact details unavailable'}
         </p>
         <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-          <span>In {chat(p.scope)}</span>
+          <span>
+            In {chat(p.scope)}
+            {p.grain === 'chat' && p.space_id?.includes('/topic/') ? ', in one topic' : ''}
+          </span>
+          {p.grain === 'chat' && <Badge>Chat rule</Badge>}
           {active && <Badge tone="good">{p.remaining === 1 ? '1 use left' : `${p.remaining} uses left`}</Badge>}
           <span title={fullTime(p.revoked_at ?? p.expires_at)}>{done ? 'Revoked just now' : ended}</span>
         </p>

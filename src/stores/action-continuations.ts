@@ -200,7 +200,12 @@ export class ActionContinuationRepository {
           OR run_id=action_id AND (state IN ('pending','waiting') OR state='failed' AND attempts<$3))`,[row.event_id,id,maxAttempts])).rowCount)return this.wait(row,5000);
         if(awaitingReceipt(action,row.created_at))return this.wait(row,10000);
         if(age<siblingWaitMs&&(await db.query(`SELECT 1 FROM controlled_actions a WHERE event_id=$1 AND id<>$2 AND job_id IS NULL
-          AND (state IN ('approved','running') OR state='ambiguous' AND error_code='executor_receipt_missing'
+          AND (state IN ('approved','running')
+            -- One a permission lets run stays proposed until it is claimed (ADR-0214).
+            OR state='proposed' AND (EXISTS(SELECT 1 FROM security_events e WHERE e.effect_id=a.id AND e.state='allowed' AND e.permission_id IS NOT NULL)
+              OR EXISTS(SELECT 1 FROM action_permissions p WHERE p.grain='chat' AND p.match_key=a.match_key AND p.kind=a.kind AND p.space_id=a.space_id
+                AND p.revoked_at IS NULL AND p.expires_at>now() AND p.remaining>0))
+            OR state='ambiguous' AND error_code='executor_receipt_missing'
           AND EXISTS(SELECT 1 FROM action_continuations c WHERE c.action_id=a.id AND c.created_at>now()-$3*interval '1 millisecond'))`,
           [row.event_id,id,receiptWaitMs])).rowCount)return this.wait(row,5000);
         // The asking reader, rebuilt as the reply's was, with inspect's rule that it reads only its own space and profile.

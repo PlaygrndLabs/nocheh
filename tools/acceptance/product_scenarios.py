@@ -53,8 +53,8 @@ class ProductScenarios(Scenarios):
                     and item['message']['message_id'] == row['message']['message_id'])
 
     def press(self, row, choice, presser=OWNER):
-        """A tap on Approve, Reject or a job's Stop, delivered like Telegram's callback_query."""
-        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns'}[choice]
+        """A tap on Approve, Reject, Allow here, Always allow or a job's Stop, delivered like Telegram's callback_query."""
+        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns', 'here': 'nc', 'always': 'nw'}[choice]
         data = next(button['callback_data'] for button in self.buttons(row) if button['callback_data'].startswith(prefix))
         number = self.f.ids()
         query = {'id': 'cb'+str(number), 'from': {'id': presser, 'is_bot': False, 'first_name': 'Synthetic '+str(presser)},
@@ -1312,7 +1312,7 @@ class ProductScenarios(Scenarios):
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('card_shows_command', marker in card['message']['text'], card=card['message']['text'])
         self.owner_reaction(request)
-        self.gate('card_still_open', len(self.buttons(self.card_message(card))) == 2 and
+        self.gate('card_still_open', [button['callback_data'][:2] for button in self.buttons(self.card_message(card))] == ['na', 'nw', 'nd'] and
                   self.f.query('nocheh_control', "SELECT state FROM controlled_actions WHERE arguments_hash IS NOT NULL ORDER BY created_at DESC LIMIT 1") == 'proposed')
         self.ran(card, marker)
         # It ended in the owner's chat, so one follow-up reads it and answers the request there (ADR-0212).
@@ -1338,6 +1338,30 @@ class ProductScenarios(Scenarios):
         time.sleep(3)
         self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] nocheh_action_status' in answer and marker in answer, text=answer[:500])
         self.gate('nothing_else_in_owner_chat', not [row for row in self.replies(before, OWNER) if not self.is_card(row)])
+
+    def allowed_command_runs_without_a_card(self):
+        # The owner taps Always allow on a member's command in a group topic. The same command asked there
+        # again runs without a card, and its answer follows (ADR-0214).
+        marker = 'RULEMARK1'
+        tool = 'یک فرمان [[tool:nocheh_shell {"command":"printf '+marker+'"}]] [[after:silent]]'
+        request = self.f.message(GROUP, tool, sender=MEMBER, topic=TEAM_TOPIC)
+        _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
+        card = self.wait('card_posted_to_owner', lambda: self.cards(before, OWNER), 120)[0]
+        self.gate('card_offers_always', [button['callback_data'][:2] for button in self.buttons(card)] == ['na', 'nw', 'nd'],
+                  buttons=[button['text'] for button in self.buttons(card)])
+        answer = self.press(card, 'always')
+        self.gate('press_answered_as_allowed', '30 days' in (answer.get('text') or ''), answer=answer.get('text'))
+        self.wait('first_answer_followed', lambda: [row for row in self.replies(before, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
+            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == request['message']['message_id']], 240)
+        again = self.f.message(GROUP, tool, sender=MEMBER, topic=TEAM_TOPIC)
+        _, later = self.silent_turn(again, GROUP, TEAM_TOPIC)
+        answers = lambda: [row for row in self.replies(later, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
+            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == again['message']['message_id']]
+        text = self.wait('follow_up_answered_in_topic', answers, 240)[0]['message']['text']
+        self.gate('ran_without_a_card', not self.cards(later), cards=[row['message']['text'][:80] for row in self.cards(later)])
+        self.gate('follow_up_read_the_result', '[brain] nocheh_action_status' in text and marker in text, text=text[:500])
+        rules = [row for row in self.f.app('/v1/tools/actions').get('permissions', []) if row.get('grain') == 'chat' and row.get('kind') == 'shell']
+        self.gate('one_chat_rule', len(rules) == 1 and rules[0]['space_id'] == str(GROUP)+'/topic/'+str(TEAM_TOPIC), rules=[{key: row.get(key) for key in ('space_id', 'match_key', 'remaining')} for row in rules])
 
     def job_operation_runs_after_approval(self):
         # A job's run asks to run a command; the owner approves it on its card after the job reported.
@@ -1607,7 +1631,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
-                 'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'job_operation_runs_after_approval',
+                 'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
