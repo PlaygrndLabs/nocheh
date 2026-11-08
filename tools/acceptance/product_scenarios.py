@@ -1351,7 +1351,8 @@ class ProductScenarios(Scenarios):
                   buttons=[button['text'] for button in self.buttons(card)])
         answer = self.press(card, 'always')
         self.gate('press_answered_as_allowed', '30 days' in (answer.get('text') or ''), answer=answer.get('text'))
-        self.wait('first_ran', lambda: (lambda row: row if row and row['state'] == 'done' else None)(self.operation(marker)), 240)
+        self.wait('first_answer_followed', lambda: [row for row in self.replies(before, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
+            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == request['message']['message_id']], 240)
         again = self.f.message(GROUP, tool, sender=MEMBER, topic=TEAM_TOPIC)
         _, later = self.silent_turn(again, GROUP, TEAM_TOPIC)
         answers = lambda: [row for row in self.replies(later, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
