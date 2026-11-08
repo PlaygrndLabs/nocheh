@@ -47,10 +47,13 @@ const routes:[string,RegExp][]=[
   ['POST',/^\/workflows\/retry-failed$/],
   ['GET',/^\/decisions\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64}$/],
   ['GET',/^\/(?:tools\/actions|knowledge\/proposals)\/[a-f0-9]{64}$/],
+  // A person or project card offers the other cards waiting, to fold one into another.
+  ['GET',/^\/entities\/suggestions$/],
   ['GET',/^\/tasks\/(?:settings|[a-f0-9]{64})$/],
   ['POST',/^\/tasks(?:\/archive-finished|\/[a-f0-9]{64}(?:\/(?:comments|delete))?)?$/],
   ['POST',/^\/tools\/(?:decide|telegram-decision|grant)$/],
   ['POST',/^\/(?:memory-access\/requests|entities)\/[a-f0-9]{64}\/decide$/],
+  ['POST',/^\/entities\/[a-f0-9]{64}\/(?:fold|split)$/],
   ['POST',/^\/knowledge\/proposals\/[a-f0-9]{64}\/(?:decide|undo)$/],
 ];
 export const miniAppRoute=(method:string,route:string):boolean=>routes.some(([m,re])=>m===method&&re.test(route));

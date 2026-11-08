@@ -78,9 +78,11 @@ test('unknown conversation context does not inherit a parent sharing grant or eq
 
 test('inbox uses database totals rather than visible page length and retains exact review identity',async()=>{
   const rows=Array.from({length:101},(_,index)=>({kind:'entity',id:digest('suggestion:'+index),state:'pending',revision:7,created_at:date,title:'Same entity name'}));
-  const {value}=repository((_store,sql)=>{assert.match(sql,/count\(\*\)/);return [{items:rows,total:145,totals:{entity:145,memory_access:20}}];});
+  // The second read lists names folded into the page's person and project cards.
+  const {value}=repository((_store,sql)=>{if(/merged_into=ANY/.test(sql))return [];assert.match(sql,/count\(\*\)/);return [{items:rows,total:145,totals:{entity:145,memory_access:20}}];});
   const result=await value.decisions(owner,{kind:'entity',limit:100});
   assert.equal(result.total,145);assert.equal(result.totals.memory_access,20);assert.equal(result.items.length,100);
   assert.equal(result.next_cursor,'entity:'+rows[99]!.id);assert.equal(result.items[0]!.review.expected_revision,7);
   assert.equal(result.items[0]!.review.href,'#inbox?kind=entity&decision='+rows[0]!.id);
+  assert.deepEqual((result.items[0] as any).also_called,[]);
 });

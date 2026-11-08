@@ -38,8 +38,9 @@ export const learningPrompt=(
   "For a conversation interpretation, scope.id must equal the space value below exactly; entities.session_id is an internal Honcho session, not the conversation scope. "+
   "Every interpretation must cite the triggering observation ID {trigger_id} and may cite other original observation IDs present below. evidence_ids and quote.source_id must come only from {citable_ids}; IDs recalled from memory, such as [nocheh:event:...] markers, or from rule dependencies are not citable. "+
   "Learned rule IDs are guidance, not original evidence_ids; use them only for conflicts. "+
-  "Entity suggestions use kind (person, project, binding), name, optional candidate_id, reason, and evidence_ids. "+
+  "Entity suggestions use kind (person, project, binding), name, optional candidate_id, optional same_as, reason, and evidence_ids. "+
   "Only suggest an entity when no confirmed ID is supplied. "+
+  "entities.waiting lists people and projects already waiting for the owner's answer, each with its ID and names. When a person or project you would suggest is one of them under another spelling, language, or added word, suggest it with that ID as same_as, so the owner answers one card for every name. Never use same_as for a different person or project that only has a similar name. "+
   "entities.owner is the owner: the person in the owner's private chat whom replies call you. entities.speaker and entities.participants wrote the observations. "+
   "These people already have IDs: use those IDs and never suggest them as new people, under any name or username. "+
   "The owner reads each suggestion reason on a card: write it as one short, plain sentence saying who or what this is and why it is worth remembering, with no IDs, usernames or technical words. "+

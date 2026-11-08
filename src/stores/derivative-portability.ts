@@ -36,7 +36,7 @@ const shapes:Record<string,Shape>={
   memory_entities:shape('control','id',{id:'text',kind:'text',name:'text',state:'text',project_id:'text',merged_into:'text',revision:'number',created_at:'date',updated_at:'date'}),
   memory_entity_bindings:shape('control','id',{id:'text',entity_id:'text',binding_kind:'text',source_object_id:'text',mention_key:'text',label:'text',state:'text',revision:'number',created_at:'date',updated_at:'date'}),
   memory_entity_binding_moves:shape('control','id',{id:'text',binding_id:'text',from_entity_id:'text',to_entity_id:'text',merge_revision:'number',undone:'boolean',created_at:'date'}),
-  memory_entity_suggestions:shape('control','id',{id:'text',kind:'text',name:'text',candidate_entity_id:'text',source_reference:'json',reason:'text',status:'text',revision:'number',created_at:'date',updated_at:'date'}),
+  memory_entity_suggestions:shape('control','id',{id:'text',kind:'text',name:'text',candidate_entity_id:'text',source_reference:'json',reason:'text',status:'text',merged_into:'text',revision:'number',created_at:'date',updated_at:'date'}),
   entity_claims:shape('derived','id',{id:'text',subject_entity_id:'text',predicate:'text',object_entity_id:'text',active_revision:'number',created_at:'date'}),
   entity_claim_versions:shape('derived','operation_id',{operation_id:'text',claim_id:'text',revision:'number',expected_revision:'number',content:'text',relationship_kind:'text',attribution:'text',speaker_entity_id:'text',uncertainty:'text',author:'text',retired:'boolean',evidence:'json',dependencies:'json',input_binding:'json',created_at:'date'}),
   memory_access_settings:shape('control','destination',{destination:'text',suggestions:'text',notify_owner:'boolean',auto_followup:'boolean',request_ttl_seconds:'number',default_grant_mode:'text',revision:'number',updated_at:'date'},true),
@@ -256,6 +256,8 @@ export class DerivativePortabilityRepository {
     if(type==='memory_entity_suggestions') {
       await this.archive.verify(row.source_reference as unknown as SourceReference);
       if(row.candidate_entity_id!==null&&!(await this.stores.control.query('SELECT 1 FROM memory_entities WHERE id=$1',[row.candidate_entity_id])).rowCount)throw new HttpError(409,'portable_entity_pending');
+      // A folded name follows its card, which may come later in the transfer.
+      if(row.merged_into!==null&&!(await this.stores.control.query('SELECT 1 FROM memory_entity_suggestions WHERE id=$1',[row.merged_into])).rowCount)throw new HttpError(409,'portable_parent_pending');
     }
     if(type==='entity_claims') {
       for(const id of [row.subject_entity_id,row.object_entity_id].filter(Boolean))if(!(await this.stores.control.query('SELECT 1 FROM memory_entities WHERE id=$1',[id])).rowCount)throw new HttpError(409,'portable_entity_pending');

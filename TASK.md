@@ -41,6 +41,19 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
 
+One waiting card per person or project (owner, 2026-11-08: "all <project name> arent same?
+isnt auto or manual merge them to one waiting item"): a new name for a person or
+project already waiting joins that card when learning names it as `same_as` or the
+names match apart from case, an `@` and a trailing `(…)`; the owner can fold a card
+into another, take a name back out, or answer it as someone or something already
+known; one Remember keeps every name for one entity, and learning finds a
+confirmed project by any of its names
+([ADR-0218](docs/adr/0218-repeat-names-wait-on-one-card.md),
+[store](test/store-entity-suggestions.test.ts)). Confirming a project card no longer
+makes a second entity that broke later learning about that project. Pending: the
+owner's yes on the approach, folding the three existing cards for one project on
+the development install, and a live learning turn that joins a waiting card.
+
 Secret check connection failures (2026-11-08): the owner's installation counted
 secret-check calls that failed with no provider status, 12 on one model and, after a
 switch, 26 on the next, with no refusals and no hidden texts; in the same window a
