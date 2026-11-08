@@ -44,7 +44,7 @@ class ProblemNoticeTests(unittest.TestCase):
                 return {'state': self.edit_outcome}
             self.sent.append(body)
             return {'state': outcome or self.outcome}
-        return problems.check(self.state, state or monitoring(), list(usage), send, now, enabled, values or {})
+        return problems.check(self.state, state or monitoring(), None if usage is None else list(usage), send, now, enabled, values or {})
 
     def test_old_failures_are_not_announced_and_new_ones_are_counted_from_them(self):
         self.assertEqual(self.check(NOW)['state'], 'nothing_new')
@@ -180,20 +180,25 @@ class ProblemNoticeTests(unittest.TestCase):
         lines = ['Memory notes: 1 task failed (12 so far).', 'Telegram replies: 2 tasks failed (2 so far).']
         self.assertEqual((self.sent[-1]['problems'], self.sent[-1]['retry']), (lines, True))
         self.check(NOW + 240, monitoring(failed=12))
+        self.assertEqual(self.edits, [], 'a drop seen by one check may be a task being retried')
+        self.check(NOW + 360, monitoring(failed=12))
         dashboard = {'kind': 'url', 'url': 'http://127.0.0.1:8783/#system'}
         self.assertEqual({key: self.edits[-1][key] for key in ('problems', 'resolved', 'open', 'retry')},
-                         {'problems': [lines[0], lines[1] + ' Resolved at 12:04 UTC.'], 'resolved': [False, True], 'open': dashboard, 'retry': False},
+                         {'problems': [lines[0], lines[1] + ' Resolved at 12:06 UTC.'], 'resolved': [False, True], 'open': dashboard, 'retry': False},
                          'Open stays for what is left; Retry failed goes with the tasks it could retry')
-        self.check(NOW + 360, monitoring(failed=11, work=False))
+        self.check(NOW + 480, monitoring(failed=11, work=False))
+        self.check(NOW + 600, monitoring(failed=11, work=False))
         self.assertEqual(len(self.edits), 1, 'unreadable background work clears nothing')
-        self.check(NOW + 480, monitoring(failed=11))
+        self.check(NOW + 720, monitoring(failed=11))
+        self.check(NOW + 840, monitoring(failed=11))
         self.assertEqual((self.edits[-1]['resolved'], self.edits[-1]['open']), ([True, True], None))
-        self.assertEqual(self.edits[-1]['problems'][0], lines[0] + ' Resolved at 12:08 UTC.')
+        self.assertEqual(self.edits[-1]['problems'][0], lines[0] + ' Resolved at 12:14 UTC.')
 
     def test_a_family_retried_to_zero_counts_its_next_failures_from_zero(self):
         self.check(NOW)
         self.check(NOW + 120, monitoring(retryable=3))
         self.check(NOW + 240, monitoring())
+        self.check(NOW + 360, monitoring())
         self.assertEqual(self.edits[-1]['resolved'], [True], 'all 3 retried and done')
         self.check(NOW + 7200, monitoring(retryable=5))
         self.assertEqual(self.sent[-1]['problems'], ['Telegram replies: 5 tasks failed (5 so far).'])
@@ -206,7 +211,8 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 120, monitoring(failed=12, retryable=1))
         lines = self.sent[-1]['problems']
         self.check(NOW + 240, monitoring(failed=12))
-        self.assertEqual((self.edits[-1]['resolved'], self.edits[-1]['retry']), ([False, True], False), 'Retry failed queued it again')
+        self.check(NOW + 300, monitoring(failed=12))
+        self.assertEqual((self.edits[-1]['resolved'], self.edits[-1]['retry']), ([False, True], False), 'Retry failed ran it, and it was done')
         self.check(NOW + 360, monitoring(failed=12, retryable=1))
         self.assertEqual((self.edits[-1]['problems'], self.edits[-1]['resolved'], self.edits[-1]['retry']), (lines, [False, False], True),
                          'it failed again: the line and Retry failed are back')
@@ -223,6 +229,27 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual(len(self.edits), edits, 'one check is a restart, not news')
         self.check(NOW + 960, monitoring(failed=12, services=['hermes']))
         self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (service['id'], [False]))
+
+    def test_a_task_that_keeps_failing_and_is_retried_is_not_news_again(self):
+        self.check(NOW)
+        self.check(NOW + 120, monitoring(retryable=1))
+        # Every few minutes the scheduler retries it: while it runs, it is not counted as failed.
+        for step in range(2, 40):
+            self.check(NOW + 120 * step, monitoring(retryable=0 if step % 4 == 0 else 1))
+        self.assertEqual((len(self.sent), self.edits), (1, []), 'one notice, and no ✅ while it keeps failing')
+
+    def test_a_problem_missing_because_its_source_could_not_be_read_is_not_news_again(self):
+        self.check(NOW, monitoring(services=['hermes']))
+        self.check(NOW + 120, monitoring(services=['hermes']))
+        self.check(NOW + 3700, {**monitoring(), 'services': None})
+        self.check(NOW + 3820, monitoring(services=['hermes']))
+        self.check(NOW + 3940, monitoring(services=['hermes']))
+        self.assertEqual(len(self.sent), 1, 'still the same down service')
+        busy = refusals(2, 2)
+        self.check(NOW + 4000, {**monitoring(), 'model_problems': busy}, usage=None)
+        self.check(NOW + 7700, {**monitoring(), 'model_problems': {'unavailable': True}}, usage=None)
+        self.check(NOW + 7820, {**monitoring(), 'model_problems': busy}, usage=None)
+        self.assertEqual(len(self.sent), 2, 'the same failed model calls, after a check that could not read usage')
 
     def test_an_edit_that_does_not_go_through_is_tried_again(self):
         self.check(NOW, monitoring(services=['hermes']))

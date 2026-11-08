@@ -17,6 +17,7 @@ except ImportError:
     fake.LinkPreviewOptions=lambda is_disabled=None:SimpleNamespace(is_disabled=is_disabled)
     fake.error=types.ModuleType('telegram.error')
     fake.error.BadRequest=type('BadRequest',(Exception,),{})
+    fake.error.Forbidden=type('Forbidden',(Exception,),{})
     sys.modules['telegram.error']=fake.error
     fake.MessageEntity=type('MessageEntity',(),{'TEXT_LINK':'text_link','__init__':lambda self,type,offset,length,url=None:self.__dict__.update(type=type,offset=offset,length=length,url=url)})
     sys.modules['telegram']=fake
@@ -187,7 +188,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'d'*64,'chat_id':'-20'},)  # only the owner's private chat
 
     async def test_a_sent_notice_is_edited_in_place_and_only_that_one(self):
-        from telegram.error import BadRequest
+        from telegram.error import BadRequest, Forbidden
         with tempfile.TemporaryDirectory() as folder:
             sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits)
             notice={'id':'a'*64,'chat_id':'123','text':'⚠️ Nocheh found a problem','buttons':[{'text':'Retry failed','callback':'nr'}]}
@@ -202,6 +203,9 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             async def unchanged(*args,**options):raise BadRequest('Message is not modified')
             gateway.adapter._bot.edit_message_text=unchanged
             self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'done','edited':False})
+            async def blocked(*args,**options):raise Forbidden('Forbidden: bot was blocked by the user')
+            gateway.adapter._bot.edit_message_text=blocked
+            self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'done','edited':False},'a definite refusal is not tried again')
             async def offline(*args,**options):raise TimeoutError()
             gateway.adapter._bot.edit_message_text=offline
             self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'not_started','error_code':'telegram_edit_failed'},

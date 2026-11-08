@@ -224,34 +224,55 @@ def text(problem, new):
     return f"{problem['label']} ({problem['model']}): " + '; '.join(parts) + '.'
 
 
-def due(current, record, now, first=False, work=True):
+def due(current, record, now, first=False, seen=None, rows=True):
     """Which problems to report now, each with how much it grew, and the record after reporting them.
     A problem that went away counts from zero when it comes back, but still waits out the quiet hour.
     A down service or worker is reported only when the previous check saw it too, so a restart
-    is not news. `work` says whether this check could read background work."""
+    is not news. `seen` is what this check could read (see readable), and `rows` whether it read
+    today's model usage: a problem missing only because its source could not be read keeps its count."""
+    seen = set(SOURCES.values()) if seen is None else seen
     keys = {problem['key'] for problem in current}
-    # A total missing from a check that read background work is zero, such as after its failed tasks were
-    # retried and done; one missing because background work could not be read keeps its count.
-    sent = {key: value if key in keys or key.startswith(TOTALS) and not work else {**value, 'count': 0}
-            for key, value in (record.get('sent') or {}).items()
-            if key in keys or key.startswith(TOTALS) or now - value['at'] < QUIET_SECONDS}
-    seen = set(record.get('seen') or [])
+    # Failed and uncertain task counts seen by the previous check that read background work.
+    totals = record.get('totals') or {}
+
+    def unread(key):
+        kind = key.split(':')[0]
+        return not rows if kind == 'model' else kind not in ('application', 'telegram') and SOURCES.get(kind) not in seen
+
+    def lowest(key, count):
+        # A task being retried leaves the failed count for a moment, so a total drops only when two checks
+        # in a row see it lower; otherwise a task that keeps failing would be news again after every retry.
+        return max(count, totals.get(key, 0)) if key.startswith(TOTALS) else count
+
+    sent = {}
+    for key, value in (record.get('sent') or {}).items():
+        if key in keys or unread(key):
+            sent[key] = value
+        elif key.startswith(TOTALS):
+            # A total missing from a check that read background work is zero, such as after its tasks were retried and done.
+            sent[key] = {**value, 'count': min(value['count'], lowest(key, 0))}
+        elif now - value['at'] < QUIET_SECONDS:
+            sent[key] = {**value, 'count': 0}
+    before = set(record.get('seen') or [])
     report = []
     for problem in current:
         previous = sent.get(problem['key'])
         if previous is None and problem['total'] and first:
             sent[problem['key']] = {'count': problem['count'], 'at': 0}
             continue
-        if problem['kind'] in STEADY and problem['key'] not in seen:
+        if problem['kind'] in STEADY and problem['key'] not in before:
             continue
         if not problem['count'] or previous and problem['count'] < previous['count']:
             # Cleared history: count growth from what is left.
-            sent[problem['key']] = {**(previous or {'at': 0}), 'count': problem['count']}
+            left = lowest(problem['key'], problem['count'])
+            sent[problem['key']] = {**(previous or {'at': 0}), 'count': min(previous['count'], left) if previous else left}
             continue
         if previous and (problem['count'] <= previous['count'] or now - previous['at'] < QUIET_SECONDS):
             continue
         report.append((problem, problem['count'] - (previous['count'] if previous and problem['total'] else 0)))
-    return report, {'sent': sent, 'seen': sorted(keys)}
+    kept = {'sent': sent, 'seen': sorted(keys)}
+    kept['totals'] = {problem['key']: problem['count'] for problem in current if problem['total']} if 'work' in seen else totals
+    return report, kept
 
 
 def readable(monitoring):
@@ -302,7 +323,7 @@ def back(watch, current, seen, before):
     return problem is not None and kind != 'telegram'
 
 
-def cleared(watch, current, seen):
+def cleared(watch, current, seen, totals=None):
     """Whether a problem a notice told about has cleared. Background tasks clear when their count is back
     to what it was before the notice, such as after Retry failed; a part's model calls clear once a call
     works after the last failure a check saw; anything else clears when a check that could read it no
@@ -319,7 +340,8 @@ def cleared(watch, current, seen):
     if SOURCES.get(kind) not in seen:
         return False
     if kind in ('failed', 'uncertain'):
-        return (problem['count'] if problem else 0) <= watch['base']
+        # As in due(), a drop counts only when the previous check saw it too, so a task being retried is not cleared.
+        return max(problem['count'] if problem else 0, (totals or {}).get(watch['key'], 0)) <= watch['base']
     # The incident stays recorded; Telegram connected again is what clears it.
     return kind == 'telegram' or problem is None
 
@@ -346,7 +368,7 @@ def follow_up(record, current, seen, now, values, send):
     loses its buttons, and is followed until its quiet hour is over. An edit that does not go through is tried
     again on the next check. Returns how many notices were edited."""
     found = {problem['key']: problem for problem in current}
-    before = set(record.get('seen') or [])
+    before, totals = set(record.get('seen') or []), record.get('totals') or {}
     followed, edited = [], 0
     for notice in record.get('notices') or []:
         if now - notice['at'] > FOLLOW_SECONDS:
@@ -356,7 +378,7 @@ def follow_up(record, current, seen, now, values, send):
         for line in notice['lines']:
             if line.get('done') is not None and quiet and any([back(watch, found, seen, before) for watch in line['watch']]):
                 line['done'] = None
-            elif line.get('done') is None and all([cleared(watch, found, seen) for watch in line['watch']]):
+            elif line.get('done') is None and all([cleared(watch, found, seen, totals) for watch in line['watch']]):
                 line['done'] = now
         lines = [shown(line, notice['at']) for line in notice['lines']]
         done = [line.get('done') is not None for line in notice['lines']]
@@ -416,15 +438,16 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
     if monitoring is None:
         from tools.operations.provider.monitoring import status
         monitoring = status(state)
-    if usage_rows is None:
-        usage_rows = monitoring.get('model_problems') if isinstance(monitoring.get('model_problems'), list) else []
     record = _read(state) or {}
     # Totals are recorded without a message the first time they can be read.
     first = not record.get('baseline')
     if isinstance((monitoring.get('workflows') or {}).get('counts'), list):
         record['baseline'] = True
+    rows = usage_rows is not None or isinstance(monitoring.get('model_problems'), list)
+    if usage_rows is None:
+        usage_rows = monitoring.get('model_problems') if rows else []
     current, seen = problems(monitoring, usage_rows, today), readable(monitoring)
-    report, kept = due(current, record, now, first, 'work' in seen)
+    report, kept = due(current, record, now, first, seen, rows)
     sent = kept['sent']
     result = {'reported': len(report), 'state': 'nothing_new'}
     if send is None:
