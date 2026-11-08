@@ -850,6 +850,17 @@ itself at startup.
 
 <verification>
 
+- Reactions while Nocheh works (2026-11-08,
+  [ADR-0211](docs/adr/0211-hermes-working-reactions-on-the-answered-message.md)):
+  the owner asked whether the bot can react to users' messages and chose
+  Hermes's built-in reactions. The committed adapter now runs Hermes's own
+  Telegram hooks around a turn: 👀 on the message it answers, then 👍 once the
+  reply is sent or 👎 when it failed; silence, cancellation and an uncertain
+  delivery clear it. Each reaction is bound to that exact message and the
+  space's permission and skips the outbound journal; Settings › Telegram "React
+  while working" turns them off. Checks: [simulation tests](services/hermes/test_telegram_simulation.py)
+  and the full tester scenario `reactions_show_while_working`. Pending: seen on
+  the owner's live install after the machine pull.
 - Typing while Nocheh works (2026-10-28,
   [ADR-0188](docs/adr/0188-typing-status-while-a-turn-works.md)): Telegram
   showed nothing while a reply was being worked on, because native typing is

@@ -15,6 +15,7 @@ export const telegramKeys = [
   'TELEGRAM_GROUP_ACCESS',
   'TELEGRAM_TOPIC_MEMORY',
   'TELEGRAM_TYPING',
+  'TELEGRAM_REACTIONS',
   'TELEGRAM_PROBLEM_NOTICES',
   'NOCHEH_DASHBOARD_URL',
   'NOCHEH_MINI_APP_URL',
@@ -95,6 +96,26 @@ export function TelegramSettings() {
                 checked={s.value('TELEGRAM_TYPING') !== 'false'}
                 disabled={s.busy}
                 onChange={on => s.set('TELEGRAM_TYPING', on ? 'true' : 'false')}
+              />
+            </div>
+          </SettingRow>
+          <SettingRow
+            title={
+              <>
+                React while working
+                <Unsaved show={s.changed('TELEGRAM_REACTIONS')} />
+              </>
+            }
+            description="Puts 👀 on the message Nocheh is working on, then 👍 when it answered or 👎 when it failed."
+            htmlFor="telegram-reactions"
+          >
+            <div className="flex sm:justify-end">
+              <Switch
+                id="telegram-reactions"
+                label="React while working"
+                checked={s.value('TELEGRAM_REACTIONS') !== 'false'}
+                disabled={s.busy}
+                onChange={on => s.set('TELEGRAM_REACTIONS', on ? 'true' : 'false')}
               />
             </div>
           </SettingRow>

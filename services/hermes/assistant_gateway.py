@@ -29,13 +29,24 @@ SOURCE_ID = re.compile(r'nocheh:event:[a-f0-9]{64}')
 # Telegram shows "typing…" for about five seconds per chat action, so a working
 # turn renews it a little sooner.
 TYPING_INTERVAL = 4.0
+# The reactions Hermes's own Telegram adapter sets on the message a turn
+# answers: 👀 while it works, then 👍 when answered or 👎 when it failed.
+WORKING_REACTIONS = frozenset(('\U0001f440', '\U0001f44d', '\U0001f44e'))
+
+
+def owner_switch(name):
+    """An on/off owner setting, on by default; a malformed value stops startup rather than guessing."""
+    value = os.environ.get(name, '').strip() or 'true'
+    if value not in ('true', 'false'): raise ValueError('Invalid ' + name)
+    return value == 'true'
 
 
 def typing_enabled():
-    """Owner setting; a malformed value stops startup rather than guessing."""
-    value = os.environ.get('TELEGRAM_TYPING', '').strip() or 'true'
-    if value not in ('true', 'false'): raise ValueError('Invalid TELEGRAM_TYPING')
-    return value == 'true'
+    return owner_switch('TELEGRAM_TYPING')
+
+
+def reactions_enabled():
+    return owner_switch('TELEGRAM_REACTIONS')
 
 
 def render_reply_citations(text):
@@ -73,6 +84,42 @@ def outbound_check(chat_id, space, authorized, cancelled=None, requests=None):
                 break
     check.observe = observe
     return check
+
+
+def reaction_check(chat_id, message_id, authorized):
+    """Bind a working reaction to the one message this turn answers.
+
+    Only Hermes's three working reactions, or clearing them, pass. A cancelled
+    turn may still clear its 👀, so cancellation does not refuse it; a revoked
+    space does.
+    """
+    def check(method, parameters):
+        reaction = parameters.get('reaction', [])
+        if (method != 'setMessageReaction' or set(parameters) - {'chat_id', 'message_id', 'reaction'} or
+                str(parameters.get('chat_id')) != str(chat_id) or str(parameters.get('message_id')) != str(message_id) or
+                not isinstance(reaction, list) or len(reaction) > 1 or
+                any(not isinstance(item, dict) or set(item) != {'type', 'emoji'} or item['type'] != 'emoji' or
+                    item['emoji'] not in WORKING_REACTIONS for item in reaction)):
+            raise RuntimeError('telegram_delivery_audience_changed')
+        if not authorized():
+            raise RuntimeError('telegram_delivery_authority_revoked')
+    return check
+
+
+def working_outcome(turn):
+    """How a turn ended, for Hermes's working reaction.
+
+    Intentional silence, cancellation and an uncertain delivery clear the 👀:
+    there is no answer to mark, or the reply may have arrived after all.
+    """
+    from gateway.platforms.base import ProcessingOutcome
+    if turn.get('delivery_skipped'):return ProcessingOutcome.CANCELLED
+    if turn.get('delivery_success'):return ProcessingOutcome.SUCCESS
+    if (turn.get('agent_result') or {}).get('state') == 'cancelled' or (turn.get('cancelled') and turn['cancelled'].is_set()):
+        return ProcessingOutcome.CANCELLED
+    if turn.get('delivery_started') and delivery_failure(turn.get('send_requests')) is None:
+        return ProcessingOutcome.CANCELLED
+    return ProcessingOutcome.FAILURE
 
 
 def delivery_failure(requests):
@@ -181,6 +228,9 @@ def committed_adapter_class():
         # Native typing stays off: it would re-arm after the final reply. A
         # committed turn shows its own, see _turn_typing.
         turn_typing=False
+        # Hermes's own working reactions, run around a committed turn; see _turn_reaction.
+        turn_reactions=False
+        def _reactions_enabled(self):return self.turn_reactions
         async def _run_post_connect_housekeeping(self):await self._register_command_menu()
         async def _ensure_forum_commands(self,msg):pass
         def _is_user_authorized_from_message(self,msg):return TURN.get() is not None
@@ -239,9 +289,27 @@ def committed_adapter_class():
                     except Exception:pass # A missed status is cosmetic; the next tick tries again.
                     await asyncio.sleep(TYPING_INTERVAL)
             finally:OUTBOUND_CHECK.reset(check)
+        async def _turn_reaction(self,event,turn,hook,*outcome):
+            """Run Hermes's own working-reaction hook on the message this turn answers.
+
+            Its request passes a check bound to that exact message and the
+            space's current permission. A missed reaction is cosmetic: the
+            native hook logs it and the turn goes on.
+            """
+            scope=turn['scope']
+            check=OUTBOUND_CHECK.set(reaction_check(scope.chat_id,event.message_id,
+                lambda:check_delivery_policy(turn['body']['archive_credential'])))
+            try:await self._run_processing_hook(hook,event,*outcome)
+            finally:OUTBOUND_CHECK.reset(check)
         async def handle_message(self,event):
             turn=TURN.get()
             if turn is None:raise RuntimeError('uncommitted_message')
+            # A fixed control reply needs no model, so there is no work to show.
+            if not self.turn_reactions or turn['body'].get('control_reply') is not None:return await self._answer(event,turn)
+            await self._turn_reaction(event,turn,'on_processing_start')
+            try:return await self._answer(event,turn)
+            finally:await self._turn_reaction(event,turn,'on_processing_complete',working_outcome(turn))
+        async def _answer(self,event,turn):
             # A fixed control reply needs no model, so there is nothing to wait for.
             typing=asyncio.create_task(self._turn_typing(event,turn)) if self.turn_typing and turn['body'].get('control_reply') is None else None
             try:response=await self._message_handler(event)
@@ -352,7 +420,8 @@ class AssistantGateway:
     def _serve(self):
         async def run():
             self.loop=asyncio.get_running_loop();self.capacity=asyncio.Semaphore(TURN_CAPACITY);self.action_lock=asyncio.Lock()
-            self.adapter=committed_adapter_class()(adapter_config(self.token));self.adapter.turn_typing=typing_enabled()
+            self.adapter=committed_adapter_class()(adapter_config(self.token))
+            self.adapter.turn_typing,self.adapter.turn_reactions=typing_enabled(),reactions_enabled()
             async def message(event):
                 turn=TURN.get()
                 if turn is None:raise RuntimeError('uncommitted_turn')

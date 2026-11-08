@@ -1,7 +1,7 @@
 """Fixture-only HTTP Bot API subset, with real PTB parsing and durable queue state.
 
 Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage, #getfile,
-#editmessagetext and #answercallbackquery.
+#editmessagetext, #answercallbackquery and #setmessagereaction.
 Unknown methods are recorded and rejected; this is not a Telegram implementation.
 """
 import asyncio
@@ -17,6 +17,10 @@ TOKEN='123456:synthetic'
 BOT={'id':123456,'is_bot':True,'first_name':'Synthetic','username':'synthetic_fixture_bot',
      'can_join_groups':True,'can_read_all_group_messages':True,'supports_inline_queries':False}
 
+
+# https://core.telegram.org/bots/api#reactiontypeemoji: the only emoji a bot may react with.
+REACTIONS=frozenset('👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🤯 😱 🤬 😢 🎉 🤩 🤮 💩 🙏 👌 🕊 🤡 🥱 🥴 😍 🐳 ❤️‍🔥 🌚 🌭 💯 🤣 ⚡ 🍌 🏆 💔 🤨 😐 🍓 🍾 💋 '
+                    '🖕 😈 😴 😭 🤓 👻 👨‍💻 👀 🎃 🙈 😇 😨 🤝 ✍ 🤗 🫡 🎅 🎄 ☃ 💅 🤪 🗿 🆒 💘 🙉 🦄 😘 💊 🙊 😎 👾 🤷‍♂️ 🤷 🤷‍♀️ 😡'.split())
 
 MARKERS={'*':'bold','_':'italic','__':'underline','~':'strikethrough','||':'spoiler'}
 RESERVED='_*[]()~`>#+-=|{}.!'
@@ -291,6 +295,15 @@ class TelegramMock:
                                           'upload_document','choose_sticker','find_location','record_video_note','upload_video_note'):
                 return self.error(400,'Bad Request: wrong parameter action in request')
             result=True
+        elif method=='setMessageReaction':
+            # https://core.telegram.org/bots/api#setmessagereaction: a bot sets at most one
+            # reaction per message, from the fixed emoji list; none clears its own.
+            reaction=data.get('reaction') or [];reaction=json.loads(reaction) if isinstance(reaction,str) else reaction
+            try:chat,number=int(data.get('chat_id')),int(data.get('message_id'))
+            except (TypeError,ValueError):return self.error(400,'Bad Request: message to react not found')
+            if (not isinstance(reaction,list) or len(reaction)>1 or any(not isinstance(item,dict) or item.get('type')!='emoji'
+                    or item.get('emoji') not in REACTIONS for item in reaction)):return self.error(400,'Bad Request: REACTION_INVALID')
+            self.state.setdefault('reactions',{})[f'{chat}:{number}']=[item['emoji'] for item in reaction];result=True
         elif method=='setChatMenuButton':result=True
         elif method in ('setMyCommands','deleteMyCommands','getMyCommands'):
             # https://core.telegram.org/bots/api#setmycommands: one list per scope

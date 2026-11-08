@@ -92,6 +92,16 @@ are tracked by target and actor; anonymous counts are separate. Changes and
 removals invalidate stale inferred meaning without sending a new reply to an old
 message. If no update is delivered, Nocheh cannot infer a reaction change.
 
+While Nocheh works on a message, the bot reacts to it with the pinned Hermes
+adapter's own working reactions: 👀 while it works, then 👍 once the reply is
+sent or 👎 when the turn failed. A turn that ends in silence, is cancelled, or
+whose delivery is uncertain clears the 👀; a retried turn sets it again. The reactions follow the same rules
+as "typing…": only for a turn that will write an answer, only on that exact
+message, under the space's current permission, and not recorded as a delivery.
+Telegram sends no update for a bot's own reactions, and a group that limits its
+reactions may refuse them, which only costs the reaction. **React while
+working** in Settings › Telegram turns them off.
+
 ## Mini app
 
 The mini app shows Home, Inbox and Tasks inside Telegram. It opens from the
