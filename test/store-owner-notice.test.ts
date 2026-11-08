@@ -33,11 +33,14 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
     texts={'system.problem_buttons':'open: Look'};
     await send({id,problems,open:{kind:'url',url:'http://127.0.0.1:8783/#system'}});
     assert.deepEqual(calls[3][1].buttons,[{text:'Look',url:'http://127.0.0.1:8783/#system'}],'the owner’s own button wording');
-    // A cleared problem: the same notice is edited in place, its line marked ✅, without buttons once all have cleared.
+    // A cleared problem: the same notice is edited in place, its line kept as sent with a ✅ status under it,
+    // without buttons once all have cleared.
     texts={};
-    await send({id,problems,resolved:[false,true],edit:true});
-    assert.deepEqual(calls[4],['telegram.notice',{id,chat_id:'42',text:'⚠️ Nocheh found a problem:\n• '+problems[0]+'\n✅ '+problems[1]+'\n\nSee System › Health in the dashboard.',edit:true}]);
-    for(const body of [{id,problems,resolved:[true]},{id,problems,resolved:[true,'yes']},{id,problems,edit:'yes'}])
+    await send({id,problems,resolved:[null,'Fixed at 12:06 UTC'],edit:true});
+    assert.deepEqual(calls[4],['telegram.notice',{id,chat_id:'42',
+      text:'⚠️ Nocheh found a problem:\n• '+problems[0]+'\n• '+problems[1]+'\n✅ Fixed at 12:06 UTC\n\nSee System › Health in the dashboard.',edit:true}]);
+    for(const body of [{id,problems,resolved:['Fixed']},{id,problems,resolved:[null,true]},{id,problems,resolved:[null,'']},
+      {id,problems,resolved:[null,'x'.repeat(121)]},{id,problems,resolved:[null,'Fixed\nat 12:06']},{id,problems,edit:'yes'}])
       assert.equal((await send(body)).status,400);
     for(const body of [{id:'not-hex',problems},{id,problems:[]},{id,problems:['x'.repeat(501)]},{id,problems:Array(21).fill('x')},
       {id,problems,open:{kind:'web_app',url:'http://mini.example.test'}},{id,problems,open:{kind:'url',url:'javascript:alert(1)'}},{id,problems,open:{kind:'callback',url:'https://x.test'}}])
