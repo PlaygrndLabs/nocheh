@@ -349,14 +349,26 @@ def tasks_tool(args,**kwargs):
     except Exception:return json.dumps({'error':'tasks_unavailable'})
 
 
+# Nothing was sent and no card was made; the notes keep a passing failure from reading as a rule of the chat.
+TIMED_OUT={'error':'action_request_timed_out','note':'Nothing was sent and no approval was asked: preparing the request took too long. Ask again in a moment.'}
+UNAVAILABLE={'error':'controlled_action_unavailable','note':'Nothing was sent: a passing problem stopped the request. It is not a setting or a limit of this chat; ask again later.'}
+
+
 def controlled_tool(kind,args):
+    from urllib.error import HTTPError,URLError
     try:
         from pathlib import Path
         from .profile_config import inherited_config,read,preferences
         home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
         if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
         return json.dumps(request('/v1/tools/propose',{'kind':kind,'arguments':args}),ensure_ascii=False)
-    except Exception:return json.dumps({'error':'controlled_action_unavailable'})
+    except HTTPError as error:
+        # The store keeps its error text private; the status still says whether asking again can help.
+        return json.dumps({400:{'error':'invalid_action_request'},403:{'error':'not_allowed_here'}}.get(error.code,UNAVAILABLE))
+    except URLError as error:
+        return json.dumps(TIMED_OUT if isinstance(error.reason,TimeoutError) else UNAVAILABLE)
+    except TimeoutError:return json.dumps(TIMED_OUT)
+    except Exception:return json.dumps(UNAVAILABLE)
 
 
 def notion_tool(args,**kwargs):

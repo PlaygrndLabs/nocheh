@@ -210,8 +210,9 @@ def _detect_once(text, credentials, model, prompts):
     from services.hermes.prompts import text as prompt
     from services.hermes.request_boundary import trusted_detector
     from services.hermes.usage import error_reason, record, response_usage
-    # A provider waking from idle can refuse its first request with a server error. The check
-    # changes nothing, so one quick retry spares the turn the workflow's 30-second retry wait.
+    # A provider waking from idle can refuse its first request with a server error or drop the
+    # connection. The check changes nothing, so one quick retry spares the turn the workflow's
+    # 30-second retry wait. A timed-out call is not asked again: that would double the wait.
     for attempt in (1, 2):
         response, failed, refused, reason = None, True, False, None
         try:
@@ -228,7 +229,8 @@ def _detect_once(text, credentials, model, prompts):
             refused = isinstance(error, DetectorContractError) and str(error) == 'detector_refused'
             reason = 'bad_answer' if isinstance(error, DetectorContractError) else error_reason(error)
             status = getattr(error, "status_code", None)
-            if attempt == 2 or not isinstance(status, int) or status < 500:
+            dropped = type(error).__name__ == "APIConnectionError"
+            if attempt == 2 or not (dropped or isinstance(status, int) and status >= 500):
                 raise
         finally:
             # Nocheh's usage tracker: the provider's reported tokens, priced by Hermes.
