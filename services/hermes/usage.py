@@ -81,8 +81,12 @@ LOOP_REASONS = {'pending_tool_result': 'empty_answer', 'local_processing_error':
                 'repeated_outer_errors': 'unknown', 'error_near_max_iterations': 'unknown',
                 'redirect_restart_limit_exceeded': 'interrupted', 'rebuilt_restart_limit_exceeded': 'interrupted'}
 # What an API call's error says of the provider: Nocheh's broker's own refusal, the provider's status the broker
-# passed on, the status of a direct call, or a lost connection or timeout.
-LOOP_BROKER = re.compile(r"\{'error': '([a-z_]{1,64})'(?:, 'provider_status': ([1-5][0-9]{2}))?")
+# passed on, the status of a direct call, or a lost connection or timeout. Hermes keeps only the error's first
+# 80 characters, so a broker code may be cut short (no closing quote), and the provider_status after it never fits.
+LOOP_BROKER = re.compile(r"\{'error': '([a-z_]{1,64})('?)")
+PROVIDER_FAILED = 'provider_request_failed'
+# The broker answers a provider's refusal with the provider's own status for these, and with 503 for any other.
+PASSED_ON = (401, 403, 429)
 LOOP_STATUS = re.compile(r'Error code: ([1-5][0-9]{2})\b')
 LOOP_TIMEOUT = re.compile(r'Error during API call #\d+: (?:Request timed out|.*\btimed out\b)', re.I | re.S)
 LOOP_CONNECTION = re.compile(r'Error during API call #\d+: (?:Connection error|Server disconnected|.*\bconnection (?:reset|refused|closed|aborted|lost))',
@@ -150,15 +154,16 @@ def loop_failure(exit_reason):
         return 'unknown', 'loop_error'
     stop, detail = found.group(1), found.group(2) or ''
     if detail.startswith('Error during API call #'):
+        found = LOOP_STATUS.search(detail)
+        status = int(found.group(1)) if found else None
         broker = LOOP_BROKER.search(detail)
-        if broker and broker.group(1) != 'provider_request_failed':
-            return 'nocheh_error', stop
         if broker:
-            status = int(broker.group(2)) if broker.group(2) else None
-            return (_status_reason(status), cause(None, status)) if status else ('provider_error', stop)
-        status = LOOP_STATUS.search(detail)
+            code, whole = broker.groups()
+            if not (code == PROVIDER_FAILED if whole else PROVIDER_FAILED.startswith(code)):
+                return 'nocheh_error', stop
+            return (_status_reason(status), cause(None, status)) if status in PASSED_ON else ('provider_error', stop)
         if status:
-            return _status_reason(int(status.group(1))), cause(None, int(status.group(1)))
+            return _status_reason(status), cause(None, status)
         if LOOP_TIMEOUT.match(detail):
             return 'timed_out', 'timeout'
         if LOOP_CONNECTION.match(detail):

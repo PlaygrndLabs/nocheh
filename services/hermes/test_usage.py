@@ -94,6 +94,9 @@ class UsageTests(unittest.TestCase):
                          ['rate_limited', 'key_rejected', 'provider_error', 'timed_out', 'unknown'])
 
     def test_a_failure_keeps_the_providers_exact_error_as_codes_only(self):
+        # The exit reason as Hermes builds it (agent/turn_loop_errors.py): the API error's first 80 characters,
+        # with the error as the OpenAI client prints it.
+        outer = lambda call, status, body: 'repeated_outer_errors(' + f'Error during API call #{call}: Error code: {status} - {body}'[:80] + ')'
         cases = [
             ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 529: Overloaded'}], ('provider_error', 'overloaded:529')),
             ([{'failed': True, 'failure_reason': 'server_error', 'error': 'HTTP 500 — Internal Server Error'}],
@@ -126,14 +129,17 @@ class UsageTests(unittest.TestCase):
               for exit_reason, expected in [
                   ('repeated_outer_errors(Error during API call #3: Connection error.)', ('provider_error', 'connection')),
                   ('repeated_outer_errors(Error during API call #2: Request timed out.)', ('timed_out', 'timeout')),
-                  ("repeated_outer_errors(Error during API call #2: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_er)",
+                  (outer(2, 529, "{'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}}"),
                    ('provider_error', 'overloaded:529')),
-                  ("repeated_outer_errors(Error during API call #2: Error code: 503 - {'error': 'provider_request_failed', 'provider_status': 529})",
-                   ('provider_error', 'overloaded:529')),
-                  ("repeated_outer_errors(Error during API call #2: Error code: 503 - {'error': 'provider_request_failed',)",
-                   ('provider_error', 'repeated_outer_errors')),
-                  ("repeated_outer_errors(Error during API call #2: Error code: 503 - {'error': 'required_guard_unavailable'})",
-                   ('nocheh_error', 'repeated_outer_errors')),
+                  # Through the broker: its own refusals are Nocheh's errors, even with the code cut short.
+                  (outer(2, 503, "{'error': 'required_guard_unavailable'}"), ('nocheh_error', 'repeated_outer_errors')),
+                  (outer(2, 503, "{'error': 'security_service_unavailable'}"), ('nocheh_error', 'repeated_outer_errors')),
+                  (outer(2, 403, "{'error': 'model_configuration_mismatch'}"), ('nocheh_error', 'repeated_outer_errors')),
+                  # A provider's refusal: the broker's status is the provider's own only for 401, 403 and 429.
+                  (outer(3, 429, "{'error': 'provider_request_failed', 'provider_status': 429}"), ('rate_limited', 'rate_limit:429')),
+                  (outer(3, 401, "{'error': 'provider_request_failed', 'provider_status': 401}"), ('key_rejected', 'auth:401')),
+                  (outer(2, 503, "{'error': 'provider_request_failed', 'provider_status': 529}"), ('provider_error', 'repeated_outer_errors')),
+                  (outer(1000, 503, "{'error': 'provider_request_failed', 'provider_status': 500}"), ('provider_error', 'repeated_outer_errors')),
                   ("repeated_outer_errors(Error during API call #3: KeyError: 'connection_id' private words)", ('unknown', 'repeated_outer_errors')),
                   ('error_near_max_iterations(Error during API call #9: private words)', ('unknown', 'error_near_max_iterations')),
                   ('pending_tool_result', ('empty_answer', 'pending_tool_result')),
