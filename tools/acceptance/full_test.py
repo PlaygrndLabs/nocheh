@@ -84,6 +84,7 @@ TITLES = {
     'background_job_uses_sealed_box': 'A background job runs its commands in the sealed box',
     'background_job_reads_a_repo_copy': 'A background job reads a GitHub copy in its sealed box',
     'approval_waits_across_a_change_and_runs': 'An approval waits through a reaction, then runs the exact command',
+    'group_operation_answers_in_topic': 'A member\'s command, approved privately, is answered in its group topic',
     'job_operation_runs_after_approval': 'A job\'s command runs once you approve it',
     'background_job_long_run': 'A background job runs past the old step limit as one run',
     'background_job_stop_button': 'Stop on a running job\'s card stops it',

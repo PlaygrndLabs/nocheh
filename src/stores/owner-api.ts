@@ -125,7 +125,7 @@ export class OwnerStorageApi {
       if(source[2]==='retirement'){
         if(method==='GET')return s.retirements.get(principal,captured.reference.id);
         const result=await s.retirements.set(principal,captured.reference.id,input);
-        if(result.retired)await s.telegram.cancelRetired(await s.retirements.events(captured.reference.id));
+        if(result.retired){const events=await s.retirements.events(captured.reference.id);await s.telegram.cancelRetired(events);await s.continuations.cancelRetired(events);}
         return result;
       }
       if(source[2]==='learning-consent')return method==='GET'?s.access.consent(principal,captured.reference):s.access.setConsent(principal,captured.reference,input);

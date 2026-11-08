@@ -1,5 +1,5 @@
 import {blockingPublications} from './publications.js';
-import {ownerAutonomyGrant} from './owner-autonomy.js';
+import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
@@ -204,8 +204,10 @@ export class TelegramActionRepository {
       // group's memory for another group waits for the owner. Deny rules still
       // apply first. The owner's own request from a group for their private
       // chat needs no approval either.
+      // A follow-up was not asked by the owner: its private chat gets nothing from it without a card (ADR-0212).
+      const group=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?this.groupRequest(principal,turn,destination,requester):null;
       const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
-        (this.groupRequest(principal,turn,destination,requester)??await ownerAutonomyGrant(db,principal,turn)):null;
+        (group==='owner_private_request'&&await followUpTurn(db,principal)?null:group)??await ownerAutonomyGrant(db,principal,turn):null;
       if(autonomy)decision=await evaluate(db,effect,autonomy);
       await recordEffect(db,effect,'proposed',decision,source);
       if(autonomy&&decision.outcome==='allow') {

@@ -137,6 +137,23 @@ def delivery_failure(requests):
     return None
 
 
+CONTINUATION=re.compile(r'[a-f0-9]{64}')
+CONTINUATION_ATTEMPT=re.compile(r'c[1-9]\d{0,2}-[a-f0-9]{40}')
+
+
+def continuation_id(body):
+    """The leader action id of a continuation, or None for a message turn. A continuation's attempt names it, so its
+    receipt, run and archived result never meet a message turn's; it carries no fixed control reply."""
+    attempt,value=body.get('attempt'),body.get('continuation')
+    if value is None:
+        if type(attempt) is not int or attempt<1:raise ValueError('invalid_dispatch_attempt')
+        return None
+    if (not isinstance(value,str) or not CONTINUATION.fullmatch(value) or not isinstance(attempt,str)
+            or not CONTINUATION_ATTEMPT.fullmatch(attempt) or attempt[-40:]!=value[:40] or body.get('control_reply') is not None):
+        raise ValueError('invalid_continuation')
+    return value
+
+
 def adapter_config(token):
     """The native adapter's settings; its own sends and replies carry no link preview."""
     from gateway.config import PlatformConfig
@@ -326,7 +343,7 @@ def committed_adapter_class():
             if not await asyncio.to_thread(check_delivery_policy,turn['body']['archive_credential']):
                 turn['agent_result']={'state':'failed','error_code':'space_policy_changed'}
                 return
-            from gateway.platforms.base import _thread_metadata_for_event
+            from gateway.platforms.base import _mark_notify_metadata,_thread_metadata_for_event
             if turn.get('progress'):turn['progress']('delivery')
             # Use native Telegram formatting/splitting and the durable
             # outbound journal, without implicit MEDIA/file/TTS delivery.
@@ -338,7 +355,10 @@ def committed_adapter_class():
             from time import perf_counter
             sending=perf_counter()
             try:
-                delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=_thread_metadata_for_event(event))
+                # A follow-up arrives when nobody watches the typing, so it alerts as Hermes's own final replies do (session_ingress.deliver_response).
+                metadata=_thread_metadata_for_event(event)
+                if turn['body'].get('continuation'):metadata=_mark_notify_metadata(metadata)
+                delivered=await self.send(event.source.chat_id,response,reply_to=event.message_id,metadata=metadata)
             finally:
                 OUTBOUND_CHECK.reset(check)
                 # A failed or uncertain send still waited on Telegram for this long.
@@ -444,13 +464,15 @@ class AssistantGateway:
 
     async def dispatch(self,body,progress=None,cancelled=None):
         if self.status!='connected' or not self.adapter:raise RuntimeError('telegram_not_connected')
+        continuation=continuation_id(body)
         scope=self.scopes.resolve(body['payload'],body['scope'])
         if scope is None:return {'state':'suppressed'}
         claims=verify_capability(body['archive_credential'],environment_secret('SERVICE_TOKEN'),scope,body['event_id'])
         scope=Scopes.apply_revision(scope,claims)
         if body['event_id']!=digest(body['source_key']) or body['source_key']!=f"telegram:{self.token.split(':',1)[0]}:update:{body['payload']['update_id']}":raise ValueError('invalid_dispatch_identity')
         # A group message nobody addressed to the bot stays archived without a turn.
-        if not scope.owner and not self.group_turn(body):return {'state':'suppressed','error_code':'not_addressed'}
+        # The asking turn was already admitted; its follow-up answers it.
+        if not scope.owner and continuation is None and not self.group_turn(body):return {'state':'suppressed','error_code':'not_addressed'}
         name=digest(body['event_id']+':'+str(body['attempt']))
         # Turns in one conversation keep their arrival order; different chats
         # and different topics of one group run side by side, up to
@@ -464,7 +486,7 @@ class AssistantGateway:
                 async with self.capacity:
                     if cancelled and cancelled.is_set():
                         result={'state':'cancelled'};await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result));return result
-                    return await self._run_turn(scope,body,name,progress,cancelled)
+                    return await (self._run_turn if continuation is None else self._run_continuation)(scope,body,name,progress,cancelled)
         finally:
             lane['users']-=1
             if not lane['users'] and self.lanes.get(key) is lane:del self.lanes[key]
@@ -480,15 +502,34 @@ class AssistantGateway:
     async def _run_turn(self,scope,body,name,progress,cancelled):
         from telegram import Update
         from telegram.ext import Application
+        # Native replay admission already claimed this update when polling
+        # met the committed-only gate, and it would drop the committed turn
+        # as a redelivery. Dispatch receipts own exactly-once turns, so the
+        # committed update enters PTB's dispatch beneath that admission.
+        return await self._run(scope,body,name,progress,cancelled,body['source_key'],
+            lambda:Application.process_update(self.adapter._app,Update.de_json(body['payload'],self.adapter._bot)))
+
+    async def _run_continuation(self,scope,body,name,progress,cancelled):
+        # Hermes resumes a session the same way: an internal event into handle_message (hermes:gateway/wake.py:96-104).
+        # Not replayed through PTB, so committed_only, media downloads and album batching never see it; its sends get their own journal key.
+        return await self._run(scope,body,name,progress,cancelled,body['source_key']+':continuation:'+body['continuation'],
+            lambda:self._continue(body))
+
+    async def _continue(self,body):
+        from telegram import Message
+        from gateway.platforms.base import MessageType
+        event=self.adapter._build_message_event(Message.de_json(body['payload']['message'],self.adapter._bot),MessageType.TEXT,
+                                                update_id=body['payload']['update_id'])
+        # Synthetic and never a gateway command; the reply still anchors on the asking message (_answer passes reply_to).
+        event.internal=True;event.allow_gateway_control=False
+        await self.adapter.handle_message(event)
+
+    async def _run(self,scope,body,name,progress,cancelled,key,enter):
         await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id'],'attempt':body['attempt']}))
-        turn={'scope':scope,'body':body,'progress':progress,'cancelled':cancelled,'tasks':set()};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(body['source_key'])
+        turn={'scope':scope,'body':body,'progress':progress,'cancelled':cancelled,'tasks':set()};token=TURN.set(turn);dispatch=DISPATCH_KEY.set(key)
         try:
             if progress:progress('assistant')
-            # Native replay admission already claimed this update when polling
-            # met the committed-only gate, and it would drop the committed turn
-            # as a redelivery. Dispatch receipts own exactly-once turns, so the
-            # committed update enters PTB's dispatch beneath that admission.
-            await Application.process_update(self.adapter._app,Update.de_json(body['payload'],self.adapter._bot))
+            await enter()
             # Native text/album batching uses delayed tasks. Keep the durable
             # dispatch open until those tasks and their native delivery finish.
             for _ in range(4):
@@ -621,7 +662,7 @@ class AssistantGateway:
                 receipt=self.receipts/(name+'.result')
                 if receipt.exists():return json.loads(receipt.read_bytes())
                 if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
-                await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
+                await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id'],'chat_id':chat}))
                 token=DISPATCH_KEY.set('approval:'+body['id'])
                 check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
                 try:
@@ -637,8 +678,22 @@ class AssistantGateway:
                 return result
         if body.get('kind')=='settle':
             if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_approval')
-            receipt=self.receipts/('approval-'+body['id']+'.result')
+            name='approval-'+body['id'];receipt=self.receipts/(name+'.result')
             card=json.loads(receipt.read_bytes()) if receipt.exists() else {}
+            seen=str(body.get('message_id') or '')
+            if seen and not re.fullmatch(r'[1-9]\d{0,15}',seen):raise ValueError('invalid_approval')
+            if card.get('state')!='done':
+                # A send whose answer was lost may still have reached the chat. A press on that card names its message
+                # (storage passes only a pressed message that carries this card's button), and it is kept at once, so
+                # later edits find it even if this edit's own answer is lost. Only a card this runtime tried to send to
+                # this chat is edited, and Telegram lets a bot edit only its own messages.
+                found=self.receipts/(name+'.seen')
+                if found.exists():card=json.loads(found.read_bytes())
+                elif seen and (self.receipts/(name+'.intent')).exists() and json.loads((self.receipts/(name+'.intent')).read_bytes()).get('chat_id')==chat:
+                    card={'state':'done','chat_id':chat,'message_id':seen}
+                    # Best effort: without it a later edit needs another press.
+                    try:await asyncio.to_thread(immutable_file,self.receipts,name+'.seen',canonical(card))
+                    except Exception:pass
             # Only a card this runtime sent, in the chat it was sent to, is edited.
             # A running background job's card keeps one Stop button; every other decided card loses its buttons.
             stop=body.get('buttons')

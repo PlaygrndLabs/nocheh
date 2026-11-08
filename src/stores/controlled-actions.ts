@@ -1,5 +1,6 @@
 import {blockingPublications} from './publications.js';
-import {ownerAutonomyGrant} from './owner-autonomy.js';
+import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
+import {followUpLeft} from './action-continuations.js';
 import {notionAuthority} from './notion.js';
 import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
 import type pg from 'pg';
@@ -64,9 +65,11 @@ export class ControlledActionRepository {
     const binding={...current,generation:turn.generation??current.generation,epoch:turn.guard_epoch};
     const source=await this.prepared.root(principal,current);
     if('connection' in raw)await notionAuthority(this.control,principal,turn,raw,false);
+    let telegram=false;
     if(source.store==='archive') {
       const original=await this.access.archive.verify(source),intake=(await this.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
       if(original.origin!=='live'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'external_effect_requires_live_turn');
+      telegram=original.channel==='telegram';
     }
     const id=digest(canonical([protocol,source,binding,body.kind,raw])),proposal=await this.derived.record({operation_id:'controlled-proposal:'+id,
       source,kind:'controlled_action_request',content:Buffer.from(canonical(raw)),producer:'nocheh',producer_version:protocol,configuration:{binding,kind:body.kind}});
@@ -93,8 +96,9 @@ export class ControlledActionRepository {
       // from a live turn there or a run of a job the owner approved there
       // (ADR-0203). It replaces the owner freedom setting for Notion calls; that
       // setting never applies to jobs. A relaunched run of a job (attempt > 1) gets
-      // no autonomy: every change it asks for waits for a card (ADR-0207).
-      const connected='connection' in args,live=source.store==='archive',fresh=!turn.job||!await relaunchedRun(db,source.id);
+      // no autonomy: every change it asks for waits for a card (ADR-0207), and
+      // neither does a follow-up turn, which no owner request started (ADR-0212).
+      const connected='connection' in args,live=source.store==='archive'&&!await followUpTurn(db,principal),fresh=!turn.job||!await relaunchedRun(db,source.id);
       const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,this.access.policy().owner_id,source,turn):live):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
@@ -104,6 +108,8 @@ export class ControlledActionRepository {
       await recordEffect(db,this.effect(row),decision.outcome==='deny'?'blocked':decision.outcome==='allow'?'allowed':'awaiting_approval',decision,source,grant?.id);
       await requestWorkflow(db,'tools',id);await db.query('COMMIT');
       if(autonomy&&decision.outcome==='allow')return {id,state:'approved',fingerprint,message:autonomy===notion?'Allowed by the owner\'s Notion setting; it will run now.':
+        // Only a Telegram chat gets the follow-up turn, at most three per asking message (ADR-0212); a browser turn reads the operation itself.
+        telegram&&await followUpLeft(db,source.id)?'Approved by your own request under the owner freedom setting; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.':
         'Approved by your own request under the owner freedom setting; it will run now.'};
       return {id,state:row.state,fingerprint,message:'Review the exact operation. Execution requires owner approval or a current bounded permission.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}

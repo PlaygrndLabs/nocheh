@@ -5,7 +5,7 @@ import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from tools.operations.security.tool_execution import FAILURES,bounded_execute,sandbox_ready
+from tools.operations.security.tool_execution import FAILURES,READ_ANSWERED,UNSENT,bounded_execute,sandbox_ready
 
 
 def permitted_execute(state,action):
@@ -77,7 +77,10 @@ def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None
         # Do not infer safe retry from the exception class or response body; keep
         # only its fixed failure code, to say why.
         cause=str(error) if isinstance(error,(RuntimeError,TimeoutError)) and str(error) in FAILURES else None
-        body.update(state='ambiguous',result={'error':'execution_outcome_unconfirmed',**({'cause':cause} if cause else {})})
+        # Known outcomes are failures, not uncertain ones: nothing was sent, or a page read got the
+        # whole answer and only refused it. A read changes nothing, so it is not asked again.
+        if cause in UNSENT or action.get('kind')=='browser' and cause in READ_ANSWERED:body.update(state='failed',result={'exit_code':1,'error':cause})
+        else:body.update(state='ambiguous',result={'error':'execution_outcome_unconfirmed',**({'cause':cause} if cause else {})})
     with receipt_lock(state):
         path=Path(state)/'admin/tools/receipts'/(action['id']+'.json');atomic(path,body)
         api.call('/v1/tools/finish',body);path.unlink()

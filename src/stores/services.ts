@@ -38,6 +38,7 @@ import {DerivativePortabilityRepository} from './derivative-portability.js';
 import {RuntimeConfigurationRepository} from './runtime-configuration.js';
 import {TelegramActionRepository} from './telegram-actions.js';
 import {TelegramDispatchRepository} from './telegram-dispatch.js';
+import {ActionContinuationRepository} from './action-continuations.js';
 import {ControlledActionRepository} from './controlled-actions.js';
 import {ControlledExecutionRepository} from './controlled-execution.js';
 import {ActionCommandRepository} from './action-commands.js';
@@ -133,6 +134,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
+    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.runtime,options.serviceToken??''),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory,knowledge,supervision,

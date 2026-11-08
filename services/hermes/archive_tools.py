@@ -228,7 +228,7 @@ def register(ctx):
     for kind,description,properties,required in (
         ('shell','Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval or an exact standing permission is required.',
          {'command':{'type':'string','maxLength':16000}},['command']),
-        ('browser','Propose inspection of one public HTTPS HTML page. The approved response renders offline without scripts or secondary requests. No logins, clicks or form submissions.',
+        ('browser','Propose reading one public HTTPS page. An HTML page renders offline without scripts or secondary requests; a JSON or plain-text answer, such as a weather service\'s, comes back as text. No logins, clicks or form submissions.',
          {'url':{'type':'string'}},['url']),
         ('mcp','Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities.',
          {'url':{'type':'string'},'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string'},'input':{'type':'object'}},['url']),
