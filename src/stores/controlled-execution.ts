@@ -62,12 +62,14 @@ export class ControlledExecutionRepository {
       return {id:row.id,state:row.state};
     }
     if(!['running','ambiguous'].includes(row.state))throw new HttpError(409,'action_not_running');
-    await this.complete(db,row,content.state,reference);
+    await this.complete(db,row,content.state,reference,content.result?.error);
     return {id:row.id,state:content.state};
   }
-  async complete(db:pg.PoolClient,row:any,state:'done'|'failed'|'ambiguous',reference:unknown) {
+  async complete(db:pg.PoolClient,row:any,state:'done'|'failed'|'ambiguous',reference:unknown,failure?:unknown) {
+    // A failure keeps the executor's fixed code, such as a refused page or a tool's own error, never remote text.
+    const code=state==='ambiguous'?'executor_outcome_unconfirmed':state==='failed'&&typeof failure==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(failure)?failure:null;
     await db.query(`UPDATE controlled_actions SET state=$2,result_id=$3,result_reference=$4,lease_until=NULL,
-      error_code=$5,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,state,(reference as any).id,reference,state==='ambiguous'?'executor_outcome_unconfirmed':null]);
+      error_code=$5,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,state,(reference as any).id,reference,code]);
     await recordEffect(db,this.actions.effect(row),state==='done'?'completed':state,
       row.security_decision??await evaluate(db,this.actions.effect(row)),row.source_reference,row.permission_id??undefined);
     // A late retained receipt can settle an already closed uncertain workflow.

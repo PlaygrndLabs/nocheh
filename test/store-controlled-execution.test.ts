@@ -79,6 +79,7 @@ test('host tool execution fences exact authority and repairs durable results wit
     assert.equal((await x.claim(pb)).claimed,false,'repeat claim cannot consume a second use');
     await a.revoke(owner,{id:grant.id});assert.deepEqual(await x.start(pb),{started:false,reason:'permission_no_longer_valid'});
     await x.finish({id:permission.id,actor:pb.actor,state:'failed',result:{error:'security_start_denied'}});assert.equal((await finishHost(pb)).state,'failed');
+    assert.equal((await a.row(permission.id)).error_code,'security_start_denied','a failure keeps its fixed code');
     assert.deepEqual(ended(),[permission.id]);await followed(permission.id);
     const waits=await proposal('printf waits',false);assert.deepEqual(await x.claim(await host(waits.id)),{claimed:false});
     assert.deepEqual(ended(),[],'a claim that only waits for the owner ends nothing');await none(waits.id,'a waiting operation has not ended');

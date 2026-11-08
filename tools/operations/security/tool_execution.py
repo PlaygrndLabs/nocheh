@@ -23,6 +23,11 @@ TOOLS_IMAGE='nocheh-tools:local'
 FAILURES=frozenset({'public_https_required','private_destination_denied','remote_unreachable','remote_unauthorized',
     'remote_response_rejected','encoded_response_denied','remote_response_limit','browser_html_required',
     'sandbox_timed_out','sandbox_execution_failed','tool_process_failed','tool_deadline','tool_result_limit'})
+# Failures whose outcome is known. Nothing was sent: the address was refused before any connection.
+UNSENT=frozenset({'public_https_required','private_destination_denied'})
+# A page read whose whole answer arrived and was refused, or whose offline rendering failed after it.
+READ_ANSWERED=frozenset({'remote_unauthorized','remote_response_rejected','encoded_response_denied','remote_response_limit',
+    'browser_html_required','sandbox_timed_out','sandbox_execution_failed'})
 
 
 def failure(error):
@@ -158,7 +163,11 @@ def execute(state,action,request=https_request,run=subprocess.run,container_name
     body={'kind':action['kind'],'arguments':args}
     if action['kind']=='browser':
         data,headers=request(args['url'])
-        if 'text/html' not in headers.get('content-type',''):raise RuntimeError('browser_html_required')
+        media=headers.get('content-type','').split(';')[0].strip().lower()
+        # A data answer, such as a weather service's JSON, is read as text: nothing in it renders or runs.
+        if media in ('application/json','text/plain') or re.fullmatch(r'application/[\w.+-]+\+json',media):
+            return {'text':data.decode('utf-8',errors='replace')[:100000],'links':[],'mode':'text','url':args['url']}
+        if media!='text/html':raise RuntimeError('browser_html_required')
         body['html']=data.decode('utf-8',errors='replace')
     name=container_name or 'nocheh-tool-'+uuid.uuid4().hex
     try:

@@ -42,7 +42,8 @@ test('allowed members post freely in their own group; everything else waits for 
   const message=(label:string,extra:Record<string,unknown>={},from=9,update?:number)=>capture(label,{...(update?{update_id:update}:{}),message:{message_id:Date.now(),date:1700000000,
     chat:{id:Number(group),type:'supergroup',is_forum:true},from:{id:from,first_name:'Member'},text:'Please prepare a message',...extra}});
   const press=(label:string,data:string,from=123)=>capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:from},chat_instance:'1',data,
-    message:{message_id:5,date:1700000000,chat:{id:Number(group),type:'supergroup',is_forum:true},message_thread_id:17,is_topic_message:true}}});
+    message:{message_id:5,date:1700000000,chat:{id:Number(group),type:'supergroup',is_forum:true},message_thread_id:17,is_topic_message:true,
+      reply_markup:{inline_keyboard:[[{text:'Approve',callback_data:data}]]}}}});
   const actor=async(source:string,space:string):Promise<Reader>=>{
     const binding=await s.guards.state();return {admin:false,scope:group,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
   };
@@ -139,6 +140,7 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal((await s.telegramActions.inspect(owner,elsewhere.id)).state,'approved');
     assert.equal(last('answer').text,'✅ Approved.');
     assert.deepEqual([last('settle').id,last('settle').chat_id,last('settle').text],[elsewhere.id,'123',card.text+'\n\n⏳ Approved. Sending now.']);
+    assert.equal(last('settle').message_id,undefined,'a press in another chat names no message of this card');
     assert.equal(await s.actionCommands.callback(pressed),true);assert.equal(last('answer').text,'✅ Approved.','a repeated delivery of one press is one decision');
     // A press reaching the reply workflow is handled there and never becomes a turn.
     await s.preparation.run(pressed.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
@@ -156,8 +158,18 @@ test('allowed members post freely in their own group; everything else waits for 
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
     assert.equal(last('card').chat_id,'123');assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in a Telegram group\n\n\{/);assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
-    assert.equal(await s.actionCommands.callback(await press('tool','na'+tool.id.slice(0,40)+tool.fingerprint.slice(0,16))),true);
+    // The press names the card's message, so a card whose send lost its answer still loses its buttons: here the card
+    // reviewed in its own group. A press in another chat names none.
+    assert.deepEqual([last('settle').id,last('settle').chat_id,last('settle').message_id],[shut.id,group,'5']);
+    const toolData='na'+tool.id.slice(0,40)+tool.fingerprint.slice(0,16),privatePress=(label:string,message:number,data:string)=>
+      capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:123},chat_instance:'1',data:toolData,
+        message:{message_id:message,date:1700000000,chat:{id:123,type:'private'},reply_markup:{inline_keyboard:[[{text:'Approve',callback_data:data}]]}}}},'123');
+    // Sent on another message, one without this button, the same data names no message.
+    assert.equal(await s.actionCommands.callback(await privatePress('tool-elsewhere',58,'na'+'0'.repeat(56))),true);
     assert.equal((await s.controlledActions.inspect(owner,tool.id)).state,'approved');assert.match(last('settle').text,/\n\n✅ Approved\.$/);
+    assert.deepEqual([last('settle').chat_id,last('settle').message_id],['123',undefined]);
+    assert.equal(await s.actionCommands.callback(await privatePress('tool',57,toolData)),true);
+    assert.deepEqual([last('settle').chat_id,last('settle').message_id],['123','57']);
     // A standing permission runs the same operation without a decision, so no buttons are offered.
     await s.controlledActions.grant(owner,{action_id:tool.id,fingerprint:tool.fingerprint,uses:1,minutes:5});
     const again=await message('again'),offered=cards.length;

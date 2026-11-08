@@ -662,7 +662,7 @@ class AssistantGateway:
                 receipt=self.receipts/(name+'.result')
                 if receipt.exists():return json.loads(receipt.read_bytes())
                 if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
-                await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id']}))
+                await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id'],'chat_id':chat}))
                 token=DISPATCH_KEY.set('approval:'+body['id'])
                 check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
                 try:
@@ -678,8 +678,22 @@ class AssistantGateway:
                 return result
         if body.get('kind')=='settle':
             if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_approval')
-            receipt=self.receipts/('approval-'+body['id']+'.result')
+            name='approval-'+body['id'];receipt=self.receipts/(name+'.result')
             card=json.loads(receipt.read_bytes()) if receipt.exists() else {}
+            seen=str(body.get('message_id') or '')
+            if seen and not re.fullmatch(r'[1-9]\d{0,15}',seen):raise ValueError('invalid_approval')
+            if card.get('state')!='done':
+                # A send whose answer was lost may still have reached the chat. A press on that card names its message
+                # (storage passes only a pressed message that carries this card's button), and it is kept at once, so
+                # later edits find it even if this edit's own answer is lost. Only a card this runtime tried to send to
+                # this chat is edited, and Telegram lets a bot edit only its own messages.
+                found=self.receipts/(name+'.seen')
+                if found.exists():card=json.loads(found.read_bytes())
+                elif seen and (self.receipts/(name+'.intent')).exists() and json.loads((self.receipts/(name+'.intent')).read_bytes()).get('chat_id')==chat:
+                    card={'state':'done','chat_id':chat,'message_id':seen}
+                    # Best effort: without it a later edit needs another press.
+                    try:await asyncio.to_thread(immutable_file,self.receipts,name+'.seen',canonical(card))
+                    except Exception:pass
             # Only a card this runtime sent, in the chat it was sent to, is edited.
             # A running background job's card keeps one Stop button; every other decided card loses its buttons.
             stop=body.get('buttons')

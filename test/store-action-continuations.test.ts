@@ -204,6 +204,14 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     assert.equal(note.state,'proposed','a message for another chat waits too');
     await s.ownerAutonomy.save(owner,{mode:'approval_required',expected_revision:enabled.revision,operation_id:key+':review'});
     await due(freed.id);observed={state:'done'};assert.equal((await follow(freed.id)).state,'completed');started={state:'done'};
+    // The owner's own request in a group may send to their private chat without a card; its follow-up may not.
+    const ownerAsk=await capture('owner in group',{update_id:++updates,message:{message_id:100+updates,date:1700000000,chat:{id:Number(group),type:'supergroup',is_forum:true},
+      from:{id:123,first_name:'Owner'},text:'Please run owner in group',message_thread_id:17,is_topic_message:true}});
+    assert.equal((await s.telegramActions.request(await actor(ownerAsk,group),{destination:'123',text:'Made-up note the owner asked for'})).state,'approved');
+    const ownerRun=await operation(ownerAsk,'printf made-up-owner-group');await asking(ownerAsk,'done');await decide(ownerRun,'na');await ran(ownerRun.id);
+    started={state:'running'};observed={state:'running'};assert.equal((await follow(ownerRun.id)).state,'running');
+    assert.equal((await s.telegramActions.request(await actor(ownerAsk,group),{destination:'123',text:'Made-up note a result asked for'})).state,'proposed');
+    await due(ownerRun.id);observed={state:'done'};assert.equal((await follow(ownerRun.id)).state,'completed');started={state:'done'};
     // The owner's own wording starts the turn.
     await stores.control.query(`UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton`,[JSON.stringify({'telegram.action_continued':'Made-up follow-up:\n{actions}'})]);
     const worded=await message('worded'),wording=await operation(worded,'printf made-up-worded');await asking(worded,'done');await decide(wording,'na');await ran(wording.id);

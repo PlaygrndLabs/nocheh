@@ -34,13 +34,19 @@ type Mark=(label:string,url:string|null)=>string;
 const reasons:Record<string,ApprovalText>={notion_not_connected:'reason_sign_in',notion_reconnect_needed:'reason_sign_in',notion_unavailable:'reason_unreachable',
   notion_not_enabled:'reason_turned_off',tool_disabled_by_owner:'reason_turned_off',tool_reported_error:'reason_refused',owner_cancelled:'reason_cancelled',job_stopped:'reason_stopped',
   guard_context_changed:'reason_changed',guard_transition_pending:'reason_changed',action_proposal_changed:'reason_changed',security_start_denied:'reason_changed',
-  permission_no_longer_valid:'reason_changed',execution_lease_expired:'reason_changed',tool_sandbox_missing:'reason_sandbox'};
+  permission_no_longer_valid:'reason_changed',execution_lease_expired:'reason_changed',tool_sandbox_missing:'reason_sandbox',
+  remote_unauthorized:'reason_refused',remote_response_rejected:'reason_refused'};
 /** An approval that fails because what the operation used changed since it was asked. */
 const outdated=new Set(['guard_context_changed','action_proposal_changed']);
 /** Failures where the executor stopped before it sent anything. */
-const unsent=new Set(['tool_disabled_by_owner','tool_policy_unavailable','tool_sandbox_missing','notion_not_connected','notion_reconnect_needed','notion_unavailable']);
+const unsent=new Set(['tool_disabled_by_owner','tool_policy_unavailable','tool_sandbox_missing','notion_not_connected','notion_reconnect_needed','notion_unavailable',
+  'public_https_required','private_destination_denied']);
 /** Card edits for one action, across every repository in this process, in the order they were asked for. */
 const editing=new Map<string,Promise<void>>();
+/** The card a button was pressed on, as Telegram names it. A card whose send lost its answer has no saved message
+ *  id, yet still reached the chat; the press names it, so its decision can still be shown (the gateway checks it). */
+type Seen={chat:string;message:string}|undefined;
+const seenIn=(seen:Seen,chat:string)=>seen&&seen.chat===chat?{message_id:seen.message}:{};
 
 /** One change on a list card: its number, kind and exact arguments. */
 const entryText=(number:number,kind:string,args:string)=>`${number}. ⚙️ ${kind.replace(controls,'')}${args?'\n'+args.replace(controls,''):''}`;
@@ -262,14 +268,14 @@ export class ActionCommandRepository {
   }
   /** A decided job's card keeps its text and shows where the job is: Stop while it waits or runs, no button once it
    *  stops or ends. A job that ended at a limit says a short note is in the chat. */
-  private async settleJob(id:string) {
+  private async settleJob(id:string,seen?:Seen) {
     if(!this.jobs)return;
     const card=await this.jobs.card(id),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
     const state=row.error_code==='job_repo_removed'?'repo_removed':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
       row.state==='done'&&row.ended?'limited':row.state;
     const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines.running:card.lines[state];
     const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;
-    if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{})});
+    if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{}),...seenIn(seen,place.chat)});
     if(['done','failed','limited'].includes(state)&&!row.cancel_requested)await this.offerList(row);
   }
   /** The changes a job left waiting, on as few cards as Telegram allows; each card is decided as a whole.
@@ -324,7 +330,7 @@ export class ActionCommandRepository {
     return null;
   }
   /** A decided list card keeps its text and says how its changes ended. */
-  private async settleList(id:string) {
+  private async settleList(id:string,seen?:Seen) {
     const found=await this.listCard({card:id}),owner=this.access.policy().owner_id;if(!found||!owner)return;
     const {line}=await this.texts(),states=(await this.access.stores.control.query('SELECT id,state,error_code FROM controlled_actions WHERE id=ANY($1)',
       [found.card.members.map(([member])=>member)])).rows;
@@ -340,26 +346,26 @@ export class ActionCommandRepository {
     const text=listText(line,title,found.card.members.length,found.index,cards.length,found.card.long??0,await this.entries(found.card));
     // Texts edited since the card was sent can make it longer; a decided card has no buttons, so its end may be cut.
     const room=cardLimit-outcome.length-3;
-    await this.approval({kind:'settle',chat_id:owner,id,text:`${text.length>room?text.slice(0,room-1)+'…':text}\n\n${outcome}`,links:[]});
+    await this.approval({kind:'settle',chat_id:owner,id,text:`${text.length>room?text.slice(0,room-1)+'…':text}\n\n${outcome}`,links:[],...seenIn(seen,owner)});
   }
   /** Show the decision on a card and remove its buttons; best effort. Edits of one card run one after
    * another and each reads the state when it starts, so the last edit shows the latest state. */
-  async settle(kind:ActionKind,id:string) {
-    const key=kind+':'+id,run=(editing.get(key)??Promise.resolve()).then(()=>this.edit(kind,id)),tail=run.catch(()=>{});
+  async settle(kind:ActionKind,id:string,seen?:Seen) {
+    const key=kind+':'+id,run=(editing.get(key)??Promise.resolve()).then(()=>this.edit(kind,id,seen)),tail=run.catch(()=>{});
     editing.set(key,tail);
     try{await run;}finally{if(editing.get(key)===tail)editing.delete(key);}
   }
-  private async edit(kind:ActionKind,id:string) {
+  private async edit(kind:ActionKind,id:string,seen?:Seen) {
     try {
-      if(kind==='background')return await this.settleJob(id);
-      if(kind==='list')return await this.settleList(id);
+      if(kind==='background')return await this.settleJob(id,seen);
+      if(kind==='list')return await this.settleList(id,seen);
       // An operation on a list card shows on that card.
       const listed=kind==='controlled'?await this.listCard({member:id}):null;
       if(listed)return await this.settle('list',listed.card.id);
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
       const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line,card.code,card.started):null;
-      if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:card.links});
+      if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:card.links,...seenIn(seen,place.chat)});
     }catch(error){if(!(error instanceof HttpError))throw error;}
   }
   /** A button press: true when it was an approval button, whatever its outcome. */
@@ -378,10 +384,13 @@ export class ActionCommandRepository {
       UNION ALL SELECT 'list',c->>'id',c->>'fingerprint' FROM background_jobs j CROSS JOIN LATERAL jsonb_array_elements(j.changes) c
         WHERE j.changes IS NOT NULL AND left(c->>'id',40)=$1`,[data[2]])).rows;
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
-    if(action?.kind==='background'&&this.jobs)return data[1]==='s'?this.stopPressed(action,presser,chat,query.id):this.jobPressed(action,data[1]==='a',presser,chat,query.id,source);
+    // Telegram fills in the pressed message; only one that carries this very button names this card's message.
+    const carries=(query.message?.reply_markup?.inline_keyboard??[]).flat().some((button:any)=>button?.callback_data===query.data);
+    const message=String(query.message?.message_id??''),seen:Seen=carries&&chat&&/^[1-9]\d{0,15}$/.test(message)?{chat,message}:undefined;
+    if(action?.kind==='background'&&this.jobs)return data[1]==='s'?this.stopPressed(action,presser,chat,query.id,seen):this.jobPressed(action,data[1]==='a',presser,chat,query.id,source,seen);
     // Stop is only a job's button; it never decides anything else.
     if(data[1]==='s'){await answer(line.changed);return true;}
-    if(action?.kind==='list'&&presser===policy.owner_id)return this.listPressed(action.id,data[1]==='a',chat,query.id,source);
+    if(action?.kind==='list'&&presser===policy.owner_id)return this.listPressed(action.id,data[1]==='a',chat,query.id,source,seen);
     const reviewer=action?.kind==='telegram'?(await this.telegram.reviewer(action.id))?.user:undefined;
     // The owner decides any card; the person who asked decides only their own card in their group.
     if(!policy.owner_id||presser!==policy.owner_id&&!(reviewer&&presser===reviewer&&chat===(await this.place('telegram',action.id))?.chat)){
@@ -397,10 +406,10 @@ export class ActionCommandRepository {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
       reply=kind==='controlled'&&outdated.has(error.code)?fillTemplate(line.not_run,{reason:line.reason_changed}):line.decided;
     }
-    await answer(reply);await this.settle(kind,action.id);return true;
+    await answer(reply);await this.settle(kind,action.id,seen);return true;
   }
   /** Approve or Reject on a list card: the owner decides each change on it, exactly as it was shown. */
-  private async listPressed(id:string,approve:boolean,chat:string,query:string,source:SourceReference):Promise<boolean> {
+  private async listPressed(id:string,approve:boolean,chat:string,query:string,source:SourceReference,seen?:Seen):Promise<boolean> {
     const {line}=await this.texts(),answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query,text:text.slice(0,200)},10000);
     const found=await this.listCard({card:id});if(!found){await answer(line.changed);return true;}
     // A change decided since, in the Inbox or by an earlier press, keeps that decision; the revision makes a
@@ -418,10 +427,10 @@ export class ActionCommandRepository {
     const count=String(found.card.members.length);
     await answer(!decided?line.decided:decided<found.card.members.length?fillTemplate(approve?line.list_partly:line.list_partly_rejected,{done:String(decided),count}):
       approve?line.approved:line.rejected_action);
-    await this.settle('list',id);return true;
+    await this.settle('list',id,seen);return true;
   }
   /** Approve or Reject on a job's card: the owner, or the person who asked on their own job's card. */
-  private async jobPressed(action:{id:string;fingerprint:string},approve:boolean,presser:string,chat:string,query:string,source:SourceReference):Promise<boolean> {
+  private async jobPressed(action:{id:string;fingerprint:string},approve:boolean,presser:string,chat:string,query:string,source:SourceReference,seen?:Seen):Promise<boolean> {
     const {line}=await this.texts(),answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query,text:text.slice(0,200)},10000);
     if(!await this.jobs!.presser(action.id,presser,chat)){await answer(presser===this.access.policy().owner_id?line.only_owner:line.only_requester);return true;}
     let reply:string;
@@ -432,11 +441,11 @@ export class ActionCommandRepository {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
       reply=line.decided;
     }
-    await answer(reply);await this.settle('background',action.id);return true;
+    await answer(reply);await this.settle('background',action.id,seen);return true;
   }
   /** Stop on a running job's card: the owner, or the person who asked on their own job's card, stops it as the tool's
    *  stop does. Its card then says it is stopping and loses the button. */
-  private async stopPressed(action:{id:string;fingerprint:string},presser:string,chat:string,query:string):Promise<boolean> {
+  private async stopPressed(action:{id:string;fingerprint:string},presser:string,chat:string,query:string,seen?:Seen):Promise<boolean> {
     const {line}=await this.texts(),answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query,text:text.slice(0,200)},10000);
     if(!await this.jobs!.presser(action.id,presser,chat)){await answer(line.only_stop);return true;}
     let reply:string;
@@ -445,7 +454,7 @@ export class ActionCommandRepository {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
       reply=line.job_ended;
     }
-    await answer(reply);await this.settle('background',action.id);return true;
+    await answer(reply);await this.settle('background',action.id,seen);return true;
   }
   /** Retry failed under a problem notice: only the owner's press in their private chat retries anything. */
   private async retryPressed(query:any):Promise<boolean> {

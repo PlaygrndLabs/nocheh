@@ -90,6 +90,34 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             offline=self.gateway(Path(folder),sent);offline.status='reconnecting'
             self.assertEqual(await offline.send_approval({**card,'id':'d'*64}),{'state':'not_started','error_code':'telegram_not_connected'})
 
+    async def test_a_card_whose_send_lost_its_answer_is_settled_through_the_press(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits)
+            async def lost(*args,**kwargs):raise TimeoutError('the answer did not arrive')
+            gateway.adapter._bot.send_message=lost
+            data=lambda choice:'n'+choice+'f'*56
+            card={'kind':'card','id':'f'*64,'chat_id':'123','text':'⚙️ Run browser','buttons':[['Approve',data('a')],['Reject',data('d')]]}
+            self.assertEqual(await gateway.send_approval(card),{'state':'ambiguous'})
+            settle={'kind':'settle','id':'f'*64,'chat_id':'123','text':'⚙️ Run browser\n\n✅ Approved.'}
+            self.assertEqual(await gateway.send_approval(settle),{'state':'done','edited':False},'no message id is known yet')
+            self.assertEqual(await gateway.send_approval({**settle,'chat_id':'-20','message_id':'77'}),{'state':'done','edited':False},
+                             'a message in another chat is never this card')
+            # Telegram names the card a button was pressed on; that message is edited and kept for later edits.
+            self.assertEqual(await gateway.send_approval({**settle,'message_id':'77'}),{'state':'done','edited':True})
+            self.assertEqual(edits[-1][:4],(123,77,settle['text'],None))
+            self.assertEqual(await gateway.send_approval({**settle,'text':'⚙️ Run browser\n\n❌ Failed.'}),{'state':'done','edited':True})
+            self.assertEqual(edits[-1][:2],(123,77),'a later edit without a press finds it')
+            # A card never sent, a bad id, or a sent card's own message id is not replaced by a press.
+            self.assertEqual(await gateway.send_approval({**settle,'id':'c'*64,'message_id':'78'}),{'state':'done','edited':False})
+            for bad in ('x','0','1'*17):
+                with self.subTest(message_id=bad),self.assertRaisesRegex(ValueError,'invalid_approval'):
+                    await gateway.send_approval({**settle,'message_id':bad})
+            other=self.gateway(Path(folder)/'other',sent,edits)
+            self.assertEqual(await other.send_approval({**card,'id':'e'*64}),{'state':'done','chat_id':'123','message_id':'41'})
+            self.assertEqual(await other.send_approval({**settle,'id':'e'*64,'message_id':'99'}),{'state':'done','edited':True})
+            self.assertEqual(edits[-1][:2],(123,41),'a card with a known message id keeps it')
+            self.assertEqual(len(edits),3)
+
     async def test_unallowed_members_who_address_nocheh_get_the_fixed_reply_once(self):
         with tempfile.TemporaryDirectory() as folder:
             sent=[];gateway=self.gateway(Path(folder),sent,access={'-20':{'granted':['7'],'denied':['8']}})

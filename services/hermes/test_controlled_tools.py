@@ -154,6 +154,43 @@ class ToolTests(unittest.TestCase):
             self.assertEqual(calls[-1][1]['result'],{'error':'execution_outcome_unconfirmed',**({'cause':cause} if cause else {})})
             self.assertNotIn('private',json.dumps(calls))
 
+    def test_a_known_outcome_is_a_failure_not_an_uncertain_one(self):
+        # Nothing was sent, or a page read got its whole answer and refused it: the result says why, and it failed.
+        for kind,raised,state in (('browser',RuntimeError('browser_html_required'),'failed'),('browser',RuntimeError('remote_response_rejected'),'failed'),
+                                  ('browser',RuntimeError('sandbox_execution_failed'),'failed'),('mcp',RuntimeError('public_https_required'),'failed'),
+                                  ('shell',RuntimeError('private_destination_denied'),'failed'),
+                                  # A remote that may have acted, a run cut short, or an unknown failure stays uncertain.
+                                  ('mcp',RuntimeError('remote_response_rejected'),'ambiguous'),('browser',RuntimeError('remote_unreachable'),'ambiguous'),
+                                  ('browser',TimeoutError('tool_deadline'),'ambiguous'),('shell',RuntimeError('sandbox_execution_failed'),'ambiguous'),
+                                  ('browser',ValueError('browser_html_required'),'ambiguous')):
+            calls=[]
+            class API:
+                def call(self,path,body):
+                    calls.append((path,body))
+                    if path.endswith('/start'):return {'started':True}
+                    return {'claimed':True,'id':'f'*64,'kind':kind} if path.endswith('/claim') else {}
+            def run(*args):raise raised
+            with self.subTest(kind=kind,error=str(raised)),tempfile.TemporaryDirectory() as folder:
+                tick(folder,API(),'actor',run,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
+                self.assertEqual(calls[-1][1]['state'],state)
+                if state=='failed':self.assertEqual(calls[-1][1]['result'],{'exit_code':1,'error':str(raised)})
+
+    def test_a_page_read_returns_json_or_plain_text_as_text(self):
+        from tools.operations.security.tool_execution import execute
+        action={'kind':'browser','arguments':{'url':'https://weather.example.com/today?format=j1'},'profile':'p'}
+        for media,expected in (('application/json; charset=utf-8',True),('text/plain',True),('application/geo+json',True),('text/html; charset=utf-8',None),
+                               ('image/png',False),('application/javascript',False),('',False)):
+            def request(url,body=None,headers=None):return b'{"temp_C": "21"}',{'content-type':media}
+            def run(command,**kwargs):
+                if command[:2]==['docker','rm']:return None
+                return subprocess.CompletedProcess(command,0,stdout=b'{"text":"rendered"}')
+            with self.subTest(media=media):
+                if expected is False:
+                    with self.assertRaisesRegex(RuntimeError,'browser_html_required'):execute('/tmp',action,request,run)
+                elif expected:
+                    self.assertEqual(execute('/tmp',action,request,run),{'text':'{"temp_C": "21"}','links':[],'mode':'text','url':action['arguments']['url']})
+                else:self.assertEqual(execute('/tmp',action,request,run),{'text':'rendered'},'an HTML page still renders in the sandbox')
+
     def test_receipt_outage_does_not_repeat_execution(self):
         class API:
             def __init__(self):self.claims=0;self.finishes=0;self.outage=True

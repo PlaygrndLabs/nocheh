@@ -876,6 +876,19 @@ itself at startup.
   already approved (C). A follow-up interrupted by a runtime restart stays
   uncertain; a follow-up that failed three times is not retried from the
   Workflows page.
+- A decided card loses its buttons, and a refused page read is a failure (2026-11-08):
+  a group weather read's card kept Approve and Reject after the owner approved it,
+  because Telegram's answer to the card send was lost, so no message id was saved.
+  A press on a message that carries the card's button names that message, so the
+  store passes it with the edit; the gateway keeps it for later edits, and uses it
+  only for a card it tried to send to that same chat. The read then ended uncertain, because
+  the service answered with JSON and the receipt filed every failure as
+  unconfirmed. A web read now returns a JSON or plain-text answer as text, and a
+  failure with a known outcome (nothing sent, or a page read that got its whole
+  answer) is failed with its fixed code, which `controlled_actions.error_code`
+  keeps. Checks: [card settle](services/hermes/test_approval_cards.py),
+  [press message](test/store-approval-buttons.test.ts),
+  [receipts and page reads](services/hermes/test_controlled_tools.py).
 - Reactions while Nocheh works (2026-11-08,
   [ADR-0211](docs/adr/0211-hermes-working-reactions-on-the-answered-message.md)):
   the owner asked whether the bot can react to users' messages and chose
