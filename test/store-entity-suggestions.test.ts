@@ -124,5 +124,24 @@ test('repeat names for one project wait on one card, fold and split by hand, and
       assert.ok(prepared.projects.some(item=>item.id===project.id),'a message that uses only another confirmed name finds the project');
       assert.ok(Array.isArray(prepared.entities.waiting),'learning sees the cards still waiting');
       assert.ok(prepared.entities.waiting!.some(item=>item.id===person.id),'including other waiting cards from this chat');
+
+      // "Not the same" locks the card before its folded name, as an answer does, so the two never deadlock.
+      // Use a pair whose folded name sorts first, where locking both in ID order would take the name first.
+      let top,alias,pair=0;
+      do{top=await entities.suggest('project',name('Race '+pair),await capture('race card '+pair),'Raced.');
+        alias=await entities.suggest('project',`${name('Race '+pair)} (alt)`,await capture('race name '+pair),'Raced.');pair++;}while(alias.id>top.id);
+      assert.equal(alias.merged_into,top.id);
+      const holder=await stores.control.connect();
+      try {
+        await holder.query('BEGIN');await holder.query('SELECT 1 FROM memory_entity_suggestions WHERE id=$1 FOR UPDATE',[top.id]);
+        const splitting=entities.split(owner,alias.id,{expected_revision:alias.revision,operation_id:`${stamp}:race-split`});
+        splitting.catch(()=>{});
+        for(let tries=0;!(await stores.control.query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND datname=current_database()")).rows[0].count;tries++) {
+          assert.ok(tries<250,'the split waits for the card');await new Promise(resolve=>setTimeout(resolve,20));
+        }
+        await holder.query('SELECT 1 FROM memory_entity_suggestions WHERE id=$1 FOR UPDATE NOWAIT',[alias.id]);
+        await holder.query('COMMIT');
+        assert.equal((await splitting).merged_into,null,'the split goes through once the card is free');
+      } catch(error){await holder.query('ROLLBACK');throw error;} finally {holder.release();}
     } finally {await stores.close();}
   });

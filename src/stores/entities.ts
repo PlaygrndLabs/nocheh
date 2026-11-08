@@ -224,7 +224,8 @@ export class EntityRepository {
     admin(principal);const body=exact(input,['target_id','expected_revision','operation_id']),source=entityId(id),target=entityId(body.target_id),expected=revision(body.expected_revision);
     if(source===target)throw new HttpError(400,'entity_suggestion_fold_self');
     return this.transaction(async db=>{
-      const rows=(await db.query('SELECT * FROM memory_entity_suggestions WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE',[[source,target]])).rows;
+      // Cards are locked before the names folded into them, as decide and split do, so these never deadlock.
+      const rows=(await db.query('SELECT * FROM memory_entity_suggestions WHERE id=ANY($1::text[]) ORDER BY merged_into IS NOT NULL,id FOR UPDATE',[[source,target]])).rows;
       const from=rows.find(row=>row.id===source),to=rows.find(row=>row.id===target);
       if(!from||!to)throw new HttpError(404,'entity_suggestion_not_found');
       if(from.merged_into===target&&from.status==='pending')return {id:source,merged_into:target,revision:from.revision};
@@ -242,8 +243,9 @@ export class EntityRepository {
     return this.transaction(async db=>{
       const card=(await db.query('SELECT merged_into FROM memory_entity_suggestions WHERE id=$1',[source])).rows[0];
       if(!card)throw new HttpError(404,'entity_suggestion_not_found');
-      const rows=(await db.query('SELECT * FROM memory_entity_suggestions WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE',[[source,card.merged_into].filter(Boolean)])).rows;
-      const row=rows.find(item=>item.id===source)!;
+      // The card is locked before its folded name, as decide and fold do, so these never deadlock.
+      if(card.merged_into)await db.query('SELECT 1 FROM memory_entity_suggestions WHERE id=$1 FOR UPDATE',[card.merged_into]);
+      const row=(await db.query('SELECT * FROM memory_entity_suggestions WHERE id=$1 FOR UPDATE',[source])).rows[0];
       if(!row.merged_into&&row.status==='pending'&&row.revision===expected+1)return {id:source,merged_into:null,revision:row.revision};
       if(row.revision!==expected||row.merged_into!==card.merged_into)throw new HttpError(409,'entity_suggestion_conflict');
       if(!row.merged_into||row.status!=='pending')throw new HttpError(409,'entity_suggestion_split_invalid');
