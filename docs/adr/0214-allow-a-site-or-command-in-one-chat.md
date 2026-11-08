@@ -38,7 +38,9 @@ tool or a Telegram message is still decided one by one. Extends
   card shows Allow once, Always allow it where asked and Reject. "Where asked" is the
   chat or topic of the request, since the card itself is in the owner's private chat. Everything else keeps
   Approve and Reject. The gateway accepts two to four buttons, Approve first and
-  Reject last, for one action, two to a row. Only the owner's press decides.
+  Reject last, for one action. Approve and Reject share a row; with allow buttons,
+  each button has its own row so its label shows in full. Only the owner's press
+  decides.
 - **Decision.** Allow where asked or Always allow approves the operation and inserts the
   rule in one owner command: 12 hours or 30 days, up to 1000 uses. Other
   operations already waiting in that chat for the same site or command are

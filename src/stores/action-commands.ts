@@ -96,14 +96,14 @@ export class ActionCommandRepository {
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
   }
   /** Where a live request was asked: its chat, topic and message. Null for background work. */
-  private async asked(source:any):Promise<{chat:string;topic?:string;message?:string}|null> {
+  private async asked(source:any):Promise<{chat:string;topic?:string;message?:string;from?:string}|null> {
     if(source?.store!=='archive')return null;
     const original=await this.access.archive.verify(source);
     if(original.origin!=='live'||original.channel!=='telegram')return null;
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
     let message:any=null;try{const payload=JSON.parse(row.payload.toString());message=payload.message??payload.edited_message;}catch{}
-    const id=String(message?.message_id??''),topic=message?.is_topic_message===true?String(message.message_thread_id??''):'';
-    return {chat:String(original.scope),...(/^[1-9][0-9]{0,15}$/.test(topic)?{topic}:{}),...(/^[1-9][0-9]{0,15}$/.test(id)?{message:id}:{})};
+    const id=String(message?.message_id??''),topic=message?.is_topic_message===true?String(message.message_thread_id??''):'',from=String(message?.from?.id??'');
+    return {chat:String(original.scope),...(/^[1-9][0-9]{0,15}$/.test(topic)?{topic}:{}),...(/^[1-9][0-9]{0,15}$/.test(id)?{message:id}:{}),...(/^[1-9][0-9]{0,15}$/.test(from)?{from}:{})};
   }
   /** The owner's card templates and texts from Settings › Instructions, or the defaults. */
   private async texts() {
@@ -236,6 +236,10 @@ export class ActionCommandRepository {
         'A card with Approve and Reject buttons for this exact request was posted here as the reply to it. It names where the message goes and shows it exactly, so it is the whole answer: do not repeat or announce it; return [NO_REPLY] unless something else needs an answer.':
         place.reviewer?
         'This exact message for the other group was posted here with Approve and Reject buttons for the person who asked; nothing is sent until they press Approve. Say only, briefly, that they can check and approve it; do not repeat the draft.':
+        // The owner asking in a group is told where their card is, not that someone else was asked.
+        asked&&asked.chat!==owner&&asked.from===owner?follows?
+        'The person who asked is the owner. Approve and Reject buttons for this exact request were sent to them in their private chat with you. In this chat tell them directly, briefly, that the card is waiting in their private chat and that the answer will follow here; do not show the draft or details.':
+        'The person who asked is the owner. Approve and Reject buttons for this exact request were sent to them in their private chat with you. In this chat tell them directly, briefly, that the card is waiting in their private chat; do not show the draft or details.':
         asked&&asked.chat!==owner?follows?
         'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner and that the answer will follow here; do not show the draft or details.':
         'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner; do not show the draft or details.':

@@ -158,6 +158,10 @@ test('allowed members post freely in their own group; everything else waits for 
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
     assert.equal(last('card').chat_id,'123');assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in a Telegram group\n\n\{/);assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
+    // When the owner asks in the group, the reply tells them their card is in their private chat.
+    const own=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'shell',arguments:{command:'printf mine'}}));
+    assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner\..*tell them directly, briefly, that the card is waiting in their private chat and that the answer will follow here/);
+    assert.doesNotMatch(own.message,/you asked the owner/);
     // The press names the card's message, so a card whose send lost its answer still loses its buttons: here the card
     // reviewed in its own group. A press in another chat names none.
     assert.deepEqual([last('settle').id,last('settle').chat_id,last('settle').message_id],[shut.id,group,'5']);

@@ -55,6 +55,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await gateway.send_approval(card),{'state':'done','chat_id':'123','message_id':'41'})
             self.assertEqual(len(sent),1,'one card per action, even when offered again')
             self.assertEqual(sent[0][:3],(123,None,'Send this message to your private chat?\n\nHello'))
+            self.assertEqual(len(getattr(sent[0][3],'inline_keyboard',sent[0][3])),1,'Approve and Reject share one row')
             group={**card,'id':'e'*64,'chat_id':'-20','topic':'17','reply_to':'5','text':'📨 Send to “Team” › Plans\n\nHello',
                    'links':[{'offset':11,'length':6,'url':'https://t.me/c/20/9'},{'offset':20,'length':5,'url':'https://t.me/c/20/17'}]}
             self.assertEqual(await gateway.send_approval(group),{'state':'done','chat_id':'-20','message_id':'42'})
@@ -67,12 +68,12 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                         {**card,'id':'b'*64,'text':''},{**card,'id':'b'*64,'text':'x'*4097}]:
                 with self.assertRaises(ValueError):await gateway.send_approval(bad)
             self.assertEqual(len(sent),2,'a card for another group or chat, or with other buttons, is never sent')
-            # An operation that can be allowed here shows up to four buttons, two to a row (ADR-0214).
+            # An operation that can be allowed here shows up to four buttons, one to a row so each label shows in full (ADR-0214).
             four={**card,'id':'f'*64,'text':'⚙️ Run browser','buttons':[['Allow once',data('a')],['Allow here',data('c')],['Always here',data('w')],['Reject',data('d')]]}
             self.assertEqual((await gateway.send_approval(four))['state'],'done')
             # The real keyboard, or the plain rows this file's stand-in builds when the runtime image is not here.
             rows=getattr(sent[2][3],'inline_keyboard',sent[2][3])
-            self.assertEqual([[(getattr(button,'callback_data',None) or button[1])[:2] for button in row] for row in rows],[['na','nc'],['nw','nd']])
+            self.assertEqual([[(getattr(button,'callback_data',None) or button[1])[:2] for button in row] for row in rows],[['na'],['nc'],['nw'],['nd']])
             for bad in [four['buttons'][::-1],four['buttons']+[['More',data('c')]],[four['buttons'][0],four['buttons'][0],four['buttons'][3]],
                         [four['buttons'][0],['Reject','nd'+'b'*56]],[four['buttons'][0],['Stop',data('s')]]]:
                 with self.subTest(buttons=bad),self.assertRaisesRegex(ValueError,'invalid_approval'):
