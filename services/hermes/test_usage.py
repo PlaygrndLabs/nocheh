@@ -93,6 +93,65 @@ class UsageTests(unittest.TestCase):
         self.assertEqual([usage.error_reason(error) for error in (Status(429), Status(401), Status(503), TimeoutError(), ValueError())],
                          ['rate_limited', 'key_rejected', 'provider_error', 'timed_out', 'unknown'])
 
+    def test_a_failure_keeps_the_providers_exact_error_as_codes_only(self):
+        cases = [
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 529: Overloaded'}], ('provider_error', 'overloaded:529')),
+            ([{'failed': True, 'failure_reason': 'server_error', 'error': 'HTTP 500 — Internal Server Error'}],
+             ('provider_error', 'server_error:500')),
+            ([{'failed': True, 'failure_reason': 'timeout', 'error': 'Request timed out.'}], ('timed_out', 'timeout')),
+            ([{'failed': True, 'failure_reason': 'thinking_signature', 'error': 'HTTP 400: private words'}],
+             ('provider_error', 'thinking_signature:400')),
+            # Without Hermes's name for the error, the provider's HTTP status names it and says the reason.
+            ([{'failed': True, 'error': 'HTTP 503: busy'}], ('provider_error', 'overloaded:503')),
+            ([{'failed': True, 'failure_reason': 'unknown', 'error': 'HTTP 429: slow down'}], ('rate_limited', 'rate_limit:429')),
+            ([{'failed': True, 'error': 'HTTP 418: odd'}], ('provider_error', 'http_error:418')),
+            ([{'failed': True, 'error': 'private words, HTTP 529 inside'}], ('unknown', None)),
+            ([{'failed': True, 'failure_reason': 'Private Words!', 'error': 'private words'}], ('provider_error', None)),
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"job_cost_limit"}'}], ('job_cost_limit', None)),
+            # A sealed turn reaches the provider through Nocheh's broker, which answers with its own status: Hermes's name
+            # for that status says nothing of the provider, so only the provider's own status, when the broker gives it, counts.
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"provider_request_failed","provider_status":529}'}],
+             ('provider_error', 'overloaded:529')),
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"provider_request_failed","provider_status":404}'}],
+             ('model_not_found', 'model_not_found:404')),
+            ([{'failed': True, 'failure_reason': 'rate_limit', 'error': 'HTTP 429: {"error":"provider_request_failed","provider_status":429}'}],
+             ('rate_limited', 'rate_limit:429')),
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"provider_request_failed"}'}], ('provider_error', None)),
+            # The broker's own refusals, such as an unavailable secret check or a changed policy, are Nocheh's errors.
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"required_guard_unavailable"}'}], ('nocheh_error', None)),
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"security_policy_changed"}'}], ('nocheh_error', None)),
+            ([{'completed': True, 'turn_exit_reason': 'text_response(finish_reason=refusal)', 'final_response': ''}], ('refused', None)),
+            ([], ('unknown', None)),
+        ]
+        for results, expected in cases:
+            self.assertEqual(usage.failure(results), expected, results)
+        class Status(Exception):
+            def __init__(self, status_code): self.status_code = status_code
+        class APIConnectionError(Exception): pass
+        class APITimeoutError(APIConnectionError): pass
+        self.assertEqual([usage.error_cause(error) for error in (Status(529), Status(401), Status(418), Status('529'), APITimeoutError(),
+                                                                 APIConnectionError(), ConnectionResetError(), ValueError('private words'))],
+                         ['overloaded:529', 'auth:401', 'http_error:418', None, 'timeout', 'connection', 'connection', None])
+
+    def test_failed_runs_keep_the_providers_exact_error_and_an_older_table_gains_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'usage/usage.sqlite'
+            path.parent.mkdir()
+            old = sqlite3.connect(str(path))
+            old.execute(usage.SCHEMA.replace("causes TEXT NOT NULL DEFAULT '{}', ", ''))
+            old.commit()
+            old.close()
+            for cause in ('overloaded:529', 'overloaded:529', 'server_error', 'a provider message, not a code', None):
+                usage.record('memory_review', {'calls': 1}, 'm', failed=True, reason='provider_error', cause=cause,
+                             provider='anthropic', path=path, now=DAY)
+            usage.record('guard', {'calls': 1}, 'm', failed=True, cause='connection', provider='anthropic', path=path, now=DAY)
+            usage.record('guard', {'calls': 1}, 'm', cause='overloaded:529', provider='anthropic', path=path, now=DAY)
+            guard, review = usage.rows('2026-10-13', path)
+            self.assertEqual((review['part'], review['failed'], review['reasons']), ('memory_review', 5, {'provider_error': 5}))
+            self.assertEqual(review['causes'], {'provider_error:overloaded:529': 2, 'provider_error:server_error': 1},
+                             'only codes are kept; a run without a known cause keeps its reason alone')
+            self.assertEqual((guard['failed'], guard['causes']), (1, {'unknown:connection': 1}), 'a run that worked has no cause')
+
     def test_record_never_fails_the_work_it_measures(self):
         with tempfile.TemporaryDirectory() as root:
             # Outside a Hermes installation nothing is written.

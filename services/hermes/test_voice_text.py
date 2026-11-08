@@ -43,13 +43,15 @@ class VoiceTextTests(unittest.TestCase):
         self.assertEqual(self.read({'success': True, 'transcript': 'x'}, name='a.bin', kind='audio'), ({'state': 'unsupported'}, []))
 
     def test_failures_say_whether_a_retry_can_help(self):
-        cases = {'Connection error: Request timed out.': 'timed_out', 'Connection error: refused': 'provider_error',
-                 'API error: Error code: 429 - slow down': 'rate_limited', 'API error: Error code: 503 - busy': 'provider_error',
-                 'API error: Error code: 401 - bad key': 'key_rejected', 'API error: Error code: 400 - corrupted': 'bad_answer',
-                 'Transcription failed: odd': 'unknown'}
-        for error, reason in cases.items():
+        cases = {'Connection error: Request timed out.': ('timed_out', 'timeout'), 'Connection error: refused': ('provider_error', 'connection'),
+                 'API error: Error code: 429 - slow down': ('rate_limited', 'rate_limit:429'),
+                 'API error: Error code: 503 - busy': ('provider_error', 'overloaded:503'),
+                 'API error: Error code: 401 - bad key': ('key_rejected', 'auth:401'),
+                 'API error: Error code: 400 - corrupted': ('bad_answer', 'format_error:400'),
+                 'Transcription failed: odd': ('unknown', None)}
+        for error, (reason, cause) in cases.items():
             self.assertEqual(self.read({'success': False, 'transcript': '', 'error': error}, kind='voice')[0],
-                             {'state': 'failed', 'reason': reason, 'seconds': 61.2}, error)
+                             {'state': 'failed', 'reason': reason, 'cause': cause, 'seconds': 61.2}, error)
         self.assertEqual(self.read({'success': False, 'error': 'Unsupported format: .xyz'}, kind='voice')[0], {'state': 'unsupported'})
         self.assertEqual(self.read({'success': True, 'transcript': '  '}, kind='voice')[0], {'state': 'silent', 'seconds': 61.2})
 

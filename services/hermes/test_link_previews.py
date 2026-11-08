@@ -101,9 +101,14 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
                                                          'reply': 'Sorry, this is private. https://example.test/b'}), {'state': 'done'})
             self.assertEqual(await gateway.send_notice({'id': 'c' * 64, 'chat_id': '123', 'text': 'A problem: https://example.test/c',
                                                         'buttons': [{'text': 'Open', 'url': 'https://example.test/open'}]}), {'state': 'done'})
+            # A cleared problem marks the notice in place, here losing its buttons.
+            self.assertEqual(await gateway.send_notice({'id': 'c' * 64, 'chat_id': '123', 'text': '✅ A problem: https://example.test/c',
+                                                        'edit': True}), {'state': 'done', 'edited': True})
+            self.assertEqual({key: wire.calls[-1][1].get(key) for key in ('chat_id', 'message_id', 'reply_markup')},
+                             {'chat_id': 123, 'message_id': 45, 'reply_markup': None}, 'the notice that went through, without its buttons')
             self.assertEqual(await gateway.send_action({'id': 'd' * 64, 'destination': '123', 'text': 'Member: hello https://example.test/d'}), {'state': 'done'})
-            self.assertEqual([name for name, _ in wire.calls], ['sendMessage', 'editMessageText', 'sendMessage', 'sendMessage', 'sendMessage', 'sendMessage'],
-                             'card, its settle edit, refusal, refused notice with buttons, notice without, native send')
+            self.assertEqual([name for name, _ in wire.calls], ['sendMessage', 'editMessageText', 'sendMessage', 'sendMessage', 'sendMessage', 'editMessageText', 'sendMessage'],
+                             'card, its settle edit, refusal, refused notice with buttons, notice without, its edit, native send')
             for name, data in wire.calls:
                 self.assertEqual(data.get('link_preview_options'), OFF, name + ' left link previews on')
             # Hermes's own adapter leaves them on by default. Nocheh's turn them off whatever the settings, including

@@ -88,7 +88,7 @@ def transcribe(body):
         if price is not None and seconds is not None and result['state'] != 'failed':
             spent['cost_usd'] = math.ceil(seconds) / 60 * price
         usage.record('transcription', spent, selected['model'], failed=result['state'] == 'failed',
-                     provider=selected['provider'], reason=result.get('reason'))
+                     provider=selected['provider'], reason=result.get('reason'), cause=result.get('cause'))
     return {key: value for key, value in result.items() if key in ('state', 'text', 'reason')}
 
 
@@ -121,6 +121,16 @@ def reason(error):
         code, 'provider_error' if code >= 500 else 'bad_answer' if code else 'unknown')
 
 
+def cause(error):
+    """The transcriber's exact error as one of the usage tracker's causes, such as `rate_limit:429`, or None."""
+    if error.startswith('Request timeout') or error.startswith('Connection error') and 'timed out' in error.lower():
+        return 'timeout'
+    if error.startswith('Connection error'):
+        return 'connection'
+    status = STATUS.match(error)
+    return usage.cause(None, int(status.group(1))) if status else None
+
+
 def read(data, hint):
     from tools.transcription_tools import transcribe_audio
     kind = suffix(hint)
@@ -141,7 +151,7 @@ def read(data, hint):
         return {'state': 'unsupported'}
     if isinstance(result, dict) and result.get('success'):
         return {'state': 'silent', 'seconds': seconds}
-    return {'state': 'failed', 'reason': reason(error), 'seconds': seconds}
+    return {'state': 'failed', 'reason': reason(error), 'cause': cause(error), 'seconds': seconds}
 
 
 if __name__ == '__main__':

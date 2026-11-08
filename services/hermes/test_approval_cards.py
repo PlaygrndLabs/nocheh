@@ -186,6 +186,28 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((len(sent),sent[-1][3]),(2,None))
             with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'d'*64,'chat_id':'-20'},)  # only the owner's private chat
 
+    async def test_a_sent_notice_is_edited_in_place_and_only_that_one(self):
+        from telegram.error import BadRequest
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits)
+            notice={'id':'a'*64,'chat_id':'123','text':'⚠️ Nocheh found a problem','buttons':[{'text':'Retry failed','callback':'nr'}]}
+            self.assertEqual(await gateway.send_notice(notice),{'state':'done'})
+            self.assertEqual(await gateway.send_notice(notice),{'state':'done'},'a repeated send answers only its state')
+            self.assertEqual(await gateway.send_notice({**notice,'text':'✅ one cleared','edit':True}),{'state':'done','edited':True})
+            self.assertEqual(edits[-1][:3],(123,41,'✅ one cleared'));self.assertIsNotNone(edits[-1][3],'it keeps its buttons')
+            self.assertEqual(await gateway.send_notice({'id':'a'*64,'chat_id':'123','text':'✅ all cleared','edit':True}),{'state':'done','edited':True})
+            self.assertEqual(edits[-1][:4],(123,41,'✅ all cleared',None),'the message that was sent, now without buttons')
+            self.assertEqual(await gateway.send_notice({**notice,'id':'b'*64,'edit':True}),{'state':'not_found'},'only a notice this runtime sent')
+            self.assertEqual(len(sent),1,'an edit never sends')
+            async def unchanged(*args,**options):raise BadRequest('Message is not modified')
+            gateway.adapter._bot.edit_message_text=unchanged
+            self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'done','edited':False})
+            async def offline(*args,**options):raise TimeoutError()
+            gateway.adapter._bot.edit_message_text=offline
+            self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'not_started','error_code':'telegram_edit_failed'},
+                             'tried again on the next check')
+            with self.assertRaises(ValueError):await gateway.send_notice({**notice,'edit':'yes'})
+
 
 
 if __name__=='__main__':

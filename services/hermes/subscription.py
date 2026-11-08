@@ -209,12 +209,12 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str,
 def _detect_once(text, credentials, model, prompts):
     from services.hermes.prompts import text as prompt
     from services.hermes.request_boundary import trusted_detector
-    from services.hermes.usage import error_reason, record, response_usage
+    from services.hermes.usage import error_cause, error_reason, record, response_usage
     # A provider waking from idle can refuse its first request with a server error or drop the
     # connection. The check changes nothing, so one quick retry spares the turn the workflow's
     # 30-second retry wait. A timed-out call is not asked again: that would double the wait.
     for attempt in (1, 2):
-        response, failed, refused, reason = None, True, False, None
+        response, failed, refused, reason, cause = None, True, False, None, None
         try:
             with trusted_detector(credentials.base_url):
                 response = _call_subscription(credentials, model, [
@@ -228,6 +228,7 @@ def _detect_once(text, credentials, model, prompts):
         except Exception as error:
             refused = isinstance(error, DetectorContractError) and str(error) == 'detector_refused'
             reason = 'bad_answer' if isinstance(error, DetectorContractError) else error_reason(error)
+            cause = None if isinstance(error, DetectorContractError) else error_cause(error)
             status = getattr(error, "status_code", None)
             dropped = type(error).__name__ == "APIConnectionError"
             if attempt == 2 or not (dropped or isinstance(status, int) and status >= 500):
@@ -235,5 +236,5 @@ def _detect_once(text, credentials, model, prompts):
         finally:
             # Nocheh's usage tracker: the provider's reported tokens, priced by Hermes.
             record('guard', response_usage(response, model, credentials.base_url) if response is not None else {'calls': 1},
-                   model, failed, refused=refused, reason=reason)
+                   model, failed, refused=refused, reason=reason, cause=cause)
         time.sleep(RETRY_SECONDS)

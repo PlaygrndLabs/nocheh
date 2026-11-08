@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,8 @@ ROUTE = 'NOCHEH_IMAGE_ROUTE_'
 KEY = 'NOCHEH_IMAGE_KEY'
 # A provider that is busy or unreachable may answer a moment later.
 TRANSIENT = ('429', 'rate limit', 'overloaded', '500', '502', '503', '504', 'timed out', 'timeout', 'connection')
+# Hermes's vision tool reports the SDK's error after its own words, such as "Error analyzing image: Error code: 529 - ...".
+STATUS = re.compile(r'Error analyzing image: Error code: ([1-5][0-9]{2})\b')
 
 
 def route():
@@ -79,7 +82,7 @@ def read_image(body):
             if cost is not None:
                 spent['cost_usd'] = cost
         usage.record('image', {'calls': 1, **spent}, selected['model'], failed=result['state'] == 'failed',
-                     provider=selected['provider'], reason=result.get('reason'))
+                     provider=selected['provider'], reason=result.get('reason'), cause=result.get('cause'))
     return {key: value for key, value in result.items() if key in ('state', 'text', 'reason')}
 
 
@@ -104,6 +107,17 @@ def reason(error):
     return 'provider_error' if any(hint in lowered for hint in TRANSIENT) else 'bad_answer'
 
 
+def cause(error):
+    """The provider's exact error as one of the usage tracker's causes, such as `overloaded:529`, or None."""
+    found = STATUS.match(error)
+    if found:
+        return usage.cause(None, int(found.group(1)))
+    lowered = error.lower()
+    if 'timed out' in lowered or 'timeout' in lowered:
+        return 'timeout'
+    return 'connection' if 'connection error' in lowered else None
+
+
 def read(data, hint):
     from agent.aux_accounting import set_accounting_context
     from tools.vision_tools import vision_analyze_tool
@@ -120,7 +134,7 @@ def read(data, hint):
     error = str(result.get('error') or '') if isinstance(result, dict) else ''
     if not spent and 'analyzing image' in error.lower() and not any(hint in error.lower() for hint in TRANSIENT):
         return {'state': 'unreadable'}
-    return {'state': 'failed', 'reason': reason(error), 'usage': spent}
+    return {'state': 'failed', 'reason': reason(error), 'cause': cause(error), 'usage': spent}
 
 
 if __name__ == '__main__':

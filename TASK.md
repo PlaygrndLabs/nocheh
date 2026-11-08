@@ -16,8 +16,15 @@ Notices carry Open (mini app Health page, else the dashboard address) and Retry
 failed buttons (owner, 2026-10-28: "better to have action btn for errors to
 dashboard or directly action, also better to open in mini app"). Failed model
 calls keep a reason code, and notices and Health say why they failed (owner,
-2026-10-29: "all yes" to keeping failure reasons). Pending: a live button press
-on a running installation.
+2026-10-29: "all yes" to keeping failure reasons). They also keep the provider's
+exact error as codes, such as overloaded with HTTP 529, and say it (owner,
+2026-11-08: "yes fix it" to keeping the exact error for clearer notices;
+[record](services/hermes/test_usage.py), [notice](services/hermes/test_problem_notices.py)).
+When a problem clears, its notice is edited in place with ✅ and the time, and loses
+its buttons once all its problems cleared (owner, 2026-11-08: "show it resolved in
+chat by update msg or reaction or reply"; [follow-up](services/hermes/test_problem_notices.py),
+[edit](services/hermes/test_approval_cards.py)). Pending: a live button press on a running
+installation, and a live notice that names a provider's exact error and is then marked ✅.
 
 Get started (owner, 2026-11-01: "yes" to a small checklist on Home, a "Find my
 Telegram ID" button and a warning when the OpenAI key is missing, before the server

@@ -167,5 +167,6 @@ def _review(profile,policy,model,credentials,body):
         record('memory_review',None,model,True,reason='nocheh_error');raise RuntimeError('review_worker_failed')
     value=json.loads(result.stdout)
     if isinstance(value,dict):
-        record('memory_review',value.pop('usage',None),model,value.get('state')!='done',reason=value.pop('failure_reason',None))
+        record('memory_review',value.pop('usage',None),model,value.get('state')!='done',reason=value.pop('failure_reason',None),
+               cause=value.pop('failure_cause',None))
     return value
