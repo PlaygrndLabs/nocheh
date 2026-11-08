@@ -42,7 +42,7 @@ CREATE TRIGGER action_continuation_requested AFTER UPDATE OF state ON controlled
 `;
 
 const protocol='action-continuation-v1';
-const maxAttempts=3,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblingWaitMs=120000,inTurnMs=55000;
+const maxAttempts=3,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblingWaitMs=120000;
 const closedRows=new Set(['done','ambiguous','suppressed','cancelled','skipped']);
 /** Names the continuation in AsyncRuns, the gateway receipt and the archived result; never an integer, so it cannot meet a message turn's. */
 export const continuationAttempt=(leader:string,attempts:number)=>'c'+attempts+'-'+leader.slice(0,40);
@@ -55,9 +55,9 @@ const awaitingReceipt=(action:{state:string;error_code:string|null},ended:Date)=
   action.state==='ambiguous'&&action.error_code==='executor_receipt_missing'&&Date.now()-ended.getTime()<receiptWaitMs;
 /** The owner's own private request that the owner rejected needs no follow-up: they pressed Reject on its answer. */
 export const ownerRejected=(action:{state:string;error_code:string|null},owner:boolean)=>owner&&action.state==='rejected'&&(action.error_code===null||action.error_code==='owner_cancelled');
-/** A Notion call its own request approved ran inside notion_tool's 60 s in-turn wait (archive_tools.py:374-395), so that turn already read it. */
-export function answeredInTurn(action:{event_id:string;kind:string;decision_reference:any;created_at:Date},notion:boolean,ended:Date):boolean {
-  return notion&&action.kind==='mcp'&&action.decision_reference?.id===action.event_id&&ended.getTime()-action.created_at.getTime()<=inTurnMs;
+/** The asking turn's own tool waited for it and read this very state, and that turn's reply went out (ADR-0215). */
+export function answeredInTurn(action:{state:string;observed_in_turn:string|null},asking:string|undefined):boolean {
+  return action.observed_in_turn===action.state&&asking==='done';
 }
 /** Only ids, tools and states reach the model; it reads each result itself through nocheh_action_status. */
 export function continuationText(template:string,actions:{id:string;kind:string;state:string}[]):string {
@@ -129,13 +129,6 @@ export class ActionContinuationRepository {
     if(!row||row.content_hash!==reference.input_hash||digest(row.content)!==row.content_hash)throw new HttpError(409,'dispatch_input_conflict');
     return JSON.parse(row.content.toString());
   }
-  /** Whether the operation is a Notion call, from Nocheh's own hash-checked record of the request; nothing is sent anywhere. */
-  private async notion(action:any):Promise<boolean> {
-    if(action.kind!=='mcp')return false;
-    const reference=action.proposal_reference,row=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
-    if(!row||row.content_hash!==reference.input_hash||digest(row.content)!==row.content_hash)throw new HttpError(409,'action_proposal_changed');
-    return JSON.parse(row.content.toString()).connection==='notion';
-  }
   async run(id:string,authority:ExecutionAuthority):Promise<Observation> {
     if(!/^[a-f0-9]{64}$/.test(id))return observation('failed','admission');
     const db=await this.control.connect();let held=false,locked=false;
@@ -190,12 +183,12 @@ export class ActionContinuationRepository {
         try{scope=conversationScope(this.access.policy(),payload,original.scope);}catch(error){if(!(error instanceof HttpError)||error.code!=='source_scope_mismatch')throw error;}
         if(!scope)return this.close(id,'suppressed','conversation_not_selected');
         if(ownerRejected(action,scope.owner))return this.close(id,'skipped','owner_rejected');
-        if(answeredInTurn(action,await this.notion(action),row.created_at))return this.close(id,'skipped','answered_in_turn');
         // The asking turn's own reply goes first, then an earlier follow-up not yet ended (claimed, running, or failed with
         // a retry left), then a receipt that may still arrive, then siblings still running or awaiting a late receipt, so
         // they are answered together. Each wait is bounded.
         const age=Date.now()-row.created_at.getTime(),asking=(await db.query('SELECT state FROM dispatches WHERE event_id=$1',[row.event_id])).rows[0];
         if((!asking||!terminalTurnStates.has(asking.state))&&age<askingWaitMs)return this.wait(row,5000);
+        if(answeredInTurn(action,asking?.state))return this.close(id,'skipped','answered_in_turn');
         if(age<askingWaitMs&&(await db.query(`SELECT 1 FROM action_continuations WHERE event_id=$1 AND action_id<>$2 AND (state='running'
           OR run_id=action_id AND (state IN ('pending','waiting') OR state='failed' AND attempts<$3))`,[row.event_id,id,maxAttempts])).rowCount)return this.wait(row,5000);
         if(awaitingReceipt(action,row.created_at))return this.wait(row,10000);
@@ -226,14 +219,14 @@ export class ActionContinuationRepository {
               await db.query("UPDATE action_continuations SET state='skipped',error_code='chain_limit',updated_at=now() WHERE action_id=$1",[id]);
               await db.query('COMMIT');return this.observation(await this.row(id));
             }
-            const candidates=(await db.query(`SELECT c.action_id,c.created_at AS ended,a.event_id,a.kind,a.state,a.error_code,a.decision_reference,a.created_at,a.proposal_reference
+            const candidates=(await db.query(`SELECT c.action_id,c.created_at AS ended,a.event_id,a.kind,a.state,a.error_code,a.observed_in_turn
               FROM action_continuations c JOIN controlled_actions a ON a.id=c.action_id
               WHERE c.event_id=$1 AND c.action_id<>$2 AND c.run_id IS NULL AND c.state IN ('pending','waiting')
               AND a.space_id=$3 AND a.profile=$4 ORDER BY c.created_at,c.action_id FOR UPDATE OF c`,[row.event_id,id,action.space_id,action.profile])).rows;
             const merged:string[]=[];
             // One that needs no follow-up of its own is left for its own job to skip, and one still awaiting a late receipt for its own wait.
             for(const candidate of candidates)if(!ownerRejected(candidate,scope.owner)&&!awaitingReceipt(candidate,candidate.ended)
-              &&!answeredInTurn(candidate,await this.notion(candidate),candidate.ended))merged.push(candidate.action_id);
+              &&!answeredInTurn(candidate,asking?.state))merged.push(candidate.action_id);
             if(merged.length)await db.query(`UPDATE action_continuations SET run_id=$2,state='skipped',error_code='merged',updated_at=now() WHERE action_id=ANY($1::text[])`,[merged,id]);
             await db.query('UPDATE action_continuations SET run_id=action_id,updated_at=now() WHERE action_id=$1',[id]);
           }

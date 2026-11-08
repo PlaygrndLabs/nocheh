@@ -324,7 +324,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     const action=path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
     if(action&&req.method==='GET') {
       const exists=(await s.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[action[1]])).rowCount;
-      return result(exists?await s.controlledActions.inspect(principal,action[1]):await s.telegramActions.inspect(principal,action[1]!),true);
+      // in_turn: the asking turn's tool holds the ended result and names the state it read (ADR-0215).
+      return result(exists?await s.controlledActions.inspect(principal,action[1],url.searchParams.get('in_turn')):await s.telegramActions.inspect(principal,action[1]!),true);
     }
     if(path==='/v1/context/prepare'&&req.method==='POST') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);

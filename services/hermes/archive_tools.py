@@ -226,9 +226,9 @@ def register(ctx):
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
             handler=handler)
     for kind,description,properties,required in (
-        ('shell','Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval or an exact standing permission is required.',
+        ('shell','Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval, a standing permission or a rule the owner set for this chat is required; when one already allows it, this call returns its result.',
          {'command':{'type':'string','maxLength':16000}},['command']),
-        ('browser','Propose reading one public HTTPS page. An HTML page renders offline without scripts or secondary requests; a JSON or plain-text answer, such as a weather service\'s, comes back as text. No logins, clicks or form submissions.',
+        ('browser','Propose reading one public HTTPS page. An HTML page renders offline without scripts or secondary requests; a JSON or plain-text answer, such as a weather service\'s, comes back as text. No logins, clicks or form submissions. When the owner already allows the site here, this call returns the page.',
          {'url':{'type':'string'}},['url']),
         ('mcp','Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities.',
          {'url':{'type':'string'},'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string'},'input':{'type':'object'}},['url']),
@@ -361,7 +361,10 @@ def controlled_tool(kind,args):
         from .profile_config import inherited_config,read,preferences
         home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
         if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
-        return json.dumps(request('/v1/tools/propose',{'kind':kind,'arguments':args}),ensure_ascii=False)
+        proposed=request('/v1/tools/propose',{'kind':kind,'arguments':args})
+        # One the owner already allows runs now: wait briefly, so its answer comes in this turn (ADR-0215).
+        value=wait_in_turn(proposed['id']) if proposed.get('allowed') else None
+        return in_parts(value) if value else json.dumps(proposed,ensure_ascii=False)
     except HTTPError as error:
         # The store keeps its error text private; the status still says whether asking again can help.
         return json.dumps({400:{'error':'invalid_action_request'},403:{'error':'not_allowed_here'}}.get(error.code,UNAVAILABLE))
@@ -382,17 +385,33 @@ def notion_tool(args,**kwargs):
         proposed=request('/v1/tools/propose',{'kind':'mcp','arguments':body})
         if proposed.get('state')!='approved':return json.dumps(proposed,ensure_ascii=False)
         # A call the owner's setting allows runs now; wait briefly so the answer comes back in this turn.
-        deadline=time.monotonic()+60
-        while time.monotonic()<deadline:
-            time.sleep(1)
-            try:value=request('/v1/tools/actions/'+proposed['id'],timeout=max(1,deadline-time.monotonic()))
-            except HTTPError:raise
-            except OSError:break
-            if value.get('state') in ('done','failed','rejected','ambiguous'):return in_parts(value)
+        value=wait_in_turn(proposed['id'])
+        if value:return in_parts(value)
         return json.dumps({'id':proposed['id'],'state':'running','note':'Still running; read it later with nocheh_action_status.'})
     except HTTPError as error:
         return json.dumps({'error':{400:'invalid_notion_call',403:'notion_only_in_owner_private_chat',409:'notion_is_off_or_changed'}.get(error.code,'notion_unavailable')})
     except Exception:return json.dumps({'error':'notion_unavailable'})
+
+
+IN_TURN_SECONDS=60
+ENDED=('done','failed','rejected','ambiguous')
+
+
+def wait_in_turn(id):
+    """An operation that runs without a card, read once it ends within the wait, else None. A failed read only ends
+    the wait: it already runs, and its answer follows in the chat. Once this turn holds the ended result, it tells
+    Nocheh which state it read, so no follow-up repeats it; if that note is lost, a follow-up repeats it (ADR-0215)."""
+    deadline=time.monotonic()+IN_TURN_SECONDS
+    while time.monotonic()<deadline:
+        time.sleep(1)
+        # The read that carries the result passes the secret check, so it keeps enough time even late in the wait.
+        try:value=request('/v1/tools/actions/'+id,timeout=max(15,deadline-time.monotonic()))
+        except Exception:return None
+        if isinstance(value,dict) and value.get('state') in ENDED:
+            try:request('/v1/tools/actions/'+id+'?in_turn='+value['state'],timeout=15)
+            except Exception:pass
+            return value
+    return None
 
 
 RESULT_KEYS=('id','kind','state','result','error_code')

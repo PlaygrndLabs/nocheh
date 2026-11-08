@@ -854,6 +854,16 @@ itself at startup.
 
 <verification>
 
+- One message when already allowed, stage C (2026-11-08,
+  [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)): an
+  operation that a rule or the owner freedom setting already allows is waited for
+  in the turn, up to 60 seconds, and answers in that reply. Once the tool holds
+  the result, it notes the state it read; the follow-up skips only that answer,
+  and a lost note or a follow-up turn's note leaves the follow-up in place. Checks:
+  [in-turn wait](services/hermes/test_action_results.py),
+  [skip rule](test/action-continuations.test.ts),
+  [marks and skips](test/store-action-continuations.test.ts), and the tester
+  scenario `allowed_command_runs_without_a_card`.
 - Allow a site or command in one chat, stage B (2026-11-08,
   [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md)): the owner
   asked for Claude Code-style auto-approve built on Hermes's approval words. A web
@@ -863,8 +873,7 @@ itself at startup.
   survives epochs; deny rules still win. Checks:
   [rules](test/store-action-rules.test.ts), the gateway's
   [card buttons](services/hermes/test_approval_cards.py), and the tester scenario
-  `allowed_command_runs_without_a_card`. Not built: a short in-turn wait so an
-  allowed operation answers in one message (stage C).
+  `allowed_command_runs_without_a_card`.
 - Answers come back to the chat that asked, stage A (2026-11-08,
   [ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md)):
   the owner decided that once an approved operation ends, the agent continues in
