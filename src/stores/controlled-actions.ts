@@ -6,7 +6,7 @@ import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {actionArguments} from '../action-arguments.js';
+import {actionArguments,ruleKey} from '../action-arguments.js';
 import {HttpError,object,string} from '../http.js';
 import {decide,validatePolicy,type Effect} from '../security/contract.js';
 import {evaluate,policySnapshot,recordEffect} from '../security/store.js';
@@ -21,6 +21,15 @@ import type {SourceReference} from './archive.js';
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
 const exact=(value:unknown,keys:string[])=>{const body=object(value);if(Object.keys(body).some(k=>!keys.includes(k)))throw new HttpError(400,'unknown_action_field');return body;};
+/** How long a chat rule from a card button lasts, in minutes, by what it covers (ADR-0213): a site here for a
+ * session of 12 hours or for 30 days, an exact command for 30 days. Telegram and Notion keep their own decisions. */
+export const ruleMinutes:Record<string,Partial<Record<'here'|'always',number>>>={browser:{here:720,always:43200},shell:{always:43200}};
+const ruleUses=1000;
+/** Whether a standing permission still covers an operation: an exact grant its fingerprint and epoch, a chat rule its
+ * site or command, kind, chat or topic, profile and installation generation, never a job's operation (ADR-0213). */
+export const covers=(grant:any,row:any)=>grant.grain==='chat'?row.job_id===null&&!!row.match_key&&grant.match_key===row.match_key&&grant.kind===row.kind&&
+  grant.space_id===row.space_id&&grant.logical_profile===row.logical_profile&&grant.binding?.generation===row.binding?.generation:
+  grant.fingerprint===row.fingerprint&&canonical(grant.binding)===canonical(row.binding)&&(grant.job_id===null||grant.job_id===row.job_id);
 
 /** Content and owner-edit history remain derived; authority and effects remain control. */
 export class ControlledActionRepository {
@@ -83,9 +92,10 @@ export class ControlledActionRepository {
       // first is ended by Stop's sweep (ADR-0204). A scheduled task's job is no background job.
       const job=turn.job?(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR SHARE',[turn.job])).rows[0]:null;
       if(job&&(job.state!=='running'||job.cancel_requested))throw new HttpError(409,'job_not_running');
-      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING`,
-        [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null]);
+      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
+        [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,
+          turn.job?null:ruleKey(body.kind as string,args)]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
@@ -111,6 +121,10 @@ export class ControlledActionRepository {
         // Only a Telegram chat gets the follow-up turn, at most three per asking message (ADR-0212); a browser turn reads the operation itself.
         telegram&&await followUpLeft(db,source.id)?'Approved by your own request under the owner freedom setting; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.':
         'Approved by your own request under the owner freedom setting; it will run now.'};
+      // A rule the owner set for this chat, or an exact permission, lets it run without a card.
+      if(row.state==='proposed'&&grant&&decision.outcome==='allow')return {id,state:row.state,fingerprint,message:
+        telegram&&!turn.job&&await followUpLeft(db,source.id)?'Allowed by a rule the owner set for this chat; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.':
+        'Allowed by a rule the owner set; it runs now.'};
       return {id,state:row.state,fingerprint,message:'Review the exact operation. Execution requires owner approval or a current bounded permission.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
@@ -167,10 +181,13 @@ export class ControlledActionRepository {
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   /** Standing permissions that cover an operation; none for one a relaunched job run asked for (ADR-0207). */
-  async grants(row:any,db:Pick<pg.Pool,'query'>=this.control) {
-    return (await db.query(`SELECT id,remaining,expires_at,revision FROM action_permissions WHERE fingerprint=$1 AND binding=$2
-      AND (job_id IS NULL OR job_id=$3) AND remaining>0 AND revoked_at IS NULL AND expires_at>now()
-      AND NOT EXISTS (SELECT 1 FROM background_runs r WHERE r.event_id=$4 AND r.attempt>1) ORDER BY expires_at,id`,[row.fingerprint,row.binding,row.job_id,row.event_id])).rows;
+  async grants(row:any,db:Pick<pg.Pool,'query'>=this.control,lock=false) {
+    // The same matching as covers(): the exact grant, or a chat rule for this site or command here (ADR-0213).
+    return (await db.query(`SELECT id,remaining,expires_at,revision,grain FROM action_permissions WHERE remaining>0 AND revoked_at IS NULL AND expires_at>now()
+      AND (grain='exact' AND fingerprint=$1 AND binding=$2 AND (job_id IS NULL OR job_id=$3)
+        OR grain='chat' AND $3::text IS NULL AND job_id IS NULL AND match_key=$5 AND kind=$6 AND space_id=$7 AND logical_profile=$8 AND binding->'generation'=$2::jsonb->'generation')
+      AND NOT EXISTS (SELECT 1 FROM background_runs r WHERE r.event_id=$4 AND r.attempt>1) ORDER BY expires_at,id${lock?' LIMIT 1 FOR UPDATE':''}`,
+      [row.fingerprint,row.binding,row.job_id,row.event_id,row.match_key,row.kind,row.space_id,row.logical_profile])).rows;
   }
   private async command<T>(principal:Reader,body:Record<string,unknown>,request:unknown,change:(db:pg.PoolClient)=>Promise<T>,source?:SourceReference) {
     admin(principal);if(source)await this.access.archive.verify(source);
@@ -184,17 +201,31 @@ export class ControlledActionRepository {
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   async decide(principal:Reader,value:unknown,source?:SourceReference) {
-    admin(principal);const body=exact(value,['id','fingerprint','decision','expected_revision','operation_id']),id=identity(body.id);
+    admin(principal);const body=exact(value,['id','fingerprint','decision','expected_revision','operation_id','allow']),id=identity(body.id);
     if(!['approve','deny'].includes(String(body.decision)))throw new HttpError(400,'invalid_decision');
+    // Approve can also allow the same site or exact command in this chat from now on (ADR-0213).
+    if(body.allow!==undefined&&(body.decision!=='approve'||!['here','always'].includes(String(body.allow))))throw new HttpError(400,'invalid_decision');
     return this.command(principal,body,{...body,operation_id:undefined},async db=>{
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!row)throw new HttpError(404,'action_not_found');
       if(body.fingerprint!==row.fingerprint||body.expected_revision!==undefined&&body.expected_revision!==row.revision)throw new HttpError(409,'action_changed');
       if(!['proposed','approved'].includes(row.state))throw new HttpError(409,'action_already_started_or_closed');
+      const minutes=body.allow===undefined?null:ruleMinutes[row.kind]?.[body.allow as 'here'|'always'];
+      if(minutes!==null&&(!minutes||!row.match_key||row.job_id))throw new HttpError(400,'rule_not_available');
       if(body.decision==='approve'){await this.fence(db,row.binding);await this.arguments(row);}
       const state=body.decision==='approve'?'approved':'rejected';
       await db.query('UPDATE controlled_actions SET state=$2,permission_id=NULL,decision_reference=$3,revision=revision+1,updated_at=now() WHERE id=$1',[id,state,source??null]);
-      await requestWorkflow(db,'tools',id);return {id,state,revision:row.revision+1};
+      await requestWorkflow(db,'tools',id);
+      if(!minutes)return {id,state,revision:row.revision+1};
+      const rule=digest(canonical(['rule',id,body.allow,body.operation_id??null]));
+      await db.query(`INSERT INTO action_permissions(id,action_id,fingerprint,proposal_reference,binding,scope,profile,kind,job_id,expires_at,remaining,grain,match_key,space_id,logical_profile)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULL,now()+$9*interval '1 minute',$10,'chat',$11,$12,$13)`,
+        [rule,id,row.fingerprint,row.proposal_reference,row.binding,row.scope,row.profile,row.kind,minutes,ruleUses,row.match_key,row.space_id,row.logical_profile]);
+      // Other operations waiting here for the same site or command run under the rule now.
+      const waiting=(await db.query(`SELECT id FROM controlled_actions WHERE state='proposed' AND job_id IS NULL AND match_key=$1 AND kind=$2 AND space_id=$3 AND id<>$4 ORDER BY id`,
+        [row.match_key,row.kind,row.space_id,id])).rows;
+      for(const other of waiting)await requestWorkflow(db,'tools',other.id);
+      return {id,state,revision:row.revision+1,rule};
     },source);
   }
   async grant(principal:Reader,value:unknown) {

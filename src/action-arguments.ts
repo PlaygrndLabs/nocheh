@@ -1,4 +1,4 @@
-import {canonical} from './archive.js';
+import {canonical,digest} from './archive.js';
 import {HttpError,object,string} from './http.js';
 
 export function actionArguments(kind:unknown,value:unknown) {
@@ -36,4 +36,12 @@ export function actionArguments(kind:unknown,value:unknown) {
     return {url:address,tool,input};
   }
   throw new HttpError(400,'unsupported_controlled_tool');
+}
+
+/** What a chat rule allows, in Hermes's approval rule_key format: one site for a web read, one exact
+ * command for a shell command. Other operations have no rule and are decided one by one (ADR-0213). */
+export function ruleKey(kind:string,args:any):string|null {
+  if(kind==='browser')return 'nocheh_browser:'+new URL(args.url).hostname;
+  if(kind==='shell')return 'nocheh_shell:'+digest(args.command);
+  return null;
 }

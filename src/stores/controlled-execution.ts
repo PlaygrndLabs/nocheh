@@ -5,7 +5,7 @@ import {evaluate,recordEffect} from '../security/store.js';
 import type {Decision} from '../security/contract.js';
 import {enterFamily,leaveFamily,releaseOperation} from '../workflows/store.js';
 import {hostActionAuthority} from '../workflows/host-tools.js';
-import type {ControlledActionRepository} from './controlled-actions.js';
+import {covers,type ControlledActionRepository} from './controlled-actions.js';
 import {defaultLogicalProfile} from './runtime-profile.js';
 import {parentSpace} from '../spaces.js';
 
@@ -114,9 +114,7 @@ export class ControlledExecutionRepository {
         {const result=await this.blocked(db,row,'job_stopped');await db.query('COMMIT');this.closed(row.id);return result;}
       if((await db.query("SELECT 1 FROM controlled_actions WHERE state='running' LIMIT 1")).rowCount){await db.query('COMMIT');return {claimed:false};}
       // A relaunched job run's operations use no standing permission (ADR-0207).
-      const grant=row.state==='proposed'?(await db.query(`SELECT id FROM action_permissions WHERE fingerprint=$1 AND binding=$2 AND (job_id IS NULL OR job_id=$3)
-        AND remaining>0 AND revoked_at IS NULL AND expires_at>now() AND NOT EXISTS (SELECT 1 FROM background_runs r WHERE r.event_id=$4 AND r.attempt>1)
-        ORDER BY expires_at,id LIMIT 1 FOR UPDATE`,[row.fingerprint,row.binding,row.job_id,row.event_id])).rows[0]:null;
+      const grant=row.state==='proposed'?(await this.actions.grants(row,db,true))[0]:null;
       if(row.state==='proposed'&&!grant){await db.query('COMMIT');return {claimed:false};}
       const decision=await evaluate(db,this.actions.effect(row),grant?.id??'exact_owner_approval',true);
       if(decision.outcome!=='allow'){const result=await this.blocked(db,row,decision.rule,decision);await db.query('COMMIT');this.closed(row.id);return result;}
@@ -142,7 +140,7 @@ export class ControlledExecutionRepository {
       if(row.lease_until<=new Date())blocked='execution_lease_expired';
       if(row.permission_id) {
         const grant=(await db.query('SELECT * FROM action_permissions WHERE id=$1 FOR SHARE',[row.permission_id])).rows[0];
-        if(!grant||grant.revoked_at||grant.expires_at<=new Date()||grant.fingerprint!==row.fingerprint||canonical(grant.binding)!==canonical(row.binding))blocked='permission_no_longer_valid';
+        if(!grant||grant.revoked_at||grant.expires_at<=new Date()||!covers(grant,row))blocked='permission_no_longer_valid';
       }
       const decision=await evaluate(db,this.actions.effect(row),row.permission_id??'exact_owner_approval',true);
       if(blocked||decision.outcome!=='allow') {

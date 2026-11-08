@@ -654,9 +654,13 @@ class AssistantGateway:
             if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_approval')
             buttons=[]
             for label,data in body.get('buttons') or []:
-                if not isinstance(label,str) or not 0<len(label)<=40 or not isinstance(data,str) or not re.fullmatch(r'n[ad][a-f0-9]{56}',data):raise ValueError('invalid_approval')
+                if not isinstance(label,str) or not 0<len(label)<=40 or not isinstance(data,str) or not re.fullmatch(r'n[adcw][a-f0-9]{56}',data):raise ValueError('invalid_approval')
                 buttons.append(InlineKeyboardButton(label,callback_data=data))
-            if len(buttons)!=2:raise ValueError('invalid_approval')
+            # Approve first and Reject last, for one action; an operation may also offer Allow here and Always allow (ADR-0213).
+            if (not 2<=len(buttons)<=4 or buttons[0].callback_data[1]!='a' or buttons[-1].callback_data[1]!='d'
+                    or len({button.callback_data[1] for button in buttons})!=len(buttons) or len({button.callback_data[2:] for button in buttons})!=1):raise ValueError('invalid_approval')
+            # Two buttons to a row, so four still fit a phone's width.
+            rows=[buttons[index:index+2] for index in range(0,len(buttons),2)]
             name='approval-'+body['id']
             async with self.action_lock:
                 receipt=self.receipts/(name+'.result')
@@ -668,7 +672,7 @@ class AssistantGateway:
                 try:
                     # In the chat where it was asked, the card is the reply to the request.
                     # Links are entities over plain text, so no default formatting applies.
-                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup([buttons]),
+                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup(rows),
                                                 entities=entities,parse_mode=None,reply_to_message_id=int(reply) if reply else None,allow_sending_without_reply=True,
                                                 link_preview_options=no_preview())
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}

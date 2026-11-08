@@ -31,6 +31,10 @@ export type Permission = {
   revoked_at?: string | null;
   revision?: number;
   created_at?: string;
+  /** "chat" for a rule from a card's Allow button: one site or exact command in one chat or topic. */
+  grain?: 'exact' | 'chat';
+  match_key?: string | null;
+  space_id?: string | null;
 };
 export type ActionQueue = {actions: Action[]; telegram?: Action[]; permissions: Permission[]};
 export type Run = {
@@ -98,6 +102,17 @@ export function actionSummary(action: Pick<Action, 'kind' | 'arguments'>): strin
       ? `List the tools at ${args.url ?? 'a connected service'}`
       : `${args.tool ?? 'A tool'} at ${args.url ?? 'a connected service'}`;
   return '';
+}
+
+/** What a permission covers: a chat rule for a web read covers every page on its site. */
+export function permissionSummary(permission: Permission): string {
+  if (
+    permission.grain === 'chat' &&
+    permission.kind === 'browser' &&
+    permission.match_key?.startsWith('nocheh_browser:')
+  )
+    return 'Any page on ' + permission.match_key.slice('nocheh_browser:'.length);
+  return actionSummary(permission);
 }
 
 /** Where a Telegram message goes, or where an action was asked for. */

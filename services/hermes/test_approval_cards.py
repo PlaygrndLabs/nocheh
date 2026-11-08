@@ -67,6 +67,15 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                         {**card,'id':'b'*64,'text':''},{**card,'id':'b'*64,'text':'x'*4097}]:
                 with self.assertRaises(ValueError):await gateway.send_approval(bad)
             self.assertEqual(len(sent),2,'a card for another group or chat, or with other buttons, is never sent')
+            # An operation that can be allowed here shows up to four buttons, two to a row (ADR-0213).
+            four={**card,'id':'f'*64,'text':'⚙️ Run browser','buttons':[['Allow once',data('a')],['Allow here',data('c')],['Always here',data('w')],['Reject',data('d')]]}
+            self.assertEqual((await gateway.send_approval(four))['state'],'done')
+            self.assertEqual([[button.callback_data[:2] for button in row] for row in sent[2][3].inline_keyboard],[['na','nc'],['nw','nd']])
+            for bad in [four['buttons'][::-1],four['buttons']+[['More',data('c')]],[four['buttons'][0],four['buttons'][0],four['buttons'][3]],
+                        [four['buttons'][0],['Reject','nd'+'b'*56]],[four['buttons'][0],['Stop',data('s')]]]:
+                with self.subTest(buttons=bad),self.assertRaisesRegex(ValueError,'invalid_approval'):
+                    await gateway.send_approval({**four,'id':'1'*64,'buttons':bad})
+            self.assertEqual(len(sent),3,'Approve first, Reject last, each choice once, all for the same action')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'a'*64,'chat_id':'123','text':'Done'}),{'state':'done','edited':True})
             self.assertEqual(edits,[(123,41,'Done',None,[])],'the decided card loses its buttons')
             self.assertEqual(await gateway.send_approval({'kind':'settle','id':'e'*64,'chat_id':'-20','text':group['text']+'\n\nSent.','links':group['links']}),{'state':'done','edited':True})

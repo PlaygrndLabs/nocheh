@@ -854,6 +854,17 @@ itself at startup.
 
 <verification>
 
+- Allow a site or command in one chat, stage B (2026-11-08,
+  [ADR-0213](docs/adr/0213-allow-a-site-or-command-in-one-chat.md)): the owner
+  asked for Claude Code-style auto-approve built on Hermes's approval words. A web
+  read's card offers Allow once, Allow here for 12 hours, Always allow this site
+  here and Reject; a command's card, Allow once, Always allow this command here and
+  Reject. A chat rule covers one site or exact command in one chat or topic, and
+  survives epochs; deny rules still win. Checks:
+  [rules](test/store-action-rules.test.ts), the gateway's
+  [card buttons](services/hermes/test_approval_cards.py), and the tester scenario
+  `allowed_command_runs_without_a_card`. Not built: a short in-turn wait so an
+  allowed operation answers in one message (stage C).
 - Answers come back to the chat that asked, stage A (2026-11-08,
   [ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md)):
   the owner decided that once an approved operation ends, the agent continues in
