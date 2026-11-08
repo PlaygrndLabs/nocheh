@@ -5,7 +5,8 @@ import {workflowIdentity} from '../workflows/client.js';
 import {hash} from '../workflows/store.js';
 import {workflowDetail,workflowView} from '../workflows/owner.js';
 
-/** All relations in this view are control metadata. Source references are links, never SQL joins to content. */
+/** All relations in this view are control metadata. Source references are links, never SQL joins to content.
+ *  An unclear operation or send that was closed (ADR-0218) counts as done when the owner said it ran, else as skipped. */
 export const storageWorkflowOwnerSchema=`
 CREATE OR REPLACE VIEW workflow_observations AS
 SELECT w.id,w.family,w.job_id,w.version,w.generation,w.state AS registry_state,w.revision,w.dispatch,
@@ -14,7 +15,9 @@ SELECT w.id,w.family,w.job_id,w.version,w.generation,w.state AS registry_state,w
  coalesce(k.source_reference->>'id',l.source_reference->>'id',d.event_id,c.event_id,CASE WHEN m.channel='browser' THEN m.event_id END,a.source_reference->>'id',t.source_reference->>'id',j.source_reference->>'id',h.source_reference->>'id',
    r.file_reference#>>'{event,id}',CASE WHEN w.family IN ('telegram','preparation') AND w.job_id ~ '^[a-f0-9]{64}$' THEN w.job_id
    WHEN w.family IN ('memory_review','honcho') AND w.job_id ~ '^source:[a-f0-9]{64}$' THEN substring(w.job_id FROM 8) END) AS source_event_id,
- CASE WHEN w.state IN ('completed','failed','skipped','cancelled','ambiguous','denied') THEN w.state
+ CASE WHEN t.state='ambiguous' AND t.resolution IS NOT NULL THEN CASE t.resolution WHEN 'ran' THEN 'completed' ELSE 'skipped' END
+ WHEN a.state='ambiguous' AND a.resolution IS NOT NULL THEN CASE a.resolution WHEN 'ran' THEN 'completed' ELSE 'skipped' END
+ WHEN w.state IN ('completed','failed','skipped','cancelled','ambiguous','denied') THEN w.state
 WHEN k.id IS NOT NULL THEN CASE k.state WHEN 'applied' THEN 'completed' WHEN 'undone' THEN 'skipped' WHEN 'stale' THEN 'skipped' WHEN 'review' THEN 'waiting' WHEN 'queued' THEN w.state ELSE k.state END
 WHEN d.event_id IS NOT NULL THEN CASE d.state WHEN 'done' THEN 'completed' WHEN 'suppressed' THEN 'skipped' WHEN 'failed' THEN 'retryable_failed' WHEN 'pending' THEN w.state ELSE d.state END
  WHEN c.action_id IS NOT NULL THEN CASE c.state WHEN 'done' THEN 'completed' WHEN 'suppressed' THEN 'skipped' WHEN 'skipped' THEN 'skipped' WHEN 'failed' THEN CASE WHEN c.attempts>=3 THEN 'failed' ELSE 'retryable_failed' END WHEN 'pending' THEN w.state WHEN 'waiting' THEN 'waiting' ELSE c.state END

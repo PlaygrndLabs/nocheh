@@ -161,7 +161,7 @@ export class ActionCommandRepository {
     return title?fillTemplate(line.from_job,{title}):null;
   }
   /** The exact content to decide on, or null when it is too long to review in Telegram. */
-  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;links:Link[];fingerprint:string;state:string;code:string|null;started:boolean;line:Record<ApprovalText,string>}|null> {
+  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;links:Link[];fingerprint:string;state:string;code:string|null;started:boolean;resolution:string|null;line:Record<ApprovalText,string>}|null> {
     const owner={admin:true,scope:null},texts=await this.texts(),urls:string[]=[];
     const line=Object.fromEntries(Object.entries(texts.line).map(([key,value])=>[key,value.replace(controls,'')])) as Record<ApprovalText,string>;
     const mark:Mark=(label,url)=>url?`\u0001${urls.push(url)-1}\u0002${label}\u0003`:label;
@@ -173,7 +173,7 @@ export class ActionCommandRepository {
       const action=await this.telegram.inspect(owner,id),[chat,topic]=String(action.arguments.destination).split('/topic/');
       const place=await this.where(chat!,line,mark,{topic,showTopic:true});
       const filled=fillTemplate(texts.card.replace(controls,''),{destination:place,origin,text:String(action.arguments.text).replace(controls,'')});
-      return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,code:null,started:true,line};
+      return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,code:null,started:true,resolution:action.resolution,line};
     }
     const action=await this.tools.inspect(owner,id);
     const shown=operation(action,line);if(!shown)return null;
@@ -183,15 +183,19 @@ export class ActionCommandRepository {
     const code=action.error_code??(typeof action.result?.result?.error==='string'?action.result.result.error:null);
     // The executor runs only after its start is recorded, so an operation never started did not run.
     const started=!!(await this.tools.row(id)).started_at;
-    return {...card,fingerprint:action.fingerprint,state:action.state,code,started,line};
+    return {...card,fingerprint:action.fingerprint,state:action.state,code,started,resolution:action.resolution,line};
   }
-  private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>,code:string|null=null,started=true) {
+  private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>,code:string|null=null,started=true,resolution:string|null=null) {
     if(state==='proposed')return null;
+    // An unclear outcome the owner closed with their word (ADR-0218); a dismissed one stays unsure.
+    if(state==='ambiguous'&&(resolution==='ran'||resolution==='not_run'))
+      return kind==='telegram'?resolution==='ran'?line.marked_sent:line.marked_not_sent:resolution==='ran'?line.marked_ran:line.marked_not_run;
     if(kind==='controlled') {
       const reason=line[code&&Object.hasOwn(reasons,code)?reasons[code]!:'reason_other'];
       if(state==='rejected'&&code||['failed','ambiguous'].includes(state)&&(!started||unsent.has(code??'')))return fillTemplate(line.not_run,{reason});
       if(state==='failed')return fillTemplate(line.failed_action,{reason});
-      if(state==='ambiguous')return line.unsure;
+      // A page read that started and got no answer closed itself.
+      if(state==='ambiguous')return resolution==='read_closed'?line.read_closed:line.unsure;
     }
     if(state==='rejected')return kind==='telegram'?line.rejected:line.rejected_action;
     if(state==='cancelled')return line.cancelled;
@@ -346,10 +350,11 @@ export class ActionCommandRepository {
   /** A decided list card keeps its text and says how its changes ended. */
   private async settleList(id:string,seen?:Seen) {
     const found=await this.listCard({card:id}),owner=this.access.policy().owner_id;if(!found||!owner)return;
-    const {line}=await this.texts(),states=(await this.access.stores.control.query('SELECT id,state,error_code FROM controlled_actions WHERE id=ANY($1)',
+    const {line}=await this.texts(),states=(await this.access.stores.control.query('SELECT id,state,error_code,resolution FROM controlled_actions WHERE id=ANY($1)',
       [found.card.members.map(([member])=>member)])).rows;
     if(states.some(row=>row.state==='proposed'))return;
-    const count=String(found.card.members.length),done=states.filter(row=>row.state==='done').length;
+    // An unclear change the owner said ran counts as done, as it does in Health (ADR-0218).
+    const count=String(found.card.members.length),done=states.filter(row=>row.state==='done'||row.state==='ambiguous'&&row.resolution==='ran').length;
     // Every change ended without running: the owner rejected it, or what it used changed since.
     const unrun=states.every(row=>row.state==='rejected'),code=states.find(row=>row.error_code)?.error_code;
     const outcome=unrun&&states.some(row=>!row.error_code)?line.rejected_action:
@@ -378,7 +383,7 @@ export class ActionCommandRepository {
       if(listed)return await this.settle('list',listed.card.id);
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
       const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
-      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line,card.code,card.started):null;
+      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer):null,outcome=card?this.outcome(kind,card.state,card.line,card.code,card.started,card.resolution):null;
       if(place&&card&&outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:card.links,...seenIn(seen,place.chat)});
     }catch(error){if(!(error instanceof HttpError))throw error;}
   }
@@ -496,7 +501,8 @@ export class ActionCommandRepository {
     const owner={admin:true,scope:null},operation_id='telegram-command:'+source.id;let controlled=false;
     if(command[1]==='actions') {
       const tools=(await this.tools.list(owner)).actions,telegram=await this.telegram.list(owner);
-      const rows=[...tools,...telegram].filter(row=>['proposed','approved','running','ambiguous'].includes(row.state))
+      // An unclear one waits until it is closed (ADR-0218).
+      const rows=[...tools,...telegram].filter(row=>['proposed','approved','running'].includes(row.state)||row.state==='ambiguous'&&!row.resolution)
         .sort((a,b)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime()).slice(0,10);
       return rows.length?rows.map(row=>`${row.id}\n${row.kind} · ${row.state}\nReview: /action ${row.id}`).join('\n\n').slice(0,3500):'No pending actions.';
     }

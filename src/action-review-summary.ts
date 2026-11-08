@@ -3,9 +3,10 @@ import type pg from 'pg';
 export type ActionReviewSummary={id:string;state:string;count:number};
 type ActionRow={id:string;event_id:string;state:string};
 
-const priority:Record<string,number>={proposed:0,approved:1,running:2,ambiguous:3,done:4,rejected:5,cancelled:6};
+const priority:Record<string,number>={proposed:0,approved:1,running:2,ambiguous:3,done:4,closed:4,rejected:5,cancelled:6};
 
-/** Keep the most actionable request visible when one source proposed several. */
+/** Keep the most actionable request visible when one source proposed several. An unclear send the owner
+ *  closed reads as closed, not uncertain (ADR-0218). */
 export function summarizeActionReviews(rows:ActionRow[]):Map<string,ActionReviewSummary>{
  const reviews=new Map<string,ActionReviewSummary>();
  for(const row of rows){
@@ -21,7 +22,8 @@ export async function actionReviews(pool:pg.Pool,eventIds:string[],layout:'legac
  if(!eventIds.length)return new Map<string,ActionReviewSummary>();
  const sql=layout==='legacy'
   ?'SELECT id,event_id,state FROM action_requests WHERE event_id=ANY($1::text[]) ORDER BY created_at DESC,id DESC'
-  :"SELECT id,source_reference->>'id' AS event_id,state FROM telegram_action_requests WHERE source_reference->>'id'=ANY($1::text[]) ORDER BY created_at DESC,id DESC";
+  :`SELECT id,source_reference->>'id' AS event_id,CASE WHEN state='ambiguous' AND resolution IS NOT NULL THEN 'closed' ELSE state END AS state
+    FROM telegram_action_requests WHERE source_reference->>'id'=ANY($1::text[]) ORDER BY created_at DESC,id DESC`;
  const rows=(await pool.query<ActionRow>(sql,[eventIds])).rows;
  return summarizeActionReviews(rows);
 }
