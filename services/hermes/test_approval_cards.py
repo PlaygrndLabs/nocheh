@@ -131,6 +131,27 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(edits[-1][:2],(123,41),'a card with a known message id keeps it')
             self.assertEqual(len(edits),3)
 
+    async def test_an_operation_card_carries_its_formatting_and_nothing_else(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];gateway=self.gateway(Path(folder),sent)
+            data=lambda choice:'n'+choice+'b'*56
+            text='Run a command\n\ntitle: Made-up\ncontent:\nLine one\nLine two\nnote:\nShort one\nShort two\n\nprintf ok'
+            at=lambda part:text.index(part)
+            formats=[{'type':'bold','offset':at('title:'),'length':6},{'type':'bold','offset':at('content:'),'length':8},
+                     {'type':'expandable_blockquote','offset':at('Line one'),'length':17},{'type':'blockquote','offset':at('Short one'),'length':19},
+                     {'type':'pre','offset':at('printf'),'length':9}]
+            card={'kind':'card','id':'a'*64,'chat_id':'123','text':text,'links':formats,'buttons':[['Approve',data('a')],['Reject',data('d')]]}
+            self.assertEqual((await gateway.send_approval(card))['state'],'done')
+            self.assertEqual(sent[0][5],[(link['type'],link['offset'],link['length'],None) for link in formats],
+                             'labels in bold, text in a quote shown whole or one that opens on a tap, a command as code')
+            bold={'type':'bold','offset':0,'length':3}
+            for bad in [[{**bold,'type':'italic'}],[{**bold,'type':'text_link'}],[{**bold,'url':'https://t.me/nocheh_team'}],[{**bold,'type':'spoiler'}],
+                        [{**bold,'length':0}],[{**bold,'offset':len(text)}],[{'offset':0,'length':3}],[bold]*101,['bold']]:
+                with self.subTest(bad=bad),self.assertRaises(ValueError):await gateway.send_approval({**card,'id':'c'*64,'links':bad})
+            self.assertEqual(await gateway.send_approval({**card,'id':'d'*64,'links':[bold]*100}),{'state':'done','chat_id':'123','message_id':'42'},
+                             'up to Telegram\'s 100 entities')
+            self.assertEqual(len(sent),2)
+
     async def test_unallowed_members_who_address_nocheh_get_the_fixed_reply_once(self):
         with tempfile.TemporaryDirectory() as folder:
             sent=[];gateway=self.gateway(Path(folder),sent,access={'-20':{'granted':['7'],'denied':['8']}})

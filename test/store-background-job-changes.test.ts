@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import pg from 'pg';
-import {canonical,digest,type Envelope} from '../src/archive.js';
+import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
@@ -104,8 +104,13 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
       assert.ok(card.text.length<=4096-300,'room is left for the outcome line');
       assert.equal(card.chat_id,'123');
     }
-    assert.ok(first!.text.startsWith(`📋 The job “Task table update” asks to make these changes (${onFirst.length}).\nCard 1 of 2.\nApprove or Reject covers exactly the changes on this card.\n\n1. ⚙️ mcp\n`));
-    assert.ok(first!.text.includes(canonical((await s.controlledActions.inspect(owner,members[0]!)).arguments)),'each change is shown exactly');
+    assert.ok(first!.text.startsWith(`📋 The job “Task table update” asks to make these changes (${onFirst.length}).\nCard 1 of 2.\nApprove or Reject covers exactly the changes on this card.\n\n`+
+      '1. ⚙️ Notion · update page\npage: made-up-page\nproperties › title: وظیفه ۱۲\n\n2. ⚙️ Notion · update page\n'),'each change is shown in words');
+    const quoted=first!.links.filter((link:any)=>link.type==='expandable_blockquote').map((link:any)=>first!.text.slice(link.offset,link.offset+link.length));
+    assert.ok(quoted.length>=1&&quoted.every((text:string)=>text==='n'.repeat(1500)),'long notes are quoted whole');
+    assert.ok(first!.links.every((link:any)=>link.offset+link.length<=first!.text.length));
+    const bold=first!.links.filter((link:any)=>link.type==='bold').map((link:any)=>first!.text.slice(link.offset,link.offset+link.length));
+    assert.deepEqual(bold.slice(0,2),['1. ⚙️ Notion · update page','page:'],'each change starts with its name in bold');
     assert.match(second!.text,/Card 2 of 2\.[^]*\n\n1 more cannot be shown on a card\. Review them in the dashboard Inbox\.$/);
     assert.doesNotMatch(first!.text,/cannot be shown/);
 
@@ -164,6 +169,20 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
     assert.equal(listCards().length,listed);assert.deepEqual(await frozenCards(lone.id),[]);
     assert.deepEqual(notices.map(notice=>[notice.chat_id,notice.text]),[['123','📋 The job “Long only” asks to make changes that cannot be shown on a card (1). Review them in the dashboard Inbox.']]);
     await s.actionCommands.settle('background',lone.id);assert.equal(notices.length,1);
+
+    // A card holds at most Telegram's 100 entities, so changes with many fields split by that count too.
+    const wide=await running('Many fields'),many:string[]=[];
+    for(const index of [1,2,3]) {
+      const input={page:'made-up-page-'+index,...Object.fromEntries(Array.from({length:40},(_,field)=>['field'+field,'v'+index]))};
+      many.push((await s.actionCommands.offer('controlled',await s.controlledActions.propose(wide.reader,{kind:'mcp',arguments:{connection:'notion',tool:'notion-update-page',input}}))).id);
+    }
+    assert.equal((await end(wide,'Report: three made-up changes.')).state,'completed');
+    assert.deepEqual((await frozenCards(wide.id)).map((card:any)=>card.members.map(([id]:[string])=>id)),[many.slice(0,2),many.slice(2)],'42 entities each: two fit a card, the third does not');
+    const split=listCards().slice(-2);
+    assert.ok(split[0]!.text.length+split[1]!.text.length<4096-300,'all three would fit by length alone');
+    for(const card of split)assert.ok(card.links.length<=100&&card.links.every((link:any)=>link.offset+link.length<=card.text.length));
+    await s.actionCommands.callback(await press(button(split[0],false),123));
+    assert.deepEqual([last('settle',split[0]!.id).text,last('settle',split[0]!.id).links],[split[0]!.text+'\n\n❌ Rejected. Nothing ran.',split[0]!.links],'a decided card keeps its formatting');
 
     // Stop while the report is on its way: the job still ends done, but what it kept ends and comes on no card.
     const late=await running('Stopped while reporting'),kept=(await change(late.reader,'Made-up task 80')).id;

@@ -957,6 +957,23 @@ itself at startup.
   while working" turns them off. Checks: [simulation tests](services/hermes/test_telegram_simulation.py)
   and the full tester scenario `reactions_show_while_working`. Pending: seen on
   the owner's live install after the machine pull.
+- Operation cards read in words (2026-11-08,
+  [ADR-0213](docs/adr/0213-operation-cards-read-in-words.md)): the owner showed a
+  Notion card that was one block of raw JSON and asked "make msg readable". A
+  shell, browser or MCP card now names what it does ("Notion · create pages") and
+  shows every field of the exact input after a bold label, long text in a quote
+  that opens on a tap, short text with line breaks in a quote shown whole, a
+  command as code; text with a hidden character, or a key or value that could
+  pass for something else, is quoted with the character written out; two keys
+  that read alike by Unicode's confusables show the JSON in code with every
+  non-ASCII character as its code; a web page names its host; past
+  3,000 characters or 90 entities it shows the exact JSON as before, and an operation
+  too long even then gets no card. Checks: [words](test/action-text.test.ts),
+  [cards](test/store-approval-buttons.test.ts),
+  [list cards](test/store-background-job-changes.test.ts),
+  [Hermes check](services/hermes/test_approval_cards.py) and the full tester
+  scenario `tool_card_reads_in_words`. Pending: a real Notion card on the owner's
+  live install after the machine pull.
 - Typing while Nocheh works (2026-10-28,
   [ADR-0188](docs/adr/0188-typing-status-while-a-turn-works.md)): Telegram
   showed nothing while a reply was being worked on, because native typing is
