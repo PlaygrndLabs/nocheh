@@ -22,8 +22,9 @@ and the change is not less efficient. Extends
   The security broker allowed only the OpenAI-compatible chat route.
 - The memory evidence was inserted ahead of all history on every call, so a change in
   it changed every message after the system prompt.
-- Anthropic's OpenAI-compatible API ignores the reasoning effort setting, so replies ran
-  with the model's own default thinking. The Messages API would apply the setting.
+- On the OpenAI-compatible route Hermes sent no reasoning setting for this provider, so
+  replies ran with the endpoint's default thinking. On the Messages API Hermes would send
+  the configured effort.
 - Hermes stops a memory-notes review once its input reaches a budget, counting only
   uncached input on the Messages API.
 - At the step limit Hermes asks for a summary on the Messages API without tools, though
@@ -47,13 +48,14 @@ and the change is not less efficient. Extends
   hosted tools, containers, MCP servers, stored files or remote media, and unknown
   request fields are refused. Earlier reasoning is not replayed, as before. A model's
   own tool call arguments are literal text to the secret check, which masks them.
-- Replies keep what they had: the same model, tools, thinking (no effort setting is
-  sent, so the model keeps its own default), memory-notes review budget (counting
-  cached input too), and step-limit summary (built with the turn's tools, as on the
-  chat route).
-- On the Messages API the memory evidence is the last block of the request, after
-  Hermes's cache breakpoints, so no cached part holds it. The OpenAI route keeps it
-  before the conversation.
+- Replies keep what they had: the same model, tools, thinking setting (none is sent, as
+  before, so the API's default applies), memory-notes review budget (counting cached
+  input too), and step-limit summary (built with the turn's tools, as on the chat
+  route).
+- The memory evidence stays before the conversation on both APIs; on the Messages API it
+  is the first block of the first message. (From 2026-11-03 to the follow-up change it was
+  the request's last block. Memory-notes reviews then took a second model call, a tool
+  step, in 34% of runs instead of 83%, so it moved back to keep reviews as they were.)
 - A profile remembers the prompt revision of each session, the last 500.
 - The Hermes image includes Anthropic's SDK; starting the development stack rebuilds an
   image that fails the Dockerfile's import checks. Image reads stay on the
@@ -63,13 +65,13 @@ and the change is not less efficient. Extends
 
 <consequences>
 - Repeated calls within five minutes read the cached start at a tenth of the input
-  price; the first call writes it at 1.25 times the input price. A single-call turn
-  after a longer pause costs slightly more than before; multi-call turns, reviews and
-  turns in a running conversation cost less.
-- Each call re-sends the memory evidence uncached; everything before it, earlier turns
-  included, is read from the cache.
-- The model sees the same memory evidence at the end of the request instead of before
-  the conversation.
+  price; the first call writes it at 1.25 times the input price.
+- The evidence changes from turn to turn, so each turn writes its conversation to the
+  cache again, and the turn's later calls read it. Multi-call turns and reviews cost less
+  than before. A single-call turn costs about 25% more input than before when nothing was
+  cached in the last five minutes, the usual case for occasional replies, and less when
+  its tools and system prompt are still cached and outweigh about a quarter of its
+  conversation.
 - The secret check, privacy filter, image reads, Honcho and Hermes's one-shot helper
   calls are unchanged. Honcho's reasoning calls are a separate, later change.
 - Usage shows the cached share of input per part.
