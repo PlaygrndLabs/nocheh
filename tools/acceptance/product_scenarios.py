@@ -1312,7 +1312,7 @@ class ProductScenarios(Scenarios):
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('card_shows_command', marker in card['message']['text'], card=card['message']['text'])
         self.owner_reaction(request)
-        self.gate('card_still_open', len(self.buttons(self.card_message(card))) == 2 and
+        self.gate('card_still_open', [button['callback_data'][:2] for button in self.buttons(self.card_message(card))] == ['na', 'nw', 'nd'] and
                   self.f.query('nocheh_control', "SELECT state FROM controlled_actions WHERE arguments_hash IS NOT NULL ORDER BY created_at DESC LIMIT 1") == 'proposed')
         self.ran(card, marker)
         # It ended in the owner's chat, so one follow-up reads it and answers the request there (ADR-0212).
