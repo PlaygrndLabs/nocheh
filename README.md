@@ -137,4 +137,6 @@ make dev-build           # rebuild after dependency or Dockerfile changes
 
 ## License
 
-See [LICENSE](LICENSE). Nocheh's code and docs are MIT. The Nocheh name and logo remain © PlaygrndLabs; you may use them to refer to Nocheh, but not as the name or logo of your own product. The [Graphify skill](.agent/skills/graphify/SKILL.md) comes from Graphify and keeps its own [MIT notice](.agent/skills/graphify/LICENSE). Hermes (MIT) and Honcho (AGPL-3.0) are not part of this repository: they are downloaded when you build and keep their own licenses.
+MIT. See [LICENSE](LICENSE).
+
+Built by [PlaygrndLabs](https://github.com/PlaygrndLabs).
