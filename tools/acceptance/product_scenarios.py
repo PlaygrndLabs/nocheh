@@ -293,6 +293,36 @@ class ProductScenarios(Scenarios):
         time.sleep(5)
         self.gate('nothing_sent', not [row for row in self.new(before) if row['message']['chat']['id'] == OTHER_GROUP])
 
+    def tool_card_reads_in_words(self):
+        # A tool's card says what it does and shows its input field by field: its name and labels in bold, long text in a
+        # quote that opens on a tap, short text with a line break in a quote shown whole, no JSON. The decided card keeps
+        # the same formatting.
+        marker = 'WORDSMARK1'
+        content = 'Made-up summary '+marker+'\n\n## Open\n- [ ] One\n- [ ] Two\n\n'+' '.join(['A made-up note that runs on.']*6)
+        note = 'Short line one\nShort line two'
+        call = {'url': 'https://mcp.example.test/mcp', 'tool': 'create-page',
+                'input': {'pages': [{'properties': {'title': 'Open items '+marker}, 'content': content, 'note': note}]}}
+        request = self.f.message(OWNER, 'یک صفحه [[tool:nocheh_mcp '+json.dumps(call)+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        text, entities = card['message']['text'], card['message'].get('entities') or []
+        wide = text.encode('utf-16-le')
+        span = lambda entity: wide[2*entity['offset']:2*(entity['offset']+entity['length'])].decode('utf-16-le')
+        self.gate('card_names_the_operation', text.startswith('⚙️ mcp.example.test · create-page\n'), card=text[:300])
+        self.gate('card_shows_fields_in_words', 'properties › title: Open items '+marker in text and 'https://mcp.example.test/mcp' in text
+                  and not any(mark in text for mark in ('{', '\\n', '"')), card=text)
+        self.gate('entities_inside_the_text', all(entity['length'] > 0 and 0 <= entity['offset'] and entity['offset']+entity['length'] <= len(wide)//2
+                                                  for entity in entities), entities=entities)
+        self.gate('name_and_labels_are_bold', sorted(span(entity) for entity in entities if entity['type'] == 'bold')
+                  == ['mcp.example.test · create-page', 'pages › content:', 'pages › note:', 'pages › properties › title:'], entities=entities)
+        self.gate('long_text_quoted_whole', [span(entity) for entity in entities if entity['type'] == 'expandable_blockquote'] == [content], entities=entities)
+        self.gate('short_text_shown_whole', [span(entity) for entity in entities if entity['type'] == 'blockquote'] == [note], entities=entities)
+        answer = self.press(card, 'reject')
+        self.gate('press_answered_as_rejected', 'Rejected' in (answer.get('text') or ''), answer=answer.get('text'))
+        edited = self.wait('card_shows_rejection', lambda: (lambda row: row if 'Rejected' in row['message']['text'] and not self.buttons(row) else None)(self.card_message(card)), 120)
+        self.gate('decided_card_keeps_its_formatting', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
+                  entities=edited['message'].get('entities'))
+
     def same_group_post_goes_right_away(self):
         # A post the owner or an allowed member asks for in their own group and topic needs no approval.
         for sender, wording in ((OWNER, 'یادآوری برای همه SAME1'), (MEMBER, 'یادآوری عضو SAME2')):
@@ -1627,7 +1657,7 @@ class ProductScenarios(Scenarios):
 PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
                  'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
-                 'owner_private_card_and_approve', 'owner_private_card_reject', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
+                 'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',

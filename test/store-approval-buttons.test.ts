@@ -156,7 +156,8 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.match(last('settle').text,/\n\n❌ Rejected\. Nothing was sent\.$/);
     // A controlled operation from a group is never approved by the request; its card also goes to the owner.
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
-    assert.equal(last('card').chat_id,'123');assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in a Telegram group\n\n\{/);assert.match(tool.message,/asked the owner/);
+    assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group\n\nprintf ok');
+    assert.deepEqual(last('card').links,[{type:'bold',offset:3,length:13},{type:'pre',offset:last('card').text.length-9,length:9}],'the name is bold, the command is code');assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
     // When the owner asks in the group, the reply tells them their card is in their private chat.
     const own=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'shell',arguments:{command:'printf mine'}}));
@@ -174,6 +175,9 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.deepEqual([last('settle').chat_id,last('settle').message_id],['123',undefined]);
     assert.equal(await s.actionCommands.callback(await privatePress('tool',57,toolData)),true);
     assert.deepEqual([last('settle').chat_id,last('settle').message_id],['123','57']);
+    // Hidden characters written out can make a short command too long for a card: it waits in the Inbox, and the model is told.
+    const shownCards=cards.length,hiding=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf '+'\u00a0'.repeat(1000)}}));
+    assert.equal(cards.length,shownCards,'no card');assert.match(hiding.message,/too long for a Telegram card[^]*dashboard Inbox/);
     // A standing permission runs the same operation without a decision, so no buttons are offered.
     await s.controlledActions.grant(owner,{action_id:tool.id,fingerprint:tool.fingerprint,uses:1,minutes:5});
     const again=await message('again'),offered=cards.length;
@@ -287,7 +291,7 @@ test('allowed members post freely in their own group; everything else waits for 
     await s.turns.register(scheduled,{logical_profile:'fixture-schedule'});
     const fromSchedule=await s.actionCommands.offer('controlled',await s.controlledActions.propose(scheduled,{kind:'shell',arguments:{command:'printf made-up-schedule'}}));
     assert.equal(fromSchedule.state,'proposed');assert.deepEqual([last('card').id,last('card').chat_id],[fromSchedule.id,'123']);
-    assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in a scheduled task\n\n\{/);assert.match(fromSchedule.message,/Do not wait for it/);
+    assert.match(last('card').text,/^⚙️ Run a command\n💬 Asked in a scheduled task\n\n\S/);assert.match(fromSchedule.message,/Do not wait for it/);
     // A waiting card whose guarded copy changes before it is approved did not run, and says why.
     const outdated=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message('made-up-outdated')).id,group),{kind:'shell',arguments:{command:'printf outdated'}}));
     const stored=await s.controlledActions.row(outdated.id),copy=await s.guards.read('derived_artifacts:'+stored.proposal_reference.id,await s.guards.state());

@@ -168,19 +168,28 @@ def no_preview():
     return LinkPreviewOptions(is_disabled=True)
 
 
+# The formatting an approval card may carry: bold labels, a quote shown whole or one that opens on a tap, and a command as code.
+APPROVAL_FORMATS=frozenset({'bold','blockquote','expandable_blockquote','pre'})
+
+
 def approval_links(links,length):
-    """Text links on an approval card: a group's, topic's or message's t.me address over its name."""
+    """Entities on an approval card's plain text: a group's, topic's or message's t.me address over its name,
+    and the formatting of an operation's arguments. Nothing else, and at most Telegram's 100."""
     import re
     if links is None:return None
     from telegram import MessageEntity
-    if not isinstance(links,list) or len(links)>4:raise ValueError('invalid_approval')
+    if not isinstance(links,list) or len(links)>100:raise ValueError('invalid_approval')
     entities=[]
     for link in links:
-        offset,size,url=(link.get(key) if isinstance(link,dict) else None for key in ('offset','length','url'))
-        if (type(offset) is not int or type(size) is not int or not 0<=offset<offset+size<=length or not isinstance(url,str)
-                or not re.fullmatch(r'https://t\.me/(?:c/[1-9]\d{0,15}|[A-Za-z][A-Za-z0-9_]{3,31})(?:/[1-9]\d{0,15}){0,2}',url)):
-            raise ValueError('invalid_approval')
-        entities.append(MessageEntity(MessageEntity.TEXT_LINK,offset,size,url=url))
+        if not isinstance(link,dict):raise ValueError('invalid_approval')
+        offset,size,url,kind=(link.get(key) for key in ('offset','length','url','type'))
+        if type(offset) is not int or type(size) is not int or not 0<=offset<offset+size<=length:raise ValueError('invalid_approval')
+        if kind is None and isinstance(url,str) and set(link)=={'offset','length','url'} and re.fullmatch(
+                r'https://t\.me/(?:c/[1-9]\d{0,15}|[A-Za-z][A-Za-z0-9_]{3,31})(?:/[1-9]\d{0,15}){0,2}',url):
+            entities.append(MessageEntity(MessageEntity.TEXT_LINK,offset,size,url=url))
+        elif kind in APPROVAL_FORMATS and set(link)=={'offset','length','type'}:
+            entities.append(MessageEntity(kind,offset,size))
+        else:raise ValueError('invalid_approval')
     return entities or None
 
 
