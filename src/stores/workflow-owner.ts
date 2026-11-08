@@ -6,7 +6,7 @@ import {hash} from '../workflows/store.js';
 import {workflowDetail,workflowView} from '../workflows/owner.js';
 
 /** All relations in this view are control metadata. Source references are links, never SQL joins to content.
- *  An unclear operation or send that was closed (ADR-0217) counts as done when the owner said it ran, else as skipped. */
+ *  An unclear operation or send that was closed (ADR-0218) counts as done when the owner said it ran, else as skipped. */
 export const storageWorkflowOwnerSchema=`
 CREATE OR REPLACE VIEW workflow_observations AS
 SELECT w.id,w.family,w.job_id,w.version,w.generation,w.state AS registry_state,w.revision,w.dispatch,

@@ -253,7 +253,7 @@ test('allowed members post freely in their own group; everything else waits for 
     const unsure=await approvedTool('made-up-unsure');await ran(unsure.id,'ambiguous',{error:'execution_outcome_unconfirmed'});
     const unsureLine='⚠️ Approved, but Nocheh could not confirm that it finished. Check before you ask again.';
     assert.equal(await ending(unsure.id,unsureLine),unsure.card+'\n\n'+unsureLine);
-    // The owner's word on it edits the card; a page read that started and got no answer closes itself (ADR-0217).
+    // The owner's word on it edits the card; a page read that started and got no answer closes itself (ADR-0218).
     await s.controlledActions.resolve(owner,{id:unsure.id,fingerprint:unsure.fingerprint,outcome:'ran'});await s.actionCommands.settle('controlled',unsure.id);
     assert.equal(await ending(unsure.id,'You marked that it ran.'),unsure.card+'\n\n✅ Approved. You marked that it ran.');
     const read=await approvedTool('made-up-read',{kind:'browser',arguments:{url:'https://example.com/made-up-read'}});

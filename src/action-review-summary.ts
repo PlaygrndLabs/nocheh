@@ -6,7 +6,7 @@ type ActionRow={id:string;event_id:string;state:string};
 const priority:Record<string,number>={proposed:0,approved:1,running:2,ambiguous:3,done:4,closed:4,rejected:5,cancelled:6};
 
 /** Keep the most actionable request visible when one source proposed several. An unclear send the owner
- *  closed reads as closed, not uncertain (ADR-0217). */
+ *  closed reads as closed, not uncertain (ADR-0218). */
 export function summarizeActionReviews(rows:ActionRow[]):Map<string,ActionReviewSummary>{
  const reviews=new Map<string,ActionReviewSummary>();
  for(const row of rows){

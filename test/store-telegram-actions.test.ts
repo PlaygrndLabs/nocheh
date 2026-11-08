@@ -92,7 +92,7 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
     await stores.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[uncertain.id]);
     assert.equal((await actions.run(uncertain.id,authority)).state,'waiting');assert.equal(calls.at(-1)!.observe_only,true);
     await due(uncertain.id);assert.equal((await actions.run(uncertain.id,authority)).state,'waiting');assert.equal(native.has(uncertain.id),false,'absence is not permission to resend');
-    // A check that finds the same unclear outcome keeps its revision, so the owner's open review stays usable (ADR-0217).
+    // A check that finds the same unclear outcome keeps its revision, so the owner's open review stays usable (ADR-0218).
     const unclear=await actions.inspect(owner,uncertain.id);assert.equal(unclear.state,'ambiguous');assert.equal(unclear.resolution,null);
     await due(uncertain.id);await actions.run(uncertain.id,authority);assert.equal((await actions.inspect(owner,uncertain.id)).revision,unclear.revision);
     const waiting=async()=>(await services.supervision.decisions(owner)).items.some(item=>item.id===uncertain.id);

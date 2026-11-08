@@ -325,7 +325,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       admin(principal);const outcome=await s.telegramActions.decide(principal,await readJson(req));
       void s.actionCommands.settle('telegram',outcome.id).catch(()=>{});return json(res,200,outcome);
     }
-    // The owner closes an unclear operation or send; its card says how (ADR-0217).
+    // The owner closes an unclear operation or send; its card says how (ADR-0218).
     if(req.method==='POST'&&['/v1/tools/resolve','/v1/tools/telegram-resolve'].includes(path)) {
       admin(principal);const body=await readJson(req),telegram=path.endsWith('/telegram-resolve');
       const outcome=await (telegram?s.telegramActions.resolve(principal,body):s.controlledActions.resolve(principal,body));

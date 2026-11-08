@@ -10,7 +10,7 @@ import {storageServices} from '../src/stores/services.js';
 import {claimHostWorkflow,finishHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {workflowDetail,workflowHealth} from '../src/workflows/owner.js';
 
-test('an unclear page read closes itself, the owner closes other unclear operations, and nothing runs again (ADR-0217)',
+test('an unclear page read closes itself, the owner closes other unclear operations, and nothing runs again (ADR-0218)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}

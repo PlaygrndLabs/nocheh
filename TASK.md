@@ -59,8 +59,11 @@ that outlives the old epoch's profile, a source's step reopens a waiting review'
 workflow, and an epoch that lands mid-check makes the workflow wait and renew
 ([ADR-0216](docs/adr/0216-failed-reviews-keep-their-place-across-epochs.md),
 [check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
-Pending: that review runs on the installation once the change is live (its old profile
-may need its failed marker added by hand).
+Once live, the source's step deleted that review instead, because another fragment of
+the same long source had already run; waiting fragments of a reviewed source now keep
+their place while their own text is unchanged
+([ADR-0217](docs/adr/0217-waiting-fragments-keep-their-place.md)). The deleted fragment
+is not queued again.
 
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
@@ -889,7 +892,7 @@ itself at startup.
 <verification>
 
 - Unclear outcomes close (2026-11-08,
-  [ADR-0217](docs/adr/0217-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md)):
+  [ADR-0218](docs/adr/0218-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md)):
   Waiting kept web page reads marked "Unclear if it ran" for good. An unclear
   page read now closes by itself; any other unclear operation or message waits
   until the owner presses It ran, It didn't run or Dismiss in its drawer. The

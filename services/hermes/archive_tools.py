@@ -415,7 +415,7 @@ def wait_in_turn(id):
     return None
 
 
-# resolution: how an unclear outcome was closed, by the owner's word or as a page read that closed itself (ADR-0217).
+# resolution: how an unclear outcome was closed, by the owner's word or as a page read that closed itself (ADR-0218).
 RESULT_KEYS=('id','kind','state','resolution','result','error_code')
 PART_CHARS=20000
 

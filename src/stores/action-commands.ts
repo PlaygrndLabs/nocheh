@@ -190,7 +190,7 @@ export class ActionCommandRepository {
   }
   private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>,code:string|null=null,started=true,resolution:string|null=null) {
     if(state==='proposed')return null;
-    // An unclear outcome the owner closed with their word (ADR-0217); a dismissed one stays unsure.
+    // An unclear outcome the owner closed with their word (ADR-0218); a dismissed one stays unsure.
     if(state==='ambiguous'&&(resolution==='ran'||resolution==='not_run'))
       return kind==='telegram'?resolution==='ran'?line.marked_sent:line.marked_not_sent:resolution==='ran'?line.marked_ran:line.marked_not_run;
     if(kind==='controlled') {
@@ -348,7 +348,7 @@ export class ActionCommandRepository {
     const {line}=await this.texts(),states=(await this.access.stores.control.query('SELECT id,state,error_code,resolution FROM controlled_actions WHERE id=ANY($1)',
       [found.card.members.map(([member])=>member)])).rows;
     if(states.some(row=>row.state==='proposed'))return;
-    // An unclear change the owner said ran counts as done, as it does in Health (ADR-0217).
+    // An unclear change the owner said ran counts as done, as it does in Health (ADR-0218).
     const count=String(found.card.members.length),done=states.filter(row=>row.state==='done'||row.state==='ambiguous'&&row.resolution==='ran').length;
     // Every change ended without running: the owner rejected it, or what it used changed since.
     const unrun=states.every(row=>row.state==='rejected'),code=states.find(row=>row.error_code)?.error_code;
@@ -496,7 +496,7 @@ export class ActionCommandRepository {
     const owner={admin:true,scope:null},operation_id='telegram-command:'+source.id;let controlled=false;
     if(command[1]==='actions') {
       const tools=(await this.tools.list(owner)).actions,telegram=await this.telegram.list(owner);
-      // An unclear one waits until it is closed (ADR-0217).
+      // An unclear one waits until it is closed (ADR-0218).
       const rows=[...tools,...telegram].filter(row=>['proposed','approved','running'].includes(row.state)||row.state==='ambiguous'&&!row.resolution)
         .sort((a,b)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime()).slice(0,10);
       return rows.length?rows.map(row=>`${row.id}\n${row.kind} · ${row.state}\nReview: /action ${row.id}`).join('\n\n').slice(0,3500):'No pending actions.';

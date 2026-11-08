@@ -331,7 +331,7 @@ export class TelegramActionRepository {
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   /** The owner's word on an unclear send, after looking in the chat: it arrived, it did not, or dismiss it. The state
-   *  stays as observed, its checks stop, and it is never sent again (ADR-0217). */
+   *  stays as observed, its checks stop, and it is never sent again (ADR-0218). */
   async resolve(principal:Reader,value:unknown) {
     admin(principal);const body=object(value);
     if(Object.keys(body).some(key=>!['id','fingerprint','outcome','operation_id','expected_revision'].includes(key))||
@@ -366,7 +366,7 @@ export class TelegramActionRepository {
       if(!locked)return observation('waiting','action',0,Date.now()+2000,'receipt_pending');
       let row=await this.row(id);
       if(['done','rejected','cancelled'].includes(row.state))return observation(row.state==='done'?'completed':row.state==='rejected'?'denied':'cancelled','action');
-      // The owner closed an unclear send: nothing is checked or sent any more (ADR-0217).
+      // The owner closed an unclear send: nothing is checked or sent any more (ADR-0218).
       const closed=row.state==='ambiguous'&&!!row.resolution;
       if(row.state==='proposed')return observation('waiting','action',0,Date.now()+30000,'approval_required');
       if(!closed&&row.next_attempt>new Date())return observation('waiting','action',0,row.next_attempt.getTime(),'receipt_pending');

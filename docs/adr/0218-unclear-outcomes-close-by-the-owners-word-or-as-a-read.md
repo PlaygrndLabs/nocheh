@@ -1,4 +1,4 @@
-# ADR-0217: An unclear outcome closes by the owner's word, or by itself for a page read
+# ADR-0218: An unclear outcome closes by the owner's word, or by itself for a page read
 
 <status>
 Accepted on 2026-11-08 after the owner's Inbox kept two web page reads marked

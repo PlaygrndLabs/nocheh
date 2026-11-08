@@ -127,7 +127,7 @@ class ActionResultTests(unittest.TestCase):
             answer = archive_tools.controlled_status({})
         request.assert_called_once_with('/v1/tools/actions')
         self.assertNotIn('SECRET', answer)
-        # How the owner closed an unclear one is listed too (ADR-0217).
+        # How the owner closed an unclear one is listed too (ADR-0218).
         self.assertEqual(json.loads(answer)['operations'], [{'id': ID, 'kind': 'mcp', 'state': 'ambiguous', 'error_code': None, 'resolution': 'not_run', 'created_at': 't'}])
         self.assertEqual(json.loads(answer)['requests'][0]['destination'], '-100555')
 

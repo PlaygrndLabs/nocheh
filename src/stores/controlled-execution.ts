@@ -20,7 +20,7 @@ export function preferenceProfile(row:{logical_profile:string;space_id:string},o
 
 const protocol='controlled-execution-v2';
 const operation=(id:string)=>'controlled-result:'+id;
-// A page read that ends unclear closes itself: a read changes nothing, so it never waits for the owner (ADR-0217).
+// A page read that ends unclear closes itself: a read changes nothing, so it never waits for the owner (ADR-0218).
 const readCloses="resolution=CASE WHEN kind='browser' THEN coalesce(resolution,'read_closed') ELSE resolution END,resolved_at=CASE WHEN kind='browser' THEN coalesce(resolved_at,now()) ELSE resolved_at END";
 const input=(value:unknown):Record<string,unknown>&{id:string;actor:string}=>{
   const body=object(value),id=string(body.id,64),actor=string(body.actor,128);

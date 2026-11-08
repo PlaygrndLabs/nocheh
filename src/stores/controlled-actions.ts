@@ -242,7 +242,7 @@ export class ControlledActionRepository {
     },source);
   }
   /** The owner's word on an unclear outcome: it ran, it did not run, or dismiss it. It is not a receipt: the state and
-   *  receipt stay as observed, a later receipt still settles the action, and nothing runs again (ADR-0217). */
+   *  receipt stay as observed, a later receipt still settles the action, and nothing runs again (ADR-0218). */
   async resolve(principal:Reader,value:unknown,source?:SourceReference) {
     admin(principal);const body=exact(value,['id','fingerprint','outcome','expected_revision','operation_id']),id=identity(body.id);
     if(!ownerResolutions.includes(body.outcome as any))throw new HttpError(400,'invalid_decision');

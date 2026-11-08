@@ -102,9 +102,9 @@ test('native review runs once per source across authorization epochs and stops o
       if(input.observe_only){observations++;return {state:mode==='running'?'running':mode==='failed'?'failed':'ambiguous'};}
       starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:['running','failed'].includes(mode)?'running':'done'};
     },honcho:async()=>{throw Error('no provider calls');}});
-  const makeSource=async(index:number)=>{
+  const makeSource=async(index:number,text='Synthetic note '+index,reply?:number)=>{
     const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
-      text:'Synthetic note '+index,payload:{message:{message_id:index,date:1,chat:{id:Number(group),type:'group'},from:{id:123},text:'Synthetic note '+index}}};
+      text,payload:{message:{message_id:index,date:1,chat:{id:Number(group),type:'group'},from:{id:123},text,...(reply?{reply_to_message:{message_id:reply}}:{})}}};
     const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
   };
   const jobs=async(source:{id:string})=>(await stores.control.query("SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1 ORDER BY id",[source.id])).rows.map(row=>row.id);
@@ -263,5 +263,44 @@ test('native review runs once per source across authorization epochs and stops o
     const replaced=await services.reviews.inspect(after!);
     assert.deepEqual([replaced.state,replaced.attempts,replaced.error_code],['pending',1,'native_review_failed']);
     assert.equal(replaced.next_attempt.getTime(),gap,'the replacement waits out the same gap');
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[after]);
+
+    // A long source is reviewed in fragments. Once one fragment ran, its failed and never-started fragments still
+    // keep their place under a later epoch, and the source gets no new fragment.
+    await makeSource(14,'Synthetic thread start');
+    const longSource=await makeSource(13,Array.from({length:4000},(_,index)=>'word'+index).join(' '),14),parts=await services.reviews.queue(longSource);
+    assert.ok(parts.length>=3,'the source is split into fragments');
+    const [firstPart,failedPart,...restParts]=parts as [string,string,...string[]];
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[firstPart]);
+    assert.equal(await services.reviews.run(failedPart,authority),'running');
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[failedPart]);
+    assert.equal(await services.reviews.run(failedPart,authority),'pending');
+    await bump();
+    assert.deepEqual(await services.reviews.queue(longSource),parts,'waiting fragments keep their identity after another fragment ran');
+    assert.deepEqual(await jobs(longSource),[...parts].sort());
+    const failedRow=await services.reviews.inspect(failedPart);
+    assert.deepEqual([failedRow.state,failedRow.attempts,failedRow.error_code],['pending',1,'native_review_failed']);
+    assert.equal(canonical(failedRow.binding),canonical(await services.guards.state()));
+    const startsBefore=starts;await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[failedPart]);
+    await bump();
+    assert.equal((await operations.memory_review!('native:'+failedPart,authority)).state,'running','its own workflow renews and runs it');
+    assert.equal(starts,startsBefore+1);assert.equal((await services.reviews.inspect(failedPart)).attempts,2);
+    assert.equal(await services.reviews.run(failedPart,authority),'pending');
+    const failedGap=(await services.reviews.inspect(failedPart)).next_attempt.getTime();
+
+    // A new reply in the thread changes every fragment's evidence. Fragments whose own text is unchanged are replaced
+    // by ones with the current input, the failed one keeping its attempts, failure and gap; a fragment whose text
+    // changed is dropped, and the new text adds no fragment.
+    await bump();await makeSource(15,'Synthetic later reply',14);
+    const renewed=await services.reviews.queue(longSource),[keptPart,...replacements]=renewed;
+    assert.equal(keptPart,firstPart);
+    assert.ok(replacements.length<=restParts.length&&replacements.length>=restParts.length-1,'only the fragments whose text changed are dropped');
+    assert.ok(replacements.every(id=>!parts.includes(id)),'replaced fragments carry the current input');
+    assert.deepEqual(await jobs(longSource),[...renewed].sort());
+    const carried=await Promise.all(replacements.map(id=>services.reviews.inspect(id)));
+    assert.deepEqual(carried.map(row=>[row.attempts,row.error_code]),
+      [[2,'native_review_failed'],...replacements.slice(1).map(()=>[0,null])],'each replacement keeps its own attempts and failure');
+    assert.equal(carried[0]!.next_attempt.getTime(),failedGap);
+    assert.equal(await services.reviews.queue(longSource).then(ids=>ids.join()),renewed.join(),'a later sweep keeps them');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

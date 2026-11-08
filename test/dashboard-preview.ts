@@ -192,7 +192,7 @@ const previewView=(row:any)=>({...row,input:{rule:sharingRules.find(r=>r.id===ro
 const inboxAgo=(minutes:number)=>new Date(Date.now()-minutes*60000).toISOString();
 actions.push({id:'7'.repeat(64),event_id:id,fingerprint:'7a'.repeat(32),kind:'browser',scope:conversation,profile,arguments:{url:'https://example.org/aurora-forecast'},state:'done',revision:3,created_at:inboxAgo(190),result:{text:'Aurora forecast: Kp 5 expected tonight, clear skies after 22:00.'}},
  {id:'8'.repeat(64),event_id:id,fingerprint:'8a'.repeat(32),kind:'shell',scope:'42',profile,arguments:{command:'rm -rf ./synthetic-cache'},state:'rejected',revision:2,created_at:inboxAgo(1500)},
- // Unclear outcomes (ADR-0217): a command waits for the owner's word; a page read closed itself.
+ // Unclear outcomes (ADR-0218): a command waits for the owner's word; a page read closed itself.
  {id:'6'.repeat(64),event_id:id,fingerprint:'6a'.repeat(32),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-unclear'},state:'ambiguous',revision:4,error_code:'executor_outcome_unconfirmed',resolution:null,created_at:inboxAgo(75),result:{state:'ambiguous',result:{error:'execution_outcome_unconfirmed'}}},
  {id:'5'.repeat(64),event_id:id,fingerprint:'5a'.repeat(32),kind:'browser',scope:conversation,profile,arguments:{url:'https://example.org/aurora-weather'},state:'ambiguous',revision:4,error_code:'executor_outcome_unconfirmed',resolution:'read_closed',resolved_at:inboxAgo(80),created_at:inboxAgo(80),result:{state:'ambiguous',result:{error:'execution_outcome_unconfirmed',cause:'remote_unreachable'}}});
 const telegramActions:any[]=[{id:'ab'.repeat(32),event_id:id,fingerprint:'ba'.repeat(32),kind:'telegram_message',scope:'42',profile,arguments:{destination:conversation,text:'Hi all, the cabin is booked for 14 to 18 March. Bring warm layers for the aurora nights!'},state:'proposed',revision:1,created_at:inboxAgo(12),result:null},
@@ -203,7 +203,7 @@ const knowledgeProposal:any={id:'f'.repeat(64),kind:'organization',origin:'learn
  proposal:{kind:'organization',reason:'The Iceland topic is all about one trip; a project keeps its notes together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:topic,project_key:'trip',reason:'Every recent message in this topic is about the trip.',evidence_ids:[id],expected_revision:1}]}};
 function inboxDecisions(){
  const summary=(kind:string,row:any,extra:any)=>({kind,id:row.id,state:row.state??row.status,revision:row.revision??1,created_at:row.created_at,source_scope:null,destination:null,fingerprint:null,...extra});
- // An unclear outcome waits until it is closed (ADR-0217).
+ // An unclear outcome waits until it is closed (ADR-0218).
  const waits=(a:any)=>a.state==='proposed'||a.state==='ambiguous'&&!a.resolution;
  return [...actions.filter(waits).map(a=>summary('controlled_action',a,{title:a.kind,source_scope:a.scope,fingerprint:a.fingerprint})),
   ...telegramActions.filter(waits).map(a=>summary('telegram_action',a,{title:'Send Telegram message',source_scope:a.scope,destination:a.arguments.destination,fingerprint:a.fingerprint})),
