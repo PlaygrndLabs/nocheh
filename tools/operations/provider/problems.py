@@ -58,6 +58,14 @@ CAUSES = {
     'payload_too_large': 'too long for the model', 'content_policy_blocked': 'refused by the model',
     'provider_policy_blocked': 'the provider account’s privacy settings blocked this model',
     'data_policy_denied': 'a connected app’s data can’t go to a model that may train on it',
+    # The assistant stopped a run itself (services/hermes/usage.py LOOP_STOP), not the provider.
+    'loop_error': 'the assistant stopped the run after errors',
+    'pending_tool_result': 'the model stopped after a tool call without answering',
+    'local_processing_error': 'the assistant failed while handling the model’s answer',
+    'repeated_outer_errors': 'the assistant stopped after repeated errors',
+    'error_near_max_iterations': 'an error came near the run’s step limit',
+    'redirect_restart_limit_exceeded': 'the run restarted too often and stopped',
+    'rebuilt_restart_limit_exceeded': 'the run restarted too often and stopped',
 }
 CAUSE = re.compile(r'([a-z][a-z0-9_]{0,47})(?::([1-5][0-9]{2}))?')
 TELEGRAM_REASONS = {

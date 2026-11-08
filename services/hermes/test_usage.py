@@ -121,6 +121,26 @@ class UsageTests(unittest.TestCase):
             ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"required_guard_unavailable"}'}], ('nocheh_error', None)),
             ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"security_policy_changed"}'}], ('nocheh_error', None)),
             ([{'completed': True, 'turn_exit_reason': 'text_response(finish_reason=refusal)', 'final_response': ''}], ('refused', None)),
+            # Hermes stopped the loop itself: not a provider error, unless the error that stopped it says so. Only codes are kept.
+            *[([{'failed': True, 'failure_reason': 'loop_error', 'turn_exit_reason': exit_reason, 'error': 'Private words'}], expected)
+              for exit_reason, expected in [
+                  ('repeated_outer_errors(Error during API call #3: Connection error.)', ('provider_error', 'connection')),
+                  ('repeated_outer_errors(Error during API call #2: Request timed out.)', ('timed_out', 'timeout')),
+                  ("repeated_outer_errors(Error during API call #2: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_er)",
+                   ('provider_error', 'overloaded:529')),
+                  ("repeated_outer_errors(Error during API call #2: Error code: 503 - {'error': 'provider_request_failed', 'provider_status': 529})",
+                   ('provider_error', 'overloaded:529')),
+                  ("repeated_outer_errors(Error during API call #2: Error code: 503 - {'error': 'provider_request_failed',)",
+                   ('provider_error', 'repeated_outer_errors')),
+                  ("repeated_outer_errors(Error during API call #2: Error code: 503 - {'error': 'required_guard_unavailable'})",
+                   ('nocheh_error', 'repeated_outer_errors')),
+                  ("repeated_outer_errors(Error during API call #3: KeyError: 'connection_id' private words)", ('unknown', 'repeated_outer_errors')),
+                  ('error_near_max_iterations(Error during API call #9: private words)', ('unknown', 'error_near_max_iterations')),
+                  ('pending_tool_result', ('empty_answer', 'pending_tool_result')),
+                  ('local_processing_error(Error during local message processing after API call #2: private words)',
+                   ('nocheh_error', 'local_processing_error')),
+                  ('rebuilt_restart_limit_exceeded', ('interrupted', 'rebuilt_restart_limit_exceeded')),
+                  ('a_new_stop(private words)', ('unknown', 'loop_error'))]],
             ([], ('unknown', None)),
         ]
         for results, expected in cases:

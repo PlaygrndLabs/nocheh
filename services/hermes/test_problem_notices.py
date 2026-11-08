@@ -132,6 +132,10 @@ class ProblemNoticeTests(unittest.TestCase):
             'Memory notes (synthetic-model): 5 model calls failed today: 2 the provider was overloaded (HTTP 529), '
             '1 took too long, 1 the provider had an error (thinking signature, HTTP 400), 1 the provider had an error.'],
             'a cause of a reason with no failures, or one that is not a code, is left out')
+        stopped = {**refusals(3, 0)[0], 'reasons': {'provider_error': 1, 'unknown': 2},
+                   'causes': {'provider_error:loop_error': 1, 'unknown:repeated_outer_errors': 2}}
+        self.assertEqual(problems.why(stopped), '2 the assistant stopped after repeated errors, 1 the assistant stopped the run after errors',
+                         'a run the assistant stopped itself is not called a provider error')
         dropped = {**refusals(12, 0)[0], 'reasons': {'unknown': 12}, 'causes': {'unknown:connection': 12}}
         self.assertEqual(problems.why(dropped), '12 couldn’t reach the provider or lost the connection',
                          'a cause says why even when the reason alone is not known')

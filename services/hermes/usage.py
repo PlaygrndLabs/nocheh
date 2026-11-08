@@ -72,6 +72,21 @@ HTTP_STATUS = re.compile(r'HTTP ([1-5][0-9]{2})\b')
 # (src/security/broker.ts). For a provider's refusal it names the provider's status too, such as
 # '{"error":"provider_request_failed","provider_status":529}'; any other code is Nocheh's own refusal.
 BROKER_ERROR = re.compile(r'HTTP [1-5][0-9]{2}: \{"error":"([a-z_]{1,64})"(?:,"provider_status":([1-5][0-9]{2}))?\}')
+# Hermes stops a turn's loop itself (failure_reason `loop_error`) for a reason its exit reason names, with the
+# start of the error that stopped it in brackets, such as "repeated_outer_errors(Error during API call #3: ...)".
+# Only codes are kept: the stop's name, or what its error says of the provider, never the error's words.
+LOOP_STOP = re.compile(r'(pending_tool_result|local_processing_error|repeated_outer_errors|error_near_max_iterations|'
+                       r'redirect_restart_limit_exceeded|rebuilt_restart_limit_exceeded)\b(?:\((.*?)\)?)?\Z', re.S)
+LOOP_REASONS = {'pending_tool_result': 'empty_answer', 'local_processing_error': 'nocheh_error',
+                'repeated_outer_errors': 'unknown', 'error_near_max_iterations': 'unknown',
+                'redirect_restart_limit_exceeded': 'interrupted', 'rebuilt_restart_limit_exceeded': 'interrupted'}
+# What an API call's error says of the provider: Nocheh's broker's own refusal, the provider's status the broker
+# passed on, the status of a direct call, or a lost connection or timeout.
+LOOP_BROKER = re.compile(r"\{'error': '([a-z_]{1,64})'(?:, 'provider_status': ([1-5][0-9]{2}))?")
+LOOP_STATUS = re.compile(r'Error code: ([1-5][0-9]{2})\b')
+LOOP_TIMEOUT = re.compile(r'Error during API call #\d+: (?:Request timed out|.*\btimed out\b)', re.I | re.S)
+LOOP_CONNECTION = re.compile(r'Error during API call #\d+: (?:Connection error|Server disconnected|.*\bconnection (?:reset|refused|closed|aborted|lost))',
+                             re.I | re.S)
 # A direct call that lost its connection to the provider, or never made one.
 CONNECTION_ERRORS = ('APIConnectionError', 'ConnectError', 'ConnectionError', 'RemoteProtocolError', 'ReadError',
                      'ServerDisconnectedError')
@@ -128,6 +143,29 @@ def cause(code=None, status=None):
     return None if code is None else f'{code}:{status}' if status else code
 
 
+def loop_failure(exit_reason):
+    """Why Hermes stopped a turn's loop itself, as (reason, cause), from its exit reason."""
+    found = LOOP_STOP.match(exit_reason)
+    if not found:
+        return 'unknown', 'loop_error'
+    stop, detail = found.group(1), found.group(2) or ''
+    if detail.startswith('Error during API call #'):
+        broker = LOOP_BROKER.search(detail)
+        if broker and broker.group(1) != 'provider_request_failed':
+            return 'nocheh_error', stop
+        if broker:
+            status = int(broker.group(2)) if broker.group(2) else None
+            return (_status_reason(status), cause(None, status)) if status else ('provider_error', stop)
+        status = LOOP_STATUS.search(detail)
+        if status:
+            return _status_reason(int(status.group(1))), cause(None, int(status.group(1)))
+        if LOOP_TIMEOUT.match(detail):
+            return 'timed_out', 'timeout'
+        if LOOP_CONNECTION.match(detail):
+            return 'provider_error', 'connection'
+    return LOOP_REASONS[stop], stop
+
+
 def _status_reason(status):
     return {429: 'rate_limited', 401: 'key_rejected', 403: 'key_rejected', 404: 'model_not_found', 413: 'too_long'}.get(
         status, 'provider_error')
@@ -156,6 +194,8 @@ def failure(results):
         found = next((reason for reason, codes in HERMES_REASONS.items() if code in codes), None)
         if found:
             return found, cause(code, status)
+        if code == 'loop_error' or LOOP_STOP.match(exit_reason):
+            return loop_failure(exit_reason)
         if 'finish_reason=refusal' in exit_reason or 'finish_reason=content_filter' in exit_reason:
             return 'refused', None
         if exit_reason.startswith(('max_iterations_reached', 'budget_exhausted', 'review_input_budget_exhausted',
