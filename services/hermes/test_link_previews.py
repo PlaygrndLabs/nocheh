@@ -13,7 +13,7 @@ from telegram.ext import ExtBot
 from telegram.request import BaseRequest
 from gateway.config import PlatformConfig
 from .assistant_gateway import AssistantGateway, adapter_config, committed_adapter_class
-from .capture import canonical, captured_adapter_class
+from .capture import Capture, canonical, captured_adapter_class, instrument_request
 
 SERVICES = Path(__file__).resolve().parents[1]
 TEXT_CALLS = {'send_message', 'edit_message_text'}  # Bot API text sends and edits; both take link_preview_options
@@ -67,7 +67,35 @@ class Wire(BaseRequest):
                                                       'chat': {'id': int(data['chat_id']), 'type': 'private'}, 'text': data['text']}})
 
 
+class LostEdit(Wire):
+    """Telegram that loses the first edit in transit."""
+    async def do_request(self, url, method, request_data=None, **kwargs):
+        if url.endswith('/editMessageText') and not getattr(self, 'lost', False):
+            from telegram.error import TimedOut
+            self.lost = True
+            raise TimedOut()
+        return await super().do_request(url, method, request_data, **kwargs)
+
+
 class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_notice_edit_lost_in_transit_reaches_telegram_on_the_next_try(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root, wire = Path(folder), LostEdit()
+            gateway = AssistantGateway(root, root / 'spool', SimpleNamespace(enabled=True, owner='123', groups=[], group_access={}),
+                                       '123456:synthetic', 'synthetic', lambda:None)
+            # The bot journals every send and edit, as the running gateway's does.
+            native = committed_adapter_class()(adapter_config('123456:synthetic'))
+            native._bot = ExtBot('123456:synthetic', request=instrument_request(wire, Capture(root / 'capture', '123456')), get_updates_request=Wire())
+            gateway.status, gateway.adapter, gateway.action_lock = 'connected', native, asyncio.Lock()
+            await gateway.adapter._bot.initialize()
+            notice = {'id': 'c' * 64, 'chat_id': '123', 'text': 'A problem.'}
+            self.assertEqual(await gateway.send_notice(notice), {'state': 'done'})
+            edit = {**notice, 'text': '✅ A problem. Resolved at 12:04 UTC.', 'edit': True}
+            self.assertEqual(await gateway.send_notice(edit), {'state': 'not_started', 'error_code': 'telegram_edit_failed'})
+            self.assertEqual(await gateway.send_notice(edit), {'state': 'done', 'edited': True},
+                             'the same edit is sent again, not answered from the journal as uncertain')
+            self.assertEqual([name for name, _ in wire.calls], ['sendMessage', 'editMessageText'])
+
     def test_every_send_edit_and_adapter_in_the_services_turns_previews_off(self):
         self.assertEqual(unprotected('bot.send_message(1, "x")\nbot.edit_message_text("x", chat_id=1, message_id=2)\nPlatformConfig(enabled=True)\n'
                                      'bot.do_api_request("sendMessage", api_kwargs={})\ncommitted_adapter_class()(config)\n'), [1, 2, 3, 4, 5],
