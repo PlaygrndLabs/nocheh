@@ -48,11 +48,13 @@ Stuck notes review (2026-11-08): on the owner's installation one Hermes native n
 review failed once without changing notes, came due again two minutes later under a
 newer epoch, and its workflow closed as superseded; nothing asked for it again, so it
 stayed waiting while the other reviews drained. Failed reviews now renew under a newer
-epoch like never-started ones, a source's step reopens a waiting review's closed
+epoch like never-started ones and keep their attempt count, Hermes keeps a failed marker
+that outlives the old epoch's profile, a source's step reopens a waiting review's closed
 workflow, and an epoch that lands mid-check makes the workflow wait and renew
 ([ADR-0216](docs/adr/0216-failed-reviews-keep-their-place-across-epochs.md),
-[check](test/store-native-review.test.ts)). Pending: that review runs on the
-installation once the change is live.
+[check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
+Pending: that review runs on the installation once the change is live (its old profile
+may need its failed marker added by hand).
 
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion

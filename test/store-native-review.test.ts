@@ -228,7 +228,9 @@ test('native review runs once per source across authorization epochs and stops o
     await bump();
     const closedSince=new Date(Date.now()-60000);
     await stores.control.query("UPDATE workflow_registry SET state='completed',created_at=$2 WHERE family='memory_review' AND job_id=$1",['source:'+closedSource.id,closedSince]);
-    assert.ok(await requestStrandedSources(stores.control,new Date(closedSince.getTime()+1))>=1,'a failed review left under an earlier epoch is stranded work');
+    const sourceSteps=async()=>(await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+closedSource.id])).rows[0].count;
+    const stepsBefore=await sourceSteps();await requestStrandedSources(stores.control,new Date(closedSince.getTime()+1));
+    assert.equal(await sourceSteps(),stepsBefore+1,'a failed review left under an earlier epoch is stranded work');
     assert.equal((await operations.memory_review!('source:'+closedSource.id,authority)).state,'completed');
     const nativeWorkflows=async()=>(await stores.control.query("SELECT state FROM workflow_registry WHERE family='memory_review' AND job_id=$1 ORDER BY generation",['native:'+lapsed])).rows.map(row=>row.state);
     assert.deepEqual(await nativeWorkflows(),['skipped','queued']);
@@ -246,5 +248,20 @@ test('native review runs once per source across authorization epochs and stops o
     assert.deepEqual([racing.state,racing.waiting_reason],['waiting','guard_pending']);assert.equal(starts,12);
     assert.equal((await operations.memory_review!('native:'+lapsed,authority)).state,'running');assert.equal(starts,13);
     assert.equal(canonical((await services.reviews.inspect(lapsed!)).binding),canonical(await services.guards.state()));
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[lapsed]);
+
+    // A failed review whose input changed under a later epoch is replaced by one that keeps its attempts, failure and gap.
+    const changingSource=await makeSource(12),[before]=await services.reviews.queue(changingSource);
+    assert.equal(await services.reviews.run(before!,authority),'running');
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[before]);
+    assert.equal(await services.reviews.run(before!,authority),'pending');
+    const gap=(await services.reviews.inspect(before!)).next_attempt.getTime();
+    await bump();
+    await stores.control.query(`UPDATE native_review_jobs SET input_reference=jsonb_set(input_reference,'{input_hash}','"${'0'.repeat(64)}"') WHERE id=$1`,[before]);
+    const [after]=await services.reviews.queue(changingSource);assert.notEqual(after,before);
+    assert.deepEqual(await jobs(changingSource),[after]);
+    const replaced=await services.reviews.inspect(after!);
+    assert.deepEqual([replaced.state,replaced.attempts,replaced.error_code],['pending',1,'native_review_failed']);
+    assert.equal(replaced.next_attempt.getTime(),gap,'the replacement waits out the same gap');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

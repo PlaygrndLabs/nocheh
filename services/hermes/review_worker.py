@@ -35,7 +35,8 @@ def observe(root,policy,body):
     directory=Path(root)/'nocheh-review-runs'
     if directory.is_symlink():raise ValueError('review_receipt_path_denied')
     started=directory/(body['id']+'.started');done=directory/(body['id']+'.done');lease=directory/(body['id']+'.lock')
-    if any(path.is_symlink() for path in (started,done,lease)):raise ValueError('review_receipt_path_denied')
+    failed=directory/(body['id']+'.failed')
+    if any(path.is_symlink() for path in (started,done,lease,failed)):raise ValueError('review_receipt_path_denied')
     # A child can finish after its supervisor disappeared. Its existing durable
     # receipt still reconciles the same effect; a launch marker never overrides it.
     if done.is_file() or native=='done':return {'state':'done'}
@@ -44,7 +45,10 @@ def observe(root,policy,body):
             with lease.open('rb') as file:
                 try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 except BlockingIOError:return {'state':'running'}
-        return {'state':native if native in ('running','failed') else 'ambiguous'}
+        if native in ('running','failed'):return {'state':native}
+        # A failed receipt goes with its epoch's profile once a newer epoch's profile
+        # replaces it; the supervisor's own failed marker still says it had no effect.
+        return {'state':'failed' if native=='not_found' and failed.is_file() else 'ambiguous'}
     return {'state':native}
 
 
@@ -106,8 +110,9 @@ def start(root,policy,model,credentials,body):
             try:fcntl.flock(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:return {'state':'waiting','error_code':'profile_busy'}
         # The lease is held here, so no supervisor runs this identity: a failed run's
-        # start marker can go. A competing request may have completed meanwhile.
-        if previous['state']=='failed':(directory/(body['id']+'.started')).unlink(missing_ok=True)
+        # markers can go, its failed marker first. A competing request may have completed meanwhile.
+        if previous['state']=='failed':
+            for marker in ('.failed','.started'):(directory/(body['id']+marker)).unlink(missing_ok=True)
         previous=observe(root,policy,body)
         if previous['state'] not in ('not_found','failed'):return previous
         if profile_recent(profile):return {'state':'waiting','error_code':'profile_busy'}
@@ -124,10 +129,20 @@ def start(root,policy,model,credentials,body):
                     # without saving protected input, credentials or exception text.
                     try:stopped(profile,body['id'],before)
                     except Exception:pass
+                # Still under the lease: a run that ended failed without changing notes keeps that
+                # beside its start marker, since its profile's receipt goes when a newer epoch's profile replaces it.
+                try:
+                    if failed_receipt(profile,body['id']):immutable_file(directory,body['id']+'.failed',b'{}')
+                except Exception:pass
         try:threading.Thread(target=execute,daemon=True,name='nocheh-memory-review').start()
         except BaseException:owned.close();raise
         return {'state':'running'}
     finally:locks.close()
+
+
+def failed_receipt(profile,review_id):
+    receipt=profile/'reviews'/review_id
+    return receipt.is_file() and not receipt.is_symlink() and receipt.read_text()=='failed'
 
 
 def stopped(profile,review_id,before):

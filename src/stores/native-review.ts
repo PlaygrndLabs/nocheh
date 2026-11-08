@@ -69,10 +69,13 @@ export class NativeReviewRepository {
     // Each source is reviewed once per installation generation; repeating a started review repeats its model calls.
     // A waiting review (never started, or failed without changing notes) can't run under an older authorization epoch,
     // so it is renewed under the current one.
-    const jobs=(await this.control.query(`SELECT id,input_reference,(state='pending' AND NOT paused) AS waiting,(state='pending' AND NOT paused AND binding<>$2::jsonb) AS stale
+    const jobs=(await this.control.query(`SELECT id,input_reference,attempts,error_code,next_attempt,(state='pending' AND NOT paused) AS waiting,(state='pending' AND NOT paused AND binding<>$2::jsonb) AS stale
       FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3 ORDER BY created_at,id`,[source.id,JSON.stringify(binding),binding.generation])).rows;
     const reviewed=jobs.filter(row=>!row.stale),stale=new Map<string,{id:string}>();
     for(const row of jobs)if(row.stale&&!stale.has(row.input_reference.input_hash))stale.set(row.input_reference.input_hash,row);
+    // A review that failed and is replaced because its input changed hands its attempts, failure and gap on,
+    // so changing input never adds to a source's four attempts.
+    const spent=jobs.filter(row=>row.stale&&row.attempts>0).sort((a,b)=>b.attempts-a.attempts||b.next_attempt-a.next_attempt)[0];
     const ids:string[]=[];
     const retire=async()=>{await this.control.query(`DELETE FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3
       AND state='pending' AND NOT paused AND binding<>$2::jsonb AND NOT (id=ANY($4::text[]))`,[source.id,JSON.stringify(binding),binding.generation,ids]);};
@@ -104,7 +107,8 @@ export class NativeReviewRepository {
       const db=await this.control.connect();
       try {
         await db.query('BEGIN');
-        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,[id,source,input,binding]);
+        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding,attempts,error_code,next_attempt)
+          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz)) ON CONFLICT DO NOTHING`,[id,source,input,binding,spent?.attempts??0,spent?.error_code??null,spent?.next_attempt??null]);
         await requestWorkflow(db,'memory_review','native:'+id);await db.query('COMMIT');
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
       ids.push(id);
