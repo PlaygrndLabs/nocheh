@@ -24,20 +24,26 @@ from tools.operations.installation.store_recovery import StoreRecovery
 
 MARKER = 'SYNTHETIC_PRE_RESET_CONTENT_4b382f4e'
 POSTGRES_PASSWORD = '1' * 64
+CUSTOM_PROFILE = 'profile-' + 'd' * 48
 INNGEST_PASSWORD = '5' * 64
 BOOTSTRAP = r'''
 import pg from 'pg';
-import {digest} from './dist/src/archive.js';
-import {initialize} from './dist/src/database.js';
-const config={host:'nocheh-db',user:'nocheh',database:'nocheh',password:process.env.POSTGRES_PASSWORD};
-const pool=new pg.Pool(config);await initialize(pool);
-await pool.query("INSERT INTO events(id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,payload,payload_hash,original_text,search_text) VALUES($1,'fixture-source','telegram','fixture','42','1','1','live','telegram_update',$2,$3,$4,$5)",
- ['a'.repeat(64),Buffer.from('{}'),digest('{}'),Buffer.from(process.env.PRIVATE_MARKER),process.env.PRIVATE_MARKER]);
-await pool.query("INSERT INTO derived_artifacts(id,event_id,kind,content,provenance,search_text) VALUES($1,$2,'runtime_context',$3,'{}',$4)",
- ['b'.repeat(64),'a'.repeat(64),Buffer.from(process.env.PRIVATE_MARKER),process.env.PRIVATE_MARKER]);
-await pool.query("INSERT INTO memory_spaces(id,overrides) VALUES('-10',$1)",
- [JSON.stringify({mode:'filtered',sources:['42'],privacy_instructions:'Only fixture facts.'})]);
-await pool.end();'''
+import {canonical,digest} from './dist/src/archive.js';
+import {bootstrapStores} from './dist/src/stores/bootstrap.js';
+await bootstrapStores();
+const store=async name=>{const client=new pg.Client({host:'nocheh-db',user:'nocheh',database:'nocheh_'+name,password:process.env.PGPASSWORD});
+ await client.connect();return client;};
+const marker=process.env.PRIVATE_MARKER,assistant={enabled:false,owner_id:'42',group_ids:['-10']};
+const archive=await store('archive'),derived=await store('derived'),control=await store('control');
+await archive.query("INSERT INTO events(id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,payload,payload_hash,original_text,search_text) VALUES($1,'fixture-source','telegram','fixture','42','1','1','live','telegram_update',$2,$3,$4,$5)",
+ ['a'.repeat(64),Buffer.from('{}'),digest('{}'),Buffer.from(marker),marker]);
+await derived.query(`INSERT INTO derived_artifacts(id,event_id,kind,content,content_hash,provenance,source_revision,input_hash,producer,producer_version,configuration_hash,operation_id,search_text)
+ VALUES($1,$2,'runtime_context',$3,$4,'{}','1',$4,'fixture','1',$4,'fixture',$5)`,['b'.repeat(64),'a'.repeat(64),Buffer.from(marker),digest(marker),marker]);
+await control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify(assistant),digest(canonical(assistant))]);
+await control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
+await control.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Fixture share','[\"42\"]','-10',true,'filtered','Only fixture facts.',1)",['c'.repeat(64)]);
+await control.query("INSERT INTO runtime_profiles(id,name,owner_id,state,revision) VALUES($1,'research','42','active',1)",[process.env.CUSTOM_PROFILE]);
+for(const client of [archive,derived,control])await client.end();'''
 
 
 def output(arguments, environment=None):
@@ -53,14 +59,13 @@ def main():
         (state / relative).mkdir(parents=True)
     (state / 'files/original').write_text(MARKER); (state / 'spool/observation').write_text(MARKER)
     (state / 'hermes/auth.json').write_text('SYNTHETIC_LOGIN_RETAINED')
-    custom = state / 'hermes/profiles/research'; custom.mkdir()
+    custom = state / 'hermes/profiles' / CUSTOM_PROFILE; custom.mkdir()
     (custom / 'config.yaml').write_text('{}\n')
-    (custom / 'nocheh-owner-profile.json').write_text('{"scope":"owner"}\n')
     (state / 'secrets').mkdir(); (state / 'secrets/token').write_text('SYNTHETIC_CREDENTIAL_RETAINED')
     (memory / 'ledger').mkdir(); (memory / 'ledger/spend').write_text('SYNTHETIC_SPENDING_RETAINED')
     (memory / 'honcho.env').write_text('SYNTHETIC_HONCHO_SETUP_RETAINED')
     values = dict(configuration.DEFAULTS)
-    values.update(NOCHEH_STORAGE_LAYOUT='legacy', TELEGRAM_ENABLED='false', TELEGRAM_OWNER_ID='42',
+    values.update(TELEGRAM_ENABLED='false', TELEGRAM_OWNER_ID='42',
         TELEGRAM_GROUP_IDS='-10', NOCHEH_MODEL='fixture-model', POSTGRES_PASSWORD=POSTGRES_PASSWORD,
         SERVICE_TOKEN='2' * 64, INNGEST_EVENT_KEY='3' * 64, INNGEST_SIGNING_KEY='4' * 64,
         INNGEST_POSTGRES_PASSWORD=INNGEST_PASSWORD,
@@ -101,7 +106,8 @@ def main():
             'volumes': ['honcho_redis:/data'],
             'healthcheck': {'test': ['CMD', 'redis-cli', 'ping'], 'interval': '1s', 'retries': 30}},
         'bootstrap': {'image': args.services_image, 'entrypoint': ['node', '--input-type=module', '-e', BOOTSTRAP],
-            'profiles': ['checks'], 'environment': {'POSTGRES_PASSWORD': POSTGRES_PASSWORD, 'PRIVATE_MARKER': MARKER},
+            'profiles': ['checks'], 'environment': {**service_environment, 'PRIVATE_MARKER': MARKER,
+                                                    'CUSTOM_PROFILE': CUSTOM_PROFILE},
             'depends_on': {'nocheh-db': {'condition': 'service_healthy'}}},
         'nocheh-reset-setup': {'image': args.services_image, 'profiles': ['reset'],
             'user': f'{os.getuid()}:{os.getgid()}', 'command': ['node', 'dist/src/stores/reset-setup-cli.js', '/reset/setup.json'],
@@ -161,7 +167,7 @@ def main():
         preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False,
             'content_copied': False, 'blockers': blockers, 'containers': containers, 'volumes': volumes,
             'paths': paths, 'external_archives': [], 'installation': {'root': str(directory), 'state': str(state),
-                'memory_state': str(memory), 'project': project, 'storage_layout': 'legacy',
+                'memory_state': str(memory), 'project': project, 'storage_layout': 'original-only-v1',
                 'config_path': str(config), 'configuration_sha256': hashlib.sha256(reset_protocol.canonical(loaded)).hexdigest(),
                 'state_anchor': reset_inventory.entry(state, 'retain_root', 'fixture')}}
 
@@ -201,11 +207,10 @@ def main():
             assert configuration.load(state)['NOCHEH_STORAGE_LAYOUT'] == 'original-only-v1'
             assert setup['snapshot']['layout'] == 'original-only-v1'
             assert setup['snapshot']['configuration']['sharing_rules'] == [{
-                **setup['snapshot']['configuration']['sharing_rules'][0],
-                'sources': ['42'], 'destination': '-10', 'enabled': True,
-                'mode': 'filtered', 'instructions': 'Only fixture facts.'}]
-            assert len(setup['snapshot']['configuration']['runtime_profiles']) == 1
-            assert setup['snapshot']['configuration']['runtime_profiles'][0]['name'] == 'research'
+                'id': 'c' * 64, 'name': 'Fixture share', 'sources': ['42'], 'destination': '-10',
+                'enabled': True, 'mode': 'filtered', 'instructions': 'Only fixture facts.'}]
+            assert setup['snapshot']['configuration']['runtime_profiles'] == [
+                {'id': CUSTOM_PROFILE, 'name': 'research', 'owner_id': '42'}]
             baseline = reset_baseline.verify(journal, preflight, environment=environment, command=command)
             assert initialized['phase'] == 'initialized' and baseline['phase'] == 'empty_baseline'
             assert journal.value['steps'][-1]['step'] == 'empty_baseline'
@@ -239,8 +244,8 @@ def main():
                   'honcho_postgres_relations': baseline['honcho_postgres_relations'],
                   'honcho_redis_keys': baseline['honcho_redis_keys'],
                   'private_reset_artifacts_retired': True, 'inactive_fences_released': True,
-                  'source_layout': 'legacy', 'target_layout': 'original-only-v1',
-                  'legacy_sharing_rules': 1, 'legacy_custom_profiles': 1,
+                  'source_layout': 'original-only-v1', 'target_layout': 'original-only-v1',
+                  'sharing_rules': 1, 'custom_profiles': 1,
                   'post_retirement_state_revalidated': True, 'fixture_boundary_calls': 1,
                   'credentials_login_and_spending_retained': True,
                   'restart_ownership': False, 'fresh_acceptance': False,
