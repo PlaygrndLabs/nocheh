@@ -51,9 +51,15 @@ export class OwnerAutonomyRepository {
   }
 }
 
+/** A follow-up turn of an asking message is running (ADR-0212): Nocheh started it on operation results, so nothing the
+ * model asks for in it is the owner's live request. It first waits for the asking reply to end, for up to ten minutes. */
+export async function followUpTurn(db:Pick<pg.PoolClient,'query'>,principal:Reader):Promise<boolean> {
+  return !!principal.turnEvent&&!!(await db.query("SELECT 1 FROM action_continuations WHERE event_id=$1 AND state='running'",[principal.turnEvent])).rowCount;
+}
+
 /** The authority string for an owner-private request, or null when approval is required. */
 export async function ownerAutonomyGrant(db:pg.PoolClient,principal:Reader,turn:{owner?:boolean;job?:string|null}):Promise<string|null> {
-  if(principal.admin||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'||!turn.owner||turn.job)return null;
+  if(principal.admin||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'||!turn.owner||turn.job||await followUpTurn(db,principal))return null;
   const row=(await db.query('SELECT mode,revision FROM owner_autonomy WHERE singleton FOR SHARE')).rows[0];
   return row?.mode==='owner_requests_execute'?'owner_autonomy:'+row.revision:null;
 }

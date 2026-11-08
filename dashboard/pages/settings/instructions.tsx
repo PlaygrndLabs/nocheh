@@ -81,6 +81,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'One “name: text” line each for the buttons, the result added to a decided card and its {reason}, the name of a job or schedule that asked, the card that lists a job’s changes (the lines starting with list), and the short notices after a press. A line you remove keeps its default.',
   },
   {
+    key: 'telegram.action_continued',
+    title: 'After an approved operation ends',
+    hint: 'Sent to the agent, not to the chat, when operations a message asked for have ended, so it answers in that chat as a reply to the message. {actions} lists each operation’s ID, tool and state.',
+  },
+  {
     key: 'tasks.reminder',
     title: 'Task reminder',
     hint: 'Sent to your private chat when a task reminder is due. {title} is the task, {due} its due day, {list} its project and {notes} its notes. A line whose value is missing is left out.',

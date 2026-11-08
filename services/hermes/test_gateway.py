@@ -438,5 +438,74 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(again,{'state':'done'});self.assertEqual(len(request.sent),6,'a replayed receipt does not resend')
                 finally:await app.shutdown()
 
+    async def test_a_continuation_answers_the_asking_message_in_its_topic_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);secret='synthetic-service-token-123456789'
+            policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20'],
+                           'group_access':{'-20':{'granted':['456'],'denied':[]}}})
+            with patch.dict(os.environ,{'NOCHEH_SPOOL_DIR':str(root/'spool'),'SERVICE_TOKEN':secret}), patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+                adapter=committed_adapter_class()(PlatformConfig(enabled=True,token='123456:synthetic',typing_indicator=False))
+                request=BotFixtureRequest();instrument_request(request,adapter.capture)
+                bot=ExtBot('123456:synthetic',request=request,get_updates_request=BotFixtureRequest())
+                app=Application.builder().bot(bot).build();await app.initialize()
+                adapter._app=app;adapter._bot=bot;adapter._text_batch_delay_seconds=0.001
+                adapter._register_handlers(app)
+                gateway=FixtureGateway(root,root/'spool',policy,'123456:synthetic','synthetic',lambda:None)
+                gateway.status='connected';gateway.adapter=adapter;gateway.capacity=asyncio.Semaphore(2);gateway.action_lock=asyncio.Lock()
+                seen=[]
+                async def message(event):
+                    turn=TURN.get()
+                    seen.append((event.internal,event.allow_gateway_control,turn['body'].get('continuation'),event.message_id,event.source.thread_id))
+                    reply='Synthetic answer '+str(len(seen))
+                    turn['agent_result']={'state':'done','text':reply,'session_id':'fixture'}
+                    return reply
+                adapter.set_message_handler(message)
+                leader='ab'*32;key='telegram:123456:update:6';event=digest(key)
+                def envelope(text,**changes):
+                    claims={'scope':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant','space':'-20/topic/7','revision':1}
+                    body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+                    signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+                    # The routed shape storage sends: the asking message's ids with the turn's own text.
+                    return {'event_id':event,'source_key':key,'scope':'-20','attempt':1,'archive_credential':'turn.'+body+'.'+signature,
+                        'text':text,'transcripts':[],'files':[],
+                        'payload':{'update_id':6,'message':{'message_id':6,'date':1700000000,'chat':{'id':-20,'type':'supergroup','is_forum':True},
+                            'from':{'id':456,'is_bot':False,'first_name':'Participant'},'text':text,'message_thread_id':7,'is_topic_message':True}},**changes}
+                def journal():
+                    return [json.loads(path.read_bytes())['key'] for path in (root/'spool/outbound').glob('*.intent')]
+                try:
+                    follow=envelope('[Operations ended] Synthetic follow-up',attempt='c1-'+leader[:40],continuation=leader,
+                                    group_addressing={'direct':False,'handles':[]})
+                    self.assertEqual(await gateway.dispatch(follow),{'state':'done'},'an unaddressed group continuation is answered')
+                    self.assertEqual(seen,[(True,False,leader,'6','7')],'an internal event that cannot run gateway commands')
+                    sent=request.sent[-1]
+                    self.assertEqual((str(sent['chat_id']),str(sent.get('message_thread_id')),str(sent['reply_parameters']['message_id'])),('-20','7','6'),
+                                     'the answer replies to the asking message in its topic')
+                    self.assertNotIn('disable_notification',sent,'the asker is alerted, as by a Hermes final reply')
+                    self.assertEqual(await gateway.dispatch(follow),{'state':'done'})
+                    self.assertEqual((len(seen),len(request.sent)),(1,1),'the receipt keeps it to one answer')
+                    prefix='outbound:123456:'+key+':continuation:'+leader+':sendMessage:'
+                    self.assertEqual([k.startswith(prefix) for k in journal()],[True],'its send has its own journal key')
+                    plain=envelope('Nocheh, what did it find?',group_addressing={'direct':True,'handles':[]})
+                    self.assertEqual(await gateway.dispatch(plain),{'state':'done'},'the message turn of the same update runs separately')
+                    self.assertEqual((seen[-1][0],seen[-1][2]),(False,None))
+                    self.assertEqual(len(request.sent),2)
+                    self.assertEqual(sum(k.startswith('outbound:123456:'+key+':sendMessage:') for k in journal()),1)
+                    self.assertEqual(await gateway.dispatch({**follow,'attempt':'c2-'+leader[:40]}),{'state':'done'},'a new attempt is a new turn')
+                    self.assertEqual((len(seen),len(request.sent)),(3,3))
+                    self.assertEqual(sum(k.startswith(prefix) for k in journal()),2,'every attempt of one continuation shares its journal key')
+                finally:await app.shutdown()
+
+
+class HermesPinTests(unittest.TestCase):
+    def test_pinned_hermes_wake_fields(self):
+        import dataclasses,inspect
+        from gateway.platforms.event import MessageEvent
+        from plugins.platforms.telegram.adapter import TelegramAdapter
+        # A continuation sets these on the event Hermes's own Telegram builder returns.
+        self.assertLessEqual({'internal','allow_gateway_control','platform_update_id'},{field.name for field in dataclasses.fields(MessageEvent)})
+        self.assertEqual(list(inspect.signature(TelegramAdapter._build_message_event).parameters)[1:],['message','msg_type','update_id'])
+        from gateway.platforms.base import _mark_notify_metadata
+        self.assertEqual(_mark_notify_metadata({'thread_id':'7'}),{'thread_id':'7','notify':True})
+
 
 if __name__=='__main__':unittest.main()

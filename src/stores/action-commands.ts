@@ -4,6 +4,7 @@ import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import {approvalAction,approvalCard,approvalLines,fillTemplate,labeledLines,ownerPrompts,problemButtons,type ApprovalText} from '../prompts.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
+import {followUpLeft} from './action-continuations.js';
 import {evaluate} from '../security/store.js';
 import type {Effect} from '../security/contract.js';
 import type {SourceReference} from './archive.js';
@@ -218,16 +219,20 @@ export class ActionCommandRepository {
         text:card.text,links:card.links,
         buttons:[[card.line.approve.slice(0,40),'na'+result.id.slice(0,40)+card.fingerprint.slice(0,16)],[card.line.reject.slice(0,40),'nd'+result.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
       if(sent?.state!=='done')return result;
+      // Only an operation answers later in the chat that asked, at most three times per asking message (ADR-0212); a message is simply sent.
+      const follows=kind==='controlled'&&!!asked&&await followUpLeft(control,row.event_id);
       return {...result,message:here?
         'A card with Approve and Reject buttons for this exact request was posted here as the reply to it. It names where the message goes and shows it exactly, so it is the whole answer: do not repeat or announce it; return [NO_REPLY] unless something else needs an answer.':
         place.reviewer?
         'This exact message for the other group was posted here with Approve and Reject buttons for the person who asked; nothing is sent until they press Approve. Say only, briefly, that they can check and approve it; do not repeat the draft.':
-        asked&&asked.chat!==owner?
+        asked&&asked.chat!==owner?follows?
+        'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner and that the answer will follow here; do not show the draft or details.':
         'The owner was asked privately, with Approve and Reject buttons, to approve this exact request. In this chat say only, briefly, that you asked the owner; do not show the draft or details.':
         // A job's run or a scheduled task runs on without a chat to wait in.
         row.source_reference?.store==='control'?
         'The owner was sent Approve and Reject buttons for this exact request in their private chat. It runs only if they approve, maybe after you finish. Do not wait for it. Say in your answer what you asked for.':
-        'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'};
+        'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'+
+        (follows?' Once it has run, its answer follows here as a reply.':'')};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
   /** Where a job's card goes: the chat and topic where it was asked, or the owner's private chat

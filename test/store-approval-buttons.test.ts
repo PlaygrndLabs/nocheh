@@ -99,6 +99,7 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.deepEqual(card.buttons,[['✅ Approve','na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)],['❌ Reject','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)]]);
     assert.ok(card.buttons.every((pair:string[])=>Buffer.byteLength(pair[1]!)<=64));
     assert.match(elsewhere.message,/say only, briefly, that you asked the owner; do not show the draft/);
+    assert.doesNotMatch(elsewhere.message,/answer will follow/,'a message has no follow-up turn');
     assert.equal(card.reply_to,undefined,'a card in another chat replies to nothing');
     // The owner's own request in the private chat: one card, the reply to it, naming the group and topic with their Telegram links.
     await capture('forum-topic',{message:{message_id:7,message_thread_id:7,date:1700000000,chat:{id:Number(forum),type:'supergroup',title:'Plans team',is_forum:true},
@@ -154,6 +155,7 @@ test('allowed members post freely in their own group; everything else waits for 
     // A controlled operation from a group is never approved by the request; its card also goes to the owner.
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
     assert.equal(last('card').chat_id,'123');assert.match(last('card').text,/^⚙️ Run shell\n💬 Asked in a Telegram group\n\n\{/);assert.match(tool.message,/asked the owner/);
+    assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
     assert.equal(await s.actionCommands.callback(await press('tool','na'+tool.id.slice(0,40)+tool.fingerprint.slice(0,16))),true);
     assert.equal((await s.controlledActions.inspect(owner,tool.id)).state,'approved');assert.match(last('settle').text,/\n\n✅ Approved\.$/);
     // A standing permission runs the same operation without a decision, so no buttons are offered.

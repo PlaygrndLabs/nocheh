@@ -854,6 +854,27 @@ itself at startup.
 
 <verification>
 
+- Answers come back to the chat that asked, stage A (2026-11-08,
+  [ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md)):
+  the owner decided that once an approved operation ends, the agent continues in
+  the chat that asked and answers as a reply to the asking message in its topic,
+  that a rejected, failed or unconfirmed operation still gets one short line, that
+  one asking message gets at most three follow-ups, and that the first reply says
+  the answer will follow. Each end state of a live conversation's operation now
+  commits a follow-up row and a `continue:` workflow; the follow-up waits for the
+  asking reply, merges siblings, skips the owner's own private rejection, and
+  starts a Hermes turn through an internal event; the text that starts it is
+  "After an approved operation ends" in Settings › Instructions. Checks:
+  [helpers](test/action-continuations.test.ts),
+  [follow-ups](test/store-action-continuations.test.ts),
+  [trigger](test/store-controlled-execution.test.ts),
+  [wording](test/store-approval-buttons.test.ts). Pending: the gateway tests that
+  need the pinned Hermes, and a live group scenario
+  (`group_operation_answers_in_the_group`). Later stages, not built:
+  allow buttons with chat grants (B), and a short in-turn wait for an operation
+  already approved (C). A follow-up interrupted by a runtime restart stays
+  uncertain; a follow-up that failed three times is not retried from the
+  Workflows page.
 - Reactions while Nocheh works (2026-11-08,
   [ADR-0211](docs/adr/0211-hermes-working-reactions-on-the-answered-message.md)):
   the owner asked whether the bot can react to users' messages and chose

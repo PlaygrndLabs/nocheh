@@ -1315,6 +1315,12 @@ class ProductScenarios(Scenarios):
         self.gate('card_still_open', len(self.buttons(self.card_message(card))) == 2 and
                   self.f.query('nocheh_control', "SELECT state FROM controlled_actions WHERE arguments_hash IS NOT NULL ORDER BY created_at DESC LIMIT 1") == 'proposed')
         self.ran(card, marker)
+        # It ended in the owner's chat, so one follow-up reads it and answers the request there (ADR-0212).
+        answers = lambda: [row for row in self.replies(before, OWNER) if not self.is_card(row) and json.loads(
+            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == request['message']['message_id']]
+        answer = self.wait('follow_up_answered', answers, 240)[0]['message']['text']
+        time.sleep(3)
+        self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] nocheh_action_status' in answer and marker in answer, text=answer[:500])
 
     def job_operation_runs_after_approval(self):
         # A job's run asks to run a command; the owner approves it on its card after the job reported.

@@ -23,7 +23,8 @@ class ScriptedBrain:
 
     A directive such as ``[[search:query]]`` in the current user turn makes the
     model request one tool; the tool result then becomes the scripted answer.
-    A background job's resumed run keeps the directives of its first message.
+    A background job's resumed run keeps the directives of its first message,
+    and a follow-up after approved operations end reads each of them.
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
@@ -41,6 +42,10 @@ class ScriptedBrain:
     RESUME = 'The job was interrupted and restarted.'
     RESTART = 'This job restarted and its earlier work could not be kept.'
     NOTICES = {'cost': '[SYSTEM NOTICE — cost budget nearly used]', 'time': '[SYSTEM NOTICE — run time budget nearly exhausted]'}
+    # Nocheh's follow-up turn once approved operations end (src/prompts.ts actionContinued): one line per operation,
+    # each read with nocheh_action_status, as the text asks.
+    CONTINUED = '[Operations ended]'
+    OPERATION = re.compile(r'^- ([a-f0-9]{64}) \([a-z_]+\): [a-z_]+$', re.M)
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
     TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
@@ -129,6 +134,8 @@ class ScriptedBrain:
         index, current = self.turn(messages, users)
         match = self.DIRECTIVE.search(current)
         tools = self.TOOL.findall(current)
+        if not match and not tools and self.CONTINUED in current:
+            tools = [('nocheh_action_status', json.dumps({'id': operation})) for operation in self.OPERATION.findall(current)]
         if not match and not tools:
             return None
         if self.canary in '\n'.join(self.text(message.content) for message in body.messages):

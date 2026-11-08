@@ -102,6 +102,17 @@ class AsyncRunTests(unittest.TestCase):
             runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'unexpected_profile_tool'},lambda body:None)
             body=self.body(3);runs.start(body);self.assertEqual(self.wait(runs,body)['error_code'],'unexpected_profile_tool')
 
+    def test_continuation_attempt_is_a_separate_run(self):
+        attempt='c1-'+'a'*40
+        self.assertNotEqual(identity(self.body(attempt)),identity(self.body()))
+        with tempfile.TemporaryDirectory() as folder:
+            runs=AsyncRuns(folder,lambda *args:{'state':'done'},lambda body:None);body={**self.body(attempt),'continuation':'a'*64}
+            first=runs.start(body);self.assertEqual(self.wait(runs,body)['run_id'],first['run_id'])
+            # Storage observes with the identity fields only, as it does for a message turn.
+            observed={'channel':'telegram','event_id':'a'*64,'attempt':attempt,'observe_only':True}
+            self.assertEqual(runs.resume(observed),{'run_id':first['run_id'],'state':'done'})
+            self.assertEqual(runs.resume({**observed,'attempt':1})['state'],'not_found','the message turn is another run')
+
     def test_exception_content_is_removed_from_durable_results(self):
         with tempfile.TemporaryDirectory() as folder:
             def fail(*args):raise RuntimeError('private provider response')

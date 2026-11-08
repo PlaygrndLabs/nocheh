@@ -1,6 +1,4 @@
 import {albumMembers,albumSettleMs} from './albums.js';
-import {blockingPublications} from './publications.js';
-import type pg from 'pg';
 import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
@@ -12,7 +10,7 @@ import type {ArchiveRepository,SourceReference} from './archive.js';
 import type {SourceRepository} from './retrieval.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
-import type {GuardRepository,GuardBinding} from './guards.js';
+import type {GuardRepository} from './guards.js';
 import type {PreparationRepository} from './preparation.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
@@ -20,6 +18,7 @@ import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
 import {notAllowedPrivateReply,notAllowedReply,ownerPrompts} from '../prompts.js';
+import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -34,12 +33,6 @@ ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS reconciliation_checked_at timest
 `;
 const protocol='telegram-dispatch-v2';
 const conversationOrderWaitMs=120000;
-const closed=new Set(['done','failed','ambiguous','suppressed','cancelled']);
-const terminal=new Set(['done','ambiguous','suppressed','cancelled']);
-const codes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured',
-  'unexpected_profile_tool','required_guard_unavailable','profile_scope_denied','invalid_process_scope_binding','unsupported_memory_compaction_revision']);
-type Input={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
 type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
 
 /** A complete journal without a delivery-stage event proves Telegram send was never entered. */
@@ -58,20 +51,6 @@ export function interruptedJournalDisposition(value:unknown):JournalDisposition 
   const last=events.at(-1);
   if(last.state!=='ambiguous'||last.stage!=='assistant'||!assistant)return 'invalid';
   return delivery?'uncertain':'pre_delivery';
-}
-
-/** Keep routing identifiers independent of editable guarded representations. */
-export function dispatchPayload(original:any,representation:any,text:string|null) {
-  const message=original.message,selected=representation?.message??{},chat=message.chat,sender=message.from;
-  const routed:any={message_id:message.message_id,date:message.date,
-    chat:{id:chat.id,type:chat.type,...(typeof chat.is_forum==='boolean'?{is_forum:chat.is_forum}:{})},
-    from:{id:sender.id,is_bot:sender.is_bot===true,first_name:typeof selected.from?.first_name==='string'?selected.from.first_name:'Participant'},
-    // All attachment text is already in the prepared input. A plain message
-    // invokes the committed handler without native downloads or media helpers.
-    text:text||'[An attachment or non-text message was archived.]'};
-  if(Number.isSafeInteger(message.message_thread_id))routed.message_thread_id=message.message_thread_id;
-  if(typeof message.is_topic_message==='boolean')routed.is_topic_message=message.is_topic_message;
-  return {update_id:original.update_id,message:routed};
 }
 
 /**
@@ -172,19 +151,6 @@ export class TelegramDispatchRepository {
     const row=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
     if(!row||row.content_hash!==reference.input_hash||digest(row.content)!==row.content_hash)throw new HttpError(409,'dispatch_input_conflict');
     return JSON.parse(row.content.toString());
-  }
-  private async current(input:Input) {
-    await this.guards.assertCurrent(input.binding);await this.turns.binding(input.principal);
-    const source=(await this.archive.captured(input.principal.turnEvent!)).reference;
-    if(await this.access.retirements?.isRetired(source))throw new HttpError(403,'source_retired');
-    const original=(await this.archive.pool.query('SELECT payload,scope FROM events WHERE id=$1',[input.principal.turnEvent])).rows[0];
-    if(!original||!conversationScope(this.access.policy(),JSON.parse(original.payload.toString()),original.scope))throw new HttpError(403,'conversation_not_selected');
-    await this.guards.assertCurrent(input.binding);
-  }
-  private async fence(db:pg.PoolClient,binding:GuardBinding) {
-    const row=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
-    if(!row||canonical({generation:row.generation,epoch:Number(row.epoch),mode:row.mode})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
-    if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
   /**
    * Conversation messages start in Telegram update order. Updates from one
@@ -370,7 +336,7 @@ export class TelegramDispatchRepository {
     const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
       ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
-    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,recent_group:recent});await this.current(input);
+    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,recent_group:recent});await currentTurn(this,input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
@@ -463,7 +429,7 @@ export class TelegramDispatchRepository {
         catch{return await this.receive(row,{state:'running'});}
         if(closed.has(String(observed.state)))return await this.receive(row,observed);
         input=await this.input(row.input_reference);
-        try{await this.current(input);}catch(error){
+        try{await currentTurn(this,input);}catch(error){
           if(!(error instanceof HttpError)||!['guard_context_changed','audience_context_changed','conversation_not_selected','guard_transition_pending','source_retired'].includes(error.code))throw error;
           // Only a retirement or a deselected chat withdraws the reply. A newer epoch alone means
           // it is rebuilt under that epoch: a turn that never started runs again, and a running
@@ -513,14 +479,14 @@ export class TelegramDispatchRepository {
         input=built.input;
         await db.query('BEGIN');
         try {
-          await this.fence(db,input.binding);
+          await turnFence(db,input.binding);
           await db.query(`UPDATE dispatches SET state='running',attempts=$4,input_reference=$2,result_reference=NULL,binding=$3,error_code=NULL,
             revision=revision+1,updated_at=now() WHERE event_id=$1 AND state IN ('pending','failed')`,[id,built.reference,input.binding,attempt]);
           await db.query('COMMIT');row=await this.row(id);
         }catch(error){await db.query('ROLLBACK');throw error;}
       }
       if(this.token.length<24)throw new HttpError(503,'service_credential_required');
-      const credential=await this.prepared.audience.turn(this.token,input.principal,id,Date.now()+600000);await this.current(input);
+      const credential=await this.prepared.audience.turn(this.token,input.principal,id,Date.now()+600000);await currentTurn(this,input);
       let result:Record<string,unknown>;
       try{result=await this.call('run.start',{...input.body,asynchronous:true,archive_credential:credential},10000);}
       catch{result={state:'running'};}

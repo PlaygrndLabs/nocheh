@@ -23,6 +23,7 @@ import {telegramActionSchema} from './telegram-action-schema.js';
 import {telegramDispatchSchema} from './telegram-dispatch.js';
 import {storageWorkflowOwnerSchema} from './workflow-owner.js';
 import {controlledActionSchema} from './controlled-action-schema.js';
+import {actionContinuationSchema} from './action-continuations.js';
 import {storageImportSchema} from './imports.js';
 import {importWorkflowSchema} from '../workflows/imports.js';
 import {memoryAccessSchema} from './memory-access-schema.js';
@@ -129,6 +130,7 @@ ${runtimeConfigurationSchema}
 ${telegramActionSchema}
 ${telegramDispatchSchema}
 ${controlledActionSchema}
+${actionContinuationSchema}
 ${controlGuardSchema}
 ${controlPolicySchema}
 ${controlEntitySchema}
