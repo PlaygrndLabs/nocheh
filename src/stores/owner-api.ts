@@ -9,7 +9,7 @@ import {taskQuery} from './tasks.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:owner-autonomy|notion|background-jobs(?:\/settings|\/[a-f0-9]{64}\/stop)?|tasks(?:\/(?:settings|archive-finished)|\/[a-f0-9]{64}(?:\/(?:comments|delete))?)?|prompts|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/(?:correct|history)|\/[a-f0-9]{64}(?:\/(?:decide|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:owner-autonomy|notion|background-jobs(?:\/settings|\/[a-f0-9]{64}\/stop)?|tasks(?:\/(?:settings|archive-finished)|\/[a-f0-9]{64}(?:\/(?:comments|delete))?)?|prompts|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/(?:correct|history)|\/[a-f0-9]{64}(?:\/(?:decide|fold|split|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -79,9 +79,11 @@ export class OwnerStorageApi {
     if(path==='/v1/entities/suggestions'&&method==='GET')return s.entities.suggestions(principal,q.get('after')??'');
     const claimCorrection=path.match(/^\/v1\/entities\/claims\/([a-f0-9]{64})\/correct$/);
     if(claimCorrection&&method==='POST')return s.entities.correct(principal,claimCorrection[1]!,input);
-    const entity=path.match(/^\/v1\/entities\/([a-f0-9]{64})(?:\/(decide|merge|unmerge|rename|correct))?$/);
+    const entity=path.match(/^\/v1\/entities\/([a-f0-9]{64})(?:\/(decide|fold|split|merge|unmerge|rename|correct))?$/);
     if(entity&&method==='POST') {
       if(entity[2]==='decide')return s.entities.decide(principal,entity[1]!,input);
+      if(entity[2]==='fold')return s.entities.fold(principal,entity[1]!,input);
+      if(entity[2]==='split')return s.entities.split(principal,entity[1]!,input);
       if(entity[2]==='merge')return s.entities.merge(principal,entity[1]!,input);
       if(entity[2]==='unmerge')return s.entities.unmerge(principal,entity[1]!,input);
       if(entity[2]==='rename')return s.entities.rename(principal,entity[1]!,input);

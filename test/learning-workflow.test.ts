@@ -58,6 +58,16 @@ test('a learning query fits Honcho\'s limit by trimming other evidence, then rul
   assert.deepEqual(cited,kept);
   assert.deepEqual(parse(omitted).limitations,['other_evidence_text_only','rules_omitted','trigger_text_only','other_evidence_omitted']);
   assert.throws(()=>learningQuery('i'.repeat(10001),context(0,0,0)),{code:'learning_query_limit'});
+  // Waiting cards give way first: other names, then cards from the end, before any evidence is trimmed.
+  const card=(index:number)=>({id:digest('card:'+index),kind:'project',name:'Synthetic card '+index,also_called:['n'.repeat(200)]});
+  const withWaiting=(count:number)=>({...context(1000,3000,2),entities:{waiting:Array.from({length:count},(_,index)=>card(index))}});
+  const roomy=parse(learningQuery('Instruction',withWaiting(2)));
+  assert.equal(roomy.entities.waiting[0].also_called.length,1,'cards that fit keep their other names');
+  const shed=parse(learningQuery('Instruction',withWaiting(80)));
+  assert.ok(shed.entities.waiting.length>0&&shed.entities.waiting.length<80);
+  assert.ok(shed.entities.waiting.every((item:{also_called:string[]})=>item.also_called.length===0));
+  assert.equal(shed.entities.waiting[0].name,'Synthetic card 0','the newest cards stay');
+  assert.deepEqual(shed.limitations,['waiting_omitted']);assert.equal(shed.observations[1].value.payload.padding.length,3000);
 });
 
 test('sources outside any conversation close instead of waiting, and refresh sweeps leave wire batches out',async()=>{

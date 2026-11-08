@@ -199,6 +199,10 @@ const telegramActions:any[]=[{id:'ab'.repeat(32),event_id:id,fingerprint:'ba'.re
  {id:'cd'.repeat(32),event_id:id,fingerprint:'dc'.repeat(32),kind:'telegram_message',scope:'42',profile,arguments:{destination:topic,text:'Reminder: flights land at 09:40.'},state:'done',revision:3,created_at:inboxAgo(2900),result:{delivered:true}}];
 const memoryAccessCreated=inboxAgo(40);
 const entitySuggestion:any={id:'0'.repeat(64),kind:'person',name:'Nia Okafor',candidate_entity_id:null,source_reference:{id},reason:'Mentioned twice in Aurora planning as the person booking the cabin.',status:'pending',revision:1,created_at:inboxAgo(300)};
+// A project card with two other names folded into it: a longer name and the same name with another spelling.
+const folded=(hex:string,name:string,minutes:number)=>({id:hex.repeat(32),name,reason:'The same cabin booking, named another way.',revision:1,source_reference:{id},created_at:inboxAgo(minutes)});
+const projectSuggestion:any={id:'02'.repeat(32),kind:'project',name:'Aurora cabin',candidate_entity_id:null,source_reference:{id},reason:'A cabin booking the group keeps planning around.',status:'pending',revision:1,created_at:inboxAgo(280),
+ also_called:[folded('03','Aurora cabin trip',260),folded('04','Aurora cabin (کلبه)',240)]};
 const knowledgeProposal:any={id:'f'.repeat(64),kind:'organization',origin:'learning',state:'review',revision:1,approved:false,created_at:inboxAgo(95),source_scope:conversation,source_reference:{id},error_code:null,result:null,decision_history:[],affected_topics:{},
  proposal:{kind:'organization',reason:'The Iceland topic is all about one trip; a project keeps its notes together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:topic,project_key:'trip',reason:'Every recent message in this topic is about the trip.',evidence_ids:[id],expected_revision:1}]}};
 function inboxDecisions(){
@@ -208,14 +212,14 @@ function inboxDecisions(){
  return [...actions.filter(waits).map(a=>summary('controlled_action',a,{title:a.kind,source_scope:a.scope,fingerprint:a.fingerprint})),
   ...telegramActions.filter(waits).map(a=>summary('telegram_action',a,{title:'Send Telegram message',source_scope:a.scope,destination:a.arguments.destination,fingerprint:a.fingerprint})),
   ...(memoryAccessRequest.state==='pending'?[summary('memory_access',{...memoryAccessRequest,created_at:memoryAccessCreated},{title:'Share a specific fact',source_scope:conversation,destination:memoryAccessRequest.destination})]:[]),
-  ...(entitySuggestion.status==='pending'?[summary('entity',entitySuggestion,{title:entitySuggestion.name})]:[]),
+  ...[entitySuggestion,projectSuggestion].filter(card=>card.status==='pending').map(card=>summary('entity',card,{title:card.name,subject_kind:card.kind,also_called:(card.also_called??[]).map((name:any)=>name.name)})),
   ...(['review','stale','failed'].includes(knowledgeProposal.state)?[summary('knowledge',knowledgeProposal,{title:knowledgeProposal.kind,source_scope:knowledgeProposal.source_scope})]:[])];
 }
 function inboxRecord(kind:string,recordId:string):any{
  if(kind==='controlled_action')return actions.find(a=>a.id===recordId);
  if(kind==='telegram_action')return telegramActions.find(a=>a.id===recordId);
  if(kind==='memory_access'&&recordId===requestId)return {...memoryAccessRequest,source_scope:conversation,fact_id:factId,fact_revision:1,current_fact_revision:1,created_at:memoryAccessCreated};
- if(kind==='entity'&&recordId===entitySuggestion.id)return entitySuggestion;
+ if(kind==='entity')return [entitySuggestion,projectSuggestion].find(card=>card.id===recordId);
  if(kind==='knowledge'&&recordId===knowledgeProposal.id)return knowledgeProposal;
 }
 /** Messages page fixture: synthetic kept messages, the assistant's copies, hiding, versions and imports. */
@@ -491,7 +495,7 @@ const server=createServer((req,res)=>{void(async()=>{
    return json(res,200,learnedRead[2]?{versions,next:null}:{id:entry.id,active_revision:entry.active_revision,entry,versions,next:null});}
   if(route==='/entities'){const kind=url.searchParams.get('kind')??'',q=(url.searchParams.get('q')??'').toLocaleLowerCase(),all=url.searchParams.get('state')==='all';
    return json(res,200,{entities:people.filter(p=>(!kind||p.kind===kind)&&(all||p.state==='active')&&p.name.toLocaleLowerCase().includes(q)),next:null});}
-  if(route==='/entities/suggestions')return json(res,200,{suggestions:entitySuggestion.status==='pending'?[entitySuggestion]:[],next:null});
+  if(route==='/entities/suggestions')return json(res,200,{suggestions:[entitySuggestion,projectSuggestion].filter(card=>card.status==='pending'),next:null});
   const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);
   if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
   if(route==='/notion')return json(res,200,await notion.get(taskOwner));
@@ -601,7 +605,12 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/tools/telegram-decision'){const item=telegramActions.find(a=>a.id===body.id);if(!item||item.fingerprint!==body.fingerprint)throw new HttpError(409,'action_changed');if(body.expected_revision!==undefined&&body.expected_revision!==item.revision)throw new HttpError(409,'action_revision_changed');if(item.state!=='proposed')throw new HttpError(409,'action_already_started_or_closed');item.state=body.decision==='approve'?'approved':'rejected';item.revision++;return json(res,200,{id:item.id,state:item.state,revision:item.revision});}
   if(route==='/tools/resolve'||route==='/tools/telegram-resolve'){const item=(route==='/tools/resolve'?actions:telegramActions).find(a=>a.id===body.id);if(!item||item.fingerprint!==body.fingerprint)throw new HttpError(409,'action_changed');if(body.expected_revision!==undefined&&body.expected_revision!==item.revision)throw new HttpError(409,'action_changed');if(item.state!=='ambiguous'||item.resolution)throw new HttpError(409,'action_already_started_or_closed');if(!['ran','not_run','dismissed'].includes(body.outcome))throw new HttpError(400,'invalid_decision');item.resolution=body.outcome;item.resolved_at=new Date().toISOString();item.revision++;return json(res,200,{id:item.id,state:item.state,resolution:item.resolution,revision:item.revision});}
   if(route==='/memory-access/requests/'+requestId+'/decide'){if(body.expected_revision!==memoryAccessRequest.revision||memoryAccessRequest.state!=='pending')throw new HttpError(409,'memory_access_request_changed');memoryAccessRequest.state=body.decision==='reject'?'rejected':'approved';if(body.wording)memoryAccessRequest.wording=body.wording;memoryAccessRequest.revision++;return json(res,200,{id:requestId,state:memoryAccessRequest.state,grant_id:null,revision:memoryAccessRequest.revision});}
-  if(route==='/entities/'+entitySuggestion.id+'/decide'){if(body.expected_revision!==entitySuggestion.revision)throw new HttpError(409,'entity_suggestion_conflict');entitySuggestion.status=body.decision==='confirm'?'confirmed':'rejected';entitySuggestion.revision++;return json(res,200,{suggestion:entitySuggestion});}
+  const cardDecide=route.match(/^\/entities\/([a-f0-9]{64})\/decide$/),card=cardDecide&&[entitySuggestion,projectSuggestion].find(item=>item.id===cardDecide[1]);
+  if(card){if(body.expected_revision!==card.revision)throw new HttpError(409,'entity_suggestion_conflict');card.status=body.decision==='confirm'?'confirmed':'rejected';card.revision++;return json(res,200,{id:card.id,status:card.status});}
+  const cardSplit=route.match(/^\/entities\/([a-f0-9]{64})\/split$/);
+  if(cardSplit){const index=(projectSuggestion.also_called as any[]).findIndex(name=>name.id===cardSplit[1]);if(index<0)throw new HttpError(409,'entity_suggestion_split_invalid');
+   projectSuggestion.also_called.splice(index,1);projectSuggestion.revision++;return json(res,200,{id:cardSplit[1],merged_into:null});}
+  if(/^\/entities\/[a-f0-9]{64}\/fold$/.test(route))return json(res,200,{id:route.split('/')[2],merged_into:body.target_id});
   if(route==='/knowledge/proposals/'+knowledgeProposal.id+'/decide'||route==='/knowledge/proposals/'+knowledgeProposal.id+'/undo'){if(body.expected_revision!==knowledgeProposal.revision)throw new HttpError(409,'knowledge_proposal_changed');knowledgeProposal.state=route.endsWith('/undo')?'undone':body.decision==='approve'?'queued':'cancelled';knowledgeProposal.revision++;return json(res,200,{id:knowledgeProposal.id,state:knowledgeProposal.state,revision:knowledgeProposal.revision});}
   if(route==='/tools/revoke'){const item=permissions.find(p=>p.id===body.id);if(item)item.revoked_at=new Date().toISOString();return json(res,200,{ok:true});}
   if(route==='/projects/assignments'){const own=assignments.find(a=>a.space_id===body.space_id);if((own?.revision??0)!==body.expected_revision)throw new HttpError(409,'assignment_revision_conflict');const next={space_id:body.space_id,project_id:body.mode==='assigned'?body.project_id:null,mode:body.mode,revision:body.expected_revision+1};if(own)Object.assign(own,next);else assignments.push(next);return json(res,200,next);}

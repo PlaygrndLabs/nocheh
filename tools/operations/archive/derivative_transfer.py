@@ -95,7 +95,7 @@ def import_derivatives(api,directory):
                                 except urllib.error.HTTPError as error:
                                     try:code=json.loads(error.read(65536)).get('error')
                                     except (ValueError,AttributeError):code=None
-                                    if kind=='derived_artifacts' and error.code==409 and code=='portable_parent_pending':continue
+                                    if kind in ('derived_artifacts','memory_entity_suggestions') and error.code==409 and code=='portable_parent_pending':continue
                                     raise RuntimeError('derivative_import_failed:'+str(code or error.code)) from None
                                 index.execute('UPDATE records SET done=1 WHERE hash=?',(checksum,));progress+=1
                             index.commit()
