@@ -66,6 +66,22 @@ class ActionResultTests(unittest.TestCase):
         with patch.object(archive_tools, 'request', side_effect=HTTPError('/', 409, 'changed', {}, None)):
             self.assertEqual(json.loads(archive_tools.notion_tool({'operation': 'list'})), {'error': 'notion_is_off_or_changed'})
 
+    def test_a_failed_proposal_says_whether_asking_again_can_help(self):
+        from urllib.error import URLError
+        fail = lambda code: HTTPError('http://app/v1/tools/propose', code, 'refused', {}, None)
+        with patch.object(archive_tools, '_PROCESS_PREFERENCES', {'nocheh_tools.browser': 'on'}):
+            for raised, error, note in ((TimeoutError('timed out'), 'action_request_timed_out', 'Ask again in a moment'),
+                                        (URLError(TimeoutError('timed out')), 'action_request_timed_out', 'Ask again in a moment'),
+                                        (URLError(ConnectionRefusedError()), 'controlled_action_unavailable', 'not a setting or a limit of this chat'),
+                                        (RuntimeError('broken'), 'controlled_action_unavailable', 'not a setting or a limit of this chat'),
+                                        (fail(503), 'controlled_action_unavailable', 'not a setting or a limit of this chat'),
+                                        (fail(403), 'not_allowed_here', None), (fail(400), 'invalid_action_request', None)):
+                with self.subTest(raised=raised), patch.object(archive_tools, 'request', side_effect=raised):
+                    answer = json.loads(archive_tools.controlled_tool('browser', {'url': 'https://example.com/'}))
+                self.assertEqual(answer['error'], error)
+                if note: self.assertIn(note, answer['note'])
+                else: self.assertNotIn('note', answer)
+
     def test_status_without_an_id_lists_operations_without_content(self):
         listed = {'telegram': [{'id': 'b' * 64, 'destination': '-100555', 'state': 'proposed', 'error_code': None, 'created_at': 't', 'arguments': {'text': 'SECRET'}}],
                   'actions': [{'id': ID, 'kind': 'mcp', 'state': 'failed', 'error_code': None, 'created_at': 't', 'result': 'SECRET', 'arguments': {'input': 'SECRET'}}]}

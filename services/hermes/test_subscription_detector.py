@@ -123,6 +123,20 @@ class DetectorTests(unittest.TestCase):
             with self.assertRaises(Exception):detect_literals('Password: juniper-ONLY-7642',credentials,'model')
         self.assertEqual({c.kwargs['reason'] for c in record.call_args_list},{'provider_error'})
 
+    def test_a_dropped_connection_is_asked_again_and_a_timeout_is_not(self):
+        class APIConnectionError(Exception):pass
+        class APITimeoutError(APIConnectionError):pass
+        credentials=SubscriptionCredentials('synthetic-token')
+        with patch('services.hermes.subscription._call_subscription',side_effect=[APIConnectionError(),response({'literals':['kite-99']})]) as call, \
+                patch('services.hermes.subscription.RETRY_SECONDS',0),patch('services.hermes.usage.record') as record:
+            self.assertEqual(detect_literals('Token: kite-99',credentials,'model'),['kite-99'])
+        self.assertEqual(call.call_count,2)
+        self.assertEqual([c.args[3] for c in record.call_args_list],[True,False],'the dropped call counts as failed, the retry as passed')
+        with patch('services.hermes.subscription._call_subscription',side_effect=APITimeoutError()) as call, \
+                patch('services.hermes.subscription.RETRY_SECONDS',0),patch('services.hermes.usage.record'):
+            with self.assertRaises(APITimeoutError):detect_literals('Token: kite-99',credentials,'model')
+        self.assertEqual(call.call_count,1)
+
     def test_transport_cannot_be_redirected_and_hides_its_key(self):
         for url,provider,mode in (('https://untrusted.example/v1','openai','chat_completions'),
                                   ('https://chatgpt.com/backend-api/codex','openai-codex','codex_responses'),
