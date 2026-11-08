@@ -855,7 +855,7 @@ itself at startup.
 <verification>
 
 - Allow a site or command in one chat, stage B (2026-11-08,
-  [ADR-0213](docs/adr/0213-allow-a-site-or-command-in-one-chat.md)): the owner
+  [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md)): the owner
   asked for Claude Code-style auto-approve built on Hermes's approval words. A web
   read's card offers Allow once, Allow where asked for 12 hours, Always allow this
   site where asked and Reject; a command's card, Allow once, Always allow it where asked and

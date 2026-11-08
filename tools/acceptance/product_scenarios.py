@@ -1341,7 +1341,7 @@ class ProductScenarios(Scenarios):
 
     def allowed_command_runs_without_a_card(self):
         # The owner taps Always allow on a member's command in a group topic. The same command asked there
-        # again runs without a card, and its answer follows (ADR-0213).
+        # again runs without a card, and its answer follows (ADR-0214).
         marker = 'RULEMARK1'
         tool = 'یک فرمان [[tool:nocheh_shell {"command":"printf '+marker+'"}]] [[after:silent]]'
         request = self.f.message(GROUP, tool, sender=MEMBER, topic=TEAM_TOPIC)

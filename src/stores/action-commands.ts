@@ -17,7 +17,7 @@ type ActionKind='telegram'|'controlled'|'background'|'list';
 /** One card of a job's waiting changes, as frozen when it was sent. */
 type ListCard={id:string;fingerprint:string;members:[string,string][];long?:number};
 // Telegram allows 64 bytes of button data: a marker, the choice (approve, deny, stop a job, or approve and
-// allow here for a session or always, ADR-0213), and prefixes of the action ID and of the fingerprint of its exact content.
+// allow here for a session or always, ADR-0214), and prefixes of the action ID and of the fingerprint of its exact content.
 const buttonData=/^n([adscw])([a-f0-9]{40})([a-f0-9]{16})$/;
 /** An operation's buttons: a web read can be allowed here for a session or always, an exact command always;
  * the rest, and a job's operations, are approved one by one. */
@@ -392,7 +392,7 @@ export class ActionCommandRepository {
     // Telegram fills in the pressed message; only one that carries this very button names this card's message.
     const carries=(query.message?.reply_markup?.inline_keyboard??[]).flat().some((button:any)=>button?.callback_data===query.data);
     const message=String(query.message?.message_id??''),seen:Seen=carries&&chat&&/^[1-9]\d{0,15}$/.test(message)?{chat,message}:undefined;
-    // Allow here and Always allow are only an operation's buttons, and only the owner's (ADR-0213).
+    // Allow here and Always allow are only an operation's buttons, and only the owner's (ADR-0214).
     if(['c','w'].includes(data[1]!)&&action&&action.kind!=='controlled'){await answer(line.changed);return true;}
     if(action?.kind==='background'&&this.jobs)return data[1]==='s'?this.stopPressed(action,presser,chat,query.id,seen):this.jobPressed(action,data[1]==='a',presser,chat,query.id,source,seen);
     // Stop is only a job's button; it never decides anything else.

@@ -21,12 +21,12 @@ import type {SourceReference} from './archive.js';
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
 const exact=(value:unknown,keys:string[])=>{const body=object(value);if(Object.keys(body).some(k=>!keys.includes(k)))throw new HttpError(400,'unknown_action_field');return body;};
-/** How long a chat rule from a card button lasts, in minutes, by what it covers (ADR-0213): a site here for a
+/** How long a chat rule from a card button lasts, in minutes, by what it covers (ADR-0214): a site here for a
  * session of 12 hours or for 30 days, an exact command for 30 days. Telegram and Notion keep their own decisions. */
 export const ruleMinutes:Record<string,Partial<Record<'here'|'always',number>>>={browser:{here:720,always:43200},shell:{always:43200}};
 const ruleUses=1000;
 /** Whether a standing permission still covers an operation: an exact grant its fingerprint and epoch, a chat rule its
- * site or command, kind, chat or topic, profile and installation generation, never a job's operation (ADR-0213). */
+ * site or command, kind, chat or topic, profile and installation generation, never a job's operation (ADR-0214). */
 export const covers=(grant:any,row:any)=>grant.grain==='chat'?row.job_id===null&&!!row.match_key&&grant.match_key===row.match_key&&grant.kind===row.kind&&
   grant.space_id===row.space_id&&grant.logical_profile===row.logical_profile&&grant.binding?.generation===row.binding?.generation:
   grant.fingerprint===row.fingerprint&&canonical(grant.binding)===canonical(row.binding)&&(grant.job_id===null||grant.job_id===row.job_id);
@@ -182,7 +182,7 @@ export class ControlledActionRepository {
   }
   /** Standing permissions that cover an operation; none for one a relaunched job run asked for (ADR-0207). */
   async grants(row:any,db:Pick<pg.Pool,'query'>=this.control,lock=false) {
-    // The same matching as covers(): the exact grant, or a chat rule for this site or command here (ADR-0213).
+    // The same matching as covers(): the exact grant, or a chat rule for this site or command here (ADR-0214).
     return (await db.query(`SELECT id,remaining,expires_at,revision,grain FROM action_permissions WHERE remaining>0 AND revoked_at IS NULL AND expires_at>now()
       AND (grain='exact' AND fingerprint=$1 AND binding=$2 AND (job_id IS NULL OR job_id=$3)
         OR grain='chat' AND $3::text IS NULL AND job_id IS NULL AND match_key=$5 AND kind=$6 AND space_id=$7 AND logical_profile=$8 AND binding->'generation'=$2::jsonb->'generation')
@@ -203,7 +203,7 @@ export class ControlledActionRepository {
   async decide(principal:Reader,value:unknown,source?:SourceReference) {
     admin(principal);const body=exact(value,['id','fingerprint','decision','expected_revision','operation_id','allow']),id=identity(body.id);
     if(!['approve','deny'].includes(String(body.decision)))throw new HttpError(400,'invalid_decision');
-    // Approve can also allow the same site or exact command in this chat from now on (ADR-0213).
+    // Approve can also allow the same site or exact command in this chat from now on (ADR-0214).
     if(body.allow!==undefined&&(body.decision!=='approve'||!['here','always'].includes(String(body.allow))))throw new HttpError(400,'invalid_decision');
     return this.command(principal,body,{...body,operation_id:undefined},async db=>{
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1 FOR UPDATE',[id])).rows[0];

@@ -81,7 +81,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Allowed members post freely in their own group; a message to another group is reviewed by the asker or the owner; other approvals go to the owner's private chat ([0159](0159-group-members-post-freely-and-approvals-go-private.md), [0161](0161-requesters-review-their-own-cross-group-messages.md)).
 - Topic destinations stay exact, a chat follows its own requests across turns, and waiting approvals carry across quiet epochs ([0092](0092-exact-topic-action-destinations.md), [0166](0166-a-chat-follows-its-own-message-requests.md), [0200](0200-waiting-approvals-survive-reaction-epochs.md)).
 - When an approved operation ends, the agent continues in the chat that asked and answers there as a reply to the request, at most three times per request; such a follow-up never acts under the owner's freedom setting ([0212](0212-approved-operations-answer-in-the-chat-that-asked.md)).
-- A web read's card can allow its site in that chat or topic for 12 hours or 30 days, and a command's card that exact command for 30 days; rules survive epochs, deny rules still win, and connected tools and messages are decided one by one ([0213](0213-allow-a-site-or-command-in-one-chat.md)).
+- A web read's card can allow its site in that chat or topic for 12 hours or 30 days, and a command's card that exact command for 30 days; rules survive epochs, deny rules still win, and connected tools and messages are decided one by one ([0214](0214-allow-a-site-or-command-in-one-chat.md)).
 - Notion is optional, through its MCP server; only the owner's private chat proposes calls ([0175](0175-notion-through-its-mcp-server.md)).
 
 ### Background jobs and sealed box

@@ -23,7 +23,7 @@ export function actionArguments(kind:unknown,value:unknown) {
     const address=string(args.url,4096);let url:URL;
     try {url=new URL(address);}catch{throw new HttpError(400,'invalid_action_url');}
     if(url.protocol!=='https:'||url.username||url.password||url.hash||(url.port&&url.port!=='443')||url.hostname==='localhost')throw new HttpError(400,'public_https_required');
-    // The host is written plainly, so the card, a chat rule and the executor all read the same one (ADR-0213):
+    // The host is written plainly, so the card, a chat rule and the executor all read the same one (ADR-0214):
     // no backslash, percent escape or non-ASCII name that another parser reads as a different host.
     if(/^https:\/\/([^/?#]*)/i.exec(address)?.[1]?.toLowerCase()!==url.host||!/^[a-z0-9.-]+$/.test(url.hostname))throw new HttpError(400,'plain_host_required');
     if(kind==='browser') {
@@ -42,7 +42,7 @@ export function actionArguments(kind:unknown,value:unknown) {
 }
 
 /** What a chat rule allows, in Hermes's approval rule_key format: one site for a web read, one exact
- * command for a shell command. Other operations have no rule and are decided one by one (ADR-0213). */
+ * command for a shell command. Other operations have no rule and are decided one by one (ADR-0214). */
 export function ruleKey(kind:string,args:any):string|null {
   if(kind==='browser')return 'nocheh_browser:'+new URL(args.url).hostname;
   if(kind==='shell')return 'nocheh_shell:'+digest(args.command);

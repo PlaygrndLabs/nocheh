@@ -1,4 +1,4 @@
-# ADR-0213: Allow a site or command in one chat from its card
+# ADR-0214: Allow a site or command in one chat from its card
 
 <status>
 Accepted on 2026-11-08, after the owner asked for Claude Code-style auto-approve

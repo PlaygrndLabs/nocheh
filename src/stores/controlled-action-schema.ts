@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS action_permissions (
  kind text NOT NULL,job_id text,expires_at timestamptz NOT NULL,remaining integer NOT NULL CHECK(remaining>=0),
  revision integer NOT NULL DEFAULT 1,revoked_at timestamptz,created_at timestamptz NOT NULL DEFAULT now()
 );
--- A chat rule covers one site or exact command in one chat or topic (ADR-0213); an exact grant, one fingerprint and epoch.
+-- A chat rule covers one site or exact command in one chat or topic (ADR-0214); an exact grant, one fingerprint and epoch.
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS match_key text;
 ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS grain text NOT NULL DEFAULT 'exact' CHECK(grain IN ('exact','chat'));
 ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS match_key text;
