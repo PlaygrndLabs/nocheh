@@ -2,17 +2,28 @@
 import fcntl
 import json
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from tools.operations.security.tool_execution import bounded_execute
+from tools.operations.security.tool_execution import FAILURES,READ_ANSWERED,UNSENT,bounded_execute,sandbox_ready
 
 
 def permitted_execute(state,action):
     from tools.operations.security.native import call
     from urllib.parse import urlencode
-    try:current=call(state,'/api/nocheh/preferences?'+urlencode({'profile':action['profile']}))
-    except Exception:return {'exit_code':1,'error':'tool_policy_unavailable'}
+    # The action's own native profile is named after the epoch it was proposed in. Its chat's stable
+    # profile still resolves after a later epoch carries the action (ADR-0200), and a job has none of its own.
+    preference=action['preference']
+    # Reading the settings changes nothing, so a new epoch or a publication mid-read is simply read again.
+    for attempt in range(3):
+        try:current=call(state,'/api/nocheh/preferences?'+urlencode({'profile':preference['profile'],'space':preference['space']}));break
+        except Exception:
+            if attempt==2:return {'exit_code':1,'error':'tool_policy_unavailable'}
+            time.sleep(1)
     if current['values'].get('nocheh_tools.'+action['kind'])!='on':return {'exit_code':1,'error':'tool_disabled_by_owner'}
+    # A shell command or page read runs in the sandbox image. Without it nothing is sent, so the
+    # owner learns it did not run, not that it may have.
+    if action['kind']!='mcp' and not sandbox_ready():return {'exit_code':1,'error':'tool_sandbox_missing'}
     return bounded_execute(state,action)
 
 
@@ -61,10 +72,15 @@ def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None
         ready=api.call('/v1/tools/start',{**body,**(workflow or {})})
         result=executor(state,action) if ready.get('started') else {'exit_code':1,'error':'security_start_denied'}
         body.update(state='failed' if result.get('exit_code',0)!=0 or result.get('limit') else 'done',result=result)
-    except Exception:
+    except Exception as error:
         # A timeout or response failure may follow an already-sent remote request.
-        # Do not infer safe retry from the exception class or response body.
-        body.update(state='ambiguous',result={'error':'execution_outcome_unconfirmed'})
+        # Do not infer safe retry from the exception class or response body; keep
+        # only its fixed failure code, to say why.
+        cause=str(error) if isinstance(error,(RuntimeError,TimeoutError)) and str(error) in FAILURES else None
+        # Known outcomes are failures, not uncertain ones: nothing was sent, or a page read got the
+        # whole answer and only refused it. A read changes nothing, so it is not asked again.
+        if cause in UNSENT or action.get('kind')=='browser' and cause in READ_ANSWERED:body.update(state='failed',result={'exit_code':1,'error':cause})
+        else:body.update(state='ambiguous',result={'error':'execution_outcome_unconfirmed',**({'cause':cause} if cause else {})})
     with receipt_lock(state):
         path=Path(state)/'admin/tools/receipts'/(action['id']+'.json');atomic(path,body)
         api.call('/v1/tools/finish',body);path.unlink()

@@ -4,7 +4,8 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {turnToken} from '../src/access.js';
-import {brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,providerTarget,scopedRoute} from '../src/security/broker.js';
+import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,providerTarget,scopedRoute} from '../src/security/broker.js';
+import type {IncomingMessage} from 'node:http';
 import {effectLog} from '../src/security/store.js';
 
 test('broker supports only explicit scoped routes and the configured reply provider',()=>{
@@ -14,7 +15,8 @@ test('broker supports only explicit scoped routes and the configured reply provi
   // The agent's reading tools reach storage, which checks who may read what.
   for(const route of ['/v1/archive/page','/v1/imports/pending'])assert.equal(scopedRoute('GET',route),true);
   assert.equal(scopedRoute('POST','/v1/memory/honcho/search'),true);
-  for(const action of ['size','propose','status','stop'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),true);
+  for(const action of ['start','status','stop'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),true);
+  for(const action of ['size','propose'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),false);
   assert.equal(scopedRoute('POST','/v1/jobs/approve'),false,'only a person approves a job, on its card');
   // Settings › Models may name one HTTPS reply provider; any other address stays denied.
   const gateway='https://gateway.example.test/v1';
@@ -33,6 +35,31 @@ test('broker supports only explicit scoped routes and the configured reply provi
   assert.equal(configuredReplyUrl('http://model-fixture:8318/v1',true),undefined);
   assert.equal(configuredReplyUrl('http://other-fixture:8317/v1',true),undefined);
 });
+test("Anthropic's Messages API is reachable only when Anthropic is the configured reply provider",()=>{
+  // Its OpenAI-compatible API has no prompt caching, so Hermes uses the Messages API through the broker.
+  const anthropic={base_url:ANTHROPIC_URL,api_mode:'chat_completions'};
+  assert.equal(providerTarget(anthropic,ANTHROPIC_MESSAGES,configuredReplyUrl(ANTHROPIC_URL+'/')),ANTHROPIC_URL+'/messages');
+  assert.equal(providerTarget(anthropic,'/v1/chat/completions',ANTHROPIC_URL),ANTHROPIC_URL+'/chat/completions');
+  const gateway='https://gateway.example.test/v1';
+  assert.throws(()=>providerTarget({base_url:gateway,api_mode:'chat_completions'},ANTHROPIC_MESSAGES,gateway),{code:'provider_route_denied'});
+  assert.throws(()=>providerTarget({base_url:gateway,api_mode:'chat_completions'},ANTHROPIC_MESSAGES,ANTHROPIC_URL),{code:'provider_route_denied'});
+  for(const path of ['/anthropic/v1/messages/batches','/anthropic/v1/files','/v1/messages'])assert.throws(()=>providerTarget(anthropic,path,ANTHROPIC_URL),{code:'provider_route_denied'});
+  // Hermes sends the turn's scoped credential in Anthropic's key header; only this route reads it there.
+  const request=(headers:Record<string,string>)=>({headers:{...headers}}) as unknown as IncomingMessage;
+  const mapped=request({'x-api-key':'turn.synthetic'});anthropicCredential(mapped,ANTHROPIC_MESSAGES);
+  assert.deepEqual(mapped.headers,{authorization:'Bearer turn.synthetic'});
+  const elsewhere=request({'x-api-key':'turn.synthetic'});anthropicCredential(elsewhere,'/v1/chat/completions');
+  assert.deepEqual(elsewhere.headers,{'x-api-key':'turn.synthetic'});
+  const bearer=request({authorization:'Bearer turn.synthetic'});anthropicCredential(bearer,ANTHROPIC_MESSAGES);
+  assert.deepEqual(bearer.headers,{authorization:'Bearer turn.synthetic'});
+  assert.throws(()=>anthropicCredential(request({'x-api-key':'turn.a',authorization:'Bearer turn.b'}),ANTHROPIC_MESSAGES),{status:401});
+  // Anthropic gets the provider key in its own header, never the scoped credential, and only Hermes's beta features.
+  assert.deepEqual(anthropicHeaders('provider-key','interleaved-thinking-2025-05-14, files-api-2025-04-14,fine-grained-tool-streaming-2025-05-14'),
+    {'content-type':'application/json','x-api-key':'provider-key','anthropic-version':'2023-06-01','user-agent':'Nocheh',
+      'anthropic-beta':'interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14'});
+  assert.equal('anthropic-beta' in anthropicHeaders('provider-key','mcp-client-2025-04-04'),false);
+  assert.equal('authorization' in anthropicHeaders('provider-key',undefined),false);
+});
 test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async t=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_broker_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
@@ -40,7 +67,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
   const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string;agent:string}[]=[];
   const secret='synthetic-provider-credential-never-returned',gateway='https://gateway.example.test/v1';
   const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL=gateway;
-  let guardDown=false,streamRevocation=false,slowMemory=false;const preparedPrincipals:any[]=[];
+  let guardDown=false,streamRevocation=false,slowMemory=false,providerStatus=0;const preparedPrincipals:any[]=[];
   const mock:typeof fetch=async(url,init)=>{
     const body=init?.body?JSON.parse(String(init.body)):null;
     calls.push({url:String(url),body,auth:new Headers(init?.headers).get('authorization')??'',agent:new Headers(init?.headers).get('user-agent')??''});
@@ -54,6 +81,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     }
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:gateway,api_mode:'chat_completions',api_key:secret});
     if(String(url).endsWith('/v1/guard'))return guardDown?new Response('unavailable',{status:503}):Response.json({guarded:true,payload:body.payload});
+    if(providerStatus)return Response.json({type:'error',error:{type:'overloaded_error',message:'private provider words'}},{status:providerStatus});
     if(streamRevocation)return new Response(new ReadableStream({start(controller){
       controller.enqueue(new TextEncoder().encode('data: first\n\n'));
       setTimeout(()=>{void pool.query('UPDATE guard_state SET epoch=epoch+1').then(()=>{controller.enqueue(new TextEncoder().encode('data: stale\n\n'));controller.close();});},30);
@@ -106,9 +134,18 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
       assert.equal((await request('/v1/memory/honcho/context',{})).status,503,'automatic context keeps the ordinary short deadline');
       assert.equal((await request('/v1/memory/recall',{query:'Synthetic recall'})).status,503);
     }finally{slowMemory=false;clock.mock.restore();}
+    // A provider's refusal passes on only its HTTP status, never its message, so the owner's notice can name it.
+    providerStatus=529;
+    const busy=await request('/v1/chat/completions',payload);
+    assert.equal(busy.status,503);assert.deepEqual(await busy.json(),{error:'provider_request_failed',provider_status:529});
+    providerStatus=429;
+    const limited=await request('/v1/chat/completions',payload);
+    assert.equal(limited.status,429);assert.deepEqual(await limited.json(),{error:'provider_request_failed',provider_status:429});
+    providerStatus=0;
+    const provided=calls.filter(x=>x.url===gateway+'/chat/completions').length;
     guardDown=true;
     assert.equal((await request('/v1/chat/completions',payload)).status,503);
-    assert.equal(calls.filter(x=>x.url===gateway+'/chat/completions').length,1,'guard outage never falls back to a direct provider call');
+    assert.equal(calls.filter(x=>x.url===gateway+'/chat/completions').length,provided,'guard outage never falls back to a direct provider call');
     const afterOutage=calls.length;
     await pool.query('UPDATE guard_state SET epoch=epoch+1');
     assert.equal((await request('/v1/chat/completions',payload)).status,409);
@@ -130,5 +167,53 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const missing=await request('/v1/chat/completions',payload,current);
     assert.equal(missing.status,503);assert.deepEqual(await missing.json(),{error:'provider_not_configured'});
     assert.equal(calls.length,unconfigured,'an unconfigured provider is reported before any upstream call');
+  }finally{if(previousRoute===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previousRoute;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await pool.end();await admin.query('DROP SCHEMA '+namespace+' CASCADE');await admin.end();}
+});
+test("PostgreSQL broker: Anthropic's Messages API gets the provider key in its own header and the same boundary",{skip:!process.env.PGHOST},async()=>{
+  const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
+  const admin=new pg.Pool(connection),namespace='security_anthropic_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
+  const pool=new pg.Pool({...connection,options:'-c search_path='+namespace});
+  const token='synthetic-service-token-only-for-tests',secret='synthetic-provider-credential-never-returned';
+  const calls:{url:string;body:unknown;headers:Headers}[]=[];
+  const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL=ANTHROPIC_URL;
+  const mock:typeof fetch=async(url,init)=>{
+    calls.push({url:String(url),body:init?.body?JSON.parse(String(init.body)):null,headers:new Headers(init?.headers)});
+    if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:ANTHROPIC_URL,api_mode:'chat_completions',api_key:secret});
+    return new Response('event: message_start\ndata: {"type":"message_start"}\n\n',{headers:{'content-type':'text/event-stream'}});
+  };
+  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(_principal,input)=>({guarded:true,payload:(input as any).payload}),hermes:'http://hermes',model:'same-model',fetch:mock});
+  try {
+    await initialize(pool);
+    const event=await ingest(pool,{version:1,key:'security-anthropic-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
+    await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const address=server.address();if(!address||typeof address==='string')throw Error();const base='http://127.0.0.1:'+address.port;
+    const credential=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
+    // Hermes's Anthropic client sends the scoped credential as x-api-key, with its version and beta headers.
+    const request=(body:unknown,headers:Record<string,string>={'x-api-key':credential})=>fetch(base+ANTHROPIC_MESSAGES,{method:'POST',
+      headers:{'content-type':'application/json','anthropic-version':'2023-06-01','anthropic-beta':'interleaved-thinking-2025-05-14,files-api-2025-04-14',...headers},body:JSON.stringify(body)});
+    const payload={model:'same-model',max_tokens:100,stream:true,system:[{type:'text',text:'system',cache_control:{type:'ephemeral'}}],
+      messages:[{role:'user',content:[{type:'text',text:'Exact owner edit',cache_control:{type:'ephemeral'}}]}]};
+    const response=await request(payload);
+    assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'text/event-stream');
+    assert.ok((await response.text()).includes('message_start'));
+    const provider=calls.at(-1)!;
+    assert.equal(provider.url,ANTHROPIC_URL+'/messages');assert.deepEqual(provider.body,payload);
+    assert.equal(provider.headers.get('x-api-key'),secret);assert.equal(provider.headers.get('authorization'),null);
+    assert.equal(provider.headers.get('anthropic-version'),'2023-06-01');
+    assert.equal(provider.headers.get('anthropic-beta'),'interleaved-thinking-2025-05-14');
+    assert.equal(JSON.stringify([...provider.headers]).includes(credential),false,'the scoped credential never reaches the provider');
+    const before=calls.length;
+    assert.equal((await request(payload,{'x-api-key':credential,authorization:'Bearer '+credential})).status,401);
+    assert.ok([401,403].includes((await request(payload,{'x-api-key':token})).status),'the service token is not a turn credential');
+    assert.equal((await request({...payload,tools:[{type:'web_search_20260209',name:'web_search'}]})).status,403);
+    assert.equal((await pool.query("SELECT rule FROM security_events WHERE state='blocked' ORDER BY id DESC LIMIT 1")).rows[0].rule,'hosted_provider_tools_denied');
+    assert.equal((await request({...payload,mcp_servers:[]})).status,403);
+    assert.equal((await request({...payload,model:'changed-model'})).status,403);
+    // Other Anthropic paths do not even read the key header.
+    assert.equal((await fetch(base+'/anthropic/v1/messages/batches',{method:'POST',headers:{'x-api-key':credential},body:'{}'})).status,401);
+    assert.equal((await fetch(base+'/anthropic/v1/messages/batches',{method:'POST',headers:{authorization:'Bearer '+credential},body:'{}'})).status,403);
+    assert.equal(calls.length,before,'denied calls never reach the provider');
+    process.env.NOCHEH_REPLY_ROUTE_URL='https://gateway.example.test/v1';
+    assert.equal((await request(payload)).status,403,'only Anthropic itself has this route');
   }finally{if(previousRoute===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previousRoute;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await pool.end();await admin.query('DROP SCHEMA '+namespace+' CASCADE');await admin.end();}
 });

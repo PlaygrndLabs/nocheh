@@ -36,7 +36,10 @@ export type Total = {
   failed: number;
   refused: number;
   hidden: number;
+  /** Every input token, cached or not. */
   input: number;
+  /** Input tokens read from the provider's prompt cache. */
+  cached: number;
   output: number;
   cost: number;
   unknown: boolean;
@@ -48,6 +51,7 @@ export const emptyTotal = (): Total => ({
   refused: 0,
   hidden: 0,
   input: 0,
+  cached: 0,
   output: 0,
   cost: 0,
   unknown: false,
@@ -59,7 +63,9 @@ export function addRow(total: Total, row: UsageRow): Total {
     failed: total.failed + row.failed,
     refused: total.refused + (row.refused ?? 0),
     hidden: total.hidden + (row.hidden ?? 0),
-    input: total.input + row.input_tokens,
+    // Input tokens count only what the cache did not cover.
+    input: total.input + row.input_tokens + (row.cache_read_tokens ?? 0) + (row.cache_write_tokens ?? 0),
+    cached: total.cached + (row.cache_read_tokens ?? 0),
     output: total.output + row.output_tokens,
     cost: total.cost + (row.cost_usd ?? 0),
     unknown: total.unknown || row.cost_usd === null || !row.cost_complete,
@@ -78,4 +84,9 @@ export function failures(total: Total): string {
   if (total.failed) parts.push(`${total.failed} failed` + (total.refused ? ` (${total.refused} refused)` : ''));
   if (total.hidden) parts.push(`${total.hidden} ${total.hidden === 1 ? 'text' : 'texts'} hidden`);
   return parts.join(' · ');
+}
+
+/** The share of input read from the prompt cache, such as "62% cached", or "". */
+export function cachedShare(total: Total): string {
+  return total.cached && total.input ? `${Math.round((100 * total.cached) / total.input)}% cached` : '';
 }

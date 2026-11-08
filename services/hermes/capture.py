@@ -1,4 +1,4 @@
-"""Fsync before PTB sees updates; journal writes before any outbound request but a chat action."""
+"""Fsync before PTB sees updates; journal writes before any outbound request but a chat action or working reaction."""
 from __future__ import annotations
 
 import asyncio
@@ -243,12 +243,14 @@ def instrument_request(request, capture: Capture, polling=False):
             # Formatting, chunks and native retries may change routing. Check
             # the actual request before journaling or transmission each time.
             check = OUTBOUND_CHECK.get()
-            if method == 'sendChatAction':
-                # A chat action ("typing…") carries no content and expires by
-                # itself. It is sent only inside a bound turn and is not
-                # journaled, so a long turn adds no archive records.
+            if method in ('sendChatAction', 'setMessageReaction'):
+                # A chat action ("typing…") or a working reaction (👀, then 👍
+                # or 👎) carries no content, and the next one replaces it. It is
+                # sent only inside a bound turn and is not journaled, so a long
+                # turn adds no archive records and a retried turn can set its 👀
+                # again instead of being answered from the journal.
                 if check is None:
-                    raise RuntimeError('telegram_chat_action_unbound')
+                    raise RuntimeError('telegram_chat_action_unbound' if method == 'sendChatAction' else 'telegram_reaction_unbound')
                 await asyncio.to_thread(check, method, parameters)
                 return await super().do_request(*args, **kwargs)
             if check is not None:
@@ -329,6 +331,9 @@ def captured_adapter_class():
     class ArchivedTelegramAdapter(TelegramAdapter):
         def __init__(self, config):
             super().__init__(config)
+            # Telegram fetches an address to preview it, so no message this adapter sends shows
+            # one, whatever the profile's platform settings say.
+            self._disable_link_previews = True
             self.capture = Capture(Path(os.environ.get('NOCHEH_SPOOL_DIR', '/data/spool')), config.token.split(':',1)[0])
 
         def _instrument_polling_request(self, request):

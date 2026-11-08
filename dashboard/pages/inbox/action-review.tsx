@@ -37,6 +37,9 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
   const [label, tone] = stateLabel(action.state);
   const exact = actionSummary(action);
   const mcpInput = action.kind === 'mcp' && action.arguments?.input ? action.arguments.input : null;
+  // A failed receipt keeps its reason in the result, as its Telegram card reads it.
+  const receipt = action.result as {result?: {error?: unknown}} | null | undefined;
+  const failure = action.error_code ?? (typeof receipt?.result?.error === 'string' ? receipt.result.error : null);
 
   const grant = () =>
     command.run('/tools/grant', {action_id: action.id, fingerprint: action.fingerprint, minutes, uses}, 'grant');
@@ -136,7 +139,7 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
 
       {review.stale && pending && (
         <Notice tone="warn" title="Can’t be approved any more">
-          Something it depends on changed after it was prepared, such as secret checking. You can still deny it.
+          Something it used changed after it was asked. Ask again if you still want it, or deny this one.
         </Notice>
       )}
       {action.state === 'ambiguous' && (
@@ -146,7 +149,7 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
       )}
       {action.state === 'failed' && (
         <Notice tone="bad" title="It failed">
-          {action.error_code ? 'Reason: ' + action.error_code.replaceAll('_', ' ') + '.' : 'No reason was recorded.'}
+          {failure ? 'Reason: ' + failure.replaceAll('_', ' ') + '.' : 'No reason was recorded.'}
         </Notice>
       )}
 

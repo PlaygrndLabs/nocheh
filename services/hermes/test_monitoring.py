@@ -7,6 +7,40 @@ from tools.operations.provider import monitoring
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_a_failed_calls_exact_error_reaches_health_and_the_notice_from_the_usage_tracker(self):
+        from datetime import datetime, timezone
+        from services.hermes import usage
+        from tools.operations.provider import problems
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as state:
+            path = Path(state) / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            usage.record('memory_review', {'calls': 1}, 'synthetic-model', failed=True, reason='provider_error', cause='overloaded:529',
+                         provider='anthropic', path=path, now=now.timestamp())
+            usage.record('memory_review', {'calls': 1}, 'synthetic-model', provider='anthropic', path=path, now=now.timestamp())
+            rows = monitoring.model_problems(state, now)
+        self.assertEqual((rows[0]['causes'], rows[0]['why']), ({'provider_error:overloaded:529': 1}, '1 the provider was overloaded (HTTP 529)'))
+        found = [problem for problem in problems.problems({}, rows, '2026-10-13') if problem['kind'] == 'model']
+        self.assertEqual(problems.text(found[0], 1),
+                         'Memory notes (synthetic-model): 1 model call failed today: 1 the provider was overloaded (HTTP 529).')
+        self.assertEqual(found[0]['ok'], 1, 'the call that worked, so the notice can say when the model works again')
+
+    def test_github_flags_come_from_the_app_file_without_its_key(self):
+        from tools.operations.connections import secret_file
+        pem='-----BEGIN RSA PRIVATE KEY-----\nMONITOR'+'x'*40+'\n-----END RSA PRIVATE KEY-----\n'
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)
+            with secret_file.locked(state,'github'):
+                secret_file.write(state,'github',{'app':{'id':7,'slug':'nocheh-example','name':'Nocheh-example','account':'octo-example',
+                                                         'account_type':'User','pem':pem,'connected_at':1},'reconnect':False,'listed':[],'listed_at':1})
+            with patch.object(monitoring,'load',return_value={}),patch.object(monitoring,'compose',return_value=(['docker'],{})),\
+                 patch.object(monitoring.subprocess,'check_output',return_value=''),patch.object(monitoring.API,'call',side_effect=ConnectionError('down')):
+                result=monitoring.status(state)
+            self.assertEqual(result['github'],{'connected':True,'reconnect':False})
+            self.assertNotIn('MONITOR',json.dumps(result))
+            secret_file.path(state,'github').unlink()
+            self.assertEqual(monitoring.github_flags(state),{'connected':False,'reconnect':False})
+
     def test_partial_outage_retains_model_routes_and_safe_telegram_incident(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);(state/'hermes').mkdir()

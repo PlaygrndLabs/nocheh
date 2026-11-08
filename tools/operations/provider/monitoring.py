@@ -21,6 +21,7 @@ INTERNAL_KEYS = (
     ('NOCHEH_DERIVED_PASSWORD', 'Database', 'Login for the store of transcripts and assistant copies'),
     ('NOCHEH_CONTROL_PASSWORD', 'Database', 'Login for the store of settings, approvals and work'),
     ('NOCHEH_MEMORY_TOKEN', 'Long-term memory (Honcho)', 'Lets Honcho’s model calls pass Nocheh’s secret check'),
+    ('NOCHEH_BOX_TOKEN', 'Sealed job box', 'Lets the launcher read a job’s chat copy and the live box list from the broker'),
 )
 
 
@@ -46,6 +47,7 @@ def status(state):
     result['services']=describe(result['containers'],config,result['hosts']) if isinstance(result['containers'],list) else None
     result['routes']=attempt(lambda:routes(config))
     result['model_problems']=attempt(lambda:model_problems(state))
+    result['github']=attempt(lambda:github_flags(state))
     result['keys']=internal_keys(config)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
@@ -63,6 +65,12 @@ def status(state):
                 'error_code':code if code in ('telegram_network_error','telegram_polling_conflict','telegram_adapter_failed','invalid_token','missing_credentials') else 'telegram_adapter_failed'}
     except (OSError,ValueError,TypeError):pass
     return result
+
+
+def github_flags(state):
+    """Whether Nocheh's GitHub app is connected or GitHub refused it: the app's file only, never its key."""
+    from tools.operations.connections import github
+    return github.flags(state)
 
 
 def routes(config):
@@ -83,6 +91,6 @@ def model_problems(state, now=None):
     day=(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')
     rows=(usage.hermes_rows(state,day) or [])+(usage.honcho_rows(state,day) or [])
     return [{'day':day,'part':row['part'],'label':usage.PARTS.get(row['part'],(row['part'],))[0],'provider':row['provider'],
-             'model':row['model'],'calls':row['calls'],'failed':row['failed'],'refused':row.get('refused') or 0,'hidden':row.get('hidden') or 0,
-             'reasons':row.get('reasons') or {},'why':problems.why(row)}
+             'model':row['model'],'calls':row['calls'],'runs':row['runs'],'failed':row['failed'],'refused':row.get('refused') or 0,'hidden':row.get('hidden') or 0,
+             'reasons':row.get('reasons') or {},'causes':row.get('causes') or {},'why':problems.why(row)}
             for row in rows if row['day']==day and (row['failed'] or row.get('hidden'))]

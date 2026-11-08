@@ -9,7 +9,7 @@ import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {RuntimeTurnRepository} from './turns.js';
-import type {GuardBinding} from './guards.js';
+import {carriesForward,type GuardBinding} from './guards.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 
 export const managedStorageSchema=`
@@ -25,7 +25,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS managed_conversation_busy ON managed_runs(scop
  WHERE admitted AND state IN ('captured','running');
 CREATE INDEX IF NOT EXISTS managed_run_lease ON managed_runs(lease_until) WHERE state='running';
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS launch_requested_at timestamptz;
--- Background job steps joined browser and scheduled runs after the first table.
+-- Background job runs joined browser and scheduled runs after the first table.
 ALTER TABLE managed_runs DROP CONSTRAINT IF EXISTS managed_runs_channel_check;
 ALTER TABLE managed_runs ADD CONSTRAINT managed_runs_channel_check CHECK(channel IN ('browser','scheduler','background'));
 `;
@@ -40,14 +40,17 @@ export abstract class ManagedExecutionRepository {
   protected abstract readonly channel:'browser'|'scheduler'|'background';
   protected abstract readonly family:'browser'|'schedules'|'background';
   protected readonly rebindBeforeLaunch:boolean=false;
-  // How long a run's credential lasts; a background job's step runs longest.
-  protected readonly credentialMillis:number=600000;
+  /** A background job's run goes on across quiet epochs, and keeps its binding when relaunched, while that binding carries
+   *  (`carriesForward`, ADR-0208). Browser and scheduled runs need their exact binding. */
+  protected readonly carries:boolean=false;
   protected get resultKind():string{return this.channel==='browser'?'browser_result':'scheduled_result';}
   protected get protocol():string{return this.channel==='browser'?'managed-browser-v2':'managed-scheduler-v2';}
   protected abstract sourceAllowed(row:any,binding:GuardBinding):Promise<void>;
   protected abstract readiness(row:any):Promise<Observation>;
   protected abstract build(row:any):Promise<{reference:DerivativeReference;input:ManagedInput}>;
   protected async contextDetails(_row:any):Promise<Record<string,unknown>>{return {};}
+  /** When a run's credential expires, in epoch milliseconds; a background job's run lasts longest. */
+  protected async credentialExpiry(_row:any):Promise<number>{return Date.now()+600000;}
   protected workflowJob(id:string){return this.channel==='browser'?id:'run:'+id;}
   constructor(readonly access:SourceAccessRepository,readonly derived:DerivedRepository,
     readonly turns:RuntimeTurnRepository,readonly token:string,readonly call:RuntimeCall){}
@@ -66,20 +69,22 @@ export abstract class ManagedExecutionRepository {
     if(entry.logical_profile!==profile||entry.scope!==scope)throw new HttpError(403,'profile_scope_denied');
     if(entry.generation!==binding.generation||entry.guard_epoch!==binding.epoch)throw new HttpError(409,'guard_context_changed');
   }
-  protected async current(row:any){this.scope(row.scope);await this.guards.assertCurrent(row.binding);
+  protected async bound(binding:GuardBinding){if(this.carries)await this.guards.assertCarried(binding);else await this.guards.assertCurrent(binding);}
+  protected async current(row:any){this.scope(row.scope);await this.bound(row.binding);
     await this.profile(row.scope,row.space_id,row.logical_profile,row.binding);
-    await this.sourceAllowed(row,row.binding);await this.guards.assertCurrent(row.binding);}
+    await this.sourceAllowed(row,row.binding);await this.bound(row.binding);}
   protected async fence(db:pg.PoolClient,binding:GuardBinding){
     const row=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
-    if(!row||canonical({generation:row.generation,epoch:Number(row.epoch),mode:row.mode})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
+    const guard=row&&{generation:row.generation,epoch:Number(row.epoch),mode:row.mode};
+    if(!guard||!(this.carries?await carriesForward(db,binding,guard):canonical(guard)===canonical(binding)))throw new HttpError(409,'guard_context_changed');
     if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
   /** Capture/admission is not a prepared execution context. Bind after initial
-   * extraction/selection, before the first native request can exist. */
+   * extraction/selection, before the first native request can exist. A run that carries keeps the binding it was given. */
   protected async bindPrepared(row:any,epoch:number){
     if((await this.readiness(row)).state!=='completed')throw new HttpError(409,'run_preparation_pending');
-    if(!this.rebindBeforeLaunch)await this.guards.assertCurrent(row.binding);
-    const binding=await this.guards.state();this.scope(row.scope);
+    if(!this.rebindBeforeLaunch)await this.bound(row.binding);
+    const binding=this.carries?row.binding:await this.guards.state();this.scope(row.scope);
     await this.profile(row.scope,row.space_id,row.logical_profile,binding);
     if(binding.generation!==row.binding.generation)throw new HttpError(409,'audience_context_changed');
     await this.sourceAllowed(row,binding);
@@ -109,7 +114,7 @@ export abstract class ManagedExecutionRepository {
     const body=object(input);await this.context(body);const row=await this.scoped(body);
     if(body.actor!=='run_'+row.event_id)throw new HttpError(403,'run_actor_mismatch');
     if(row.state!=='captured')return {claimed:false,event_id:row.event_id,state:row.state};
-    const built=await this.build(row),db=await this.control.connect();let held=false;
+    const built=await this.build(row),expires=await this.credentialExpiry(row),db=await this.control.connect();let held=false;
     try {
       held=await enterFamily(db,this.family,'inngest',Number(body.owner_epoch));if(!held)throw new HttpError(409,'workflow_owner_changed');
       await db.query('BEGIN');await this.fence(db,row.binding);
@@ -126,7 +131,7 @@ export abstract class ManagedExecutionRepository {
     await this.current(row);await this.turns.binding(built.input.principal);
     return {claimed:true,event_id:row.event_id,state:'running',channel:this.channel,scope:row.scope,owner:row.scope===this.access.policy().owner_id,
       guard_mode:row.binding.mode,text:built.input.text,source_key:built.input.source_key,payload:{profile:row.logical_profile,space:row.space_id,conversation_id:row.conversation_id},
-      archive_credential:await this.turns.prepared.audience.turn(this.token,built.input.principal,row.event_id,Date.now()+this.credentialMillis)};
+      archive_credential:await this.turns.prepared.audience.turn(this.token,built.input.principal,row.event_id,expires,this.carries?row.binding:undefined)};
   }
   async prepare(input:unknown){const row=await this.scoped(input);await this.leased(row,object(input));const saved=await this.savedInput(row);
     await this.turns.binding(saved.principal);await this.current(row);return {transcripts:saved.transcripts,files:saved.files};}
@@ -146,8 +151,10 @@ export abstract class ManagedExecutionRepository {
       const saved=(await db.query('SELECT * FROM managed_runs WHERE event_id=$1 FOR UPDATE',[row.event_id])).rows[0];
       if(saved.result_reference){if(canonical(saved.result_reference)!==canonical(reference))throw new HttpError(409,'run_result_conflict');await db.query('COMMIT');return {event_id:row.event_id,state:saved.state,duplicate:true};}
       // Retain late evidence without claiming that its execution stayed supervised.
-      const guard=(await db.query('SELECT i.generation,g.epoch FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
-      const interrupted=saved.state==='interrupted'||!saved.lease_until||saved.lease_until<=new Date()||guard.generation!==row.binding.generation||Number(guard.epoch)!==row.binding.epoch;
+      const guard=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
+      const moved=this.carries?!await carriesForward(db,row.binding,{generation:guard.generation,epoch:Number(guard.epoch),mode:guard.mode}):
+        guard.generation!==row.binding.generation||Number(guard.epoch)!==row.binding.epoch;
+      const interrupted=saved.state==='interrupted'||!saved.lease_until||saved.lease_until<=new Date()||moved;
       const state=interrupted?'interrupted':saved.cancel_requested?'cancelled':result.state;
       await db.query(`UPDATE managed_runs SET state=$2,result_reference=$3,error_code=$4,lease_until=NULL,revision=revision+1,updated_at=now() WHERE event_id=$1`,
         [row.event_id,state,reference,interrupted?'execution_interrupted':result.error_code]);
@@ -160,7 +167,7 @@ export abstract class ManagedExecutionRepository {
   async finish(input:unknown){const body=object(input),row=await this.row(managedEventId(body.event_id));
     if(!row?.actor||row.actor!==body.actor||!row.input_reference)throw new HttpError(403,'run_actor_mismatch');
     const state=string(body.state,32);if(!closed.has(state))throw new HttpError(400,'invalid_run_state');
-    const code=body.error_code===null||body.error_code===undefined?null:['managed_execution_failed','runtime_execution_interrupted','execution_interrupted','model_unavailable','intentional_silence'].includes(String(body.error_code))?body.error_code:'managed_execution_failed';
+    const code=body.error_code===null||body.error_code===undefined?null:['managed_execution_failed','runtime_execution_interrupted','execution_interrupted','model_unavailable','intentional_silence','job_box_unavailable'].includes(String(body.error_code))?body.error_code:'managed_execution_failed';
     const result={state,text:string(body.text??'',1000000),session:managedIdentity(body.session),error_code:code};
     const reference=await this.derived.record({operation_id:this.channel+'-result:'+row.event_id,source:row.source_reference,parents:[row.input_reference],
       kind:this.resultKind,content:Buffer.from(canonical(result)),producer:'hermes',producer_version:this.protocol,configuration:{binding:row.binding},
@@ -183,9 +190,12 @@ export abstract class ManagedExecutionRepository {
     const row=(await this.control.query("SELECT event_id FROM managed_runs WHERE channel=$4 AND scope=$1 AND logical_profile=$2 AND conversation_id=$3 AND state IN ('captured','running') ORDER BY created_at DESC LIMIT 1",[scope,profile,conversation,this.channel])).rows[0];
     return row?{active:true,...await this.observe({...body,event_id:row.event_id})}:{active:false,event_id:null};}
   async cancel(input:unknown){return this.cancelRow((await this.scoped(input)).event_id);}
-  protected async cancelRow(id:string){const db=await this.control.connect();try{await db.query('BEGIN');
+  /** Cancel a run inside the caller's transaction: its runtime turn closes with it, so the broker refuses its next call. */
+  protected async cancelIn(db:pg.PoolClient,id:string){
     await db.query("UPDATE managed_runs SET cancel_requested=true,state=CASE WHEN state='captured' THEN 'cancelled' ELSE state END,revision=revision+1,updated_at=now() WHERE event_id=$1 AND state IN ('captured','running')",[id]);
-    await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);await db.query('COMMIT');return {cancel_requested:true};
+    await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);}
+  protected async cancelRow(id:string){const db=await this.control.connect();try{await db.query('BEGIN');
+    await this.cancelIn(db,id);await db.query('COMMIT');return {cancel_requested:true};
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}}
   protected async interrupt(id:string,code:string){const db=await this.control.connect();try{await db.query('BEGIN');
     await db.query("UPDATE managed_runs SET state='interrupted',error_code=$2,lease_until=NULL,revision=revision+1,updated_at=now() WHERE event_id=$1 AND state IN ('captured','running')",[id,code]);
@@ -206,11 +216,14 @@ export abstract class ManagedExecutionRepository {
       if(row.state==='captured'&&!row.launch_requested_at&&!row.cancel_requested&&row.owner_epoch===authority.epoch){
         const ready=await this.readiness(row);if(ready.state!=='completed')return observation('waiting',ready.stage,0,ready.next_attempt,'prerequisite');
         try{row=await this.bindPrepared(row,authority.epoch);}catch(error){
-          if(!(error instanceof HttpError)||!['profile_not_found','profile_scope_denied','guard_context_changed','audience_context_changed','turn_source_denied','schedule_definition_changed'].includes(error.code))throw error;
+          if(!(error instanceof HttpError)||!['profile_not_found','profile_scope_denied','guard_context_changed','audience_context_changed','turn_source_denied','schedule_definition_changed','job_not_permitted','job_not_running'].includes(error.code))throw error;
           await this.cancelRow(id);return this.status(await this.row(id));
         }
       }
-      let current=row.owner_epoch===authority.epoch;try{await this.current(row);}catch(error){if(!(error instanceof HttpError))throw error;current=false;}
+      let current=row.owner_epoch===authority.epoch;try{await this.current(row);}catch(error){if(!(error instanceof HttpError))throw error;
+        // A run that carries waits out a publication still pending; the next look decides (ADR-0208).
+        if(this.carries&&current&&error.code==='guard_transition_pending'&&!row.cancel_requested)return this.status(row);
+        current=false;}
       const body={channel:this.channel,event_id:id,attempt:1,owner_epoch:row.owner_epoch??authority.epoch,asynchronous:true};
       if(!current||row.cancel_requested){
         await this.cancelRow(id);

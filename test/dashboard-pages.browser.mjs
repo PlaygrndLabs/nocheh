@@ -404,6 +404,58 @@ test('discard drops unsaved edits', async () => {
   await page.close();
 });
 
+test('the sealed box switch saves with the job limits in either order, and again after a change elsewhere', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const posts = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/background-jobs/settings'))
+      posts.push(request.postDataJSON());
+  });
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  const box = page.getByRole('switch', {name: 'Sealed box for jobs'});
+  const minutes = page.locator('#job-minutes_limit');
+  const on = async () => (await box.getAttribute('aria-checked')) === 'true';
+  // One save sends the switch and the limits together, over one revision, whichever was changed first.
+  for (const order of ['switch first', 'limit first']) {
+    const wasOn = await on();
+    const next = String(Number(await minutes.inputValue()) - 5);
+    if (order === 'switch first') await box.click();
+    await minutes.fill(next);
+    if (order === 'limit first') await box.click();
+    await bar.getByText('2 unsaved changes').waitFor();
+    const sent = posts.length;
+    await bar.getByRole('button', {name: 'Save'}).click();
+    await bar.getByText('No unsaved changes').waitFor();
+    assert.equal(posts.length, sent + 1, order);
+    assert.equal(posts.at(-1).box_tools, !wasOn, order);
+    assert.equal(posts.at(-1).minutes_limit, Number(next), order);
+    assert.equal(await on(), !wasOn, order);
+    assert.equal(await minutes.inputValue(), next, order);
+  }
+  // Changed elsewhere meanwhile: the save is refused with the edit kept, and Try again saves over the new revision.
+  const other = await open('settings?view=assistant');
+  const otherBar = other.page.getByRole('region', {name: 'Save changes'});
+  const wasOn = await on();
+  const next = String(Number(await minutes.inputValue()) - 5);
+  await minutes.fill(next);
+  await other.page.getByRole('switch', {name: 'Sealed box for jobs'}).click();
+  await otherBar.getByRole('button', {name: 'Save'}).click();
+  await otherBar.getByText('No unsaved changes').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByRole('button', {name: 'Try again'}).waitFor();
+  assert.match(await bar.textContent(), /Job settings were changed somewhere else\. Your edits are kept/);
+  assert.equal(await minutes.inputValue(), next, 'the edit is kept');
+  await bar.getByRole('button', {name: 'Try again'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.reload();
+  await minutes.waitFor();
+  assert.equal(await minutes.inputValue(), next);
+  assert.equal(await on(), !wasOn, 'the switch saved elsewhere stays');
+  assert.deepEqual([...problems, ...other.problems], []);
+  await other.page.close();
+  await page.close();
+});
+
 test('a custom provider is checked, added and saved from one dialog', async () => {
   const {page, problems} = await open('settings?view=models');
   await page.getByRole('button', {name: 'Add provider'}).first().click();
@@ -596,6 +648,42 @@ test('Notion is connected through its sign-in, turned on with an approval choice
   await page.close();
 });
 
+test('GitHub is connected through its own app, lists the chosen repositories, copies one and is disconnected', async () => {
+  const {page, problems} = await open('settings?view=connections');
+  const card = page.getByRole('region', {name: 'GitHub'});
+  await card.getByText('Not connected').waitFor();
+  // A sign-in that comes back while Nocheh is busy keeps its code in the address, so a reload can finish it.
+  await page.goto(origin + '/?connect=github&code=preview-busy&state=fixture-state');
+  await card.getByText('Reload this page in a minute to finish.', {exact: false}).waitFor();
+  assert.equal(new URL(page.url()).search, '?connect=github&code=preview-busy&state=fixture-state');
+  problems.splice(0, problems.length, ...problems.filter(problem => !/409/.test(problem)));
+  await page.goto(origin + '/#settings?view=connections');
+  await card.getByText('Not connected').waitFor();
+  // GitHub creates the app, then asks which repositories it may read, and each time sends the browser back here.
+  await card.getByRole('button', {name: 'Connect GitHub'}).click();
+  await page.getByRole('status').filter({hasText: 'GitHub is connected.'}).waitFor();
+  await card.getByText('Connected', {exact: true}).waitFor();
+  await card.getByText('Nocheh reads through its app Nocheh-a1b2c3 on octo-example', {exact: false}).waitFor();
+  assert.equal(new URL(page.url()).search, '');
+  assert.match(page.url(), /#settings\?view=connections$/);
+  const widgets = card
+    .getByRole('list', {name: 'Repositories'})
+    .getByRole('listitem')
+    .filter({hasText: 'example-org/widgets'});
+  await widgets.getByRole('button', {name: 'Copy'}).click();
+  await page.getByRole('status').filter({hasText: 'example-org/widgets is copied.'}).waitFor();
+  await card.getByRole('button', {name: 'Disconnect'}).click();
+  await page.getByRole('dialog', {name: 'Disconnect GitHub?'}).getByRole('button', {name: 'Disconnect'}).click();
+  await card.getByText('Not connected').waitFor();
+  // The app stays on GitHub until the owner deletes it there.
+  assert.equal(
+    await card.getByRole('link', {name: 'Open it on GitHub'}).getAttribute('href'),
+    'https://github.com/settings/apps/nocheh-a1b2c3',
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('personal tasks and each project keep separate lists, with tags, a group and people on a task', async () => {
   const {page, problems} = await open('tasks');
   const lists = page.getByRole('radiogroup', {name: 'List'});
@@ -653,6 +741,8 @@ test('usage shows calls, tokens and cost, and never prices an unknown cost as fr
     .getByText(/At least \$|Unknown/)
     .first()
     .waitFor();
+  // Input counts cached tokens too, and says how much the prompt cache covered.
+  await page.getByRole('table', {name: 'Usage by part'}).getByText('67% cached').waitFor();
   await page.getByRole('radiogroup', {name: 'Period'}).getByText('Today').click();
   assert.equal(new URL(page.url()).hash, '#usage?days=1');
   assert.deepEqual(problems, []);

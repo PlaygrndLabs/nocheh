@@ -10,7 +10,23 @@ import {reader,scopeToken} from '../src/access.js';
 import {HttpError,json} from '../src/http.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
-import {OwnerStorageApi} from '../src/stores/owner-api.js';
+import {OwnerStorageApi,ownerStoragePath} from '../src/stores/owner-api.js';
+import {existsSync,readFileSync} from 'node:fs';
+
+const pathFixture=new URL('../../test/fixtures/owner-storage-paths.json',import.meta.url);
+// The compiled tests run without the source tree in the stores image; the unit run reads the fixture.
+test('the dashboard forwards exactly the shared fixture\'s owner paths, and the GitHub copies stay management\'s own',
+  {skip:existsSync(pathFixture)?false:'the shared path fixture is not in this image'},()=>{
+  const rows=JSON.parse(readFileSync(pathFixture,'utf8')).paths as {path:string;owner_storage:boolean;allowed_path:boolean}[];
+  assert.ok(rows.length>80);
+  for(const row of rows)assert.equal(ownerStoragePath(row.path),row.owner_storage,row.path);
+  // One known asymmetry: allowed_path lets a delegation's resume through, but no store route serves it.
+  assert.deepEqual(rows.filter(row=>row.owner_storage!==row.allowed_path).map(row=>row.path),['/v1/organization/delegations/'+'a'.repeat(64)+'/resume']);
+  assert.ok(rows.some(row=>row.path==='/v1/background-jobs/copies'&&!row.owner_storage&&!row.allowed_path));
+  const api=new OwnerStorageApi({} as never);
+  assert.equal(api.owns('/v1/background-jobs/copies'),true,'reached only with the service token');
+  assert.equal(api.owns('/v1/background-jobs/copies/x'),false);
+});
 
 test('owner HTTP manages versions, provenance, corrections, project assignments and sharing with revision checks',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -38,6 +54,11 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const unauthorized=await fetch(base+'/v1/projects',{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}});
     assert.equal(unauthorized.status,403,'owner authority is checked before body parsing');
     assert.equal((await fetch(base+'/v1/projects')).status,401);
+    // The GitHub copies: the service token only, and a body the store checks itself.
+    assert.deepEqual(await request('/v1/background-jobs/copies'),{copies:[],pinned:[],removal:0});
+    assert.deepEqual(await request('/v1/background-jobs/copies',{remove:'example-org/widgets.git'},400),{error:'invalid_github_copy'});
+    assert.deepEqual(await request('/v1/background-jobs/copies',{clear:true}),{copies:[],pinned:[],removal:0});
+    assert.equal((await fetch(base+'/v1/background-jobs/copies',{headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}})).status,403);
     const transferTypes=await request('/v1/exports/derivatives/types');assert.ok(transferTypes.types.includes('guard_revisions'));
     await request('/v1/exports/derivatives?type=workflow_registry',undefined,400);
     assert.equal((await request('/v1/derivation-engines')).engines.length,3);

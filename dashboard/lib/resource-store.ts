@@ -7,6 +7,9 @@ export type Entry = {
   timer?: ReturnType<typeof setTimeout>;
   sequence: number;
   path: string;
+  /** The request running now, and a refresh waiting for it to end. */
+  request?: Promise<void>;
+  again?: Promise<void>;
 };
 /** Shared requests survive a React commit that hands a path between pages. */
 export function createResourceStore(fetcher: (path: string, options: {signal: AbortSignal}) => Promise<unknown>) {
@@ -34,8 +37,17 @@ export function createResourceStore(fetcher: (path: string, options: {signal: Ab
     if (value.listeners.size && intervals.length)
       value.timer = setTimeout(() => void update(value), Math.min(...intervals));
   }
-  async function update(value: Entry) {
-    if (value.controller) return;
+  /** Asks for the path unless a request already runs. A `fresh` refresh, which follows a change, does not settle for
+   * an answer asked for before it: it asks again once that request ends. */
+  function update(value: Entry, fresh = false): Promise<void> {
+    if (!value.controller) return (value.request = load(value));
+    if (!fresh) return Promise.resolve();
+    return (value.again ??= (value.request ?? Promise.resolve()).then(() => {
+      value.again = undefined;
+      return value.listeners.size && entries.get(value.path) === value ? update(value) : undefined;
+    }));
+  }
+  async function load(value: Entry) {
     const controller = new AbortController(),
       sequence = ++value.sequence;
     value.controller = controller;
@@ -91,7 +103,8 @@ export function createResourceStore(fetcher: (path: string, options: {signal: Ab
     subscribe,
     observe,
     update,
-    refresh: () => Promise.allSettled([...entries.values()].filter(value => value.listeners.size).map(update)),
+    refresh: () =>
+      Promise.allSettled([...entries.values()].filter(value => value.listeners.size).map(value => update(value, true))),
     refreshPaths: (paths: (string | null)[], prefixes: string[] = []) => {
       const exact = new Set(paths.filter((path): path is string => !!path));
       return Promise.allSettled(
@@ -101,7 +114,7 @@ export function createResourceStore(fetcher: (path: string, options: {signal: Ab
               value.listeners.size > 0 &&
               (exact.has(value.path) || prefixes.some(prefix => value.path.startsWith(prefix))),
           )
-          .map(update),
+          .map(value => update(value, true)),
       );
     },
   };

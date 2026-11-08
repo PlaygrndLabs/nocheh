@@ -1,5 +1,7 @@
 # Unified memory relationship and access map
 
+Status: implemented; the map was later replaced by lists with side panels ([ADR-0145](adr/0145-rebuilt-owner-dashboard.md)); kept as history.
+
 This plan implements [ADR-0057](adr/0057-memory-relationship-access-map.md) in four
 verified increments: contract and durable schema; scoped grants and private review;
 owner APIs and the accessible two-dimensional map; then portability and isolated

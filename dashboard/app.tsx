@@ -67,8 +67,8 @@ function canonicalPage(): PageId {
   if (hash) history.replaceState(null, '', hash);
   return page;
 }
-// Notion's sign-in returns to `/?connect=notion…`; Settings › Connections finishes it.
-if (new URLSearchParams(location.search).get('connect') === 'notion')
+// Notion's and GitHub's sign-ins return to `/?connect=…`; Settings › Connections finishes them.
+if (['notion', 'github'].includes(new URLSearchParams(location.search).get('connect') ?? ''))
   history.replaceState(null, '', location.pathname + location.search + '#settings?view=connections');
 canonicalPage();
 addEventListener('hashchange', canonicalPage);

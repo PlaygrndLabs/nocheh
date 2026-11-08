@@ -65,8 +65,9 @@ class UsageTests(unittest.TestCase):
             for reason in ('timed_out', 'timed_out', 'refused', 'a provider message, not a code'):
                 usage.record('memory_review', {'calls': 1}, 'm', failed=True, reason=reason, provider='anthropic', path=path, now=DAY)
             usage.record('memory_review', {'calls': 1}, 'm', reason='timed_out', provider='anthropic', path=path, now=DAY)
+            usage.record('memory_review', {'calls': 1}, 'm', failed=True, reason='job_cost_limit', provider='anthropic', path=path, now=DAY)
             row = usage.rows('2026-10-13', path)[0]
-            self.assertEqual((row['failed'], row['refused']), (4, 1))
+            self.assertEqual((row['runs'], row['failed'], row['refused']), (6, 4, 1), "a run Nocheh's own limit stopped is no failure")
             self.assertEqual(row['reasons'], {'timed_out': 2, 'refused': 1, 'unknown': 1},
                              'an unknown code is kept as unknown, and a run that worked has no reason')
 
@@ -81,6 +82,8 @@ class UsageTests(unittest.TestCase):
             ([{'completed': False, 'interrupted': True}], 'interrupted'),
             ([{'completed': True, 'final_response': ' '}], 'empty_answer'),
             ([{'completed': True, 'final_response': 'fine'}, {'failed': True}], 'unknown'),
+            # The broker's refusal of a job's call past its byte backstop is Nocheh's own stop, not a rejected key.
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"job_cost_limit"}'}], 'job_cost_limit'),
             ([], 'unknown'),
         ]
         for results, reason in cases:
@@ -89,6 +92,91 @@ class UsageTests(unittest.TestCase):
             def __init__(self, status_code): self.status_code = status_code
         self.assertEqual([usage.error_reason(error) for error in (Status(429), Status(401), Status(503), TimeoutError(), ValueError())],
                          ['rate_limited', 'key_rejected', 'provider_error', 'timed_out', 'unknown'])
+
+    def test_a_failure_keeps_the_providers_exact_error_as_codes_only(self):
+        # The exit reason as Hermes builds it (agent/turn_loop_errors.py): the API error's first 80 characters,
+        # with the error as the OpenAI client prints it.
+        outer = lambda call, status, body: 'repeated_outer_errors(' + f'Error during API call #{call}: Error code: {status} - {body}'[:80] + ')'
+        cases = [
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 529: Overloaded'}], ('provider_error', 'overloaded:529')),
+            ([{'failed': True, 'failure_reason': 'server_error', 'error': 'HTTP 500 — Internal Server Error'}],
+             ('provider_error', 'server_error:500')),
+            ([{'failed': True, 'failure_reason': 'timeout', 'error': 'Request timed out.'}], ('timed_out', 'timeout')),
+            ([{'failed': True, 'failure_reason': 'thinking_signature', 'error': 'HTTP 400: private words'}],
+             ('provider_error', 'thinking_signature:400')),
+            # Without Hermes's name for the error, the provider's HTTP status names it and says the reason.
+            ([{'failed': True, 'error': 'HTTP 503: busy'}], ('provider_error', 'overloaded:503')),
+            ([{'failed': True, 'failure_reason': 'unknown', 'error': 'HTTP 429: slow down'}], ('rate_limited', 'rate_limit:429')),
+            ([{'failed': True, 'error': 'HTTP 418: odd'}], ('provider_error', 'http_error:418')),
+            ([{'failed': True, 'error': 'private words, HTTP 529 inside'}], ('unknown', None)),
+            ([{'failed': True, 'failure_reason': 'Private Words!', 'error': 'private words'}], ('provider_error', None)),
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"job_cost_limit"}'}], ('job_cost_limit', None)),
+            # A sealed turn reaches the provider through Nocheh's broker, which answers with its own status: Hermes's name
+            # for that status says nothing of the provider, so only the provider's own status, when the broker gives it, counts.
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"provider_request_failed","provider_status":529}'}],
+             ('provider_error', 'overloaded:529')),
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"provider_request_failed","provider_status":404}'}],
+             ('model_not_found', 'model_not_found:404')),
+            ([{'failed': True, 'failure_reason': 'rate_limit', 'error': 'HTTP 429: {"error":"provider_request_failed","provider_status":429}'}],
+             ('rate_limited', 'rate_limit:429')),
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"provider_request_failed"}'}], ('provider_error', None)),
+            # The broker's own refusals, such as an unavailable secret check or a changed policy, are Nocheh's errors.
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"required_guard_unavailable"}'}], ('nocheh_error', None)),
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"security_policy_changed"}'}], ('nocheh_error', None)),
+            ([{'completed': True, 'turn_exit_reason': 'text_response(finish_reason=refusal)', 'final_response': ''}], ('refused', None)),
+            # Hermes stopped the loop itself: not a provider error, unless the error that stopped it says so. Only codes are kept.
+            *[([{'failed': True, 'failure_reason': 'loop_error', 'turn_exit_reason': exit_reason, 'error': 'Private words'}], expected)
+              for exit_reason, expected in [
+                  ('repeated_outer_errors(Error during API call #3: Connection error.)', ('provider_error', 'connection')),
+                  ('repeated_outer_errors(Error during API call #2: Request timed out.)', ('timed_out', 'timeout')),
+                  (outer(2, 529, "{'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}}"),
+                   ('provider_error', 'overloaded:529')),
+                  # Through the broker: its own refusals are Nocheh's errors, even with the code cut short.
+                  (outer(2, 503, "{'error': 'required_guard_unavailable'}"), ('nocheh_error', 'repeated_outer_errors')),
+                  (outer(2, 503, "{'error': 'security_service_unavailable'}"), ('nocheh_error', 'repeated_outer_errors')),
+                  (outer(2, 403, "{'error': 'model_configuration_mismatch'}"), ('nocheh_error', 'repeated_outer_errors')),
+                  # A provider's refusal: the broker's status is the provider's own only for 401, 403 and 429.
+                  (outer(3, 429, "{'error': 'provider_request_failed', 'provider_status': 429}"), ('rate_limited', 'rate_limit:429')),
+                  (outer(3, 401, "{'error': 'provider_request_failed', 'provider_status': 401}"), ('key_rejected', 'auth:401')),
+                  (outer(2, 503, "{'error': 'provider_request_failed', 'provider_status': 529}"), ('provider_error', 'repeated_outer_errors')),
+                  (outer(1000, 503, "{'error': 'provider_request_failed', 'provider_status': 500}"), ('provider_error', 'repeated_outer_errors')),
+                  ("repeated_outer_errors(Error during API call #3: KeyError: 'connection_id' private words)", ('unknown', 'repeated_outer_errors')),
+                  ('error_near_max_iterations(Error during API call #9: private words)', ('unknown', 'error_near_max_iterations')),
+                  ('pending_tool_result', ('empty_answer', 'pending_tool_result')),
+                  ('local_processing_error(Error during local message processing after API call #2: private words)',
+                   ('nocheh_error', 'local_processing_error')),
+                  ('rebuilt_restart_limit_exceeded', ('interrupted', 'rebuilt_restart_limit_exceeded')),
+                  ('a_new_stop(private words)', ('unknown', 'loop_error'))]],
+            ([], ('unknown', None)),
+        ]
+        for results, expected in cases:
+            self.assertEqual(usage.failure(results), expected, results)
+        class Status(Exception):
+            def __init__(self, status_code): self.status_code = status_code
+        class APIConnectionError(Exception): pass
+        class APITimeoutError(APIConnectionError): pass
+        self.assertEqual([usage.error_cause(error) for error in (Status(529), Status(401), Status(418), Status('529'), APITimeoutError(),
+                                                                 APIConnectionError(), ConnectionResetError(), ValueError('private words'))],
+                         ['overloaded:529', 'auth:401', 'http_error:418', None, 'timeout', 'connection', 'connection', None])
+
+    def test_failed_runs_keep_the_providers_exact_error_and_an_older_table_gains_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'usage/usage.sqlite'
+            path.parent.mkdir()
+            old = sqlite3.connect(str(path))
+            old.execute(usage.SCHEMA.replace("causes TEXT NOT NULL DEFAULT '{}', ", ''))
+            old.commit()
+            old.close()
+            for cause in ('overloaded:529', 'overloaded:529', 'server_error', 'a provider message, not a code', None):
+                usage.record('memory_review', {'calls': 1}, 'm', failed=True, reason='provider_error', cause=cause,
+                             provider='anthropic', path=path, now=DAY)
+            usage.record('guard', {'calls': 1}, 'm', failed=True, cause='connection', provider='anthropic', path=path, now=DAY)
+            usage.record('guard', {'calls': 1}, 'm', cause='overloaded:529', provider='anthropic', path=path, now=DAY)
+            guard, review = usage.rows('2026-10-13', path)
+            self.assertEqual((review['part'], review['failed'], review['reasons']), ('memory_review', 5, {'provider_error': 5}))
+            self.assertEqual(review['causes'], {'provider_error:overloaded:529': 2, 'provider_error:server_error': 1},
+                             'only codes are kept; a run without a known cause keeps its reason alone')
+            self.assertEqual((guard['failed'], guard['causes']), (1, {'unknown:connection': 1}), 'a run that worked has no cause')
 
     def test_record_never_fails_the_work_it_measures(self):
         with tempfile.TemporaryDirectory() as root:
@@ -166,6 +254,49 @@ class UsageTests(unittest.TestCase):
         with patch.dict(sys.modules, {'agent': types.ModuleType('agent'), 'agent.usage_pricing': pricing}):
             costs = usage.price([{**row, 'provider': 'anthropic'}, {**row, 'provider': 'custom'}, row])
         self.assertEqual(costs, [12.0, None, None])
+
+    def test_reply_rates_take_the_higher_claude_card_per_bucket_on_the_anthropic_provider(self):
+        with patch.dict('os.environ', {}, clear=False):
+            self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'anthropic', ''),
+                             {'input': 2.0, 'output': 10.0, 'cache_read': 0.2, 'cache_write': 2.5, 'request': 0.0})
+            self.assertEqual(usage.reply_rates('anthropic/claude-haiku-5.5', 'anthropic', ''),
+                             {'input': 0.5, 'output': 2.5, 'cache_read': 0.05, 'cache_write': 0.625, 'request': 0.0}, 'the long-prompt card is higher')
+
+    def test_reply_rates_ask_hermes_with_million_token_rows_and_stay_unknown_without_a_price(self):
+        class Cost:
+            def __init__(self, amount, status): self.amount_usd, self.status = amount, status
+
+        def estimate(model, canonical, provider, base_url):
+            if model != 'priced-model':
+                return Cost(None, 'unknown')
+            # A whole prompt over 200K tokens is priced at a higher tier, output included.
+            above = canonical.input_tokens + canonical.cache_read_tokens + canonical.cache_write_tokens > 200_000
+            rates = (3, 15, 0.3, 4) if above else (1, 5, 0.1, 2)
+            # A per-request price, as a model list can carry, counts only for a row with calls.
+            return Cost(sum(getattr(canonical, bucket) * rate for bucket, rate in zip(usage.CLAUDE_BUCKETS, rates)) / 1e6
+                        + canonical.request_count * 0.005, 'estimated')
+
+        pricing = types.SimpleNamespace(CanonicalUsage=types.SimpleNamespace, estimate_usage_cost=estimate)
+        with patch.dict(sys.modules, {'agent': types.ModuleType('agent'), 'agent.usage_pricing': pricing}):
+            self.assertEqual(usage.reply_rates('priced-model', 'openai', 'https://gateway.example.test/v1'),
+                             {'input': 3.0, 'output': 15.0, 'cache_read': 0.3, 'cache_write': 4.0, 'request': 0.005})
+            unknown = dict.fromkeys(usage.RATES)
+            self.assertEqual(usage.reply_rates('synthetic-model', 'openai', ''), unknown)
+            self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'custom', ''), unknown, "Nocheh's Claude prices are for Anthropic's own API only")
+        with patch.dict(sys.modules, {'agent': None}):
+            self.assertEqual(usage.reply_rates('synthetic-model', 'openai', ''), dict.fromkeys(usage.RATES), 'without Hermes nothing is priced')
+
+    def test_the_fixture_rates_count_only_inside_the_installation_fixture(self):
+        given = {usage.FIXTURE_RATES: '{"input": 50, "output": 50, "cache_read": 0.5, "cache_write": "x"}'}
+        with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': '1'}):
+            self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''),
+                             {'input': 50.0, 'output': 50.0, 'cache_read': 0.5, 'cache_write': None, 'request': None})
+        with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': '1', usage.FIXTURE_RATES: 'not json'}):
+            self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''), dict.fromkeys(usage.RATES))
+        for flag in ('0', '', 'true'):
+            with patch.dict('os.environ', {**given, 'NOCHEH_INSTALLATION_FIXTURE': flag}), patch.dict(sys.modules, {'agent': None}):
+                self.assertEqual(usage.reply_rates('fixture-model', 'model-fixture', ''), dict.fromkeys(usage.RATES), 'outside the fixture it does nothing')
+                self.assertEqual(usage.reply_rates('claude-sonnet-5-5', 'anthropic', '')['input'], 2.0)
 
 
 if __name__ == '__main__':

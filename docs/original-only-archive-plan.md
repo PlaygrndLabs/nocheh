@@ -2,6 +2,8 @@
 
 # Original-only archive implementation and clean restart
 
+Status: implemented; `original-only-v1` is the only storage layout, and the clean development setup ([ADR-0075](adr/0075-clean-development-setup.md)) replaced step 7's reset; kept as history.
+
 <authority>
 The owner accepted this plan on 2026-09-18. Product requirements live in
 [SPECS.md](../SPECS.md); [ADR-0053](adr/0053-original-only-archive.md) records the

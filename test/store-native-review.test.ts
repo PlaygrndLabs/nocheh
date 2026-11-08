@@ -102,9 +102,9 @@ test('native review runs once per source across authorization epochs and stops o
       if(input.observe_only){observations++;return {state:mode==='running'?'running':mode==='failed'?'failed':'ambiguous'};}
       starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:['running','failed'].includes(mode)?'running':'done'};
     },honcho:async()=>{throw Error('no provider calls');}});
-  const makeSource=async(index:number)=>{
+  const makeSource=async(index:number,text='Synthetic note '+index,reply?:number)=>{
     const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
-      text:'Synthetic note '+index,payload:{message:{message_id:index,date:1,chat:{id:Number(group),type:'group'},from:{id:123},text:'Synthetic note '+index}}};
+      text,payload:{message:{message_id:index,date:1,chat:{id:Number(group),type:'group'},from:{id:123},text,...(reply?{reply_to_message:{message_id:reply}}:{})}}};
     const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
   };
   const jobs=async(source:{id:string})=>(await stores.control.query("SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1 ORDER BY id",[source.id])).rows.map(row=>row.id);
@@ -205,5 +205,102 @@ test('native review runs once per source across authorization epochs and stops o
     const exhausted=await services.reviews.inspect(failed!);
     assert.deepEqual([exhausted.state,exhausted.error_code,exhausted.attempts],['ambiguous','native_review_failed',4]);
     assert.equal(await services.reviews.run(failed!,authority),'ambiguous','a closed review is not started again');assert.equal(starts,9);
+
+    // A failed review whose retry waits past a later epoch is rebound where it waits and runs again, instead of closing as superseded.
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[running]);
+    const retrySource=await makeSource(10),[retry]=await services.reviews.queue(retrySource);
+    assert.equal(await services.reviews.run(retry!,authority),'running');assert.equal(starts,10);
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[retry]);
+    assert.equal(await services.reviews.run(retry!,authority),'pending');
+    await bump();await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[retry]);
+    assert.equal((await operations.memory_review!('native:'+retry,authority)).state,'running');assert.equal(starts,11);
+    const retried=await services.reviews.inspect(retry!);
+    assert.deepEqual([retried.state,retried.attempts],['running',2]);
+    assert.equal(canonical(retried.binding),canonical(await services.guards.state()));
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[retry]);
+
+    // A failed review whose workflow closed before it ran again gets a new workflow from its source's step, once.
+    const closedSource=await makeSource(11),[lapsed]=await services.reviews.queue(closedSource);
+    assert.equal(await services.reviews.run(lapsed!,authority),'running');
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[lapsed]);
+    assert.equal(await services.reviews.run(lapsed!,authority),'pending');assert.equal(starts,12);
+    await stores.control.query("UPDATE workflow_registry SET state='skipped',waiting_reason='superseded' WHERE family='memory_review' AND job_id=$1",['native:'+lapsed]);
+    await bump();
+    const closedSince=new Date(Date.now()-60000);
+    await stores.control.query("UPDATE workflow_registry SET state='completed',created_at=$2 WHERE family='memory_review' AND job_id=$1",['source:'+closedSource.id,closedSince]);
+    const sourceSteps=async()=>(await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+closedSource.id])).rows[0].count;
+    const stepsBefore=await sourceSteps();await requestStrandedSources(stores.control,new Date(closedSince.getTime()+1));
+    assert.equal(await sourceSteps(),stepsBefore+1,'a failed review left under an earlier epoch is stranded work');
+    assert.equal((await operations.memory_review!('source:'+closedSource.id,authority)).state,'completed');
+    const nativeWorkflows=async()=>(await stores.control.query("SELECT state FROM workflow_registry WHERE family='memory_review' AND job_id=$1 ORDER BY generation",['native:'+lapsed])).rows.map(row=>row.state);
+    assert.deepEqual(await nativeWorkflows(),['skipped','queued']);
+    await services.reviews.queue(closedSource);assert.deepEqual(await nativeWorkflows(),['skipped','queued'],'an open workflow is not asked for twice');
+    const kept=await services.reviews.inspect(lapsed!);
+    assert.deepEqual([kept.state,kept.attempts,kept.error_code],['pending',1,'native_review_failed'],'it keeps its attempts and failure');
+    assert.equal(canonical(kept.binding),canonical(await services.guards.state()));
+
+    // An epoch that lands while a waiting review is checked makes it wait and renew, not close.
+    const assertCurrent=services.guards.assertCurrent.bind(services.guards);let raced=false;
+    services.guards.assertCurrent=async binding=>{if(!raced){raced=true;await bump();}return assertCurrent(binding);};
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[lapsed]);
+    const racing=await operations.memory_review!('native:'+lapsed,authority);
+    services.guards.assertCurrent=assertCurrent;
+    assert.deepEqual([racing.state,racing.waiting_reason],['waiting','guard_pending']);assert.equal(starts,12);
+    assert.equal((await operations.memory_review!('native:'+lapsed,authority)).state,'running');assert.equal(starts,13);
+    assert.equal(canonical((await services.reviews.inspect(lapsed!)).binding),canonical(await services.guards.state()));
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[lapsed]);
+
+    // A failed review whose input changed under a later epoch is replaced by one that keeps its attempts, failure and gap.
+    const changingSource=await makeSource(12),[before]=await services.reviews.queue(changingSource);
+    assert.equal(await services.reviews.run(before!,authority),'running');
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[before]);
+    assert.equal(await services.reviews.run(before!,authority),'pending');
+    const gap=(await services.reviews.inspect(before!)).next_attempt.getTime();
+    await bump();
+    await stores.control.query(`UPDATE native_review_jobs SET input_reference=jsonb_set(input_reference,'{input_hash}','"${'0'.repeat(64)}"') WHERE id=$1`,[before]);
+    const [after]=await services.reviews.queue(changingSource);assert.notEqual(after,before);
+    assert.deepEqual(await jobs(changingSource),[after]);
+    const replaced=await services.reviews.inspect(after!);
+    assert.deepEqual([replaced.state,replaced.attempts,replaced.error_code],['pending',1,'native_review_failed']);
+    assert.equal(replaced.next_attempt.getTime(),gap,'the replacement waits out the same gap');
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[after]);
+
+    // A long source is reviewed in fragments. Once one fragment ran, its failed and never-started fragments still
+    // keep their place under a later epoch, and the source gets no new fragment.
+    await makeSource(14,'Synthetic thread start');
+    const longSource=await makeSource(13,Array.from({length:4000},(_,index)=>'word'+index).join(' '),14),parts=await services.reviews.queue(longSource);
+    assert.ok(parts.length>=3,'the source is split into fragments');
+    const [firstPart,failedPart,...restParts]=parts as [string,string,...string[]];
+    await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[firstPart]);
+    assert.equal(await services.reviews.run(failedPart,authority),'running');
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[failedPart]);
+    assert.equal(await services.reviews.run(failedPart,authority),'pending');
+    await bump();
+    assert.deepEqual(await services.reviews.queue(longSource),parts,'waiting fragments keep their identity after another fragment ran');
+    assert.deepEqual(await jobs(longSource),[...parts].sort());
+    const failedRow=await services.reviews.inspect(failedPart);
+    assert.deepEqual([failedRow.state,failedRow.attempts,failedRow.error_code],['pending',1,'native_review_failed']);
+    assert.equal(canonical(failedRow.binding),canonical(await services.guards.state()));
+    const startsBefore=starts;await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[failedPart]);
+    await bump();
+    assert.equal((await operations.memory_review!('native:'+failedPart,authority)).state,'running','its own workflow renews and runs it');
+    assert.equal(starts,startsBefore+1);assert.equal((await services.reviews.inspect(failedPart)).attempts,2);
+    assert.equal(await services.reviews.run(failedPart,authority),'pending');
+    const failedGap=(await services.reviews.inspect(failedPart)).next_attempt.getTime();
+
+    // A new reply in the thread changes every fragment's evidence. Fragments whose own text is unchanged are replaced
+    // by ones with the current input, the failed one keeping its attempts, failure and gap; a fragment whose text
+    // changed is dropped, and the new text adds no fragment.
+    await bump();await makeSource(15,'Synthetic later reply',14);
+    const renewed=await services.reviews.queue(longSource),[keptPart,...replacements]=renewed;
+    assert.equal(keptPart,firstPart);
+    assert.ok(replacements.length<=restParts.length&&replacements.length>=restParts.length-1,'only the fragments whose text changed are dropped');
+    assert.ok(replacements.every(id=>!parts.includes(id)),'replaced fragments carry the current input');
+    assert.deepEqual(await jobs(longSource),[...renewed].sort());
+    const carried=await Promise.all(replacements.map(id=>services.reviews.inspect(id)));
+    assert.deepEqual(carried.map(row=>[row.attempts,row.error_code]),
+      [[2,'native_review_failed'],...replacements.slice(1).map(()=>[0,null])],'each replacement keeps its own attempts and failure');
+    assert.equal(carried[0]!.next_attempt.getTime(),failedGap);
+    assert.equal(await services.reviews.queue(longSource).then(ids=>ids.join()),renewed.join(),'a later sweep keeps them');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

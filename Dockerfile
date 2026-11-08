@@ -57,7 +57,8 @@ FROM docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14
 # Install management tools before copying application output so source edits do
 # not repeat apt-get on every watched dashboard rebuild.
 FROM node:26.12.1-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS management-base
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-yaml git ca-certificates && rm -rf /var/lib/apt/lists/*
+# python3-cryptography signs the GitHub app's requests for short repo keys (ADR-0210).
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-yaml python3-cryptography git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
 

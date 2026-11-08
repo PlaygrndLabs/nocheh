@@ -139,6 +139,17 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                 self.assertEqual(handler.dispatch({'text':'synthetic'}),{'text':'synthetic reply'})
             called.assert_called_once_with('synthetic')
 
+    def test_price_route_gives_the_reply_models_rates_as_replies_use_it(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789',
+                                                                            'NOCHEH_REPLY_ROUTE_PROVIDER':'anthropic','NOCHEH_REPLY_ROUTE_URL':'https://api.anthropic.com/v1'}):
+            from . import runtime
+            handler=object.__new__(runtime.Handler);handler.path='/internal/usage/price'
+            with patch.object(runtime,'MODEL','claude-sonnet-5-5'):
+                self.assertEqual(handler.dispatch({'rates':'reply'}),{'rates':{'input':2.0,'output':10.0,'cache_read':0.2,'cache_write':2.5,'request':0.0}})
+            with patch.object(runtime,'MODEL','claude-sonnet-5-5'),patch('services.hermes.usage.reply_rates',return_value={}) as rates:
+                handler.dispatch({'rates':'reply'})
+            rates.assert_called_once_with('claude-sonnet-5-5','anthropic','https://api.anthropic.com/v1')
+
     def test_new_profile_never_transcribes_voice_notes(self):
         from . import runtime
         with tempfile.TemporaryDirectory() as folder,patch.object(runtime,'PROFILE_HOME',Path(folder)):

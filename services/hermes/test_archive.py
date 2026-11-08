@@ -170,22 +170,65 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(json.loads(archive_tools.meaning_tool({'query':' '})),{'error':'memory_search_unavailable'})
             request.assert_not_called()
 
-    def test_background_jobs_are_sized_proposed_listed_and_stopped_through_the_bound_scope(self):
+    def test_background_jobs_are_started_listed_and_stopped_through_the_bound_scope(self):
         with patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request:
-            result=json.loads(archive_tools.job_tool({'action':'propose','title':'Open tasks','instruction':'Find open tasks.','chat':'-1002','scope':'ignored','limit':5}))
+            result=json.loads(archive_tools.job_tool({'action':'start','title':'Open tasks','instruction':'Find open tasks.','chat':'-1002','from':'2026-01-01','to':'2026-02-01',
+                                                      'scope':'ignored','limit':5,'box':False}))
+            archive_tools.job_tool({'action':'status','title':'ignored','box':True})
+            archive_tools.job_tool({'action':'stop','id':'b'*64,'box':True})
         self.assertEqual(result['state'],'proposed')
-        request.assert_called_once_with('/v1/jobs/propose',{'title':'Open tasks','instruction':'Find open tasks.','chat':'-1002'})
+        self.assertEqual([call.args for call in request.call_args_list],[
+            ('/v1/jobs/start',{'title':'Open tasks','instruction':'Find open tasks.','chat':'-1002','from':'2026-01-01','to':'2026-02-01','box':False}),
+            ('/v1/jobs/status',{'title':'ignored'}),('/v1/jobs/stop',{'id':'b'*64})])
         import io
         from urllib.error import HTTPError
-        limit=HTTPError('url',409,'Conflict',{},io.BytesIO(b'{"error":"job_limit_reached"}'))
-        with patch.object(archive_tools,'request',side_effect=limit):
-            self.assertEqual(json.loads(archive_tools.job_tool({'action':'propose','title':'t','instruction':'i'})),{'error':'job_limit_reached'})
+        for code in ('job_limit_reached','job_too_long','job_not_found','job_not_permitted','job_in_a_job'):
+            refused=HTTPError('url',409,'Conflict',{},io.BytesIO(json.dumps({'error':code}).encode()))
+            with self.subTest(code=code),patch.object(archive_tools,'request',side_effect=refused):
+                self.assertEqual(json.loads(archive_tools.job_tool({'action':'start','title':'t','instruction':'i'})),{'error':code})
         private=HTTPError('url',503,'Unavailable',{},io.BytesIO(b'{"error":"private storage detail"}'))
         with patch.object(archive_tools,'request',side_effect=private):
             self.assertEqual(json.loads(archive_tools.job_tool({'action':'status'})),{'error':'background_jobs_unavailable'})
         with patch.object(archive_tools,'request') as request:
-            self.assertEqual(json.loads(archive_tools.job_tool({'action':'delete'})),{'error':'background_jobs_unavailable'})
+            for action in ('delete','size','propose'):
+                self.assertEqual(json.loads(archive_tools.job_tool({'action':action,'title':'t','instruction':'i'})),{'error':'background_jobs_unavailable'})
             request.assert_not_called()
+
+    def test_a_repo_is_forwarded_only_with_start_and_a_name(self):
+        with patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request,\
+                patch.object(archive_tools,'isolated_runtime',return_value=True):
+            archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True,'repo':'example-org/widgets'})
+            for repo in ('',None,7,['example-org/widgets']):
+                archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True,'repo':repo})
+            archive_tools.job_tool({'action':'status','repo':'example-org/widgets'})
+            archive_tools.job_tool({'action':'stop','id':'b'*64,'repo':'example-org/widgets'})
+        self.assertEqual([call.args for call in request.call_args_list],[
+            ('/v1/jobs/start',{'title':'t','instruction':'i','box':True,'repo':'example-org/widgets'}),
+            *[('/v1/jobs/start',{'title':'t','instruction':'i','box':True})]*4,('/v1/jobs/status',{}),('/v1/jobs/stop',{'id':'b'*64})])
+        import io
+        from urllib.error import HTTPError
+        refused=HTTPError('url',409,'Conflict',{},io.BytesIO(json.dumps({'error':'job_repo_not_allowed'}).encode()))
+        with patch.object(archive_tools,'request',side_effect=refused),patch.object(archive_tools,'isolated_runtime',return_value=True):
+            self.assertEqual(json.loads(archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True,'repo':'example-org/widgets'})),
+                             {'error':'job_repo_not_allowed'})
+        tools={}
+        class Context:
+            def register_tool(self,**kwargs):tools[kwargs['name']]=kwargs['schema']
+        archive_tools.register(Context())
+        schema=tools['nocheh_background_job'];repo=schema['parameters']['properties']['repo']
+        self.assertEqual((repo['type'],repo['maxLength']),('string',140));self.assertTrue(repo['description'].startswith('With start and box=true'))
+        self.assertIn('/repo/code',repo['description']);self.assertIn('GitHub copies',schema['description'])
+        self.assertNotIn('repo',schema['parameters']['required'])
+
+    def test_the_job_tool_offers_start_status_and_stop_only(self):
+        tools={}
+        class Context:
+            def register_tool(self,**kwargs):tools[kwargs['name']]=kwargs['schema']
+        archive_tools.register(Context())
+        schema=tools['nocheh_background_job']
+        self.assertEqual(schema['parameters']['properties']['action']['enum'],['start','status','stop'])
+        self.assertIn('action=start asks for one',schema['description']);self.assertNotIn('size',schema['description']);self.assertNotIn('propose',schema['description'])
+        self.assertTrue(schema['parameters']['properties']['box']['description'].startswith('With start:'))
 
     def test_archive_tools_require_bound_scope_and_never_accept_scope_from_model(self):
         with patch('urllib.request.urlopen') as network:

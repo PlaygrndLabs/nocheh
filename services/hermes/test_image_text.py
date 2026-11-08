@@ -48,7 +48,9 @@ class ImageTextTests(unittest.TestCase):
 
     def test_failures_say_whether_a_retry_can_help(self):
         busy = self.read({'success': False, 'error': 'Error analyzing image: Error code: 529 - overloaded'}, {'input_tokens': 0})[0]
-        self.assertEqual((busy['state'], busy['reason']), ('failed', 'provider_error'))
+        self.assertEqual((busy['state'], busy['reason'], busy['cause']), ('failed', 'provider_error', 'overloaded:529'))
+        dropped = self.read({'success': False, 'error': 'Error analyzing image: Connection error.'}, {'input_tokens': 0})[0]
+        self.assertEqual((dropped['reason'], dropped['cause']), ('provider_error', 'connection'))
         refused = self.read({'success': False, 'error': 'Error analyzing image: content_policy violation'}, {'input_tokens': 10})[0]
         self.assertEqual(refused['reason'], 'refused')
         self.assertEqual(self.read({'success': False, 'error': 'Error analyzing image: cannot identify image file'})[0], {'state': 'unreadable'})
@@ -77,7 +79,8 @@ class ImageTextTests(unittest.TestCase):
         self.assertNotIn('SERVICE_TOKEN', seen['env'])
         self.assertEqual(seen['env'][image_text.KEY], 'synthetic-image-key')
         self.assertEqual(seen['config']['auxiliary']['vision'], {'provider': 'custom', 'model': 'vision-model',
-                         'base_url': 'https://images.example.test/v1', 'api_key': '${env:' + image_text.KEY + '}'})
+                         'base_url': 'https://images.example.test/v1', 'api_key': '${env:' + image_text.KEY + '}',
+                         'api_mode': 'chat_completions'})
         self.assertEqual(seen['hint'], {'prompt': 'Only the text, please.'})
         self.assertEqual([(row['part'], row['provider'], row['input_tokens'], row['cost_usd'], row['priced_runs']) for row in rows],
                          [('image', 'gateway', 1200, 0.004, 1)], 'a cost Hermes did not report is priced from its table')

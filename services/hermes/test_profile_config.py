@@ -1,7 +1,9 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
-from .profile_config import configure_profile, read, atomic_yaml
+from unittest.mock import patch
+from .profile_config import configure_profile, read, atomic_yaml, resolved
 
 
 class ProfileConfigurationTests(unittest.TestCase):
@@ -39,6 +41,9 @@ class ProfileConfigurationTests(unittest.TestCase):
             raw['plugins']['enabled'].append('unapproved')
             raw['fallback_models'] = ['untrusted']
             raw['curator'] = {'enabled': True, 'archive_after_days': 30}
+            raw['terminal'] = {'backend': 'local', 'cwd': '/workspace'}
+            raw['code_execution'] = {'timeout': 3600, 'max_tool_calls': 500}
+            raw['tool_output'] = {'max_bytes': 10**9}
             atomic_yaml(path, raw)
             configure_profile(profile, 'subscription-model')
             saved = read(path)
@@ -52,7 +57,29 @@ class ProfileConfigurationTests(unittest.TestCase):
             self.assertEqual(saved['fallback_models'], [])
             # Owner-set skills are never archived by the native curator.
             self.assertEqual(saved['curator'], {'enabled': False})
+            # Hermes's own tools run only in a job's sealed box, never on a backend the YAML names.
+            self.assertNotIn('terminal', saved)
+            self.assertEqual(saved['code_execution'], {'timeout': 120, 'max_tool_calls': 20, 'max_session_kernels': 1, 'kernel_idle_timeout': 600})
+            self.assertEqual(saved['tool_output'], {'max_bytes': 30000, 'max_lines': 400, 'max_line_length': 1000})
+            # Hermes compacts a long conversation, such as a background job's run, at Nocheh's threshold.
+            self.assertEqual(saved['compression']['threshold_tokens'], 100000)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_anthropic_replies_use_its_messages_api_with_prompt_caching(self):
+        # Anthropic's OpenAI-compatible API has no prompt caching; isolated turns use its Messages API.
+        for runtime, route, provider in (('isolated', 'https://api.anthropic.com/v1', 'anthropic'),
+                                         ('isolated', 'https://gateway.example.test/v1', 'openai'),
+                                         ('legacy', 'https://api.anthropic.com/v1', 'openai')):
+            with self.subTest(runtime=runtime, route=route), \
+                    patch.dict(os.environ, NOCHEH_SECURITY_RUNTIME=runtime, NOCHEH_REPLY_ROUTE_URL=route):
+                config = resolved({'model': {'provider': 'untrusted'}, 'prompt_caching': {'cache_ttl': 'off'},
+                                   'compression': {'threshold_tokens': 5000, 'enabled': True}}, 'reply-model')
+                self.assertEqual(config['compression'], {'threshold_tokens': 100000, 'enabled': True}, 'the threshold is kept over the YAML')
+                self.assertEqual(config['model'], {'provider': provider, 'default': 'reply-model'})
+                self.assertEqual(config['prompt_caching'], {'cache_ttl': '5m'})
+                # One-shot helper calls keep the broker's chat route.
+                self.assertEqual(config['auxiliary'], {task: {'provider': 'openai', 'model': 'reply-model'}
+                                                       for task in ('session_search', 'compression', 'title_generation')})
 
     def test_conflicting_invalid_and_unmanaged_edits_do_not_write(self):
         with tempfile.TemporaryDirectory() as folder:

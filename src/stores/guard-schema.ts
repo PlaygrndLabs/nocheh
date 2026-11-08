@@ -47,4 +47,8 @@ CREATE TABLE IF NOT EXISTS guard_invalidations (
  created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(source_id,epoch)
 );
 CREATE INDEX IF NOT EXISTS guard_invalidations_created ON guard_invalidations(created_at);
+CREATE TABLE IF NOT EXISTS guard_quiet_epochs (
+ generation uuid NOT NULL,epoch bigint NOT NULL,reason text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(generation,epoch)
+);
 `;

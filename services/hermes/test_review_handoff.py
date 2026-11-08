@@ -93,6 +93,37 @@ class ReviewHandoffTests(unittest.TestCase):
         with patch('services.hermes.review_worker._review',side_effect=AssertionError('replayed effect')):
             self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'ambiguous'},'a review that may have changed notes never starts again')
 
+    def test_a_failed_review_starts_again_after_its_epoch_profile_is_removed(self):
+        import shutil
+        receipts=self.profile/'reviews';receipts.mkdir();runs=self.root/'nocheh-review-runs'
+        def failed(*args):
+            (receipts/self.body['id']).write_text('failed');return {'state':'failed','error_code':'assistant_runtime_unavailable'}
+        with patch('services.hermes.review_worker._review',side_effect=failed):
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'failed')
+        self.assertTrue((runs/(self.body['id']+'.failed')).is_file())
+        # A newer epoch's profile replaces this one, and the idle earlier profile goes with its receipt.
+        shutil.rmtree(self.profile);newer=self.root/'profiles'/('nocheh-'+'d'*24);newer.mkdir()
+        self.assertEqual(observe(self.root,self.policy,self.body),{'state':'failed'})
+        with patch('services.hermes.review_worker.review_profile',return_value=newer), \
+                patch('services.hermes.review_worker._review',return_value={'state':'done'}) as child:
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'done');self.assertEqual(child.call_count,1)
+        self.assertFalse((runs/(self.body['id']+'.failed')).exists(),'a launched review no longer counts as failed')
+        # A review that changed notes keeps no failed marker, so losing its profile leaves it uncertain.
+        second={**self.body,'id':'b'*64};(newer/'memories').mkdir()
+        def wrote(*args):
+            (newer/'reviews').mkdir(exist_ok=True);(newer/'reviews'/second['id']).write_text('running')
+            (newer/'memories'/'MEMORY.md').write_text('a new note');raise RuntimeError('fixture_stopped')
+        with patch('services.hermes.review_worker.review_profile',return_value=newer), \
+                patch('services.hermes.review_worker._review',side_effect=wrote):
+            self.assertEqual(start(self.root,self.policy,'model',None,second),{'state':'running'})
+            self.wait_state(second,'ambiguous')
+        self.assertFalse((runs/(second['id']+'.failed')).exists())
+        shutil.rmtree(newer)
+        with patch('services.hermes.review_worker._review',side_effect=AssertionError('replayed effect')):
+            self.assertEqual(start(self.root,self.policy,'model',None,second),{'state':'ambiguous'})
+
     def test_a_review_stopped_at_its_time_limit_without_changing_notes_starts_again(self):
         import subprocess
         receipts=self.profile/'reviews';receipts.mkdir();notes=self.profile/'memories';notes.mkdir()
@@ -115,7 +146,8 @@ class ReviewHandoffTests(unittest.TestCase):
         from .review_worker import _review
         credentials=SimpleNamespace(runtime=lambda:{'api_mode':'chat_completions'})
         child=SimpleNamespace(returncode=0,stdout=json.dumps({'state':'failed','error_code':'assistant_runtime_unavailable',
-                                                              'failure_reason':'refused','usage':{'calls':1}}).encode())
+                                                              'failure_reason':'provider_error','failure_cause':'overloaded:529',
+                                                              'usage':{'calls':1}}).encode())
         with patch('services.hermes.security_transport.isolated_enabled',return_value=False), \
                 patch('services.hermes.usage.record') as record:
             with patch('services.hermes.review_worker.subprocess.run',return_value=child):
@@ -123,7 +155,8 @@ class ReviewHandoffTests(unittest.TestCase):
                                  {'state':'failed','error_code':'assistant_runtime_unavailable'})
             with patch('services.hermes.review_worker.subprocess.run',side_effect=subprocess.TimeoutExpired('review',220)):
                 with self.assertRaises(subprocess.TimeoutExpired):_review(self.profile,self.policy,'model',credentials,self.body)
-        self.assertEqual([c.kwargs['reason'] for c in record.call_args_list],['refused','timed_out'])
+        self.assertEqual([(c.kwargs['reason'],c.kwargs.get('cause')) for c in record.call_args_list],
+                         [('provider_error','overloaded:529'),('timed_out',None)])
 
     def test_failed_thread_launch_keeps_ambiguity_and_releases_capacity(self):
         with patch('services.hermes.review_worker.threading.Thread.start',side_effect=RuntimeError('fixture_launch_failed')):

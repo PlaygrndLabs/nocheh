@@ -28,9 +28,9 @@ export const nativeReconcileLimit=8;
 /** A review that failed without changing any notes runs again up to this many attempts in all. */
 export const nativeAttemptLimit=4;
 
-/** Sources whose native review never started, or whose newest learning stopped, under an earlier epoch are renewed by
- * their per-source step. That step runs after each epoch; work stranded before a restart asks for it once more here,
- * at most once per source since `since`. */
+/** Sources whose native review is still waiting to run (never started, or failed without changing notes), or whose newest
+ * learning stopped, under an earlier epoch are renewed by their per-source step. That step runs after each epoch; work
+ * stranded before a restart asks for it once more here, at most once per source since `since`. */
 export async function requestStrandedSources(pool:pg.Pool,since:Date,limit=100):Promise<number> {
   if(!Number.isSafeInteger(limit)||limit<1||limit>1000)throw new HttpError(400,'invalid_workflow_limit');
   const db=await pool.connect();
@@ -42,7 +42,7 @@ export async function requestStrandedSources(pool:pg.Pool,since:Date,limit=100):
         FROM interpretation_jobs j JOIN memory_generations m ON m.id=j.workspace AND m.state<>'retired' JOIN current c ON m.installation_generation=c.generation
         ORDER BY j.workspace,j.audience,j.source_reference->>'id',j.created_at DESC,j.id DESC),
       stranded AS (
-        SELECT n.source_reference->>'id' AS id FROM native_review_jobs n,current c WHERE n.state='pending' AND NOT n.paused AND n.attempts=0
+        SELECT n.source_reference->>'id' AS id FROM native_review_jobs n,current c WHERE n.state='pending' AND NOT n.paused
           AND n.binding->>'generation'=c.generation::text AND n.binding<>c.binding
         UNION SELECT l.id FROM learning l,current c WHERE l.binding<>c.binding
           AND (l.state='pending' OR l.state='failed' AND l.error_code IS DISTINCT FROM 'invalid_interpretation_result'))
@@ -67,35 +67,64 @@ export class NativeReviewRepository {
   async queue(source:SourceReference):Promise<string[]> {
     const binding=await this.contexts.guards.state();
     // Each source is reviewed once per installation generation; repeating a started review repeats its model calls.
-    // A review that never started can't run under an older authorization epoch, so it is renewed under the current one.
-    const jobs=(await this.control.query(`SELECT id,input_reference,(state='pending' AND NOT paused AND attempts=0 AND binding<>$2::jsonb) AS stale
+    // A waiting review (never started, or failed without changing notes) can't run under an older authorization epoch,
+    // so it is renewed under the current one.
+    const jobs=(await this.control.query(`SELECT id,input_reference,attempts,error_code,next_attempt,(state='pending' AND NOT paused) AS waiting,(state='pending' AND NOT paused AND binding<>$2::jsonb) AS stale
       FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3 ORDER BY created_at,id`,[source.id,JSON.stringify(binding),binding.generation])).rows;
-    const reviewed=jobs.filter(row=>!row.stale),stale=new Map<string,{id:string}>();
+    const reviewed=jobs.filter(row=>!row.stale),stale=new Map<string,{id:string;input_reference:{id:string;input_hash:string};attempts:number;error_code:string|null;next_attempt:Date}>();
     for(const row of jobs)if(row.stale&&!stale.has(row.input_reference.input_hash))stale.set(row.input_reference.input_hash,row);
+    // A review that failed and is replaced because its input changed hands its attempts, failure and gap on,
+    // so changing input never adds to a source's four attempts.
+    const spent=jobs.filter(row=>row.stale&&row.attempts>0).sort((a,b)=>b.attempts-a.attempts||b.next_attempt-a.next_attempt)[0];
     const ids:string[]=[];
     const retire=async()=>{await this.control.query(`DELETE FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3
-      AND state='pending' AND NOT paused AND attempts=0 AND binding<>$2::jsonb AND NOT (id=ANY($4::text[]))`,[source.id,JSON.stringify(binding),binding.generation,ids]);};
-    if(reviewed.length){await retire();return reviewed.map(row=>String(row.id));}
+      AND state='pending' AND NOT paused AND binding<>$2::jsonb AND NOT (id=ANY($4::text[]))`,[source.id,JSON.stringify(binding),binding.generation,ids]);};
+    // A long source is reviewed in fragments. Once one has started, finished or waits under the current binding, the
+    // source gets no new fragment, but its other fragments still waiting under an earlier epoch keep their place while
+    // their own text is unchanged, so its review is completed rather than cut short.
+    const kept=reviewed.map(row=>String(row.id)),waiting=reviewed.filter(row=>row.waiting).map(row=>String(row.id));
+    const settle=async()=>{await retire();await this.keepWaiting([...waiting,...ids]);return [...kept,...ids];};
+    if(kept.length&&!stale.size)return await settle();
     let context;
     try{context=await this.contexts.prepare(source,binding);}
-    catch(error){if(error instanceof HttpError&&error.code==='learning_consent_required')await retire();throw error;}
+    catch(error) {
+      if(!(error instanceof HttpError&&error.code==='learning_consent_required'))throw error;
+      if(kept.length)return await settle();
+      await retire();throw error;
+    }
     const actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
     const text=canonical({space:context.space,observations:context.observations,rules:context.rules,limitations:context.limitations});
-    if(text.length>200000)throw new HttpError(413,'native_review_input_limit');
+    if(text.length>200000){if(kept.length)return await settle();throw new HttpError(413,'native_review_input_limit');}
+    // Every fragment carries the whole source's evidence, so a new reply or reaction in its thread changes every fragment's
+    // input. A waiting fragment whose own text is unchanged is then replaced by one with the current input, keeping its
+    // attempts, last failure and gap.
+    const twins=new Map<string,typeof spent>();
+    if(kept.length) {
+      const rows=[...stale.values()],stored=(await this.derived.pool.query('SELECT id,content FROM derived_artifacts WHERE id=ANY($1::text[])',
+        [rows.map(row=>row.input_reference.id)])).rows;
+      for(const row of rows) {
+        const content=stored.find(input=>input.id===row.input_reference.id)?.content;
+        if(content)twins.set(digest(String(JSON.parse(content.toString()).text)),row);
+      }
+    }
     const characters=Array.from(text);
     for(let offset=0;offset<characters.length;offset+=8000) {
       const content=`Source nocheh:event:${source.id}; conversation ${context.space}; fragment ${offset/8000+1}. Speakers are not necessarily the owner.\n`+characters.slice(offset,offset+8000).join('');
       const document={text:content,evidence:context.evidence.map(e=>e.reference),dependencies:context.dependencies};
-      // The same prepared input keeps its identity and its place in the queue; only changed input becomes a new review.
+      // The same prepared input keeps its identity, attempts and place in the queue; only changed input becomes a new review.
       const hash=digest(canonical(document)),same=stale.get(hash);
       if(same) {
         stale.delete(hash);
         await this.prepared.allow(actor,{text:content});await this.turns.binding(actor);
         await this.control.query(`UPDATE native_review_jobs SET binding=$2,revision=revision+1,updated_at=now()
-          WHERE id=$1 AND state='pending' AND NOT paused AND attempts=0`,[same.id,binding]);
+          WHERE id=$1 AND state='pending' AND NOT paused`,[same.id,binding]);
         ids.push(same.id);continue;
       }
+      const twin=twins.get(digest(content));
+      if(kept.length&&!(twin&&stale.get(twin.input_reference.input_hash)===twin))continue;
+      if(twin)stale.delete(twin.input_reference.input_hash);
+      const carried=twin??spent;
       const id=digest(canonical([protocol,binding,source,document]));
       const input=await this.derived.record({operation_id:'native-review-input:'+id,source,kind:'runtime_context',content:Buffer.from(canonical(document)),
         producer:'nocheh',producer_version:protocol,configuration:{binding,purpose:'memory-review'},provenance:{evidence:document.evidence}});
@@ -103,13 +132,28 @@ export class NativeReviewRepository {
       const db=await this.control.connect();
       try {
         await db.query('BEGIN');
-        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,[id,source,input,binding]);
+        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding,attempts,error_code,next_attempt)
+          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz)) ON CONFLICT DO NOTHING`,[id,source,input,binding,carried?.attempts??0,carried?.error_code??null,carried?.next_attempt??null]);
         await requestWorkflow(db,'memory_review','native:'+id);await db.query('COMMIT');
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
       ids.push(id);
     }
-    await retire();
-    return ids;
+    return await settle();
+  }
+  /** A waiting review keeps an open workflow. One whose workflow closed before it ran (an epoch once closed a failed
+   * review's retry that way) gets a new one, so it still runs in its turn. */
+  private async keepWaiting(ids:string[]) {
+    if(!ids.length)return;
+    const db=await this.control.connect();
+    try {
+      await db.query('BEGIN');
+      const closed=(await db.query(`SELECT j.id,greatest(coalesce(max(w.generation),0)+1,j.revision) AS generation FROM native_review_jobs j
+        LEFT JOIN workflow_registry w ON w.family='memory_review' AND w.job_id='native:'||j.id
+        WHERE j.id=ANY($1::text[]) AND j.state='pending' AND NOT j.paused GROUP BY j.id,j.revision
+        HAVING NOT bool_or(coalesce(w.state IN ('queued','waiting','running','retryable_failed'),false))`,[ids])).rows;
+      for(const row of closed)await requestWorkflow(db,'memory_review','native:'+row.id,Number(row.generation));
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   async inspect(id:string) {
     const row=(await this.control.query('SELECT * FROM native_review_jobs WHERE id=$1',[id])).rows[0];

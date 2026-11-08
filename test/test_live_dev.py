@@ -190,6 +190,17 @@ class LiveDevTests(unittest.TestCase):
         self.assertIn(str(live_dev.ROOT / 'docker-compose.yml'), command)
         self.assertIn(str(root), command)
 
+    def test_development_services_come_back_after_docker_restarts(self):
+        # A Mac or Docker restart must not leave the operating bot down; make dev-stop still stops it.
+        policies, service = {}, None
+        for line in (live_dev.ROOT / 'docker-compose.dev.yml').read_text().splitlines():
+            if line.startswith('  ') and not line.startswith('   ') and line.rstrip().endswith(':'):
+                service = line.strip()[:-1]
+            elif line.strip().startswith('restart:'):
+                policies[service] = line.split(':', 1)[1].strip()
+        self.assertIn('hermes', policies)
+        self.assertEqual({name for name, policy in policies.items() if policy != 'unless-stopped'}, set())
+
     def test_rejects_occupied_development_port(self):
         with patch.object(live_dev, 'port_available', side_effect=lambda port: port != 8783), patch.object(live_dev.time, 'sleep'):
             with self.assertRaisesRegex(ValueError, '8783 is in use'):
@@ -240,6 +251,23 @@ class LiveDevTests(unittest.TestCase):
         with patch.object(live_dev.subprocess, 'run', side_effect=run):
             live_dev.prepare_runtime_images({'PATH': '/usr/bin'}, Path('/synthetic/operating'))
         self.assertNotIn(['/synthetic/operating/bin/nocheh', 'build'], calls)
+
+    def test_a_pinned_image_missing_a_library_is_rebuilt(self):
+        honcho = 'nocheh-honcho:' + json.loads((live_dev.ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+        revisions = {}
+        pins, calls, run = self.runtime_images(revisions)
+        revisions.update({'nocheh-hermes:local': pins, honcho: ''})
+        def checked(arguments, **options):
+            if arguments[:2] == ['docker', 'run']:
+                calls.append(arguments)
+                built = ['/synthetic/operating/bin/nocheh', 'build'] in calls
+                return type('Result', (), {'returncode': 0 if built or 'anthropic' not in arguments[-1] else 1})()
+            return run(arguments, **options)
+        with patch.object(live_dev.subprocess, 'run', side_effect=checked):
+            live_dev.prepare_runtime_images({'PATH': '/usr/bin'}, Path('/synthetic/operating'))
+        self.assertIn(['/synthetic/operating/bin/nocheh', 'build'], calls)
+        checks = [arguments[-1] for arguments in calls if arguments[:2] == ['docker', 'run']]
+        self.assertTrue(any('import' in check and 'anthropic' in check for check in checks))
 
     def test_rejects_a_runtime_base_still_unpinned_after_building(self):
         revisions = {'nocheh-hermes:local': 'wrong-revision', 'after_build': {}}

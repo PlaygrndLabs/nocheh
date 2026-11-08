@@ -67,10 +67,100 @@ class ScriptedBrainTests(unittest.TestCase):
         absent=self.brain.respond(request(older,message('assistant','ok'),message('user','[[turn:UNADDR42]]')))
         self.assertEqual((present['content'],absent['content']),('[brain] turn UNADDR42 present','[brain] turn UNADDR42 absent'))
 
+    def test_memory_tool_and_notes_count_only_native_notes_the_model_sees(self):
+        saved=message('user','note it [[tool:memory {"action":"add","target":"memory","content":"NOTEMARK52 synthetic"}]]')
+        self.assertEqual(self.brain.respond(request(saved)),
+                         {'tool':'memory','arguments':{'action':'add','target':'memory','content':'NOTEMARK52 synthetic'}})
+        from services.hermes.memory_evidence import PREFIX
+        self.assertEqual(self.brain.EVIDENCE,PREFIX)
+        evidence=lambda *entries:message('user',PREFIX+json.dumps({'entries':list(entries)}))
+        native={'source':'hermes.native.memory.0','content':'MEMORY NOTEMARK52 synthetic'}
+        recalled={'source':'nocheh.memory.recall','content':{'hits':['NOTEMARK52 synthetic']}}
+        ask=message('user','[[notes:NOTEMARK52]]')
+        # The conversation quotes the note where it was saved; only the notes themselves count.
+        history=(saved,message('assistant',None),message('tool','{"success": true}'),message('assistant','saved'))
+        answers=[self.brain.respond(request(*messages))['content'] for messages in (
+            (evidence(native),*history,ask),(*history,evidence(native),ask),(message('system','notes: NOTEMARK52'),ask),
+            (*history,ask),(evidence(recalled),*history,ask),(message('user',self.brain.EVIDENCE+'not json'),ask))]
+        self.assertEqual(answers,['[brain] notes NOTEMARK52 present']*3+['[brain] notes NOTEMARK52 absent']*3)
+
+    def test_box_tools_run_in_order_then_answer_with_every_result(self):
+        user=message('user','box [[tool:terminal {"command":"wc -l /chat/part-00001.jsonl"}]] [[tool:read_file {"path":"/work/result.txt"}]]')
+        tools=('nocheh_archive_page','terminal','read_file')
+        self.assertEqual(self.brain.respond(request(user,tools=tools)),{'tool':'terminal','arguments':{'command':'wc -l /chat/part-00001.jsonl'}})
+        first=[user,message('assistant',None),message('tool','{"output": "3"}')]
+        self.assertEqual(self.brain.respond(request(*first,tools=tools)),{'tool':'read_file','arguments':{'path':'/work/result.txt'}})
+        final=self.brain.respond(request(*first,message('assistant',None),message('tool','{"content": "1|BOXMARKED=3"}'),tools=tools))
+        self.assertEqual(final['content'],'[brain] terminal: {"output": "3"}\n[brain] read_file: {"content": "1|BOXMARKED=3"}')
+        # A job's scripted instruction travels inside the proposal's arguments with its braces escaped.
+        nested='{"instruction":'+json.dumps('[[tool:terminal {"command":"id"}]]').replace('{','\\u007b').replace('}','\\u007d')+'}'
+        proposal=self.brain.respond(request(message('user','[[tool:nocheh_background_job '+nested+']]'),tools=('nocheh_background_job',)))
+        self.assertEqual(proposal,{'tool':'nocheh_background_job','arguments':{'instruction':'[[tool:terminal {"command":"id"}]]'}})
+
     def test_raw_canary_in_scripted_turn_is_counted_and_rejected(self):
         result=self.brain.respond(request(message('system','fixture-canary'),message('user','[[search:x]]')))
         self.assertEqual(result,{'error':'unguarded_fixture_canary'})
         self.assertEqual(self.counts['raw_canary_outside_detector'],1)
+
+    def test_usage_directive_sets_the_prompt_tokens_of_each_scripted_answer_in_its_turn(self):
+        user=message('user','search it [[usage:8000]] [[search:COSTMARK]]')
+        call=self.brain.respond(request(user))
+        self.assertEqual((call['tool'],call['prompt_tokens']),('nocheh_archive_search',8000))
+        final=self.brain.respond(request(user,message('assistant',None),message('tool','{"sources":[]}')))
+        self.assertEqual(final['prompt_tokens'],8000)
+        self.assertNotIn('prompt_tokens',self.brain.respond(request(message('user','[[search:COSTMARK]]'))),'one token by default')
+        self.assertIsNone(self.brain.respond(request(message('user','[[usage:8000]] alone'))),'not a directive of its own')
+        self.assertNotIn('prompt_tokens',self.brain.respond(request(message('user','[[usage:8000\\u005d\\u005d [[search:COSTMARK]]'))))
+        responses=SimpleNamespace(JSONResponse=None,StreamingResponse=None)
+        with patch.dict('sys.modules',{'fastapi':SimpleNamespace(responses=responses),'fastapi.responses':responses}):
+            rendered=self.brain.render(SimpleNamespace(model='fixture',stream=False,stream_options=None),{'content':'done','prompt_tokens':8000})
+        self.assertEqual(rendered['usage']['prompt_tokens'],8000)
+
+    def test_todo_list_and_delay_directives(self):
+        todos='{"todos":[{"id":"1","content":"Search the marks","status":"in_progress"}]}'
+        user=message('user','[[delay:6]] [[tool:todo_list '+todos+']] [[search:LONGMARK0]]')
+        call=self.brain.respond(request(user,tools=('nocheh_archive_search','todo_list')))
+        self.assertEqual(call,{'tool':'todo_list','arguments':json.loads(todos),'delay':6})
+        events=len(self.brain.events)
+        self.assertEqual(self.brain.events[-1],{'directive':'tool','argument':todos,'phase':'call','tool':'todo_list'},'recorded before the wait')
+        for given,delay in (('0',1),('200',90),('90',90)):
+            self.assertEqual(self.brain.respond(request(message('user','[[delay:'+given+']] [[search:x]]')))['delay'],delay)
+        self.assertNotIn('delay',self.brain.respond(request(message('user','[[search:x]]'))))
+        self.assertIsNone(self.brain.respond(request(message('user','[[delay:5]] alone'))),'not a directive of its own')
+        self.assertGreater(len(self.brain.events),events)
+
+    def test_a_resumed_job_run_goes_on_with_its_first_messages_directives(self):
+        first=message('user','[Background job: Long JOB4] [[usage:30000]] [[delay:3]] [[tool:nocheh_archive_search {"query":"A"}]] [[tool:nocheh_archive_search {"query":"B"}]]')
+        done=[first,message('assistant',None),message('tool','{"hits":["A"]}')]
+        resume=message('user','[Background job: Long JOB4] The job was interrupted and restarted. Your to-do list and the work so far are above.')
+        call=self.brain.respond(request(*done,resume))
+        self.assertEqual(call,{'tool':'nocheh_archive_search','arguments':{'query':'B'},'prompt_tokens':30000,'delay':3})
+        self.assertIn({'directive':'resume','phase':'seen','results':1},self.brain.events)
+        final=self.brain.respond(request(*done,resume,message('assistant',None),message('tool','{"hits":["B"]}')))
+        self.assertEqual(final['content'],'[brain] nocheh_archive_search: {"hits":["A"]}\n[brain] nocheh_archive_search: {"hits":["B"]}')
+        self.assertEqual(sum(event['directive']=='resume' for event in self.brain.events),1,'once per directive turn')
+        # A resume line with no earlier directive is an ordinary turn.
+        self.assertIsNone(self.brain.respond(request(message('user','hello'),resume)))
+
+    def test_notices_and_a_fresh_restart_are_recorded_once(self):
+        user=message('user','[[tool:nocheh_archive_search {"query":"A"}]] [[tool:nocheh_archive_search {"query":"B"}]]')
+        cost='{"hits":[]}\n\n[SYSTEM NOTICE — cost budget nearly used] This job has used about 80% of its cost limit.'
+        time='{"hits":[]}\n\n[SYSTEM NOTICE — run time budget nearly exhausted] Run time budget nearly exhausted.'
+        self.brain.respond(request(user,message('assistant',None),message('tool',cost)))
+        self.brain.respond(request(user,message('assistant',None),message('tool',cost),message('assistant',None),message('tool',time)))
+        notices=[event for event in self.brain.events if event['directive']=='notice']
+        self.assertEqual(notices,[{'directive':'notice','kind':'cost','phase':'seen'},{'directive':'notice','kind':'time','phase':'seen'}])
+        restart=message('user','[Background job: Restart JOB6] [[search:RESTARTMARK]]\n\nThis job restarted and its earlier work could not be kept.\n'
+                               'Your last to-do list was: Search (in_progress)')
+        earlier=(message('user','hello'),message('assistant','hi'))
+        self.brain.respond(request(*earlier,restart));self.brain.respond(request(*earlier,restart))
+        self.assertEqual([event for event in self.brain.events if event['directive']=='restart'],
+                         [{'directive':'restart','phase':'seen','todo':True,'earlier':2}])
+        # A fresh run's request starts with Nocheh's memory evidence, which is no earlier history.
+        fresh=message('user','[Background job: Restart JOB7] [[search:RESTARTMARK]]\n\nThis job restarted and its earlier work could not be kept.')
+        self.brain.respond(request(message('user',self.brain.EVIDENCE+'{"entries":[]}'),fresh))
+        self.assertEqual([event for event in self.brain.events if event['directive']=='restart'][-1],
+                         {'directive':'restart','phase':'seen','todo':False,'earlier':0})
 
 
 if __name__=='__main__':unittest.main()

@@ -2,6 +2,7 @@ import asyncio
 import json
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 import httpx
 from openai import OpenAI, AsyncOpenAI
 from .request_boundary import Boundary, GuardUnavailable, install, trusted_detector
@@ -66,6 +67,26 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(GuardUnavailable):aux.resolve_provider_client('bedrock',model='synthetic')
             with self.assertRaises(GuardUnavailable):CodexAppServerSession()
         finally:restore()
+
+    def test_step_limit_summary_on_anthropic_keeps_the_turns_tools(self):
+        # Anthropic refuses tool calls in a request without tools, so the summary request is
+        # built like every other call of the turn.
+        from .compatibility_patch import install as install_native
+        from agent import chat_completion_helpers as calls
+        original=calls._SUMMARY_ATTEMPT_BUILDERS
+        sent=[]
+        agent=SimpleNamespace(_build_api_kwargs=lambda messages:{'messages':messages,'tools':[{'name':'f'}]},
+                              _interruptible_api_call=object(),_is_anthropic_oauth=False)
+        restore=install_native()
+        try:
+            with patch.object(calls,'_managed_summary_call',side_effect=lambda agent,request_id,request,callback,retry_count:sent.append(request) or 'response'),\
+                 patch.object(calls,'_summary_text',return_value='summary'):
+                attempt=calls._SUMMARY_ATTEMPT_BUILDERS['anthropic_messages'](agent,[{'role':'user','content':'go'}],'summary-id')
+                self.assertEqual(attempt(0),'summary')
+            self.assertEqual(sent,[{'messages':[{'role':'user','content':'go'}],'tools':[{'name':'f'}]}])
+            self.assertIs(calls._SUMMARY_ATTEMPT_BUILDERS['codex_responses'],original['codex_responses'])
+        finally:restore()
+        self.assertIs(calls._SUMMARY_ATTEMPT_BUILDERS,original)
 
     def test_trusted_redirect_is_rechecked_before_untrusted_destination(self):
         destinations=[]

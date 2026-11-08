@@ -85,6 +85,8 @@ x-management: &management
     NOCHEH_STATE_DIR: ${NOCHEH_STATE_DIR:-${PWD}/data/local}
     NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
     COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-nocheh}
+    # The GitHub fetcher runs the launcher's box image (ADR-0209).
+    NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${NOCHEH_INSTALLATION_ROOT:-${PWD}}:${NOCHEH_INSTALLATION_ROOT:-${PWD}}
@@ -331,6 +333,12 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    environment:
+      <<: *environment
+      # Only the broker and the launcher hold the sealed job box token; ./bin/nocheh init and up generate it.
+      # Without it both refuse every box route, so an older .env still starts: no new job may ask for a box, and a box
+      # job approved before the token went missing fails its next step with job_box_unavailable until it is back.
+      NOCHEH_BOX_TOKEN: ${NOCHEH_BOX_TOKEN:-}
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
     healthcheck:
@@ -359,9 +367,14 @@ services:
       NOCHEH_PARALLEL_RUNS: ${NOCHEH_PARALLEL_RUNS:-4}
       NOCHEH_UID: ${NOCHEH_UID:-1000}
       NOCHEH_GID: ${NOCHEH_GID:-1000}
+      NOCHEH_BOX_TOKEN: ${NOCHEH_BOX_TOKEN:-}
+      NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
+      NOCHEH_BOX_LIMIT: ${NOCHEH_BOX_LIMIT:-2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles:/profiles:ro
+      # The GitHub copies jobs pin; the launcher opens only the one a binding names (ADR-0209).
+      - ${NOCHEH_STATE_DIR:-./data/local}/github/copies:/repo-copies:ro
     depends_on:
       nocheh-security: {condition: service_healthy}
     healthcheck:
@@ -553,6 +566,7 @@ services:
       TELEGRAM_GROUP_REPLIES: ${TELEGRAM_GROUP_REPLIES:-addressed}
       TELEGRAM_BOT_NAMES: ${TELEGRAM_BOT_NAMES-Nocheh,نوچه}
       TELEGRAM_TYPING: ${TELEGRAM_TYPING:-true}
+      TELEGRAM_REACTIONS: ${TELEGRAM_REACTIONS:-true}
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
       NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-isolated}
       NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-evidence}

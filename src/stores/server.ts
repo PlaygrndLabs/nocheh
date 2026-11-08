@@ -34,11 +34,13 @@ import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
+import {JobBoxRepository} from './job-box.js';
+import {afterPending,jobRun} from './guards.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
 export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
-  const owner=new OwnerStorageApi(s);
+  const owner=new OwnerStorageApi(s),box=new JobBoxRepository(s.access);
   const server=createServer((req,res)=>{void(async()=>{
     const url=new URL(req.url??'/','http://local'),path=url.pathname;
     if(req.method==='GET'&&path==='/health')return json(res,200,{ok:true,service:config.service,storage_layout:'original-only-v1',
@@ -80,9 +82,13 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(req.method==='POST'&&path==='/v1/runtime/owner-notice'){
       // The dashboard's problem check: one message to the owner's private chat, in the owner's wording, sent at most once.
+      // With edit, the same notice is edited in place: under each cleared line, its short status such as "Fixed at 12:06 UTC" marked ✅.
       admin(principal);
-      const input=object(await readJson(req,64*1024)),id=string(input.id,64),lines=input.problems;
-      if(!/^[a-f0-9]{64}$/.test(id)||!Array.isArray(lines)||!lines.length||lines.length>20||lines.some(line=>typeof line!=='string'||!line.trim()||line.length>500))
+      const input=object(await readJson(req,64*1024)),id=string(input.id,64),lines=input.problems,resolved=input.resolved,edit=input.edit===true;
+      if(!/^[a-f0-9]{64}$/.test(id)||!Array.isArray(lines)||!lines.length||lines.length>20||lines.some(line=>typeof line!=='string'||!line.trim()||line.length>500)||
+        resolved!==undefined&&(!Array.isArray(resolved)||resolved.length!==lines.length||
+          resolved.some(note=>note!==null&&(typeof note!=='string'||!note.trim()||note.length>120||/[\r\n]/.test(note))))||
+        input.edit!==undefined&&typeof input.edit!=='boolean')
         throw new HttpError(400,'invalid_owner_notice');
       const owner=s.access.policy().owner_id;
       if(!owner)return json(res,200,{state:'not_started',error_code:'owner_not_set'});
@@ -91,9 +97,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(open&&(!['web_app','url'].includes(String(open.kind))||typeof open.url!=='string'||open.url.length>512||
         !(open.kind==='web_app'?/^https:\/\/[^\s]+$/:/^https?:\/\/[^\s]+$/).test(open.url)))throw new HttpError(400,'invalid_owner_notice');
       const prompts=await ownerPrompts(s.stores.control),labels=labeledLines(problemButtons,prompts['system.problem_buttons']);
-      const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map(line=>'• '+line).join('\n')}).slice(0,4000);
+      const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map((line,index)=>'• '+line+(resolved?.[index]?'\n✅ '+resolved[index]:'')).join('\n')}).slice(0,4000);
       const buttons=[...(open?[{text:labels.open!.slice(0,40),[String(open.kind)]:open.url}]:[]),...(retry?[{text:labels.retry!.slice(0,40),callback:retryButton}]:[])];
-      return json(res,200,await call('telegram.notice',{id,chat_id:owner,text,...(buttons.length?{buttons}:{})},30000));
+      return json(res,200,await call('telegram.notice',{id,chat_id:owner,text,...(buttons.length?{buttons}:{}),...(edit?{edit:true}:{})},30000));
     }
     if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
       admin(principal);
@@ -130,7 +136,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     // Owners can inspect and repair incomplete guard changes; scoped callers
     // must observe the complete current authorization generation on every call.
-    if(!principal.admin){await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);}
+    // A job's run waits out a publication still pending first (ADR-0208).
+    if(!principal.admin)await afterPending(jobRun(principal),async()=>{await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);});
     if(req.method==='GET'&&path==='/v1/entities')return json(res,200,await s.entities.list(principal,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
       after:url.searchParams.get('after')??'',state:url.searchParams.get('state')??'active'}));
     const entityHistory=path.match(/^\/v1\/entities\/claims\/([a-f0-9]{64})\/history$/);
@@ -205,15 +212,15 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/background/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/background/'.length),steps=s.jobs.steps;
-      if(operation==='finish')return json(res,200,await steps.finish(body));
-      if(operation==='cancel')return json(res,200,await steps.cancel(body));
-      if(operation==='observe')return json(res,200,await steps.observe(body));
+      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/background/'.length),runs=s.jobs.runs;
+      if(operation==='finish')return json(res,200,await runs.finish(body));
+      if(operation==='cancel')return json(res,200,await runs.cancel(body));
+      if(operation==='observe')return json(res,200,await runs.observe(body));
       await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='workflow-context')return json(res,200,await steps.context(body));
-      if(operation==='claim')return json(res,200,await steps.claim(body));
-      if(operation==='prepare')return json(res,200,await steps.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await steps.heartbeat(body));
+      if(operation==='workflow-context')return json(res,200,await runs.context(body));
+      if(operation==='claim')return json(res,200,await runs.claim(body));
+      if(operation==='prepare')return json(res,200,await runs.prepare(body));
+      if(operation==='heartbeat')return json(res,200,await runs.heartbeat(body));
       throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
@@ -288,10 +295,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
     if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
-    if(req.method==='POST'&&/^\/v1\/jobs\/(?:size|propose|status|stop)$/.test(path)) {
+    if(req.method==='POST'&&/^\/v1\/jobs\/(?:start|status|stop)$/.test(path)) {
       const body=await readJson(req),action=path.slice('/v1/jobs/'.length);
-      if(action==='size')return result(await s.jobs.size(principal,body));
-      if(action==='propose')return result(await s.actionCommands.offer('background',await s.jobs.propose(principal,body)));
+      if(action==='start')return result(await s.actionCommands.offer('background',await s.jobs.start(principal,body)));
       if(action==='status')return result(await s.jobs.list(principal));
       const stopped=await s.jobs.stop(principal,body);
       // A stopped job's card shows that it stopped.
@@ -312,7 +318,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,outcome);
     }
     if(path==='/v1/tools/actions'&&req.method==='GET') {
-      if(!principal.admin)return result({telegram:await s.telegramActions.recent(principal)},true);
+      if(!principal.admin)return result({telegram:await s.telegramActions.recent(principal),actions:await s.controlledActions.recent(principal)},true);
       admin(principal);return json(res,200,{...await s.controlledActions.list(principal),telegram:await s.telegramActions.list(principal)});
     }
     if(path==='/v1/tools/telegram-decision'&&req.method==='POST') {
@@ -322,7 +328,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     const action=path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
     if(action&&req.method==='GET') {
       const exists=(await s.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[action[1]])).rowCount;
-      return result(exists?await s.controlledActions.inspect(principal,action[1]):await s.telegramActions.inspect(principal,action[1]!),true);
+      // in_turn: the asking turn's tool holds the ended result and names the state it read (ADR-0215).
+      return result(exists?await s.controlledActions.inspect(principal,action[1],url.searchParams.get('in_turn')):await s.telegramActions.inspect(principal,action[1]!),true);
     }
     if(path==='/v1/context/prepare'&&req.method==='POST') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
@@ -330,8 +337,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/memory/check'&&req.method==='GET'){
       const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
-      // Schedule fires and job steps are control operations, never archived; the admitted run is their authority.
-      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)||await s.jobs.steps.deliveryAllowed(principal)});
+      // Schedule fires and job runs are control operations, never archived; the admitted run is their authority.
+      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)||await s.jobs.runs.deliveryAllowed(principal)});
       const retired=principal.turnEvent?await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference):false;
       return json(res,200,{valid:principal.admin||!retired&&telegramDeliveryAllowed(s.access.policy(),principal,source)});
     }
@@ -390,6 +397,13 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       if(path==='/v1/archive/page')return result(await s.sources.page(principal,{chat:url.searchParams.get('chat')??'',from:url.searchParams.get('from')??'',
         to:url.searchParams.get('to')??'',after:url.searchParams.get('after')??'',count:limit(url.searchParams.get('limit'),30,50)}),true);
+      // A sealed job box's chat copy, through the broker only, which also checks the box token. Chat and period come from the job.
+      if(path==='/v1/box/chat') {
+        if([...url.searchParams.keys()].some(key=>key!=='cursor'))throw new HttpError(400,'invalid_box_request');
+        if(principal.admin)throw new HttpError(403,'job_box_not_allowed');
+        const copy=await box.chat(principal,await s.turns.binding(principal),s.sources,url.searchParams.get('cursor')??'');
+        await s.turns.assertAudience(principal);return json(res,200,copy);
+      }
       if(path==='/v1/imports/pending') {
         const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});

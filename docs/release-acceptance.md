@@ -56,7 +56,7 @@ complete the gate.
 Use only synthetic text. Record event IDs, scoped profile IDs, derived record IDs,
 delivery receipts and timestamps in content-free evidence under
 `data/acceptance/results/`. Do not commit reports, tokens, real chat contents or numeric chat
-identities. The owner can inspect the corresponding originals in Archive/Activity.
+identities. The owner can inspect the corresponding originals in Messages and the Inbox.
 Use ordinary conversational wording in owner-facing messages. Identify each live
 test by its captured event ID and timestamp; the owner need not type an internal
 tool name or a test prefix.
@@ -66,9 +66,9 @@ tool name or a test prefix.
 | Intentional silence | In the selected group say `This is just a note for the group; no reply is needed.` Verify one captured original and a completed silent decision with no reply receipt. |
 | Private/group isolation | In the owner DM say `In this private chat, remember that my test phrase is blue pomegranate.` Then in the selected group ask `Do you know the phrase I told you privately?` Inspect the group-bound retrieval trace and answer; the phrase and private source must be absent. Policy must not share that source. |
 | Voice persistence | Send a short Telegram voice note in the owner DM saying `I saw a blue kite this morning.` Verify original audio bytes and hash, the captured Telegram envelope, a generated transcript with that sentence after the secret check, and a reply that answers it. Without a Voice notes key, verify the status `Voice note archived; transcription is not available.` and that the voice note does not hold the next owner reply. |
-| Exact owner approval | In the owner DM ask in ordinary language: `Please send me a separate message saying: The blue window is open. Show me exactly what you will send, and wait for my approval.` Inspect the exact destination/text, approve that one action in Activity or with `/approve FULL_ACTION_ID`, then verify one confirmed Telegram receipt and no second send on replay. The owner must not need to name an internal tool. |
+| Exact owner approval | In the owner DM ask in ordinary language: `Please send me a separate message saying: The blue window is open. Show me exactly what you will send, and wait for my approval.` Inspect the exact destination/text, approve that one action in the Inbox or with `/approve FULL_ACTION_ID`, then verify one confirmed Telegram receipt and no second send on replay. The owner must not need to name an internal tool. |
 | Reconnect/restart | In the owner DM say `Could you acknowledge this once?` Allow capture, restart the supervised runtime from the trusted host, inspect durable identity and receipt recovery, and confirm one response. Repeat after reconnect only if the first attempt is unresolved; do not manufacture incoming events. The conversational agent has no restart authority. |
-| Owner retirement | Send an ordinary short owner DM, save its captured event ID and timestamp, then use Archive to retire that exact message. Verify the original and any file/transcript remain inspectable, the owner action history records the revision, and no unsent reply is delivered. Ask a later ordinary question about the retired message. Verify its runtime context and answer exclude the retired content, and the answer does not identify the current question or another accessible source as the retired message. Undo with the revision-checked action and verify future use is permitted. Sending a second message must leave the first decision unchanged. |
+| Owner retirement | Send an ordinary short owner DM, save its captured event ID and timestamp, then use Messages to hide (retire) that exact message. Verify the original and any file/transcript remain inspectable, the owner action history records the revision, and no unsent reply is delivered. Ask a later ordinary question about the retired message. Verify its runtime context and answer exclude the retired content, and the answer does not identify the current question or another accessible source as the retired message. Undo with the revision-checked action and verify future use is permitted. Sending a second message must leave the first decision unchanged. |
 | Old reaction change/removal | Have a non-owner human react to an older captured message in a selected group, change the reaction, then remove it. Save the target and each reaction event ID and timestamp. Verify group admin rights, delivery of individual reaction updates, current per-actor state, absence of stale inferred meaning, topic isolation, and no new reply to the old message. Record absent updates or missing admin rights as pending or failed. Anonymous counts are separate and may arrive late. |
 
 For forum-topic isolation, use distinct resolved audiences: General and a named
@@ -108,5 +108,5 @@ authorization for those actions. Group members cannot approve or change policy.
 Before cutover, all checks must pass and restored pending work must be reconciled
 against the source installation. Verified Git integration follows
 [AGENTS.md](../AGENTS.md) independently under ADRs 0039–0040; it does not complete
-these checks or activate the runtime. Honcho activation follows its separate
-production acceptance gate.
+these checks or activate the runtime. Honcho attaches by default; its live
+acceptance is required only by the reset request above.

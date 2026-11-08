@@ -31,6 +31,10 @@ export type Permission = {
   revoked_at?: string | null;
   revision?: number;
   created_at?: string;
+  /** "chat" for a rule from a card's Allow button: one site or exact command in one chat or topic. */
+  grain?: 'exact' | 'chat';
+  match_key?: string | null;
+  space_id?: string | null;
 };
 export type ActionQueue = {actions: Action[]; telegram?: Action[]; permissions: Permission[]};
 export type Run = {
@@ -100,6 +104,17 @@ export function actionSummary(action: Pick<Action, 'kind' | 'arguments'>): strin
   return '';
 }
 
+/** What a permission covers: a chat rule for a web read covers every page on its site. */
+export function permissionSummary(permission: Permission): string {
+  if (
+    permission.grain === 'chat' &&
+    permission.kind === 'browser' &&
+    permission.match_key?.startsWith('nocheh_browser:')
+  )
+    return 'Any page on ' + permission.match_key.slice('nocheh_browser:'.length);
+  return actionSummary(permission);
+}
+
 /** Where a Telegram message goes, or where an action was asked for. */
 export const actionPlace = (action: Action) =>
   action.kind === 'telegram_message' && typeof action.arguments?.destination === 'string'
@@ -141,8 +156,8 @@ export function problemText(error: unknown): string {
   if (/expired/.test(code)) return 'This request expired. Nocheh will ask again if it is still needed.';
   if (code === 'memory_fact_changed')
     return 'The fact changed after this was suggested, so it can’t be shared in this form.';
-  if (/context_changed|guard/.test(code))
-    return 'Secret checking changed after this was prepared, so it can’t be approved now.';
+  if (/context_changed/.test(code))
+    return 'Something it used changed after it was asked. It can’t be approved now. Ask again if you still want it.';
   if (code === 'action_already_started_or_closed') return 'This was already decided, or it has started.';
   if (code === 'action_delivery_denied') return 'Your security settings don’t allow sending this message.';
   if (code === 'invalid_permission_bounds') return 'Choose up to 30 days and up to 1000 uses.';

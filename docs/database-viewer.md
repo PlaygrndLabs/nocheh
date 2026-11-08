@@ -20,19 +20,15 @@ database services or files show an error state. Redis holds
 operational keys rather than tables; Monitoring shows its service health, not
 raw keys.
 
-On a legacy installation, **Legacy combined** is the old shared PostgreSQL
-database. Its raw table list includes source, derived, and control data. The
-source-only `nocheh_archive` database appears after the controlled transition to
-the separate-store layout.
-
-Use the optional pgweb browser below when raw SQL queries or exports of the owned
-archive are needed. It is read-only; product records must be changed through their
+Use the optional pgweb browser below when raw SQL queries or exports are needed on
+a legacy combined installation. It is read-only; product records must be changed through their
 dashboard, API, or CLI commands so revision, authorization, invalidation, and
 provenance rules still apply.
 
 Run `./bin/nocheh db`, then open <http://127.0.0.1:8782>.
 This starts the pinned pgweb image from the optional Compose `tools` profile.
-It reuses the current PostgreSQL archive and does not restart the assistant.
+It opens the `nocheh` database, which holds the archive only on a legacy combined
+installation; browse the separate stores under **Databases**. It does not restart the assistant.
 `./bin/nocheh down` also stops the viewer; run `db` to start it again.
 
 The owner can inspect all archive scopes here. The HTTP port is loopback-only;

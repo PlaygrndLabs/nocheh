@@ -18,7 +18,8 @@ a live view and Stop. Extends [ADR-0031](0031-native-managed-schedules.md),
 
 <decision>
 - The agent sizes a request with `nocheh_background_job`. When it is large, it
-  proposes a job with a title and the person's own instruction. Nocheh prices the
+  proposes a job with a title and the person's own instruction (one `start` call
+  since 2026-11-04; see the note below). Nocheh prices the
   estimate with the reply model and posts an Approve and Reject card that answers
   the request. The person who asked approves, or the owner when a member's
   estimate is over the cost limit or has no known price. A decision expires after
@@ -36,6 +37,30 @@ a live view and Stop. Extends [ADR-0031](0031-native-managed-schedules.md),
 - A job's steps are admitted like replies, not behind memory reviews. At most two jobs run at once. Members start a few jobs a day in each group, set
   by the owner; the owner has no daily limit.
 </decision>
+
+<note date="2026-11-04">
+Amended on 2026-11-04 after the owner's direction that the agent decides by itself
+when work needs a job, and the person never words a request as a job.
+- The agent makes one `start` call. Nocheh counts and prices the work inside it,
+  so there is no separate size step; the result carries the estimate, the limits
+  and who approves. A job whose time limit would pass 1440 minutes is refused with
+  `job_too_long`, and the agent narrows the period or splits the work.
+- Stop follows the card's rule: the dashboard and the owner stop any job; a member
+  stops only the job they asked for, in its own chat. A job of another chat is not
+  found, and someone else's job in the same chat is not permitted.
+- A job's own turns have no job tool, so a job can neither start nor stop jobs.
+- The card says that starting it already used one secret check and, for a member's
+  job, that it counts toward their daily limit unless it is rejected.
+</note>
+
+<note date="2026-11-04">
+The chain of steps is replaced by [ADR-0207](0207-a-background-job-is-one-hermes-run.md):
+a job is one Hermes run of at most 50 minutes, warned at 80% of its cost or time limit
+and stopped at the limit with a short note of what is done and left instead of a
+report; a failed run is relaunched at most twice. There is no continue or wrap-up step,
+and `job_too_long` now means a time limit past 50 minutes. Stop is also a button on a
+running job's card, by the same rule.
+</note>
 
 <consequences>
 - Any long instruction can run as a job; the instruction and the agent's own

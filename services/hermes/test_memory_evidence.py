@@ -28,6 +28,38 @@ class MemoryEvidenceTests(unittest.TestCase):
             finally:restore()
         self.assertIs(evidence.inject({'input':history})['input'],history)
 
+    def test_anthropic_evidence_comes_before_the_conversation_and_holds_through_a_turn(self):
+        # The model sees the evidence where the OpenAI-compatible route puts it, before the
+        # conversation and the current request. Within a turn it does not change, so each
+        # call's request starts the next one's and the prompt cache keeps the turn.
+        def call(memory,payload,anthropic=None):
+            with patch.multiple(evidence,_active=True,_native=['native note'],_recalled={'memory':memory}):
+                return evidence.inject(copy.deepcopy(payload),anthropic)
+        def entries(block):return json.loads(block['text'][len(evidence.PREFIX):])['entries']
+        system=[{'type':'text','text':'instructions'}]
+        history=[{'role':'user','content':'first'},{'role':'assistant','content':[{'type':'text','text':'answer'}]}]
+        current={'role':'user','content':[{'type':'text','text':'second','cache_control':{'type':'ephemeral'}}]}
+        first=call('turn one',{'system':system,'messages':[*history,current]})
+        self.assertEqual(first['system'],system)
+        self.assertEqual(entries(first['messages'][0]['content'][0])[1]['content'],{'memory':'turn one'})
+        self.assertEqual(first['messages'][0]['content'][1:],[{'type':'text','text':'first'}])
+        self.assertEqual(first['messages'][1:],[history[1],current])
+        self.assertEqual([m['role'] for m in first['messages']],['user','assistant','user'])
+        # The tool loop: every earlier message of the call is sent again unchanged.
+        loop=[{'role':'assistant','content':[{'type':'tool_use','id':'c','name':'f','input':{}}]},
+              {'role':'user','content':[{'type':'tool_result','tool_use_id':'c','content':'result'}]}]
+        second=call('turn one',{'system':system,'messages':[*history,current,*loop]})
+        self.assertEqual(second['messages'][:3],first['messages'])
+        self.assertEqual(second['messages'][3:],loop)
+        # A one-message turn and a request without a system prompt.
+        bare=call('turn one',{'messages':[{'role':'user','content':'only'}]},anthropic=True)['messages']
+        self.assertEqual(len(bare),1);self.assertEqual(bare[0]['content'][1],{'type':'text','text':'only'})
+        self.assertTrue(bare[0]['content'][0]['text'].startswith(evidence.PREFIX))
+        # The OpenAI-compatible route keeps the evidence as its own message before the conversation.
+        chat=call('turn one',{'messages':[{'role':'system','content':'instructions'},*history]})['messages']
+        self.assertEqual(chat[0],{'role':'system','content':'instructions'});self.assertEqual(chat[2:],history)
+        self.assertTrue(chat[1]['content'].startswith(evidence.PREFIX))
+
     def test_native_rebuild_refreshes_evidence_and_missing_transport_fails_closed(self):
         from agent import system_prompt,context_compressor
         original=context_compressor.SUMMARY_PREFIX

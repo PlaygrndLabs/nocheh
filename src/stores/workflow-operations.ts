@@ -152,7 +152,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         throw new HttpError(503,'invalid_organization_outcome');
       });
     },
-    telegram:(id,authority)=>s.telegram.run(id,authority),
+    // A job id `continue:<action>` is an approved operation's follow-up turn in the chat that asked; others are event ids.
+    telegram:(id,authority)=>id.startsWith('continue:')?s.continuations.run(id.slice(9),authority):s.telegram.run(id,authority),
     browser:(id,authority)=>s.browser.run(id,authority),
     schedules:(id,authority)=>s.scheduled.operation(id,authority),
     background:(id,authority)=>s.jobs.operation(id,authority),
@@ -210,29 +211,38 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       let row=await s.reviews.inspect(id);
       if(row.paused)return waiting('review','owner_paused');
       if(row.state==='done')return observation('completed','review',row.attempts);
-      if(row.state==='pending'&&row.attempts===0&&canonical(row.binding)!==canonical(await s.guards.state())) {
-        // A newer epoch renews a review that never started where it waits, instead of closing it for the next sweep to queue again.
-        const renewed=await fenced('memory_review',authority,async()=>(await s.reviews.queue(row.source_reference)).includes(id)?
-          observation('running','review'):observation('skipped','review',0,Date.now(),'superseded'));
-        if(renewed.state!=='running')return renewed;
+      if(row.state==='pending') {
+        try {
+          if(canonical(row.binding)!==canonical(await s.guards.state())) {
+            // A newer epoch renews a waiting review (never started, or failed without changing notes) where it waits,
+            // instead of closing it for the next sweep to queue again.
+            const renewed=await fenced('memory_review',authority,async()=>(await s.reviews.queue(row.source_reference)).includes(id)?
+              observation('running','review'):observation('skipped','review',0,Date.now(),'superseded'));
+            if(renewed.state!=='running')return renewed;
+            row=await s.reviews.inspect(id);
+          }
+          // A native note review can hold this background slot for minutes. Give
+          // current primary-memory writes their first attempt before starting it.
+          // Started/uncertain reviews must still reconcile their existing effect.
+          await s.guards.assertCurrent(row.binding);
+          const initial=(await control.query(`SELECT 1 FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
+            JOIN memory_engine_connection c ON c.singleton AND c.attached
+            WHERE g.installation_generation=$1 AND g.state<>'retired' AND r.retired_at IS NULL
+            AND r.state='pending' AND r.attempts=0 AND r.error_code IS NULL AND r.next_attempt<=now() LIMIT 1`,
+            [row.binding.generation])).rowCount;
+          if(initial)return waiting('review','prerequisite',10000);
+          // Hermes runs one native review at a time, so a waiting review doesn't ask while another is running.
+          if((await control.query(`SELECT 1 FROM native_review_jobs WHERE state='running' AND id<>$1 AND updated_at>now()-interval '10 minutes' LIMIT 1`,[id])).rowCount)
+            return waiting('review','prerequisite',15000);
+          if(row.next_attempt<=new Date())await s.reviews.run(id,authority);
+        }catch(error) {
+          // An epoch that lands while a waiting review is renewed, checked or started renews it on the next look, instead of closing it.
+          if(error instanceof HttpError&&['guard_context_changed','audience_context_changed'].includes(error.code))return waiting('review','guard_pending',2000);
+          throw error;
+        }
         row=await s.reviews.inspect(id);
       }
-      if(row.state==='pending') {
-        // A native note review can hold this background slot for minutes. Give
-        // current primary-memory writes their first attempt before starting it.
-        // Started/uncertain reviews must still reconcile their existing effect.
-        await s.guards.assertCurrent(row.binding);
-        const initial=(await control.query(`SELECT 1 FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
-          JOIN memory_engine_connection c ON c.singleton AND c.attached
-          WHERE g.installation_generation=$1 AND g.state<>'retired' AND r.retired_at IS NULL
-          AND r.state='pending' AND r.attempts=0 AND r.error_code IS NULL AND r.next_attempt<=now() LIMIT 1`,
-          [row.binding.generation])).rowCount;
-        if(initial)return waiting('review','prerequisite',10000);
-        // Hermes runs one native review at a time, so a waiting review doesn't ask while another is running.
-        if((await control.query(`SELECT 1 FROM native_review_jobs WHERE state='running' AND id<>$1 AND updated_at>now()-interval '10 minutes' LIMIT 1`,[id])).rowCount)
-          return waiting('review','prerequisite',15000);
-      }
-      if(row.next_attempt<=new Date()){await s.reviews.run(id,authority);row=await s.reviews.inspect(id);}
+      else if(row.next_attempt<=new Date()){await s.reviews.run(id,authority);row=await s.reviews.inspect(id);}
       // Uncertain native effects are observed under the same identity. Inngest
       // schedules reconciliation; no timer or fresh execution identity retries it.
       // After a bounded number of observations the review stays uncertain and its workflow closes.

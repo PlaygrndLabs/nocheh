@@ -18,7 +18,7 @@ DEFAULTS = {
     'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_MODEL': 'claude-sonnet-5-5',
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
-    'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}', 'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true',
+    'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}', 'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true',
     'TELEGRAM_PROBLEM_NOTICES': 'true', 'NOCHEH_DASHBOARD_URL': '',
     'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
@@ -242,6 +242,7 @@ def validate(values):
     if values.get('TELEGRAM_GROUP_REPLIES','addressed') not in ('addressed','all'):raise ValueError('TELEGRAM_GROUP_REPLIES must be addressed or all')
     if values.get('TELEGRAM_TOPIC_MEMORY','group') not in ('group','topic'):raise ValueError('TELEGRAM_TOPIC_MEMORY must be group or topic')
     if values.get('TELEGRAM_TYPING','true') not in ('true','false'):raise ValueError('TELEGRAM_TYPING must be true or false')
+    if values.get('TELEGRAM_REACTIONS','true') not in ('true','false'):raise ValueError('TELEGRAM_REACTIONS must be true or false')
     if values.get('TELEGRAM_PROBLEM_NOTICES','true') not in ('true','false'):raise ValueError('TELEGRAM_PROBLEM_NOTICES must be true or false')
     if values.get('NOCHEH_DASHBOARD_URL') and not re.fullmatch(r'https?://[^\s/?#]+(?:/[^\s?#]*)?',values['NOCHEH_DASHBOARD_URL'][:300]):
         raise ValueError('NOCHEH_DASHBOARD_URL must be an http or https address such as https://nocheh.example.com')
@@ -255,11 +256,34 @@ def validate(values):
     if not values['NOCHEH_PORT'].isdigit() or not 1024 <= int(values['NOCHEH_PORT']) <= 65535: raise ValueError('Invalid NOCHEH_PORT')
     for name in ('POSTGRES_PASSWORD', 'SERVICE_TOKEN'):
         if len(values[name]) < 24: raise ValueError(f'{name} must contain at least 24 characters')
+    # Only the broker and the launcher hold the sealed job box token, so it is never the shared one.
+    # It is no setting: initialize() and make dev fill it when empty, and Settings never shows or edits it.
+    box=values.get('NOCHEH_BOX_TOKEN')
+    if box and (len(box)<32 or box==values['SERVICE_TOKEN']):raise ValueError('NOCHEH_BOX_TOKEN must contain at least 32 characters and differ from SERVICE_TOKEN')
+    # Every job that may run at once (two) must be able to have its box.
+    if not re.fullmatch(r'[2-8]',str(values.get('NOCHEH_BOX_LIMIT','2'))):raise ValueError('NOCHEH_BOX_LIMIT must be 2-8')
+
+
+GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD')
+
+
+def generate(values, names=GENERATED):
+    """Fills each missing internal credential; `make dev`, which never runs initialize(), fills only the box token."""
+    for name in names:
+        if not values.get(name): values[name] = secrets.token_hex(32)
+    return values
+
+
+def github_folders(state):
+    """The GitHub copies folder (ADR-0209), one level at a time: mkdir(parents=True) would give `github` the default mode."""
+    (Path(state) / 'github').mkdir(exist_ok=True, mode=0o700)
+    (Path(state) / 'github/copies').mkdir(exist_ok=True, mode=0o700)
 
 
 def initialize(state):
     state = Path(state).resolve()
     for name in ('files', 'spool', 'hermes', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
+    github_folders(state)
     path = env_path(state); existing = read_env(path)
     values = dict(DEFAULTS)
     values.update(existing)
@@ -267,8 +291,7 @@ def initialize(state):
     if 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))
-    for name in ('POSTGRES_PASSWORD','SERVICE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD'):
-        if not values[name]: values[name] = secrets.token_hex(32)
+    generate(values)
     if values['NOCHEH_HONCHO_ENABLED']=='true' and owns_project(state):
         # `make dev` reads Honcho's volumes from .env, so setup saves the ones Compose uses. Honcho's
         # folder stays unsaved and follows the checkout. A state without its own project gets no

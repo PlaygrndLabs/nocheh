@@ -16,6 +16,7 @@ import {ManagementMaintenance} from './management-maintenance.js';
 import {DashboardLiveUpdates} from './dashboard-live.js';
 import {OwnerLock} from './owner-lock.js';
 import {miniAppRoute} from './mini-app.js';
+import {githubReturn} from './github-return.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
@@ -121,6 +122,11 @@ async function exclusive<T>(id: string, run: () => Promise<T>): Promise<T> {
   if (locked.has(id)) throw new HttpError(409, 'job_busy');
   locked.add(id); try { return await run(); } finally { locked.delete(id); }
 }
+/** Whether a backup, restore or restart must wait: one already runs, a child process works for an import or an apply,
+ *  or a GitHub copy or refresh runs, whose fetcher a stopped app would leave behind (ADR-0209). */
+export function operationBlocked(state:{busy:boolean;active:number;locked:ReadonlySet<string>}):boolean {
+  return state.busy||state.active>0||state.locked.has('github-connection');
+}
 const runningTasks = new Set<Promise<void>>();
 const maintenance=new ManagementMaintenance();
 function launch(job: Job, body: Record<string, unknown>, coordinator?:string) {
@@ -220,13 +226,13 @@ export async function startManagement() {
     if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
     if(!opened&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
-  /** The dashboard page opened in a tab from another site, as Notion's sign-in does when it sends the browser back. */
+  /** The dashboard page opened in a tab from another site, as Notion's and GitHub's sign-ins do when they send the browser back. */
   const openedFromAnotherSite=(req:IncomingMessage)=>req.method==='GET'&&req.headers['sec-fetch-site']==='cross-site'&&
-    req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&new URL(req.url??'/','http://local').pathname==='/';
+    req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&['/','/connect/github'].includes(new URL(req.url??'/','http://local').pathname);
   /** Starts an enumerated operation; callers hold the writer-start lock. `request` is the
    * caller's own admitted request, which a backup's drain must not wait for. */
   async function startOperation(action:string,options:unknown,request:symbol,automatic=false):Promise<Job> {
-    if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
+    if(operationBlocked({busy:operationBusy,active:active.size,locked}))throw new HttpError(409,'wait_for_active_jobs');
     operationBusy=true;
     let coordinator:string|undefined,job:Job|undefined;
     try {job=await newJob('operations.'+action);job.state='running';if(automatic)job.automatic=true;await putJob(job);
@@ -343,6 +349,16 @@ export async function startManagement() {
       if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
+      // Nocheh's GitHub App and the copies background jobs may read (ADR-0209, ADR-0210). The app's key never comes
+      // back. A copy, a list and the hourly check run one at a time. Connecting, Remove and Disconnect never wait for
+      // them: github.py's short file lock and the store order them with a copy that is still running.
+      if(req.method==='GET'&&route==='/connections/github')return json(res,200,await python({operation:'github.status'}));
+      const github=route.match(/^\/connections\/github\/(start|finish|copy|list|remove|disconnect)$/)?.[1];
+      if(req.method==='POST'&&github){
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        const run=async()=>json(res,200,await python({operation:'github.'+github,request:object(await readJson(req))}));
+        return ['start','finish','remove','disconnect'].includes(github)?run():exclusive('github-connection',run);
+      }
       // The mini app's password. The owner sets it here; the mini app service signs in and
       // checks its sessions through the same routes.
       // The owner's password, from a signed-in browser only.
@@ -461,6 +477,8 @@ export async function startManagement() {
     res.setHeader('x-frame-options','DENY');res.setHeader('referrer-policy','no-referrer');res.setHeader('x-content-type-options','nosniff');
     if(req.method==='GET'&&(path==='/nocheh'||path==='/nocheh/')){res.writeHead(308,{location:'/'+url.search});res.end();return;}
     if(req.method==='GET'&&path==='/hermes'){res.writeHead(308,{location:'/hermes/'+url.search});res.end();return;}
+    // GitHub's way back after it created Nocheh's app or installed it; the page finishes it (ADR-0210).
+    if(req.method==='GET'&&path==='/connect/github'){res.writeHead(302,{location:githubReturn(url.searchParams),'cache-control':'no-store'});res.end();return;}
     if(process.env.NOCHEH_DEV_WATCH==='1'&&req.method==='GET'&&path==='/__dev/revision') {
       const revision=await readFile(join(ROOT,'dashboard/dist/.dev-revision'),'utf8').catch(()=>'');
       res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});res.end(revision);return;
@@ -518,9 +536,10 @@ export async function startManagement() {
   // waits for the next check; the schedule records each start, so a failure is not retried
   // until the next day.
   const automaticBackup=async()=>{
-    if(stopping||operationBusy||active.size||maintenance.active||locked.has('writer-start'))return;
+    const blocked=()=>operationBlocked({busy:operationBusy,active:active.size,locked});
+    if(stopping||maintenance.active||locked.has('writer-start')||blocked())return;
     if(object(await python({operation:'backups.due'})).due!==true)return;
-    await exclusive('writer-start',async()=>{if(!stopping&&!operationBusy&&!active.size)await startOperation('backup',{},Symbol('schedule'),true);});
+    await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('backup',{},Symbol('schedule'),true);});
   };
   const schedule=setInterval(()=>void automaticBackup().catch(()=>{}),5*60*1000);schedule.unref();
   // Every two minutes, new or worse problems go to the owner's private chat. Backups, restores
@@ -531,8 +550,14 @@ export async function startManagement() {
     checkingProblems=true;
     void python({operation:'problems.check'}).catch(()=>{}).finally(()=>{checkingProblems=false;});
   },2*60*1000);problemCheck.unref();
+  // Every hour, each GitHub copy is copied again when its branch moved (owner decision D1). A key, copy or check still
+  // running, a backup, a restore or an apply skips the hour.
+  const githubCheck=setInterval(()=>{
+    if(stopping||operationBusy||maintenance.active||locked.has('github-connection'))return;
+    void exclusive('github-connection',()=>python({operation:'github.refresh'})).catch(()=>{});
+  },60*60*1000);githubCheck.unref();
   const stop = () => {
-    if(stopping)return;stopping=true;clearInterval(schedule);clearInterval(problemCheck);
+    if(stopping)return;stopping=true;clearInterval(schedule);clearInterval(problemCheck);clearInterval(githubCheck);
     live.closeAll();
     for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');

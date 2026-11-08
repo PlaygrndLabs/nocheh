@@ -14,7 +14,8 @@ export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:owner-autonomy|n
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
   owns(path:string):boolean {
-    return /^\/v1\/imports\/legacy(?:\/[a-f0-9]{64}|\/files\/[a-f0-9]{64}\/bytes)?$/.test(path)||ownerStoragePath(path)||/^\/v1\/(?:exports\/(?:sources|derivatives(?:\/types)?|derivative-history)|imports\/(?:sources|derivatives(?:\/verify)?)|original-files\/[a-f0-9]{64}\/bytes)$/.test(path);
+    // The GitHub copies are management's alone: never an ownerStoragePath, which a browser reaches through the dashboard.
+    return /^\/v1\/imports\/legacy(?:\/[a-f0-9]{64}|\/files\/[a-f0-9]{64}\/bytes)?$/.test(path)||ownerStoragePath(path)||/^\/v1\/(?:exports\/(?:sources|derivatives(?:\/types)?|derivative-history)|imports\/(?:sources|derivatives(?:\/verify)?)|original-files\/[a-f0-9]{64}\/bytes)$/.test(path)||path==='/v1/background-jobs/copies';
   }
   async request(principal:Reader,method:string,url:URL,input?:unknown):Promise<unknown> {
     admin(principal);const path=url.pathname,s=this.services,q=url.searchParams;
@@ -28,6 +29,7 @@ export class OwnerStorageApi {
     if(path==='/v1/background-jobs/settings')return method==='GET'?s.jobs.settings():s.jobs.saveSettings(principal,input);
     const background=path.match(/^\/v1\/background-jobs\/([a-f0-9]{64})\/stop$/);
     if(background&&method==='POST'){const stopped=await s.jobs.stop(principal,{id:background[1]});await s.actionCommands.settle('background',background[1]!);return stopped;}
+    if(path==='/v1/background-jobs/copies')return method==='GET'?s.jobs.copies(principal):s.jobs.changeCopies(principal,input);
     if(path==='/v1/tasks')return method==='GET'?s.tasks.list(principal,taskQuery(q)):s.tasks.create(principal,input);
     if(path==='/v1/tasks/settings')return method==='GET'?s.tasks.settings(principal):s.tasks.saveSettings(principal,input);
     if(path==='/v1/tasks/archive-finished'&&method==='POST')return s.tasks.archiveFinished(principal,input);
@@ -123,7 +125,7 @@ export class OwnerStorageApi {
       if(source[2]==='retirement'){
         if(method==='GET')return s.retirements.get(principal,captured.reference.id);
         const result=await s.retirements.set(principal,captured.reference.id,input);
-        if(result.retired)await s.telegram.cancelRetired(await s.retirements.events(captured.reference.id));
+        if(result.retired){const events=await s.retirements.events(captured.reference.id);await s.telegram.cancelRetired(events);await s.continuations.cancelRetired(events);}
         return result;
       }
       if(source[2]==='learning-consent')return method==='GET'?s.access.consent(principal,captured.reference):s.access.setConsent(principal,captured.reference,input);

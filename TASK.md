@@ -16,8 +16,21 @@ Notices carry Open (mini app Health page, else the dashboard address) and Retry
 failed buttons (owner, 2026-10-28: "better to have action btn for errors to
 dashboard or directly action, also better to open in mini app"). Failed model
 calls keep a reason code, and notices and Health say why they failed (owner,
-2026-10-29: "all yes" to keeping failure reasons). Pending: a live button press
-on a running installation.
+2026-10-29: "all yes" to keeping failure reasons). They also keep the provider's
+exact error as codes, such as overloaded with HTTP 529, and say it (owner,
+2026-11-08: "yes fix it" to keeping the exact error for clearer notices;
+[record](services/hermes/test_usage.py), [notice](services/hermes/test_problem_notices.py)).
+A run Hermes stopped itself (`loop_error`) is named by its stop and not called a
+provider error; the first live ones, three memory-notes runs on 2026-11-08, kept no more
+detail than `loop_error`.
+When a problem clears, its notice is edited in place: the line stays as sent and a short
+✅ line under it says when it cleared, such as "Fixed at 12:06 UTC". The notice loses
+its buttons once all its problems cleared, and takes the ✅ line back if the problem returns
+within the quiet hour (owner, 2026-11-08: "show it resolved in
+chat by update msg or reaction or reply", then "show check in new row with a short text";
+[follow-up](services/hermes/test_problem_notices.py),
+[edit](services/hermes/test_approval_cards.py)). Pending: a live button press on a running
+installation, and a live notice that names a provider's exact error and is then marked ✅.
 
 Get started (owner, 2026-11-01: "yes" to a small checklist on Home, a "Find my
 Telegram ID" button and a warning when the OpenAI key is missing, before the server
@@ -27,6 +40,190 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [discovery](services/hermes/test_telegram_directory.py),
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
+
+Secret check connection failures (2026-11-08): the owner's installation counted
+secret-check calls that failed with no provider status, 12 on one model and, after a
+switch, 26 on the next, with no refusals and no hidden texts; in the same window a
+memory-search call to another provider stalled and failed. They were dropped
+or stalled connections, not the model. Each check opened a new HTTPS connection;
+checks now reuse the process's open connections to the provider
+([check](services/hermes/test_subscription_detector.py)). Pending: a failed secret
+check on a running installation that names its cause.
+
+Stuck notes review (2026-11-08): on the owner's installation one Hermes native notes
+review failed once without changing notes, came due again two minutes later under a
+newer epoch, and its workflow closed as superseded; nothing asked for it again, so it
+stayed waiting while the other reviews drained. Failed reviews now renew under a newer
+epoch like never-started ones and keep their attempt count, Hermes keeps a failed marker
+that outlives the old epoch's profile, a source's step reopens a waiting review's closed
+workflow, and an epoch that lands mid-check makes the workflow wait and renew
+([ADR-0216](docs/adr/0216-failed-reviews-keep-their-place-across-epochs.md),
+[check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
+Once live, the source's step deleted that review instead, because another fragment of
+the same long source had already run; waiting fragments of a reviewed source now keep
+their place while their own text is unchanged
+([ADR-0217](docs/adr/0217-waiting-fragments-keep-their-place.md)). The deleted fragment
+is not queued again.
+
+Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
+build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
+task table against a group chat): long tool results are read in parts
+([check](services/hermes/test_action_results.py)). Waiting and approved tool
+actions, such as Notion calls, survive reactions in any chat and automatic learning
+revisions (owner, 2026-11-03: "Keep them valid"), then run when approved, and a later turn or
+job step of the asking chat reads its own action; any other epoch change still
+stops them, and the reader then sees only the state
+([ADR-0200](docs/adr/0200-waiting-approvals-survive-reaction-epochs.md),
+[check](test/store-quiet-epochs.test.ts)). A job's report is sent after
+reactions too, and after learning revisions by the same quiet-epoch rule (its own check
+covers reactions only); any other change after its run sends no further part of the
+report and ends the job as failed (`job_report_outdated`), and Stop sends no
+further part either ([ADR-0201](docs/adr/0201-job-reports-survive-reaction-epochs.md),
+[check](test/store-background-job-epochs.test.ts)). An approved tool action's card
+now says whether it finished, failed or did not run, with a reason from fixed codes
+in the owner's texts; a tool's own error counts as failed; a card that a job asked
+for names the job, and the job's agent does not wait for it; a later turn or step
+lists its operations when it no longer holds their IDs
+([ADR-0202](docs/adr/0202-approved-actions-report-how-they-ended.md),
+[cards](test/store-approval-buttons.test.ts), [list](test/store-quiet-epochs.test.ts)).
+The executor checks the tool settings of the action's chat, so an action that
+carried, or one a job asked for, runs once approved
+([check](services/hermes/test_runtime_profiles.py), [fake Telegram](tools/acceptance/product_scenarios.py):
+`approval_waits_across_a_change_and_runs`, `job_operation_runs_after_approval`).
+Still open: a shell approval that waits past its profile's 15 idle minutes fails
+without running, and another pending publication between claim and start ends an
+action as ambiguous.
+A step of a job the owner asked for and approved in their private chat reads
+Notion as the owner's setting allows; its changes always ask, even under "Nothing
+asks me"; group and member jobs never reach Notion; scheduled tasks ask for every
+call; the job's card says what it may read without asking; Stop stops a read that
+has not started ([ADR-0203](docs/adr/0203-owner-approved-jobs-read-notion.md),
+[check](test/store-background-job-notion.test.ts)).
+A running job's waiting operations get no card; after its report they come on as
+few cards as fit, each showing every change exactly and decided as a whole by the
+owner, and each card says how its changes ended; Stop rejects them
+([ADR-0204](docs/adr/0204-a-jobs-changes-come-on-list-cards.md),
+[check](test/store-background-job-changes.test.ts)).
+Step 3, the sealed box: a job the owner asks for in their private chat can get
+a sealed box while "Sealed box for jobs" in Settings › Assistant is on (the
+default); its card says so, and the box is part of its fingerprint. Its run uses
+Hermes's own terminal, file and Python tools in a container with no network,
+keys or Docker socket, and a read-only copy of the job's chat that passed the
+secret check. The box is kept while only reactions or automatic learning change
+and the last run ended normally, and removed within 15 seconds once the job stops, the switch goes off or
+its time is up; a launcher touches only its own installation's boxes. A box
+command never outlives its run. A `/chat` that runs out of room stops for good and
+its manifest says `full`. A failed box job says `job_box_unavailable`, and a box
+request in the legacy runtime is refused. Those runs lose the approved shell, the
+browser, Hermes memory and subagents, and the tools are blocked in every other
+turn. Notion reads are an exact list of read tools, and
+a job's fetch by an address outside notion.so asks. Link previews are off for
+every message the bot sends or edits
+([ADR-0205](docs/adr/0205-owner-approved-jobs-work-in-a-sealed-box.md),
+[stores](test/store-job-box.test.ts), [launcher](services/hermes/test_box_launcher.py),
+[box server](services/hermes/test_box_server.py), [backend and hook](services/hermes/test_job_box.py),
+[previews](services/hermes/test_link_previews.py)). The end-to-end check is the
+full tester scenario `background_job_uses_sealed_box`
+([tester scenario](tools/acceptance/product_scenarios.py)). On the fake Telegram,
+with made-up group messages and a scripted model, a job's terminal, read_file and
+execute_code calls ran in its box, the result file never appeared in the turn, the
+report reached the owner, and the box was gone when the job was done. It passed on
+a fresh fixture, and failed as expected when the launcher had no box token. Not
+yet run with a real model.
+Step 4, GitHub copies: the owner presses Connect GitHub once in Settings › Connections ›
+GitHub, which makes Nocheh's own read-only GitHub App, picks repositories on GitHub and
+copies one there. A box job the owner asks for in
+their private chat can read one copy. Its card names the repository, branch, commit
+and size, and every run of the job, relaunches too, finds that commit read-only in
+`/repo/code` in its box, with git and rg. Only a fresh fetcher container's fetch step
+holds a key, one that lasts an hour and reads only that repository; no key reaches the box, the launcher, Hermes, a turn, the database
+or a log. Remove and Disconnect answer at once: they withdraw waiting cards, stop
+jobs that have not started and remove running jobs' boxes. Nocheh checks for new
+commits every hour, and a refused app raises one problem notice
+([ADR-0209](docs/adr/0209-owner-approved-jobs-read-a-github-copy-in-their-box.md),
+[ADR-0210](docs/adr/0210-github-access-goes-through-nochehs-own-github-app.md),
+[stores](test/store-job-repo.test.ts), [sign-in and copies](services/hermes/test_github_connection.py),
+[fetcher](services/hermes/test_repo_fetch.py), [writer](services/hermes/test_box_repo.py),
+[launcher](services/hermes/test_box_launcher.py)). The end-to-end check is the full
+tester scenario `background_job_reads_a_repo_copy`
+([tester scenario](tools/acceptance/product_scenarios.py),
+[fake GitHub](tools/acceptance/github_mock.py)). On a fake GitHub with a made-up
+repository, the Settings routes made and installed the app and copied it, a job read the history with
+git, searched and read files in its box, and a key committed in the repository came
+back masked (Hermes's own redaction masked it first, keeping 6 and 4 characters). Neither
+the app's key nor a short repo key was found in the box, the launcher, the job and copy
+rows, a dashboard answer or any request but GitHub's, and a relaunch got a new box at the same commit. Remove, Copy again, a refused app and
+Disconnect each did what the card says. It passed together with
+`background_job_uses_sealed_box` on a fresh fixture. Not yet run against real GitHub or
+with a real model. Open owner questions D1 to D4 are in ADR-0209; Nocheh is built as
+recommended until they are answered.
+Open owner questions: does the owner accept, in their own words, the new SPECS
+lines that a reaction change or a learning revision does not stop a waiting or approved proposal, that a
+card says how an approved operation ended and which job or schedule asked, that
+jobs the owner approved use Notion, that a job's changes come on list cards, and
+that a job the owner approved can work in a sealed box? They are not yet accepted.
+Telegram message
+requests keep the exact-epoch rule, so a reaction or a learning revision in the seconds between
+staging a report part and sending it still cancels that part and fails the job.
+An owner cancel from Workflows does not edit the card yet.
+The box rests on Hermes internals, so each Hermes upgrade must run the box checks
+again: the backend and hook tests (the hook blocks the box tools elsewhere, and
+oversized results keep their preview) and the `background_job_uses_sealed_box`
+scenario (terminal, read_file and execute_code run in the box). Still open by
+design: no gVisor or user namespace remapping on the default host, one uid for the
+box server and its commands, and the secret check of box output is not counted in
+the job's cost. Follow-up, not built now: retention for `runtime_prepared_values`,
+an older gap (see Storage growth below). Nothing deletes its rows, and each secret
+check loads every row of its audience and epoch; box pages are not added to it.
+Pending: a live check: ask for a Notion change, react in a group, then approve;
+a job whose report comes after a reaction in a group; a Notion call that fails
+and one that finishes, each showing it on its card; a job in the owner's
+private chat that reads a real Notion table; a box job that checks a real Notion
+table against a group chat; and turning the box switch off while a box job runs.
+A job as one Hermes run (owner, 2026-11-04, four choices): a job runs at most 50
+minutes in one go, and bigger work becomes several jobs that the agent splits itself;
+at 80% of its cost or time limit the agent is warned so it writes its report, and at
+the limit Nocheh stops it and sends a short note of what is done and left, from its
+last to-do list and with no model call; a running job's card has a Stop button.
+Choice 2 (owner, 2026-11-04): reactions and automatic learning keep updating while a
+job runs, and its run carries across them; other changes still wait for the run or
+end it, and a relaunch after only quiet epochs keeps its history
+([ADR-0208](docs/adr/0208-running-jobs-carry-across-quiet-epochs.md),
+[stores](test/store-background-job-carry.test.ts), fake Telegram:
+`background_job_reaction_during_run` and `background_job_restart`, whose case (b) now
+resumes and whose case (c) restarts after a hide). Pending for choice 2: run both
+scenarios on the fake Telegram, and measure on the owner's installation, with a long
+job in a busy group, the secret-check cost of re-checking a carried run's resent
+history in each new epoch (ADR-0208). Built in source: one
+sealed run per job with per-call cost counting, both notices, the limit note, at most
+two relaunches with a resume or restart message, and Stop on the card
+([ADR-0207](docs/adr/0207-a-background-job-is-one-hermes-run.md),
+[stores](test/store-background-job-runs.test.ts), [turn](services/hermes/test_job_progress.py),
+[fake Telegram](tools/acceptance/product_scenarios.py): `background_job_long_run`,
+`background_job_cost_cap`, `background_job_time_limit`, `background_job_stop_button`,
+`background_job_restart`). Neither ADR-0207's nor ADR-0208's scenarios have been run
+on the fake Telegram or with a real model yet.
+Prompt caching (owner, 2026-11-01: "I want to make sure that we comply with this in
+Nocheh", after Anthropic reported a low cache hit rate on the account's key; merge only
+if replies stay the same and it is not less efficient): no Anthropic call was cached,
+because every provider was reached through its OpenAI-compatible API. Replies and
+memory-notes reviews on the Anthropic preset now use Anthropic's Messages API through
+the broker with Hermes's own cache breakpoints. They keep the same model, tools,
+thinking, review budget and step-limit summary; the memory evidence stays before the
+conversation; a profile remembers each session's prompt; and Usage shows the cached share
+of input
+([ADR-0199](docs/adr/0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md),
+[broker](test/security-broker.test.ts), [boundary](test/security-contract.test.ts),
+[evidence](services/hermes/test_memory_evidence.py)). The secret check, privacy filter,
+image reads and Honcho's deriver are too short or one-off to cache. Live since
+2026-11-03 with no failed or refused calls: memory-notes reviews cost 26-38% less per
+call, and a two-call reply about 26% less than the same calls uncached (measured with the
+evidence as the request's last block). In that layout reviews took a second model call,
+a tool step, in 34% of runs instead of 83%, with no note changes in either period, so
+the evidence moved back before the conversation, where it was. Pending: the same share
+on live reviews after the move; if it stays low, a side-by-side replay of fixed sources,
+old route against new, to test the thinking default. Next:
+Honcho's reasoning calls through its own Messages API support.
 
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for
@@ -68,8 +265,8 @@ instruction ([ADR-0194](docs/adr/0194-images-are-read-by-the-runtime-vision-tool
 checked with made-up images and a stand-in provider in the Hermes image.
 Pending: a large made-up import on a running installation, a real voice note
 and photo on the development machine, then reading a chat in order with
-project-level role and skills (part 3), background sessions on Hermes Kanban
-(part 4).
+project-level role and skills (part 3), background jobs as one Hermes run
+(part 4, [ADR-0207](docs/adr/0207-a-background-job-is-one-hermes-run.md)).
 
 Honcho memory on by default (owner, 2026-10-23: "turn it on default.", then
 chose to drop the live safety check): with the Honcho service enabled, the store
@@ -131,8 +328,10 @@ a withheld turn's memory call wrote, checked before every turn
 Hermes native notes reach every turn. With the memory evidence on, Hermes read the
 notes only when it built a session's prompt, so the later turns of a session carried
 none. Each turn now reads them itself, and the stored prompt stays the same
-([checks](services/hermes/test_memory_evidence.py)). Pending: the same checks in the
-Hermes image on the owner's machine, and a live reply after the pull.
+([checks](services/hermes/test_memory_evidence.py)). The checks passed in the Hermes
+image on the owner's machine, and replies went through after the pull. The full tester
+saves a note and checks that the chat's next two messages still carry it
+([scenario](tools/acceptance/product_scenarios.py), [fixture model](test/test_scripted_brain.py)).
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
@@ -692,6 +891,72 @@ itself at startup.
 
 <verification>
 
+- One message when already allowed, stage C (2026-11-08,
+  [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)): an
+  operation that a rule or the owner freedom setting already allows is waited for
+  in the turn, up to 60 seconds, and answers in that reply. Once the tool holds
+  the result, it notes the state it read; the follow-up skips only that answer,
+  and a lost note or a follow-up turn's note leaves the follow-up in place. Checks:
+  [in-turn wait](services/hermes/test_action_results.py),
+  [skip rule](test/action-continuations.test.ts),
+  [marks and skips](test/store-action-continuations.test.ts), and the tester
+  scenario `allowed_command_runs_without_a_card`.
+- Allow a site or command in one chat, stage B (2026-11-08,
+  [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md)): the owner
+  asked for Claude Code-style auto-approve built on Hermes's approval words. A web
+  read's card offers Allow once, Allow where asked for 12 hours, Always allow this
+  site where asked and Reject; a command's card, Allow once, Always allow it where asked and
+  Reject. A chat rule covers one site or exact command in one chat or topic, and
+  survives epochs; deny rules still win. Checks:
+  [rules](test/store-action-rules.test.ts), the gateway's
+  [card buttons](services/hermes/test_approval_cards.py), and the tester scenario
+  `allowed_command_runs_without_a_card`.
+- Answers come back to the chat that asked, stage A (2026-11-08,
+  [ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md)):
+  the owner decided that once an approved operation ends, the agent continues in
+  the chat that asked and answers there. The details follow the plan's
+  recommendations and await the owner's review: the answer is a reply to the
+  asking message in its topic, a rejected, failed or unconfirmed operation still
+  gets one short line, one asking message gets at most three follow-ups, and the
+  first reply says the answer will follow. Each end state of a live conversation's operation now
+  commits a follow-up row and a `continue:` workflow; the follow-up waits for the
+  asking reply, merges siblings, skips the owner's own private rejection, and
+  starts a Hermes turn through an internal event; the text that starts it is
+  "After an approved operation ends" in Settings › Instructions. Checks:
+  [helpers](test/action-continuations.test.ts),
+  [follow-ups](test/store-action-continuations.test.ts),
+  [trigger](test/store-controlled-execution.test.ts),
+  [wording](test/store-approval-buttons.test.ts), and the tester scenarios
+  `approval_waits_across_a_change_and_runs` (private chat) and
+  `group_operation_answers_in_topic` (group topic). Later stages, not built:
+  allow buttons with chat grants (B), and a short in-turn wait for an operation
+  already approved (C). A follow-up interrupted by a runtime restart stays
+  uncertain; a follow-up that failed three times is not retried from the
+  Workflows page.
+- A decided card loses its buttons, and a refused page read is a failure (2026-11-08):
+  a group weather read's card kept Approve and Reject after the owner approved it,
+  because Telegram's answer to the card send was lost, so no message id was saved.
+  A press on a message that carries the card's button names that message, so the
+  store passes it with the edit; the gateway keeps it for later edits, and uses it
+  only for a card it tried to send to that same chat. The read then ended uncertain, because
+  the service answered with JSON and the receipt filed every failure as
+  unconfirmed. A web read now returns a JSON or plain-text answer as text, and a
+  failure with a known outcome (nothing sent, or a page read that got its whole
+  answer) is failed with its fixed code, which `controlled_actions.error_code`
+  keeps. Checks: [card settle](services/hermes/test_approval_cards.py),
+  [press message](test/store-approval-buttons.test.ts),
+  [receipts and page reads](services/hermes/test_controlled_tools.py).
+- Reactions while Nocheh works (2026-11-08,
+  [ADR-0211](docs/adr/0211-hermes-working-reactions-on-the-answered-message.md)):
+  the owner asked whether the bot can react to users' messages and chose
+  Hermes's built-in reactions. The committed adapter now runs Hermes's own
+  Telegram hooks around a turn: 👀 on the message it answers, then 👍 once the
+  reply is sent or 👎 when it failed; silence, cancellation and an uncertain
+  delivery clear it. Each reaction is bound to that exact message and the
+  space's permission and skips the outbound journal; Settings › Telegram "React
+  while working" turns them off. Checks: [simulation tests](services/hermes/test_telegram_simulation.py)
+  and the full tester scenario `reactions_show_while_working`. Pending: seen on
+  the owner's live install after the machine pull.
 - Typing while Nocheh works (2026-10-28,
   [ADR-0188](docs/adr/0188-typing-status-while-a-turn-works.md)): Telegram
   showed nothing while a reply was being worked on, because native typing is

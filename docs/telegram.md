@@ -52,18 +52,27 @@ BotFather or give it the appropriate group administrator role. Telegram otherwis
 delivers a limited set of group messages. The archive can preserve only updates
 the Bot API supplies; use Desktop imports for available history. See Telegram's
 [message visibility rules](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get).
-Large files that Telegram cannot supply remain visibly failed artifacts; supplied
+A file over Telegram's 20 MB bot download limit is archived as a reference only
+and does not hold the reply; supplied
 Desktop media can be imported separately.
 
-Each selected group/topic has its own native Hermes memory and history. Memory
+Each selected group/topic keeps its own Hermes notes and conversation history; by default a
+group's topics share Honcho recall and archive search (**Topic memory** in
+Settings › Telegram can keep each topic separate). Memory
 access supports isolated, approved and filtered derived sharing under ADR-0030;
-the owner DM may search the complete archive and registered native memory. Unselected
-chats and participants without a group grant cannot trigger the assistant. Bot
+the owner DM may search registered native memory and the archive, except chats Nocheh does not serve. Unselected
+chats and participants without a group grant cannot start a turn. Someone who
+addresses Nocheh in a selected group without a grant, or anyone else who writes
+privately (at most once a UTC day), gets the owner's fixed reply without a model;
+messages from chats Nocheh does not serve are archived but never prepared. Bot
 senders, edits and historical replay do not trigger new replies.
-Normal group chatter can produce intentional silence. Voice, audio and round
+In a group, a message starts a turn only when it addresses Nocheh: a reply to
+one of its messages, its @username, or one of its names opening the message
+(**Names that call Nocheh**). Other messages reach the next reply as context;
+**When Nocheh answers** can answer every message instead. Voice, audio and round
 video notes keep their original bytes and are transcribed before their reply
 (see [provider.md](provider.md#voice-notes)). Media bytes are downloaded
-by the archive worker; the assistant does not repeat native media downloads or
+by the preparation workflow; the assistant does not repeat native media downloads or
 run a shared sticker-description cache. Photos and documents remain available as
 archived files and captions, and their text is read before the reply
 ([provider.md](provider.md#images)).
@@ -75,13 +84,13 @@ a second voice note creates a separate request; it does not cancel the first.
 The Bot API's `deleted_business_messages` update applies to connected business
 accounts, not ordinary bot chats.
 
-In an original-only Archive, open the exact captured message and choose **Retire
-from Nocheh** to stop future agent use and learning. This works for text, voice,
+In **Messages**, open the exact captured message and choose **Hide from
+assistant** to stop future agent use and learning. This works for text, voice,
 media, edits, and assistant replies; all observed edits of one Telegram message
-share the decision. **Undo retirement** restores future use. The original,
+share the decision. **Undo hiding** restores future use. The original,
 attachments, transcripts, and owner action history remain inspectable. A reply
 already sent cannot be retracted, and an uncertain send remains uncertain until
-its delivery receipt is resolved. The Archive action records an owner decision,
+its delivery receipt is resolved. Hiding records an owner decision,
 not a Telegram deletion observation.
 
 The pinned native adapter explicitly requests all Telegram update types, which
@@ -91,6 +100,17 @@ updates, and Telegram may delay anonymous count updates. Individual reactions
 are tracked by target and actor; anonymous counts are separate. Changes and
 removals invalidate stale inferred meaning without sending a new reply to an old
 message. If no update is delivered, Nocheh cannot infer a reaction change.
+
+While Nocheh works on a message, the bot shows "typing…" in its chat or topic
+(**Show typing while working** turns it off) and reacts to it with the pinned Hermes
+adapter's own working reactions: 👀 while it works, then 👍 once the reply is
+sent or 👎 when the turn failed. A turn that ends in silence, is cancelled, or
+whose delivery is uncertain clears the 👀; a retried turn sets it again. The reactions follow the same rules
+as "typing…": only for a turn that will write an answer, only on that exact
+message, under the space's current permission, and not recorded as a delivery.
+Telegram sends no update for a bot's own reactions, and a group that limits its
+reactions may refuse them, which only costs the reaction. **React while
+working** in Settings › Telegram turns them off.
 
 ## Mini app
 
@@ -142,9 +162,11 @@ In the owner's private DM:
 ```
 
 `/action` shows the destination and exact requested text. A live typed owner DM,
-the authenticated owner's Activity page or `./bin/nocheh approvals` can approve.
-Group messages, imported history, callbacks and transcripts cannot approve or
-alter settings. Controlled shell, browser and public HTTPS MCP requests also use
+the dashboard Inbox, `./bin/nocheh approvals`, or the owner's Approve press on
+the card Nocheh sends to the owner's private chat can approve. A group request for
+a post in that same group (that same topic when **Topic memory** keeps topics separate) needs none; a card for another group or topic goes to the person
+who asked when they are allowed in both. Other group messages, imported history
+and transcripts cannot approve or alter settings. Controlled shell, browser and public HTTPS MCP requests also use
 exact proposals and bounded revocable permissions; see ADR-0029. Uncertain
 delivery remains ambiguous; it is not automatically resent.
 

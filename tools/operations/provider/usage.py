@@ -44,7 +44,7 @@ def _read(path, query, args):
         db.close()
 
 
-def failure_reasons(value):
+def failure_reasons(value, size=40):
     """Failed runs by why they failed, such as {'refused': 2}; codes and counts only."""
     try:
         found = json.loads(value or '{}')
@@ -52,7 +52,7 @@ def failure_reasons(value):
         return {}
     if not isinstance(found, dict):
         return {}
-    return {str(key)[:40]: count for key, count in found.items() if type(count) is int and count > 0}
+    return {str(key)[:size]: count for key, count in found.items() if type(count) is int and count > 0}
 
 
 def hermes_rows(state, since):
@@ -64,6 +64,8 @@ def hermes_rows(state, since):
         row['cost_usd'] = row['cost_usd'] if priced else None
         row['cost_complete'] = priced == row['runs']
         row['reasons'] = failure_reasons(row.get('reasons'))
+        # The provider's exact errors, such as {'provider_error:overloaded:529': 1}.
+        row['causes'] = failure_reasons(row.get('causes'), 80)
     return rows
 
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 from .turn_process import _run_process,run_process
+from .job_progress import run_tokens
 from .scopes import Scope,Scopes
 
 class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
@@ -47,7 +48,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         signature=base64.urlsafe_b64encode(hmac.new(self.secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
-    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None):
+    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None):
         with tempfile.TemporaryDirectory() as folder:
             self.env=None;original=asyncio.create_subprocess_exec
             async def spawn(*args,**kwargs):
@@ -58,7 +59,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 result=await _run_process(Path(folder),Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
-                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel)
+                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 return result,events
     async def test_stream_framing_and_failed_child(self):
@@ -66,13 +67,69 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
-    async def test_a_background_job_step_runs_longer_with_its_step_count_and_reports_its_cost(self):
-        child=('import sys,json,time; body=json.load(sys.stdin); assert body["channel"]=="background"; assert body["heartbeat"] is True; '
-               'assert body["background"]=={"max_iterations":20}; assert 230<body["turn_deadline_epoch"]-time.time()<=540; '
-               'print(json.dumps({"event":"heartbeat"})); print(json.dumps({"state":"done","text":"so far","continue":True,"usage":{"cost_usd":0.25,"calls":3}}))')
-        result,events=await self.execute(child,extra={'channel':'background','background':{'max_iterations':20,'kind':'work'}})
-        self.assertEqual(events,[]);self.assertEqual((result['state'],result['continue'],result['cost_usd']),('done',True,0.25))
-        self.assertNotIn('usage',result)
+    async def test_a_failed_turn_counts_the_providers_exact_error_and_keeps_it_out_of_the_result(self):
+        with patch('services.hermes.usage.record') as record:
+            result,_=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"failed","error_code":"assistant_runtime_unavailable",'
+                                        '"failure_reason":"provider_error","failure_cause":"overloaded:529"}))')
+        self.assertEqual((record.call_args.args[3],record.call_args.kwargs['reason'],record.call_args.kwargs['cause']),(True,'provider_error','overloaded:529'))
+        self.assertEqual(result,{'state':'failed','error_code':'assistant_runtime_unavailable'})
+    def job(self,**changes):
+        """A job run's context as storage sends it, its deadlines from now."""
+        now=time.time()
+        return {'channel':'background','background':{'job_id':'c'*64,'attempt':1,'max_iterations':300,'box':False,'soft_deadline':int(now)+2700,
+                'hard_deadline':int(now)+2880,'rates':{'input':2,'output':10,'cache_read':0.2,'cache_write':2.5,'request':None},
+                'cost_limit_usd':5,'prior_cost_usd':0,**changes}}
+    async def test_a_background_job_run_lasts_to_its_hard_deadline_and_relays_its_progress(self):
+        usage={"input_tokens":1200,"output_tokens":300,"cache_read_tokens":5000,"cache_write_tokens":40,"reasoning_tokens":7,"calls":3,"cost_usd":0.25,"model":"m"}
+        extra=self.job();limits=extra['background']
+        line={'event':'progress','tokens':{'input_tokens':1200,'output_tokens':300,'cache_read_tokens':5000,'cache_write_tokens':40,'calls':3},'unknown_calls':1,
+              'todo':[{'content':'Search the marks','status':'in_progress'}]}
+        expected={key:limits[key] for key in ('max_iterations','box','soft_deadline','rates','cost_limit_usd','prior_cost_usd')}
+        child=('import sys,json; body=json.load(sys.stdin); assert body["channel"]=="background"; assert body["heartbeat"] is True; '
+               'assert body["background"]=='+repr(expected)+', body["background"]; '
+               'assert body["turn_deadline_epoch"]=='+str(limits['hard_deadline'])+'; '
+               'print(json.dumps({"event":"heartbeat"})); print(json.dumps('+json.dumps(line)+',ensure_ascii=False)); '
+               'print(json.dumps({"state":"done","text":"The report.","usage":'+json.dumps(usage)+'}))')
+        seen=[];original=asyncio.wait_for;timeouts=[]
+        async def wait_for(task,timeout):timeouts.append(timeout);return await original(task,timeout)
+        with patch('services.hermes.turn_process.asyncio.wait_for',wait_for):
+            result,events=await self.execute(child,extra=extra,progress=seen.append)
+        self.assertEqual(events,[]);self.assertEqual(result['state'],'done')
+        self.assertEqual(seen,[{key:line[key] for key in ('tokens','unknown_calls','todo')}])
+        self.assertAlmostEqual(timeouts[0],limits['hard_deadline']+60-time.time(),delta=2)
+        # Only the token buckets and calls: Nocheh prices them at the job's rates, never at Hermes's estimate.
+        self.assertEqual(result['tokens'],run_tokens(usage))
+        self.assertEqual(result['tokens'],{'input_tokens':1200,'output_tokens':300,'cache_read_tokens':5000,'cache_write_tokens':40,'calls':3})
+        self.assertNotIn('usage',result);self.assertNotIn('cost_usd',result);self.assertNotIn('continue',result)
+        bare=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"The report."}))',extra=self.job())
+        self.assertIsNone(bare[0]['tokens'],'a run without usage reports no counts of its own')
+        other,_=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"done","text":"hello","usage":'+json.dumps(usage)+'}))')
+        self.assertEqual(other,{'state':'done','text':'hello'},'other turns are unchanged')
+    async def test_a_progress_line_that_is_too_big_misshapen_or_off_a_job_fails_the_turn(self):
+        tokens={'input_tokens':1,'output_tokens':1,'cache_read_tokens':0,'cache_write_tokens':0,'calls':1}
+        big={'event':'progress','tokens':tokens,'unknown_calls':0,'todo':[{'content':'\x01'*200,'status':'\x02'*20}]*50}
+        self.assertEqual(len((json.dumps(big,ensure_ascii=False)+'\n').encode()),67714)
+        for line in (big,{'event':'progress','tokens':tokens},{'event':'progress','tokens':{**tokens,'calls':-1},'unknown_calls':0}):
+            child='import sys,json; sys.stdin.read(); print(json.dumps('+json.dumps(line)+',ensure_ascii=False)); print(json.dumps({"state":"done","text":"x"}))'
+            with self.subTest(line=str(line)[:80]),self.assertRaisesRegex(RuntimeError,'assistant_output_invalid'):
+                await self.execute(child,extra=self.job(),progress=lambda value:self.fail('an invalid line is never relayed'))
+        child='import sys,json; sys.stdin.read(); print(json.dumps('+json.dumps({**big,'todo':[]})+')); print(json.dumps({"state":"done","text":"x"}))'
+        with self.assertRaisesRegex(RuntimeError,'assistant_output_invalid'):await self.execute(child)
+    async def test_a_run_past_its_hard_deadline_is_never_launched(self):
+        async def spawn(*args,**kwargs):self.fail('no child starts past the hard deadline')
+        with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn):
+            result=await _run_process(Path('/nonexistent'),Scope('-10','42',False,'group'),
+                {'event_id':'event','archive_credential':'scoped','text':'go',**self.job(soft_deadline=int(time.time())-200,hard_deadline=int(time.time())-20)},
+                'model',SimpleNamespace(runtime=lambda:self.fail('no transport is made')),'job_s',None,None)
+        self.assertEqual(result,{'state':'failed','error_code':'managed_execution_failed','text':'','session_id':'job_s'})
+    async def test_a_box_run_says_so_to_the_turn_with_a_strict_boolean_and_checked_deadlines(self):
+        child='import sys,json; body=json.load(sys.stdin); assert body["background"]["box"] is True; print(json.dumps({"state":"done","text":"so far"}))'
+        result,_=await self.execute(child,extra=self.job(box=True))
+        self.assertEqual(result['state'],'done')
+        now=int(time.time())
+        for changes in ({'box':'true'},{'soft_deadline':None},{'hard_deadline':'later'},{'soft_deadline':now+3000,'hard_deadline':now+2000},{'hard_deadline':float('inf')}):
+            with self.subTest(changes=changes),self.assertRaisesRegex(ValueError,'invalid_background_run'):
+                await self.execute(child,extra=self.job(**changes))
     async def test_untranscribed_earlier_voice_is_named_without_entering_memory_query(self):
         check='import sys,json; body=json.load(sys.stdin); assert body["memory_query"]=="original"; print(json.dumps({"state":"done","text":body["text"]}))'
         result,_=await self.execute(check,extra={'untranscribed_voice':2})

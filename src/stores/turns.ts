@@ -25,12 +25,12 @@ const sourceProcessing=(principal:Reader)=>!principal.logical_profile&&['memory-
 export class RuntimeTurnRepository implements BrokerStorage {
   constructor(readonly access:SourceAccessRepository,readonly prepared:PreparedContextRepository){}
   async assertAudience(principal:Reader):Promise<GuardBinding> {
-    const binding=await this.prepared.audience.assert(principal);
+    const binding=await this.prepared.audience.assert(principal),own=this.own(principal,binding);
     if(principal.turnEvent) {
       const managed=(await this.access.stores.control.query('SELECT state,generation,guard_epoch,logical_profile,reference FROM runtime_turns WHERE id=$1',[principal.turnEvent])).rows[0];
       const run=(await this.access.stores.control.query('SELECT state,cancel_requested,lease_until,source_reference FROM managed_runs WHERE event_id=$1',[principal.turnEvent])).rows[0];
       const independent=sourceProcessing(principal)&&(managed?.reference?.store==='archive'||run?.source_reference?.store==='archive');
-      if(managed&&!independent&&(managed.state!=='open'||managed.generation!==binding.generation||Number(managed.guard_epoch)!==binding.epoch))
+      if(managed&&!independent&&(managed.state!=='open'||managed.generation!==own.generation||Number(managed.guard_epoch)!==own.epoch))
         throw new HttpError(409,'runtime_turn_changed');
       if(managed&&!independent&&managed.logical_profile!==principal.logical_profile)throw new HttpError(409,'runtime_profile_changed');
       if(run&&!independent&&(run.cancel_requested||!['captured','running'].includes(run.state)||run.state==='running'&&(!run.lease_until||run.lease_until<=new Date())))throw new HttpError(409,'runtime_turn_changed');
@@ -40,11 +40,16 @@ export class RuntimeTurnRepository implements BrokerStorage {
   profile(principal:Reader,binding:GuardBinding):string {
     return runtimeProfile(principal,binding);
   }
+  /** The binding a turn runs under, its credential's own: the current one, as the audience check found it, or the earlier one
+   *  of a background job's run that carries to it (ADR-0208). Its runtime turn and physical profile keep it. */
+  private own(principal:Reader,current:GuardBinding):GuardBinding {
+    return principal.admin||principal.guard_epoch===undefined?current:{...current,epoch:principal.guard_epoch};
+  }
   /** Trusted admission only. The referenced operation/source must already be durable. */
   async register(principal:Reader,input:{logical_profile:string;job?:string}):Promise<void> {
     if(principal.admin||!principal.turnEvent||!principal.space||! /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(input.logical_profile)||principal.logical_profile!==input.logical_profile||
       input.job!==undefined&&!/^[-\w.]{1,200}$/.test(input.job))throw new HttpError(400,'invalid_runtime_turn');
-    const binding=await this.assertAudience(principal),reference=await this.prepared.root(principal,binding);
+    const current=await this.assertAudience(principal),binding=this.own(principal,current),reference=await this.prepared.root(principal,current);
     await this.checkSpace(principal,reference);
     if(reference.store==='archive'&&(await this.access.archive.verify(reference)).channel!=='browser')
       throw new HttpError(400,'managed_turn_source_required');
@@ -80,19 +85,20 @@ export class RuntimeTurnRepository implements BrokerStorage {
   }
   async binding(principal:Reader):Promise<TurnBinding> {
     if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');
-    const current=await this.assertAudience(principal),reference=await this.prepared.root(principal,current),scope=await this.checkSpace(principal,reference);
+    const current=await this.assertAudience(principal),own=this.own(principal,current),reference=await this.prepared.root(principal,current),scope=await this.checkSpace(principal,reference);
     // A later permitted review/filter processes the original evidence under its
     // own signed purpose. It does not reopen the original browser execution.
     const managed=reference.store==='archive'&&sourceProcessing(principal)?null:
       (await this.access.stores.control.query('SELECT * FROM runtime_turns WHERE id=$1',[reference.id])).rows[0];
     if((reference.store==='control'||principal.logical_profile!==undefined)&&!managed)throw new HttpError(403,'runtime_turn_not_admitted');
-    if(managed&&(managed.generation!==current.generation||Number(managed.guard_epoch)!==current.epoch||managed.space_id!==principal.space||
+    if(managed&&(managed.generation!==own.generation||Number(managed.guard_epoch)!==own.epoch||managed.space_id!==principal.space||
       managed.owner!==(principal.scope===null)||managed.state!=='open'||canonical(managed.reference)!==canonical(reference)))
       throw new HttpError(409,'runtime_turn_changed');
     await this.assertAudience(principal);
-    return {event_id:reference.id,reference,scope,profile:this.profile(principal,current),
+    // The physical profile is the one Hermes derives from the credential, so a carried run keeps its profile and history.
+    return {event_id:reference.id,reference,scope,profile:this.profile(principal,own),
       logical_profile:managed?.logical_profile??defaultLogicalProfile(principal),
-      owner:principal.scope===null,guard_epoch:current.epoch,generation:current.generation,...(principal.revision===undefined?{}:{revision:principal.revision}),
+      owner:principal.scope===null,guard_epoch:own.epoch,generation:own.generation,...(principal.revision===undefined?{}:{revision:principal.revision}),
       ...(managed?.job_id?{job:managed.job_id}:{})};
   }
   async turnFile(principal:Reader,hash:string):Promise<string> {

@@ -3,17 +3,31 @@
 from dataclasses import dataclass, field
 import os
 import sys
+import threading
 import time
 
 # The security broker relays every isolated model call to the configured reply provider.
 BROKER_URL = "http://nocheh-security:8786/v1"
+# The broker's route to Anthropic's own Messages API, the only Anthropic API with prompt
+# caching. Hermes appends /v1/messages to it.
+BROKER_ANTHROPIC_URL = "http://nocheh-security:8786/anthropic"
+# Anthropic's address in Settings › Models; replies there use its Messages API.
+ANTHROPIC_URL = "https://api.anthropic.com/v1"
 # Installation rehearsals serve models from this local fixture; nothing else may use http.
 FIXTURE_URL = "http://model-fixture:8317/v1"
 # Wait before the secret check's one retry after a provider server error.
 RETRY_SECONDS = 2
+# Provider clients by address and key, shared by every check in this process.
+CLIENTS = {}
+CLIENTS_LOCK = threading.Lock()
 # Nocheh joins the texts of one secret check with one of these separators.
 FRAGMENT = '\n<NOCHEH_FRAGMENT>\n'
 FIELD = '\n⟪NOCHEH_FIELD_BOUNDARY⟫\n'
+# The secret check's answer as a schema. Anthropic's OpenAI-compatible endpoint accepts only a
+# strict json_schema, and holds the model to it; other providers keep the prompt's contract alone.
+LITERALS_FORMAT = {"type": "json_schema", "json_schema": {"name": "literals", "strict": True, "schema": {
+    "type": "object", "properties": {"literals": {"type": "array", "items": {"type": "string"}}},
+    "required": ["literals"], "additionalProperties": False}}}
 
 
 class DetectorContractError(ValueError):
@@ -91,9 +105,11 @@ class SubscriptionCredentials:
 
     def __post_init__(self):
         allowed = {BROKER_URL} | configured_urls()
+        # Anthropic's Messages API is reached only through the broker, which sends it to Anthropic.
+        native = (self.provider, self.api_mode) == ("anthropic", "anthropic_messages") and self.base_url == BROKER_ANTHROPIC_URL
         if (not isinstance(self.access_token, str) or not self.access_token.strip()
-                or self.base_url.rstrip("/") not in allowed
-                or (self.provider, self.api_mode) != ("openai", "chat_completions")):
+                or not (native or (self.base_url.rstrip("/") in allowed
+                                   and (self.provider, self.api_mode) == ("openai", "chat_completions")))):
             raise ValueError("A configured reasoning transport is required")
 
     def runtime(self):
@@ -139,20 +155,42 @@ def resolve_credentials(part: str = "reply") -> SubscriptionCredentials:
     return SubscriptionCredentials(key, url, "openai", "chat_completions")
 
 
-def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list):
-    """Call the part's configured provider with retries disabled. No tools field: Anthropic's
-    OpenAI-compatible endpoint rejects an empty tools list."""
+def detector_format(base_url: str):
+    """The answer format a secret check asks for: the literals schema on Anthropic, else none."""
+    from urllib.parse import urlsplit
+    return LITERALS_FORMAT if urlsplit(base_url).hostname == "api.anthropic.com" else None
+
+
+def _client(credentials):
+    """The provider client for one address and key, kept for the life of the process. Checks reuse
+    its open connections: a new HTTPS connection for every check costs a handshake each time, and on
+    a shaky network each new connection is one more chance to fail."""
     import httpx
     from openai import OpenAI
 
-    with OpenAI(
-        api_key=credentials.access_token, base_url=credentials.base_url,
-        http_client=httpx.Client(trust_env=False), timeout=90, max_retries=0,
-    ) as client:
-        return client.chat.completions.create(
-            model=model, messages=messages, timeout=90,
-            extra_body={"reasoning_effort": "low"},
-        )
+    key = (credentials.base_url, credentials.access_token)
+    with CLIENTS_LOCK:
+        client = CLIENTS.get(key)
+        if client is None:
+            if len(CLIENTS) >= 8:
+                # Settings changes restart the process, so only tests get here; a call still
+                # running on a dropped client finishes on it.
+                CLIENTS.clear()
+            client = CLIENTS[key] = OpenAI(
+                api_key=credentials.access_token, base_url=credentials.base_url,
+                http_client=httpx.Client(trust_env=False), timeout=90, max_retries=0,
+            )
+        return client
+
+
+def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list, response_format=None):
+    """Call the part's configured provider with retries disabled. No tools field: Anthropic's
+    OpenAI-compatible endpoint rejects an empty tools list."""
+    return _client(credentials).chat.completions.create(
+        model=model, messages=messages, timeout=90,
+        extra_body={"reasoning_effort": "low"},
+        **({"response_format": response_format} if response_format else {}),
+    )
 
 
 def detect_literals(text: str, credentials: SubscriptionCredentials, model: str, prompts=None):
@@ -190,17 +228,18 @@ def detect_literals(text: str, credentials: SubscriptionCredentials, model: str,
 def _detect_once(text, credentials, model, prompts):
     from services.hermes.prompts import text as prompt
     from services.hermes.request_boundary import trusted_detector
-    from services.hermes.usage import error_reason, record, response_usage
-    # A provider waking from idle can refuse its first request with a server error. The check
-    # changes nothing, so one quick retry spares the turn the workflow's 30-second retry wait.
+    from services.hermes.usage import error_cause, error_reason, record, response_usage
+    # A provider waking from idle can refuse its first request with a server error or drop the
+    # connection. The check changes nothing, so one quick retry spares the turn the workflow's
+    # 30-second retry wait. A timed-out call is not asked again: that would double the wait.
     for attempt in (1, 2):
-        response, failed, refused, reason = None, True, False, None
+        response, failed, refused, reason, cause = None, True, False, None, None
         try:
             with trusted_detector(credentials.base_url):
                 response = _call_subscription(credentials, model, [
                     {"role": "system", "content": prompt(prompts, "guard.secret_check")},
                     {"role": "user", "content": text},
-                ])
+                ], detector_format(credentials.base_url))
             choice = response.choices[0]
             candidates = detector_reply(choice.message.content, text, getattr(choice, 'finish_reason', None))
             failed = False
@@ -208,11 +247,13 @@ def _detect_once(text, credentials, model, prompts):
         except Exception as error:
             refused = isinstance(error, DetectorContractError) and str(error) == 'detector_refused'
             reason = 'bad_answer' if isinstance(error, DetectorContractError) else error_reason(error)
+            cause = None if isinstance(error, DetectorContractError) else error_cause(error)
             status = getattr(error, "status_code", None)
-            if attempt == 2 or not isinstance(status, int) or status < 500:
+            dropped = type(error).__name__ == "APIConnectionError"
+            if attempt == 2 or not (dropped or isinstance(status, int) and status >= 500):
                 raise
         finally:
             # Nocheh's usage tracker: the provider's reported tokens, priced by Hermes.
             record('guard', response_usage(response, model, credentials.base_url) if response is not None else {'calls': 1},
-                   model, failed, refused=refused, reason=reason)
+                   model, failed, refused=refused, reason=reason, cause=cause)
         time.sleep(RETRY_SECONDS)

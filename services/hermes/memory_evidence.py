@@ -7,7 +7,8 @@ _active=False
 _native=[]
 _recalled=None
 
-def inject(payload):
+def inject(payload,anthropic=None):
+    """``anthropic``: the request goes to Anthropic's Messages API; None judges by the payload."""
     if not _active:return payload
     entries=[{'source':'hermes.native.memory.'+str(index),'content':block} for index,block in enumerate(_native)]
     if _recalled is not None:entries.append({'source':'nocheh.memory.recall','content':_recalled})
@@ -18,6 +19,15 @@ def inject(payload):
     value=payload[field]
     messages=value if isinstance(value,list) else [{'role':'user','content':value}]
     # Never alter or summarize a source or mutate the native conversation history.
+    if anthropic is None:anthropic='system' in payload
+    if anthropic and messages and isinstance(messages[0],dict) and messages[0].get('role')=='user':
+        # Anthropic's Messages API keeps the system prompt outside the messages and takes
+        # alternating roles, so the evidence is the first block of the first message: before
+        # the conversation, as on the OpenAI-compatible route. It stays the same through a
+        # turn, so each later call of the turn reads the turn's start from the prompt cache.
+        first=messages[0];own=first.get('content')
+        blocks=own if isinstance(own,list) else [{'type':'text','text':own}] if isinstance(own,str) and own else []
+        return {**payload,field:[{**first,'content':[{'type':'text','text':content},*blocks]},*messages[1:]]}
     # Keep any provider system messages first; put evidence before conversation turns.
     split=0
     while split<len(messages) and messages[split].get('role') in ('system','developer'):split+=1

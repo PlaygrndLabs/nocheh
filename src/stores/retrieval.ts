@@ -12,14 +12,14 @@ import {AudienceRepository} from './audience.js';
 import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
 import type {SourceReference} from './archive.js';
-import type {GuardBinding} from './guards.js';
+import {afterEpoch,jobRun,type GuardBinding} from './guards.js';
 import {evidenceNodeLabel,graphChatType,graphGroupLabel,graphUserLabel} from '../graph-labels.js';
 import {ProjectRepository} from './projects.js';
 import type {RelationshipAudience} from './relationships.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
-import {PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
+import {BOX_PAGE_BUDGET,PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
 import {parentSpace} from '../spaces.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
@@ -77,7 +77,8 @@ export class SourceRepository {
     return {sources,complete:false as const};
   }
   /** Discover observed current reactions without guessing the target's words or ID. */
-  async currentReactions(principal:Reader,count=5) {
+  async currentReactions(principal:Reader,count=5){return afterEpoch(jobRun(principal),()=>this.currentReactionsOnce(principal,count));}
+  private async currentReactionsOnce(principal:Reader,count:number) {
     limit(count,5,10);
     const binding=principal.admin?null:await this.audience.assert(principal);
     const rows=(await this.stores.control.query(`SELECT event_id FROM reaction_states
@@ -124,7 +125,9 @@ export class SourceRepository {
     }
     return texts;
   }
-  async read(principal:Reader,id:string) {
+  // A job run's read runs again when an epoch it carries across commits meanwhile (ADR-0208).
+  async read(principal:Reader,id:string){return afterEpoch(jobRun(principal),()=>this.readOnce(principal,id));}
+  private async readOnce(principal:Reader,id:string) {
     const binding=principal.admin?null:await this.audience.assert(principal),reference=await this.permitted(principal,id,binding);
     const row=(await this.stores.archive.query('SELECT * FROM events WHERE id=$1',[id])).rows[0];
     let content:any={text:row.original_text?.toString()??null,payload:JSON.parse(row.payload.toString())},guardedRevision:number|null=null;
@@ -167,7 +170,8 @@ export class SourceRepository {
   }
 
   /** Archive search deliberately excludes transcripts, contexts and learned results. */
-  async search(principal:Reader,query:string,count=20,filters:ArchiveFilters={kind:'',scope:'',reply:''}) {
+  async search(principal:Reader,query:string,count=20,filters:ArchiveFilters={kind:'',scope:'',reply:''}){return afterEpoch(jobRun(principal),()=>this.searchOnce(principal,query,count,filters));}
+  private async searchOnce(principal:Reader,query:string,count:number,filters:ArchiveFilters) {
     string(query,2000);limit(count);if(!query.trim())throw new HttpError(400,'empty_query');
     const binding=principal.admin?null:await this.audience.assert(principal);
     const rows=await (binding?.mode==='on'?this.stores.derived.query(`SELECT s.event_id AS id,r.content FROM guard_sources s
@@ -213,7 +217,8 @@ export class SourceRepository {
     await this.allowPrepared(principal,hits);return hits;
   }
   /** Messages another index found, such as memory search by meaning, read back through the reader's own access. */
-  async found(principal:Reader,ids:string[],count:number) {
+  async found(principal:Reader,ids:string[],count:number){return afterEpoch(jobRun(principal),()=>this.foundOnce(principal,ids,count));}
+  private async foundOnce(principal:Reader,ids:string[],count:number) {
     const binding=principal.admin?null:await this.audience.assert(principal);
     const liveCopies=await this.access.retirements?.liveCopies(ids)??new Set<string>();
     const hits:{source:string;scope:string;kind:string;occurred_at:string|null;text:string;truncated?:true}[]=[];
@@ -264,41 +269,50 @@ export class SourceRepository {
       files:files.files,images:files.images,voice_notes:files.voice_notes,
       first:totals.first?.toISOString()??null,last:totals.last?.toISOString()??null};
   }
-  async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number}) {
-    const after=cursor(input.after),{chat,from,to,binding}=await this.conversation(principal,input);
-    const records=pageRecords;
+  /** `whole` reads a sealed job box's copy (job-box.ts): checked text only, without the page cuts, in bigger pages,
+   *  without reaction updates; a message still being checked is left out and counted in `checking`. */
+  async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number;whole?:boolean}){return afterEpoch(jobRun(principal),()=>this.pageOnce(principal,input));}
+  private async pageOnce(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number;whole?:boolean}) {
+    const after=cursor(input.after),{chat,from,to,binding}=await this.conversation(principal,input),whole=!!input.whole;
+    if(whole&&binding?.mode!=='on')throw new HttpError(409,'job_box_guard_off');
+    const records=pageRecords,budget=whole?BOX_PAGE_BUDGET:PAGE_BUDGET;
     const rows=(await this.stores.archive.query(`SELECT id,kind,at,micros ${records} AND ($4::bigint IS NULL OR (e.micros,e.id)>($4::bigint,$5))
       ORDER BY e.micros,e.id LIMIT 201`,[chat,from,to,after?.micros??null,after?.id??''])).rows;
     const liveCopies=principal.admin?new Set<string>():await this.access.retirements?.liveCopies(rows.map(row=>row.id))??new Set<string>();
-    const items:Record<string,unknown>[]=[],shown:string[]=[];let last:{micros:string;id:string}|null=null,size=0,full=false;
+    const items:Record<string,unknown>[]=[],shown:string[]=[];let last:{micros:string;id:string}|null=null,size=0,full=false,checking=0;
     for(const row of rows.slice(0,200)) {
-      if(items.length===input.count||size>=PAGE_BUDGET){full=true;break;}
-      last=row;
+      if(items.length===input.count||size>=budget){full=true;break;}
+      const previous=last;last=row;
       if(liveCopies.has(row.id))continue;
       const captured=await this.access.archive.captured(row.id);
       if(binding&&!await this.access.canRead(principal,captured.reference,binding))continue;
       const original=(await this.stores.archive.query('SELECT original_text,payload FROM events WHERE id=$1',[row.id])).rows[0];
       let value:any={text:original.original_text?.toString()??'',payload:JSON.parse(original.payload.toString())};
       const type=pageEntry(row.kind,value.payload);
-      if(!type)continue;
+      if(!type||whole&&type==='reaction')continue;
       shown.push(row.id);
       if(binding?.mode==='on') {
         const guarded=await this.access.guards.read('events:'+row.id,binding).catch(error=>{if(pending(error))return null;throw error;});
-        if(!guarded){items.push({source:'nocheh:event:'+row.id,at:row.at.toISOString(),type,checking:true});continue;}
+        if(!guarded){if(whole)checking++;else items.push({source:'nocheh:event:'+row.id,at:row.at.toISOString(),type,checking:true});continue;}
         value=guarded.value;
       }
       const files=captured.artifact_ids.length?await this.derivedTexts(row.id,binding).catch(error=>{if(pending(error))return null;throw error;}):[];
-      const item=pageItem({id:row.id,kind:row.kind,at:row.at,payload:value.payload,text:String(value.text??''),files:files??[]});
-      const entry=files===null?{...item,files_checking:true}:item;
-      size+=JSON.stringify(entry).length;items.push(entry);
+      if(whole&&files===null){checking++;continue;}
+      const item=pageItem({id:row.id,kind:row.kind,at:row.at,payload:value.payload,text:String(value.text??''),files:files??[]},whole);
+      const entry=files===null?{...item,files_checking:true}:item,length=JSON.stringify(entry).length;
+      // A box page ends before a record that would take it over its size; a record near the size on its own comes alone.
+      if(whole&&items.length&&size+length>budget){last=previous;full=true;break;}
+      size+=length;items.push(entry);
     }
     const more=full||rows.length>200;
     const position=(await this.stores.archive.query(`SELECT count(*)::integer AS total,
       count(*) FILTER (WHERE $4::bigint IS NOT NULL AND (e.micros,e.id)<=($4::bigint,$5))::integer AS through ${records}`,
       [chat,from,to,last?.micros??after?.micros??null,last?.id??after?.id??''])).rows[0];
     if(binding){for(const id of shown)await this.permitted(principal,id,binding);await this.audience.assert(principal);}
-    const result={chat,items,next:more&&last?last.micros+'-'+last.id:null,position:{through:position.through,total:position.total},complete:!more};
-    await this.allowPrepared(principal,result);return result;
+    const result={chat,items,next:more&&last?last.micros+'-'+last.id:null,position:{through:position.through,total:position.total},complete:!more,...(whole?{checking}:{})};
+    // A box copy fills the box; what box tools return from it is checked as tool output. Its pages are not kept as prepared values,
+    // which every later model call of the job would load.
+    if(!whole)await this.allowPrepared(principal,result);return result;
   }
   async bytes(principal:Reader,id:string):Promise<Buffer> {
     const binding=principal.admin?null:await this.audience.assert(principal);

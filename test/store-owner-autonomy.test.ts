@@ -54,7 +54,7 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
     const sameGroup=await s.telegramActions.request(await actor((await capture(group,123,'Owner posts here')).id,group,group),{destination:'current',text:'Posted here'});
     assert.equal(await state(sameGroup.id),'approved','a post in the same group needs no approval');
     const tool=await s.controlledActions.propose(await actor((await capture('123',123,'Run a tool')).id,null,'123'),{kind:'shell',arguments:{command:'printf ok'}});
-    assert.equal(tool.state,'approved');
+    assert.equal(tool.state,'approved');assert.match(tool.message,/answer will follow here as a reply/);
     const groupTool=await s.controlledActions.propose(await actor((await capture(group,123,'Group tool')).id,group,group),{kind:'shell',arguments:{command:'printf group'}});
     assert.equal(groupTool.state,'proposed');
 

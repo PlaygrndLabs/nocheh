@@ -13,7 +13,7 @@ then run:
 ```
 
 Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
-Open Hermes from the sidebar for its dedicated native dashboard at `/hermes/nocheh`;
+Open Assistant console from the sidebar for Hermes's native dashboard at `/hermes/nocheh`;
 its return link brings you back to Nocheh. Old `/nocheh#…` bookmarks still work.
 Settings › Models holds the model providers and keeps their keys server-side; see
 [model providers](provider.md).
@@ -30,14 +30,15 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 
 | Page | Use it for |
 | --- | --- |
-| Home | What needs you (decisions waiting, problems), today's replies, cost, kept messages and long-term memory, and where things are. |
+| Home | What needs you (decisions waiting, problems), a Get started checklist until setup is done, today's replies, cost, kept messages and long-term memory, and where things are. |
 | Inbox | Waiting: decide approvals, memory-access requests, identity suggestions and organization changes. Allowed actions: standing permissions you can revoke. History: earlier decisions and their outcomes. |
-| Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: let one chat use knowledge from another, with previews of exactly what is shared, and access defaults. |
+| Tasks | Personal and per-project to-do lists, also filled by telling Nocheh in chat: Open, Today, Upcoming, Board, Done, Dropped, Archive and Trash. |
+| Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there, its role and skills, and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: let one chat use knowledge from another, with previews of exactly what is shared, and access defaults. |
 | Messages | Messages: every original message, its agent copy and versions, files, transcripts and reactions; hide (retire) a message or restore it. Import: choose a Telegram export, review access and files, then start or resume an import. |
-| Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, project chats and organization). Assistant notes: native notes and history for one chat. Long-term memory: Honcho readiness, attachment, budget and stored data. |
+| Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, project chats and organization). Assistant notes: native notes and history for one chat. Long-term memory: Honcho readiness, attachment, budget, re-run or replace, and stored data. |
 | Usage | Model calls, tokens and cost by part and by model, calls per day, and reply speed with a per-stage breakdown for each reply. |
-| System | Health: services, connections, storage and diagnostics. Background work: workflow totals, history charts and the run list with retry and cancel. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
-| Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (secret check, how long history is kept), Assistant (owner freedom and agent preferences) and Advanced. |
+| System | Health: services, connections, storage and diagnostics. Background work: background jobs with Stop, workflow totals, history charts and the task list with retry and cancel. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
+| Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (backups, secret check, how long history is kept, password), Assistant (owner freedom, role and skills, limits, background jobs), Tasks (statuses, priorities, columns, time zone), Connections (Notion, GitHub) and Advanced. |
 
 Every settings edit, on any page, is a draft. On Settings and Chats the page header
 always stays at the top of the screen with Discard and Save, turned off until something
@@ -58,9 +59,9 @@ their integration acceptance passes; see TASK.md for actual phase status.
 Original chats are preserved evidence. Native notes are generated working memory
 and may change. Imported messages become archive sources, not native sessions or
 automatically generated memory. At import confirmation, checking the optional learning control grants
-learning consent. That permits native note review and Honcho ingestion when attached;
-preparing guarded copies alone grants no learning consent. Honcho stays detached
-until its real provider acceptance passes.
+learning consent. That permits Honcho ingestion only, not native note review (ADR-0198);
+preparing guarded copies alone grants no learning consent. Honcho attaches once by
+default; its live acceptance is an optional check.
 
 ## Change configuration
 
@@ -136,7 +137,7 @@ rejects opaque image context. Generated results and transcripts retain provenanc
 Native Sessions can resume a conversation in its profile. Cancel stops the isolated
 model process. Reload reconnects to the same live terminal. After a service restart,
 a recorded run can be completed, failed or interrupted; it is never automatically
-executed again. Activity shows the latest 50 browser inputs and their source/result.
+executed again. Inbox › History lists the latest 50 assistant runs (browser conversations and scheduled jobs together), each with its state and a link to its original message.
 An explicit retry creates another observed input. Local UI commands appear as
 “Captured only” because they do not start a model turn.
 
@@ -147,7 +148,7 @@ are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the 
 
 ## Native memory and Honcho
 
-Hermes memory lists configured and historical group/topic profiles. Notes are read-only;
+Memory › Assistant notes lists configured and historical group/topic profiles. Notes are read-only;
 preferences in Settings › Assistant use the same locked resolver as assistant startup and take effect on
 the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show
@@ -182,9 +183,9 @@ incomplete collection. `complete` refers to the requested command/limit, with
 server pagination metadata retained. Inspect is a summary, not a full export.
 
 The dashboard shows live-gate status, attachment, current memory generations and
-receipts alongside workspace/peer/session lists. Attach remains disabled until
-provider acceptance passes. After acceptance, owner attach/detach controls
-offer optional consented history and catch-up. The CLI provides deeper stored-data
+receipts alongside workspace/peer/session lists. Honcho attaches by
+default; Connect and Disconnect stay available, and Connect offers optional
+consented history and catch-up. The CLI provides deeper stored-data
 inspection. See [the current memory system](guarded-memory-system.md) for activation
 and budget instructions; fixture tests do not certify live provider behavior.
 
@@ -197,7 +198,7 @@ The source-backed node types are users, projects, groups, and messages. It inclu
 recorded authorship, replies to original source IDs, same-source revisions, and
 explicit group-to-project assignments. Actions, events,
 runtime context, files, generated artifacts, Hermes profiles, and memory notes are
-excluded from both the visual graph and its JSON export. Messages without display
+excluded from the graph and its JSON export. Messages without display
 text use their source kind and a stable short message ID instead of sharing an
 indistinguishable placeholder. Telegram users use their recorded `@username` or
 display name, groups use their recorded chat title, and private conversations are
@@ -223,7 +224,7 @@ next cursor to retrieve additional graph pages:
 ./bin/nocheh memory graph --scope CHAT_ID --after EVENT_ID --output next-page.json
 ```
 
-Maintenance provides diagnostics, portable archive ZIP export, consistent backup,
+System › Backups provides diagnostics, portable archive ZIP export, consistent backup,
 service restart, and restore into a new inactive Compose project. Backup and
 restart show a review step. Restore selects a locally generated backup ID and an
 unused loopback port; it cannot overwrite current state. Restored Telegram stays
@@ -270,6 +271,11 @@ beside its input; resetting removes the profile override after saving so the glo
 value applies. Existing native values remain explicit overrides. Nocheh settings
 shows `****` for a configured Telegram bot token without exposing its value and explains
 that an empty selected group list still permits owner private messages.
+Under the background job limits, **Sealed box for jobs** (on by default) lets a
+job the owner asks for in their private chat run commands and Python in a sealed
+box ([ADR-0205](adr/0205-owner-approved-jobs-work-in-a-sealed-box.md)). Off: no
+new job gets a box, a running job loses its box within seconds, and any relaunch
+runs without one. It saves over the job settings' revision, like the limits.
 Job preference overrides can be stored via CLI; scheduler execution is P6 work.
 Broader tool and approval policy controls are P5 work, not active capabilities yet.
 
@@ -291,7 +297,7 @@ preserve managed Telegram bindings; removal retains their directory under
 selected profile. Native file browsing/uploads are confined to that profile's
 workspace, including symlink checks. These workspace files are not chat imports;
 chat attachment capture is part of P4. Native session imports remain gated: use
-Nocheh Imports to preserve originals and provenance.
+Messages › Import to preserve originals and provenance.
 
 Inspection does not bootstrap, migrate or auto-archive a session database. SQLite
 can create its normal WAL/locking sidecars during a read-only connection. It does
@@ -301,14 +307,14 @@ managed execution phase passes acceptance.
 
 ## Tools and approvals
 
-**Activity → Approvals** shows the complete command, page URL or MCP arguments,
-the originating profile and scope, and the eventual execution result. Approve or
-deny each operation there or in your private Telegram DM with `/actions`,
+**Inbox › Waiting** shows the complete command, page URL or MCP arguments,
+and the originating profile and scope; Inbox › History shows the eventual
+execution result. Approve or deny each operation in Waiting or in your private Telegram DM with `/actions`,
 `/action ID`, `/approve ID` and `/deny ID`. Group messages cannot approve actions.
 Long operations require the dashboard so approval never relies on truncated text.
 
 An optional permission allows only that exact operation in that scope/profile,
-for 1–20 starts and 1–1440 minutes. Revoke it in Activity, `/revoke ID`, or the CLI.
+for 1–1000 starts and up to 30 days (the dashboard offers 1, 3, 10 or 50 starts for an hour, a day, a week or 30 days). Revoke it in Inbox › Allowed actions, `/revoke ID`, or the CLI.
 Revocation stops future starts; it cannot undo a started operation. Ambiguous
 results are retained without automatically repeating execution.
 
@@ -348,7 +354,7 @@ owner authorization. Filtering can miss personal details; failures withhold wide
 knowledge. The access preview performs no model call and shows eligible sources,
 not a promise that their contents will be released.
 
-At the final import step, **Review with Hermes to update private memory** is
+At the final import step, **Let the assistant learn from this history** is
 unchecked. The saved choice survives cancellation/restart and cannot change on
 resume. Completed imports without approval remain searchable. Review jobs use
 Hermes's native memory review, with no external-action tools. Pause/resume controls
@@ -384,12 +390,12 @@ and one-time schedules. Each fire starts a fresh session with that profile's mem
 Set **Run settings** to override agent steps and time for one job, or leave them
 blank to inherit. Production model selection remains in Nocheh Settings.
 
-**Local** saves results in Activity. **Telegram** proposes the exact result to that
+**Local** saves results in Inbox › History. **Telegram** proposes the exact result to that
 scope for owner approval. Overlong results stay local with a visible delivery error.
 Pause prevents future starts; Cancel run interrupts an active run. Runs more than
 60 seconds late are recorded as missed; **Catch up once** is an explicit extra run.
 It does not replay every missed interval. Original prompts and generated results
-remain separately inspectable in Activity, including after deleting a schedule.
+remain separately inspectable in Inbox › History, including after deleting a schedule.
 
 ```sh
 ./bin/nocheh cron list --profile all
@@ -410,7 +416,7 @@ Custom skills/scripts, alternate providers and topic schedules are not enabled.
 
 ## Original and guarded versions (ADR-0033)
 
-Archive now browses all records without requiring a search. Open a source to see
+Messages browses all records without requiring a search. Open a source to see
 its read-only original beside the separate guarded copy, including derived text
 and file metadata. Save guarded wording directly; matching copies of the message
 text are updated together. Other guarded fields can be inspected and edited too.
@@ -424,24 +430,24 @@ archive recall. See [task history](task-history.md) for that recorded checkpoint
 
 ## System monitoring
 
-Open **Monitoring** (`/#monitoring`) for running, waiting and failed workflow
+Open **System › Background work** for running, waiting and failed workflow
 totals, the last confirmed workflow completion, and unpublished backlog across
 all workflow families. The summary refreshes every ten seconds independently of
 history filters and pagination. Unavailable data is shown explicitly; failed
 refreshes retain the last snapshot with a stale-data warning.
 
-Use **Open Inngest** for native execution history at `/inngest/runs`, behind the
-same owner session. That view is read-only. Expand **Workflow details** to filter
+Use **Scheduler console** for native execution history at `/inngest/runs`, behind the
+same owner session. That view is read-only. Use **Kind of work** and the **Tasks** list to filter
 history, inspect stages, source evidence and receipts, use authorized retry/cancel
 controls, or check delivery and worker freshness. Telegram, provider, background
 work and service diagnostics have their own expandable sections. Failures,
 uncertain effects, disconnected workers and unhealthy services remain visible
 without expanding details. A healthy container does not certify model access or
-Telegram reception. **Inspect original** opens the archived evidence.
+Telegram reception. **Open the message** opens the archived evidence.
 **Storage** shows the same read-only report as `./bin/nocheh storage`: each
 database's size and largest tables, local state folder sizes (a folder the
 dashboard cannot fully read is shown as "at least"), Docker log limits and the
-workflow history retention setting. It is measured only when expanded.
+workflow history retention setting. It is measured when System › Health opens.
 
 <design_and_metrics>
 
@@ -449,7 +455,7 @@ workflow history retention setting. It is measured only when expanded.
 
 The owner dashboard uses a small set of locally owned Radix-based components
 (`dashboard/ui`), Tailwind semantic colour tokens, Lucide, and Recharts, with no
-page stylesheet. Appearance follows the system by default; Light, Dark, or System
+page stylesheet. Appearance follows the system by default; Light, Dark, or Match device
 is persisted locally. The sidebar lists each page's tabs under it (from
 `dashboard/lib/page-tabs.ts`, which the pages read too); the open page's tabs show,
 and the chevron beside a page shows or hides its tabs, remembered locally. The
@@ -457,7 +463,7 @@ desktop sidebar collapses to icons, and below 1024px navigation opens in a
 keyboard-accessible drawer. Refresh updates data without remounting
 the page. Hermes keeps its native interface and integration link.
 
-Monitoring retains global running, waiting, failed, last confirmed success and
+Background work retains global running, waiting, failed, last confirmed success and
 unpublished backlog totals, independent of table pagination and chart filters.
 Workflow history is paginated; its details drawer holds receipts, publication,
 revision-aware retry/cancel, and source links. Status combines words, icons and
@@ -484,7 +490,7 @@ can move between buckets because the registry is not a historical transition log
 Current status refreshes every ten seconds, aggregates every sixty seconds, and
 manual Refresh updates both. Failed refreshes retain successful observations
 with a stale warning. Unavailable counts are not shown as zero. Chart legends,
-keyboard tooltips and View chart data provide alternative inspection paths.
+keyboard tooltips and Show as a table provide alternative inspection paths.
 Current workload-by-family uses health counts, never historical queue depth.
 Workflow summary values and label icons use blue for running, amber for waiting
 and backlog, red for failures, and green for a recorded confirmed completion.
@@ -545,7 +551,7 @@ Keep the second command in the persistent preview terminal. The fixture uses rea
 PostgreSQL workflow aggregates and synthetic page data. Its action/settings/import
 controls change only synthetic state; integration links show a fixture boundary.
 For injected browser failures, `/tmp/nocheh-ui-scenario` inside that preview
-container accepts `offline`, `unavailable`, `conflict`, or `no-graphics`; `normal`
+container accepts `offline`, `unavailable`, `conflict`, `fresh`, `no-provider`, `slow-apply` or `lost-apply`; `normal`
 restores normal behavior. Never apply these probes to installation containers.
 
 For the existing native inspection and database bootstrap tests, combine the

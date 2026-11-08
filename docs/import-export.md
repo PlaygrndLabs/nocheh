@@ -11,6 +11,9 @@ integration. It archives delivered updates; general history retrieval is a
 [user-account API method](https://core.telegram.org/method/messages.getHistory).
 No user-account history connector is implemented. Export/import is the supported
 backfill path; it makes old messages searchable without sending old replies.
+**Messages › Import** in the dashboard uploads a Desktop export, maps each chat
+and shows progress; the owner's private chat gets one notice once every imported
+message is prepared.
 
 <platform_sources>
 The database also accepts platform-independent source objects through the
@@ -26,9 +29,8 @@ and generated local port configuration; credentials never appear in arguments.
 ```sh
 ./bin/nocheh archive import-telegram /absolute/export/result.json
 ./bin/nocheh archive import-telegram /absolute/export/result.json --scope=-1001234567890
-./bin/nocheh archive export /absolute/new-export-directory
+./bin/nocheh archive export --sources-only /absolute/new-export-directory
 ./bin/nocheh archive import /absolute/new-export-directory
-./bin/nocheh archive replay EVENT_ID
 ```
 
 Both a single-chat Telegram Desktop JSON file and `chats.list` exports are
@@ -43,8 +45,9 @@ and records that topic beside the exported message; an export mapped to its own
 live supergroup then files the message under that live topic. Messages in
 General, or whose reply chain leaves the export, stay at group level.
 
-A mapped export is read and learned in the chat it was mapped to, like a live
-message there; learning still needs the owner's explicit choice on the import.
+A mapped export is read in the chat it was mapped to, like a live message there.
+Only Honcho memory learns it, after the owner's explicit choice on the import;
+Hermes native notes never review imported messages (ADR-0198).
 
 Unmapped Desktop chats use `desktop:TYPE:ID` scopes, available only to owner-wide
 retrieval. Map a single export explicitly with `--scope`, or use `--scope-map`
@@ -56,8 +59,7 @@ Native exports contain `manifest.json`, `events.ndjson`, and content-addressed
 files. Incomplete exports are marked and cannot be imported. Reimport verifies
 hashes, preserves original versus derived content and provenance, and is
 idempotent. Stored event origin is retained, but import transport suppresses
-dispatch. Archive replay validates/re-ingests existing records and retries missing
-Telegram attachments; it does not call an agent or send historical replies.
+dispatch.
 
 Exports paginate immutable sources and fetch files separately. Pause archive
 writes if an exact point-in-time export is required. Database backup/restore is
@@ -67,7 +69,7 @@ data with other agent or memory stacks.
 ## Interfaces
 
 All `/v1/` routes require bearer authentication. Only the owner/service credential
-may ingest, import, export, replay, upload files or inspect global status. Signed,
+may ingest, import, export, upload files or inspect global status. Signed,
 expiring read credentials bind the scope on the server; caller-supplied scope
 arguments cannot broaden it. An owner DM can receive an archive-wide read
 credential without receiving administrative API authority.
@@ -78,10 +80,10 @@ credential without receiving administrative API authority.
 | GET `/v1/search?q=...&limit=20` | Bounded PostgreSQL lexical search, no embeddings |
 | GET `/v1/events/ID` | Original event, source reference, artifacts and derived text |
 | GET `/v1/artifacts/ID/bytes` | Scoped, hash-verified original bytes |
-| GET `/v1/export?after=ID&limit=20` | Owner-only portable record page |
+| GET `/v1/exports/sources?after=ID&limit=20` | Owner-only source export page |
 | POST `/v1/import` | Portable record; no historical dispatch |
 | POST `/v1/artifacts/ID/bytes` | Owner upload with required SHA-256 |
-| POST `/v1/replay` | `{ "event_ids": [...] }`, archive-only replay |
+| POST `/v1/imports/sources` | Source-export record; no historical dispatch |
 | GET `/v1/status` | Service heartbeats, pending/failed archive work |
 
 The `nocheh_archive_search`, `nocheh_archive_read`, `nocheh_archive_page`

@@ -8,6 +8,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {DashboardSessions} from '../src/dashboard-auth.js';
 import {HttpError,json,readJson} from '../src/http.js';
+import {githubReturn} from '../src/github-return.js';
 import {OwnerLock} from '../src/owner-lock.js';
 import {tmpdir} from 'node:os';
 import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
@@ -32,6 +33,15 @@ for(const [id,name] of [['1'.repeat(64),'Mira Chen'],['d1'.repeat(32),'Devon']])
 const notion=new NotionRepository(pool);
 // Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
 let notionSignIn:{connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean}={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};
+// GitHub: the preview stands in for GitHub's create and install pages and returns at once; made-up repositories, and the
+// copies live only in this preview.
+const githubListed=[{name:'example-org/gadgets',branch:'main',private:false,size_kb:900},{name:'example-org/widgets',branch:'main',private:true,size_kb:21000}];
+const githubApp={name:'Nocheh-a1b2c3',account:'octo-example',install_url:'/__preview/github/install',settings_url:'https://github.com/settings/apps/nocheh-a1b2c3'};
+// As github.py keeps them: connected_at and listed_at in epoch seconds.
+let githubSignIn:{connected:boolean;app:typeof githubApp|null;connected_at:number|null;reconnect:boolean;listed:typeof githubListed;listed_at:number|null}=
+  {connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};
+let githubCopies:Record<string,unknown>[]=[];
+const githubStatus=()=>({...githubSignIn,copies:githubCopies.map(copy=>({...copy,missing:false}))});
 const tasks=new TaskRepository(pool,async()=>{throw new HttpError(403,'owner_private_turn_required');}),taskOwner={admin:true,scope:null};
 await tasks.create(taskOwner,{operation_id:'preview-1',title:'Book the Iceland flights',notes:'Window seats if possible.',group:'-10042/topic/7',tags:['Travel'],due_on:new Date(Date.now()+3*864e5).toISOString().slice(0,10)});
 await tasks.create(taskOwner,{operation_id:'preview-2',title:'Send the garden supplier the measurements',scope:garden,tags:['Suppliers'],people:['1'.repeat(64)]});
@@ -78,7 +88,7 @@ function modelRoutes() {
 }
 /** The `fresh` scenario: a new installation with a saved bot token and nothing else yet. */
 const freshInstall:Record<string,{value?:string|null;configured?:boolean}>={TELEGRAM_OWNER_ID:{value:''},TELEGRAM_BOT_TOKEN:{configured:true},OPENAI_API_KEY:{configured:false}};
-const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'TELEGRAM_GROUP_REPLIES',value:'addressed',editable:true},{key:'TELEGRAM_BOT_NAMES',value:'Nocheh,نوچه',editable:true},{key:'TELEGRAM_TOPIC_MEMORY',value:'group',editable:true},{key:'TELEGRAM_TYPING',value:'true',editable:true},{key:'TELEGRAM_PROBLEM_NOTICES',value:'true',editable:true},{key:'NOCHEH_DASHBOARD_URL',value:'',editable:true},{key:'NOCHEH_MODEL',value:'claude-sonnet-5-5',editable:true},{key:'NOCHEH_EMBEDDING_MODEL',value:'text-embedding-3-small',editable:true},{key:'NOCHEH_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_MODEL',value:'',editable:true},{key:'NOCHEH_MEMORY_PROVIDER',value:'',editable:true},{key:'NOCHEH_MEMORY_MODEL',value:'',editable:true},{key:'NOCHEH_GUARD_PROVIDER',value:'',editable:true},{key:'NOCHEH_GUARD_MODEL',value:'',editable:true},{key:'NOCHEH_EMBEDDING_PROVIDER',value:'openai',editable:true},{key:'NOCHEH_PROVIDERS',value:'[]',editable:true},{key:'NOCHEH_PROVIDER_KEYS',value:null,secret:true,configured:false,editable:true},{key:'OPENAI_API_KEY',value:null,secret:true,configured:true,editable:true},{key:'ANTHROPIC_API_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'NOCHEH_PARALLEL_RUNS',value:'4',editable:true},{key:'NOCHEH_PARALLEL_REPLIES',value:'3',editable:true},{key:'NOCHEH_PARALLEL_GUARD_CHECKS',value:'3',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true}];
+const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'TELEGRAM_GROUP_REPLIES',value:'addressed',editable:true},{key:'TELEGRAM_BOT_NAMES',value:'Nocheh,نوچه',editable:true},{key:'TELEGRAM_TOPIC_MEMORY',value:'group',editable:true},{key:'TELEGRAM_TYPING',value:'true',editable:true},{key:'TELEGRAM_REACTIONS',value:'true',editable:true},{key:'TELEGRAM_PROBLEM_NOTICES',value:'true',editable:true},{key:'NOCHEH_DASHBOARD_URL',value:'',editable:true},{key:'NOCHEH_MODEL',value:'claude-sonnet-5-5',editable:true},{key:'NOCHEH_EMBEDDING_MODEL',value:'text-embedding-3-small',editable:true},{key:'NOCHEH_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_MODEL',value:'',editable:true},{key:'NOCHEH_MEMORY_PROVIDER',value:'',editable:true},{key:'NOCHEH_MEMORY_MODEL',value:'',editable:true},{key:'NOCHEH_GUARD_PROVIDER',value:'',editable:true},{key:'NOCHEH_GUARD_MODEL',value:'',editable:true},{key:'NOCHEH_EMBEDDING_PROVIDER',value:'openai',editable:true},{key:'NOCHEH_PROVIDERS',value:'[]',editable:true},{key:'NOCHEH_PROVIDER_KEYS',value:null,secret:true,configured:false,editable:true},{key:'OPENAI_API_KEY',value:null,secret:true,configured:true,editable:true},{key:'ANTHROPIC_API_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'NOCHEH_PARALLEL_RUNS',value:'4',editable:true},{key:'NOCHEH_PARALLEL_REPLIES',value:'3',editable:true},{key:'NOCHEH_PARALLEL_GUARD_CHECKS',value:'3',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true}];
 const personas:Record<string,{role:string;skills:{name:string;description:string;body:string}[];revision:string}>={
   default:{role:'',skills:[{name:'weekly-menu',description:'When someone asks what to cook this week.',body:'Suggest five dinners from what is in the fridge.'}],revision:'persona-1'}};
 const persona=(scope:string)=>({scope,...(personas[scope]??={role:'',skills:[],revision:'persona-1'})});
@@ -142,12 +152,12 @@ const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assig
 const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.now()-m*60000).toISOString();
 // Background jobs: one reading a chat now, one that finished with its report.
 const backgroundJobs:any[]=[
-  {id:hx('9a'),title:'Open tasks in the aurora group',state:'running',chat:'-10042',asked_in:'-10042',steps:3,cost_usd:0.84,cost_limit_usd:5,minutes_limit:60,
+  {id:hx('9a'),title:'Open tasks in the aurora group',state:'running',chat:'-10042',asked_in:'-10042',attempts:1,ended:null,cost_usd:0.84,cost_limit_usd:5,priced:true,minutes_limit:45,
    estimate:{minutes:14,cost_usd:1.6,messages:2400},todo:[{content:'Read March',status:'completed'},{content:'Read April',status:'in_progress'},{content:'Check who owns each open task',status:'pending'}],
    started_at:minutesAgo(9),finished_at:null,created_at:minutesAgo(10),error_code:null},
-  {id:hx('9b'),title:'Summary of last week',state:'done',chat:'42',asked_in:'42',steps:1,cost_usd:0.12,cost_limit_usd:5,minutes_limit:60,
+  {id:hx('9b'),title:'Summary of last week',state:'done',chat:'42',asked_in:'42',attempts:1,ended:'time',cost_usd:0.12,cost_limit_usd:5,priced:true,minutes_limit:45,
    estimate:{minutes:2,cost_usd:0.1,messages:180},todo:[],started_at:minutesAgo(120),finished_at:minutesAgo(118),created_at:minutesAgo(121),error_code:null}];
-let jobLimits={cost_limit_usd:5,minutes_limit:60,member_daily_jobs:3,revision:0};
+let jobLimits={cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,box_tools:true,revision:0};
 const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',revision:2}];
 const devonId=hx('d1');
 const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
@@ -331,6 +341,14 @@ const server=createServer((req,res)=>{void(async()=>{
   const session=sessions.page(req);res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/`);
   res.setHeader('content-type','text/html');res.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;
  }
+ // GitHub's create page takes the manifest form and sends the browser back with a code; its install page sends it back
+ // with the installation. The dashboard's return page then opens the dashboard on them, as management.ts does.
+ if(req.method==='POST'&&path==='/__preview/github/new'){let raw='';for await(const part of req)raw+=part;
+  const manifest=JSON.parse(new URLSearchParams(raw).get('manifest')??'{}');
+  if(JSON.stringify(manifest.default_permissions)!==JSON.stringify({contents:'read',metadata:'read'})||manifest.public!==false)throw new HttpError(400,'manifest_not_read_only');
+  res.writeHead(302,{location:'/connect/github?code=preview-code&state='+encodeURIComponent(url.searchParams.get('state')??'')});res.end();return;}
+ if(req.method==='GET'&&path==='/__preview/github/install'){res.writeHead(302,{location:'/connect/github?installation_id=1&setup_action=install'});res.end();return;}
+ if(req.method==='GET'&&path==='/connect/github'){res.writeHead(302,{location:githubReturn(url.searchParams)});res.end();return;}
  if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;}
  // The mini app's phones sign in with the preview's synthetic password and send their session instead of a cookie.
  const phoneRoute=path.match(/^\/api\/nocheh\/mini-app\/(sign-in|check|sign-out)$/)?.[1];
@@ -352,8 +370,8 @@ const server=createServer((req,res)=>{void(async()=>{
  if(req.method==='GET'){
   if(route==='/health')return json(res,200,{ok:true});
   if(route==='/usage'){const days=Number(url.searchParams.get('days')||30),day=(ago:number)=>new Date(Date.now()-ago*864e5).toISOString().slice(0,10);
-    const row=(ago:number,part:string,label:string,service:string,provider:string,provider_name:string,model:string,calls:number,input:number,output:number,cost:number|null)=>({day:day(ago),part,label,service,provider,provider_name,model,runs:calls,calls,failed:part==='memory'&&ago===0?1:part==='guard'&&ago===0?3:0,refused:part==='guard'&&ago===0?2:0,hidden:part==='guard'&&ago===0?1:0,input_tokens:input,output_tokens:output,cache_read_tokens:0,cache_write_tokens:0,reasoning_tokens:0,cost_usd:cost,cost_complete:cost!==null});
-    const rows=[row(0,'reply','Telegram replies','Hermes','openai','OpenAI','gpt-5.6-sol',12,48000,3200,0.21),row(3,'reply','Telegram replies','Hermes','custom-1','Example gateway','claude-sonnet-5-5',5,20000,1500,null),
+    const row=(ago:number,part:string,label:string,service:string,provider:string,provider_name:string,model:string,calls:number,input:number,output:number,cost:number|null)=>({day:day(ago),part,label,service,provider,provider_name,model,runs:calls,calls,failed:part==='memory'&&ago===0?1:part==='guard'&&ago===0?3:0,refused:part==='guard'&&ago===0?2:0,hidden:part==='guard'&&ago===0?1:0,input_tokens:input,output_tokens:output,cache_read_tokens:provider==='anthropic'?input*3:0,cache_write_tokens:provider==='anthropic'?input/2:0,reasoning_tokens:0,cost_usd:cost,cost_complete:cost!==null});
+    const rows=[row(0,'reply','Telegram replies','Hermes','openai','OpenAI','gpt-5.6-sol',12,48000,3200,0.21),row(3,'reply','Telegram replies','Hermes','custom-1','Example gateway','claude-sonnet-5-5',5,20000,1500,null),row(1,'memory_review','Memory notes','Hermes','anthropic','Anthropic','claude-sonnet-5-5',4,2000,900,0.02),
       row(0,'guard','Secret check','Nocheh','openai','OpenAI','gpt-5.6-sol',12,6000,240,0.01),row(0,'memory','Memory','Honcho','custom-1','Example gateway','claude-sonnet-5-5',9,30000,4000,null),
       row(0,'embedding','Memory search','Honcho','openai','OpenAI','text-embedding-3-small',20,8000,0,0.0002)].filter(r=>r.day>=day(days-1));
     return json(res,200,{since:day(days-1),today:day(0),days,rows,parts:[['reply','Telegram replies','Hermes'],['browser','Browser chat','Hermes'],['schedule','Scheduled runs','Hermes'],['memory_review','Memory notes','Hermes'],['guard','Secret check','Nocheh'],['memory','Memory','Honcho'],['embedding','Memory search','Honcho']].map(([id,label,service])=>({id,label,service})),sources:{hermes:'ok',honcho:'ok',pricing:'ok'}});}
@@ -473,6 +491,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
   if(route==='/notion')return json(res,200,await notion.get(taskOwner));
   if(route==='/connections/notion')return json(res,200,notionSignIn);
+  if(route==='/connections/github')return json(res,200,githubStatus());
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
   if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs});
@@ -525,10 +544,29 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
     notionSignIn={connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
   if(route==='/connections/notion/disconnect'){notionSignIn={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};return json(res,200,notionSignIn);}
+  if(route==='/connections/github/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/connect/github')throw new HttpError(400,'invalid_github_redirect');
+    return json(res,200,{action:'/__preview/github/new?state=fixture-state',manifest:JSON.stringify({name:'Nocheh-a1b2c3',url:new URL(String(body.redirect)).origin,
+      redirect_url:body.redirect,setup_url:body.redirect,setup_on_update:true,public:false,default_permissions:{contents:'read',metadata:'read'},default_events:[]})});}
+  // A code from a sign-in that came back while Nocheh was busy: the real route refuses it before github.py sees it.
+  if(route==='/connections/github/finish'&&body.code==='preview-busy')throw new HttpError(409,'wait_for_active_jobs');
+  if(route==='/connections/github/finish'){if(body.state!=='fixture-state'||body.code!=='preview-code')throw new HttpError(400,'github_sign_in_expired');
+    githubSignIn={connected:true,app:githubApp,connected_at:Math.floor(Date.now()/1000),reconnect:false,listed:[],listed_at:null};
+    return json(res,200,{...githubStatus(),install_url:githubApp.install_url});}
+  if(route==='/connections/github/list'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
+    githubSignIn.listed=githubListed;githubSignIn.listed_at=Math.floor(Date.now()/1000);return json(res,200,githubStatus());}
+  if(route==='/connections/github/copy'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
+    const repo=String(body.repo??''),known=githubListed.find(row=>row.name.toLowerCase()===repo.toLowerCase());if(!known)throw new HttpError(400,'github_repo_not_readable');
+    const commit=randomUUID().replace(/-/g,'').padEnd(40,'0'),copied_at=new Date().toISOString(),row={repo:known.name,branch:known.branch,commit,digest:commit.padEnd(64,'0'),
+      bytes:known.size_kb*1000,need:known.size_kb*3000,files:1204,previous_digest:null,copied_at};
+    githubCopies=[...githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==repo.toLowerCase()),row].sort((a,b)=>String(a.repo).localeCompare(String(b.repo)));
+    return json(res,200,{state:'copied',repo:row.repo,branch:row.branch,commit,copied_at,bytes:row.bytes,files:row.files});}
+  if(route==='/connections/github/remove'){githubCopies=githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==String(body.repo??'').toLowerCase());return json(res,200,githubStatus());}
+  if(route==='/connections/github/disconnect'){githubSignIn={connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};githubCopies=[];return json(res,200,githubStatus());}
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');
-    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),revision:jobLimits.revision+1};return json(res,200,jobLimits);}
+    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),
+      box_tools:typeof body.box_tools==='boolean'?body.box_tools:jobLimits.box_tools,revision:jobLimits.revision+1};return json(res,200,jobLimits);}
   const jobStop=route.match(/^\/background-jobs\/([a-f0-9]{64})\/stop$/);
   if(jobStop){const job=backgroundJobs.find(row=>row.id===jobStop[1]);if(!job)throw new HttpError(404,'job_not_found');job.state='stopping';return json(res,200,{id:job.id,state:'stopping'});}
   if(route==='/tasks/archive-finished')return json(res,200,await tasks.archiveFinished(taskOwner,body));

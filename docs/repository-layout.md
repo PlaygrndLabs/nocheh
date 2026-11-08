@@ -9,13 +9,13 @@ Git contains source code, configuration needed to build and deploy it, documenta
 | `dashboard/` | Owner dashboard source |
 | `deploy/` | Dockerfiles, synthetic acceptance overlays, and pinned upstream revisions |
 | `docs/` | Specifications support, decisions, procedures, and non-identifying status summaries |
-| `services/` | Hermes plugin and Honcho service code |
+| `services/` | Hermes runtime, Telegram gateway, agent launcher and plugin; Honcho service code |
 | `src/` | TypeScript application services |
 | `test/` | Tests and explicitly synthetic fixtures |
 | `tools/` | CLI routing, operations, runtime helpers, acceptance harnesses, development tools, and build helpers |
 | Root Compose files and manifests, `AGENTS.md`, `SPECS.md`, `TASK.md`, `LICENSE` | Operating and development Compose configuration, build inputs, and authoritative project context |
 
-The former top-level `compatibility/` mixed these roles. Its reusable scripts are under `tools/acceptance`, Compose overlays under `deploy/acceptance`, synthetic fixtures under `test/fixtures/acceptance`, and procedures under `docs/acceptance`.
+The former top-level `compatibility/` mixed these roles. Its reusable scripts are under `tools/acceptance`, Compose overlays under `deploy/acceptance`, and its historical findings under `docs/acceptance`.
 
 | Ignored local path | Contents |
 | --- | --- |

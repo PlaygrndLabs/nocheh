@@ -16,6 +16,15 @@ CREATE TABLE IF NOT EXISTS action_permissions (
  kind text NOT NULL,job_id text,expires_at timestamptz NOT NULL,remaining integer NOT NULL CHECK(remaining>=0),
  revision integer NOT NULL DEFAULT 1,revoked_at timestamptz,created_at timestamptz NOT NULL DEFAULT now()
 );
+-- A chat rule covers one site or exact command in one chat or topic (ADR-0214); an exact grant, one fingerprint and epoch.
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS match_key text;
+-- The state the asking turn read whole while it waited, so no follow-up repeats that answer (ADR-0215).
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS observed_in_turn text;
+ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS grain text NOT NULL DEFAULT 'exact' CHECK(grain IN ('exact','chat'));
+ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS match_key text;
+ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS space_id text;
+ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS logical_profile text;
+CREATE INDEX IF NOT EXISTS action_permission_rules ON action_permissions(match_key,space_id) WHERE grain='chat';
 CREATE TABLE IF NOT EXISTS action_owner_commands (
  id text PRIMARY KEY,request_hash text NOT NULL,result jsonb NOT NULL,source_reference jsonb,created_at timestamptz NOT NULL DEFAULT now()
 );

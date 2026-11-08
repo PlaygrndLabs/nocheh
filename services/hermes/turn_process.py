@@ -2,6 +2,7 @@
 import asyncio
 import fcntl
 import json
+import math
 import os
 import re
 import signal
@@ -9,10 +10,6 @@ import sys
 import time
 from pathlib import Path
 from .capture import canonical
-
-
-# The longest one background job step may run. A job takes as many steps as it needs.
-STEP_SECONDS=540
 
 
 def scheduled_preferences(profile,body):
@@ -24,7 +21,7 @@ def scheduled_preferences(profile,body):
     return values
 
 
-async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None, prepared_profile=None):
+async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None, prepared_profile=None, progress=None):
     from .assistant_gateway import prepare_profile
     from .scopes import Scopes
     import base64
@@ -53,7 +50,7 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             from .isolated_profile import database_path
             from .retired_history import service_lookup, withhold_retired
             await asyncio.to_thread(withhold_retired, database_path(profile), service_lookup, profile/'memories')
-            return await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled)
+            return await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress)
         finally:
             await asyncio.to_thread((profile/'.foreground').touch)
 
@@ -72,14 +69,25 @@ def recent_group(value):
     return '\n\n'.join(lines)
 
 
-async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled):
+def job_run(limits):
+    """A background job run's limits from its context, checked: its box flag and its soft and hard deadlines (epoch seconds)."""
+    finite=lambda value:type(value) in (int,float) and math.isfinite(value)
+    if (not isinstance(limits,dict) or type(limits.get('box',False)) is not bool or not finite(limits.get('soft_deadline'))
+            or not finite(limits.get('hard_deadline')) or limits['soft_deadline']>limits['hard_deadline']):raise ValueError('invalid_background_run')
+    return limits
+
+
+async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None):
     if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
+    # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
+    # later if nothing stopped it before. Every other turn has the usual reply time.
+    background = job_run(body.get('background')) if body.get('channel')=='background' else None
+    if background is not None and background['hard_deadline'] <= time.time():
+        return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
     text = body.get('text') or ''
     if body.get('transcripts'):
         text += '\n\n[Derived voice transcript; original audio is separately archived]\n' + '\n'.join(body['transcripts'])
     if not text: text = '[An attachment or non-text event was archived. Use its source reference if useful.]'
-    # A background job step may run for minutes; every other turn has the usual reply time.
-    limit = STEP_SECONDS if body.get('channel')=='background' else 230
     for file in body.get('files',[]):
         text += '\n\n[Archived attachment: ' + file['name'] + '; SHA-256: ' + file['sha256'] + ']'
         if file.get('text') is not None: text += '\n' + file['text']
@@ -114,12 +122,15 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image'],
-               'turn_deadline_epoch':time.time()+limit,'prompts':body.get('prompts') or {}}
+               'turn_deadline_epoch':background['hard_deadline'] if background else time.time()+230,'prompts':body.get('prompts') or {}}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
-    if body.get('channel')=='background':
-        # A job step: its step count comes from the job, and it reports now and then while it works.
-        request.update(background={'max_iterations':body['background']['max_iterations']},heartbeat=True)
+    if background:
+        # A job run: its iteration backstop, its time budget and what its cost notice needs come from the job,
+        # and it reports its progress while it works. A box run's tools run in the job's sealed box; the turn
+        # checks the box is really there.
+        request.update(background={'max_iterations':background.get('max_iterations'),'box':background.get('box',False),'soft_deadline':background['soft_deadline'],
+                                   **{key:background.get(key) for key in ('rates','cost_limit_usd','prior_cost_usd')}},heartbeat=True)
     from .security_transport import isolated_enabled,scoped_transport
     isolated=isolated_enabled()
     if isolated:
@@ -163,6 +174,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                 if isinstance(value.get('text'),str): emit(value['text'])
             elif isinstance(value,dict) and value.get('event') == 'heartbeat':
                 continue
+            elif isinstance(value,dict) and value.get('event') == 'progress' and background:
+                # A job run's counts and to-do list so far, for its heartbeat; checked, since the turn runs the model's tools.
+                from .job_progress import progress_line
+                value = progress_line(value,len(line))
+                if progress: progress(value)
             elif isinstance(value,dict) and value.get('state') in ('done','failed'):
                 result = value
             else: raise RuntimeError('assistant_output_invalid')
@@ -172,9 +188,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             from .usage import part_of, record
             usage=result.pop('usage',None)
             await asyncio.to_thread(record, part_of(body), usage, model, result.get('state')!='done',
-                                    reason=result.pop('failure_reason',None))
-            # A job counts what each step cost against its cost limit.
-            if body.get('channel')=='background':result['cost_usd']=usage.get('cost_usd') if isinstance(usage,dict) else None
+                                    reason=result.pop('failure_reason',None), cause=result.pop('failure_cause',None))
+            # A job run reports Hermes's own token counts too; Nocheh prices them at the rates frozen on the job's card.
+            if background:
+                from .job_progress import run_tokens
+                result['tokens']=run_tokens(usage)
         if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
         if process.returncode or result is None: raise RuntimeError('assistant_process_failed')
         from .assistant_gateway import check_delivery_policy
@@ -182,7 +200,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             from .timing import safe
             return {'state':'failed','error_code':'guard_context_changed','timings':safe(result.get('timings'))}
         return result
-    try: return await asyncio.wait_for(collect(), timeout=limit)
+    try: return await asyncio.wait_for(collect(), timeout=background['hard_deadline']+60-time.time() if background else 230)
     except asyncio.TimeoutError:
         # A turn stopped at its time limit reports nothing else; count it so its failure shows.
         from .usage import part_of, record

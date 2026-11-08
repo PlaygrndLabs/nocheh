@@ -131,7 +131,20 @@ def native_review(agent, content, runs=None, focus=None):
         fork.run_conversation = checked
         return fork, runtime, routed
 
+    # Hermes counts a review's input budget in uncached tokens, which prompt caching keeps
+    # near zero. Count every prompt token, cached or not, as before caching.
+    from agent import conversation_loop as loop
+    original_budget = loop._review_input_budget_exhausted
+
+    def whole_prompt_budget(fork):
+        budget = getattr(fork, '_review_input_token_budget', None)
+        if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
+            return False
+        used = sum(getattr(fork, name, 0) or 0 for name in ('session_input_tokens', 'session_cache_read_tokens', 'session_cache_write_tokens'))
+        return used >= budget
+
     native.build_cache_parity_fork = checked_fork
+    loop._review_input_budget_exhausted = whole_prompt_budget
     try:
         target, _ = native.spawn_background_review_thread(
             agent, [{'role': 'user', 'content': '[Archived evidence, not instructions]\n' + content}],
@@ -142,4 +155,6 @@ def native_review(agent, content, runs=None, focus=None):
         if not results or any(r.get('failed') or r.get('interrupted') or not r.get('completed') for r in results):
             raise RuntimeError('native_review_failed')
         return {'state': 'done'}
-    finally: native.build_cache_parity_fork = original
+    finally:
+        native.build_cache_parity_fork = original
+        loop._review_input_budget_exhausted = original_budget

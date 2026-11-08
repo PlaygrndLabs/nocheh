@@ -38,6 +38,7 @@ import {DerivativePortabilityRepository} from './derivative-portability.js';
 import {RuntimeConfigurationRepository} from './runtime-configuration.js';
 import {TelegramActionRepository} from './telegram-actions.js';
 import {TelegramDispatchRepository} from './telegram-dispatch.js';
+import {ActionContinuationRepository} from './action-continuations.js';
 import {ControlledActionRepository} from './controlled-actions.js';
 import {ControlledExecutionRepository} from './controlled-execution.js';
 import {ActionCommandRepository} from './action-commands.js';
@@ -73,7 +74,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
       const source=(await archive.captured(principal.turnEvent!)).reference;
       if(!await access.canRead(principal,source,binding))throw new HttpError(403,'turn_source_denied');return source;
     } catch(error) {if(!(error instanceof HttpError)||error.code!=='source_not_found')throw error;}
-    const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind IN ('scheduled_trigger','background_step')",[principal.turnEvent])).rows[0];
+    const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind IN ('scheduled_trigger','background_run')",[principal.turnEvent])).rows[0];
     if(!operation||operation.scope!==principal.space)throw new HttpError(403,'turn_source_denied');
     const reference={store:'control' as const,kind:'operation' as const,id:operation.id,generation:operation.generation,input_hash:operation.input_hash};
     await operations.verify(reference);return reference;
@@ -116,8 +117,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   },{call:options.runtime,owner:()=>options.policy().owner_id});
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs);
-  // A card edit is best effort: a job never fails because its card could not be updated.
+  const controlledExecution=new ControlledExecutionRepository(controlledActions);
+  // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
+  jobs.stopped=async id=>{await controlledActions.stopJob(id);};
+  controlledExecution.settled=id=>actionCommands.settle('controlled',id).then(()=>{},()=>{});
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
@@ -128,8 +132,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.runtime,schedules,telegramActions),
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime,browserDelivery),
-    controlledActions,controlledExecution:new ControlledExecutionRepository(controlledActions),memoryAccess,memoryMap,
+    controlledActions,controlledExecution,memoryAccess,memoryMap,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
+    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.runtime,options.serviceToken??''),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory,knowledge,supervision,

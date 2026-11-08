@@ -2,7 +2,7 @@ import json,sys,tempfile,unittest,subprocess
 from pathlib import Path
 from unittest.mock import patch
 from tools.operations.security.tool_execution import public_target,workspace,sandbox_command,mcp_call,execute
-from tools.operations.security.tool_receipts import tick
+from tools.operations.security.tool_receipts import tick,permitted_execute
 
 class ToolTests(unittest.TestCase):
     def test_public_resolver_denies_every_private_candidate_and_pins_public_ip(self):
@@ -24,6 +24,9 @@ class ToolTests(unittest.TestCase):
             self.assertIn('type=bind,src='+str((home/'workspace').resolve())+',dst=/workspace',command)
             self.assertFalse(any('SERVICE_TOKEN' in x or 'docker.sock' in x for x in command))
             self.assertNotIn('--mount',sandbox_command(root,{**action,'kind':'browser'},'test-only'))
+            # Chromium's threads count as processes; a shell command keeps the tighter bound.
+            self.assertIn('--pids-limit=512',sandbox_command(root,{**action,'kind':'browser'},'test-only'))
+            self.assertIn('--pids-limit=128',command)
             (home/'workspace').rmdir();(home/'workspace').symlink_to(root)
             with self.assertRaisesRegex(ValueError,'workspace_path_denied'):workspace(root,'scoped')
             with self.assertRaisesRegex(ValueError,'profile_denied'):workspace(root,'../private')
@@ -42,6 +45,151 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(calls[-1][2]['Mcp-Session-Id'],'session')
         def malicious(url,body,headers):return json.dumps({'jsonrpc':'2.0','id':1,'method':'sampling/createMessage'}).encode(),{'content-type':'application/json'}
         with self.assertRaisesRegex(RuntimeError,'mcp_response_rejected'):mcp_call(args,malicious)
+
+    def test_a_tool_that_answers_with_its_own_error_is_recorded_as_failed(self):
+        def remote(answer):
+            def call(url,body,headers):
+                if body['method']=='initialize':return json.dumps({'jsonrpc':'2.0','id':1,'result':{'protocolVersion':'2025-11-25'}}).encode(),{'content-type':'application/json'}
+                if body['method']=='notifications/initialized':return b'',{}
+                return json.dumps({'jsonrpc':'2.0','id':2,'result':answer}).encode(),{'content-type':'application/json'}
+            return call
+        refused={'content':[{'type':'text','text':'Invalid made-up property'}],'isError':True}
+        args={'url':'https://example.com/mcp','tool':'fixture','input':{}}
+        result=mcp_call(args,remote(refused))
+        self.assertEqual([result['exit_code'],result['error'],result['response']],[1,'tool_reported_error',refused],'the answer is kept to read')
+        self.assertNotIn('exit_code',mcp_call(args,remote({'content':[],'isError':False})))
+        self.assertNotIn('exit_code',mcp_call({**args,'operation':'list'},remote({'tools':[],'isError':True})),'only a tool call can fail this way')
+        class API:
+            def __init__(self):self.finished=None
+            def call(self,path,body):
+                if path.endswith('/claim'):return {'claimed':True,'id':'a'*64,'kind':'mcp'}
+                if path.endswith('/start'):return {'started':True}
+                self.finished=body;return {'state':body['state']}
+        with tempfile.TemporaryDirectory() as folder:
+            api=API();tick(folder,api,'actor',lambda state,action:result,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
+        self.assertEqual([api.finished['state'],api.finished['result']['error']],['failed','tool_reported_error'])
+
+    def test_the_settings_check_names_the_chat_profile_not_the_proposal_epoch(self):
+        asked=[]
+        def native(state,path):
+            asked.append(path)
+            return {'values':{'nocheh_tools.shell':'off' if 'off' in path else 'on'}}
+        action={'kind':'shell','profile':'nocheh-epoch-bound','preference':{'profile':'nocheh-chat','space':'-10/topic/7'},'arguments':{}}
+        ready=patch('tools.operations.security.tool_receipts.sandbox_ready',return_value=True);ready.start();self.addCleanup(ready.stop)
+        with patch('tools.operations.security.native.call',native),patch('tools.operations.security.tool_receipts.bounded_execute',lambda state,action:{'stdout':'ran'}):
+            self.assertEqual(permitted_execute('/state',action),{'stdout':'ran'})
+            self.assertEqual(asked,['/api/nocheh/preferences?profile=nocheh-chat&space=-10%2Ftopic%2F7'])
+            self.assertEqual(permitted_execute('/state',{**action,'preference':{'profile':'nocheh-off','space':'42'}}),{'exit_code':1,'error':'tool_disabled_by_owner'})
+        def down(state,path):raise ValueError('native_administration_unavailable')
+        with patch('tools.operations.security.native.call',down),patch('tools.operations.security.tool_receipts.time.sleep') as wait:
+            self.assertEqual(permitted_execute('/state',action),{'exit_code':1,'error':'tool_policy_unavailable'})
+            self.assertEqual(wait.call_count,2,'it reads the settings three times before it gives up')
+        answers=[ValueError('native_administration_unavailable'),{'values':{'nocheh_tools.shell':'on'}}]
+        def once(state,path):
+            answer=answers.pop(0)
+            if isinstance(answer,Exception):raise answer
+            return answer
+        with patch('tools.operations.security.native.call',once),patch('tools.operations.security.tool_receipts.time.sleep'),\
+             patch('tools.operations.security.tool_receipts.bounded_execute',lambda state,action:{'stdout':'ran'}):
+            self.assertEqual(permitted_execute('/state',action),{'stdout':'ran'},'a read that fails once, as during a new epoch, is read again')
+
+    def test_a_missing_sandbox_image_stops_before_anything_is_sent(self):
+        from tools.operations.security import tool_execution
+        asked=[]
+        def docker(command,**kwargs):
+            asked.append(command);return type('Done',(),{'returncode':1})()
+        self.assertFalse(tool_execution.sandbox_ready(docker))
+        self.assertEqual(asked,[['docker','image','inspect','--format','{{.Id}}','nocheh-tools:local']])
+        self.assertTrue(tool_execution.sandbox_ready(lambda command,**kwargs:type('Done',(),{'returncode':0})()))
+        def unreachable(command,**kwargs):raise FileNotFoundError('docker')
+        self.assertFalse(tool_execution.sandbox_ready(unreachable),'without Docker there is no sandbox either')
+        native=lambda state,path:{'values':{'nocheh_tools.browser':'on','nocheh_tools.mcp':'on'}}
+        action={'kind':'browser','profile':'nocheh-chat','preference':{'profile':'nocheh-chat','space':'-10'},'arguments':{'url':'https://example.com/'}}
+        def never(*args):raise AssertionError('nothing may be sent without the sandbox')
+        with patch('tools.operations.security.native.call',native),patch('tools.operations.security.tool_receipts.sandbox_ready',return_value=False),\
+             patch('tools.operations.security.tool_receipts.bounded_execute',never):
+            self.assertEqual(permitted_execute('/state',action),{'exit_code':1,'error':'tool_sandbox_missing'})
+        with patch('tools.operations.security.native.call',native),patch('tools.operations.security.tool_receipts.sandbox_ready',side_effect=AssertionError('mcp needs no sandbox')),\
+             patch('tools.operations.security.tool_receipts.bounded_execute',lambda state,action:{'response':{}}):
+            self.assertEqual(permitted_execute('/state',{**action,'kind':'mcp'}),{'response':{}})
+        class API:
+            def __init__(self):self.finished=None
+            def call(self,path,body):
+                if path.endswith('/claim'):return {'claimed':True,'id':'a'*64,'kind':'browser'}
+                if path.endswith('/start'):return {'started':True}
+                self.finished=body;return {'state':body['state']}
+        with tempfile.TemporaryDirectory() as folder:
+            api=API();tick(folder,api,'actor',lambda state,action:{'exit_code':1,'error':'tool_sandbox_missing'},action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
+        self.assertEqual([api.finished['state'],api.finished['result']['error']],['failed','tool_sandbox_missing'])
+
+    def test_the_isolated_helper_reports_only_a_fixed_failure_code(self):
+        from tools.operations.security.tool_execution import bounded_execute
+        action={'kind':'browser','arguments':{'url':'http://example.com/'}}
+        with tempfile.TemporaryDirectory() as folder,patch('tools.operations.security.tool_execution.subprocess.run') as run:
+            with self.assertRaises(RuntimeError) as raised:bounded_execute(folder,action)
+        self.assertEqual(str(raised.exception),'public_https_required')
+        self.assertEqual(run.call_args.args[0][:3],['docker','rm','-f'])
+
+    def test_an_unconfirmed_outcome_keeps_only_a_fixed_failure_code(self):
+        from tools.operations.security.tool_execution import failure
+        import subprocess,socket,ssl
+        self.assertEqual(failure(RuntimeError('browser_html_required')),'browser_html_required')
+        self.assertEqual(failure(socket.gaierror('lookup of a private name')),'remote_unreachable')
+        self.assertEqual(failure(subprocess.TimeoutExpired(['docker'],50)),'sandbox_timed_out')
+        for error in (ConnectionRefusedError(),ssl.SSLError(),TimeoutError()):
+            with self.subTest(error=type(error).__name__):self.assertEqual(failure(error),'remote_unreachable')
+        self.assertEqual(failure(FileNotFoundError('docker')),'tool_process_failed')
+        self.assertEqual(failure(RuntimeError('remote said something private')),'tool_process_failed')
+        for raised,cause in ((RuntimeError('sandbox_execution_failed'),'sandbox_execution_failed'),(TimeoutError('tool_deadline'),'tool_deadline'),
+                             (RuntimeError('remote said something private'),None),(ValueError('browser_html_required'),None)):
+            calls=[]
+            class API:
+                def call(self,path,body):
+                    calls.append((path,body))
+                    if path.endswith('/start'):return {'started':True}
+                    return {'claimed':True,'id':'f'*64} if path.endswith('/claim') else {}
+            def run(*args):raise raised
+            with tempfile.TemporaryDirectory() as folder:tick(folder,API(),'actor',run,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
+            self.assertEqual(calls[-1][1]['state'],'ambiguous')
+            self.assertEqual(calls[-1][1]['result'],{'error':'execution_outcome_unconfirmed',**({'cause':cause} if cause else {})})
+            self.assertNotIn('private',json.dumps(calls))
+
+    def test_a_known_outcome_is_a_failure_not_an_uncertain_one(self):
+        # Nothing was sent, or a page read got its whole answer and refused it: the result says why, and it failed.
+        for kind,raised,state in (('browser',RuntimeError('browser_html_required'),'failed'),('browser',RuntimeError('remote_response_rejected'),'failed'),
+                                  ('browser',RuntimeError('sandbox_execution_failed'),'failed'),('mcp',RuntimeError('public_https_required'),'failed'),
+                                  ('shell',RuntimeError('private_destination_denied'),'failed'),
+                                  # A remote that may have acted, a run cut short, or an unknown failure stays uncertain.
+                                  ('mcp',RuntimeError('remote_response_rejected'),'ambiguous'),('browser',RuntimeError('remote_unreachable'),'ambiguous'),
+                                  ('browser',TimeoutError('tool_deadline'),'ambiguous'),('shell',RuntimeError('sandbox_execution_failed'),'ambiguous'),
+                                  ('browser',ValueError('browser_html_required'),'ambiguous')):
+            calls=[]
+            class API:
+                def call(self,path,body):
+                    calls.append((path,body))
+                    if path.endswith('/start'):return {'started':True}
+                    return {'claimed':True,'id':'f'*64,'kind':kind} if path.endswith('/claim') else {}
+            def run(*args):raise raised
+            with self.subTest(kind=kind,error=str(raised)),tempfile.TemporaryDirectory() as folder:
+                tick(folder,API(),'actor',run,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
+                self.assertEqual(calls[-1][1]['state'],state)
+                if state=='failed':self.assertEqual(calls[-1][1]['result'],{'exit_code':1,'error':str(raised)})
+
+    def test_a_page_read_returns_json_or_plain_text_as_text(self):
+        from tools.operations.security.tool_execution import execute
+        action={'kind':'browser','arguments':{'url':'https://weather.example.com/today?format=j1'},'profile':'p'}
+        for media,expected in (('application/json; charset=utf-8',True),('text/plain',True),('application/geo+json',True),('text/html; charset=utf-8',None),
+                               ('image/png',False),('application/javascript',False),('',False)):
+            def request(url,body=None,headers=None):return b'{"temp_C": "21"}',{'content-type':media}
+            def run(command,**kwargs):
+                if command[:2]==['docker','rm']:return None
+                return subprocess.CompletedProcess(command,0,stdout=b'{"text":"rendered"}')
+            with self.subTest(media=media):
+                if expected is False:
+                    with self.assertRaisesRegex(RuntimeError,'browser_html_required'):execute('/tmp',action,request,run)
+                elif expected:
+                    self.assertEqual(execute('/tmp',action,request,run),{'text':'{"temp_C": "21"}','links':[],'mode':'text','url':action['arguments']['url']})
+                else:self.assertEqual(execute('/tmp',action,request,run),{'text':'rendered'},'an HTML page still renders in the sandbox')
 
     def test_receipt_outage_does_not_repeat_execution(self):
         class API:

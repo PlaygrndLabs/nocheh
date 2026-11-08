@@ -37,7 +37,7 @@ from tools.acceptance.owner_dashboard import FIXTURE_PASSWORD
 from tools.paths import ROOT
 
 IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
-          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:a92650bc'}
+          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:a92650bc', 'box': 'nocheh-box:local'}
 BROWSER_IMAGE = 'nocheh-tester-browser:local'
 
 # Plain-English names for the report, by scenario.
@@ -64,6 +64,7 @@ TITLES = {
     'group_members': 'Set up allowed members', 'group_name_addresses': 'Groups: calling Nocheh by name',
     'unaddressed_messages_reach_next_reply': 'Groups: unaddressed messages inform the next reply',
     'typing_shows_while_working': 'Typing shows while Nocheh works',
+    'reactions_show_while_working': 'Reactions show while Nocheh works',
     'not_allowed_person_gets_fixed_reply': 'People not allowed get the fixed reply',
     'menu_shown_to_nobody': 'Nobody sees a command menu', 'stranger_in_private_gets_one_reply': 'A stranger in private: one fixed reply, nothing else',
     'owner_private_card_and_approve': 'Approval card in private chat, Approve button',
@@ -72,11 +73,25 @@ TITLES = {
     'owner_reviews_when_member_not_allowed_there': 'You review a member\'s message to a group they are not in',
     'owner_from_group_to_own_private_chat': 'From a group to your private chat, no approval',
     'owner_from_group_to_other_group': 'From one group to another, card in your private chat',
-    'hidden_message_keeps_the_chat': 'Hide and unhide keep the conversation', 'reaction_keeps_group_name': 'A reaction keeps the group name',
+    'hidden_message_keeps_the_chat': 'Hide and unhide keep the conversation',
+    'native_notes_reach_later_turns': 'A saved note reaches the chat\'s later messages', 'reaction_keeps_group_name': 'A reaction keeps the group name',
     'learning_reaches_honcho': 'Learning reaches Honcho', 'inbox_never_asks_about_the_owner': 'Inbox: one card per new person, none for you',
     'import_with_topics_files_and_learning': 'Telegram import with topics, files and learning',
+    'import_learning_choice': 'Import learn box: off, kept private, learned later',
     'tasks_from_chat_with_reminder': 'Tasks from chat, reminder, status and done', 'tasks_not_in_unrelated_group': 'Tasks stay private in groups', 'chat_is_read_in_order': 'A chat is read in order',
     'background_job_runs_and_reports': 'A background job is approved, runs and reports',
+    'background_job_cost_cap': 'A background job at its cost limit stops with a short note',
+    'background_job_uses_sealed_box': 'A background job runs its commands in the sealed box',
+    'background_job_reads_a_repo_copy': 'A background job reads a GitHub copy in its sealed box',
+    'approval_waits_across_a_change_and_runs': 'An approval waits through a reaction, then runs the exact command',
+    'group_operation_answers_in_topic': 'A member\'s command, approved privately, is answered in its group topic',
+    'allowed_command_runs_without_a_card': 'Always allow on a card lets the same command run in that topic, answered in one reply',
+    'job_operation_runs_after_approval': 'A job\'s command runs once you approve it',
+    'background_job_long_run': 'A background job runs past the old step limit as one run',
+    'background_job_stop_button': 'Stop on a running job\'s card stops it',
+    'background_job_restart': 'A background job restarts after its turn is killed or a message is hidden',
+    'background_job_reaction_during_run': 'A background job runs on through a reaction in its chat',
+    'background_job_time_limit': 'A background job at its time limit stops with a short note',
     'defaults_keep_history_and_notion_off': 'Defaults: history kept, Notion off',
     'settings_apply_is_followed_to_the_end': 'Settings: Save and apply finish, and a reload keeps following',
     'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',
@@ -90,7 +105,9 @@ BUILDS = [('services', 'nocheh-services:tester', ['--target', 'runtime']),
           ('management', 'nocheh-management:tester', ['--target', 'management']),
           ('postgres', 'nocheh-store-postgres:tester', ['--target', 'store-postgres']),
           ('native', 'nocheh-hermes:tester', ['-f', 'deploy/hermes.Dockerfile',
-                                               '--build-context', 'hermes_source=data/compat/upstreams/hermes-agent'])]
+                                               '--build-context', 'hermes_source=data/compat/upstreams/hermes-agent']),
+          # The sealed job box, which the GitHub fetcher runs too; it uses no build arguments.
+          ('box', 'nocheh-box:tester', ['-f', 'deploy/box.Dockerfile'])]
 
 
 def build_images(log):

@@ -127,11 +127,18 @@ export class LearnedMemoryRepository {
       if(job.state==='publishing'||job.state==='done'){await db.query('COMMIT');return;}
       if(canonical({epoch:Number(state.epoch),mode:state.mode,generation:state.generation})!==canonical(binding))throw new HttpError(409,'guard_context_changed');
       const changed=versions.some(v=>v.expected_revision!==null);
-      // Automatic reinterpretation can wait until an admitted reply finishes.
+      // Automatic reinterpretation can wait until an admitted reply finishes, and until a running
+      // approved action has run: its start and its executor's checks refuse while a publication is pending.
+      // A background job's run goes on across it and waits out the publication (ADR-0208).
       // Owner corrections and source/privacy revocations use their immediate paths.
-      if(versions.length&&await foregroundReplyActive(db,binding))
+      if(versions.length&&(await foregroundReplyActive(db,binding,true)||
+        (await db.query("SELECT 1 FROM controlled_actions WHERE state='running' AND lease_until>now() LIMIT 1")).rowCount))
         throw new HttpError(409,'learning_publication_pending');
       const epoch=changed?Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch):Number(state.epoch);
+      // An automatic revision rewords learned text and hides no message, so waiting approvals and job
+      // reports carry across its epoch, as across a reaction (ADR-0200). Owner corrections go through
+      // revokeBeforePublication and stay unrecorded. Only an epoch advanced here is recorded.
+      if(changed)await db.query("INSERT INTO guard_quiet_epochs(generation,epoch,reason) VALUES($1,$2,'learning') ON CONFLICT DO NOTHING",[state.generation,epoch]);
       for(const version of versions) {
         await db.query(`INSERT INTO guard_publications(id,operation_kind,source_id,revision,expected_revision,epoch) VALUES($1,'memory',$2,$3,$4,$5)`,
           [version.operation_id,version.entry_id,version.revision,version.expected_revision,epoch]);

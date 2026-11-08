@@ -1,5 +1,6 @@
 """Native archive tools. Scope is bound by the trusted dispatcher, never an argument."""
 import contextvars
+import hashlib
 import base64
 import json
 import math
@@ -28,17 +29,18 @@ def bind_process_credential(credential):
     _PROCESS_CREDENTIAL=credential
 
 
-def bind_process_deadline(deadline):
-    """Bound a foreground memory call to the trusted parent turn lifetime (a background job step is the longest)."""
+def bind_process_deadline(deadline, background=False):
+    """Bound a foreground memory call to the trusted parent turn lifetime. A background job run, up to its job's
+    hard deadline, is the only one that may last longer than ten minutes, and never longer than its credential's hour."""
     global _PROCESS_DEADLINE
     if (_PROCESS_DEADLINE is not None or isinstance(deadline,bool) or
             not isinstance(deadline,(int,float)) or not math.isfinite(deadline) or
-            deadline > time.time()+600):
+            deadline > time.time()+(3600 if background else 600)):
         raise RuntimeError('invalid_process_deadline')
     _PROCESS_DEADLINE=float(deadline)
 
 
-def request(path,body=None):
+def request(path,body=None,timeout=None):
     credential = _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()
     if not credential:
         raise RuntimeError('archive_scope_not_bound')
@@ -47,7 +49,9 @@ def request(path,body=None):
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Prepared context can include a cold guard-model pass. It is still bounded,
     # but must not share the short timeout used by ordinary archive reads.
-    timeout = 615 if path == '/v1/memory/honcho/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/honcho/search') or path.startswith('/v1/jobs/') else 15
+    # An action's proposal and its result both pass the secret check, so they get the longer timeout too.
+    timeout = timeout or (615 if path == '/v1/memory/honcho/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/honcho/search', '/v1/tools/propose')
+                          or path.startswith(('/v1/jobs/', '/v1/tools/actions/')) else 15)
     if path == '/v1/memory/honcho/recall' and _PROCESS_DEADLINE is not None:
         # Leave time for Hermes to reason and check delivery policy.
         timeout = min(timeout, _PROCESS_DEADLINE-time.time()-45)
@@ -114,16 +118,26 @@ def meaning_tool(args, **kwargs):
         return json.dumps({'error':'memory_search_unavailable'})
 
 
-JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job')
+JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed')
+
+
+def isolated_runtime():
+    """Whether job runs run in the isolated runtime, the only one with sealed boxes: this is an
+    isolated turn (its container does not carry the runtime setting), or the setting says so."""
+    from .security_transport import isolated_enabled
+    return os.environ.get('NOCHEH_ISOLATED_TURN')=='1' or isolated_enabled()
 
 
 def job_tool(args, **kwargs):
-    """Background jobs: size a chat, ask to start a job, list this chat's jobs, or stop one."""
+    """Background jobs: ask to start one (Nocheh counts and prices it), list this chat's jobs, or stop one."""
     from urllib.error import HTTPError
     try:
         action=args.get('action')
-        if action not in ('size','propose','status','stop'):raise ValueError('invalid_job_action')
+        if action not in ('start','status','stop'):raise ValueError('invalid_job_action')
         body={key:args[key] for key in ('title','instruction','chat','from','to','id') if isinstance(args.get(key),str) and args[key]}
+        if action=='start' and type(args.get('box')) is bool:body['box']=args['box']
+        if action=='start' and isinstance(args.get('repo'),str) and args['repo']:body['repo']=args['repo']
+        if body.get('box') and not isolated_runtime():return json.dumps({'error':'job_box_not_allowed'})
         return json.dumps(request('/v1/jobs/'+action,body),ensure_ascii=False)
     except HTTPError as error:
         # Storage says what to correct, such as a member's daily limit; other failures stay opaque.
@@ -193,13 +207,18 @@ def register(ctx):
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
         ('nocheh_action_request','Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',
          {'destination':{'type':'string','description':'Use current for this Telegram conversation including its topic, a numeric Telegram chat ID, or CHAT_ID/topic/THREAD_ID. The server resolves current from the authenticated source turn.'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
-        ('nocheh_background_job','Background jobs: work too big for one reply, such as reading a whole chat or months of messages, which runs on its own and '
-         'reports back here when it is done. action=size counts what a chat holds, or the period from and to (YYYY-MM-DD): messages, files and voice notes, '
-         'with an estimate of the time and cost to read it all. action=propose asks to start a job, with a short title and the full instruction it will follow, '
-         'written so that a fresh session can do it without this conversation; nothing runs until it is approved with buttons, and the result says who approves '
-         'and what to tell the person. action=status lists this chat\'s jobs with their progress; action=stop with id stops one. Only the owner may name another chat.',
-         {'action':{'type':'string','enum':['size','propose','status','stop']},'title':{'type':'string','maxLength':100},'instruction':{'type':'string','maxLength':8000},
-          'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'id':{'type':'string'}},['action'],job_tool),
+        ('nocheh_background_job','Background jobs: work too big for one reply runs in a session of its own and reports back here. '
+         'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD) and box. '
+         'Nocheh counts and prices it and posts an Approve card; nothing runs until it is approved, and the result says who approves. '
+         'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos). '
+         'action=stop with id stops a job you may stop. Only the owner may name another chat.',
+         {'action':{'type':'string','enum':['start','status','stop']},'title':{'type':'string','maxLength':100},'instruction':{'type':'string','maxLength':8000},
+          'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'id':{'type':'string'},
+          'box':{'type':'boolean','description':'With start: true when the job needs to run commands, work with files or run Python. '
+                 'It then gets a sealed box with no internet that holds a checked copy of the job\'s own chat and, with repo, a read-only copy of that GitHub repository. '
+                 'Only for a job the owner asks for in their private chat.'},
+          'repo':{'type':'string','maxLength':140,'description':'With start and box=true, for a job the owner asks for in their private chat: a GitHub repository '
+                  'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'}},['action'],job_tool),
         ('nocheh_telegram_destinations','In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner\'s approval.',
          {},[],destinations_tool),
     ):
@@ -207,9 +226,9 @@ def register(ctx):
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
             handler=handler)
     for kind,description,properties,required in (
-        ('shell','Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval or an exact standing permission is required.',
+        ('shell','Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval, a standing permission or a rule the owner set for this chat is required; when one already allows it, this call returns its result.',
          {'command':{'type':'string','maxLength':16000}},['command']),
-        ('browser','Propose inspection of one public HTTPS HTML page. The approved response renders offline without scripts or secondary requests. No logins, clicks or form submissions.',
+        ('browser','Propose reading one public HTTPS page. An HTML page renders offline without scripts or secondary requests; a JSON or plain-text answer, such as a weather service\'s, comes back as text. No logins, clicks or form submissions. When the owner already allows the site here, this call returns the page.',
          {'url':{'type':'string'}},['url']),
         ('mcp','Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities.',
          {'url':{'type':'string'},'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string'},'input':{'type':'object'}},['url']),
@@ -262,17 +281,21 @@ def register(ctx):
             'after':{'type':'string'}},
             'required':['action'],'additionalProperties':False}},handler=tasks_tool)
     name='nocheh_notion';description=('The owner\'s own Notion, through Notion\'s MCP server, when the owner has connected it and turned it on. Only in the owner\'s '
-        'private conversation. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
+        'private conversation and in background jobs the owner approved there; in a job, changes always wait for the owner. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '
         'notion-create-pages or notion-update-page) with its input. Reads may run right away and changes may wait for the owner to approve the exact call, '
-        'as the owner set; the result says which. Nocheh\'s own task list stays the main one: use Notion when the owner asks for Notion.')
+        'as the owner set; the result says which. Ask only for what you need: for a big table, read its columns first, then query just the columns and rows '
+        'you need, with a filter or a limit. A long result comes in parts; read every part with nocheh_action_status before relying on it. '
+        'Nocheh\'s own task list stays the main one: use Notion when the owner asks for Notion.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
             'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string','maxLength':128},'input':{'type':'object'}},
             'required':['operation'],'additionalProperties':False}},handler=notion_tool)
     name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
-        'Without an id it lists this chat\'s recent Telegram message requests with their destinations and states; read one by its id for its text.')
+        'Without an id it lists this chat\'s recent Telegram message requests and operations, such as Notion calls, with their states; read one by its id for its text or result. '
+        'A long result comes in parts: the answer gives part and parts, and part reads another one.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
-        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'}},'additionalProperties':False}},handler=controlled_status)
+        schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'},'part':{'type':'integer','minimum':1}},
+            'additionalProperties':False}},handler=controlled_status)
 
 
 OWNER_VIEWS=('conversations','conversation-context','telegram-identities','people','projects','project-assignments','memory-map')
@@ -326,14 +349,29 @@ def tasks_tool(args,**kwargs):
     except Exception:return json.dumps({'error':'tasks_unavailable'})
 
 
+# Nothing was sent and no card was made; the notes keep a passing failure from reading as a rule of the chat.
+TIMED_OUT={'error':'action_request_timed_out','note':'Nothing was sent and no approval was asked: preparing the request took too long. Ask again in a moment.'}
+UNAVAILABLE={'error':'controlled_action_unavailable','note':'Nothing was sent: a passing problem stopped the request. It is not a setting or a limit of this chat; ask again later.'}
+
+
 def controlled_tool(kind,args):
+    from urllib.error import HTTPError,URLError
     try:
         from pathlib import Path
         from .profile_config import inherited_config,read,preferences
         home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
         if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
-        return json.dumps(request('/v1/tools/propose',{'kind':kind,'arguments':args}),ensure_ascii=False)
-    except Exception:return json.dumps({'error':'controlled_action_unavailable'})
+        proposed=request('/v1/tools/propose',{'kind':kind,'arguments':args})
+        # One the owner already allows runs now: wait briefly, so its answer comes in this turn (ADR-0215).
+        value=wait_in_turn(proposed['id']) if proposed.get('allowed') else None
+        return in_parts(value) if value else json.dumps(proposed,ensure_ascii=False)
+    except HTTPError as error:
+        # The store keeps its error text private; the status still says whether asking again can help.
+        return json.dumps({400:{'error':'invalid_action_request'},403:{'error':'not_allowed_here'}}.get(error.code,UNAVAILABLE))
+    except URLError as error:
+        return json.dumps(TIMED_OUT if isinstance(error.reason,TimeoutError) else UNAVAILABLE)
+    except TimeoutError:return json.dumps(TIMED_OUT)
+    except Exception:return json.dumps(UNAVAILABLE)
 
 
 def notion_tool(args,**kwargs):
@@ -347,32 +385,66 @@ def notion_tool(args,**kwargs):
         proposed=request('/v1/tools/propose',{'kind':'mcp','arguments':body})
         if proposed.get('state')!='approved':return json.dumps(proposed,ensure_ascii=False)
         # A call the owner's setting allows runs now; wait briefly so the answer comes back in this turn.
-        deadline=time.monotonic()+60
-        while time.monotonic()<deadline:
-            time.sleep(1)
-            value=request('/v1/tools/actions/'+proposed['id'])
-            if value.get('state') in ('done','failed','rejected','ambiguous'):
-                result=json.dumps({key:value.get(key) for key in ('id','state','result','error_code')},ensure_ascii=False)
-                return result if len(result)<=24000 else json.dumps({'id':value['id'],'state':value['state'],'excerpt':result[:22000],'truncated':True},ensure_ascii=False)
+        value=wait_in_turn(proposed['id'])
+        if value:return in_parts(value)
         return json.dumps({'id':proposed['id'],'state':'running','note':'Still running; read it later with nocheh_action_status.'})
     except HTTPError as error:
         return json.dumps({'error':{400:'invalid_notion_call',403:'notion_only_in_owner_private_chat',409:'notion_is_off_or_changed'}.get(error.code,'notion_unavailable')})
     except Exception:return json.dumps({'error':'notion_unavailable'})
 
 
+IN_TURN_SECONDS=60
+ENDED=('done','failed','rejected','ambiguous')
+
+
+def wait_in_turn(id):
+    """An operation that runs without a card, read once it ends within the wait, else None. A failed read only ends
+    the wait: it already runs, and its answer follows in the chat. Once this turn holds the ended result, it tells
+    Nocheh which state it read, so no follow-up repeats it; if that note is lost, a follow-up repeats it (ADR-0215)."""
+    deadline=time.monotonic()+IN_TURN_SECONDS
+    while time.monotonic()<deadline:
+        time.sleep(1)
+        # The read that carries the result passes the secret check, so it keeps enough time even late in the wait.
+        try:value=request('/v1/tools/actions/'+id,timeout=max(15,deadline-time.monotonic()))
+        except Exception:return None
+        if isinstance(value,dict) and value.get('state') in ENDED:
+            try:request('/v1/tools/actions/'+id+'?in_turn='+value['state'],timeout=15)
+            except Exception:pass
+            return value
+    return None
+
+
+RESULT_KEYS=('id','kind','state','result','error_code')
+PART_CHARS=20000
+
+
+def in_parts(value,part=1):
+    """An action's view, whole when it is short, otherwise one part of it; the parts joined give the whole view."""
+    full=json.dumps({key:value.get(key) for key in RESULT_KEYS},ensure_ascii=False)
+    parts=1 if len(full)<=24000 else -(-len(full)//PART_CHARS)
+    if parts==1 and part==1:return full
+    if part>parts:return json.dumps({'id':value.get('id'),'error':'no_such_part','parts':parts})
+    return json.dumps({'id':value.get('id'),'state':value.get('state'),'part':part,'parts':parts,'hash':hashlib.sha256(full.encode()).hexdigest()[:12],
+                       'text':full[(part-1)*PART_CHARS:part*PART_CHARS],
+                       'note':'A long result in parts: join the text of every part, in order, before relying on it; read the others with nocheh_action_status and part.'},
+                      ensure_ascii=False)
+
+
 def controlled_status(args,**kwargs):
     import re
     try:
         id=args.get('id') or ''
+        part=args.get('part',1)
+        if type(part) is not int or part<1:return json.dumps({'error':'invalid_part'})
         if not id:
-            # This chat's recent message requests, for a later turn that no longer holds their IDs.
-            keys=('id','destination','state','error_code','created_at')
-            return json.dumps({'requests':[{key:item.get(key) for key in keys} for item in request('/v1/tools/actions').get('telegram',[])]},ensure_ascii=False)[:24000]
+            # This chat's recent message requests and operations, for a later turn that no longer holds their IDs.
+            listed=request('/v1/tools/actions')
+            keys=('id','destination','state','error_code','created_at');operation_keys=('id','kind','state','error_code','created_at')
+            return json.dumps({'requests':[{key:item.get(key) for key in keys} for item in listed.get('telegram',[])],
+                               'operations':[{key:item.get(key) for key in operation_keys} for item in listed.get('actions',[])]},ensure_ascii=False)[:24000]
         if not re.fullmatch(r'[a-f0-9]{64}',id):raise ValueError('invalid_action')
-        value=request('/v1/tools/actions/'+id)
-        # Bound tool context; complete bytes remain in the archive and owner UI.
-        result=json.dumps({key:value.get(key) for key in ('id','kind','state','result','result_id','error_code')},ensure_ascii=False)
-        return result if len(result)<=24000 else json.dumps({'id':id,'state':value['state'],'result_id':value['result_id'],'excerpt':result[:22000],'truncated':True})
+        # A long result comes in parts; complete bytes remain in the archive and owner UI.
+        return in_parts(request('/v1/tools/actions/'+id),part)
     except Exception:return json.dumps({'error':'controlled_action_unavailable'})
 
 

@@ -11,12 +11,13 @@ CREATE OR REPLACE VIEW workflow_observations AS
 SELECT w.id,w.family,w.job_id,w.version,w.generation,w.state AS registry_state,w.revision,w.dispatch,
  w.created_at,w.created_at::text AS created_cursor,w.updated_at,w.owner_epoch,o.owner,o.admission,
  (w.lease_until>now()) IS TRUE AS active_step,
- coalesce(k.source_reference->>'id',l.source_reference->>'id',d.event_id,CASE WHEN m.channel='browser' THEN m.event_id END,a.source_reference->>'id',t.source_reference->>'id',j.source_reference->>'id',h.source_reference->>'id',
+ coalesce(k.source_reference->>'id',l.source_reference->>'id',d.event_id,c.event_id,CASE WHEN m.channel='browser' THEN m.event_id END,a.source_reference->>'id',t.source_reference->>'id',j.source_reference->>'id',h.source_reference->>'id',
    r.file_reference#>>'{event,id}',CASE WHEN w.family IN ('telegram','preparation') AND w.job_id ~ '^[a-f0-9]{64}$' THEN w.job_id
    WHEN w.family IN ('memory_review','honcho') AND w.job_id ~ '^source:[a-f0-9]{64}$' THEN substring(w.job_id FROM 8) END) AS source_event_id,
  CASE WHEN w.state IN ('completed','failed','skipped','cancelled','ambiguous','denied') THEN w.state
 WHEN k.id IS NOT NULL THEN CASE k.state WHEN 'applied' THEN 'completed' WHEN 'undone' THEN 'skipped' WHEN 'stale' THEN 'skipped' WHEN 'review' THEN 'waiting' WHEN 'queued' THEN w.state ELSE k.state END
 WHEN d.event_id IS NOT NULL THEN CASE d.state WHEN 'done' THEN 'completed' WHEN 'suppressed' THEN 'skipped' WHEN 'failed' THEN 'retryable_failed' WHEN 'pending' THEN w.state ELSE d.state END
+ WHEN c.action_id IS NOT NULL THEN CASE c.state WHEN 'done' THEN 'completed' WHEN 'suppressed' THEN 'skipped' WHEN 'skipped' THEN 'skipped' WHEN 'failed' THEN CASE WHEN c.attempts>=3 THEN 'failed' ELSE 'retryable_failed' END WHEN 'pending' THEN w.state WHEN 'waiting' THEN 'waiting' ELSE c.state END
  WHEN a.id IS NOT NULL THEN CASE a.state WHEN 'done' THEN 'completed' WHEN 'rejected' THEN 'denied' WHEN 'proposed' THEN 'waiting' WHEN 'approved' THEN w.state ELSE a.state END
  WHEN t.id IS NOT NULL THEN CASE t.state WHEN 'done' THEN 'completed' WHEN 'rejected' THEN 'denied' WHEN 'proposed' THEN 'waiting' WHEN 'approved' THEN w.state ELSE t.state END
  WHEN i.id IS NOT NULL THEN CASE WHEN i.state='queued' THEN w.state ELSE i.state END
@@ -28,7 +29,7 @@ WHEN d.event_id IS NOT NULL THEN CASE d.state WHEN 'done' THEN 'completed' WHEN 
  WHEN w.stage<>'admission' THEN w.stage WHEN d.event_id IS NOT NULL THEN d.runtime_stage
  WHEN w.family='imports' THEN 'import' WHEN w.family='preparation' THEN 'preparation' WHEN w.family='memory_review' THEN 'review'
  WHEN w.family='organization' THEN 'organization' WHEN w.family='honcho' THEN 'sync' WHEN w.family IN ('actions','tools') THEN 'action' ELSE w.stage END AS stage,
- greatest(w.attempts,coalesce(d.attempts,0),coalesce(j.attempts,0),coalesce(h.attempts,0),coalesce(r.attempts,0),CASE WHEN t.started_at IS NOT NULL OR m.actor IS NOT NULL THEN 1 ELSE 0 END) AS attempts,
+ greatest(w.attempts,coalesce(d.attempts,0),coalesce(c.attempts,0),coalesce(j.attempts,0),coalesce(h.attempts,0),coalesce(r.attempts,0),CASE WHEN t.started_at IS NOT NULL OR m.actor IS NOT NULL THEN 1 ELSE 0 END) AS attempts,
  coalesce(w.next_attempt,d.next_attempt,j.next_attempt,h.next_attempt) AS next_attempt,
  CASE WHEN k.state='review' THEN 'approval_required' WHEN a.state='proposed' OR t.state='proposed' THEN 'approval_required' WHEN j.paused OR j.state='paused' THEN 'owner_paused'
  WHEN j.state='ambiguous' OR h.state='uncertain' THEN 'receipt_pending' ELSE w.waiting_reason END AS waiting_reason,
@@ -42,6 +43,7 @@ LEFT JOIN knowledge_proposals k ON w.family='organization' AND w.job_id='proposa
 LEFT JOIN interpretation_jobs l ON w.family='organization' AND w.job_id='learning:'||l.id
 LEFT JOIN workflow_imports i ON w.family='imports' AND i.id::text=w.job_id
 LEFT JOIN dispatches d ON w.family='telegram' AND d.event_id=w.job_id
+LEFT JOIN action_continuations c ON w.family='telegram' AND w.job_id='continue:'||c.action_id
 LEFT JOIN telegram_action_requests a ON w.family='actions' AND a.id=w.job_id
 LEFT JOIN controlled_actions t ON w.family='tools' AND t.id=w.job_id
 LEFT JOIN managed_runs m ON (w.family='browser' AND m.channel='browser' AND m.event_id=w.job_id)
@@ -88,7 +90,9 @@ export async function controlStorageWorkflow(pool:pg.Pool,principal:Reader,id:st
           await db.query(`UPDATE knowledge_proposals SET state='queued',error_code=NULL,revision=revision+1,updated_at=now()
             WHERE state='failed' AND ${job.startsWith('proposal:')?'id':'source_job_id'}=$1`,[job.slice(9)]);
         }
-        if(row.family==='telegram')await db.query("UPDATE dispatches SET next_attempt=now(),revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='failed'",[job]);
+        // A follow-up turn runs again as its next attempt, so an owner retry adds exactly one.
+        if(row.family==='telegram'&&job.startsWith('continue:'))await db.query("UPDATE action_continuations SET state='pending',error_code=NULL,next_attempt=now(),updated_at=now() WHERE action_id=$1 AND state='failed'",[job.slice(9)]);
+        else if(row.family==='telegram')await db.query("UPDATE dispatches SET next_attempt=now(),revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='failed'",[job]);
         if(row.family==='preparation'&&!job.startsWith('reprocess:'))await db.query("UPDATE attachment_retrievals SET next_attempt=now() WHERE event_id=$1 AND state='failed' AND error_code IS DISTINCT FROM 'import_bytes_pending'",[job]);
         if(row.family==='honcho'&&job.startsWith('receipt:'))await db.query("UPDATE memory_ingestion_receipts SET next_attempt=now() WHERE id=$1 AND state='pending'",[job.slice(8)]);
         if(row.family==='memory_review'&&job.startsWith('native:'))await db.query("UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1 AND state='pending' AND NOT paused",[job.slice(7)]);
@@ -103,7 +107,9 @@ export async function controlStorageWorkflow(pool:pg.Pool,principal:Reader,id:st
             changed=1; // Cancelling before extraction must also prevent later proposals.
           }
         }
-        if(row.family==='telegram') {
+        // A running follow-up turn is not cancelled here, like a reply that started.
+        if(row.family==='telegram'&&job.startsWith('continue:'))changed=(await db.query("UPDATE action_continuations SET state='cancelled',error_code='owner_cancelled',updated_at=now() WHERE action_id=$1 AND state IN ('pending','waiting','failed')",[job.slice(9)])).rowCount??0;
+        else if(row.family==='telegram') {
           await db.query(`INSERT INTO dispatches(event_id,source_reference) SELECT event_id,jsonb_build_object('store','archive','kind','event','id',event_id,'revision',source_revision,'input_hash',payload_hash)
             FROM capture_handoffs WHERE event_id=$1 ON CONFLICT DO NOTHING`,[job]);
           changed=(await db.query("UPDATE dispatches SET state='cancelled',error_code='owner_cancelled',revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='pending' AND attempts=0",[job])).rowCount??0;

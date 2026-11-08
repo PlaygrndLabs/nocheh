@@ -1,4 +1,4 @@
-/** Settings › Assistant: how much Nocheh may do without asking, its role and skills, limits for each chat and for background jobs, and its built-in instructions. */
+/** Settings › Assistant: how much Nocheh may do without asking, its role and skills, limits for each chat and for background jobs, the sealed box for jobs, and its built-in instructions. */
 import {useEffect, useState} from 'react';
 import {RotateCcw} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';

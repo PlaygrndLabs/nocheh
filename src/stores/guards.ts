@@ -16,6 +16,57 @@ export type GuardReference=SourceReference|FileReference|DerivativeReference;
 export interface GuardBinding {generation:string;epoch:number;mode:'on'|'off'}
 export interface GuardRevision {source_id:string;revision:number;operation_id:string;expected_revision:number|null}
 
+/** True when `binding` is `current`, or when every later epoch up to `current` is recorded as quiet, which
+ *  only a reaction change and an automatic learning revision are (ADR-0200). Any other epoch, or a generation or mode change, means it does not carry. */
+export async function carriesForward(db:Pick<pg.Pool,'query'>,binding:GuardBinding,current:GuardBinding):Promise<boolean> {
+  const from=Number(binding.epoch),to=Number(current.epoch);
+  if(current.generation!==binding.generation||current.mode!==binding.mode||!Number.isSafeInteger(from)||to<from)return false;
+  if(to===from)return true;
+  const quiet=(await db.query('SELECT count(*)::int AS n FROM guard_quiet_epochs WHERE generation=$1 AND epoch>$2 AND epoch<=$3',[binding.generation,from,to])).rows[0];
+  return quiet.n===to-from;
+}
+
+/** Whether a credential is a background job run's (its signed `job-` profile): only such a run carries across quiet epochs while
+ *  it runs, and only it waits out a pending publication (ADR-0208). */
+export const jobRun=(principal:Pick<Reader,'admin'|'logical_profile'>)=>!principal.admin&&!!principal.logical_profile?.startsWith('job-');
+
+/** A pending publication, such as an automatic learning batch a job's run goes on across, refuses every reader for a moment.
+ *  For a job's run (`job`) the check waits for it, up to 4 s from its first refusal, so also after a check that ran long, and
+ *  then runs again in full; anyone else is refused at once. */
+export async function afterPending<T>(job:boolean,check:()=>Promise<T>):Promise<T> {
+  let until:number|undefined;
+  for(;;) {
+    try{return await check();}
+    catch(error){
+      if(!job||!(error instanceof HttpError)||error.code!=='guard_transition_pending')throw error;
+      until??=Date.now()+4000;if(Date.now()>=until)throw error;
+    }
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+}
+
+/** A read that takes the current binding once and then reads under it exactly (guards.read) fails when any epoch commits meanwhile,
+ *  quiet or not. For a job's run (`job`) it waits out a pending publication and runs again in full, up to 3 times: its own audience
+ *  check takes the new binding while the run carries to it and refuses once a change that is not quiet passed (ADR-0208).
+ *  Anyone else is refused at once. */
+export async function afterEpoch<T>(job:boolean,read:()=>Promise<T>):Promise<T> {
+  for(let attempt=1;;attempt++) {
+    try{return await afterPending(job,read);}
+    catch(error){if(!job||attempt>=3||!(error instanceof HttpError)||error.code!=='guard_context_changed')throw error;}
+  }
+}
+
+/** The earliest epoch whose context still carries to `current`: the latest epoch up to it that was not quiet.
+ *  A sealed job box filled under it may be kept until a change that is not quiet (job-box.ts). */
+export async function validFromEpoch(db:Pick<pg.Pool,'query'>,current:GuardBinding):Promise<number> {
+  // The quiet epochs that run back from `current` without a gap; the epoch just before them is the last change.
+  const run=(await db.query(`SELECT min(epoch) AS low FROM (SELECT epoch,$2::bigint-epoch AS back,row_number() OVER (ORDER BY epoch DESC)-1 AS n
+    FROM guard_quiet_epochs WHERE generation=$1 AND epoch<=$2) q WHERE back=n`,[current.generation,current.epoch])).rows[0];
+  const from=run?.low==null?Number(current.epoch):Number(run.low)-1;
+  if(!await carriesForward(db,{...current,epoch:from},current))throw new HttpError(409,'guard_context_changed');
+  return from;
+}
+
 export class GuardRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository){}
 
@@ -30,6 +81,13 @@ export class GuardRepository {
   async assertCurrent(binding:GuardBinding):Promise<void> {
     const state=await this.state();
     if(canonical(state)!==canonical(binding))throw new HttpError(409,'guard_context_changed');
+  }
+
+  /** The current binding, when `binding` still carries to it; nothing is rebound. */
+  async assertCarried(binding:GuardBinding):Promise<GuardBinding> {
+    const state=await this.state();
+    if(!await carriesForward(this.stores.control,binding,state))throw new HttpError(409,'guard_context_changed');
+    return state;
   }
 
   async setMode(mode:'on'|'off'):Promise<GuardBinding> {
@@ -198,11 +256,18 @@ export class GuardRepository {
     const id=await this.register(reference),source=(await this.stores.derived.query('SELECT input,input_hash,active_revision FROM guard_sources WHERE id=$1',[id])).rows[0];
     if(source.active_revision!==null)return null;
     const preparationVersion=version+':authorized-context-v1',content=await contexts.prepare(principal,JSON.parse(source.input.toString()),detect);
-    const operationId=digest(canonical(['guard',id,source.input_hash,preparationVersion]));
+    // The content depends on the binding's prepared values, so a job's run retried after a quiet epoch (ADR-0208) stages its
+    // own revision under the later binding instead of conflicting with one staged earlier and never published. Anyone else
+    // keeps one operation per source, so concurrent retries across an epoch still share it.
+    const operationId=digest(canonical(['guard',id,source.input_hash,preparationVersion,...(jobRun(principal)?[binding]:[])]));
     let revision:GuardRevision;
     try{revision=await this.stage(id,null,content,'automatic',preparationVersion,operationId);}
     catch(error){if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
-    await this.beginPublication(revision,binding);await this.finishPublication(operationId);return revision;
+    await this.beginPublication(revision,binding);
+    // Another attempt of a job's run, under another binding, published first: its revision is the one read.
+    try{await this.finishPublication(operationId);}
+    catch(error){if(error instanceof HttpError&&error.code==='guard_revision_conflict')return null;throw error;}
+    return revision;
   }
 
   async restore(id:string,expected:number|null,oldRevision:number,operationId:string):Promise<GuardRevision> {

@@ -1,5 +1,7 @@
 # Nocheh runtime platform execution
 
+Status: P1–P7 reached their recorded checkpoints by 2026-09-16 ([task history](task-history.md)); kept as history.
+
 Product requirements live in [SPECS.md](../SPECS.md); implementation and remaining
 live gates live in [TASK.md](../TASK.md). This is the seven-phase execution sequence
 from ADR-0027, interpreted with later memory, guarding, provider, and security ADRs.
