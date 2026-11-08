@@ -71,7 +71,7 @@ export class NativeReviewRepository {
     // so it is renewed under the current one.
     const jobs=(await this.control.query(`SELECT id,input_reference,attempts,error_code,next_attempt,(state='pending' AND NOT paused) AS waiting,(state='pending' AND NOT paused AND binding<>$2::jsonb) AS stale
       FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3 ORDER BY created_at,id`,[source.id,JSON.stringify(binding),binding.generation])).rows;
-    const reviewed=jobs.filter(row=>!row.stale),stale=new Map<string,{id:string}>();
+    const reviewed=jobs.filter(row=>!row.stale),stale=new Map<string,{id:string;input_reference:{id:string;input_hash:string};attempts:number;error_code:string|null;next_attempt:Date}>();
     for(const row of jobs)if(row.stale&&!stale.has(row.input_reference.input_hash))stale.set(row.input_reference.input_hash,row);
     // A review that failed and is replaced because its input changed hands its attempts, failure and gap on,
     // so changing input never adds to a source's four attempts.
@@ -79,14 +79,35 @@ export class NativeReviewRepository {
     const ids:string[]=[];
     const retire=async()=>{await this.control.query(`DELETE FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$3
       AND state='pending' AND NOT paused AND binding<>$2::jsonb AND NOT (id=ANY($4::text[]))`,[source.id,JSON.stringify(binding),binding.generation,ids]);};
-    if(reviewed.length){await retire();await this.keepWaiting(reviewed.filter(row=>row.waiting).map(row=>String(row.id)));return reviewed.map(row=>String(row.id));}
+    // A long source is reviewed in fragments. Once one has started, finished or waits under the current binding, the
+    // source gets no new fragment, but its other fragments still waiting under an earlier epoch keep their place while
+    // their own text is unchanged, so its review is completed rather than cut short.
+    const kept=reviewed.map(row=>String(row.id)),waiting=reviewed.filter(row=>row.waiting).map(row=>String(row.id));
+    const settle=async()=>{await retire();await this.keepWaiting([...waiting,...ids]);return [...kept,...ids];};
+    if(kept.length&&!stale.size)return await settle();
     let context;
     try{context=await this.contexts.prepare(source,binding);}
-    catch(error){if(error instanceof HttpError&&error.code==='learning_consent_required')await retire();throw error;}
+    catch(error) {
+      if(!(error instanceof HttpError&&error.code==='learning_consent_required'))throw error;
+      if(kept.length)return await settle();
+      await retire();throw error;
+    }
     const actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
     const text=canonical({space:context.space,observations:context.observations,rules:context.rules,limitations:context.limitations});
-    if(text.length>200000)throw new HttpError(413,'native_review_input_limit');
+    if(text.length>200000){if(kept.length)return await settle();throw new HttpError(413,'native_review_input_limit');}
+    // Every fragment carries the whole source's evidence, so a new reply or reaction in its thread changes every fragment's
+    // input. A waiting fragment whose own text is unchanged is then replaced by one with the current input, keeping its
+    // attempts, last failure and gap.
+    const twins=new Map<string,typeof spent>();
+    if(kept.length) {
+      const rows=[...stale.values()],stored=(await this.derived.pool.query('SELECT id,content FROM derived_artifacts WHERE id=ANY($1::text[])',
+        [rows.map(row=>row.input_reference.id)])).rows;
+      for(const row of rows) {
+        const content=stored.find(input=>input.id===row.input_reference.id)?.content;
+        if(content)twins.set(digest(String(JSON.parse(content.toString()).text)),row);
+      }
+    }
     const characters=Array.from(text);
     for(let offset=0;offset<characters.length;offset+=8000) {
       const content=`Source nocheh:event:${source.id}; conversation ${context.space}; fragment ${offset/8000+1}. Speakers are not necessarily the owner.\n`+characters.slice(offset,offset+8000).join('');
@@ -100,6 +121,10 @@ export class NativeReviewRepository {
           WHERE id=$1 AND state='pending' AND NOT paused`,[same.id,binding]);
         ids.push(same.id);continue;
       }
+      const twin=twins.get(digest(content));
+      if(kept.length&&!(twin&&stale.get(twin.input_reference.input_hash)===twin))continue;
+      if(twin)stale.delete(twin.input_reference.input_hash);
+      const carried=twin??spent;
       const id=digest(canonical([protocol,binding,source,document]));
       const input=await this.derived.record({operation_id:'native-review-input:'+id,source,kind:'runtime_context',content:Buffer.from(canonical(document)),
         producer:'nocheh',producer_version:protocol,configuration:{binding,purpose:'memory-review'},provenance:{evidence:document.evidence}});
@@ -108,13 +133,12 @@ export class NativeReviewRepository {
       try {
         await db.query('BEGIN');
         await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding,attempts,error_code,next_attempt)
-          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz)) ON CONFLICT DO NOTHING`,[id,source,input,binding,spent?.attempts??0,spent?.error_code??null,spent?.next_attempt??null]);
+          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz)) ON CONFLICT DO NOTHING`,[id,source,input,binding,carried?.attempts??0,carried?.error_code??null,carried?.next_attempt??null]);
         await requestWorkflow(db,'memory_review','native:'+id);await db.query('COMMIT');
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
       ids.push(id);
     }
-    await retire();await this.keepWaiting(ids);
-    return ids;
+    return await settle();
   }
   /** A waiting review keeps an open workflow. One whose workflow closed before it ran (an epoch once closed a failed
    * review's retry that way) gets a new one, so it still runs in its turn. */
