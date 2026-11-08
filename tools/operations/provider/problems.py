@@ -5,7 +5,10 @@ today's model usage, and sends the owner's private chat one message that lists e
 problem that is new or worse. A problem repeats at most once an hour, and only when it got
 worse; one that goes away and comes back is new again. Failed and uncertain background
 tasks are kept forever, so only their growth is news: the first check after an
-installation that can read them records the totals it finds without a message."""
+installation that can read them records the totals it finds without a message.
+
+When a problem clears, the notice that told the owner about it is edited in place: its line is
+marked ✅ with the time, and once every line has cleared the notice loses its buttons."""
 import hashlib
 import json
 import os
@@ -21,6 +24,12 @@ STEADY = ('application', 'service', 'workers', 'work_unchecked')
 # Counts kept forever, so only their growth is news.
 TOTALS = ('failed:', 'uncertain:')
 MAX_LINES = 20
+# Sent notices are followed for a week, so a problem that clears later still marks its line.
+FOLLOW_SECONDS = 7 * 86400
+MAX_FOLLOWED = 50
+# What each kind of problem needs to read before it may count as cleared.
+SOURCES = {'application': 'application', 'service': 'services', 'models': 'routes', 'work_unchecked': 'work', 'workers': 'work',
+           'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'github': 'github', 'telegram': 'telegram'}
 # Background work families, as System › Work names them.
 FAMILIES = {
     'telegram': 'Telegram replies', 'preparation': 'Preparing messages', 'browser': 'Browser chat',
@@ -109,10 +118,13 @@ def problems(monitoring, usage_rows, today):
     for row in usage_rows:
         if row.get('day') != today:
             continue
-        hidden = row.get('hidden') or 0
-        add(f"model:{today}:{row['part']}:{row['provider']}:{row['model']}", (row.get('failed') or 0) + hidden, 'model',
-            label=row.get('label') or row['part'], model=row['model'], failed=row.get('failed') or 0,
-            refused=row.get('refused') or 0, hidden=hidden, reasons=row.get('reasons') or {}, causes=row.get('causes') or {})
+        hidden, failed = row.get('hidden') or 0, row.get('failed') or 0
+        runs = row.get('runs')
+        add(f"model:{today}:{row['part']}:{row['provider']}:{row['model']}", failed + hidden, 'model',
+            label=row.get('label') or row['part'], model=row['model'], failed=failed,
+            refused=row.get('refused') or 0, hidden=hidden, reasons=row.get('reasons') or {}, causes=row.get('causes') or {},
+            # Calls that worked today, so a notice can say when the model works again.
+            ok=runs - failed if type(runs) is int else None)
     # Nocheh's GitHub app: its key never expires, so only a refused one gives a notice.
     if (monitoring.get('github') or {}).get('reconnect'):
         add('github', 1, 'github', reason='reconnect')
@@ -233,6 +245,107 @@ def due(current, record, now, first=False):
     return report, {'sent': sent, 'seen': sorted(keys)}
 
 
+def readable(monitoring):
+    """What this check could read, so a problem missing from it counts as cleared only when its source
+    was read; 'telegram' means Telegram is connected now."""
+    work = monitoring.get('workflows') or {}
+    found = {'application'}
+    if isinstance(monitoring.get('services'), list):
+        found.add('services')
+    if isinstance(monitoring.get('routes'), list):
+        found.add('routes')
+    if isinstance(work.get('counts'), list) and not work.get('unavailable'):
+        found.add('work')
+    if isinstance(((monitoring.get('archive') or {}).get('archive') or {}).get('spool_failures'), list):
+        found.add('spool')
+    github = monitoring.get('github')
+    if isinstance(github, dict) and not github.get('unavailable'):
+        found.add('github')
+    if ((monitoring.get('runtime') or {}).get('status') or {}).get('telegram') == 'connected':
+        found.add('telegram')
+    return found
+
+
+def _watch(problem, new):
+    """What a notice line remembers about its problem, to tell later when it cleared."""
+    watch = {'key': problem['key'], 'kind': problem['kind']}
+    if problem['total']:
+        watch['base'] = problem['count'] - new
+    if problem['kind'] == 'model':
+        watch.update(count=problem['count'], ok=problem.get('ok'))
+    return watch
+
+
+def cleared(watch, current, seen):
+    """Whether a problem a notice told about has cleared. Background tasks clear when their count is back
+    to what it was before the notice, such as after Retry failed; a part's model calls clear once a call
+    works after the last failure a check saw; anything else clears when a check that could read it no
+    longer finds it. A part's model calls from an earlier day stay as they were."""
+    kind, problem = watch['kind'], current.get(watch['key'])
+    if kind == 'model':
+        if not problem or type(problem.get('ok')) is not int or type(watch.get('ok')) is not int:
+            return False
+        if problem['count'] > watch['count']:
+            # It failed again since: wait for a call that works after this failure.
+            watch.update(count=problem['count'], ok=problem['ok'])
+            return False
+        return problem['ok'] > watch['ok']
+    if SOURCES.get(kind) not in seen:
+        return False
+    if kind in ('failed', 'uncertain'):
+        return (problem['count'] if problem else 0) <= watch['base']
+    # The incident stays recorded; Telegram connected again is what clears it.
+    return kind == 'telegram' or problem is None
+
+
+def _when(at, since):
+    """A time in the notice's words: the hour on the notice's own day, else with the date."""
+    moment, start = datetime.fromtimestamp(at, timezone.utc), datetime.fromtimestamp(since, timezone.utc)
+    return moment.strftime('%H:%M UTC' if moment.date() == start.date() else '%Y-%m-%d %H:%M UTC')
+
+
+def shown(line, since):
+    """A notice line as the owner sees it: as sent, or with when it cleared."""
+    if line.get('done') is None:
+        return line['text']
+    worked = all(watch['kind'] == 'model' for watch in line['watch'])
+    note = f"{'Worked again' if worked else 'Resolved'} at {_when(line['done'], since)}."
+    room = 500 - len(note) - 1
+    return (line['text'] if len(line['text']) <= room else line['text'][:room - 1].rstrip() + '…') + ' ' + note
+
+
+def follow_up(record, current, seen, now, values, send):
+    """Marks ✅ the lines of sent notices whose problem cleared, by editing each notice in place. A notice whose
+    lines have all cleared loses its buttons and is no longer followed. An edit that does not go through is
+    tried again on the next check. Returns how many notices were edited."""
+    found = {problem['key']: problem for problem in current}
+    followed, edited = [], 0
+    for notice in record.get('notices') or []:
+        if now - notice['at'] > FOLLOW_SECONDS:
+            continue
+        for line in notice['lines']:
+            if line.get('done') is None and all([cleared(watch, found, seen) for watch in line['watch']]):
+                line['done'] = now
+        done = [line.get('done') is not None for line in notice['lines']]
+        if done != notice.get('shown'):
+            body = {'id': notice['id'], 'problems': [shown(line, notice['at']) for line in notice['lines']], 'resolved': done,
+                    'open': None if all(done) else opening(values),
+                    'retry': any(line.get('retry') and line.get('done') is None for line in notice['lines']), 'edit': True}
+            try:
+                outcome = send(body).get('state')
+            except Exception:
+                outcome = 'unavailable'
+            if outcome == 'not_found':
+                continue  # Sent before notices kept their message, or not sent at all: nothing to edit.
+            if outcome == 'done':
+                notice['shown'] = done
+                edited += 1
+        if not all(done) or done != notice.get('shown'):
+            followed.append(notice)
+    record['notices'] = followed[-MAX_FOLLOWED:]
+    return edited
+
+
 def _read(state):
     try:
         return json.loads((Path(state) / RECORD).read_text())
@@ -277,18 +390,24 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
     first = not record.get('baseline')
     if isinstance((monitoring.get('workflows') or {}).get('counts'), list):
         record['baseline'] = True
-    report, kept = due(problems(monitoring, usage_rows, today), record, now, first)
+    current = problems(monitoring, usage_rows, today)
+    report, kept = due(current, record, now, first)
     sent = kept['sent']
     result = {'reported': len(report), 'state': 'nothing_new'}
+    if send is None:
+        from tools.operations.archive.archive import API
+        send = lambda body: API().call('/v1/runtime/owner-notice', body, timeout=60)
+    if enabled:
+        result['edited'] = follow_up(record, current, readable(monitoring), now, values, send)
     if report and enabled:
         lines = [text(problem, new) for problem, new in report][:MAX_LINES]
+        # Each line and the problems it tells about; the last line may stand for the rest.
+        groups = [[item] for item in report[:MAX_LINES]]
         if len(report) > MAX_LINES:
             lines[-1] = f'…and {len(report) - MAX_LINES + 1} more. See System › Health.'
+            groups[-1] = report[MAX_LINES - 1:]
         sequence = record.get('sequence', 0)
         notice = hashlib.sha256(json.dumps([sequence, lines]).encode()).hexdigest()
-        if send is None:
-            from tools.operations.archive.archive import API
-            send = lambda body: API().call('/v1/runtime/owner-notice', body, timeout=60)
         try:
             retry = any(problem['kind'] == 'failed' and problem['retryable'] for problem, _ in report)
             outcome = send({'id': notice, 'problems': lines, 'open': opening(values), 'retry': retry}).get('state')
@@ -301,6 +420,10 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
             _write(state, {**record, **kept})
             return result
         record['sequence'] = sequence + 1
+        if outcome == 'done':
+            record['notices'] = [*(record.get('notices') or []), {'id': notice, 'at': now, 'shown': [False] * len(lines), 'lines': [
+                {'text': line, 'retry': any(problem['kind'] == 'failed' and problem['retryable'] for problem, _ in group),
+                 'watch': [_watch(problem, new) for problem, new in group]} for line, group in zip(lines, groups)]}][-MAX_FOLLOWED:]
     elif report:
         result['state'] = 'turned_off'
     for problem, _ in report:

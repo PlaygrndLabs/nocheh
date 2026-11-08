@@ -774,7 +774,8 @@ class AssistantGateway:
 
     async def send_notice(self,body):
         """A task reminder or a problem notice in the owner's private chat. No model runs;
-        the text is the owner's template filled in by storage, sent at most once."""
+        the text is the owner's template filled in by storage, sent at most once.
+        With edit, a notice this runtime sent is edited in place instead, such as to mark a cleared problem."""
         import re
         chat=str(body.get('chat_id') or '')
         if not re.fullmatch('[a-f0-9]{64}',body.get('id','')) or not self.scopes.owner or chat!=str(self.scopes.owner) or not re.fullmatch(r'[1-9]\d{0,18}',chat):
@@ -782,28 +783,54 @@ class AssistantGateway:
         text=body.get('text')
         if not isinstance(text,str) or not text.strip() or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_notice')
         markup=notice_buttons(body.get('buttons'))
+        if body.get('edit') not in (None,True):raise ValueError('invalid_notice')
         if self.status!='connected' or not self.adapter:return {'state':'not_started','error_code':'telegram_not_connected'}
         name='notice-'+body['id']
+        if body.get('edit'):return await self.edit_notice(name,chat,text,markup)
         async with self.action_lock:
             receipt=self.receipts/(name+'.result')
-            if receipt.exists():return json.loads(receipt.read_bytes())
+            if receipt.exists():return {key:value for key,value in json.loads(receipt.read_bytes()).items() if key!='message_id'}
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'notice_id':body['id']}))
             token=DISPATCH_KEY.set('notice:'+body['id'])
             check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True))
             try:
                 from telegram.error import BadRequest
-                try:await self.adapter._bot.send_message(int(chat),text,parse_mode=None,reply_markup=markup,link_preview_options=no_preview())
+                try:sent=await self.adapter._bot.send_message(int(chat),text,parse_mode=None,reply_markup=markup,link_preview_options=no_preview())
                 except BadRequest:
                     # Telegram refused a button, such as a dashboard address it does not accept;
                     # nothing was sent, so the notice goes without buttons.
                     if markup is None:raise
-                    await self.adapter._bot.send_message(int(chat),text,parse_mode=None,link_preview_options=no_preview())
+                    sent=await self.adapter._bot.send_message(int(chat),text,parse_mode=None,link_preview_options=no_preview())
                 result={'state':'done'}
             except Exception:result={'state':'ambiguous'}
             finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
-            await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
+            # The receipt keeps which message it was, so the notice can be edited later; callers get only the state.
+            message=getattr(sent,'message_id',None) if result['state']=='done' else None
+            await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical({**result,**({'message_id':message} if isinstance(message,int) else {})}))
             return result
+
+    async def edit_notice(self,name,chat,text,markup):
+        """Edits a notice this runtime sent to the owner, found by its receipt. Without buttons, the notice loses them.
+        Telegram refusing the edit, such as for unchanged text or a message the owner deleted, changes nothing and is
+        not tried again; an edit that could not reach Telegram is."""
+        try:sent=json.loads((self.receipts/(name+'.result')).read_bytes())
+        except (OSError,ValueError):sent={}
+        message=sent.get('message_id') if isinstance(sent,dict) and sent.get('state')=='done' else None
+        if not isinstance(message,int):return {'state':'not_found'}
+        from telegram.error import BadRequest
+        token=DISPATCH_KEY.set('notice-edit:'+name)
+        edit=lambda reply_markup:self.adapter._bot.edit_message_text(text,chat_id=int(chat),message_id=message,parse_mode=None,
+                                                                     reply_markup=reply_markup,link_preview_options=no_preview())
+        try:
+            try:return {'state':'done','edited':bool(await edit(markup))}
+            except BadRequest as error:
+                # A button Telegram does not accept: the notice was sent without buttons, so it is edited without them.
+                if markup is None or 'not modified' in str(error).lower():return {'state':'done','edited':False}
+                try:return {'state':'done','edited':bool(await edit(None))}
+                except BadRequest:return {'state':'done','edited':False}
+        except Exception:return {'state':'not_started','error_code':'telegram_edit_failed'}
+        finally:DISPATCH_KEY.reset(token)
 
     def stop(self):
         self.stopping=True

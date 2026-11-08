@@ -23,6 +23,7 @@ class MonitoringTests(unittest.TestCase):
         found = [problem for problem in problems.problems({}, rows, '2026-10-13') if problem['kind'] == 'model']
         self.assertEqual(problems.text(found[0], 1),
                          'Memory notes (synthetic-model): 1 model call failed today: 1 the provider was overloaded (HTTP 529).')
+        self.assertEqual(found[0]['ok'], 1, 'the call that worked, so the notice can say when the model works again')
 
     def test_github_flags_come_from_the_app_file_without_its_key(self):
         from tools.operations.connections import secret_file

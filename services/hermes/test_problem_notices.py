@@ -33,9 +33,14 @@ class ProblemNoticeTests(unittest.TestCase):
         self.state = folder.name
         self.sent = []
         self.outcome = 'done'
+        self.edits = []
+        self.edit_outcome = 'done'
 
     def check(self, now, state=None, usage=(), enabled=True, outcome=None, values=None):
         def send(body):
+            if body.get('edit'):
+                self.edits.append(body)
+                return {'state': self.edit_outcome}
             self.sent.append(body)
             return {'state': outcome or self.outcome}
         return problems.check(self.state, state or monitoring(), list(usage), send, now, enabled, values or {})
@@ -137,6 +142,64 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual([problem for problem in yesterday if problem['kind'] == 'model'], [],
                          'yesterday’s failures are not today’s')
 
+    def test_a_notice_line_is_marked_when_its_model_works_again(self):
+        def busy(failed, runs):
+            return [{**refusals(failed, 0)[0], 'part': 'memory_review', 'label': 'Memory notes', 'runs': runs,
+                     'reasons': {'provider_error': failed}, 'causes': {'provider_error:overloaded:529': failed}}]
+        self.check(NOW, usage=busy(1, 10))
+        line = 'Memory notes (synthetic-model): 1 model call failed today: 1 the provider was overloaded (HTTP 529).'
+        self.assertEqual(self.sent[-1]['problems'], [line])
+        self.check(NOW + 120, usage=busy(1, 10))
+        self.assertEqual(self.edits, [], 'nothing has worked since')
+        self.check(NOW + 240, usage=busy(2, 11))
+        self.assertEqual(self.edits, [], 'it failed again: it waits for a call that works after that')
+        self.check(NOW + 900, usage=busy(2, 12))
+        self.assertEqual(self.edits, [{'id': self.sent[0]['id'], 'problems': [line + ' Worked again at 12:15 UTC.'], 'resolved': [True],
+                                       'open': None, 'retry': False, 'edit': True}], 'marked in place and without buttons')
+        self.check(NOW + 1020, usage=busy(2, 13))
+        self.assertEqual((len(self.edits), len(self.sent)), (1, 1), 'a cleared notice is no longer followed')
+
+    def test_retried_tasks_clear_their_line_and_the_notice_loses_its_buttons_when_all_clear(self):
+        self.check(NOW)
+        self.check(NOW + 120, monitoring(failed=12, retryable=2))
+        lines = ['Memory notes: 1 task failed (12 so far).', 'Telegram replies: 2 tasks failed (2 so far).']
+        self.assertEqual((self.sent[-1]['problems'], self.sent[-1]['retry']), (lines, True))
+        self.check(NOW + 240, monitoring(failed=12))
+        dashboard = {'kind': 'url', 'url': 'http://127.0.0.1:8783/#system'}
+        self.assertEqual({key: self.edits[-1][key] for key in ('problems', 'resolved', 'open', 'retry')},
+                         {'problems': [lines[0], lines[1] + ' Resolved at 12:04 UTC.'], 'resolved': [False, True], 'open': dashboard, 'retry': False},
+                         'Open stays for what is left; Retry failed goes with the tasks it could retry')
+        self.check(NOW + 360, monitoring(failed=11, work=False))
+        self.assertEqual(len(self.edits), 1, 'unreadable background work clears nothing')
+        self.check(NOW + 480, monitoring(failed=11))
+        self.assertEqual((self.edits[-1]['resolved'], self.edits[-1]['open']), ([True, True], None))
+        self.assertEqual(self.edits[-1]['problems'][0], lines[0] + ' Resolved at 12:08 UTC.')
+
+    def test_an_edit_that_does_not_go_through_is_tried_again(self):
+        self.check(NOW, monitoring(services=['hermes']))
+        self.check(NOW + 120, monitoring(services=['hermes']))
+        self.check(NOW + 240, {**monitoring(), 'services': None})
+        self.assertEqual(self.edits, [], 'services that could not be read clear nothing')
+        self.edit_outcome = 'not_started'
+        self.check(NOW + 360, monitoring())
+        self.check(NOW + 480, monitoring())
+        self.assertEqual([edit['problems'] for edit in self.edits], [['Assistant isn’t running as expected. Resolved at 12:06 UTC.']] * 2)
+        self.edit_outcome = 'done'
+        self.check(NOW + 600, monitoring())
+        self.check(NOW + 720, monitoring())
+        self.assertEqual(len(self.edits), 3)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_a_telegram_outage_clears_once_telegram_is_connected(self):
+        down = {**monitoring(), 'telegram_incident': {'at': '2026-10-28T11:50:00+00:00', 'error_code': 'telegram_network_error'}}
+        self.check(NOW, down)
+        self.assertEqual(self.sent[-1]['problems'], ['Telegram stopped working at 2026-10-28 11:50 UTC: it couldn’t reach Telegram.'])
+        self.check(NOW + 120, {**down, 'runtime': {'status': {'telegram': 'recovering'}}})
+        self.assertEqual(self.edits, [])
+        self.edit_outcome = 'not_found'
+        self.check(NOW + 240, {**down, 'runtime': {'status': {'telegram': 'connected'}}})
+        self.check(NOW + 360, {**down, 'runtime': {'status': {'telegram': 'connected'}}})
+        self.assertEqual([edit['resolved'] for edit in self.edits], [[True]], 'a notice with no message to edit is no longer followed')
 
     def test_a_refused_github_app_gives_one_notice(self):
         refused = {**monitoring(), 'github': {'connected': False, 'reconnect': True}}
