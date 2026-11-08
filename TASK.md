@@ -20,8 +20,12 @@ calls keep a reason code, and notices and Health say why they failed (owner,
 exact error as codes, such as overloaded with HTTP 529, and say it (owner,
 2026-11-08: "yes fix it" to keeping the exact error for clearer notices;
 [record](services/hermes/test_usage.py), [notice](services/hermes/test_problem_notices.py)).
-When a problem clears, its notice is edited in place with ✅ and the time, and loses
-its buttons once all its problems cleared (owner, 2026-11-08: "show it resolved in
+A run Hermes stopped itself (`loop_error`) is named by its stop and not called a
+provider error; the first live ones, three memory-notes runs on 2026-11-08, kept no more
+detail than `loop_error`.
+When a problem clears, its notice is edited in place with ✅ and the time, loses
+its buttons once all its problems cleared, and takes the ✅ back if the problem returns
+within the quiet hour (owner, 2026-11-08: "show it resolved in
 chat by update msg or reaction or reply"; [follow-up](services/hermes/test_problem_notices.py),
 [edit](services/hermes/test_approval_cards.py)). Pending: a live button press on a running
 installation, and a live notice that names a provider's exact error and is then marked ✅.

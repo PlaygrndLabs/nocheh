@@ -812,14 +812,16 @@ class AssistantGateway:
 
     async def edit_notice(self,name,chat,text,markup):
         """Edits a notice this runtime sent to the owner, found by its receipt. Without buttons, the notice loses them.
-        Telegram refusing the edit, such as for unchanged text or a message the owner deleted, changes nothing and is
-        not tried again; an edit that could not reach Telegram is."""
+        Telegram refusing the edit, such as for unchanged text, a message the owner deleted or a bot the owner blocked,
+        changes nothing and is not tried again; an edit that could not reach Telegram is. Repeating an edit that went through changes
+        nothing, so each attempt gets its own journal entry: one lost in transit never blocks the next."""
+        import uuid
         try:sent=json.loads((self.receipts/(name+'.result')).read_bytes())
         except (OSError,ValueError):sent={}
         message=sent.get('message_id') if isinstance(sent,dict) and sent.get('state')=='done' else None
         if not isinstance(message,int):return {'state':'not_found'}
-        from telegram.error import BadRequest
-        token=DISPATCH_KEY.set('notice-edit:'+name)
+        from telegram.error import BadRequest, Forbidden
+        token=DISPATCH_KEY.set('notice-edit:'+name+':'+uuid.uuid4().hex)
         edit=lambda reply_markup:self.adapter._bot.edit_message_text(text,chat_id=int(chat),message_id=message,parse_mode=None,
                                                                      reply_markup=reply_markup,link_preview_options=no_preview())
         try:
@@ -829,6 +831,7 @@ class AssistantGateway:
                 if markup is None or 'not modified' in str(error).lower():return {'state':'done','edited':False}
                 try:return {'state':'done','edited':bool(await edit(None))}
                 except BadRequest:return {'state':'done','edited':False}
+        except Forbidden:return {'state':'done','edited':False}
         except Exception:return {'state':'not_started','error_code':'telegram_edit_failed'}
         finally:DISPATCH_KEY.reset(token)
 
