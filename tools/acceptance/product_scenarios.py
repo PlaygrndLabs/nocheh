@@ -1322,6 +1322,23 @@ class ProductScenarios(Scenarios):
         time.sleep(3)
         self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] nocheh_action_status' in answer and marker in answer, text=answer[:500])
 
+    def group_operation_answers_in_topic(self):
+        # A member asks for a command in a group topic. The owner approves it in their private chat,
+        # and one follow-up answers the request in that topic as a reply to it (ADR-0212).
+        marker = 'TOPICMARK1'
+        request = self.f.message(GROUP, 'یک فرمان [[tool:nocheh_shell {"command":"printf '+marker+'"}]] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
+        _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
+        card = self.wait('card_posted_to_owner', lambda: self.cards(before, OWNER), 120)[0]
+        self.gate('card_shows_command', marker in card['message']['text'], card=card['message']['text'])
+        self.gate('no_card_in_group', not self.cards(before, GROUP))
+        self.ran(card, marker)
+        answers = lambda: [row for row in self.replies(before, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
+            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == request['message']['message_id']]
+        answer = self.wait('follow_up_answered_in_topic', answers, 240)[0]['message']['text']
+        time.sleep(3)
+        self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] nocheh_action_status' in answer and marker in answer, text=answer[:500])
+        self.gate('nothing_else_in_owner_chat', not [row for row in self.replies(before, OWNER) if not self.is_card(row)])
+
     def job_operation_runs_after_approval(self):
         # A job's run asks to run a command; the owner approves it on its card after the job reported.
         # The run's own profile is the job's, so the executor checks the job's chat settings.
@@ -1590,7 +1607,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
-                 'approval_waits_across_a_change_and_runs', 'job_operation_runs_after_approval',
+                 'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',

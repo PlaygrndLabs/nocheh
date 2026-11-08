@@ -2,10 +2,11 @@
 
 <status>
 Accepted on 2026-11-08, after the owner decided that once an approved operation
-ends, the agent continues in the chat that asked and posts the answer as a reply
-to the asking message in its topic; that a rejected, failed or unconfirmed
-operation still gets one short line; that one asking message gets at most three
-follow-ups; and that the first reply says the answer will follow. Amends
+ends, the agent continues in the chat that asked and posts the answer there. The
+details follow the recommendations the owner was shown: the answer is a reply to
+the asking message in its topic; a rejected, failed or unconfirmed operation still
+gets one short line; one asking message gets at most three follow-ups; and the
+first reply says the answer will follow. Amends
 [ADR-0159](0159-group-members-post-freely-and-approvals-go-private.md): the group
 hears the outcome, not only that the owner was asked. Amends
 [ADR-0202](0202-approved-actions-report-how-they-ended.md): the agent says the
