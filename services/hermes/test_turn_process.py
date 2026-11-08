@@ -67,6 +67,12 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
+    async def test_a_failed_turn_counts_the_providers_exact_error_and_keeps_it_out_of_the_result(self):
+        with patch('services.hermes.usage.record') as record:
+            result,_=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"failed","error_code":"assistant_runtime_unavailable",'
+                                        '"failure_reason":"provider_error","failure_cause":"overloaded:529"}))')
+        self.assertEqual((record.call_args.args[3],record.call_args.kwargs['reason'],record.call_args.kwargs['cause']),(True,'provider_error','overloaded:529'))
+        self.assertEqual(result,{'state':'failed','error_code':'assistant_runtime_unavailable'})
     def job(self,**changes):
         """A job run's context as storage sends it, its deadlines from now."""
         now=time.time()

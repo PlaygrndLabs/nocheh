@@ -67,7 +67,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
   const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string;agent:string}[]=[];
   const secret='synthetic-provider-credential-never-returned',gateway='https://gateway.example.test/v1';
   const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL=gateway;
-  let guardDown=false,streamRevocation=false,slowMemory=false;const preparedPrincipals:any[]=[];
+  let guardDown=false,streamRevocation=false,slowMemory=false,providerStatus=0;const preparedPrincipals:any[]=[];
   const mock:typeof fetch=async(url,init)=>{
     const body=init?.body?JSON.parse(String(init.body)):null;
     calls.push({url:String(url),body,auth:new Headers(init?.headers).get('authorization')??'',agent:new Headers(init?.headers).get('user-agent')??''});
@@ -81,6 +81,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     }
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:gateway,api_mode:'chat_completions',api_key:secret});
     if(String(url).endsWith('/v1/guard'))return guardDown?new Response('unavailable',{status:503}):Response.json({guarded:true,payload:body.payload});
+    if(providerStatus)return Response.json({type:'error',error:{type:'overloaded_error',message:'private provider words'}},{status:providerStatus});
     if(streamRevocation)return new Response(new ReadableStream({start(controller){
       controller.enqueue(new TextEncoder().encode('data: first\n\n'));
       setTimeout(()=>{void pool.query('UPDATE guard_state SET epoch=epoch+1').then(()=>{controller.enqueue(new TextEncoder().encode('data: stale\n\n'));controller.close();});},30);
@@ -133,9 +134,18 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
       assert.equal((await request('/v1/memory/honcho/context',{})).status,503,'automatic context keeps the ordinary short deadline');
       assert.equal((await request('/v1/memory/recall',{query:'Synthetic recall'})).status,503);
     }finally{slowMemory=false;clock.mock.restore();}
+    // A provider's refusal passes on only its HTTP status, never its message, so the owner's notice can name it.
+    providerStatus=529;
+    const busy=await request('/v1/chat/completions',payload);
+    assert.equal(busy.status,503);assert.deepEqual(await busy.json(),{error:'provider_request_failed',provider_status:529});
+    providerStatus=429;
+    const limited=await request('/v1/chat/completions',payload);
+    assert.equal(limited.status,429);assert.deepEqual(await limited.json(),{error:'provider_request_failed',provider_status:429});
+    providerStatus=0;
+    const provided=calls.filter(x=>x.url===gateway+'/chat/completions').length;
     guardDown=true;
     assert.equal((await request('/v1/chat/completions',payload)).status,503);
-    assert.equal(calls.filter(x=>x.url===gateway+'/chat/completions').length,1,'guard outage never falls back to a direct provider call');
+    assert.equal(calls.filter(x=>x.url===gateway+'/chat/completions').length,provided,'guard outage never falls back to a direct provider call');
     const afterOutage=calls.length;
     await pool.query('UPDATE guard_state SET epoch=epoch+1');
     assert.equal((await request('/v1/chat/completions',payload)).status,409);

@@ -188,7 +188,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             from .usage import part_of, record
             usage=result.pop('usage',None)
             await asyncio.to_thread(record, part_of(body), usage, model, result.get('state')!='done',
-                                    reason=result.pop('failure_reason',None))
+                                    reason=result.pop('failure_reason',None), cause=result.pop('failure_cause',None))
             # A job run reports Hermes's own token counts too; Nocheh prices them at the rates frozen on the job's card.
             if background:
                 from .job_progress import run_tokens

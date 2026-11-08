@@ -7,6 +7,23 @@ from tools.operations.provider import monitoring
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_a_failed_calls_exact_error_reaches_health_and_the_notice_from_the_usage_tracker(self):
+        from datetime import datetime, timezone
+        from services.hermes import usage
+        from tools.operations.provider import problems
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as state:
+            path = Path(state) / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            usage.record('memory_review', {'calls': 1}, 'synthetic-model', failed=True, reason='provider_error', cause='overloaded:529',
+                         provider='anthropic', path=path, now=now.timestamp())
+            usage.record('memory_review', {'calls': 1}, 'synthetic-model', provider='anthropic', path=path, now=now.timestamp())
+            rows = monitoring.model_problems(state, now)
+        self.assertEqual((rows[0]['causes'], rows[0]['why']), ({'provider_error:overloaded:529': 1}, '1 the provider was overloaded (HTTP 529)'))
+        found = [problem for problem in problems.problems({}, rows, '2026-10-13') if problem['kind'] == 'model']
+        self.assertEqual(problems.text(found[0], 1),
+                         'Memory notes (synthetic-model): 1 model call failed today: 1 the provider was overloaded (HTTP 529).')
+
     def test_github_flags_come_from_the_app_file_without_its_key(self):
         from tools.operations.connections import secret_file
         pem='-----BEGIN RSA PRIVATE KEY-----\nMONITOR'+'x'*40+'\n-----END RSA PRIVATE KEY-----\n'

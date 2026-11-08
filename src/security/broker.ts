@@ -81,6 +81,11 @@ export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBin
     guard_epoch:principal.guard_epoch,revision:principal.revision,
     ...(event.managed&&event.channel==='scheduler'&&typeof payload.job_id==='string'?{job:payload.job_id}:{})};
 }
+/** A provider refused a model call. The broker answers with its own status, and passes on only the provider's HTTP status,
+ * never its message, so the owner's notice can say what went wrong, such as overloaded (529). */
+export class ProviderFailure extends HttpError {
+  constructor(readonly providerStatus:number){super([401,403,429].includes(providerStatus)?providerStatus:503,'provider_request_failed');}
+}
 /** What a job request may be told to correct, as services/hermes/archive_tools.py JOB_ERRORS names it; any other refusal stays opaque. */
 export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed']);
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
@@ -105,7 +110,8 @@ export function brokerServer(options:BrokerOptions) {
   const assertCurrent=(principal:Reader)=>afterPending(jobRun(principal),async()=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal));
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
-    json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'security_service_unavailable'});
+    json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'security_service_unavailable',
+      ...(error instanceof ProviderFailure&&Number.isInteger(error.providerStatus)&&error.providerStatus>=100&&error.providerStatus<=599?{provider_status:error.providerStatus}:{})});
   });});
   async function handle(req:IncomingMessage,res:ServerResponse) {
     const url=new URL(req.url??'/','http://security'),path=url.pathname;
@@ -236,7 +242,7 @@ export function brokerServer(options:BrokerOptions) {
       const providerStarted=performance.now();let response:Response;
       try{response=await call(destination,{method:'POST',headers,body:sent,redirect:'error',signal:controller.signal});}
       finally{timings.provider_headers_ms=elapsed(providerStarted);}
-      if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.reference??binding.event_id,undefined,timings);attempt.closed=true;throw new HttpError([401,403,429].includes(response.status)?response.status:503,'provider_request_failed');}
+      if(!response.ok){await response.body?.cancel();await recordEffect(options.pool,attempt.effect,'failed',attempt.decision,binding.reference??binding.event_id,undefined,timings);attempt.closed=true;throw new ProviderFailure(response.status);}
       await stream(response,principal,res,8*1024*1024,timings);
       await recordEffect(options.pool,attempt.effect,'completed',attempt.decision,binding.reference??binding.event_id,undefined,timings);attempt.closed=true;
     }catch(error){if(trace&&!trace.closed)await recordEffect(options.pool,trace.effect,trace.started?'ambiguous':'failed',trace.decision,binding.reference??binding.event_id,undefined,timings);throw error;}

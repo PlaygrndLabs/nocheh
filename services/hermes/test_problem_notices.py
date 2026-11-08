@@ -116,6 +116,20 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual(problems.text(next(p for p in found if p['kind'] == 'model'), 4),
                          'Memory notes (synthetic-model): 4 model calls failed today.', 'no reason known, none said')
 
+    def test_a_notice_says_the_providers_exact_error_where_it_is_known(self):
+        row = {**refusals(5, 0)[0], 'part': 'memory_review', 'label': 'Memory notes',
+               'reasons': {'provider_error': 4, 'timed_out': 1},
+               'causes': {'provider_error:overloaded:529': 2, 'provider_error:thinking_signature:400': 1,
+                          'timed_out:timeout': 1, 'refused:content_policy_blocked': 3, 'provider_error:Private words': 1}}
+        self.check(NOW, usage=[row])
+        self.assertEqual(self.sent[-1]['problems'], [
+            'Memory notes (synthetic-model): 5 model calls failed today: 2 the provider was overloaded (HTTP 529), '
+            '1 took too long, 1 the provider had an error (thinking signature, HTTP 400), 1 the provider had an error.'],
+            'a cause of a reason with no failures, or one that is not a code, is left out')
+        dropped = {**refusals(12, 0)[0], 'reasons': {'unknown': 12}, 'causes': {'unknown:connection': 12}}
+        self.assertEqual(problems.why(dropped), '12 couldn’t reach the provider or lost the connection',
+                         'a cause says why even when the reason alone is not known')
+
     def test_only_todays_model_failures_count(self):
         found = problems.problems(monitoring(), refusals(1, 1), TODAY)
         self.assertEqual({problem['kind'] for problem in found}, {'failed', 'model'})

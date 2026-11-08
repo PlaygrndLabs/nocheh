@@ -121,7 +121,7 @@ class DetectorTests(unittest.TestCase):
         with patch('services.hermes.subscription._call_subscription',side_effect=Busy()), \
                 patch('services.hermes.subscription.RETRY_SECONDS',0),patch('services.hermes.usage.record') as record:
             with self.assertRaises(Exception):detect_literals('Password: juniper-ONLY-7642',credentials,'model')
-        self.assertEqual({c.kwargs['reason'] for c in record.call_args_list},{'provider_error'})
+        self.assertEqual({(c.kwargs['reason'],c.kwargs['cause']) for c in record.call_args_list},{('provider_error','overloaded:503')})
 
     def test_a_dropped_connection_is_asked_again_and_a_timeout_is_not(self):
         class APIConnectionError(Exception):pass
@@ -132,6 +132,7 @@ class DetectorTests(unittest.TestCase):
             self.assertEqual(detect_literals('Token: kite-99',credentials,'model'),['kite-99'])
         self.assertEqual(call.call_count,2)
         self.assertEqual([c.args[3] for c in record.call_args_list],[True,False],'the dropped call counts as failed, the retry as passed')
+        self.assertEqual(record.call_args_list[0].kwargs['cause'],'connection','the owner is told the provider could not be reached')
         with patch('services.hermes.subscription._call_subscription',side_effect=APITimeoutError()) as call, \
                 patch('services.hermes.subscription.RETRY_SECONDS',0),patch('services.hermes.usage.record'):
             with self.assertRaises(APITimeoutError):detect_literals('Token: kite-99',credentials,'model')

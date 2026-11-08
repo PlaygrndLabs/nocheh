@@ -9,6 +9,7 @@ installation that can read them records the totals it finds without a message.""
 import hashlib
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +36,21 @@ MODEL_REASONS = {
     'interrupted': 'stopped before finishing', 'empty_answer': 'the model gave an empty answer',
     'bad_answer': 'the model’s answer couldn’t be used', 'nocheh_error': 'Nocheh’s own error', 'unknown': 'reason not known',
 }
+# The provider's exact error, by Hermes's names for it (services/hermes/usage.py causes), when it says more than the reason.
+CAUSES = {
+    'overloaded': 'the provider was overloaded', 'server_error': 'the provider had a server error',
+    'upstream_blocked': 'a proxy in front of the provider blocked the call',
+    'incomplete_response': 'the provider stopped before answering', 'format_error': 'the provider rejected the request',
+    'connection': 'couldn’t reach the provider or lost the connection', 'timeout': 'took too long',
+    'rate_limit': 'over the provider’s rate limit', 'upstream_rate_limit': 'over the provider’s rate limit',
+    'billing': 'the provider account is out of credit or over its limit', 'auth': 'the provider refused the key',
+    'auth_permanent': 'the provider refused the key', 'model_entitlement': 'the provider account can’t use this model',
+    'model_not_found': 'the provider doesn’t know this model', 'context_overflow': 'too long for the model',
+    'payload_too_large': 'too long for the model', 'content_policy_blocked': 'refused by the model',
+    'provider_policy_blocked': 'the provider account’s privacy settings blocked this model',
+    'data_policy_denied': 'a connected app’s data can’t go to a model that may train on it',
+}
+CAUSE = re.compile(r'([a-z][a-z0-9_]{0,47})(?::([1-5][0-9]{2}))?')
 TELEGRAM_REASONS = {
     'telegram_network_error': 'it couldn’t reach Telegram', 'telegram_polling_conflict': 'another copy of the bot was running',
     'invalid_token': 'Telegram refused the bot token', 'missing_credentials': 'no bot token is set',
@@ -96,16 +112,28 @@ def problems(monitoring, usage_rows, today):
         hidden = row.get('hidden') or 0
         add(f"model:{today}:{row['part']}:{row['provider']}:{row['model']}", (row.get('failed') or 0) + hidden, 'model',
             label=row.get('label') or row['part'], model=row['model'], failed=row.get('failed') or 0,
-            refused=row.get('refused') or 0, hidden=hidden, reasons=row.get('reasons') or {})
+            refused=row.get('refused') or 0, hidden=hidden, reasons=row.get('reasons') or {}, causes=row.get('causes') or {})
     # Nocheh's GitHub app: its key never expires, so only a refused one gives a notice.
     if (monitoring.get('github') or {}).get('reconnect'):
         add('github', 1, 'github', reason='reconnect')
     return found
 
 
+def _cause_words(reason, code, status):
+    """A cause in the owner's words, such as 'the provider was overloaded (HTTP 529)'."""
+    # A status Hermes has no name for: a 4xx means the provider would not take the request.
+    words = CAUSES.get(code) or (CAUSES['format_error'] if code == 'http_error' and str(status or '').startswith('4')
+                                 else MODEL_REASONS.get(reason, MODEL_REASONS['unknown']))
+    notes = [] if code in CAUSES or code == 'http_error' else [code.replace('_', ' ')]
+    if status:
+        notes.append('HTTP ' + status)
+    return words + (f" ({', '.join(notes)})" if notes else '')
+
+
 def why(problem):
     """Why a part's model calls failed, most common first, such as '2 refused by the model, 1 took too long',
-    or '' when no reason is known."""
+    with the provider's exact error where it is known, such as '1 the provider was overloaded (HTTP 529)',
+    or '' when nothing is known."""
     reasons = {key: count for key, count in (problem.get('reasons') or {}).items() if isinstance(count, int) and count > 0}
     # Calls counted before reasons were kept: only their refusals are known.
     refused = problem.get('refused') or 0
@@ -114,10 +142,31 @@ def why(problem):
     known = sum(reasons.values())
     if known < (problem.get('failed') or 0) and reasons:
         reasons['unknown'] = reasons.get('unknown', 0) + problem['failed'] - known
-    if not reasons or list(reasons) == ['unknown']:
+    # Each reason's calls by the provider's exact error, such as {'provider_error': {('overloaded', '529'): 1}}.
+    causes = {}
+    for key, count in (problem.get('causes') or {}).items():
+        reason, _, detail = str(key).partition(':')
+        found = CAUSE.fullmatch(detail)
+        if reason in reasons and found and isinstance(count, int) and count > 0:
+            causes.setdefault(reason, {})[found.groups()] = count
+    if not reasons or list(reasons) == ['unknown'] and not causes:
         return ''
-    ordered = sorted(reasons.items(), key=lambda item: (-item[1], list(MODEL_REASONS).index(item[0]) if item[0] in MODEL_REASONS else 99))
-    return ', '.join(f"{count} {MODEL_REASONS.get(key, MODEL_REASONS['unknown'])}" for key, count in ordered)
+    # Counts by their words, so a cause that says no more than its reason joins it.
+    pieces = {}
+    def add(words, count, rank):
+        total, first = pieces.get(words, (0, rank))
+        pieces[words] = (total + count, min(first, rank))
+    for reason, count in reasons.items():
+        rank = list(MODEL_REASONS).index(reason) if reason in MODEL_REASONS else 99
+        for (code, status), found in sorted(causes.get(reason, {}).items(), key=lambda item: -item[1]):
+            found = min(found, count)
+            if found:
+                add(_cause_words(reason, code, status), found, rank)
+                count -= found
+        if count:
+            add(MODEL_REASONS.get(reason, MODEL_REASONS['unknown']), count, rank)
+    ordered = sorted(pieces.items(), key=lambda item: (-item[1][0], item[1][1]))
+    return ', '.join(f'{count} {words}' for words, (count, _) in ordered)
 
 
 def text(problem, new):

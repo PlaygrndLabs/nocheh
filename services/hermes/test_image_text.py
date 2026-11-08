@@ -48,7 +48,9 @@ class ImageTextTests(unittest.TestCase):
 
     def test_failures_say_whether_a_retry_can_help(self):
         busy = self.read({'success': False, 'error': 'Error analyzing image: Error code: 529 - overloaded'}, {'input_tokens': 0})[0]
-        self.assertEqual((busy['state'], busy['reason']), ('failed', 'provider_error'))
+        self.assertEqual((busy['state'], busy['reason'], busy['cause']), ('failed', 'provider_error', 'overloaded:529'))
+        dropped = self.read({'success': False, 'error': 'Error analyzing image: Connection error.'}, {'input_tokens': 0})[0]
+        self.assertEqual((dropped['reason'], dropped['cause']), ('provider_error', 'connection'))
         refused = self.read({'success': False, 'error': 'Error analyzing image: content_policy violation'}, {'input_tokens': 10})[0]
         self.assertEqual(refused['reason'], 'refused')
         self.assertEqual(self.read({'success': False, 'error': 'Error analyzing image: cannot identify image file'})[0], {'state': 'unreadable'})
