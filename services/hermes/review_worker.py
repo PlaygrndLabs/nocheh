@@ -141,8 +141,11 @@ def start(root,policy,model,credentials,body):
 
 
 def failed_receipt(profile,review_id):
+    """Whether the review's own receipt says failed, read once no run of it holds the notes lock."""
+    from .native_memory import memory_lock
     receipt=profile/'reviews'/review_id
-    return receipt.is_file() and not receipt.is_symlink() and receipt.read_text()=='failed'
+    with memory_lock(profile):
+        return receipt.is_file() and not receipt.is_symlink() and receipt.read_text()=='failed'
 
 
 def stopped(profile,review_id,before):
