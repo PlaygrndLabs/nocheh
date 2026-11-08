@@ -12,6 +12,8 @@ test('a proposed action remains visible ahead of an older completed action from 
  ]);
  assert.deepEqual(summary.get('message'),{id:'waiting',state:'proposed',count:2});
  assert.deepEqual(summary.get('other'),{id:'separate',state:'approved',count:1});
+ const closed=summarizeActionReviews([{id:'closed',event_id:'message',state:'closed'},{id:'unclear',event_id:'message',state:'ambiguous'}]);
+ assert.deepEqual(closed.get('message'),{id:'unclear',state:'ambiguous',count:2},'an open unclear send outranks a closed one');
 });
 
 test('action review lookup uses only requested source IDs in either storage layout',async()=>{
@@ -28,6 +30,7 @@ test('action review lookup uses only requested source IDs in either storage layo
  assert.deepEqual(observed.map(item=>item.ids),[['source-a'],['source-a']]);
  assert.match(observed[0]!.sql,/FROM action_requests WHERE event_id=ANY/);
  assert.match(observed[1]!.sql,/FROM telegram_action_requests WHERE source_reference->>'id'=ANY/);
+ assert.match(observed[1]!.sql,/WHEN state='ambiguous' AND resolution IS NOT NULL THEN 'closed'/,'a send the owner closed no longer reads as uncertain');
 });
 
 test('legacy direct review loads a Telegram action beyond the limited queue and rejects an unknown ID',async()=>{

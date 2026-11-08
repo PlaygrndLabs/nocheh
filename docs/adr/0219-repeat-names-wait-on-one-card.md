@@ -1,4 +1,4 @@
-# ADR-0218: Repeat names for one person or project wait on one card
+# ADR-0219: Repeat names for one person or project wait on one card
 
 <status>
 Accepted on 2026-11-08 after the owner's Waiting list showed three separate

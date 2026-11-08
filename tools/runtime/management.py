@@ -59,7 +59,7 @@ def dispatch(body):
         import re
         action=body.get('action','actions')
         read=action=='actions' or re.fullmatch(r'actions/[a-f0-9]{64}',action)
-        if not read and action not in ('decide','telegram-decision','grant','revoke'):raise ValueError('tools_route_denied')
+        if not read and action not in ('decide','telegram-decision','resolve','telegram-resolve','grant','revoke'):raise ValueError('tools_route_denied')
         try:return API().call('/v1/tools/'+action,None if read else body['request'])
         except HTTPError as error:
             try:code=json.load(error).get('error')

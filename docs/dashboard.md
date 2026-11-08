@@ -316,7 +316,11 @@ Long operations require the dashboard so approval never relies on truncated text
 An optional permission allows only that exact operation in that scope/profile,
 for 1–1000 starts and up to 30 days (the dashboard offers 1, 3, 10 or 50 starts for an hour, a day, a week or 30 days). Revoke it in Inbox › Allowed actions, `/revoke ID`, or the CLI.
 Revocation stops future starts; it cannot undo a started operation. Ambiguous
-results are retained without automatically repeating execution.
+results are retained without automatically repeating execution. An unclear one
+waits in Inbox › Waiting until you open it and press It ran, It didn't run or
+Dismiss (for a message: It was sent, It wasn't sent or Dismiss); an unclear web
+page read closes by itself, since a read changes nothing. Closing one runs
+nothing again, and History says how it closed.
 
 Shell runs in a disposable, network-disabled container with only the selected
 workspace mounted. Browser inspection fetches one approved public HTTPS page and
