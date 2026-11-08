@@ -27,7 +27,8 @@ local audience policy remains independent of source identity and relationships.
 
 Attachments keep source IDs and metadata. Downloads are retried with capped
 backoff, saved by SHA-256 under `files/`, and fsynced before their database state
-becomes `ready`. Unretrievable files remain `failed` with attempt counts and a
+becomes `ready`. A file over Telegram's 20 MB bot limit stays a reference only; other failures
+remain `failed` with attempt counts and a
 next retry time. Extracted text and extraction statuses belong in
 `derived_artifacts` with provenance; they never replace an original message.
 
@@ -36,16 +37,19 @@ and response bytes. A missing result after restart is `ambiguous`; the same send
 cannot be blindly retried. Confirmed results are reused when native code retries.
 Journal records remain outside the pending spool for restart reconciliation.
 
-Live update events receive a dispatch record in the same database transaction.
+Each committed live update requests its preparation, memory review and reply
+workflows in one control-store transaction; the reply's dispatch record is
+created when that workflow first runs.
 Native Telegram handlers reject updates unless invoked by the committed dispatch
-path. Imports, wire captures and outbound records are suppressed. The assistant
-uses committed originals and separately recorded extracted text. Archive capture,
-attachment downloads, assistant work and approved actions have independent retry
-loops; a slow model request does not block archive ingestion or downloads. A loop
+path. Imports, wire captures and outbound records request no reply workflow. The assistant
+uses committed originals and separately recorded extracted text. Archive capture
+runs in a worker loop; preparation with its downloads, replies and approved actions
+run as separate Inngest workflows; a slow model request does not block archive ingestion or downloads. A loop
 never overlaps itself. Malformed live source messages stay archived with a visible
 suppressed dispatch, allowing later work to continue.
 
-Committed media uses native Telegram event decoding and replies. The integration
+Committed media reaches the native handler as a plain text message; its text,
+transcripts and files travel in the turn input. The integration
 bypasses native duplicate downloads and sticker vision preprocessing; those paths
 would operate outside the scoped assistant process. Voice, audio and round video
 notes keep their original bytes and are transcribed by the runtime's transcriber
@@ -65,4 +69,5 @@ cold-start/reconnect behavior and ambiguous sends across restart.
 On 2026-09-06, an actual Compose PostgreSQL stop/start also passed: a synthetic
 event remained fsynced throughout the outage, recovered automatically as one
 unchanged archive record, and retained its suppressed historical dispatch.
-No live Telegram account has been exercised yet.
+Live Telegram results are tracked in
+[MVP acceptance status](mvp-acceptance-status.md).

@@ -9,6 +9,8 @@ to a provider chosen in Settings › Models
 
 - **OpenAI**: `https://api.openai.com/v1` with `OPENAI_API_KEY`.
 - **Anthropic**: `https://api.anthropic.com/v1` with `ANTHROPIC_API_KEY`.
+  Replies use its Messages API, for prompt caching
+  ([ADR-0199](adr/0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md)).
 - **Custom**: any OpenAI-compatible HTTPS provider, such as a hosted
   gateway. It needs a short id, a name, its address and its API key. Custom
   providers are saved in `NOCHEH_PROVIDERS`; their keys in
@@ -20,11 +22,14 @@ to a provider chosen in Settings › Models
   or `/v1beta/openai`, is saved as typed. Saved addresses are used as saved.
 
 Keys are saved in the installation `.env` and never returned to the browser.
+Hermes holds the reply, secret-check, image and voice keys; the security broker
+asks Hermes for the reply key on each call. Honcho's provider gateway holds the
+memory and embedding keys.
 
 ## Providers for each part
 
 One default provider and model (`NOCHEH_PROVIDER`, `NOCHEH_MODEL`) serve
-replies (Hermes), memory (Honcho reasoning) and the secret check unless a part
+replies (Hermes), memory (Honcho reasoning), the secret check and images unless a part
 names its own provider or model. Apply recreates the services whose routes
 changed: Hermes and the security broker for replies and the secret check,
 Honcho and its egress meter for memory and embeddings.

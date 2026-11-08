@@ -98,7 +98,7 @@ synthetic `NOCHEH_SOURCE_FIXTURE_PASSWORD`. It has a private internal network,
 project-owned PostgreSQL volume, no published ports, and no runtime, poller,
 scheduler, OAuth owner, or production configuration mounts. Build its development
 image from the pinned root Dockerfile or a verified cached development image with
-the same package lock and Node 24.
+the same package lock and Node 26.
 
 Run `dist/test/source-model.test.js` for focused acceptance and the existing
 TypeScript/PostgreSQL suite for regressions. Its database-disconnection check
@@ -111,7 +111,7 @@ Slack-shaped/Discord-shaped/non-message fixtures, and verify portable originals,
 missing/supplied files, scope isolation, and silent replay. Run the existing Python
 archive/import-job/operations tests. Verify a fixture-only PostgreSQL dump/restore
 and restart with identical source-model fingerprints before marking recovery as
-passed. Runtime activation requires a separately authorized installation migration.
+passed. The live archive store creates the source model with its schema.
 </acceptance>
 
 </source_model>

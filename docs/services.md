@@ -9,7 +9,7 @@ Docker administration access is explicitly owner-authorized.
 <layout>
 
 One Compose project contains 14 continuously running containers when Honcho is
-enabled, or 15 with pgweb. In the original-only layout, database initialization
+enabled, 16 with the Telegram mini app, and one more with pgweb. In the original-only layout, database initialization
 runs inside `nocheh-db` before it reports healthy. The legacy layout retains
 its application startup initialization.
 Temporary isolated agent containers are additional.
@@ -21,8 +21,8 @@ Temporary isolated agent containers are additional.
 | `nocheh-app` | API, source capture, durable event publisher and ordinary Inngest handlers | Docker / running |
 | `nocheh-db` | Separate Nocheh and Inngest databases and roles | Docker / running |
 | `nocheh-security` | Security broker, guard and exact authorization checks | Docker / running |
-| `hermes` | Managed Hermes runtime and native dashboard | Docker / running |
-| `hermes-agent-sb` | Launch isolated agents; only agent infrastructure container mounting the Docker socket | Docker / running |
+| `hermes` | The only Telegram poller and sender; managed Hermes runtime and native dashboard | Docker / running |
+| `hermes-agent-sb` | Launch sealed turn containers and job boxes; only agent infrastructure container mounting the Docker socket | Docker / running |
 | `inngest-server` | Workflow scheduling, retries, waits and inspection UI | Docker / running |
 | `inngest-redis` | Durable workflow queue and run state | Docker / running |
 | `honcho-api` | Memory API | Docker / running when enabled |
@@ -30,6 +30,8 @@ Temporary isolated agent containers are additional.
 | `honcho-postgres` | Memory, vectors and derivation jobs | Docker / running when enabled |
 | `honcho-redis` | Memory cache | Docker / running when enabled |
 | `honcho-provider-gateway` | Controlled model access and embedding spending records | Docker / running when enabled |
+| `nocheh-miniapp` | Telegram mini app (Home, Inbox, Tasks); holds no credentials | Docker / running when set up |
+| `nocheh-tunnel` | Tunnel connector; reaches only the mini app | Docker / running when set up |
 | `pgweb-archive` | Read-only database viewer | Docker / optional-stopped |
 | `honcho-cli` | One-shot memory inspection | Docker / optional-stopped |
 
@@ -39,7 +41,7 @@ process availability; memory backlog and receipt observations establish progress
 API, capture and Inngest connectivity are separate observations.
 
 Nocheh runs no model provider service. Model calls leave through the security
-broker (replies and the secret check) and `honcho-provider-gateway` (memory and
+broker (replies), `hermes` (the secret check, images and voice notes) and `honcho-provider-gateway` (memory and
 embeddings) to the providers chosen in Settings › Models; see
 [model providers](provider.md).
 
@@ -51,7 +53,8 @@ embeddings) to the providers chosen in Settings › Models; see
 flowchart TB
     Owner[Owner] --> Dashboard
     Telegram[Telegram] --> Hermes
-    subgraph Docker["Local Docker Compose · 14 services"]
+    Telegram -.->|mini app| Tunnel --> MiniApp --> Dashboard
+    subgraph Docker["Local Docker Compose · 14 services, 16 with the mini app"]
         Dashboard["nocheh-dashboard :8783"]
         Executor["nocheh-executor<br/>imports · approved tools · receipt recovery"]
         App["nocheh-app<br/>API · capture · publisher · workflow handlers"]
@@ -66,6 +69,8 @@ flowchart TB
         MemoryDB[honcho-postgres]
         Cache[honcho-redis]
         Gateway["honcho-provider-gateway<br/>controlled model access and spending ledger"]
+        MiniApp["nocheh-miniapp<br/>optional · no credentials"]
+        Tunnel["nocheh-tunnel<br/>optional · outbound only"]
     end
     Dashboard --> App
     Dashboard --> Hermes
@@ -80,20 +85,24 @@ flowchart TB
     App -->|prepared work| Hermes
     Hermes --> Launcher
     Launcher --> Agents[Temporary isolated Docker agents]
+    Launcher --> Box[Sealed job boxes · no network]
     Agents --> Security
     Security --> App
+    Security -->|fetches provider key per call| Hermes
     Security --> Providers[Settings › Models providers]
+    Hermes -->|secret check · images · voice| Providers
     App --> Memory
     Memory --> MemoryDB
     Deriver --> MemoryDB
     Memory --> Cache
     Deriver --> Gateway
     Memory --> Gateway
+    Gateway -->|secret check| App
     Gateway --> Providers
     Gateway --> Embeddings[Dedicated capped embeddings provider]
 ```
 
-Ordinary functions share one application and concurrency four. Executor functions use
+Ordinary functions share one application and concurrency eight. Executor functions use
 concurrency two. The application gives API/capture and workflow handlers separate
 PostgreSQL pools, each capped at eight. SDK reconnection does not gate API startup.
 Inngest Redis uses AOF, `appendfsync always` and `noeviction`.
@@ -108,9 +117,10 @@ legacy layout follows [ADR-0049](adr/0049-application-database-bootstrap.md).
 
 <workflow>
 
-Telegram → capture and save → durable event publication → Inngest → prepare files,
-extracted text and guarded copies → Hermes reasoning → security and exact approvals →
-deliver and save receipt → sync authorized Honcho memory.
+Telegram → `hermes` spools the update → `nocheh-app` archives it and requests the
+preparation, memory review and reply workflows → files read and secret-checked into masked
+copies → sealed Hermes turn through `nocheh-security`, with exact approvals for actions → `hermes` sends the reply, which is
+archived. Memory review writes the masked messages it may learn from to Honcho beside the reply, once preparation finishes.
 
 Preparation is a prerequisite. Workflow events carry opaque references and approved
 metadata; originals, transcripts, arguments and credentials remain protected.

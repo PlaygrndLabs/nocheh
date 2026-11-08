@@ -26,6 +26,7 @@ source identifiers and links do not change when a derivative is activated.
 | POST `/v1/sources/:id/reprocess` | Queue work from a verified original file hash |
 | POST `/v1/sources/:id/prepare` | Request deterministic preparation in the current authorization epoch |
 | GET/POST `/v1/sources/:id/learning-consent` | Inspect effective learning permission or save an explicit owner decision |
+| GET/POST `/v1/sources/:id/retirement` | Inspect a source's hidden state and history, or hide or unhide it; hiding cancels its pending replies |
 | GET `/v1/reprocessing/:id` | Execution state and durable result reference |
 | GET `/v1/derivatives/:id` | Exact saved output, producer/configuration/input provenance and guard link |
 | POST `/v1/derivatives/:id/activate` | Activate a prepared version; `expected_revision: null` for the first selection |
@@ -40,6 +41,8 @@ source identifiers and links do not change when a derivative is activated.
 | GET/POST `/v1/projects/assignments` | Explicit chat/topic assignment, exclusion or inheritance |
 | GET `/v1/projects/effective?space=…` | Effective membership, with inheritance shown |
 | GET/POST `/v1/sharing/rules` | Selected source spaces, exact destination, mode and enabled state |
+| POST `/v1/sharing/preview`; GET `/v1/sharing/previews[/:id]`; POST `/v1/sharing/previews/:id/approve` | Prepare, inspect or approve a release from chosen sources |
+| GET `/v1/sharing/releases`; POST `/v1/sharing/releases/:id/revoke` | List or revoke releases |
 | POST `/v1/memory/provenance` | Bounded native conclusion ancestry and confirmed ingestion references |
 
 List cursors use `after`; histories use `before`. Learned filters use both

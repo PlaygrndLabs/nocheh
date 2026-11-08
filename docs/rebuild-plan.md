@@ -1,5 +1,7 @@
 # Nocheh rebuild execution and acceptance
 
+Status: the phases reached their recorded checkpoints by 2026-09-16 ([task history](task-history.md)), except phase 8's live release acceptance, which [TASK.md](../TASK.md) still tracks; kept as history.
+
 [SPECS.md](../SPECS.md) is the product definition; [TASK.md](../TASK.md) records
 actual completion and activation. Follow [AGENTS.md](../AGENTS.md) for verified
 increments and Git integration. ADR-0018 began this sequence; ADR-0019 selects

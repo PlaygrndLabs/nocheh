@@ -1,13 +1,13 @@
 # Saved guarded copies
 
-Set `NOCHEH_GUARD_MODE=on` (default) or `off` in the ignored `.env`, then
-apply with `./bin/nocheh up`. Existing `auto` values migrate to `on`.
+Turn **Hide secrets from the assistant** on (default) or off in Settings › Privacy &
+data, or set `NOCHEH_GUARD_MODE=on` or `off` in the ignored `.env` and apply with `./bin/nocheh up`. Existing `auto` values migrate to `on`.
 Endpoint trust no longer changes this choice. ADR-0033 supersedes the older
 outgoing-only policy; historical ADRs and compatibility reports remain unchanged.
 
 Original messages and files are archived first. Durable jobs prepare each source
-revision and save its guarded projection. UTF-8 text files and supported audio
-produce separate derived artifacts with provenance. Unsupported media remains
+revision and save its guarded projection; live messages from chats Nocheh does not serve are only archived. UTF-8 text, documents, images and
+recordings produce separate derived artifacts with provenance. Unsupported media remains
 available to the owner; agents cannot download original files while guarding is on.
 
 The owner dashboard shows both versions, preparation status and revision history.
@@ -22,9 +22,9 @@ attempt. Previously prepared passages are reused; only new text needs detection.
 Unknown, failed or unavailable content is withheld on. Retries and route changes
 cannot bypass the broker. Agents have scoped credentials and no archive admin token.
 
-The dedicated detector receives original text. Local code validates its literal
-candidates and applies masks. Explicitly trusted transcription may receive original
-media. Guarding does not encrypt the archive and detection can miss secrets.
+The Secret check model in Settings › Models receives original text through Hermes.
+Local code validates its literal candidates, adds fixed patterns for common keys and
+tokens, and applies masks. The Voice notes and Images providers receive original media. Guarding does not encrypt the archive and detection can miss secrets.
 
 Edits and mode changes retire runtime contexts and credentials. In-flight delivery
 checks reject retired contexts. A reaction change starts a new epoch and makes only

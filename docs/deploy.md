@@ -63,7 +63,7 @@ in the single `nocheh` project on normal localhost ports. Stop unattended servic
 first and verify exclusive Telegram polling.
 The launcher refuses another running Nocheh project or
 an active unattended stack. It starts PostgreSQL, app, dashboard, executor,
-security, Hermes, workflow services, and Honcho.
+security, Hermes, workflow services, Honcho, and the mini app with its tunnel when set up.
 The existing app container mounts source from the session checkout read-only
 and compiles changed TypeScript, React, CSS, and plugin assets into separate
 generated-code volumes. Node watches generated code, the dashboard reloads when
@@ -126,6 +126,8 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 `on`. See [guarded-copy operations](guard.md).
 `NOCHEH_BOX_IMAGE`, `NOCHEH_BOX_LIMIT` and the generated `NOCHEH_BOX_TOKEN` set up
 the sealed job box; see [the security service](security-service.md).
+Settings › Telegram › Mini app saves the mini app address and tunnel token; with both set and Telegram on,
+`up` also starts `nocheh-miniapp` and `nocheh-tunnel`. See [Telegram](telegram.md#mini-app).
 The API binds only to loopback; PostgreSQL has no host port.
 
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.
