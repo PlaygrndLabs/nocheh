@@ -2,6 +2,8 @@
 
 # Local Inngest workflow migration
 
+Status: I1–I7 done; every family runs on Inngest since the local cutover recorded in [task history](task-history.md); kept as history.
+
 <authority>
 
 Accepted by the owner's implementation request on 2026-09-12. Product requirements

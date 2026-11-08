@@ -62,7 +62,7 @@ that the model's answer was correct. Successful routine activity creates no aler
 
 Owner API routes are `/v1/security/plugin`, `/policy`, `/preview` and `/effects`
 (each prefixed by `/v1/security`). They are available through the owner archive
-API and the service itself; scoped turn credentials cannot access them.
+API; the service itself serves all but `/preview`. Scoped turn credentials cannot access them.
 
 The trusted launcher is part of the host's security boundary: it owns Docker
 authority. Agent containers do not. It pins the installed image ID at startup,
@@ -78,9 +78,8 @@ history and memory files unchanged. The same evidence participates in initial
 context-size estimates; the layer does not lower limits or summarize sources.
 The pinned native compaction instruction is adjusted so it does not label memory
 as administrative authority. The memory and process-isolation settings remain independently configurable.
-The local installation uses `NOCHEH_SECURITY_RUNTIME=isolated` and
-`NOCHEH_MEMORY_CONTEXT=evidence`; fresh configurations retain explicit opt-in
-defaults until their own acceptance and profile conversion are complete.
+Fresh configurations default to `NOCHEH_SECURITY_RUNTIME=isolated` and
+`NOCHEH_MEMORY_CONTEXT=evidence`.
 
 
 For an existing installation, stop Hermes and its native writers before running

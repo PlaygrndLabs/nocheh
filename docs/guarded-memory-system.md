@@ -28,8 +28,8 @@ flowchart TD
     I --> J
 ```
 
-A fresh installation needs a model provider from Settings › Models and must pass
-Honcho's separate embedding and recall acceptance before attachment. [TASK.md](../TASK.md) records
+A fresh installation needs a model provider from Settings › Models. Honcho
+memory attaches at startup; its embedding and recall acceptance is optional. [TASK.md](../TASK.md) records
 the active installation's completed checks and remaining pilot work.
 
 1. Import `Database password: mango123`. The original is archived unchanged.
@@ -45,19 +45,19 @@ Automatic preparation never replaces an original or an owner-edited projection.
 
 <voice_notes>
 
-Nocheh has no voice transcription. A voice note keeps its original audio and
-records the extraction status "Voice note archived; transcription is not
-available." There is no text to guard or learn from, and the note never holds a
-reply.
+Hermes's transcriber turns voice notes, audio files and round videos into text with
+the Voice notes provider in Settings › Models. The transcript is checked for secrets
+like typed text, and the original audio is kept. Without a key, a note records "Voice
+note archived; transcription is not available." and never holds a reply.
 
 </voice_notes>
 
 ## Operating the local system
 
 - Apply configuration with `./bin/nocheh up`. `auto` migrates to `on`.
-- Dashboard → Archive → Browse → open a source to inspect/edit guarded copies,
+- Dashboard → Messages → open a message to inspect/edit guarded copies,
   original file access, preparation status and revision history.
-- Dashboard → Honcho shows attachment, workspace, sessions, receipts, live-gate status,
+- Dashboard → Memory → Long-term memory shows attachment, workspace, sessions, receipts, live-gate status,
   the embedding reservation and usage estimate, and an owner control for the
   monthly embedding cap after attachment. OpenAI's API Usage page is the source
   for billed usage; Nocheh's reservation is a conservative admission limit.
@@ -109,23 +109,22 @@ For initial setup or an embedding HTTP 429:
    paste it into chat.
 3. Keep the configured `text-embedding-3-small` model for an existing small-model
    ledger. Changing a model is a memory rebuild operation, not a quota repair.
-4. Run the verification and activation sequence below from the repository root.
-   Stop at any failed command. `verify-memory` must pass before `accept-memory`;
-   setting a key or starting containers does not attach memory.
+4. Apply with `./bin/nocheh up` or Apply in Settings › Models, then check
+   `./bin/nocheh memory honcho status`.
 
 OpenAI documents [separate API billing](https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform)
 and [429 diagnosis](https://help.openai.com/en/articles/5955604-troubleshooting-api-rate-limits-and-429-errors).
 
-OpenAI is the only enabled provider. `text-embedding-3-large` is also supported
+Embeddings need OpenAI or a gateway that serves the same models; Anthropic cannot serve them. `text-embedding-3-large` is also supported
 for a fresh setup; both models use 1536 dimensions. After the first paid attempt,
 switching embedding models is blocked until memory is rebuilt, so incompatible
 vectors cannot mix. The small model reserves $0.01 per bounded request; the large
 model reserves $0.02. The total spending caps stay unchanged (ADR-0034).
 `NOCHEH_MODEL` is the default reasoning model; Settings › Models can give each part its own provider and model.
 The old `NOCHEH_EMBEDDING_API_KEY` is a migration alias; explicit `OPENAI_API_KEY`
-wins, including an empty value. Only the Honcho provider gateway receives the paid key.
-Settings displays credential presence, never its value. Edit these fields in `.env`
-and restart the production Honcho services through the installation CLI.
+wins, including an empty value. Of Honcho's services, only the provider gateway receives the paid key; Hermes also gets it when OpenAI serves voice notes or another part.
+Settings displays credential presence, never its value. Change the key in Settings › Models;
+Apply restarts the Honcho services.
 
 Production Honcho uses pinned revisions and the installation Compose project.
 The retained state directory and ledger have historical names for data compatibility;
@@ -153,7 +152,7 @@ enables a $5 per UTC calendar month cap and preserves all pilot reservations. If
 the exhausted pilot blocks required live acceptance, the owner can activate
 the monthly cap while memory is still detached and unverified. That does not
 accept or attach memory. After accepted attachment, the owner can change the
-monthly cap in the Honcho dashboard from $0 to $15 in cent increments.
+monthly cap in Memory › Long-term memory from $0 to $15 in cent increments.
 Changing or repeating the cap command cannot reset spending. The dashboard
 shows reservation headroom and an estimate from provider-reported embedding
 tokens; neither is an invoice.

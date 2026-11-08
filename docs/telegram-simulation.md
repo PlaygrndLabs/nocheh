@@ -59,7 +59,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | Workflow recovery | Independent capture, bounded admission, durable native review handoff, isolated native lease recovery under the profile lock, outbox and protected completion receipts | `store-workflows.test.ts`, `workflow-store.test.ts`, `test_review_handoff.py`, `test_native_leases.py`, `test_workflow_recovery.py` |
 | Imports and portability | No historical replies; explicit learning consent; safe extraction and source identity; corrections preserved | `store-imports.test.ts`, `store-source-portability.test.ts`, `store-portable-bundle.test.ts` |
 | Provider and budgets | Scoped routes, guarded attempts, conservative durable reservations and separate reasoning limits | `services/honcho/test_meter.py`, `test_honcho_budget.py` |
-| Operations and recovery | Inactive restores, quiescence, single authority, data/credential ownership | `test_store_recovery.py`, `test_reset_*.py`, `test_live_dev.py` |
+| Operations and recovery | Inactive restores, quiescence, single authority, data/credential ownership | `test_store_recovery.py`, `test_reset_*.py`, `test/test_live_dev.py` |
 
 Python filenames without a directory refer to `services/hermes/`; TypeScript
 filenames refer to `test/`. Host-only checks are identified separately in reports.
@@ -139,8 +139,9 @@ ordered bursts, chunked long replies, intentional silence, blank answers,
 owner-private archive search, model context and Honcho recall against group
 and other-group isolation, literal guarding, exact Telegram approvals and
 denials with stale fingerprints and repeated decisions, `current` destinations,
-denied, unselected and granted/revoked participants, retirement, a voice note
-archived without transcription that does not hold the next reply, an ordinary file with a caption, an owner-private schedule that fires on its
+a fixed reply to a participant not allowed, replies only when addressed in a group,
+unselected and granted/revoked participants, retirement, a voice note
+transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule that fires on its
 own cadence and waits for exact review before one delivery, deleted topics,
 polling 5xx (measured after the adapter restarts polling), lost send responses,
 a blocked bot, and restart. Two operations scenarios close the run: the
@@ -153,9 +154,10 @@ drain and records how long that took.
 
 The model fixture's scripted brain acts only on an explicit directive in
 the current user turn of a request that offers Nocheh tools: `[[search:q]]`,
-`[[recall:q]]` and `[[action:destination|text]]` request that real tool and
+`[[recall:q]]`, `[[owner:view]]` and `[[action:destination|text]]` request that real tool and
 answer from its actual result; `[[context:marker]]` reports whether a marker
-appears anywhere in the request except the current turn; `[[long:n]]`,
+appears anywhere in the request except the current turn, `[[notes:marker]]`
+whether it is in the Hermes native notes the model sees; `[[long:n]]`,
 `[[silent]]` and `[[empty-once:key]]` produce long, `[NO_REPLY]` and one blank
 answer. `[[turn:marker]]` reports whether a marker appears in the current turn
 (unaddressed group messages travel there), `[[tool:nocheh_x {json}]]` calls any
@@ -241,7 +243,7 @@ Build the browser image once with `docker build -t nocheh-tester-browser:local
 -f deploy/acceptance/browser.Dockerfile deploy/acceptance`. On a development
 machine pass `--build`: the development stack runs its own source-watched
 images, so the installation's `:local` images can be older than the checkout.
-`--build` builds the checkout's services, management, store and Hermes images
+`--build` builds the checkout's services, management, store, Hermes and box images
 under `:tester` tags, refreshes the browser image, and tests those; the live
 tags are never rebuilt. Honcho keeps the installation's pinned image. Scripted answers
 test Nocheh's wiring and rules, not model judgement; Telegram's official test
