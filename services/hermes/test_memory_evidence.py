@@ -28,42 +28,34 @@ class MemoryEvidenceTests(unittest.TestCase):
             finally:restore()
         self.assertIs(evidence.inject({'input':history})['input'],history)
 
-    def test_anthropic_evidence_comes_after_every_cached_part(self):
-        # Anthropic's prompt cache matches a request's start byte for byte, up to Hermes's
-        # markers on the latest messages. Evidence that changes every turn is the request's
-        # last block, so each call's request without it starts the next call's request.
+    def test_anthropic_evidence_comes_before_the_conversation_and_holds_through_a_turn(self):
+        # The model sees the evidence where the OpenAI-compatible route puts it, before the
+        # conversation and the current request. Within a turn it does not change, so each
+        # call's request starts the next one's and the prompt cache keeps the turn.
         def call(memory,payload,anthropic=None):
             with patch.multiple(evidence,_active=True,_native=['native note'],_recalled={'memory':memory}):
                 return evidence.inject(copy.deepcopy(payload),anthropic)
         def entries(block):return json.loads(block['text'][len(evidence.PREFIX):])['entries']
-        def unmarked(message):return {**message,'content':[{k:v for k,v in b.items() if k!='cache_control'} for b in message['content']]}
-        marked={'type':'text','text':'second','cache_control':{'type':'ephemeral'}}
         system=[{'type':'text','text':'instructions'}]
         history=[{'role':'user','content':'first'},{'role':'assistant','content':[{'type':'text','text':'answer'}]}]
-        first=call('turn one',{'system':system,'messages':[*history,{'role':'user','content':[marked]}]})
+        current={'role':'user','content':[{'type':'text','text':'second','cache_control':{'type':'ephemeral'}}]}
+        first=call('turn one',{'system':system,'messages':[*history,current]})
         self.assertEqual(first['system'],system)
-        self.assertEqual(first['messages'][:2],history)
-        self.assertEqual(first['messages'][2]['content'][0],marked)
-        self.assertEqual(entries(first['messages'][2]['content'][1])[1]['content'],{'memory':'turn one'})
-        # The tool loop: Hermes moves its markers to the newest messages.
+        self.assertEqual(entries(first['messages'][0]['content'][0])[1]['content'],{'memory':'turn one'})
+        self.assertEqual(first['messages'][0]['content'][1:],[{'type':'text','text':'first'}])
+        self.assertEqual(first['messages'][1:],[history[1],current])
+        self.assertEqual([m['role'] for m in first['messages']],['user','assistant','user'])
+        # The tool loop: every earlier message of the call is sent again unchanged.
         loop=[{'role':'assistant','content':[{'type':'tool_use','id':'c','name':'f','input':{}}]},
-              {'role':'user','content':[{'type':'tool_result','tool_use_id':'c','content':'result','cache_control':{'type':'ephemeral'}}]}]
-        second=call('turn one',{'system':system,'messages':[*history,{'role':'user','content':[{'type':'text','text':'second'}]},*loop]})
-        self.assertEqual(second['messages'][2],{'role':'user','content':[{'type':'text','text':'second'}]})
-        self.assertEqual(second['messages'][4]['content'][0],loop[1]['content'][0])
-        self.assertEqual(entries(second['messages'][4]['content'][1])[1]['content'],{'memory':'turn one'})
-        # The next turn keeps every block of the previous call as sent, without its evidence.
-        reply={'role':'assistant','content':[{'type':'text','text':'reply'}]}
-        tool_result={'role':'user','content':[{'type':'tool_result','tool_use_id':'c','content':'result'}]}
-        later=call('turn two',{'system':system,'messages':[*history,{'role':'user','content':[{'type':'text','text':'second'}]},loop[0],tool_result,reply,{'role':'user','content':'third'}]})
-        previous=[*second['messages'][:4],{**second['messages'][4],'content':second['messages'][4]['content'][:1]}]
-        self.assertEqual([unmarked(m) if isinstance(m['content'],list) else m for m in later['messages'][:5]],[unmarked(m) if isinstance(m['content'],list) else m for m in previous])
-        self.assertEqual(later['messages'][6]['content'][0],{'type':'text','text':'third'})
-        self.assertEqual(entries(later['messages'][6]['content'][1])[1]['content'],{'memory':'turn two'})
-        # Without a system prompt, the request's address says which API it is.
+              {'role':'user','content':[{'type':'tool_result','tool_use_id':'c','content':'result'}]}]
+        second=call('turn one',{'system':system,'messages':[*history,current,*loop]})
+        self.assertEqual(second['messages'][:3],first['messages'])
+        self.assertEqual(second['messages'][3:],loop)
+        # A one-message turn and a request without a system prompt.
         bare=call('turn one',{'messages':[{'role':'user','content':'only'}]},anthropic=True)['messages']
-        self.assertEqual(len(bare),1);self.assertEqual(bare[0]['content'][0],{'type':'text','text':'only'})
-        # The OpenAI-compatible route keeps the evidence before the conversation.
+        self.assertEqual(len(bare),1);self.assertEqual(bare[0]['content'][1],{'type':'text','text':'only'})
+        self.assertTrue(bare[0]['content'][0]['text'].startswith(evidence.PREFIX))
+        # The OpenAI-compatible route keeps the evidence as its own message before the conversation.
         chat=call('turn one',{'messages':[{'role':'system','content':'instructions'},*history]})['messages']
         self.assertEqual(chat[0],{'role':'system','content':'instructions'});self.assertEqual(chat[2:],history)
         self.assertTrue(chat[1]['content'].startswith(evidence.PREFIX))

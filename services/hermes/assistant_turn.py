@@ -145,9 +145,9 @@ def conversation_result(result, session_id, limited_memory=False):
 
 
 def reasoning(credentials,prefs):
-    """Thinking settings for the turn. Anthropic's OpenAI-compatible API ignored the effort
-    preference, so the model ran with its own default. Its Messages API would apply it, so
-    Anthropic turns send none and keep the same thinking as before."""
+    """Thinking settings for the turn. On Anthropic's OpenAI-compatible route Hermes sent no
+    effort setting, so the model ran with the endpoint's default. On its Messages API Hermes
+    would send the preference, so Anthropic turns send none and keep the API's default."""
     return None if credentials.api_mode=='anthropic_messages' else {'effort':prefs['agent.reasoning_effort']}
 
 

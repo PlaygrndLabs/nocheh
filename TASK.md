@@ -172,17 +172,21 @@ if replies stay the same and it is not less efficient): no Anthropic call was ca
 because every provider was reached through its OpenAI-compatible API. Replies and
 memory-notes reviews on the Anthropic preset now use Anthropic's Messages API through
 the broker with Hermes's own cache breakpoints. They keep the same model, tools,
-thinking, review budget and step-limit summary; the memory evidence is the request's
-last block, after the cached part; a profile remembers each session's prompt; and Usage
-shows the cached share of input
+thinking, review budget and step-limit summary; the memory evidence stays before the
+conversation; a profile remembers each session's prompt; and Usage shows the cached share
+of input
 ([ADR-0199](docs/adr/0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md),
 [broker](test/security-broker.test.ts), [boundary](test/security-contract.test.ts),
 [evidence](services/hermes/test_memory_evidence.py)). The secret check, privacy filter,
-image reads and Honcho's deriver are too short or one-off to cache. Pending: rebuild the
-Hermes image, then a live reply with a tool and a memory-notes review showing cache
-reads on the Usage page with no refused calls and a similar cost and reply length;
-Hermes's Python tests on the owner's machine. Next: Honcho's reasoning calls through its
-own Messages API support.
+image reads and Honcho's deriver are too short or one-off to cache. Live since
+2026-11-03 with no failed or refused calls: memory-notes reviews cost 26-38% less per
+call, and a two-call reply about 26% less than the same calls uncached (measured with the
+evidence as the request's last block). In that layout reviews took a second model call,
+a tool step, in 34% of runs instead of 83%, with no note changes in either period, so
+the evidence moved back before the conversation, where it was. Pending: the same share
+on live reviews after the move; if it stays low, a side-by-side replay of fixed sources,
+old route against new, to test the thinking default. Next:
+Honcho's reasoning calls through its own Messages API support.
 
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for

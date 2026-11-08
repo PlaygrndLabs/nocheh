@@ -20,14 +20,14 @@ def inject(payload,anthropic=None):
     messages=value if isinstance(value,list) else [{'role':'user','content':value}]
     # Never alter or summarize a source or mutate the native conversation history.
     if anthropic is None:anthropic='system' in payload
-    if anthropic and messages and isinstance(messages[-1],dict) and messages[-1].get('role')=='user':
-        # Anthropic's prompt cache keeps a request's start up to Hermes's markers on the latest
-        # messages. The evidence changes from turn to turn, so it is the request's last block,
-        # after those markers: no cached part holds it, and every later call of this turn and
-        # the next turn reuse what earlier calls cached.
-        message=messages[-1];own=message.get('content')
+    if anthropic and messages and isinstance(messages[0],dict) and messages[0].get('role')=='user':
+        # Anthropic's Messages API keeps the system prompt outside the messages and takes
+        # alternating roles, so the evidence is the first block of the first message: before
+        # the conversation, as on the OpenAI-compatible route. It stays the same through a
+        # turn, so each later call of the turn reads the turn's start from the prompt cache.
+        first=messages[0];own=first.get('content')
         blocks=own if isinstance(own,list) else [{'type':'text','text':own}] if isinstance(own,str) and own else []
-        return {**payload,field:[*messages[:-1],{**message,'content':[*blocks,{'type':'text','text':content}]}]}
+        return {**payload,field:[{**first,'content':[{'type':'text','text':content},*blocks]},*messages[1:]]}
     # Keep any provider system messages first; put evidence before conversation turns.
     split=0
     while split<len(messages) and messages[split].get('role') in ('system','developer'):split+=1
