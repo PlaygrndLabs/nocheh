@@ -292,7 +292,8 @@ def register(ctx):
             'required':['operation'],'additionalProperties':False}},handler=notion_tool)
     name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
         'Without an id it lists this chat\'s recent Telegram message requests and operations, such as Notion calls, with their states; read one by its id for its text or result. '
-        'A long result comes in parts: the answer gives part and parts, and part reads another one.')
+        'A long result comes in parts: the answer gives part and parts, and part reads another one. '
+        'An ambiguous one may have a resolution: ran or not_run is the owner\'s word, dismissed means the owner closed it unchecked, read_closed means a page read that got no answer.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{'id':{'type':'string'},'part':{'type':'integer','minimum':1}},
             'additionalProperties':False}},handler=controlled_status)
@@ -414,7 +415,8 @@ def wait_in_turn(id):
     return None
 
 
-RESULT_KEYS=('id','kind','state','result','error_code')
+# resolution: how an unclear outcome was closed, by the owner's word or as a page read that closed itself (ADR-0217).
+RESULT_KEYS=('id','kind','state','resolution','result','error_code')
 PART_CHARS=20000
 
 
@@ -439,7 +441,7 @@ def controlled_status(args,**kwargs):
         if not id:
             # This chat's recent message requests and operations, for a later turn that no longer holds their IDs.
             listed=request('/v1/tools/actions')
-            keys=('id','destination','state','error_code','created_at');operation_keys=('id','kind','state','error_code','created_at')
+            keys=('id','destination','state','error_code','resolution','created_at');operation_keys=('id','kind','state','error_code','resolution','created_at')
             return json.dumps({'requests':[{key:item.get(key) for key in keys} for item in listed.get('telegram',[])],
                                'operations':[{key:item.get(key) for key in operation_keys} for item in listed.get('actions',[])]},ensure_ascii=False)[:24000]
         if not re.fullmatch(r'[a-f0-9]{64}',id):raise ValueError('invalid_action')

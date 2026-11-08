@@ -92,6 +92,34 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
     await stores.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[uncertain.id]);
     assert.equal((await actions.run(uncertain.id,authority)).state,'waiting');assert.equal(calls.at(-1)!.observe_only,true);
     await due(uncertain.id);assert.equal((await actions.run(uncertain.id,authority)).state,'waiting');assert.equal(native.has(uncertain.id),false,'absence is not permission to resend');
+    // A check that finds the same unclear outcome keeps its revision, so the owner's open review stays usable (ADR-0217).
+    const unclear=await actions.inspect(owner,uncertain.id);assert.equal(unclear.state,'ambiguous');assert.equal(unclear.resolution,null);
+    await due(uncertain.id);await actions.run(uncertain.id,authority);assert.equal((await actions.inspect(owner,uncertain.id)).revision,unclear.revision);
+    const waiting=async()=>(await services.supervision.decisions(owner)).items.some(item=>item.id===uncertain.id);
+    assert.equal(await waiting(),true,'an unclear send waits for the owner');
+    await assert.rejects(actions.resolve(principal,{id:uncertain.id,fingerprint:unclear.fingerprint,outcome:'not_run'}),{status:403});
+    await assert.rejects(actions.resolve(owner,{id:uncertain.id,fingerprint:unclear.fingerprint,outcome:'resend'}),{code:'invalid_decision'});
+    await assert.rejects(actions.resolve(owner,{id:uncertain.id,fingerprint:digest('other'),outcome:'not_run'}),{code:'action_changed'});
+    await assert.rejects(actions.resolve(owner,{id:uncertain.id,fingerprint:unclear.fingerprint,outcome:'not_run',expected_revision:unclear.revision-1}),{code:'action_changed'});
+    const word={id:uncertain.id,fingerprint:unclear.fingerprint,outcome:'not_run',expected_revision:unclear.revision,operation_id:key+':not-sent'};
+    const closed=await actions.resolve(owner,word);assert.deepEqual(closed,{id:uncertain.id,state:'ambiguous',resolution:'not_run',revision:unclear.revision+1});
+    assert.deepEqual(await actions.resolve(owner,word),closed,'a repeated press answers the same');
+    await assert.rejects(actions.resolve(owner,{...word,outcome:'ran'}),{code:'action_decision_conflict'});
+    await assert.rejects(actions.resolve(owner,{id:uncertain.id,fingerprint:unclear.fingerprint,outcome:'ran'}),{code:'action_already_started_or_closed'});
+    assert.equal((await actions.inspect(owner,uncertain.id)).resolution,'not_run');assert.equal(await waiting(),false,'a closed send no longer waits');
+    const checks=calls.length;await due(uncertain.id);assert.equal((await actions.run(uncertain.id,authority)).state,'skipped');
+    assert.equal(calls.length,checks,'a closed send is neither checked nor sent again');assert.equal(native.has(uncertain.id),false);
+    // A delivery receipt saved just before the owner's word still settles the send: the word never hides it.
+    const late=await actions.request(principal,{destination:'123',text:'Late confirmed delivery'});await approve(late.id);
+    await stores.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[late.id]);
+    await actions.run(late.id,authority);assert.equal((await actions.inspect(owner,late.id)).state,'ambiguous');
+    native.set(late.id,'done');loseCompletion=true;await due(late.id);
+    await assert.rejects(actions.run(late.id,authority),/lost control completion/);
+    const lateView=await actions.inspect(owner,late.id);assert.equal(lateView.state,'ambiguous');
+    await actions.resolve(owner,{id:late.id,fingerprint:lateView.fingerprint,outcome:'not_run'});
+    const lateChecks=calls.length;assert.equal((await actions.run(late.id,authority)).state,'completed');assert.equal(calls.length,lateChecks,'the saved receipt needs no new check');
+    const settled=await actions.inspect(owner,late.id);assert.equal(settled.state,'done');assert.equal(settled.resolution,null);
+    await assert.rejects(actions.resolve(owner,{id:approveResult.id,fingerprint:proposal.fingerprint,outcome:'ran'}),{code:'action_already_started_or_closed'},'only an unclear send is closed by the owner');
     const denied=await actions.request(principal,{destination:'123',text:'Deny under current security policy'});await approve(denied.id);
     const security=(await stores.control.query('SELECT revision FROM security_policy WHERE singleton')).rows[0].revision;
     await savePolicy(stores.control,owner,{expected_revision:Number(security),policy:{version:1,rules:[{id:key,kind:'telegram.send',outcome:'deny',fingerprint:denied.fingerprint}]}});

@@ -1,3 +1,8 @@
+/** What the owner can say about an operation or message whose outcome is unclear (ADR-0217). */
+export const ownerResolutions=['ran','not_run','dismissed'] as const;
+/** How an unclear outcome was closed. Only an unclear one carries it: a later receipt's state replaces it (ADR-0217). */
+export const closedAs=(row:{state:string;resolution?:string|null;resolved_at?:Date|string|null})=>row.state==='ambiguous'&&row.resolution?
+  {resolution:row.resolution as string,resolved_at:row.resolved_at??null}:{resolution:null,resolved_at:null};
 export const controlledActionSchema=`
 CREATE TABLE IF NOT EXISTS controlled_actions (
  id text PRIMARY KEY,event_id text NOT NULL,source_reference jsonb NOT NULL,proposal_reference jsonb NOT NULL,
@@ -25,6 +30,12 @@ ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS match_key text;
 ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS space_id text;
 ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS logical_profile text;
 CREATE INDEX IF NOT EXISTS action_permission_rules ON action_permissions(match_key,space_id) WHERE grain='chat';
+-- How an unclear outcome was closed: the owner's word, or a page read that closed itself (ADR-0217).
+-- State and receipt stay as observed, so a later receipt still settles the action.
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS resolution text CHECK(resolution IN ('ran','not_run','dismissed','read_closed'));
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
+-- Page reads that ended unclear before reads closed themselves.
+UPDATE controlled_actions SET resolution='read_closed',resolved_at=updated_at WHERE state='ambiguous' AND kind='browser' AND resolution IS NULL;
 CREATE TABLE IF NOT EXISTS action_owner_commands (
  id text PRIMARY KEY,request_hash text NOT NULL,result jsonb NOT NULL,source_reference jsonb,created_at timestamptz NOT NULL DEFAULT now()
 );

@@ -83,6 +83,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - When an approved operation ends, the agent continues in the chat that asked and answers there as a reply to the request, at most three times per request; such a follow-up never acts under the owner's freedom setting ([0212](0212-approved-operations-answer-in-the-chat-that-asked.md)).
 - An operation a rule or the owner freedom setting already allows is waited for in the turn, up to a minute, and answers in that reply; no follow-up repeats it ([0215](0215-an-allowed-operation-answers-in-the-same-turn.md)).
 - A web read's card can allow its site in that chat or topic for 12 hours or 30 days, and a command's card that exact command for 30 days; rules survive epochs, deny rules still win, and connected tools and messages are decided one by one ([0214](0214-allow-a-site-or-command-in-one-chat.md)).
+- An operation or message whose outcome is unclear waits in the Inbox until the owner says it ran, says it did not, or dismisses it; an unclear web page read closes by itself. The receipt stays as observed and nothing runs again ([0217](0217-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md)).
 - Notion is optional, through its MCP server; only the owner's private chat proposes calls ([0175](0175-notion-through-its-mcp-server.md)).
 
 ### Background jobs and sealed box

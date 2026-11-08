@@ -1,4 +1,5 @@
-/** Review of one external action or Telegram message: the exact thing, then Approve or Deny. */
+/** Review of one external action or Telegram message: the exact thing, then Approve or Deny.
+ *  An unclear outcome waits here until the owner says whether it happened, or dismisses it. */
 import {useId, useState} from 'react';
 import {Badge, Button, Details, Field, Notice, Select, Switch, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
@@ -6,10 +7,10 @@ import {Exact, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawe
 import {
   actionName,
   actionPlace,
+  actionStateLabel,
   actionSummary,
   fromNow,
   fullTime,
-  stateLabel,
   useChatNames,
   useCommand,
   type Action,
@@ -22,6 +23,7 @@ const durations = [
   {minutes: 43200, label: 'for 30 days'},
 ];
 const useCounts = [1, 3, 10, 50];
+type Resolution = 'ran' | 'not_run' | 'dismissed';
 
 export function ActionReview({action, review, onClose}: {action: Action; review: ReviewState; onClose: () => void}) {
   const {toast} = useFeedback();
@@ -33,8 +35,10 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
   const [uses, setUses] = useState(3);
   const telegram = action.kind === 'telegram_message';
   const pending = action.state === 'proposed';
+  // No receipt confirms how it ended, and nothing has closed it yet.
+  const unclear = action.state === 'ambiguous' && !action.resolution;
   const locked = !!(review.changed || review.unavailable) || !!command.busy;
-  const [label, tone] = stateLabel(action.state);
+  const [label, tone] = actionStateLabel(action);
   const exact = actionSummary(action);
   const mcpInput = action.kind === 'mcp' && action.arguments?.input ? action.arguments.input : null;
   // A failed receipt keeps its reason in the result, as its Telegram card reads it.
@@ -66,6 +70,23 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
             ? 'Approved. The message is being sent.'
             : 'Approved. It starts shortly; the result shows in History.',
       );
+    onClose();
+  };
+  const resolve = async (outcome: Resolution) => {
+    const body: Record<string, unknown> = {id: action.id, fingerprint: action.fingerprint, outcome};
+    if (typeof action.revision === 'number') body.expected_revision = action.revision;
+    if (!(await command.run(telegram ? '/tools/telegram-resolve' : '/tools/resolve', body, outcome))) return;
+    toast(
+      outcome === 'dismissed'
+        ? 'Dismissed.'
+        : outcome === 'ran'
+          ? telegram
+            ? 'Marked as sent.'
+            : 'Marked as ran.'
+          : telegram
+            ? 'Marked as not sent.'
+            : 'Marked as not run.',
+    );
     onClose();
   };
   const allowOnly = async () => {
@@ -105,7 +126,13 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
 
   return (
     <ReviewDrawer
-      title={telegram ? 'Send this Telegram message?' : actionName(action.kind) + (pending ? '?' : '')}
+      title={
+        telegram
+          ? pending
+            ? 'Send this Telegram message?'
+            : 'Telegram message'
+          : actionName(action.kind) + (pending ? '?' : '')
+      }
       description={pending ? 'Approval covers exactly what is shown here, nothing else.' : undefined}
       onClose={onClose}
       review={review}
@@ -125,6 +152,23 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
               Deny
             </Button>
           </>
+        ) : unclear ? (
+          <>
+            <Button busy={command.busy === 'ran'} disabled={locked} onClick={() => void resolve('ran')}>
+              {telegram ? 'It was sent' : 'It ran'}
+            </Button>
+            <Button busy={command.busy === 'not_run'} disabled={locked} onClick={() => void resolve('not_run')}>
+              {telegram ? 'It wasn’t sent' : 'It didn’t run'}
+            </Button>
+            <Button
+              variant="ghost"
+              busy={command.busy === 'dismissed'}
+              disabled={locked}
+              onClick={() => void resolve('dismissed')}
+            >
+              Dismiss
+            </Button>
+          </>
         ) : undefined
       }
     >
@@ -142,9 +186,20 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
           Something it used changed after it was asked. Ask again if you still want it, or deny this one.
         </Notice>
       )}
-      {action.state === 'ambiguous' && (
-        <Notice tone="warn" title="Nocheh isn’t sure whether this ran">
-          The connection dropped part way. Check the result below before asking for it again.
+      {unclear && (
+        <Notice
+          tone="warn"
+          title={telegram ? 'Nocheh isn’t sure whether this was sent' : 'Nocheh isn’t sure whether this ran'}
+        >
+          {telegram
+            ? 'No confirmed delivery came back. Check the chat, then say what happened below. It is never sent again by itself.'
+            : 'No confirmed result came back, so it may or may not have happened. Check, then say what happened below. It never runs again by itself.'}
+        </Notice>
+      )}
+      {action.state === 'ambiguous' && action.resolution === 'read_closed' && (
+        <Notice title="Closed by itself">
+          No answer came back. A page read changes nothing, so there was nothing to check. Ask again if you still need
+          it.
         </Notice>
       )}
       {action.state === 'failed' && (

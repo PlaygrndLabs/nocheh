@@ -49,7 +49,7 @@ const routes:[string,RegExp][]=[
   ['GET',/^\/(?:tools\/actions|knowledge\/proposals)\/[a-f0-9]{64}$/],
   ['GET',/^\/tasks\/(?:settings|[a-f0-9]{64})$/],
   ['POST',/^\/tasks(?:\/archive-finished|\/[a-f0-9]{64}(?:\/(?:comments|delete))?)?$/],
-  ['POST',/^\/tools\/(?:decide|telegram-decision|grant)$/],
+  ['POST',/^\/tools\/(?:decide|telegram-decision|resolve|telegram-resolve|grant)$/],
   ['POST',/^\/(?:memory-access\/requests|entities)\/[a-f0-9]{64}\/decide$/],
   ['POST',/^\/knowledge\/proposals\/[a-f0-9]{64}\/(?:decide|undo)$/],
 ];

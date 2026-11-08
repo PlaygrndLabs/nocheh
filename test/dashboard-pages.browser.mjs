@@ -180,6 +180,43 @@ test('home leads with what needs the owner', async () => {
   await page.close();
 });
 
+test('an unclear action waits for the owner’s word, and an unclear page read closes itself', async () => {
+  const unclear = '6'.repeat(64),
+    read = '5'.repeat(64);
+  const {page, problems} = await open('inbox');
+  const posts = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/tools/resolve')) posts.push(request.postDataJSON());
+  });
+  // Waiting lists the unclear command, but not the page read that closed itself.
+  await page.getByText('printf synthetic-unclear').waitFor();
+  assert.equal(await page.getByText('https://example.org/aurora-weather').count(), 0);
+  await page.goto(origin + '/#inbox?kind=controlled_action&decision=' + unclear);
+  const dialog = page.getByRole('dialog');
+  await dialog.getByText('Nocheh isn’t sure whether this ran').waitFor();
+  assert.equal(await dialog.getByText(/connection dropped/).count(), 0);
+  for (const name of ['It ran', 'It didn’t run', 'Dismiss'])
+    assert.equal(await dialog.getByRole('button', {name}).isEnabled(), true, name);
+  await dialog.getByRole('button', {name: 'It didn’t run'}).click();
+  await dialog.waitFor({state: 'detached'});
+  const sent = posts.at(-1);
+  assert.equal(typeof sent.operation_id, 'string');
+  assert.deepEqual(
+    {...sent, operation_id: undefined},
+    {id: unclear, fingerprint: '6a'.repeat(32), outcome: 'not_run', expected_revision: 4, operation_id: undefined},
+  );
+  await page.getByText('printf synthetic-unclear').waitFor({state: 'detached'});
+  // History says how each one closed; a closed one offers no buttons.
+  await page.goto(origin + '/#inbox?view=history');
+  await page.getByText('You marked it didn’t run').waitFor();
+  await page.getByText('Closed, no answer').waitFor();
+  await page.goto(origin + '/#inbox?view=history&action=' + read);
+  await dialog.getByText('Closed by itself').waitFor();
+  assert.equal(await dialog.getByRole('button', {name: 'Dismiss'}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a new installation is guided on Home and finds its Telegram ID without a terminal', async () => {
   writeFileSync('/tmp/nocheh-ui-scenario', 'fresh');
   try {

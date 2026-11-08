@@ -325,6 +325,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       admin(principal);const outcome=await s.telegramActions.decide(principal,await readJson(req));
       void s.actionCommands.settle('telegram',outcome.id).catch(()=>{});return json(res,200,outcome);
     }
+    // The owner closes an unclear operation or send; its card says how (ADR-0217).
+    if(req.method==='POST'&&['/v1/tools/resolve','/v1/tools/telegram-resolve'].includes(path)) {
+      admin(principal);const body=await readJson(req),telegram=path.endsWith('/telegram-resolve');
+      const outcome=await (telegram?s.telegramActions.resolve(principal,body):s.controlledActions.resolve(principal,body));
+      void s.actionCommands.settle(telegram?'telegram':'controlled',outcome.id).catch(()=>{});return json(res,200,outcome);
+    }
     const action=path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
     if(action&&req.method==='GET') {
       const exists=(await s.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[action[1]])).rowCount;

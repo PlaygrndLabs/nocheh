@@ -888,6 +888,18 @@ itself at startup.
 
 <verification>
 
+- Unclear outcomes close (2026-11-08,
+  [ADR-0217](docs/adr/0217-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md)):
+  Waiting kept web page reads marked "Unclear if it ran" for good. An unclear
+  page read now closes by itself; any other unclear operation or message waits
+  until the owner presses It ran, It didn't run or Dismiss in its drawer. The
+  receipt stays as observed, nothing runs again, and Health stops counting closed
+  ones as uncertain. Checks: [closing](test/store-action-resolutions.test.ts),
+  [messages](test/store-telegram-actions.test.ts), the dashboard
+  [drawer](test/dashboard-pages.browser.mjs) and the agent's
+  [status keys](services/hermes/test_action_results.py). Pending: after merge, the
+  owner's two existing reads leave Waiting once the development schema update
+  runs (automatic on the next build in `make dev`).
 - One message when already allowed, stage C (2026-11-08,
   [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)): an
   operation that a rule or the owner freedom setting already allows is waited for

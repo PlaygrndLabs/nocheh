@@ -50,9 +50,10 @@ export function actionSummary(kind:unknown,args:unknown):string|null {
   if(kind==='mcp')return value.operation==='list'?`List the tools at ${text('url')??'a connected service'}`:`${text('tool')??'A tool'} at ${text('url')??'a connected service'}`;
   return null;
 }
+// An unclear outcome waits until the owner closes it or, for a page read, until it closes itself (ADR-0217).
 const decisionTables:Record<DecisionKind,string>={controlled_action:'controlled_actions',telegram_action:'telegram_action_requests',memory_access:'memory_access_requests',entity:'memory_entity_suggestions',knowledge:'knowledge_proposals'};
-const unionDecisions=`SELECT 'controlled_action'::text AS kind,id,state,revision,created_at,space_id AS source_scope,NULL::text AS destination,fingerprint,kind AS title,NULL::text AS note FROM controlled_actions WHERE state IN ('proposed','ambiguous')
-  UNION ALL SELECT 'telegram_action',id,state,revision,created_at,space_id,destination,fingerprint,'Send Telegram message',NULL FROM telegram_action_requests WHERE state IN ('proposed','ambiguous')
+const unionDecisions=`SELECT 'controlled_action'::text AS kind,id,state,revision,created_at,space_id AS source_scope,NULL::text AS destination,fingerprint,kind AS title,NULL::text AS note FROM controlled_actions WHERE state='proposed' OR state='ambiguous' AND resolution IS NULL
+  UNION ALL SELECT 'telegram_action',id,state,revision,created_at,space_id,destination,fingerprint,'Send Telegram message',NULL FROM telegram_action_requests WHERE state='proposed' OR state='ambiguous' AND resolution IS NULL
   UNION ALL SELECT 'memory_access',id,state,revision,created_at,source_scope,destination,NULL,'Share a specific fact',proposal_reference->>'id' FROM memory_access_requests WHERE state='pending' AND expires_at>now()
   UNION ALL SELECT 'entity',id,status,revision,created_at,NULL,NULL,NULL,name,reason FROM memory_entity_suggestions WHERE status='pending'
   UNION ALL SELECT 'knowledge',id,state,revision,created_at,source_scope,NULL,NULL,kind,NULL FROM knowledge_proposals WHERE state IN ('review','stale','failed')`;

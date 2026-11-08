@@ -219,8 +219,8 @@ test('allowed members post freely in their own group; everything else waits for 
 
     // Once an approved operation ends, its card says how, with a reason only from fixed codes in the owner's wording.
     await stores.control.query(`UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton`,[JSON.stringify({'telegram.approval_texts':'reason_sign_in: Sign in to Notion again in the dashboard.'})]);
-    const approvedTool=async(label:string)=>{
-      const asked=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message(label)).id,group),{kind:'shell',arguments:{command:'printf '+label}}));
+    const approvedTool=async(label:string,request:Record<string,unknown>={kind:'shell',arguments:{command:'printf '+label}})=>{
+      const asked=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message(label)).id,group),request));
       assert.equal(await s.actionCommands.callback(await press(label+'-approve','na'+asked.id.slice(0,40)+asked.fingerprint.slice(0,16))),true);
       return {...asked,card:cards.find(card=>card.kind==='card'&&card.id===asked.id)!.text as string};
     };
@@ -253,6 +253,21 @@ test('allowed members post freely in their own group; everything else waits for 
     const unsure=await approvedTool('made-up-unsure');await ran(unsure.id,'ambiguous',{error:'execution_outcome_unconfirmed'});
     const unsureLine='⚠️ Approved, but Nocheh could not confirm that it finished. Check before you ask again.';
     assert.equal(await ending(unsure.id,unsureLine),unsure.card+'\n\n'+unsureLine);
+    // The owner's word on it edits the card; a page read that started and got no answer closes itself (ADR-0217).
+    await s.controlledActions.resolve(owner,{id:unsure.id,fingerprint:unsure.fingerprint,outcome:'ran'});await s.actionCommands.settle('controlled',unsure.id);
+    assert.equal(await ending(unsure.id,'You marked that it ran.'),unsure.card+'\n\n✅ Approved. You marked that it ran.');
+    const read=await approvedTool('made-up-read',{kind:'browser',arguments:{url:'https://example.com/made-up-read'}});
+    await ran(read.id,'ambiguous',{error:'execution_outcome_unconfirmed'});
+    const readLine='⚠️ Approved, but the page did not answer. A read changes nothing, so you can ask again.';
+    assert.equal(await ending(read.id,readLine),read.card+'\n\n'+readLine);
+    const unstarted=await approvedTool('made-up-unstarted-read',{kind:'browser',arguments:{url:'https://example.com/made-up-unstarted'}});
+    await ran(unstarted.id,'ambiguous',{error:'execution_outcome_unconfirmed'},false);
+    assert.equal(await ending(unstarted.id,'🚫 It did not run: see the dashboard Inbox.'),unstarted.card+'\n\n🚫 It did not run: see the dashboard Inbox.',
+      'a read that never started did not run, so it is not called unanswered');
+    const unclearSend=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor((await message('made-up-unclear-send')).id,group),{destination:'123',text:'Unclear send'}));
+    await stores.control.query("UPDATE telegram_action_requests SET state='ambiguous',error_code='delivery_unconfirmed' WHERE id=$1",[unclearSend.id]);
+    await s.telegramActions.resolve(owner,{id:unclearSend.id,fingerprint:unclearSend.fingerprint,outcome:'ran'});await s.actionCommands.settle('telegram',unclearSend.id);
+    assert.equal(last('settle').id,unclearSend.id);assert.match(last('settle').text,/\n\n✅ Approved\. You marked that it was sent\.$/,'a message card says sent, not ran');
     const refusedStart=await approvedTool('made-up-start-refused');await ran(refusedStart.id,'failed',{exit_code:1,error:'security_start_denied'},false);
     const changedLine='🚫 It did not run: something it used changed after it was asked. Ask again if you still want it.';
     assert.equal(await ending(refusedStart.id,changedLine),refusedStart.card+'\n\n'+changedLine,'an operation never started did not run');

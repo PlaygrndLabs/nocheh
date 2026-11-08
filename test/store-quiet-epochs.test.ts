@@ -84,7 +84,7 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     // Without IDs, a later turn or step lists its own operations by state only, for the same readers.
     const listed=await a.recent(later),ids=listed.map(row=>row.id);
     assert.ok([waiting.id,stopped.id,early.id,late.id,permitted.id].every(id=>ids.includes(id)));assert.ok(!ids.includes(job.id));
-    assert.ok(listed.every(row=>Object.keys(row).sort().join()==='created_at,error_code,id,kind,state'),'no arguments or results');
+    assert.ok(listed.every(row=>Object.keys(row).sort().join()==='created_at,error_code,id,kind,resolution,state'),'no arguments or results');
     assert.equal(listed.find(row=>row.id===waiting.id)!.state,'done');
     assert.deepEqual((await a.recent(await step('step-3'))).map(row=>row.id),[job.id],'a job step lists its own job\'s operations');
     assert.deepEqual(await a.recent(reader(quiet,elsewhere.id,other)),[]);assert.deepEqual(await a.recent({...later,purpose:'filter'}),[]);
@@ -117,7 +117,7 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     assert.equal((await x.claim(await host(late.id))).claimed,false);
     const rejected=await a.row(late.id);assert.equal(rejected.state,'rejected');assert.equal(rejected.error_code,'guard_context_changed');
     const current=reader(changed),view=await a.inspect(current,stopped.id);
-    assert.deepEqual(Object.keys(view).sort(),['created_at','error_code','id','kind','state']);
+    assert.deepEqual(Object.keys(view).sort(),['created_at','error_code','id','kind','resolution','state']);
     assert.equal(view.state,'proposed');assert.equal(view.error_code,'guard_context_changed');
     assert.equal((await a.recent(current)).find(row=>row.id===stopped.id)?.state,'proposed','it is still listed, by its state');
     await s.prepared.allow(current,view);// What the read route does with the view.
