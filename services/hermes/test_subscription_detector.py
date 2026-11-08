@@ -152,5 +152,38 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(SubscriptionCredentials('token',BROKER_ANTHROPIC_URL,'anthropic','anthropic_messages').runtime()['api_mode'],'anthropic_messages')
         self.assertNotIn('synthetic-token',repr(SubscriptionCredentials('synthetic-token')))
 
+    def test_checks_reuse_open_connections_to_the_provider(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        from . import subscription
+        connections=set()
+        class Provider(BaseHTTPRequestHandler):
+            protocol_version='HTTP/1.1'
+            def do_POST(self):
+                connections.add(self.client_address)
+                self.rfile.read(int(self.headers['Content-Length']))
+                body=json.dumps({'id':'synthetic','object':'chat.completion','created':0,'model':'model','choices':[
+                    {'index':0,'finish_reason':'stop','message':{'role':'assistant','content':'{"literals":[]}'}}]}).encode()
+                self.send_response(200);self.send_header('Content-Type','application/json')
+                self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+            def log_message(self,*_):pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Provider)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        credentials=SimpleNamespace(base_url=f'http://127.0.0.1:{server.server_port}/v1',access_token='synthetic-token')
+        message=[{'role':'user','content':'synthetic'}]
+        try:
+            for _ in range(3):subscription._call_subscription(credentials,'model',message)
+            self.assertEqual(len(connections),1,'checks one after another share one connection')
+            with ThreadPoolExecutor(max_workers=3) as workers:
+                answers=list(workers.map(lambda _:subscription._call_subscription(credentials,'model',message),range(6)))
+            self.assertEqual([answer.choices[0].message.content for answer in answers],['{"literals":[]}']*6)
+            self.assertLessEqual(len(connections),4,'checks side by side open at most one connection each')
+            other=SimpleNamespace(base_url=credentials.base_url,access_token='other-token')
+            self.assertIsNot(subscription._client(other),subscription._client(credentials),'a new key gets its own client')
+        finally:
+            server.shutdown();server.server_close()
+            with subscription.CLIENTS_LOCK:subscription.CLIENTS.clear()
+
 
 if __name__=='__main__':unittest.main()
