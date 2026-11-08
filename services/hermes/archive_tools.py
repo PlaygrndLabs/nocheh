@@ -398,14 +398,19 @@ ENDED=('done','failed','rejected','ambiguous')
 
 
 def wait_in_turn(id):
-    """An operation that runs without a card, read once it ends within the wait, else None. The read tells Nocheh that
-    this turn has the answer, so no follow-up repeats it (ADR-0215). A failed read only ends the wait: it already runs."""
+    """An operation that runs without a card, read once it ends within the wait, else None. A failed read only ends
+    the wait: it already runs, and its answer follows in the chat. Once this turn holds the ended result, it tells
+    Nocheh which state it read, so no follow-up repeats it; if that note is lost, a follow-up repeats it (ADR-0215)."""
     deadline=time.monotonic()+IN_TURN_SECONDS
     while time.monotonic()<deadline:
         time.sleep(1)
-        try:value=request('/v1/tools/actions/'+id+'?in_turn=1',timeout=max(1,deadline-time.monotonic()))
-        except OSError:return None
-        if value.get('state') in ENDED:return value
+        # The read that carries the result passes the secret check, so it keeps enough time even late in the wait.
+        try:value=request('/v1/tools/actions/'+id,timeout=max(15,deadline-time.monotonic()))
+        except Exception:return None
+        if isinstance(value,dict) and value.get('state') in ENDED:
+            try:request('/v1/tools/actions/'+id+'?in_turn='+value['state'],timeout=15)
+            except Exception:pass
+            return value
     return None
 
 

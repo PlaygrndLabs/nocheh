@@ -202,22 +202,26 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     assert.equal(steered.state,'proposed','no owner request started the follow-up');assert.match(steered.message,/Approve and Reject buttons/);
     const note=await s.telegramActions.request(await actor(free,null),{destination:group,text:'Made-up note from the owner\'s memory'});
     assert.equal(note.state,'proposed','a message for another chat waits too');
+    // A follow-up turn's note marks nothing: its reply is not the asking reply (ADR-0215).
+    await s.controlledActions.inspect(await actor(free,null),freed.id,'done');
+    assert.equal((await s.controlledActions.row(freed.id)).observed_in_turn,null,'a follow-up\'s read is not the asking reply');
     // One that runs without a card is read whole by the asking turn's own wait, so no follow-up repeats it (ADR-0215).
     const read=await privately('read'),quick=await operation(read,'printf made-up-quick',null),reading=await actor(read,null);
     assert.equal(quick.allowed,true);
-    await s.controlledActions.inspect(reading,quick.id,true);
+    await s.controlledActions.inspect(reading,quick.id,(await s.controlledActions.row(quick.id)).state);
     assert.equal((await s.controlledActions.row(quick.id)).observed_in_turn,null,'a state before the end is no answer');
     await ran(quick.id);
-    await s.controlledActions.inspect(await actor(await privately('another turn'),null),quick.id,true);await s.controlledActions.inspect(reading,quick.id);
-    assert.equal((await s.controlledActions.row(quick.id)).observed_in_turn,null,'only the asking turn\'s own wait counts');
-    assert.equal((await s.controlledActions.inspect(reading,quick.id,true)).state,'done');
+    await s.controlledActions.inspect(await actor(await privately('another turn'),null),quick.id,'done');await s.controlledActions.inspect(reading,quick.id);
+    await s.controlledActions.inspect(reading,quick.id,'ambiguous');
+    assert.equal((await s.controlledActions.row(quick.id)).observed_in_turn,null,'only the asking turn\'s own note of the state it holds counts');
+    assert.deepEqual(await s.controlledActions.inspect(reading,quick.id,'done'),{id:quick.id,state:'done'});
     assert.equal((await s.controlledActions.row(quick.id)).observed_in_turn,'done');
     await asking(read,'done');before=starts.length;
     assert.equal((await follow(quick.id)).state,'skipped');
     assert.deepEqual(pick(await row(quick.id),'state','error_code'),{state:'skipped',error_code:'answered_in_turn'});assert.equal(starts.length,before);
     // When the reply that held it may not have gone out, the follow-up answers.
     const dropped=await privately('dropped'),unsent=await operation(dropped,'printf made-up-unsent',null);
-    await ran(unsent.id);await s.controlledActions.inspect(await actor(dropped,null),unsent.id,true);await asking(dropped,'ambiguous');
+    await ran(unsent.id);await s.controlledActions.inspect(await actor(dropped,null),unsent.id,'done');await asking(dropped,'ambiguous');
     assert.equal((await follow(unsent.id)).state,'running');assert.ok(starts.at(-1).text.includes('- '+unsent.id+' (shell): done'));
     await due(unsent.id);observed={state:'done'};assert.equal((await follow(unsent.id)).state,'completed');observed={state:'running'};
     await s.ownerAutonomy.save(owner,{mode:'approval_required',expected_revision:enabled.revision,operation_id:key+':review'});

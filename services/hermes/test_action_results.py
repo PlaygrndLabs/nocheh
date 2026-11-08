@@ -49,7 +49,7 @@ class ActionResultTests(unittest.TestCase):
 
     def test_notion_answer_matches_the_first_part_and_keeps_its_id_on_a_slow_poll(self):
         value = view('Synthetic row. ' * 3000)
-        answers = [{'id': ID, 'state': 'approved'}, value]
+        answers = [{'id': ID, 'state': 'approved'}, value, {'id': ID, 'state': 'done'}]
         with patch.object(archive_tools, 'request', side_effect=lambda *a, **k: answers.pop(0)), patch.object(archive_tools.time, 'sleep'):
             first = archive_tools.notion_tool({'operation': 'call', 'tool': 'notion-fetch', 'input': {'id': 'synthetic'}})
         self.assertEqual(first, archive_tools.in_parts(value))
@@ -71,18 +71,29 @@ class ActionResultTests(unittest.TestCase):
         value = {**view('Synthetic forecast'), 'kind': 'browser'}
         call = lambda: archive_tools.controlled_tool('browser', {'url': 'https://example.com/'})
         with patch.object(archive_tools, '_PROCESS_PREFERENCES', {'nocheh_tools.browser': 'on'}), patch.object(archive_tools.time, 'sleep'):
-            answers = [{'id': ID, 'state': 'proposed', 'allowed': True, 'message': 'Allowed by a rule'}, {'id': ID, 'state': 'running'}, value]
+            answers = [{'id': ID, 'state': 'proposed', 'allowed': True, 'message': 'Allowed by a rule'}, {'id': ID, 'state': 'running'}, value, {'id': ID, 'state': 'done'}]
             with patch.object(archive_tools, 'request', side_effect=lambda *a, **k: answers.pop(0)) as request:
                 self.assertEqual(call(), archive_tools.in_parts(value))
-            self.assertEqual([c.args[0] for c in request.call_args_list], ['/v1/tools/propose'] + ['/v1/tools/actions/' + ID + '?in_turn=1'] * 2,
-                             'the read tells Nocheh this turn has the answer')
+            self.assertEqual([c.args[0] for c in request.call_args_list], ['/v1/tools/propose'] + ['/v1/tools/actions/' + ID] * 2 + ['/v1/tools/actions/' + ID + '?in_turn=done'],
+                             'only once it holds the result does the turn tell Nocheh which state it read')
+            # A lost note still returns the result; the follow-up then repeats it rather than dropping it.
+            answers = [{'id': ID, 'state': 'proposed', 'allowed': True, 'message': 'Allowed by a rule'}, value, TimeoutError('note lost')]
+
+            def noted(*args, **kwargs):
+                answer = answers.pop(0)
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+            with patch.object(archive_tools, 'request', side_effect=noted):
+                self.assertEqual(call(), archive_tools.in_parts(value))
             # One that waits for the owner answers at once.
             asked = {'id': ID, 'state': 'proposed', 'message': 'Approve and Reject buttons were sent'}
             with patch.object(archive_tools, 'request', return_value=asked) as request:
                 self.assertEqual(json.loads(call()), asked)
             self.assertEqual(request.call_count, 1)
             # A failed read or a slow one returns the proposal, whose answer then follows in the chat.
-            for later in (HTTPError('/', 404, 'gone', {}, None), TimeoutError('slow secret check')):
+            from http.client import IncompleteRead
+            for later in (HTTPError('/', 404, 'gone', {}, None), TimeoutError('slow secret check'), IncompleteRead(b'{"id"')):
                 answers = [{'id': ID, 'state': 'approved', 'allowed': True, 'message': 'It runs now; its answer will follow here.'}, later]
 
                 def step(*args, **kwargs):

@@ -23,10 +23,13 @@ the 55-second Notion rule is replaced by an explicit mark.
 - **Wait.** `nocheh_shell` and `nocheh_browser` then poll the operation for up to
   60 seconds, as `nocheh_notion` does, and return its result when it ends. A slow
   or failed read returns the proposal, which says the answer will follow.
-- **Mark.** The poll reads `/v1/tools/actions/<id>?in_turn=1`. Only Nocheh's tool
-  code sets the flag. When the reader's turn is the operation's asking turn and
-  the operation has ended, the read records the ended state it returned in
-  `controlled_actions.observed_in_turn`, after the secret check prepared it.
+- **Mark.** Once the tool holds an ended result, it sends a note,
+  `/v1/tools/actions/<id>?in_turn=<state>`, naming the state it read. Only
+  Nocheh's tool code sends it. When the note comes from the operation's asking
+  turn, not from a follow-up turn, and names the current ended state, Nocheh
+  records it in `controlled_actions.observed_in_turn`. The note returns only the
+  state. If the result read fails or times out, or the note is lost, nothing is
+  recorded, so the follow-up repeats the answer rather than dropping it.
 - **Skip.** A follow-up is skipped as `answered_in_turn` only when the recorded
   state is still the operation's state and the asking turn's reply went out
   (dispatch `done`). A late receipt that changed the state, or a reply that was

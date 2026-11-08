@@ -131,12 +131,21 @@ export class ControlledActionRepository {
       return {id,state:row.state,fingerprint,message:'Review the exact operation. Execution requires owner approval or a current bounded permission.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
-  async inspect(principal:Reader,id:unknown,inTurn=false) {
+  /** `inTurn` is the asking turn's own note, sent once its tool holds the ended result, of the state it read (ADR-0215). */
+  async inspect(principal:Reader,id:unknown,inTurn:string|null=null) {
     const row=await this.row(id);
     if(!principal.admin) {
       // The same chat, owner or member, purpose and profile as the asker, under the action's own epoch.
       await this.turns.binding(principal);
       if(principal.space!==row.space_id||this.turns.profile(principal,row.binding)!==row.profile)throw new HttpError(404,'action_not_found');
+    }
+    if(inTurn!==null) {
+      if(principal.admin)throw new HttpError(403,'scoped_turn_required');
+      // Only the state still current counts, and only from the asking turn: a follow-up's reply is not the asking reply,
+      // so its own follow-up still answers. A lost note leaves a follow-up that repeats the answer, never one dropped.
+      if(principal.turnEvent===row.event_id&&inTurn===row.state&&['done','failed','rejected','ambiguous'].includes(row.state)&&!await followUpTurn(this.control,principal))
+        await this.control.query('UPDATE controlled_actions SET observed_in_turn=$2 WHERE id=$1 AND state=$2',[row.id,row.state]);
+      return {id:row.id,state:row.state};
     }
     let args:unknown;
     try{args=await this.arguments(row,!principal.admin);}
@@ -156,11 +165,7 @@ export class ControlledActionRepository {
       state:row.state,revision:row.revision,job_id:row.job_id,created_at:row.created_at,permission_id:row.permission_id,error_code:row.error_code,result};
     // Results are untrusted generated content and need their own guarded context.
     if(principal.admin)return view;
-    await this.prepared.allow(principal,args);const prepared=await this.prepared.prepare(principal,view,this.detect) as any;
-    // The asking turn's own wait read it whole once it ended; a follow-up then answers only a later state (ADR-0215).
-    if(inTurn&&principal.turnEvent===row.event_id&&['done','failed','rejected','ambiguous'].includes(row.state))
-      await this.control.query('UPDATE controlled_actions SET observed_in_turn=$2 WHERE id=$1 AND state=$2',[row.id,row.state]);
-    return prepared;
+    await this.prepared.allow(principal,args);return await this.prepared.prepare(principal,view,this.detect) as any;
   }
   /** This chat's recent operations, such as Notion calls, for a later turn or job run that no longer holds their IDs.
    * States only, so a quick look needs no content check; one is read whole by its ID, with the same audience. */

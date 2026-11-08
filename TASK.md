@@ -857,8 +857,9 @@ itself at startup.
 - One message when already allowed, stage C (2026-11-08,
   [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)): an
   operation that a rule or the owner freedom setting already allows is waited for
-  in the turn, up to 60 seconds, and answers in that reply. The read marks the
-  state the turn saw, and the follow-up skips only that answer. Checks:
+  in the turn, up to 60 seconds, and answers in that reply. Once the tool holds
+  the result, it notes the state it read; the follow-up skips only that answer,
+  and a lost note or a follow-up turn's note leaves the follow-up in place. Checks:
   [in-turn wait](services/hermes/test_action_results.py),
   [skip rule](test/action-continuations.test.ts),
   [marks and skips](test/store-action-continuations.test.ts), and the tester
