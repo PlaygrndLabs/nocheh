@@ -652,13 +652,16 @@ class AssistantGateway:
         bot=self.adapter._bot
         if body.get('kind')=='card':
             if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_approval')
-            buttons=[]
-            for label,data in body.get('buttons') or []:
+            pairs=list(body.get('buttons') or [])
+            for pair in pairs:
+                if not isinstance(pair,(list,tuple)) or len(pair)!=2:raise ValueError('invalid_approval')
+                label,data=pair
                 if not isinstance(label,str) or not 0<len(label)<=40 or not isinstance(data,str) or not re.fullmatch(r'n[adcw][a-f0-9]{56}',data):raise ValueError('invalid_approval')
-                buttons.append(InlineKeyboardButton(label,callback_data=data))
+            choices=[data for _,data in pairs]
             # Approve first and Reject last, for one action; an operation may also offer Allow where asked and Always allow (ADR-0214).
-            if (not 2<=len(buttons)<=4 or buttons[0].callback_data[1]!='a' or buttons[-1].callback_data[1]!='d'
-                    or len({button.callback_data[1] for button in buttons})!=len(buttons) or len({button.callback_data[2:] for button in buttons})!=1):raise ValueError('invalid_approval')
+            if (not 2<=len(choices)<=4 or choices[0][1]!='a' or choices[-1][1]!='d'
+                    or len({data[1] for data in choices})!=len(choices) or len({data[2:] for data in choices})!=1):raise ValueError('invalid_approval')
+            buttons=[InlineKeyboardButton(label,callback_data=data) for label,data in pairs]
             # Two buttons to a row, so four still fit a phone's width.
             rows=[buttons[index:index+2] for index in range(0,len(buttons),2)]
             name='approval-'+body['id']

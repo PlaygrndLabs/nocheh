@@ -70,7 +70,9 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             # An operation that can be allowed here shows up to four buttons, two to a row (ADR-0214).
             four={**card,'id':'f'*64,'text':'⚙️ Run browser','buttons':[['Allow once',data('a')],['Allow here',data('c')],['Always here',data('w')],['Reject',data('d')]]}
             self.assertEqual((await gateway.send_approval(four))['state'],'done')
-            self.assertEqual([[button.callback_data[:2] for button in row] for row in sent[2][3].inline_keyboard],[['na','nc'],['nw','nd']])
+            # The real keyboard, or the plain rows this file's stand-in builds when the runtime image is not here.
+            rows=getattr(sent[2][3],'inline_keyboard',sent[2][3])
+            self.assertEqual([[(getattr(button,'callback_data',None) or button[1])[:2] for button in row] for row in rows],[['na','nc'],['nw','nd']])
             for bad in [four['buttons'][::-1],four['buttons']+[['More',data('c')]],[four['buttons'][0],four['buttons'][0],four['buttons'][3]],
                         [four['buttons'][0],['Reject','nd'+'b'*56]],[four['buttons'][0],['Stop',data('s')]]]:
                 with self.subTest(buttons=bad),self.assertRaisesRegex(ValueError,'invalid_approval'):

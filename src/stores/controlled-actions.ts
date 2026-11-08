@@ -55,7 +55,7 @@ export class ControlledActionRepository {
     const saved=row.guard_revision===null?(await this.derived.pool.query('SELECT input AS content FROM guard_sources WHERE id=$1',[id])).rows[0]:
       (await this.derived.pool.query('SELECT content FROM guard_revisions WHERE source_id=$1 AND revision=$2',[id,row.guard_revision])).rows[0];
     if(!saved)throw new HttpError(409,'action_proposal_changed');
-    const document=JSON.parse(saved.content.toString()),args=actionArguments(row.kind,JSON.parse(document.text));
+    const document=JSON.parse(saved.content.toString()),args=actionArguments(row.kind,JSON.parse(document.text),true);
     if(digest(canonical(args))!==row.arguments_hash||digest(canonical({binding:row.binding,scope:row.scope,profile:row.logical_profile,kind:row.kind,arguments:args,job:row.job_id}))!==row.fingerprint)
       throw new HttpError(409,'action_proposal_changed');
     if(live) {

@@ -1,7 +1,9 @@
 import {canonical,digest} from './archive.js';
 import {HttpError,object,string} from './http.js';
 
-export function actionArguments(kind:unknown,value:unknown) {
+/** `stored` re-reads a saved operation: it keeps every check except the plain host one, which only new
+ * proposals need, since a chat rule only ever covers an operation proposed with a plain host (ADR-0214). */
+export function actionArguments(kind:unknown,value:unknown,stored=false) {
   const args=object(value), keys=Object.keys(args);
   if(kind==='shell') {
     const command=string(args.command,16000);
@@ -25,7 +27,7 @@ export function actionArguments(kind:unknown,value:unknown) {
     if(url.protocol!=='https:'||url.username||url.password||url.hash||(url.port&&url.port!=='443')||url.hostname==='localhost')throw new HttpError(400,'public_https_required');
     // The host is written plainly, so the card, a chat rule and the executor all read the same one (ADR-0214):
     // no backslash, percent escape or non-ASCII name that another parser reads as a different host.
-    if(/^https:\/\/([^/?#]*)/i.exec(address)?.[1]?.toLowerCase()!==url.host||!/^[a-z0-9.-]+$/.test(url.hostname))throw new HttpError(400,'plain_host_required');
+    if(!stored&&(/^https:\/\/([^/?#]*)/i.exec(address)?.[1]?.toLowerCase()!==url.host||!/^[a-z0-9.-]+$/.test(url.hostname)))throw new HttpError(400,'plain_host_required');
     if(kind==='browser') {
       if(keys.some(k=>k!=='url'))throw new HttpError(400,'invalid_browser_action');
       return {url:address};
