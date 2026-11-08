@@ -17,6 +17,7 @@ import {afterEpoch,carriesForward,jobRun,type GuardRepository,type GuardBinding}
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
+import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
@@ -153,7 +154,7 @@ export class ControlledActionRepository {
       // What it used may have been withdrawn since, so only its state is shown. Only an action that
       // has not run yet is stopped by that; a finished or running one keeps its own outcome.
       if(principal.admin||!(error instanceof HttpError)||error.code!=='guard_context_changed')throw error;
-      return {id:row.id,kind:row.kind,state:row.state,error_code:row.error_code??(['proposed','approved'].includes(row.state)?error.code:null),created_at:row.created_at};
+      return {id:row.id,kind:row.kind,state:row.state,error_code:row.error_code??(['proposed','approved'].includes(row.state)?error.code:null),resolution:closedAs(row).resolution,created_at:row.created_at};
     }
     let result:unknown=null;
     if(row.result_reference) {
@@ -162,7 +163,7 @@ export class ControlledActionRepository {
       result=JSON.parse(output.content.toString());
     }
     const view={id:row.id,event_id:row.event_id,scope:row.scope,profile:row.profile,logical_profile:row.logical_profile,kind:row.kind,arguments:args,fingerprint:row.fingerprint,
-      state:row.state,revision:row.revision,job_id:row.job_id,created_at:row.created_at,permission_id:row.permission_id,error_code:row.error_code,result};
+      state:row.state,revision:row.revision,job_id:row.job_id,created_at:row.created_at,permission_id:row.permission_id,error_code:row.error_code,...closedAs(row),result};
     // Results are untrusted generated content and need their own guarded context.
     if(principal.admin)return view;
     await this.prepared.allow(principal,args);return await this.prepared.prepare(principal,view,this.detect) as any;
@@ -173,10 +174,10 @@ export class ControlledActionRepository {
     const turn=await this.turns.binding(principal);
     if((principal.purpose??'assistant')!=='assistant')return [];
     // The owner and a member of one group share its space, so the reader's own 20 come from a wider window.
-    const rows=(await this.control.query(`SELECT id,kind,state,error_code,created_at,binding,profile FROM controlled_actions
+    const rows=(await this.control.query(`SELECT id,kind,state,error_code,resolution,created_at,binding,profile FROM controlled_actions
       WHERE space_id=$1 AND logical_profile=$2 ORDER BY created_at DESC,id DESC LIMIT 100`,[principal.space,turn.logical_profile])).rows;
     return rows.filter(row=>this.turns.profile(principal,row.binding)===row.profile).slice(0,20)
-      .map(row=>({id:row.id,kind:row.kind,state:row.state,error_code:row.error_code,created_at:row.created_at.toISOString()}));
+      .map(row=>({id:row.id,kind:row.kind,state:row.state,error_code:row.error_code,resolution:closedAs(row).resolution,created_at:row.created_at.toISOString()}));
   }
   /** A stopped job's operations that still wait for the owner end without running (ADR-0204). */
   async stopJob(job:string):Promise<string[]> {
@@ -238,6 +239,20 @@ export class ControlledActionRepository {
         [row.match_key,row.kind,row.space_id,id])).rows;
       for(const other of waiting)await requestWorkflow(db,'tools',other.id);
       return {id,state,revision:row.revision+1,rule};
+    },source);
+  }
+  /** The owner's word on an unclear outcome: it ran, it did not run, or dismiss it. It is not a receipt: the state and
+   *  receipt stay as observed, a later receipt still settles the action, and nothing runs again (ADR-0218). */
+  async resolve(principal:Reader,value:unknown,source?:SourceReference) {
+    admin(principal);const body=exact(value,['id','fingerprint','outcome','expected_revision','operation_id']),id=identity(body.id);
+    if(!ownerResolutions.includes(body.outcome as any))throw new HttpError(400,'invalid_decision');
+    return this.command(principal,body,{kind:'resolve',...body,operation_id:undefined},async db=>{
+      const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if(!row)throw new HttpError(404,'action_not_found');
+      if(body.fingerprint!==row.fingerprint||body.expected_revision!==undefined&&body.expected_revision!==row.revision)throw new HttpError(409,'action_changed');
+      if(row.state!=='ambiguous'||row.resolution)throw new HttpError(409,'action_already_started_or_closed');
+      await db.query('UPDATE controlled_actions SET resolution=$2,resolved_at=now(),revision=revision+1,updated_at=now() WHERE id=$1',[id,body.outcome]);
+      return {id,state:row.state,resolution:body.outcome,revision:row.revision+1};
     },source);
   }
   async grant(principal:Reader,value:unknown) {

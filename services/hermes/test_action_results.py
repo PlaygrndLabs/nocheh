@@ -122,12 +122,13 @@ class ActionResultTests(unittest.TestCase):
 
     def test_status_without_an_id_lists_operations_without_content(self):
         listed = {'telegram': [{'id': 'b' * 64, 'destination': '-100555', 'state': 'proposed', 'error_code': None, 'created_at': 't', 'arguments': {'text': 'SECRET'}}],
-                  'actions': [{'id': ID, 'kind': 'mcp', 'state': 'failed', 'error_code': None, 'created_at': 't', 'result': 'SECRET', 'arguments': {'input': 'SECRET'}}]}
+                  'actions': [{'id': ID, 'kind': 'mcp', 'state': 'ambiguous', 'error_code': None, 'resolution': 'not_run', 'created_at': 't', 'result': 'SECRET', 'arguments': {'input': 'SECRET'}}]}
         with patch.object(archive_tools, 'request', return_value=listed) as request:
             answer = archive_tools.controlled_status({})
         request.assert_called_once_with('/v1/tools/actions')
         self.assertNotIn('SECRET', answer)
-        self.assertEqual(json.loads(answer)['operations'], [{'id': ID, 'kind': 'mcp', 'state': 'failed', 'error_code': None, 'created_at': 't'}])
+        # How the owner closed an unclear one is listed too (ADR-0218).
+        self.assertEqual(json.loads(answer)['operations'], [{'id': ID, 'kind': 'mcp', 'state': 'ambiguous', 'error_code': None, 'resolution': 'not_run', 'created_at': 't'}])
         self.assertEqual(json.loads(answer)['requests'][0]['destination'], '-100555')
 
     def test_proposals_and_results_get_the_secret_check_timeout(self):

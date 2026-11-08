@@ -11,6 +11,7 @@ import {
   actionIcon,
   actionName,
   actionPlace,
+  actionStateLabel,
   actionSummary,
   byNewest,
   fromNow,
@@ -51,7 +52,7 @@ export function History() {
           ) : (
             <ul className="divide-y divide-line border-t border-line">
               {actions.slice(actionPage * PAGE, (actionPage + 1) * PAGE).map(action => {
-                const [label, tone] = stateLabel(action.state);
+                const [label, tone] = actionStateLabel(action);
                 const Icon = actionIcon(action.kind);
                 return (
                   <li key={action.id}>

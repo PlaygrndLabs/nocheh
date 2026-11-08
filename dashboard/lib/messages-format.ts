@@ -153,6 +153,7 @@ const actionStates: Record<string, Status> = {
   approved: {label: 'Action approved, sending', tone: 'info'},
   running: {label: 'Action sending', tone: 'info'},
   ambiguous: {label: 'Action result uncertain', tone: 'warn'},
+  closed: {label: 'Action closed', tone: 'neutral'},
   done: {label: 'Action done', tone: 'good'},
   rejected: {label: 'Action denied', tone: 'neutral'},
   cancelled: {label: 'Action cancelled', tone: 'neutral'},

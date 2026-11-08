@@ -18,6 +18,7 @@ import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {GuardRepository,GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
+import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 import type {RuntimeTurnRepository} from './turns.js';
 
 const protocol='telegram-action-v2';
@@ -277,15 +278,15 @@ export class TelegramActionRepository {
     const text=await this.text(row,!principal.admin),result=row.result_reference?(await this.stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[row.result_reference.id])).rows[0]:null;
     if(!principal.admin){await this.prepared.allow(principal,{text});await this.turns.assertAudience(principal);}
     return {id:row.id,event_id:row.source_reference.id,scope:row.scope,profile:row.profile,kind:'telegram_message',arguments:{destination:row.destination,text},
-      fingerprint:row.fingerprint,state:row.state,revision:row.revision,error_code:row.error_code,created_at:row.created_at,result:result?JSON.parse(result.content.toString()):null};
+      fingerprint:row.fingerprint,state:row.state,revision:row.revision,error_code:row.error_code,...closedAs(row),created_at:row.created_at,result:result?JSON.parse(result.content.toString()):null};
   }
   /** This chat's most recent message requests and their states, for a later turn that no longer holds their IDs. */
   async recent(principal:Reader) {
     const turn=await this.turns.binding(principal);
     // States and destinations only, so a quick look needs no content check; a request's text is read by its ID.
-    const rows=(await this.stores.control.query(`SELECT id,destination,state,error_code,created_at FROM telegram_action_requests
+    const rows=(await this.stores.control.query(`SELECT id,destination,state,error_code,resolution,created_at FROM telegram_action_requests
       WHERE space_id=$1 AND profile=$2 ORDER BY created_at DESC,id DESC LIMIT 10`,[principal.space,turn.logical_profile])).rows;
-    return rows.map(row=>({id:row.id,destination:row.destination,state:row.state,error_code:row.error_code,created_at:row.created_at.toISOString()}));
+    return rows.map(row=>({id:row.id,destination:row.destination,state:row.state,error_code:row.error_code,resolution:closedAs(row).resolution,created_at:row.created_at.toISOString()}));
   }
   async list(principal:Reader) {
     admin(principal);const rows=(await this.stores.control.query('SELECT id FROM telegram_action_requests ORDER BY created_at DESC,id DESC LIMIT 100')).rows;
@@ -329,6 +330,34 @@ export class TelegramActionRepository {
       await db.query('COMMIT');return {id,state,revision};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
+  /** The owner's word on an unclear send, after looking in the chat: it arrived, it did not, or dismiss it. The state
+   *  stays as observed, its checks stop, and it is never sent again (ADR-0218). */
+  async resolve(principal:Reader,value:unknown) {
+    admin(principal);const body=object(value);
+    if(Object.keys(body).some(key=>!['id','fingerprint','outcome','operation_id','expected_revision'].includes(key))||
+      !ownerResolutions.includes(body.outcome as any))throw new HttpError(400,'invalid_decision');
+    const id=string(body.id,64),row=await this.row(id);
+    if(body.fingerprint!==row.fingerprint)throw new HttpError(409,'action_changed');
+    const request={id,fingerprint:row.fingerprint,decision:body.outcome},hash=digest(canonical(request));
+    const operation=body.operation_id===undefined?'telegram-resolution:'+hash:string(body.operation_id,200),db=await this.stores.control.connect();
+    try {
+      await db.query('BEGIN');
+      // The lock a check of this send holds, so a check in flight finishes before the owner's word is saved.
+      await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,803363))',[id]);
+      const current=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      const prior=(await db.query('SELECT * FROM telegram_action_decisions WHERE operation_id=$1',[operation])).rows[0];
+      if(prior) {
+        if(prior.request_hash!==hash)throw new HttpError(409,'action_decision_conflict');
+        await db.query('COMMIT');return {id,state:current.state,resolution:current.resolution,revision:current.revision};
+      }
+      if(body.expected_revision!==undefined&&body.expected_revision!==current.revision)throw new HttpError(409,'action_changed');
+      if(current.state!=='ambiguous'||current.resolution)throw new HttpError(409,'action_already_started_or_closed');
+      const revision=current.revision+1;
+      await db.query('UPDATE telegram_action_requests SET resolution=$2,resolved_at=now(),revision=$3,updated_at=now() WHERE id=$1',[id,body.outcome,revision]);
+      await db.query('INSERT INTO telegram_action_decisions(operation_id,request_hash,action_id,decision,revision) VALUES($1,$2,$3,$4,$5)',[operation,hash,id,body.outcome,revision]);
+      await db.query('COMMIT');return {id,state:current.state,resolution:body.outcome,revision};
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
   async run(id:string,authority:ExecutionAuthority):Promise<Observation> {
     const db=await this.stores.control.connect();let held=false,locked=false;
     try {
@@ -337,14 +366,18 @@ export class TelegramActionRepository {
       if(!locked)return observation('waiting','action',0,Date.now()+2000,'receipt_pending');
       let row=await this.row(id);
       if(['done','rejected','cancelled'].includes(row.state))return observation(row.state==='done'?'completed':row.state==='rejected'?'denied':'cancelled','action');
+      // The owner closed an unclear send: nothing is checked or sent any more (ADR-0218).
+      const closed=row.state==='ambiguous'&&!!row.resolution;
       if(row.state==='proposed')return observation('waiting','action',0,Date.now()+30000,'approval_required');
-      if(row.next_attempt>new Date())return observation('waiting','action',0,row.next_attempt.getTime(),'receipt_pending');
+      if(!closed&&row.next_attempt>new Date())return observation('waiting','action',0,row.next_attempt.getTime(),'receipt_pending');
       const observe=['running','ambiguous'].includes(row.state),effect=this.effect(row);
       let decision=row.security_decision,text:string|undefined;
       const finish=async(state:'done'|'denied'|'ambiguous',result:unknown)=>{
         await db.query('BEGIN');
         try {
-          await db.query(`UPDATE telegram_action_requests SET state=$2,result_reference=$3,error_code=$4,next_attempt=now()+interval '60 seconds',revision=revision+1,updated_at=now() WHERE id=$1`,
+          // A check that finds the same unclear outcome changes nothing, so its revision stays and an open review stays usable.
+          await db.query(`UPDATE telegram_action_requests SET state=$2,result_reference=$3,error_code=$4,next_attempt=now()+interval '60 seconds',
+            revision=revision+CASE WHEN state IS DISTINCT FROM $2 OR result_reference IS DISTINCT FROM $3::jsonb OR error_code IS DISTINCT FROM $4 THEN 1 ELSE 0 END,updated_at=now() WHERE id=$1`,
             [id,state==='denied'?'rejected':state,result,state==='done'?null:state==='denied'?'action_delivery_denied':'delivery_unconfirmed']);
           if(decision)await recordEffect(db,effect,state==='done'?'completed':state==='denied'?'blocked':'ambiguous',decision,row.source_reference);
           await db.query('COMMIT');
@@ -357,6 +390,8 @@ export class TelegramActionRepository {
         if(digest(durable.content)!==durable.content_hash||!['done','denied'].includes(state)||durable.content.toString()!==canonical({state}))throw new HttpError(409,'action_result_conflict');
         return await finish(state,{store:'derived',kind:'artifact',id:durable.id,input_hash:durable.content_hash});
       }
+      // A receipt saved before the owner's word still settles it, above; otherwise the word stands.
+      if(closed)return observation(row.resolution==='ran'?'completed':'skipped','action');
       if(!observe) {
         try{text=await this.text(row);}catch(error){
           if(error instanceof HttpError&&error.code==='action_delivery_denied') {

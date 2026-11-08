@@ -19,6 +19,9 @@ export type Action = {
   state: string;
   revision?: number;
   error_code?: string | null;
+  /** How an unclear outcome was closed: the owner's word, or a page read that closed itself. */
+  resolution?: 'ran' | 'not_run' | 'dismissed' | 'read_closed' | null;
+  resolved_at?: string | null;
   created_at: string;
 };
 export type Permission = {
@@ -149,6 +152,27 @@ export const stateLabel = (state: string): [string, Tone] =>
     state ? state.charAt(0).toUpperCase() + state.slice(1).replaceAll('_', ' ') : 'Unknown',
     'neutral',
   ];
+
+const resolutionText: Record<string, [string, Tone]> = {
+  read_closed: ['Closed, no answer', 'neutral'],
+  ran: ['You marked it ran', 'good'],
+  not_run: ['You marked it didn’t run', 'neutral'],
+  dismissed: ['Dismissed', 'neutral'],
+};
+const messageResolutionText: Record<string, [string, Tone]> = {
+  ran: ['You marked it sent', 'good'],
+  not_run: ['You marked it not sent', 'neutral'],
+};
+/** An action's label: an unclear one that was closed says how. */
+export const actionStateLabel = (action: Pick<Action, 'kind' | 'state' | 'resolution'>): [string, Tone] => {
+  const closed = action.state === 'ambiguous' && action.resolution ? action.resolution : null;
+  if (!closed) return stateLabel(action.state);
+  return (
+    (action.kind === 'telegram_message' && messageResolutionText[closed]) ||
+    resolutionText[closed] ||
+    stateLabel(action.state)
+  );
+};
 
 /** Plain words for an error code from the API. */
 export function problemText(error: unknown): string {

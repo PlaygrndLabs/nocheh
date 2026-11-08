@@ -20,6 +20,8 @@ export function preferenceProfile(row:{logical_profile:string;space_id:string},o
 
 const protocol='controlled-execution-v2';
 const operation=(id:string)=>'controlled-result:'+id;
+// A page read that ends unclear closes itself: a read changes nothing, so it never waits for the owner (ADR-0218).
+const readCloses="resolution=CASE WHEN kind='browser' THEN coalesce(resolution,'read_closed') ELSE resolution END,resolved_at=CASE WHEN kind='browser' THEN coalesce(resolved_at,now()) ELSE resolved_at END";
 const input=(value:unknown):Record<string,unknown>&{id:string;actor:string}=>{
   const body=object(value),id=string(body.id,64),actor=string(body.actor,128);
   if(!/^[a-f0-9]{64}$/.test(id)||!/^wf-[a-f0-9]{64}$/.test(actor))throw new HttpError(400,'invalid_action_identity');
@@ -69,7 +71,7 @@ export class ControlledExecutionRepository {
     // A failure keeps the executor's fixed code, such as a refused page or a tool's own error, never remote text.
     const code=state==='ambiguous'?'executor_outcome_unconfirmed':state==='failed'&&typeof failure==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(failure)?failure:null;
     await db.query(`UPDATE controlled_actions SET state=$2,result_id=$3,result_reference=$4,lease_until=NULL,
-      error_code=$5,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,state,(reference as any).id,reference,code]);
+      error_code=$5,${state==='ambiguous'?readCloses+',':''}revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,state,(reference as any).id,reference,code]);
     await recordEffect(db,this.actions.effect(row),state==='done'?'completed':state,
       row.security_decision??await evaluate(db,this.actions.effect(row)),row.source_reference,row.permission_id??undefined);
     // A late retained receipt can settle an already closed uncertain workflow.
@@ -91,7 +93,7 @@ export class ControlledExecutionRepository {
       const repairs=!row.result_reference;
       if(await this.recover(db,row)){await db.query('COMMIT');if(repairs)this.closed(row.id);return {claimed:false};}
       if(row.state==='running'&&row.lease_until<=new Date()) {
-        await db.query("UPDATE controlled_actions SET state='ambiguous',error_code='executor_receipt_missing',revision=revision+1,updated_at=now() WHERE id=$1",[row.id]);
+        await db.query(`UPDATE controlled_actions SET state='ambiguous',error_code='executor_receipt_missing',${readCloses},revision=revision+1,updated_at=now() WHERE id=$1`,[row.id]);
         await recordEffect(db,this.actions.effect(row),'ambiguous',row.security_decision??await evaluate(db,this.actions.effect(row)),row.source_reference,row.permission_id??undefined);
         await db.query('COMMIT');this.closed(row.id);return {claimed:false};
       }
