@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
+import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {policySnapshot,savePolicy} from '../src/security/store.js';
 
 test('a card\'s Allow here and Always allow let the same site or command run in that chat without asking',
@@ -96,6 +97,16 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     assert.equal(later.card,null,'no card');assert.match(later.message,/Allowed by a rule the owner set for this chat; it runs now\. Its answer will follow here/);
     const covered=await run(later.id);assert.equal(covered.state,'done');
     assert.equal((await s.controlledActions.row(later.id)).permission_id,rule.id);
+    // Two reads of one message that the rule lets run are answered together: the first one's follow-up waits for the second.
+    const pair=await message('pair'),one=await ask(pair,'browser',{url:'https://weather.example.com/one'}),two=await ask(pair,'browser',{url:'https://weather.example.com/two'});
+    assert.deepEqual([one.card,two.card],[null,null]);
+    await stores.control.query(`INSERT INTO dispatches(event_id,source_reference,state,attempts) VALUES($1,$2,'done',1)`,[pair.id,pair]);
+    assert.equal((await run(one.id)).state,'done');
+    const operations=storageWorkflowOperations(s,async()=>({}));
+    const owned=Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='telegram'")).rows[0].epoch);
+    assert.equal((await operations.telegram!('continue:'+one.id,{owner:'inngest',epoch:owned})).state,'waiting','the second has not run yet');
+    assert.equal((await run(two.id)).state,'done');
+    await stores.control.query("UPDATE action_continuations SET state='cancelled' WHERE event_id=$1",[pair.id]);
     // Another topic, another site or another kind is not covered.
     for(const [source,kind,args] of [[await message('elsewhere',18),'browser',{url:'https://weather.example.com/today'}],
       [await message('other site'),'browser',{url:'https://news.example.com/'}],[await message('a command'),'shell',{command:'printf weather.example.com'}]] as const) {
@@ -127,6 +138,14 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     const days=(new Date(always.expires_at).getTime()-Date.now())/86400000;assert.ok(days>29.9&&days<=30);
     const again=await ask(await message('again'),'shell',{command:'printf made-up-rule'});assert.equal(again.card,null);
     assert.equal((await ask(await message('different'),'shell',{command:'printf made-up-other'})).card?.kind,'card');
+    // A follow-up turn is started by Nocheh after a result, not asked by anyone: no rule covers what it asks for,
+    // and its card offers no rule.
+    const followed=await message('followed'),before=await ask(followed,'shell',{command:'printf made-up-before'});
+    await tap(before,'na');assert.equal((await run(before.id)).state,'done');
+    await stores.control.query("UPDATE action_continuations SET state='running' WHERE action_id=$1",[before.id]);
+    const steered=await ask(followed,'shell',{command:'printf made-up-rule'});
+    assert.deepEqual(choices(steered.card),['na','nd']);assert.equal((await s.controlledActions.row(steered.id)).match_key,null);
+    await stores.control.query("UPDATE action_continuations SET state='cancelled' WHERE action_id=$1",[before.id]);
     // A connected tool has no rule: its Approve stays one decision, and an Allow press on it decides nothing.
     assert.match(await tap(tool,'nc'),/already decided/);assert.equal((await s.controlledActions.row(tool.id)).state,'proposed');
     assert.equal((await rules()).filter(row=>row.kind==='mcp').length,0);

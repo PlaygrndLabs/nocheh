@@ -92,10 +92,13 @@ export class ControlledActionRepository {
       // first is ended by Stop's sweep (ADR-0204). A scheduled task's job is no background job.
       const job=turn.job?(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR SHARE',[turn.job])).rows[0]:null;
       if(job&&(job.state!=='running'||job.cancel_requested))throw new HttpError(409,'job_not_running');
+      // A follow-up was started by Nocheh after a result came back, not asked by anyone: like a job's operation, what it
+      // asks for has no rule key, so no chat rule covers it and its card offers no rule (ADR-0212, ADR-0214).
+      const followUp=source.store==='archive'&&await followUpTurn(db,principal);
       await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,
-          turn.job?null:ruleKey(body.kind as string,args)]);
+          turn.job||followUp?null:ruleKey(body.kind as string,args)]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
@@ -108,7 +111,7 @@ export class ControlledActionRepository {
       // setting never applies to jobs. A relaunched run of a job (attempt > 1) gets
       // no autonomy: every change it asks for waits for a card (ADR-0207), and
       // neither does a follow-up turn, which no owner request started (ADR-0212).
-      const connected='connection' in args,live=source.store==='archive'&&!await followUpTurn(db,principal),fresh=!turn.job||!await relaunchedRun(db,source.id);
+      const connected='connection' in args,live=source.store==='archive'&&!followUp,fresh=!turn.job||!await relaunchedRun(db,source.id);
       const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,this.access.policy().owner_id,source,turn):live):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
