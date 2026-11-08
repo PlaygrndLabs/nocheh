@@ -202,6 +202,24 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     assert.equal(steered.state,'proposed','no owner request started the follow-up');assert.match(steered.message,/Approve and Reject buttons/);
     const note=await s.telegramActions.request(await actor(free,null),{destination:group,text:'Made-up note from the owner\'s memory'});
     assert.equal(note.state,'proposed','a message for another chat waits too');
+    // One that runs without a card is read whole by the asking turn's own wait, so no follow-up repeats it (ADR-0215).
+    const read=await privately('read'),quick=await operation(read,'printf made-up-quick',null),reading=await actor(read,null);
+    assert.equal(quick.allowed,true);
+    await s.controlledActions.inspect(reading,quick.id,true);
+    assert.equal((await s.controlledActions.row(quick.id)).observed_in_turn,null,'a state before the end is no answer');
+    await ran(quick.id);
+    await s.controlledActions.inspect(await actor(await privately('another turn'),null),quick.id,true);await s.controlledActions.inspect(reading,quick.id);
+    assert.equal((await s.controlledActions.row(quick.id)).observed_in_turn,null,'only the asking turn\'s own wait counts');
+    assert.equal((await s.controlledActions.inspect(reading,quick.id,true)).state,'done');
+    assert.equal((await s.controlledActions.row(quick.id)).observed_in_turn,'done');
+    await asking(read,'done');before=starts.length;
+    assert.equal((await follow(quick.id)).state,'skipped');
+    assert.deepEqual(pick(await row(quick.id),'state','error_code'),{state:'skipped',error_code:'answered_in_turn'});assert.equal(starts.length,before);
+    // When the reply that held it may not have gone out, the follow-up answers.
+    const dropped=await privately('dropped'),unsent=await operation(dropped,'printf made-up-unsent',null);
+    await ran(unsent.id);await s.controlledActions.inspect(await actor(dropped,null),unsent.id,true);await asking(dropped,'ambiguous');
+    assert.equal((await follow(unsent.id)).state,'running');assert.ok(starts.at(-1).text.includes('- '+unsent.id+' (shell): done'));
+    await due(unsent.id);observed={state:'done'};assert.equal((await follow(unsent.id)).state,'completed');observed={state:'running'};
     await s.ownerAutonomy.save(owner,{mode:'approval_required',expected_revision:enabled.revision,operation_id:key+':review'});
     await due(freed.id);observed={state:'done'};assert.equal((await follow(freed.id)).state,'completed');started={state:'done'};
     // The owner's own request in a group may send to their private chat without a card; its follow-up may not.

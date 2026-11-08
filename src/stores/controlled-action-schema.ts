@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS action_permissions (
 );
 -- A chat rule covers one site or exact command in one chat or topic (ADR-0214); an exact grant, one fingerprint and epoch.
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS match_key text;
+-- The state the asking turn read whole while it waited, so no follow-up repeats that answer (ADR-0215).
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS observed_in_turn text;
 ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS grain text NOT NULL DEFAULT 'exact' CHECK(grain IN ('exact','chat'));
 ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS match_key text;
 ALTER TABLE action_permissions ADD COLUMN IF NOT EXISTS space_id text;

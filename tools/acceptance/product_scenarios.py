@@ -1340,26 +1340,27 @@ class ProductScenarios(Scenarios):
         self.gate('nothing_else_in_owner_chat', not [row for row in self.replies(before, OWNER) if not self.is_card(row)])
 
     def allowed_command_runs_without_a_card(self):
-        # The owner taps Always allow on a member's command in a group topic. The same command asked there
-        # again runs without a card, and its answer follows (ADR-0214).
+        # The owner taps Always allow on a member's command in a group topic (ADR-0214). The same command asked
+        # there again runs without a card, and the turn waits for it, so its answer comes in one reply (ADR-0215).
         marker = 'RULEMARK1'
-        tool = 'یک فرمان [[tool:nocheh_shell {"command":"printf '+marker+'"}]] [[after:silent]]'
-        request = self.f.message(GROUP, tool, sender=MEMBER, topic=TEAM_TOPIC)
+        command = '[[tool:nocheh_shell {"command":"printf '+marker+'"}]]'
+        request = self.f.message(GROUP, 'یک فرمان '+command+' [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
         card = self.wait('card_posted_to_owner', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('card_offers_always', [button['callback_data'][:2] for button in self.buttons(card)] == ['na', 'nw', 'nd'],
                   buttons=[button['text'] for button in self.buttons(card)])
         answer = self.press(card, 'always')
         self.gate('press_answered_as_allowed', '30 days' in (answer.get('text') or ''), answer=answer.get('text'))
-        self.wait('first_answer_followed', lambda: [row for row in self.replies(before, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
-            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == request['message']['message_id']], 240)
-        again = self.f.message(GROUP, tool, sender=MEMBER, topic=TEAM_TOPIC)
-        _, later = self.silent_turn(again, GROUP, TEAM_TOPIC)
-        answers = lambda: [row for row in self.replies(later, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
-            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == again['message']['message_id']]
-        text = self.wait('follow_up_answered_in_topic', answers, 240)[0]['message']['text']
+        replied = lambda message, since: [row for row in self.replies(since, GROUP, TEAM_TOPIC) if not self.is_card(row) and json.loads(
+            row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == message['message']['message_id']]
+        self.wait('first_answer_followed', lambda: replied(request, before), 240)
+        again = self.f.message(GROUP, 'دوباره '+command, sender=MEMBER, topic=TEAM_TOPIC)
+        later = len(self.f.sent())
+        _, text = self.turn(again, GROUP, TEAM_TOPIC)
         self.gate('ran_without_a_card', not self.cards(later), cards=[row['message']['text'][:80] for row in self.cards(later)])
-        self.gate('follow_up_read_the_result', '[brain] nocheh_action_status' in text and marker in text, text=text[:500])
+        self.gate('answered_in_one_reply', '[brain] nocheh_shell' in text and marker in text, text=text[:500])
+        time.sleep(20)
+        self.gate('no_follow_up_repeats_it', len(replied(again, later)) == 1, replies=len(replied(again, later)))
         rules = [row for row in self.f.app('/v1/tools/actions').get('permissions', []) if row.get('grain') == 'chat' and row.get('kind') == 'shell']
         self.gate('one_chat_rule', len(rules) == 1 and rules[0]['space_id'] == str(GROUP)+'/topic/'+str(TEAM_TOPIC), rules=[{key: row.get(key) for key in ('space_id', 'match_key', 'remaining')} for row in rules])
 

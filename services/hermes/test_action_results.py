@@ -66,6 +66,33 @@ class ActionResultTests(unittest.TestCase):
         with patch.object(archive_tools, 'request', side_effect=HTTPError('/', 409, 'changed', {}, None)):
             self.assertEqual(json.loads(archive_tools.notion_tool({'operation': 'list'})), {'error': 'notion_is_off_or_changed'})
 
+    def test_an_operation_already_allowed_answers_in_this_turn(self):
+        # A rule or the owner freedom setting lets it run now: the tool waits and returns the result (ADR-0215).
+        value = {**view('Synthetic forecast'), 'kind': 'browser'}
+        call = lambda: archive_tools.controlled_tool('browser', {'url': 'https://example.com/'})
+        with patch.object(archive_tools, '_PROCESS_PREFERENCES', {'nocheh_tools.browser': 'on'}), patch.object(archive_tools.time, 'sleep'):
+            answers = [{'id': ID, 'state': 'proposed', 'allowed': True, 'message': 'Allowed by a rule'}, {'id': ID, 'state': 'running'}, value]
+            with patch.object(archive_tools, 'request', side_effect=lambda *a, **k: answers.pop(0)) as request:
+                self.assertEqual(call(), archive_tools.in_parts(value))
+            self.assertEqual([c.args[0] for c in request.call_args_list], ['/v1/tools/propose'] + ['/v1/tools/actions/' + ID + '?in_turn=1'] * 2,
+                             'the read tells Nocheh this turn has the answer')
+            # One that waits for the owner answers at once.
+            asked = {'id': ID, 'state': 'proposed', 'message': 'Approve and Reject buttons were sent'}
+            with patch.object(archive_tools, 'request', return_value=asked) as request:
+                self.assertEqual(json.loads(call()), asked)
+            self.assertEqual(request.call_count, 1)
+            # A failed read or a slow one returns the proposal, whose answer then follows in the chat.
+            for later in (HTTPError('/', 404, 'gone', {}, None), TimeoutError('slow secret check')):
+                answers = [{'id': ID, 'state': 'approved', 'allowed': True, 'message': 'It runs now; its answer will follow here.'}, later]
+
+                def step(*args, **kwargs):
+                    answer = answers.pop(0)
+                    if isinstance(answer, Exception):
+                        raise answer
+                    return answer
+                with self.subTest(later=later), patch.object(archive_tools, 'request', side_effect=step):
+                    self.assertEqual(json.loads(call())['message'], 'It runs now; its answer will follow here.')
+
     def test_a_failed_proposal_says_whether_asking_again_can_help(self):
         from urllib.error import URLError
         fail = lambda code: HTTPError('http://app/v1/tools/propose', code, 'refused', {}, None)

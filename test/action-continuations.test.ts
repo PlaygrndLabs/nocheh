@@ -19,17 +19,16 @@ test('only ids, tools and states reach the follow-up\'s text',()=>{
     'an owner\'s own text gets the values only where it places them');
 });
 
-test('the owner\'s own rejection and an in-turn Notion read need no follow-up',()=>{
+test('the owner\'s own rejection and an answer read in the asking turn need no follow-up',()=>{
   assert.equal(ownerRejected({state:'rejected',error_code:null},true),true);
   assert.equal(ownerRejected({state:'rejected',error_code:'owner_cancelled'},true),true);
   assert.equal(ownerRejected({state:'rejected',error_code:null},false),false,'a member hears that the owner said no');
   assert.equal(ownerRejected({state:'rejected',error_code:'guard_context_changed'},true),false,'a blocked request says why it did not run');
   assert.equal(ownerRejected({state:'done',error_code:null},true),false);
-  const event='c'.repeat(64),asked=new Date('2026-11-08T10:00:00Z'),after=(seconds:number)=>new Date(asked.getTime()+seconds*1000);
-  const self={event_id:event,kind:'mcp',decision_reference:{store:'archive',kind:'event',id:event},created_at:asked};
-  assert.equal(answeredInTurn(self,true,after(30)),true,'the asking turn waited for it and read it');
-  assert.equal(answeredInTurn(self,true,after(70)),false,'past the in-turn wait');
-  assert.equal(answeredInTurn({...self,decision_reference:{store:'archive',kind:'event',id:'d'.repeat(64)}},true,after(30)),false,'approved by a press');
-  assert.equal(answeredInTurn(self,false,after(30)),false,'another online tool');
-  assert.equal(answeredInTurn({...self,kind:'shell'},true,after(30)),false);
+  // The asking turn's own tool waited and read that very state, and its reply went out (ADR-0215).
+  assert.equal(answeredInTurn({state:'done',observed_in_turn:'done'},'done'),true);
+  assert.equal(answeredInTurn({state:'done',observed_in_turn:'ambiguous'},'done'),false,'a late receipt changed what the turn read');
+  assert.equal(answeredInTurn({state:'done',observed_in_turn:null},'done'),false,'the turn did not read it whole');
+  assert.equal(answeredInTurn({state:'done',observed_in_turn:'done'},'failed'),false,'the reply that held it was not sent');
+  assert.equal(answeredInTurn({state:'done',observed_in_turn:'done'},undefined),false);
 });

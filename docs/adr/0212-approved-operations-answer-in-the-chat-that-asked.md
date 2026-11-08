@@ -50,8 +50,9 @@ receipts.
   and answers them in one turn; their own jobs end as merged. A sibling still
   awaiting a late receipt is left to its own job, so its answer is not reported as
   unconfirmed. One asking message gets at most three follow-ups. No follow-up runs for: the owner's own private
-  request that the owner rejected; a Notion call its own request approved that
-  ended within 55 seconds, since the asking turn already waited for it; anything
+  request that the owner rejected; an operation the asking turn already read
+  whole while it waited ([ADR-0215](0215-an-allowed-operation-answers-in-the-same-turn.md));
+  anything
   but a live Telegram message; a chat no longer served or a member no longer
   allowed; a retired message; a changed space or profile.
 - **Reader and checks.** The follow-up rebuilds the asking reader the way the reply
