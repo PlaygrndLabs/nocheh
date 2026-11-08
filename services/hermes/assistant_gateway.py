@@ -662,8 +662,8 @@ class AssistantGateway:
             if (not 2<=len(choices)<=4 or choices[0][1]!='a' or choices[-1][1]!='d'
                     or len({data[1] for data in choices})!=len(choices) or len({data[2:] for data in choices})!=1):raise ValueError('invalid_approval')
             buttons=[InlineKeyboardButton(label,callback_data=data) for label,data in pairs]
-            # Two buttons to a row, so four still fit a phone's width.
-            rows=[buttons[index:index+2] for index in range(0,len(buttons),2)]
+            # Approve and Reject share a row; longer allow buttons get one row each, so every label shows in full.
+            rows=[buttons] if len(buttons)==2 else [[button] for button in buttons]
             name='approval-'+body['id']
             async with self.action_lock:
                 receipt=self.receipts/(name+'.result')
