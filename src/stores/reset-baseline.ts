@@ -14,6 +14,9 @@ const exact=(value:unknown,keys:string[])=>{
 const same=(left:unknown,right:unknown)=>canonical(left)===canonical(right);
 // Match declarations in the owned schema, not prose mentioning DDL in comments.
 const tables=(schema:string)=>[...schema.matchAll(/^\s*CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)\s*\(/gm)].map(match=>match[1]!).sort();
+// Settings tables the schema seeds with one default row; a fresh install holds exactly that row.
+const defaults=(schema:string)=>Object.fromEntries([...schema.matchAll(
+  /^\s*INSERT INTO\s+([a-z_][a-z0-9_]*)\(singleton\) VALUES\(true\) ON CONFLICT DO NOTHING;/gm)].map(match=>[match[1]!,1]));
 const NAME=/^[a-z_][a-z0-9_]*$/;
 
 async function counts(pool:pg.Pool,schema:keyof typeof storeSchemas) {
@@ -73,8 +76,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
   const configuration=snapshot.configuration,profileCount=configuration.runtime_profiles.length;
   const [archive,derived,control]=await Promise.all([counts(stores.archive,'archive'),counts(stores.derived,'derived'),counts(stores.control,'control')]);
   only(archive,{});only(derived,{});
-  only(control,{installation:1,guard_state:1,capture_reconciliation:1,memory_engine_connection:1,owner_autonomy:1,owner_prompts:1,owner_task_settings:1,owner_notion:1,
-    security_policy:1,security_policy_versions:[1,2],runtime_configuration:1,runtime_configuration_versions:1,
+  only(control,{...defaults(storeSchemas.control),installation:1,security_policy:1,security_policy_versions:[1,2],runtime_configuration:1,runtime_configuration_versions:1,
     workflow_owners:families.length,projects:configuration.projects.length,
     project_assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,
     memory_access_settings:configuration.memory_access_settings.length,
