@@ -159,16 +159,17 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 240, usage=busy(2, 12))
         self.assertEqual(self.edits, [], 'it failed again, and a call that worked may have come before that failure')
         self.check(NOW + 900, usage=busy(2, 13))
-        self.assertEqual(self.edits, [{'id': self.sent[0]['id'], 'problems': [line + ' Worked again at 12:15 UTC.'], 'resolved': [True],
-                                       'open': None, 'retry': False, 'edit': True}], 'marked in place and without buttons')
+        self.assertEqual(self.edits, [{'id': self.sent[0]['id'], 'problems': [line], 'resolved': ['Working again since 12:15 UTC'],
+                                       'open': None, 'retry': False, 'edit': True}],
+                         'the line stays as sent, its status goes under it, and the buttons go')
         self.check(NOW + 1020, usage=busy(2, 14))
         self.assertEqual((len(self.edits), len(self.sent)), (1, 1))
         # It fails again within the quiet hour, so no new notice: the ✅ is taken back instead, buttons and all.
         self.check(NOW + 1140, usage=busy(3, 15))
-        self.assertEqual((self.edits[-1]['problems'], self.edits[-1]['resolved'], len(self.sent)), ([line], [False], 1))
+        self.assertEqual((self.edits[-1]['problems'], self.edits[-1]['resolved'], len(self.sent)), ([line], [None], 1))
         self.assertIsNotNone(self.edits[-1]['open'])
         self.check(NOW + 1260, usage=busy(3, 16))
-        self.assertEqual(self.edits[-1]['problems'], [line + ' Worked again at 12:21 UTC.'])
+        self.assertEqual((self.edits[-1]['problems'], self.edits[-1]['resolved']), ([line], ['Working again since 12:21 UTC']))
         self.check(NOW + 3800, usage=busy(3, 17))
         self.assertEqual(len(self.edits), 3)
         self.assertNotIn(self.sent[0]['id'], [notice['id'] for notice in problems._read(self.state)['notices']],
@@ -184,22 +185,22 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 360, monitoring(failed=12))
         dashboard = {'kind': 'url', 'url': 'http://127.0.0.1:8783/#system'}
         self.assertEqual({key: self.edits[-1][key] for key in ('problems', 'resolved', 'open', 'retry')},
-                         {'problems': [lines[0], lines[1] + ' Resolved at 12:06 UTC.'], 'resolved': [False, True], 'open': dashboard, 'retry': False},
+                         {'problems': lines, 'resolved': [None, 'Fixed at 12:06 UTC'], 'open': dashboard, 'retry': False},
                          'Open stays for what is left; Retry failed goes with the tasks it could retry')
         self.check(NOW + 480, monitoring(failed=11, work=False))
         self.check(NOW + 600, monitoring(failed=11, work=False))
         self.assertEqual(len(self.edits), 1, 'unreadable background work clears nothing')
         self.check(NOW + 720, monitoring(failed=11))
         self.check(NOW + 840, monitoring(failed=11))
-        self.assertEqual((self.edits[-1]['resolved'], self.edits[-1]['open']), ([True, True], None))
-        self.assertEqual(self.edits[-1]['problems'][0], lines[0] + ' Resolved at 12:14 UTC.')
+        self.assertEqual((self.edits[-1]['problems'], self.edits[-1]['resolved'], self.edits[-1]['open']),
+                         (lines, ['Fixed at 12:14 UTC', 'Fixed at 12:06 UTC'], None))
 
     def test_a_family_retried_to_zero_counts_its_next_failures_from_zero(self):
         self.check(NOW)
         self.check(NOW + 120, monitoring(retryable=3))
         self.check(NOW + 240, monitoring())
         self.check(NOW + 360, monitoring())
-        self.assertEqual(self.edits[-1]['resolved'], [True], 'all 3 retried and done')
+        self.assertEqual(self.edits[-1]['resolved'], ['Fixed at 12:06 UTC'], 'all 3 retried and done')
         self.check(NOW + 7200, monitoring(retryable=5))
         self.assertEqual(self.sent[-1]['problems'], ['Telegram replies: 5 tasks failed (5 so far).'])
         self.assertEqual(len(self.edits), 1, 'the first notice’s ✅ stays: the new failures have a notice of their own')
@@ -212,9 +213,10 @@ class ProblemNoticeTests(unittest.TestCase):
         lines = self.sent[-1]['problems']
         self.check(NOW + 240, monitoring(failed=12))
         self.check(NOW + 300, monitoring(failed=12))
-        self.assertEqual((self.edits[-1]['resolved'], self.edits[-1]['retry']), ([False, True], False), 'Retry failed ran it, and it was done')
+        self.assertEqual((self.edits[-1]['resolved'], self.edits[-1]['retry']), ([None, 'Fixed at 12:05 UTC'], False),
+                         'Retry failed ran it, and it was done')
         self.check(NOW + 360, monitoring(failed=12, retryable=1))
-        self.assertEqual((self.edits[-1]['problems'], self.edits[-1]['resolved'], self.edits[-1]['retry']), (lines, [False, False], True),
+        self.assertEqual((self.edits[-1]['problems'], self.edits[-1]['resolved'], self.edits[-1]['retry']), (lines, [None, None], True),
                          'it failed again: the line and Retry failed are back')
         self.assertEqual(len(self.sent), 1, 'no new notice within the quiet hour')
         # A down service needs two checks to be news, and to take back its ✅.
@@ -223,12 +225,12 @@ class ProblemNoticeTests(unittest.TestCase):
         service = self.sent[-1]
         self.check(NOW + 720, monitoring(failed=12))
         self.assertEqual(self.edits[-1]['id'], service['id'])
-        self.assertEqual(self.edits[-1]['resolved'], [True])
+        self.assertEqual(self.edits[-1]['resolved'], ['Fixed at 12:12 UTC'])
         edits = len(self.edits)
         self.check(NOW + 840, monitoring(failed=12, services=['hermes']))
         self.assertEqual(len(self.edits), edits, 'one check is a restart, not news')
         self.check(NOW + 960, monitoring(failed=12, services=['hermes']))
-        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (service['id'], [False]))
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (service['id'], [None]))
 
     def test_a_task_that_keeps_failing_and_is_retried_is_not_news_again(self):
         self.check(NOW)
@@ -259,7 +261,8 @@ class ProblemNoticeTests(unittest.TestCase):
         self.edit_outcome = 'not_started'
         self.check(NOW + 360, monitoring())
         self.check(NOW + 480, monitoring())
-        self.assertEqual([edit['problems'] for edit in self.edits], [['Assistant isn’t running as expected. Resolved at 12:06 UTC.']] * 2)
+        self.assertEqual([(edit['problems'], edit['resolved']) for edit in self.edits],
+                         [(['Assistant isn’t running as expected.'], ['Fixed at 12:06 UTC'])] * 2)
         self.edit_outcome = 'done'
         self.check(NOW + 600, monitoring())
         self.check(NOW + 720, monitoring())
@@ -275,7 +278,7 @@ class ProblemNoticeTests(unittest.TestCase):
         self.edit_outcome = 'not_found'
         self.check(NOW + 240, {**down, 'runtime': {'status': {'telegram': 'connected'}}})
         self.check(NOW + 360, {**down, 'runtime': {'status': {'telegram': 'connected'}}})
-        self.assertEqual([edit['resolved'] for edit in self.edits], [[True]], 'a notice with no message to edit is no longer followed')
+        self.assertEqual([edit['resolved'] for edit in self.edits], [['Fixed at 12:04 UTC']], 'a notice with no message to edit is no longer followed')
 
     def test_a_refused_github_app_gives_one_notice(self):
         refused = {**monitoring(), 'github': {'connected': False, 'reconnect': True}}

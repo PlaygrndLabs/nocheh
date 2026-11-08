@@ -90,7 +90,7 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
             await gateway.adapter._bot.initialize()
             notice = {'id': 'c' * 64, 'chat_id': '123', 'text': 'A problem.'}
             self.assertEqual(await gateway.send_notice(notice), {'state': 'done'})
-            edit = {**notice, 'text': '✅ A problem. Resolved at 12:04 UTC.', 'edit': True}
+            edit = {**notice, 'text': '• A problem.\n✅ Fixed at 12:04 UTC', 'edit': True}
             self.assertEqual(await gateway.send_notice(edit), {'state': 'not_started', 'error_code': 'telegram_edit_failed'})
             self.assertEqual(await gateway.send_notice(edit), {'state': 'done', 'edited': True},
                              'the same edit is sent again, not answered from the journal as uncertain')

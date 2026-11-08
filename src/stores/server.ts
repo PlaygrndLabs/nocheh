@@ -82,11 +82,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(req.method==='POST'&&path==='/v1/runtime/owner-notice'){
       // The dashboard's problem check: one message to the owner's private chat, in the owner's wording, sent at most once.
-      // With edit, the same notice is edited in place, its cleared lines marked ✅ (resolved).
+      // With edit, the same notice is edited in place: under each cleared line, its short status such as "Fixed at 12:06 UTC" marked ✅.
       admin(principal);
       const input=object(await readJson(req,64*1024)),id=string(input.id,64),lines=input.problems,resolved=input.resolved,edit=input.edit===true;
       if(!/^[a-f0-9]{64}$/.test(id)||!Array.isArray(lines)||!lines.length||lines.length>20||lines.some(line=>typeof line!=='string'||!line.trim()||line.length>500)||
-        resolved!==undefined&&(!Array.isArray(resolved)||resolved.length!==lines.length||resolved.some(done=>typeof done!=='boolean'))||
+        resolved!==undefined&&(!Array.isArray(resolved)||resolved.length!==lines.length||
+          resolved.some(note=>note!==null&&(typeof note!=='string'||!note.trim()||note.length>120||/[\r\n]/.test(note))))||
         input.edit!==undefined&&typeof input.edit!=='boolean')
         throw new HttpError(400,'invalid_owner_notice');
       const owner=s.access.policy().owner_id;
@@ -96,7 +97,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(open&&(!['web_app','url'].includes(String(open.kind))||typeof open.url!=='string'||open.url.length>512||
         !(open.kind==='web_app'?/^https:\/\/[^\s]+$/:/^https?:\/\/[^\s]+$/).test(open.url)))throw new HttpError(400,'invalid_owner_notice');
       const prompts=await ownerPrompts(s.stores.control),labels=labeledLines(problemButtons,prompts['system.problem_buttons']);
-      const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map((line,index)=>(resolved?.[index]?'✅ ':'• ')+line).join('\n')}).slice(0,4000);
+      const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map((line,index)=>'• '+line+(resolved?.[index]?'\n✅ '+resolved[index]:'')).join('\n')}).slice(0,4000);
       const buttons=[...(open?[{text:labels.open!.slice(0,40),[String(open.kind)]:open.url}]:[]),...(retry?[{text:labels.retry!.slice(0,40),callback:retryButton}]:[])];
       return json(res,200,await call('telegram.notice',{id,chat_id:owner,text,...(buttons.length?{buttons}:{}),...(edit?{edit:true}:{})},30000));
     }

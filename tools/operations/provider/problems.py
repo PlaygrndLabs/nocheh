@@ -352,14 +352,12 @@ def _when(at, since):
     return moment.strftime('%H:%M UTC' if moment.date() == start.date() else '%Y-%m-%d %H:%M UTC')
 
 
-def shown(line, since):
-    """A notice line as the owner sees it: as sent, or with when it cleared."""
+def resolution(line, since):
+    """The short status shown on its own line under a notice line whose problem cleared, or None while it is open."""
     if line.get('done') is None:
-        return line['text']
+        return None
     worked = all(watch['kind'] == 'model' for watch in line['watch'])
-    note = f"{'Worked again' if worked else 'Resolved'} at {_when(line['done'], since)}."
-    room = 500 - len(note) - 1
-    return (line['text'] if len(line['text']) <= room else line['text'][:room - 1].rstrip() + '…') + ' ' + note
+    return f"{'Working again since' if worked else 'Fixed at'} {_when(line['done'], since)}"
 
 
 def follow_up(record, current, seen, now, values, send):
@@ -380,10 +378,13 @@ def follow_up(record, current, seen, now, values, send):
                 line['done'] = None
             elif line.get('done') is None and all([cleared(watch, found, seen, totals) for watch in line['watch']]):
                 line['done'] = now
-        lines = [shown(line, notice['at']) for line in notice['lines']]
-        done = [line.get('done') is not None for line in notice['lines']]
+        texts = [line['text'] for line in notice['lines']]
+        statuses = [resolution(line, notice['at']) for line in notice['lines']]
+        # Each line as the owner sees it: the problem as sent, and under it how it cleared.
+        lines = [[text, mark] for text, mark in zip(texts, statuses)]
+        done = [mark is not None for mark in statuses]
         if lines != notice.get('shown'):
-            body = {'id': notice['id'], 'problems': lines, 'resolved': done, 'open': None if all(done) else opening(values),
+            body = {'id': notice['id'], 'problems': texts, 'resolved': statuses, 'open': None if all(done) else opening(values),
                     'retry': any(line.get('retry') and line.get('done') is None for line in notice['lines']), 'edit': True}
             try:
                 outcome = send(body).get('state')
@@ -477,7 +478,7 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
             return result
         record['sequence'] = sequence + 1
         if outcome == 'done':
-            record['notices'] = [*(record.get('notices') or []), {'id': notice, 'at': now, 'shown': lines, 'lines': [
+            record['notices'] = [*(record.get('notices') or []), {'id': notice, 'at': now, 'shown': [[line, None] for line in lines], 'lines': [
                 {'text': line, 'retry': any(problem['kind'] == 'failed' and problem['retryable'] for problem, _ in group),
                  'watch': [_watch(problem, new) for problem, new in group]} for line, group in zip(lines, groups)]}][-MAX_FOLLOWED:]
     elif report:
