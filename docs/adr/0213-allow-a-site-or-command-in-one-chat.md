@@ -31,9 +31,10 @@ tool or a Telegram message is still decided one by one. Extends
   from its guarded arguments, in Hermes's `rule_key` format:
   `nocheh_browser:<host>` for a web read and `nocheh_shell:<sha256 of the command>`
   for a command. Other operations have none.
-- **Buttons.** A web read's card shows Allow once, Allow here for 12 hours, Always
-  allow this site here and Reject (`na`, `nc`, `nw`, `nd`). A command's card shows
-  Allow once, Always allow this command here and Reject. Everything else keeps
+- **Buttons.** A web read's card shows Allow once, Allow where asked for 12 hours,
+  Always allow this site where asked and Reject (`na`, `nc`, `nw`, `nd`). A command's
+  card shows Allow once, Always allow it where asked and Reject. "Where asked" is the
+  chat or topic of the request, since the card itself is in the owner's private chat. Everything else keeps
   Approve and Reject. The gateway accepts two to four buttons, Approve first and
   Reject last, for one action, two to a row. Only the owner's press decides.
 - **Decision.** Allow here or Always allow approves the operation and inserts the

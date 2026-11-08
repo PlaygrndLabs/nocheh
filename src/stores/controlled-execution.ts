@@ -115,10 +115,17 @@ export class ControlledExecutionRepository {
       if((await db.query("SELECT 1 FROM controlled_actions WHERE state='running' LIMIT 1")).rowCount){await db.query('COMMIT');return {claimed:false};}
       // A relaunched job run's operations use no standing permission (ADR-0207).
       const grant=row.state==='proposed'?(await this.actions.grants(row,db,true))[0]:null;
-      if(row.state==='proposed'&&!grant){await db.query('COMMIT');return {claimed:false};}
+      if(row.state==='proposed'&&!grant) {
+        // One a permission let in got no card. If that permission ended before it ran, it is closed, so its chat hears
+        // that it did not run, rather than left waiting where nobody sees it.
+        if((await db.query("SELECT 1 FROM security_events WHERE effect_id=$1 AND state='allowed' AND permission_id IS NOT NULL",[this.actions.effect(row).id])).rowCount)
+          {const result=await this.blocked(db,row,'permission_no_longer_valid');await db.query('COMMIT');this.closed(row.id);return result;}
+        await db.query('COMMIT');return {claimed:false};
+      }
       const decision=await evaluate(db,this.actions.effect(row),grant?.id??'exact_owner_approval',true);
       if(decision.outcome!=='allow'){const result=await this.blocked(db,row,decision.rule,decision);await db.query('COMMIT');this.closed(row.id);return result;}
-      if(grant)await db.query('UPDATE action_permissions SET remaining=remaining-1,revision=revision+1 WHERE id=$1',[grant.id]);
+      // A use is counted, not a change to what it allows, so a Revoke sent with the shown revision still applies.
+      if(grant)await db.query('UPDATE action_permissions SET remaining=remaining-1 WHERE id=$1',[grant.id]);
       await recordEffect(db,this.actions.effect(row),'claimed',decision,row.source_reference,grant?.id);
       await db.query(`UPDATE controlled_actions SET state='running',actor=$2,permission_id=$3,security_decision=$4,lease_until=now()+interval '120 seconds',
         execution_owner='inngest',owner_epoch=$5,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,b.actor,grant?.id??null,decision,authority.epoch]);

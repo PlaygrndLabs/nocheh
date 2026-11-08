@@ -63,12 +63,12 @@ export const approvalCard='📨 Send to {destination}\n💬 Asked in {origin}\n\
 export const approvalAction='⚙️ Run {kind}\n💬 Asked in {origin}\n\n{arguments}';
 /** One "name: text" line for each button, outcome and notice on an approval card. */
 export const approvalTexts=[
-  'approve: ✅ Approve','reject: ❌ Reject','allow_once: ✅ Allow once','allow_here: 🕒 Allow here for 12 hours','allow_always: 📌 Always allow this site here',
-  'allow_command: 📌 Always allow this command here','stop: 🛑 Stop','stopping_job: 🛑 Stopping the job. Nothing more runs.','job_ended: This job has already ended.',
+  'approve: ✅ Approve','reject: ❌ Reject','allow_once: ✅ Allow once','allow_here: 🕒 Allow where asked, 12 hours','allow_always: 📌 Always allow this site where asked',
+  'allow_command: 📌 Always allow it where asked','stop: 🛑 Stop','stopping_job: 🛑 Stopping the job. Nothing more runs.','job_ended: This job has already ended.',
   'only_stop: Only the person who asked or the owner can stop this job.','private_chat: your private chat','unnamed_group: a Telegram group',
   'topic: › {topic}','unnamed_topic: a topic','general_topic: General',
   'sent: ✅ Approved and sent.','sending: ⏳ Approved. Sending now.','done: ✅ Approved and done.','approved: ✅ Approved.',
-  'allowed_here: ✅ Approved. This site is allowed in this chat for 12 hours.','allowed_always: ✅ Approved. It is allowed in this chat for 30 days; revoke it in the dashboard.',
+  'allowed_here: ✅ Approved. This site is allowed for 12 hours in the chat that asked.','allowed_always: ✅ Approved. It is allowed for 30 days in the chat that asked; revoke it in the dashboard.',
   'failed: ⚠️ Approved, but it did not finish. See the dashboard Inbox.',
   'failed_action: ⚠️ Approved, but it failed: {reason}','unsure: ⚠️ Approved, but Nocheh could not confirm that it finished. Check before you ask again.',
   'not_run: 🚫 It did not run: {reason}',

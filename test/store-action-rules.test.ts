@@ -70,7 +70,7 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     // a connected tool, Approve and Reject only.
     const first=await ask(await message('weather'),'browser',{url:'https://weather.example.com/today'});
     assert.deepEqual(choices(first.card),['na','nc','nw','nd']);
-    assert.match(first.card.buttons[1][0],/Allow here for 12 hours/);
+    assert.match(first.card.buttons[1][0],/Allow where asked, 12 hours/);
     const command=await ask(await message('command'),'shell',{command:'printf made-up-rule'});
     assert.deepEqual(choices(command.card),['na','nw','nd']);
     const tool=await ask(await message('tool'),'mcp',{url:'https://tools.example.com/mcp',operation:'list'});
@@ -80,7 +80,7 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     // A second read of the same site, still waiting, runs too once the owner allows the first here.
     const waiting=await ask(await message('waiting'),'browser',{url:'https://weather.example.com/tomorrow'});
     assert.ok(waiting.card,'without a rule it asks');
-    assert.match(await tap(first,'nc'),/allowed in this chat for 12 hours/);
+    assert.match(await tap(first,'nc'),/allowed for 12 hours in the chat that asked/);
     const [rule]=await rules();
     assert.deepEqual([rule.match_key,rule.kind,rule.space_id,rule.job_id,rule.remaining],['nocheh_browser:weather.example.com','browser',group+'/topic/17',null,1000]);
     const hours=(new Date(rule.expires_at).getTime()-Date.now())/3600000;assert.ok(hours>11.9&&hours<=12,'a session is 12 hours');
@@ -108,14 +108,20 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     await savePolicy(stores.control,owner,{expected_revision:original.revision,policy:{version:1,rules:[...original.policy.rules,{id:key,kind:'browser',fingerprint:blocked.fingerprint,outcome:'deny'}]}});
     try{assert.equal((await run(blocked.id)).state,'rejected');}
     finally{await savePolicy(stores.control,owner,{expected_revision:(await policySnapshot(stores.control)).revision,policy:original.policy});}
-    // Revoking the rule ends it: the next read asks again.
-    await s.controlledActions.revoke(owner,{id:rule.id,operation_id:key+':revoke'});
+    // An address another parser reads as a different host is refused, so no rule can cover it.
+    for(const url of ['https://weather.example.com\\c2vjcmv0.attacker.example/today','https://stra\u00dfe.example/','https://%77eather.example.com/'])
+      await assert.rejects(ask(await message('odd host'),'browser',{url}),{code:'plain_host_required'});
+    // Revoking the rule ends it: one it let in without a card but not yet run is closed, and the next read asks again.
+    // Its uses since it was shown do not change the revision a Revoke is sent with.
+    const pending=await ask(await message('pending'),'browser',{url:'https://weather.example.com/pending'});assert.equal(pending.card,null);
+    await s.controlledActions.revoke(owner,{id:rule.id,expected_revision:rule.revision,operation_id:key+':revoke'});
+    assert.deepEqual(await run(pending.id).then(async()=>{const row=await s.controlledActions.row(pending.id);return [row.state,row.error_code];}),['rejected','permission_no_longer_valid']);
     const revoked=await ask(await message('revoked'),'browser',{url:'https://weather.example.com/today'});assert.ok(revoked.card);
     // Always allow an exact command: the same command runs here without a card for 30 days; another command still asks.
     // The first card's request is from before the edit, so it is asked again.
     assert.match(await tap(command,'nw'),/It did not run: something it used changed/);assert.equal((await rules()).filter(row=>row.kind==='shell').length,0);
     const exactly=await ask(await message('command again'),'shell',{command:'printf made-up-rule'});
-    assert.match(await tap(exactly,'nw'),/allowed in this chat for 30 days/);
+    assert.match(await tap(exactly,'nw'),/allowed for 30 days in the chat that asked/);
     const always=(await rules()).find(row=>row.kind==='shell')!;
     assert.equal(always.match_key,'nocheh_shell:'+digest('printf made-up-rule'));
     const days=(new Date(always.expires_at).getTime()-Date.now())/86400000;assert.ok(days>29.9&&days<=30);

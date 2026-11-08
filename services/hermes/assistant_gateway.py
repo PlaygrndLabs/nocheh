@@ -656,7 +656,7 @@ class AssistantGateway:
             for label,data in body.get('buttons') or []:
                 if not isinstance(label,str) or not 0<len(label)<=40 or not isinstance(data,str) or not re.fullmatch(r'n[adcw][a-f0-9]{56}',data):raise ValueError('invalid_approval')
                 buttons.append(InlineKeyboardButton(label,callback_data=data))
-            # Approve first and Reject last, for one action; an operation may also offer Allow here and Always allow (ADR-0213).
+            # Approve first and Reject last, for one action; an operation may also offer Allow where asked and Always allow (ADR-0213).
             if (not 2<=len(buttons)<=4 or buttons[0].callback_data[1]!='a' or buttons[-1].callback_data[1]!='d'
                     or len({button.callback_data[1] for button in buttons})!=len(buttons) or len({button.callback_data[2:] for button in buttons})!=1):raise ValueError('invalid_approval')
             # Two buttons to a row, so four still fit a phone's width.

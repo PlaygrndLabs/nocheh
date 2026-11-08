@@ -857,8 +857,8 @@ itself at startup.
 - Allow a site or command in one chat, stage B (2026-11-08,
   [ADR-0213](docs/adr/0213-allow-a-site-or-command-in-one-chat.md)): the owner
   asked for Claude Code-style auto-approve built on Hermes's approval words. A web
-  read's card offers Allow once, Allow here for 12 hours, Always allow this site
-  here and Reject; a command's card, Allow once, Always allow this command here and
+  read's card offers Allow once, Allow where asked for 12 hours, Always allow this
+  site where asked and Reject; a command's card, Allow once, Always allow it where asked and
   Reject. A chat rule covers one site or exact command in one chat or topic, and
   survives epochs; deny rules still win. Checks:
   [rules](test/store-action-rules.test.ts), the gateway's

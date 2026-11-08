@@ -40,7 +40,7 @@ export function Allowed() {
           ) : active.length === 0 ? (
             <Empty icon={ShieldCheck} title="Every action asks you first">
               To skip asking for one exact action, turn on “Allow this exact action again” when you approve it. On a
-              Telegram card, “Allow here” and “Always allow” do the same for a site or command in that chat.
+              Telegram card, “Allow where asked” and “Always allow” do the same for a site or command in that chat.
             </Empty>
           ) : (
             <ul className="divide-y divide-line border-t border-line">
