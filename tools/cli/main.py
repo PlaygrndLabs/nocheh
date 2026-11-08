@@ -99,8 +99,10 @@ def main():
         from tools.development.live_dev import main as live_dev
         if args.command == 'dev':
             development_box_token()
-            # Development boxes run this checkout's box server and writer.
-            if result := build_image('box'): return result
+            # Development boxes run this checkout's box server and writer; approved shell
+            # commands and page reads run in the tool image.
+            for name in ('box','tools'):
+                if result := build_image(name): return result
         return live_dev(args.command, rest)
     if args.command == 'test':
         return run_isolated_tests(rest)
@@ -271,7 +273,7 @@ def main():
     # The launcher looks for the box image as it starts, so up builds it before the stack.
     result = build_image('box', env) if args.command == 'up' else 0
     if result == 0: result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
-    for name in {'up':('tools',),'build':('box',)}.get(args.command,()):
+    for name in {'up':('tools',),'build':('box','tools')}.get(args.command,()):
         if result==0: result=build_image(name, env)
 
     return result

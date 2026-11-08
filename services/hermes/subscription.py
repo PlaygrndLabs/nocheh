@@ -19,6 +19,11 @@ RETRY_SECONDS = 2
 # Nocheh joins the texts of one secret check with one of these separators.
 FRAGMENT = '\n<NOCHEH_FRAGMENT>\n'
 FIELD = '\n⟪NOCHEH_FIELD_BOUNDARY⟫\n'
+# The secret check's answer as a schema. Anthropic's OpenAI-compatible endpoint accepts only a
+# strict json_schema, and holds the model to it; other providers keep the prompt's contract alone.
+LITERALS_FORMAT = {"type": "json_schema", "json_schema": {"name": "literals", "strict": True, "schema": {
+    "type": "object", "properties": {"literals": {"type": "array", "items": {"type": "string"}}},
+    "required": ["literals"], "additionalProperties": False}}}
 
 
 class DetectorContractError(ValueError):
@@ -146,7 +151,13 @@ def resolve_credentials(part: str = "reply") -> SubscriptionCredentials:
     return SubscriptionCredentials(key, url, "openai", "chat_completions")
 
 
-def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list):
+def detector_format(base_url: str):
+    """The answer format a secret check asks for: the literals schema on Anthropic, else none."""
+    from urllib.parse import urlsplit
+    return LITERALS_FORMAT if urlsplit(base_url).hostname == "api.anthropic.com" else None
+
+
+def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list, response_format=None):
     """Call the part's configured provider with retries disabled. No tools field: Anthropic's
     OpenAI-compatible endpoint rejects an empty tools list."""
     import httpx
@@ -159,6 +170,7 @@ def _call_subscription(credentials: SubscriptionCredentials, model: str, message
         return client.chat.completions.create(
             model=model, messages=messages, timeout=90,
             extra_body={"reasoning_effort": "low"},
+            **({"response_format": response_format} if response_format else {}),
         )
 
 
@@ -207,7 +219,7 @@ def _detect_once(text, credentials, model, prompts):
                 response = _call_subscription(credentials, model, [
                     {"role": "system", "content": prompt(prompts, "guard.secret_check")},
                     {"role": "user", "content": text},
-                ])
+                ], detector_format(credentials.base_url))
             choice = response.choices[0]
             candidates = detector_reply(choice.message.content, text, getattr(choice, 'finish_reason', None))
             failed = False

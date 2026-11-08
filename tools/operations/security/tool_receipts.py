@@ -5,7 +5,7 @@ import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from tools.operations.security.tool_execution import bounded_execute
+from tools.operations.security.tool_execution import FAILURES,bounded_execute,sandbox_ready
 
 
 def permitted_execute(state,action):
@@ -21,6 +21,9 @@ def permitted_execute(state,action):
             if attempt==2:return {'exit_code':1,'error':'tool_policy_unavailable'}
             time.sleep(1)
     if current['values'].get('nocheh_tools.'+action['kind'])!='on':return {'exit_code':1,'error':'tool_disabled_by_owner'}
+    # A shell command or page read runs in the sandbox image. Without it nothing is sent, so the
+    # owner learns it did not run, not that it may have.
+    if action['kind']!='mcp' and not sandbox_ready():return {'exit_code':1,'error':'tool_sandbox_missing'}
     return bounded_execute(state,action)
 
 
@@ -69,10 +72,12 @@ def tick(state,api,actor,executor=permitted_execute,action_id=None,workflow=None
         ready=api.call('/v1/tools/start',{**body,**(workflow or {})})
         result=executor(state,action) if ready.get('started') else {'exit_code':1,'error':'security_start_denied'}
         body.update(state='failed' if result.get('exit_code',0)!=0 or result.get('limit') else 'done',result=result)
-    except Exception:
+    except Exception as error:
         # A timeout or response failure may follow an already-sent remote request.
-        # Do not infer safe retry from the exception class or response body.
-        body.update(state='ambiguous',result={'error':'execution_outcome_unconfirmed'})
+        # Do not infer safe retry from the exception class or response body; keep
+        # only its fixed failure code, to say why.
+        cause=str(error) if isinstance(error,(RuntimeError,TimeoutError)) and str(error) in FAILURES else None
+        body.update(state='ambiguous',result={'error':'execution_outcome_unconfirmed',**({'cause':cause} if cause else {})})
     with receipt_lock(state):
         path=Path(state)/'admin/tools/receipts'/(action['id']+'.json');atomic(path,body)
         api.call('/v1/tools/finish',body);path.unlink()

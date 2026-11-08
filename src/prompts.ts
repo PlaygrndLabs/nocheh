@@ -74,7 +74,7 @@ export const approvalTexts=[
   'reason_sign_in: Notion needs you to sign in again. Reconnect it in the dashboard.','reason_unreachable: Notion could not be reached. Try again later.',
   'reason_turned_off: it is turned off in Settings.','reason_refused: the service answered with an error. Ask Nocheh what went wrong.',
   'reason_changed: something it used changed after it was asked. Ask again if you still want it.','reason_cancelled: it was cancelled.',
-  'reason_stopped: the job was stopped.','reason_other: see the dashboard Inbox.',
+  'reason_stopped: the job was stopped.','reason_sandbox: the tool sandbox is not installed on this computer. Run ./bin/nocheh up, or start make dev again, to install it.','reason_other: see the dashboard Inbox.',
   'from_job: the job “{title}”','from_schedule: a scheduled task',
   'list: 📋 The job “{title}” asks to make these changes ({count}).','list_part: Card {part} of {parts}.','list_note: Approve or Reject covers exactly the changes on this card.',
   'list_long: {count} more cannot be shown on a card. Review them in the dashboard Inbox.','list_inbox: 📋 The job “{title}” asks to make changes that cannot be shown on a card ({count}). Review them in the dashboard Inbox.','list_done: ✅ Approved and done: all {count} changes.',
@@ -85,7 +85,7 @@ export const approvalTexts=[
   'changed: This request changed or no longer exists. Review it in the dashboard Inbox.',
   'decided: This request was already decided or can no longer change. Review it in the dashboard Inbox.'].join('\n');
 export type ApprovalText='approve'|'reject'|'private_chat'|'unnamed_group'|'topic'|'unnamed_topic'|'general_topic'|'sent'|'sending'|'done'|'approved'|'failed'|'rejected'|'rejected_action'|'cancelled'|
-  'failed_action'|'unsure'|'not_run'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_other'|
+  'failed_action'|'unsure'|'not_run'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
   'from_job'|'from_schedule'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
