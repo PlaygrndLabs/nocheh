@@ -77,9 +77,9 @@ function WaitingList({filter}: {filter: DecisionKind | null}) {
         };
       case 'entity':
         return {
-          title: identityTitle(undefined, item.title),
+          title: identityTitle(item.subject_kind ?? undefined, item.title),
           summary: item.summary ?? 'Nocheh noticed this name in a conversation.',
-          where: '',
+          where: item.also_called?.length ? 'Also called ' + item.also_called.join(', ') : '',
         };
       default:
         return {
@@ -186,7 +186,7 @@ function WaitingList({filter}: {filter: DecisionKind | null}) {
                       {(where || !ordinary.has(item.state)) && (
                         <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
                           {!ordinary.has(item.state) && <Badge tone={tone}>{label}</Badge>}
-                          {where && <span>{where}</span>}
+                          {where && <span dir="auto">{where}</span>}
                         </span>
                       )}
                     </span>

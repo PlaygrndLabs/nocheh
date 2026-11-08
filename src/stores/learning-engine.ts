@@ -22,16 +22,24 @@ const queued=`EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='memory_re
   AND w.state IN ('queued','waiting','running','retryable_failed'))`;
 /** Honcho rejects a longer reasoning query before any model call. */
 const honchoQueryLimit=10000;
-/** The learning query within Honcho's limit. Other evidence keeps only its text first, then rules
+/** The learning query within Honcho's limit. Waiting cards give up their other names and then leave
+ * from the end first, as they only help join repeat names. Then other evidence keeps only its text, then rules
  * are left out from the end, then the trigger keeps only its text, then other evidence is left out from
  * the end; anything longer cannot be asked. The instruction lists the evidence the query still shows. */
 export function learningQuery(instruction:string|((citable:string[])=>string),context:Pick<PreparedLearningContext,'source'|'space'|'projects'|'organization_context'|'entities'|'observations'|'rules'|'limitations'>):string {
   const textOnly=(item:PreparedLearningContext['observations'][number])=>({...item,value:{text:(item.value as {text?:unknown})?.text??null}});
-  let observations=context.observations,rules=context.rules;const limitations=[...context.limitations];
+  let observations=context.observations,rules=context.rules,waiting=context.entities.waiting;const limitations=[...context.limitations];
+  // Contexts saved before waiting cards carry none and keep their exact query.
+  const entities=()=>waiting===undefined?context.entities:{...context.entities,waiting};
   const query=()=>(typeof instruction==='string'?instruction:instruction(observations.map(item=>item.source.id)))+
-    `\n${canonical({space:context.space,projects:context.projects,organization_context:context.organization_context,entities:context.entities,observations,rules,limitations})}`;
+    `\n${canonical({space:context.space,projects:context.projects,organization_context:context.organization_context,entities:entities(),observations,rules,limitations})}`;
   const fits=()=>Array.from(query()).length<=honchoQueryLimit;
   if(fits())return query();
+  if(waiting?.length) {
+    limitations.push('waiting_omitted');waiting=waiting.map(card=>({...card,also_called:[]}));
+    while(waiting.length&&!fits())waiting=waiting.slice(0,-1);
+    if(fits())return query();
+  }
   observations=observations.map(item=>item.source.id===context.source.id?item:textOnly(item));limitations.push('other_evidence_text_only');
   if(!fits()&&rules.length){limitations.push('rules_omitted');while(rules.length&&!fits())rules=rules.slice(0,-1);}
   if(!fits()){observations=observations.map(item=>item.source.id===context.source.id?textOnly(item):item);limitations.push('trigger_text_only');}
@@ -53,7 +61,10 @@ export class ContextualLearningRepository {
     const context=await this.contexts.prepare(source,binding);
     const owner=this.contexts.access.policy().owner_id;
     if(audience!==(context.space===owner?'owner':context.space))throw new HttpError(403,'learning_workspace_scope_mismatch');
-    const {binding:_,rules:_rules,rule_ids:_ruleIds,...inputs}=context;
+    // Waiting cards change as learning and the owner work through them; like rules, they never make a
+    // finished message learn again.
+    const {binding:_,rules:_rules,rule_ids:_ruleIds,entities:{waiting:_waiting,...entities},limitations,...rest}=context;
+    const inputs={...rest,entities,limitations:limitations.filter(code=>code!=='waiting_suggestion_limit')};
     return {context,contextHash:digest(canonical([protocol,audience,inputs])),id:digest(canonical([protocol,workspace,context]))};
   }
   private async record(source:SourceReference,id:string,context:PreparedLearningContext,binding:GuardBinding) {

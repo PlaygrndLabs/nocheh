@@ -8,7 +8,7 @@ import {LearnedMemoryRepository,type PreparedDependency} from './learned.js';
 import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
 import {RECORDINGS} from './reprocessing.js';
-import {EntityRepository,type EntityContext,type KnownPeople} from './entities.js';
+import {EntityRepository,type EntityContext,type KnownPeople,type WaitingCards} from './entities.js';
 
 export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner'|'owner_guard';id:string;revision:number;text:string};
 export interface PreparedLearningContext {
@@ -17,7 +17,7 @@ export interface PreparedLearningContext {
   observations:{source:SourceReference;value:unknown;derivatives:{kind:string;id:string;value:unknown}[]}[];
   // Older persisted contexts predate rule_inputs; fresh preparation always supplies it.
   rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];rule_inputs?:LearningRuleInput[];projects:{id:string;name:string}[];
-  entities:EntityContext&KnownPeople;
+  entities:EntityContext&KnownPeople&WaitingCards;
   organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean};projects:{id:string;name:string;revision:number}[]};
   limitations:string[];
 }
@@ -78,13 +78,20 @@ export class LearningContextRepository {
     const all=(await this.access.stores.control.query("SELECT id,name,description,state,revision FROM projects WHERE state='active' ORDER BY id LIMIT 101")).rows;
     if(all.length>100)limitations.push('project_catalog_limit');
     const corpus=(evidence.find(item=>item.reference.id===source.id)?.text??'').toLocaleLowerCase(),mentioned=[];
-    for(const candidate of all.slice(0,100))if(candidate.id!==project?.id&&candidate.name.trim()&&corpus.includes(candidate.name.toLocaleLowerCase())) {
-      const matches=all.filter(other=>other.name.toLocaleLowerCase()===candidate.name.toLocaleLowerCase());
-      if(matches.length===1){projects.push({id:candidate.id,name:candidate.name,revision:candidate.revision});mentioned.push(candidate);}
+    // A project is found by its name or by any other name the owner confirmed for it. A name
+    // that more than one project uses names none of them.
+    const catalog=all.slice(0,100),aliases=await this.entities.projectAliases(catalog.map(candidate=>candidate.id)),owners=new Map<string,Set<string>>();
+    const names=(candidate:{id:string;name:string})=>[...new Set([...(candidate.name.trim()?[candidate.name.toLocaleLowerCase()]:[]),
+      ...(aliases.get(candidate.id)??[]).map(alias=>alias.toLocaleLowerCase()).filter(alias=>alias.trim())])];
+    for(const candidate of catalog)for(const name of names(candidate))owners.set(name,(owners.get(name)??new Set()).add(candidate.id));
+    for(const candidate of catalog)if(candidate.id!==project?.id) {
+      const used=names(candidate).filter(name=>corpus.includes(name));if(!used.length)continue;
+      if(used.some(name=>owners.get(name)!.size===1)){projects.push({id:candidate.id,name:candidate.name,revision:candidate.revision});mentioned.push(candidate);}
       else limitations.push('ambiguous_project_reference');
     }
-    const local=await this.entities.context(source,mentioned,corpus);
-    const entities={...local,...await this.entities.knownPeople(evidence.map(item=>item.reference),local.speaker)};
+    const local=await this.entities.context(source,mentioned,corpus),waiting=await this.entities.waiting(principal,binding);
+    if(waiting.partial)limitations.push('waiting_suggestion_limit');
+    const entities={...local,...await this.entities.knownPeople(evidence.map(item=>item.reference),local.speaker),waiting:waiting.waiting};
     const candidates=(await this.access.stores.derived.query(`SELECT e.id,v.dependencies,g.active_revision AS rule_guard_revision,r.author AS rule_guard_author
       FROM learned_entries e JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
       LEFT JOIN guard_sources g ON g.id='derived_artifacts:'||v.derived_id

@@ -40,6 +40,8 @@
  {"path": "/v1/entities/claims/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/history", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/decide", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/fold", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/split", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/merge", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/unmerge", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/rename", "owner_storage": true, "allowed_path": true},

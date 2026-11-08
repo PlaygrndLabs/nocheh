@@ -8,6 +8,7 @@ import type {TelegramChatRepository} from './telegram-chats.js';
 import type {TelegramTopicRepository} from './telegram-topics.js';
 import type {StorePools} from './connections.js';
 import {carriesForward} from './guards.js';
+import {foldedNames} from './entities.js';
 import type {ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
@@ -52,11 +53,12 @@ export function actionSummary(kind:unknown,args:unknown):string|null {
 }
 // An unclear outcome waits until the owner closes it or, for a page read, until it closes itself (ADR-0218).
 const decisionTables:Record<DecisionKind,string>={controlled_action:'controlled_actions',telegram_action:'telegram_action_requests',memory_access:'memory_access_requests',entity:'memory_entity_suggestions',knowledge:'knowledge_proposals'};
-const unionDecisions=`SELECT 'controlled_action'::text AS kind,id,state,revision,created_at,space_id AS source_scope,NULL::text AS destination,fingerprint,kind AS title,NULL::text AS note FROM controlled_actions WHERE state='proposed' OR state='ambiguous' AND resolution IS NULL
-  UNION ALL SELECT 'telegram_action',id,state,revision,created_at,space_id,destination,fingerprint,'Send Telegram message',NULL FROM telegram_action_requests WHERE state='proposed' OR state='ambiguous' AND resolution IS NULL
-  UNION ALL SELECT 'memory_access',id,state,revision,created_at,source_scope,destination,NULL,'Share a specific fact',proposal_reference->>'id' FROM memory_access_requests WHERE state='pending' AND expires_at>now()
-  UNION ALL SELECT 'entity',id,status,revision,created_at,NULL,NULL,NULL,name,reason FROM memory_entity_suggestions WHERE status='pending'
-  UNION ALL SELECT 'knowledge',id,state,revision,created_at,source_scope,NULL,NULL,kind,NULL FROM knowledge_proposals WHERE state IN ('review','stale','failed')`;
+// A name folded into another card waits on that card, not as its own item.
+const unionDecisions=`SELECT 'controlled_action'::text AS kind,id,state,revision,created_at,space_id AS source_scope,NULL::text AS destination,fingerprint,kind AS title,NULL::text AS note,NULL::text AS subject_kind FROM controlled_actions WHERE state='proposed' OR state='ambiguous' AND resolution IS NULL
+  UNION ALL SELECT 'telegram_action',id,state,revision,created_at,space_id,destination,fingerprint,'Send Telegram message',NULL,NULL FROM telegram_action_requests WHERE state='proposed' OR state='ambiguous' AND resolution IS NULL
+  UNION ALL SELECT 'memory_access',id,state,revision,created_at,source_scope,destination,NULL,'Share a specific fact',proposal_reference->>'id',NULL FROM memory_access_requests WHERE state='pending' AND expires_at>now()
+  UNION ALL SELECT 'entity',id,status,revision,created_at,NULL,NULL,NULL,name,reason,kind FROM memory_entity_suggestions WHERE status='pending' AND merged_into IS NULL
+  UNION ALL SELECT 'knowledge',id,state,revision,created_at,source_scope,NULL,NULL,kind,NULL,NULL FROM knowledge_proposals WHERE state IN ('review','stale','failed')`;
 
 /** Owner projections read saved records only. They never reconcile, refresh a provider, or grant authority. */
 export class OwnerSupervisionRepository {
@@ -170,7 +172,9 @@ export class OwnerSupervisionRepository {
     const fingerprint=row.fingerprint??null;
     return {kind,id,title:row.title??row.name??(kind==='knowledge'?'Knowledge change':kind.replaceAll('_',' ')),state,revision,
       source_scope:row.source_scope??row.space_id??null,destination:row.destination??null,fingerprint,summary:null as string|null,
-      created_at:iso(row.created_at),review:{...review,expected_revision:revision,fingerprint}};
+      created_at:iso(row.created_at),review:{...review,expected_revision:revision,fingerprint},
+      // A person or project card says which it is, and lists the other names folded into it.
+      ...(kind==='entity'?{subject_kind:row.subject_kind??null,also_called:[] as string[]}:{})};
   }
 
   /** Fill each item's one-line summary from its saved record; an unreadable record leaves it empty. */
@@ -179,9 +183,10 @@ export class OwnerSupervisionRepository {
     const proposals=rows.filter(row=>row.kind==='memory_access'&&row.note).map(row=>String(row.note));
     const wording=new Map(proposals.length?(await this.stores.derived.query('SELECT id,content FROM derived_artifacts WHERE id=ANY($1::text[])',[proposals])).rows
       .map(row=>[row.id,clean(row.content.toString())]):[]);
+    const folded=await foldedNames(this.stores.control,items.filter(item=>item.kind==='entity').map(item=>item.id));
     await Promise.all(items.map(async(item,index)=>{
       const row=rows[index];
-      if(item.kind==='entity')item.summary=clean(row.note);
+      if(item.kind==='entity'){item.summary=clean(row.note);item.also_called=(folded.get(item.id)??[]).map(name=>name.name);}
       else if(item.kind==='memory_access')item.summary=wording.get(String(row.note))??null;
       else if(item.kind==='controlled_action'||item.kind==='telegram_action') {
         const detail=await (item.kind==='controlled_action'?this.services.controlledActions:this.services.telegramActions).inspect(owner,item.id).catch(()=>null) as any;
@@ -214,6 +219,7 @@ export class OwnerSupervisionRepository {
     if(kind==='controlled_action')detail=await this.services.controlledActions.inspect(principal,id);
     else if(kind==='telegram_action')detail=await this.services.telegramActions.inspect(principal,id);
     else if(kind==='knowledge')detail=await this.services.knowledge.proposal(principal,id);
+    else if(kind==='entity')detail={...row,also_called:(await foldedNames(this.stores.control,[id])).get(id)??[]};
     else if(kind==='memory_access') {
       const artifact=(await this.stores.derived.query('SELECT content,content_hash,provenance FROM derived_artifacts WHERE id=$1',[row.proposal_reference.id])).rows[0];
       if(!artifact||digest(artifact.content)!==artifact.content_hash||artifact.content_hash!==row.proposal_reference.input_hash)throw new HttpError(409,'memory_proposal_changed');
@@ -227,7 +233,7 @@ export class OwnerSupervisionRepository {
     // Organization revalidates relevant evidence at application; unrelated learning epochs do not invalidate that review.
     const stale=changed||row.binding&&!carried&&(!guard||row.binding.generation!==guard.generation||
       (row.binding.mode!==undefined&&row.binding.mode!==guard.mode)||kind!=='knowledge'&&Number(row.binding.epoch)!==Number(guard.epoch));
-    return {...this.summary({...row,kind,title:kind==='knowledge'?row.kind:row.name}),detail,observed_at:new Date().toISOString(),
+    return {...this.summary({...row,kind,title:kind==='knowledge'?row.kind:row.name,subject_kind:kind==='entity'?row.kind:null}),detail,observed_at:new Date().toISOString(),
       observation:stale?'stale':'current',note:'Review commands recheck the exact revision and current authorization before applying a decision.'};
   }
 

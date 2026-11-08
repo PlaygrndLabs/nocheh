@@ -63,6 +63,9 @@ export type DecisionItem = {
   fingerprint?: string | null;
   /** One line on what it would do, from the server; null when the record can't say. */
   summary?: string | null;
+  /** A person or project card: which one it is, and the other names folded into it. */
+  subject_kind?: string | null;
+  also_called?: string[];
   created_at: string;
 };
 export type DecisionList = {

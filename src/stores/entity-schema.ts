@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS memory_entity_suggestions (
  revision integer NOT NULL DEFAULT 1 CHECK(revision>0),created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS memory_entity_suggestions_status ON memory_entity_suggestions(status,id);
+-- A name folded into another card for the same person or project waits there, not as its own card.
+ALTER TABLE memory_entity_suggestions ADD COLUMN IF NOT EXISTS merged_into text REFERENCES memory_entity_suggestions(id);
+CREATE INDEX IF NOT EXISTS memory_entity_suggestions_merged ON memory_entity_suggestions(merged_into,created_at,id) WHERE merged_into IS NOT NULL;
 `;
 
 export const derivedEntitySchema=`
