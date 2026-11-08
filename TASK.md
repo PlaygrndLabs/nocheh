@@ -35,6 +35,15 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
 
+Secret check connection failures (2026-11-08): the owner's installation counted
+secret-check calls that failed with no provider status, 12 on one model and, after a
+switch, 26 on the next, with no refusals and no hidden texts; in the same window a
+memory-search call to another provider stalled and failed. They were dropped
+or stalled connections, not the model. Each check opened a new HTTPS connection;
+checks now reuse the process's open connections to the provider
+([check](services/hermes/test_subscription_detector.py)). Pending: a failed secret
+check on a running installation that names its cause.
+
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
 task table against a group chat): long tool results are read in parts

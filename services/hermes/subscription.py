@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 import os
 import sys
+import threading
 import time
 
 # The security broker relays every isolated model call to the configured reply provider.
@@ -16,6 +17,9 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1"
 FIXTURE_URL = "http://model-fixture:8317/v1"
 # Wait before the secret check's one retry after a provider server error.
 RETRY_SECONDS = 2
+# Provider clients by address and key, shared by every check in this process.
+CLIENTS = {}
+CLIENTS_LOCK = threading.Lock()
 # Nocheh joins the texts of one secret check with one of these separators.
 FRAGMENT = '\n<NOCHEH_FRAGMENT>\n'
 FIELD = '\n⟪NOCHEH_FIELD_BOUNDARY⟫\n'
@@ -157,21 +161,36 @@ def detector_format(base_url: str):
     return LITERALS_FORMAT if urlsplit(base_url).hostname == "api.anthropic.com" else None
 
 
-def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list, response_format=None):
-    """Call the part's configured provider with retries disabled. No tools field: Anthropic's
-    OpenAI-compatible endpoint rejects an empty tools list."""
+def _client(credentials):
+    """The provider client for one address and key, kept for the life of the process. Checks reuse
+    its open connections: a new HTTPS connection for every check costs a handshake each time, and on
+    a shaky network each new connection is one more chance to fail."""
     import httpx
     from openai import OpenAI
 
-    with OpenAI(
-        api_key=credentials.access_token, base_url=credentials.base_url,
-        http_client=httpx.Client(trust_env=False), timeout=90, max_retries=0,
-    ) as client:
-        return client.chat.completions.create(
-            model=model, messages=messages, timeout=90,
-            extra_body={"reasoning_effort": "low"},
-            **({"response_format": response_format} if response_format else {}),
-        )
+    key = (credentials.base_url, credentials.access_token)
+    with CLIENTS_LOCK:
+        client = CLIENTS.get(key)
+        if client is None:
+            if len(CLIENTS) >= 8:
+                # Settings changes restart the process, so only tests get here; a call still
+                # running on a dropped client finishes on it.
+                CLIENTS.clear()
+            client = CLIENTS[key] = OpenAI(
+                api_key=credentials.access_token, base_url=credentials.base_url,
+                http_client=httpx.Client(trust_env=False), timeout=90, max_retries=0,
+            )
+        return client
+
+
+def _call_subscription(credentials: SubscriptionCredentials, model: str, messages: list, response_format=None):
+    """Call the part's configured provider with retries disabled. No tools field: Anthropic's
+    OpenAI-compatible endpoint rejects an empty tools list."""
+    return _client(credentials).chat.completions.create(
+        model=model, messages=messages, timeout=90,
+        extra_body={"reasoning_effort": "low"},
+        **({"response_format": response_format} if response_format else {}),
+    )
 
 
 def detect_literals(text: str, credentials: SubscriptionCredentials, model: str, prompts=None):
