@@ -27,7 +27,7 @@ class AssistantResultTests(unittest.TestCase):
                          {'state':'done','text':'','session_id':'session'})
 
     def test_the_reply_is_the_agents_own_text(self):
-        # Memory status reaches the agent as context; nothing is added to what it wrote (ADR-0220).
+        # Memory status reaches the agent as context; nothing is added to what it wrote (ADR-0221).
         answer='A synthetic answer mentions [NO_REPLY] as text.'
         self.assertEqual(conversation_result({'completed':True,'final_response':answer},'session'),
                          {'state':'done','text':answer,'session_id':'session'})

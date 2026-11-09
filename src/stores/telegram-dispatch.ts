@@ -59,7 +59,7 @@ export function interruptedJournalDisposition(value:unknown):JournalDisposition 
  * no numeric Telegram ID is ever included. The owner's own message ends with
  * a separate `[the owner]` tag, from the captured sender ID. A name loses its
  * brackets, and the runtime shows a look-alike line in message text as text,
- * so no one else can write it (ADR-0221).
+ * so no one else can write it (ADR-0222).
  */
 export function speakerLine(original:any,representation:any,owner?:string|null):string|null {
   const sender=representation?.message?.from??{},date=original?.message?.date,from=original?.message?.from?.id;

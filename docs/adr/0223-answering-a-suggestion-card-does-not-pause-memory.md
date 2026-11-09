@@ -1,4 +1,4 @@
-# ADR-0222: Answering a suggestion card does not pause long-term memory
+# ADR-0223: Answering a suggestion card does not pause long-term memory
 
 <status>
 Accepted on 2026-11-09. The owner pressed Remember on a project card, and a

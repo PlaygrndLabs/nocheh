@@ -394,7 +394,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     assert.match(correctedRecall.sources[0]!.text,/Checkmark means reviewed, not done\./);
     assert.equal(JSON.stringify(await services.memory.recall(fresh,'What does another symbol mean?')).includes('owner_corrected_interpretation'),false,
       'an unrelated question cannot receive the correction');
-    // Answering a suggestion card or renaming a person makes no write invalid, so neither holds Honcho (ADR-0222).
+    // Answering a suggestion card or renaming a person makes no write invalid, so neither holds Honcho (ADR-0223).
     const card=await services.entities.suggest('person','Card Person',source,'A person named in this chat.');
     const answered:any=await services.entities.decide(owner,card.id,{decision:'confirm',expected_revision:card.revision,operation_id:key+':remember'});
     await services.entities.rename(owner,answered.entity.id,{name:'Renamed Person',expected_revision:answered.entity.revision,operation_id:key+':rename'});

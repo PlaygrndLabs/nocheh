@@ -1,4 +1,4 @@
-# ADR-0220: Limited memory is the agent's context, never added reply text
+# ADR-0221: Limited memory is the agent's context, never added reply text
 
 <status>
 Accepted on 2026-11-09 after a group reply ended with the fixed line "Memory

@@ -1,4 +1,4 @@
-# ADR-0221: A group turn knows when the owner is speaking
+# ADR-0222: A group turn knows when the owner is speaking
 
 <status>
 Accepted on 2026-11-09 after the owner asked for a web read in a group and the

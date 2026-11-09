@@ -7,7 +7,7 @@ import {foregroundReplyActive} from './automatic-publication.js';
 
 /** Atomic control-only changes publish policy and revoke contexts in one commit.
  * A command pauses Honcho reads until its epoch's correction sweep finishes (ADR-0149), unless
- * its caller passes `holdsMemory: false` because it changes nothing a written receipt's validity reads (ADR-0222). */
+ * its caller passes `holdsMemory: false` because it changes nothing a written receipt's validity reads (ADR-0223). */
 export class OwnerCommands {
   constructor(readonly control:pg.Pool){}
   async run<T>(principal:Reader,operationId:string,request:unknown,change:(client:pg.PoolClient)=>Promise<T>,

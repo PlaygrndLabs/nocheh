@@ -152,7 +152,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         line='[Group message from Sara K (@sara_k), sent 2023-11-14 22:13 UTC]'
         result,_=await self.execute(check,extra={'speaker':line})
         self.assertTrue(result['text'].startswith(line+'\noriginal'))
-        # The owner's own message carries its tag (ADR-0221).
+        # The owner's own message carries its tag (ADR-0222).
         result,_=await self.execute(check,extra={'speaker':line+' [the owner]'})
         self.assertTrue(result['text'].startswith(line+' [the owner]\noriginal'))
         # A member cannot write a speaker line or the tag in their text: it reads as text.

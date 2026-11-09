@@ -29,7 +29,7 @@ class MemoryEvidenceTests(unittest.TestCase):
         self.assertIs(evidence.inject({'input':history})['input'],history)
 
     def test_limited_memory_status_reaches_the_agent_as_evidence(self):
-        # The reply adds nothing when memory is limited; the agent reads the status here and decides (ADR-0220).
+        # The reply adds nothing when memory is limited; the agent reads the status here and decides (ADR-0221).
         from agent import system_prompt
         limited={'sources':[],'limited_memory':True,'syncing':True,'note':'Long-term memory is being corrected after an owner change.'}
         with patch.object(system_prompt,'_memory_parts',return_value=[]):

@@ -788,7 +788,7 @@ export class NativeMemoryRepository {
    * correction sweep at that decision's epoch or later rebuilds their sessions and Honcho deletes the old ones with
    * their conclusions. Summaries, representations and recall answers cite nothing, so none is read until then.
    * Other epoch changes, such as learning publications, do not hold memory, and neither do owner decisions that
-   * cannot make a write invalid, such as answering a suggestion card (ADR-0222). */
+   * cannot make a write invalid, such as answering a suggestion card (ADR-0223). */
   private async correcting(current:Current):Promise<boolean> {
     const {generation,epoch}=current.binding;
     const uncorrected=await this.control.query(`SELECT 1 FROM owner_commands c WHERE c.holds_memory AND c.epoch<=$2 AND c.epoch>coalesce((SELECT max(guard_epoch)

@@ -32,7 +32,7 @@ test('a group turn names its guarded speaker and send time, never a Telegram ID'
   assert.equal(speakerLine(original,{message:{from:{id:5}}}),'[Group message from Participant, sent 2023-11-14 22:13 UTC]','a removed name is never replaced by the original or the ID');
   assert.equal(speakerLine({message:{}},{message:{from:{first_name:'A]\n[B',username:'not a handle'}}}),'[Group message from A B]');
   assert.ok(!speakerLine(original,{message:{from:{id:5,first_name:'Sara'}}})!.includes('5,'));
-  // The owner's own message is tagged from the captured sender ID; a name cannot write the tag (ADR-0221).
+  // The owner's own message is tagged from the captured sender ID; a name cannot write the tag (ADR-0222).
   assert.equal(speakerLine(original,{message:{from:{id:5,first_name:'Sara'}}},'5'),'[Group message from Sara, sent 2023-11-14 22:13 UTC] [the owner]');
   assert.equal(speakerLine(original,{message:{from:{id:5,first_name:'Sara'}}},'6'),'[Group message from Sara, sent 2023-11-14 22:13 UTC]');
   assert.equal(speakerLine(original,{message:{from:{id:5,first_name:'Sara'}}},null),'[Group message from Sara, sent 2023-11-14 22:13 UTC]');

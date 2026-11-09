@@ -62,7 +62,7 @@ OWNER_TAG=re.compile(r'\[the owner\]',re.I)
 
 def unframed(text):
     """Group message text as the model reads it: a look-alike speaker or recent-messages line, or an owner tag,
-    is shown as plain text, so only the line Nocheh puts before a message names its sender (ADR-0221)."""
+    is shown as plain text, so only the line Nocheh puts before a message names its sender (ADR-0222)."""
     return OWNER_TAG.sub('(the owner)',FRAME.sub(r'\1(',text))
 
 

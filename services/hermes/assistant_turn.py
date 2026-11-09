@@ -131,7 +131,7 @@ RUNS=[]
 
 def conversation_result(result, session_id):
     """Only explicit native completion with an answer or silence marker succeeds.
-    The reply is the agent's own text: memory status reaches the agent as context, never as added reply text (ADR-0220)."""
+    The reply is the agent's own text: memory status reaches the agent as context, never as added reply text (ADR-0221)."""
     if (not isinstance(result,dict) or result.get('completed') is not True
             or result.get('failed') or result.get('interrupted')):
         return {'state':'failed','error_code':'model_unavailable'}
