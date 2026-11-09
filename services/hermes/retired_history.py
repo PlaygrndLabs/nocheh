@@ -116,7 +116,7 @@ def _lookup(lookup,event_ids):
 
 
 def _memory_writes(row):
-    """Entry text that a stored memory tool call added or wrote."""
+    """Entry text that a stored memory tool call added or wrote, as one top-level change or operations[]."""
     try:calls=json.loads(row.get('tool_calls') or '[]')
     except ValueError:return set()
     written=set()
@@ -125,8 +125,16 @@ def _memory_writes(row):
         if not isinstance(function,dict) or function.get('name')!='memory':continue
         try:arguments=json.loads(function.get('arguments') or '{}')
         except (TypeError,ValueError):continue
-        if isinstance(arguments,dict) and isinstance(arguments.get('content'),str) and arguments['content'].strip():
-            written.add(arguments['content'].strip())
+        if not isinstance(arguments,dict):continue
+        # Stored arguments are the model's raw ones; Hermes parses a JSON string and wraps a single object before running.
+        operations=arguments.get('operations')
+        if isinstance(operations,str):
+            try:operations=json.loads(operations)
+            except ValueError:operations=None
+        operations=[operations] if isinstance(operations,dict) else operations if isinstance(operations,list) else []
+        for change in [arguments]+[item for item in operations if isinstance(item,dict) and item.get('action') in ('add','patch')]:
+            text=change.get('content') or change.get('new_text')
+            if isinstance(text,str) and text.strip():written.add(text.strip())
     return written
 
 
