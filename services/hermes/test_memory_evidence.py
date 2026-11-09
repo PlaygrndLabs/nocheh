@@ -28,6 +28,19 @@ class MemoryEvidenceTests(unittest.TestCase):
             finally:restore()
         self.assertIs(evidence.inject({'input':history})['input'],history)
 
+    def test_limited_memory_status_reaches_the_agent_as_evidence(self):
+        # The reply adds nothing when memory is limited; the agent reads the status here and decides (ADR-0220).
+        from agent import system_prompt
+        limited={'sources':[],'limited_memory':True,'syncing':True,'note':'Long-term memory is being corrected after an owner change.'}
+        with patch.object(system_prompt,'_memory_parts',return_value=[]):
+            restore=evidence.install(limited)
+            try:
+                system_prompt._memory_parts(None)
+                result=evidence.inject({'messages':[{'role':'user','content':'current request'}]})
+                self.assertEqual(json.loads(result['messages'][0]['content'][len(evidence.PREFIX):])['entries'],
+                                 [{'source':'nocheh.memory.recall','content':limited}])
+            finally:restore()
+
     def test_anthropic_evidence_comes_before_the_conversation_and_holds_through_a_turn(self):
         # The model sees the evidence where the OpenAI-compatible route puts it, before the
         # conversation and the current request. Within a turn it does not change, so each

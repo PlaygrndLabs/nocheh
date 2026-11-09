@@ -161,7 +161,7 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
     // When the owner asks in the group, the reply tells them their card is in their private chat.
     const own=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'shell',arguments:{command:'printf mine'}}));
-    assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner\..*tell them directly, briefly, that the card is waiting in their private chat and that the answer will follow here/);
+    assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner, so the decision is theirs:.*answer them as "you", briefly: their card is waiting in their private chat, and the answer will follow here\. Do not say it waits for the owner or anyone else/);
     assert.doesNotMatch(own.message,/you asked the owner/);
     // The press names the card's message, so a card whose send lost its answer still loses its buttons: here the card
     // reviewed in its own group. A press in another chat names none.
