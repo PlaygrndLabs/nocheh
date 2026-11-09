@@ -17,11 +17,21 @@ import {afterEpoch,carriesForward,jobRun,type GuardRepository,type GuardBinding}
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
+import type {OperationReference} from './operations.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
 const exact=(value:unknown,keys:string[])=>{const body=object(value);if(Object.keys(body).some(k=>!keys.includes(k)))throw new HttpError(400,'unknown_action_field');return body;};
+/** What the asker says an operation does, for its card (ADR-0220): text on one line, or none when it is empty
+ * or longer than this; it never changes what runs. */
+const summaryLength=500;
+const summaryOf=(value:unknown)=>{
+  if(value===undefined||value===null)return null;
+  if(typeof value!=='string')throw new HttpError(400,'invalid_action_summary');
+  const line=value.replace(/\s+/g,' ').trim();
+  return line&&line.length<=summaryLength?line:null;
+};
 /** How long a chat rule from a card button lasts, in minutes, by what it covers (ADR-0214): a site here for a
  * session of 12 hours or for 30 days, an exact command for 30 days. Telegram and Notion keep their own decisions. */
 export const ruleMinutes:Record<string,Partial<Record<'here'|'always',number>>>={browser:{here:720,always:43200},shell:{always:43200}};
@@ -69,7 +79,8 @@ export class ControlledActionRepository {
   async propose(principal:Reader,value:unknown) {return afterEpoch(jobRun(principal),()=>this.proposeOnce(principal,value));}
   private async proposeOnce(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
-    const body=exact(value,['kind','arguments']),raw=actionArguments(body.kind,body.arguments),turn=await this.turns.binding(principal),current=await this.guards.state();
+    const body=exact(value,['kind','arguments','summary']),raw=actionArguments(body.kind,body.arguments),note=summaryOf(body.summary);
+    const turn=await this.turns.binding(principal),current=await this.guards.state();
     // Bound to the asking turn's own binding: the current one, or the earlier one of a job's run that carries to it (ADR-0208).
     // It carries from there; its profile, the run's own, holds the run's workspace and lets the run read it back.
     const binding={...current,generation:turn.generation??current.generation,epoch:turn.guard_epoch};
@@ -83,7 +94,9 @@ export class ControlledActionRepository {
     }
     const id=digest(canonical([protocol,source,binding,body.kind,raw])),proposal=await this.derived.record({operation_id:'controlled-proposal:'+id,
       source,kind:'controlled_action_request',content:Buffer.from(canonical(raw)),producer:'nocheh',producer_version:protocol,configuration:{binding,kind:body.kind}});
-    await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
+    // The summary is checked beside the arguments, at the same time, so it adds no wait.
+    const [,summary]=await Promise.all([this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect),
+      note?this.summarize(id,source,binding,current,principal,note):null]);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,current),args=actionArguments(body.kind,JSON.parse((representation.value as any).text));
     const fingerprint=digest(canonical({binding,scope:turn.scope,profile:turn.logical_profile,kind:body.kind,arguments:args,job:turn.job??null}));
     const db=await this.control.connect();
@@ -96,10 +109,11 @@ export class ControlledActionRepository {
       // A follow-up was started by Nocheh after a result came back, not asked by anyone: like a job's operation, what it
       // asks for has no rule key, so no chat rule covers it and its card offers no rule (ADR-0212, ADR-0214).
       const followUp=source.store==='archive'&&await followUpTurn(db,principal);
-      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
+      // A repeat of the same request keeps the summary it was first asked with, so its card never changes.
+      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,
-          turn.job||followUp?null:ruleKey(body.kind as string,args)]);
+          turn.job||followUp?null:ruleKey(body.kind as string,args),summary]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
@@ -131,6 +145,28 @@ export class ControlledActionRepository {
         'Allowed by a rule the owner set; it runs now.'};
       return {id,state:row.state,fingerprint,message:'Review the exact operation. Execution requires owner approval or a current bounded permission.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  /** The asker's summary, kept as content beside the proposal and secret-checked as its arguments are, but never
+   * part of what runs, the action's identity or its fingerprint (ADR-0220). Each wording is its own record, so a
+   * repeat in other words never conflicts with the first. Null when its check cannot finish: the card then shows
+   * the operation as it would without one. */
+  private async summarize(id:string,source:SourceReference|OperationReference,binding:GuardBinding,current:GuardBinding,principal:Reader,note:string) {
+    try {
+      const record=await this.derived.record({operation_id:'controlled-summary:'+digest(canonical([id,note])),source,kind:'controlled_action_summary',
+        content:Buffer.from(note),producer:'nocheh',producer_version:protocol,configuration:{binding}});
+      await this.guards.prepareContext(record,protocol,principal,this.prepared,this.detect);
+      return {...record,revision:(await this.guards.read('derived_artifacts:'+record.id,current)).revision};
+    }catch(error){if(error instanceof HttpError)return null;throw error;}
+  }
+  /** An operation's summary as its check left it, or null when it has none or it no longer reads back whole. */
+  async summary(row:any):Promise<string|null> {
+    const reference=row.summary_reference;if(!reference)return null;
+    const artifact=(await this.derived.pool.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
+    if(artifact?.content_hash!==reference.input_hash)return null;
+    const id='derived_artifacts:'+reference.id,saved=reference.revision===null?(await this.derived.pool.query('SELECT input AS content FROM guard_sources WHERE id=$1',[id])).rows[0]:
+      (await this.derived.pool.query('SELECT content FROM guard_revisions WHERE source_id=$1 AND revision=$2',[id,reference.revision])).rows[0];
+    const text=saved?JSON.parse(saved.content.toString()).text:null;
+    return typeof text==='string'?text:null;
   }
   /** `inTurn` is the asking turn's own note, sent once its tool holds the ended result, of the state it read (ADR-0215). */
   async inspect(principal:Reader,id:unknown,inTurn:string|null=null) {
@@ -164,8 +200,9 @@ export class ControlledActionRepository {
     }
     const view={id:row.id,event_id:row.event_id,scope:row.scope,profile:row.profile,logical_profile:row.logical_profile,kind:row.kind,arguments:args,fingerprint:row.fingerprint,
       state:row.state,revision:row.revision,job_id:row.job_id,created_at:row.created_at,permission_id:row.permission_id,error_code:row.error_code,...closedAs(row),result};
-    // Results are untrusted generated content and need their own guarded context.
-    if(principal.admin)return view;
+    // Results are untrusted generated content and need their own guarded context. The summary is for the owner's
+    // card and Inbox only; the asker reads its operations by their arguments.
+    if(principal.admin)return {...view,summary:await this.summary(row)};
     await this.prepared.allow(principal,args);return await this.prepared.prepare(principal,view,this.detect) as any;
   }
   /** This chat's recent operations, such as Notion calls, for a later turn or job run that no longer holds their IDs.

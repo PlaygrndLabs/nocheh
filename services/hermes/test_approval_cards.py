@@ -150,7 +150,17 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(bad=bad),self.assertRaises(ValueError):await gateway.send_approval({**card,'id':'c'*64,'links':bad})
             self.assertEqual(await gateway.send_approval({**card,'id':'d'*64,'links':[bold]*100}),{'state':'done','chat_id':'123','message_id':'42'},
                              'up to Telegram\'s 100 entities')
-            self.assertEqual(len(sent),2)
+            # Arguments folded under a summary: bold labels inside one quote that opens on a tap, as Telegram allows.
+            fold={'type':'expandable_blockquote','offset':at('title:'),'length':at('note:')-at('title:')}
+            self.assertEqual((await gateway.send_approval({**card,'id':'e'*64,'links':[fold,formats[0],formats[1]]}))['state'],'done')
+            span=lambda kind,offset,size:{'type':kind,'offset':offset,'length':size}
+            for bad in [[fold,formats[2]],                                          # a quote in a quote
+                        [fold,span('pre',at('title:'),3)],                         # code in a quote
+                        [fold,span('bold',at('note:')-2,4)],                       # a label across the fold's end
+                        [span('pre',at('printf'),9),span('bold',at('printf'),6)],  # anything in code
+                        [span('bold',at('title:'),8),span('bold',at('title:')+4,6)]]:  # a partial overlap
+                with self.subTest(nested=bad),self.assertRaisesRegex(ValueError,'invalid_approval'):await gateway.send_approval({**card,'id':'f'*64,'links':bad})
+            self.assertEqual(len(sent),3)
 
     async def test_unallowed_members_who_address_nocheh_get_the_fixed_reply_once(self):
         with tempfile.TemporaryDirectory() as folder:

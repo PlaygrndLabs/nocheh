@@ -218,6 +218,12 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
         </>
       ) : (
         <>
+          {action.summary && (
+            <div>
+              <p className="text-xs font-medium text-muted">The assistant says</p>
+              <p className="mt-1 text-sm">{action.summary}</p>
+            </div>
+          )}
           <Exact label={action.kind === 'shell' ? 'Command' : action.kind === 'browser' ? 'Web page' : 'Exactly'} mono>
             {exact || 'The details couldn’t be read.'}
           </Exact>

@@ -233,6 +233,7 @@ def register(ctx):
         ('mcp','Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities.',
          {'url':{'type':'string'},'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string'},'input':{'type':'object'}},['url']),
     ):
+        properties={**properties,'summary':SUMMARY}
         name='nocheh_'+kind
         ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
@@ -288,7 +289,7 @@ def register(ctx):
         'Nocheh\'s own task list stays the main one: use Notion when the owner asks for Notion.')
     ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
         schema={'name':name,'description':description,'parameters':{'type':'object','properties':{
-            'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string','maxLength':128},'input':{'type':'object'}},
+            'operation':{'type':'string','enum':['list','call']},'tool':{'type':'string','maxLength':128},'input':{'type':'object'},'summary':SUMMARY},
             'required':['operation'],'additionalProperties':False}},handler=notion_tool)
     name='nocheh_action_status';description=('Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '
         'Without an id it lists this chat\'s recent Telegram message requests and operations, such as Notion calls, with their states; read one by its id for its text or result. '
@@ -355,6 +356,19 @@ TIMED_OUT={'error':'action_request_timed_out','note':'Nothing was sent and no ap
 UNAVAILABLE={'error':'controlled_action_unavailable','note':'Nothing was sent: a passing problem stopped the request. It is not a setting or a limit of this chat; ask again later.'}
 
 
+# What a controlled operation does, in the asker's words, for the owner's approval card. It travels beside the
+# exact arguments, never in them, so it never changes what runs (ADR-0220).
+SUMMARY={'type':'string','maxLength':300,'description':'One short plain sentence for the owner, in the language of this conversation, saying what this call '
+         'will do, with names instead of IDs, such as: Add 3 open tasks as rows in the table "Plans". The owner\'s approval card shows it above the exact call, '
+         'which it never changes. Give it on every call that may wait for approval.'}
+
+
+def summarized(body,args):
+    """A proposal with the asker's summary beside its arguments, when there is one."""
+    summary=args.get('summary')
+    return {**body,'summary':summary} if isinstance(summary,str) and summary.strip() else body
+
+
 def controlled_tool(kind,args):
     from urllib.error import HTTPError,URLError
     try:
@@ -362,7 +376,7 @@ def controlled_tool(kind,args):
         from .profile_config import inherited_config,read,preferences
         home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
         if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.'+kind]!='on':return json.dumps({'error':'tool_disabled_by_owner'})
-        proposed=request('/v1/tools/propose',{'kind':kind,'arguments':args})
+        proposed=request('/v1/tools/propose',summarized({'kind':kind,'arguments':{key:value for key,value in args.items() if key!='summary'}},args))
         # One the owner already allows runs now: wait briefly, so its answer comes in this turn (ADR-0215).
         value=wait_in_turn(proposed['id']) if proposed.get('allowed') else None
         return in_parts(value) if value else json.dumps(proposed,ensure_ascii=False)
@@ -383,7 +397,7 @@ def notion_tool(args,**kwargs):
         home=Path(os.environ['HERMES_HOME']);config,_=inherited_config(home,read(home/'config.yaml'))
         if (_PROCESS_PREFERENCES or preferences(config))['nocheh_tools.mcp']!='on':return json.dumps({'error':'tool_disabled_by_owner'})
         body={'connection':'notion',**({'operation':'list'} if args.get('operation')=='list' else {'tool':args.get('tool'),'input':args.get('input') or {}})}
-        proposed=request('/v1/tools/propose',{'kind':'mcp','arguments':body})
+        proposed=request('/v1/tools/propose',summarized({'kind':'mcp','arguments':body},args))
         if proposed.get('state')!='approved':return json.dumps(proposed,ensure_ascii=False)
         # A call the owner's setting allows runs now; wait briefly so the answer comes back in this turn.
         value=wait_in_turn(proposed['id'])

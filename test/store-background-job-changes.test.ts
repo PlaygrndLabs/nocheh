@@ -57,8 +57,8 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
     return {id:proposed.id,reader,step,context:context as any};
   };
   /** A Notion change from the step, offered as the server offers it. */
-  const change=async(reader:Reader,title:string,notes='')=>s.actionCommands.offer('controlled',await s.controlledActions.propose(reader,
-    {kind:'mcp',arguments:{connection:'notion',tool:'notion-update-page',input:{page:'made-up-page',properties:{title},...(notes?{notes}:{})}}}));
+  const change=async(reader:Reader,title:string,notes='',summary?:string)=>s.actionCommands.offer('controlled',await s.controlledActions.propose(reader,
+    {kind:'mcp',arguments:{connection:'notion',tool:'notion-update-page',input:{page:'made-up-page',properties:{title},...(notes?{notes}:{})}},...(summary?{summary}:{})}));
   /** The step ends with its report, and the report is delivered, so the job ends done. */
   const end=async(job:{id:string;step:string;context:any},text:string)=>{
     await s.jobs.runs.prepare({...job.context,actor:job.context.actor});
@@ -140,9 +140,13 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
     await s.actionCommands.settle('background',job.id);assert.equal(listCards().length,2);
 
     // A change the owner decided in the Inbox keeps that decision when the card is pressed.
-    const inbox=await running('Inbox first'),[early,other]=[(await change(inbox.reader,'Made-up task 50')).id,(await change(inbox.reader,'Made-up task 52')).id];
+    const inbox=await running('Inbox first'),[early,other]=[(await change(inbox.reader,'Made-up task 50','','Rename the made-up page to task 50.')).id,(await change(inbox.reader,'Made-up task 52')).id];
     assert.equal((await end(inbox,'Report: two made-up changes.')).state,'completed');
     const [both]=(await frozenCards(inbox.id)),bothCard=listCards().at(-1)!;
+    // A change with the asker's summary shows it under its name, its fields folded under it (ADR-0220).
+    assert.match(bothCard.text,/\n\n1\. ⚙️ Notion · update page\n📝 Rename the made-up page to task 50\.\nExact details\npage: made-up-page\nproperties › title: Made-up task 50\n\n2\. ⚙️ Notion · update page\npage: /);
+    const fold=bothCard.links.find((link:any)=>link.type==='expandable_blockquote');
+    assert.equal(bothCard.text.slice(fold.offset,fold.offset+fold.length),'Exact details\npage: made-up-page\nproperties › title: Made-up task 50');
     assert.deepEqual([bothCard.id,both.members.map(([id]:[string])=>id)],[both.id,[early,other]]);
     const view=await s.controlledActions.inspect(owner,early!);
     await s.controlledActions.decide(owner,{id:early,fingerprint:view.fingerprint,decision:'approve'});

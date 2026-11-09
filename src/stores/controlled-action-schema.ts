@@ -34,6 +34,8 @@ CREATE INDEX IF NOT EXISTS action_permission_rules ON action_permissions(match_k
 -- State and receipt stay as observed, so a later receipt still settles the action.
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS resolution text CHECK(resolution IN ('ran','not_run','dismissed','read_closed'));
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
+-- What the asker says an operation does, as content beside its proposal, for its card only (ADR-0220).
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS summary_reference jsonb;
 -- Page reads that ended unclear before reads closed themselves.
 UPDATE controlled_actions SET resolution='read_closed',resolved_at=updated_at WHERE state='ambiguous' AND kind='browser' AND resolution IS NULL;
 CREATE TABLE IF NOT EXISTS action_owner_commands (

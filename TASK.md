@@ -54,6 +54,20 @@ makes a second entity that broke later learning about that project. Pending: the
 owner's yes on the approach, folding the three existing cards for one project on
 the development install, and a live learning turn that joins a waiting card.
 
+Approval cards lead with the assistant's summary (owner, 2026-11-09: "ai say want to
+do this short and get my approve and done, thats what I want is simple flow"): the
+shell, browser, MCP and Notion tools take a one-line `summary` beside the exact
+arguments; the card shows it under the operation's name and folds the exact fields
+into one quote that opens on a tap, a command staying open in code; it is
+secret-checked like the arguments and never changes what runs
+([ADR-0220](docs/adr/0220-operation-cards-lead-with-the-askers-summary.md),
+[words](test/action-text.test.ts), [store](test/store-controlled-actions.test.ts),
+[cards](test/store-approval-buttons.test.ts), [list cards](test/store-background-job-changes.test.ts),
+[Hermes](services/hermes/test_action_results.py), [gateway](services/hermes/test_approval_cards.py),
+full tester scenario `tool_card_reads_in_words`). Pending: the owner's yes on the
+mock, and a real Notion card with a summary on the owner's live install after the
+machine pull.
+
 Secret check connection failures (2026-11-08): the owner's installation counted
 secret-check calls that failed with no provider status, 12 on one model and, after a
 switch, 26 on the next, with no refusals and no hidden texts; in the same window a

@@ -50,8 +50,8 @@ const editing=new Map<string,Promise<void>>();
 type Seen={chat:string;message:string}|undefined;
 const seenIn=(seen:Seen,chat:string)=>seen&&seen.chat===chat?{message_id:seen.message}:{};
 
-/** One change on a list card: its number and what it does in bold, then its exact arguments. */
-const entryText=(number:number,operation:OperationText)=>heading(`${number}. ⚙️ ${operation.title}`)+(operation.body?'\n'+operation.body:'');
+/** One change on a list card: its number and what it does in bold, what the asker says it does, then its exact arguments. */
+const entryText=(number:number,operation:OperationText)=>heading(`${number}. ⚙️ ${operation.title}`)+(operation.summary?'\n📝 '+operation.summary:'')+(operation.body?'\n'+operation.body:'');
 /** A list card: how many changes and from which job, which card of how many, then each change exactly. */
 function listText(line:Record<ApprovalText,string>,title:string,count:number,index:number,parts:number,long:number,items:string[]):string {
   const fill=(text:string,values:Record<string,string>)=>fillTemplate(text.replace(controls,''),values);
@@ -65,9 +65,16 @@ const listEntry=(text:OperationText|null,room:number)=>{
   const shown=text?linked(entryText(999,text)):null;
   return shown&&shown.text.length+2<=room&&shown.links.length<=entityLimit?shown:null;
 };
-/** How an operation reads on a card, in the owner's words for its kind, or null when it is too long to review in Telegram. */
-const operation=(action:{kind:string;arguments:Record<string,any>},line:Record<ApprovalText,string>)=>
-  canonical(action.arguments).length>reviewLimit?null:operationText(action.kind,action.arguments,line);
+/** How an operation reads on a card, in the owner's words for its kind and with what the asker says it does,
+ * or null when it is too long to review in Telegram. */
+const operation=(action:{kind:string;arguments:Record<string,any>;summary?:string|null},line:Record<ApprovalText,string>)=>
+  canonical(action.arguments).length>reviewLimit?null:operationText(action.kind,action.arguments,line,action.summary??null);
+/** A change as a list card with `room` left shows it: with its summary while that fits, otherwise as it reads
+ * without one, so a summary never sends a change to the Inbox. The same every time, so a decided card keeps its text. */
+const listed=(action:{kind:string;arguments:Record<string,any>;summary?:string|null},line:Record<ApprovalText,string>,room:number)=>{
+  const shown=operation(action,line);
+  return shown?.summary&&!listEntry(shown,room)?operation({...action,summary:null},line):shown;
+};
 
 /** A t.me address of a group, topic or message, or null where Telegram has none, such as a basic group. */
 export function telegramLink(chat:string,username:string|null,path:(string|null|undefined)[]):string|null {
@@ -177,8 +184,10 @@ export class ActionCommandRepository {
     }
     const action=await this.tools.inspect(owner,id);
     const shown=operation(action,line);if(!shown)return null;
-    const card=linked(operationCard(texts.action,shown,origin),urls);
-    // Room is kept for the line that says how it ended.
+    let card=linked(operationCard(texts.action,shown,origin),urls);
+    // Room is kept for the line that says how it ended. A summary never keeps a card from Telegram: one that does
+    // not fit with it goes without it.
+    if(card.text.length>cardLimit-outcomeRoom&&shown.summary)card=linked(operationCard(texts.action,operation({...action,summary:null},line)!,origin),urls);
     if(card.text.length>cardLimit-outcomeRoom)return null;
     const code=action.error_code??(typeof action.result?.result?.error==='string'?action.result.result.error:null);
     // The executor runs only after its start is recorded, so an operation never started did not run.
@@ -305,7 +314,7 @@ export class ActionCommandRepository {
       if((await evaluate(control,this.tools.effect(row))).outcome!=='ask'||(await this.tools.grants(row)).length)continue;
       const action=await this.tools.inspect({admin:true,scope:null},row.id).catch(error=>{if(error instanceof HttpError)return null;throw error;});
       // A card holds what fits Telegram's length and its number of entities.
-      const shown=listEntry(action&&'arguments' in action?operation(action,line):null,room);
+      const shown=listEntry(action&&'arguments' in action?listed(action,line,room):null,room);
       if(!shown){long++;continue;}
       const size=shown.text.length+2,count=shown.links.length;
       if(used+size>room||marks+count>entityLimit)close();
@@ -319,7 +328,7 @@ export class ActionCommandRepository {
     if(long&&!cards.length)try{await this.call!('telegram.notice',{id:digest(canonical(['action-list-inbox-v1',job.id])),chat_id:owner,
       text:fillTemplate(line.list_inbox.replace(controls,''),{count:String(long),title})},30000);}catch{}
     for(const [index,card] of cards.entries()) {
-      const shown=linked(listText(line,title,card.members.length,index,cards.length,card.long??0,await this.entries(card,line)));
+      const shown=linked(listText(line,title,card.members.length,index,cards.length,card.long??0,await this.entries(card,line,room)));
       await this.approval({kind:'card',chat_id:owner,id:card.id,text:shown.text,links:shown.links,
         buttons:[[line.approve.slice(0,40),'na'+card.id.slice(0,40)+card.fingerprint.slice(0,16)],[line.reject.slice(0,40),'nd'+card.id.slice(0,40)+card.fingerprint.slice(0,16)]]});
     }
@@ -331,11 +340,11 @@ export class ActionCommandRepository {
     return {title,room:cardLimit-outcomeRoom-listText(line,title,999,98,99,999,[]).length};
   }
   /** A list card's changes, read again from its members, so a decided card shows what it showed before. */
-  private async entries(card:ListCard,line:Record<ApprovalText,string>):Promise<string[]> {
+  private async entries(card:ListCard,line:Record<ApprovalText,string>,room:number):Promise<string[]> {
     const items=[];
     for(const [number,[id]] of card.members.entries()) {
       const action=await this.tools.inspect({admin:true,scope:null},id).catch(error=>{if(error instanceof HttpError)return null;throw error;});
-      items.push(entryText(number+1,(action&&'arguments' in action?operation(action,line):null)??{title:action?.kind??'',body:''}));
+      items.push(entryText(number+1,(action&&'arguments' in action?listed(action,line,room):null)??{title:action?.kind??'',summary:null,body:''}));
     }
     return items;
   }
@@ -361,8 +370,8 @@ export class ActionCommandRepository {
       unrun?fillTemplate(line.not_run,{reason:line[code&&Object.hasOwn(reasons,code)?reasons[code]!:'reason_other']}):
       states.some(row=>['approved','running'].includes(row.state))?line.approved:
       done===states.length?fillTemplate(line.list_done,{count}):fillTemplate(line.list_some,{done:String(done),count});
-    const cards=found.job.changes as ListCard[],title=clean((await this.jobs!.proposal(found.job)).title)??'';
-    const shown=linked(listText(line,title,found.card.members.length,found.index,cards.length,found.card.long??0,await this.entries(found.card,line)));
+    const cards=found.job.changes as ListCard[],{title,room}=await this.listRoom(found.job,line);
+    const shown=linked(listText(line,title,found.card.members.length,found.index,cards.length,found.card.long??0,await this.entries(found.card,line,room)));
     // Texts edited since the card was sent can make it longer; a decided card has no buttons, so its end may be cut.
     const kept=cut(shown,cardLimit-outcome.length-3);
     await this.approval({kind:'settle',chat_id:owner,id,text:`${kept.text}\n\n${outcome}`,links:kept.links,...seenIn(seen,owner)});

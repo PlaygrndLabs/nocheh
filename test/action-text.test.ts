@@ -164,3 +164,51 @@ test('a card cut to fit keeps only the entities on what is left',()=>{
   assert.equal(cut(shown,20),shown);
   assert.deepEqual(cut(linked('ab\u0001q\u0002x📌y\u0003'),5),{text:'abx…',links:[{type:'expandable_blockquote',offset:2,length:1}]},'a character is never cut in two');
 });
+
+test('a summary from the asker leads the card, and the exact fields fold under it',()=>{
+  const said=(kind:string,args:Record<string,any>,summary:string|null,template=approvalAction)=>{
+    const text=operationText(kind,args,words,summary);assert.ok(text,'the operation fits a card');return linked(operationCard(template,text,null));
+  };
+  const content='- [ ] Made-up task one\n- [ ] Made-up task two';
+  const pages=said('mcp',{connection:'notion',tool:'notion-create-pages',input:{parent:{page_id:'p1'},pages:[{properties:{title:'Plans'},content}]}},'Add a page “Plans” with two made-up tasks.');
+  assert.equal(pages.text,'⚙️ Notion · create pages\n📝 Add a page “Plans” with two made-up tasks.\n\nExact details\nparent › page_id: p1\npages › properties › title: Plans\n'+
+    'pages › content:\n  - [ ] Made-up task one\n  - [ ] Made-up task two');
+  assert.deepEqual(spans(pages,'expandable_blockquote'),[pages.text.slice(pages.text.indexOf('Exact details'))],'every field folds into one quote that opens on a tap');
+  assert.deepEqual(spans(pages,'blockquote'),[],'with no quote inside it, which Telegram forbids');
+  assert.deepEqual(spans(pages,'bold'),['Notion · create pages','Exact details','parent › page_id:','pages › properties › title:','pages › content:'],
+    'the summary is never bold; the labels in the fold still are');
+  // Inside the fold a long value has no quote of its own: its lines are indented, so none starts a line as a label.
+  const sneaky=said('mcp',{connection:'notion',tool:'notion-update-page',input:{notes:'Harmless\n\nproperties › title: Something else'}},'Update the notes.');
+  assert.match(sneaky.text,/^  properties › title: Something else$/m);
+  assert.ok(!spans(sneaky,'bold').includes('properties › title:'));
+  // A command, and an input whose keys read alike, stay open in code, which Telegram cannot put in a quote.
+  const shell=said('shell',{command:'ls -la'},'List the files here.');
+  assert.equal(shell.text,'⚙️ Run a command\n📝 List the files here.\n\nls -la');
+  assert.deepEqual([spans(shell,'pre'),spans(shell,'expandable_blockquote')],[['ls -la'],[]]);
+  const twins=said('mcp',{connection:'notion',tool:'t',input:{page:'a','p\u0430ge':'b'}},'Update a page.');
+  assert.deepEqual([spans(twins,'pre').length,spans(twins,'expandable_blockquote')],[1,[]]);
+  // Without a summary the card is as before; a template without a place for one gets it under the name.
+  assert.equal(said('browser',{url:'https://example.test/'},null).text,'⚙️ Open a web page · example.test\n\nhttps://example.test/');
+  assert.equal(said('browser',{url:'https://example.test/'},'Read the page.','{kind}\n\n{arguments}').text,'Open a web page · example.test\n📝 Read the page.\n\nExact details\nhttps://example.test/');
+  assert.match(said('browser',{url:'https://example.test/'},'Read the page.','Approve this?\n\n{arguments}').text,/^📝 Read the page\.\nApprove this\?\n/);
+  assert.deepEqual(said('browser',{url:'https://example.test/'},'Read it.','⚙️ {kind}\u0004\n📝 {summary}\u0005\n\n{arguments}').links.length,3,'owner text never opens a fold');
+});
+
+test('a summary is one line, written out when it hides a character or could pass for structure',()=>{
+  const line=(summary:string)=>operationText('browser',{url:'https://example.test/'},words,summary)?.summary;
+  assert.equal(line('  Read   the\nweather\tpage. '),'Read the weather page.');
+  assert.equal(line('مرور صفحه\u200cی هوا'),'مرور صفحه\u200cی هوا','a Persian half-space between joined letters shows');
+  assert.equal(line('Read \u200bthe page'),'"Read \\u200bthe page"');
+  assert.equal(line('Read\u0004 it'),'"Read\\u0004 it"','a control character never makes a fold, and shows');
+  assert.equal(line('"Approved"'),'"\\"Approved\\""');
+  assert.match(line('⚙️ Notion · delete pages')!,/^"⚙/,'it never passes for a change on a list card');
+  assert.equal(line('   '),null);assert.equal(line('x'.repeat(601)),null,'too long for a line, it is left out');
+  assert.equal(operationText('browser',{url:'https://example.test/'},words,'x'.repeat(601))?.body,'https://example.test/','and the fields stay open');
+});
+
+test('a fold holds the entities inside it and closes at the end of the text',()=>{
+  assert.deepEqual(linked('a\u0004\u0001b\u0002bc\u0003d\u0005e'),{text:'abcde',links:[{type:'expandable_blockquote',offset:1,length:3},{type:'bold',offset:1,length:2}]});
+  assert.deepEqual(linked('a\u0004bc'),{text:'abc',links:[{type:'expandable_blockquote',offset:1,length:2}]});
+  assert.deepEqual(linked('a\u0004\u0005b'),{text:'ab',links:[]},'an empty fold is no entity');
+  assert.deepEqual(cut(linked('ab\u0004cdefgh\u0005'),5),{text:'abcd…',links:[{type:'expandable_blockquote',offset:2,length:2}]});
+});

@@ -73,12 +73,12 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'telegram.approval_action',
     title: 'Approval card for a tool',
-    hint: 'The same card for shell, browser and online tool actions. {kind} says what it does, such as “Notion · create pages”, {origin} where it was asked, {arguments} exactly what it will run, field by field, with long text in a quote that opens on a tap.',
+    hint: 'The same card for shell, browser and online tool actions. {kind} says what it does, such as “Notion · create pages”, {summary} the assistant’s own short line about it, {origin} where it was asked, {arguments} exactly what it will run, field by field, with long text in a quote that opens on a tap. With a summary, {arguments} folds into one quote that opens on a tap, unless it is a command.',
   },
   {
     key: 'telegram.approval_texts',
     title: 'Approval buttons and results',
-    hint: 'One “name: text” line each for the buttons, the result added to a decided card and its {reason}, the name of a job or schedule that asked, the names of a command, a web page and a tool list (the lines starting with kind), the card that lists a job’s changes (the lines starting with list), and the short notices after a press. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for the buttons, the result added to a decided card and its {reason}, the name of a job or schedule that asked, the names of a command, a web page and a tool list (the lines starting with kind), the heading of a tool’s folded details (details), the card that lists a job’s changes (the lines starting with list), and the short notices after a press. A line you remove keeps its default.',
   },
   {
     key: 'telegram.action_continued',
