@@ -56,15 +56,19 @@ export function interruptedJournalDisposition(value:unknown):JournalDisposition 
 /**
  * Who sent a group message and when, as one line for the model. Names come
  * from the guarded representation, the time from the captured original, and
- * no numeric Telegram ID is ever included.
+ * no numeric Telegram ID is ever included. The owner's own message ends with
+ * a separate `[the owner]` tag, from the captured sender ID. A name loses its
+ * brackets, and the runtime shows a look-alike line in message text as text,
+ * so no one else can write it (ADR-0222).
  */
-export function speakerLine(original:any,representation:any):string|null {
-  const sender=representation?.message?.from??{},date=original?.message?.date;
+export function speakerLine(original:any,representation:any,owner?:string|null):string|null {
+  const sender=representation?.message?.from??{},date=original?.message?.date,from=original?.message?.from?.id;
   const part=(value:unknown)=>typeof value==='string'?value.replace(/[\[\]\p{Cc}]+/gu,' ').trim():'';
   const name=[part(sender.first_name),part(sender.last_name)].filter(Boolean).join(' ').slice(0,64).trim()||'Participant';
   const username=typeof sender.username==='string'&&/^[A-Za-z0-9_]{1,32}$/.test(sender.username)?' (@'+sender.username+')':'';
   const sent=Number.isSafeInteger(date)&&date>0?', sent '+new Date(date*1000).toISOString().slice(0,16).replace('T',' ')+' UTC':'';
-  return '[Group message from '+name+username+sent+']';
+  const own=!!owner&&from!==undefined&&from!==null&&String(from)===owner?' [the owner]':'';
+  return '[Group message from '+name+username+sent+']'+own;
 }
 
 /**
@@ -228,7 +232,7 @@ export class TelegramDispatchRepository {
       try {
         if(await this.access.space((await this.archive.captured(row.id)).reference)!==space)continue;
         const guarded=await this.sources.read(principal,row.id),text=typeof guarded.event.text==='string'&&guarded.event.text?guarded.event.text.slice(0,1000):'[A message without text]';
-        const speaker=speakerLine(JSON.parse(row.payload.toString()),guarded.event.payload);if(speaker)recent.push({id:row.id,speaker,text});
+        const speaker=speakerLine(JSON.parse(row.payload.toString()),guarded.event.payload,this.access.policy().owner_id);if(speaker)recent.push({id:row.id,speaker,text});
       } catch {continue;}
       if(recent.length===20)break;
     }
@@ -331,7 +335,7 @@ export class TelegramDispatchRepository {
       const other=groupAddressing(JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString()),botId);
       if(addressing&&other)addressing={direct:addressing.direct||other.direct,handles:[...new Set([...addressing.handles,...other.handles])].sort().slice(0,20)};
     }
-    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
+    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
     // An album's caption usually sits on one part; the turn reads every part's text in order.
     const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,

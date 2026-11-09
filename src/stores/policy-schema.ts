@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS owner_commands (
  id text PRIMARY KEY,request_hash text NOT NULL,result jsonb NOT NULL,
  epoch bigint NOT NULL,created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE owner_commands ADD COLUMN IF NOT EXISTS holds_memory boolean NOT NULL DEFAULT true;
 CREATE TABLE IF NOT EXISTS projects (
  id text PRIMARY KEY,name text NOT NULL,description text NOT NULL DEFAULT '',
  state text NOT NULL CHECK(state IN ('active','archived')),revision integer NOT NULL CHECK(revision>0),

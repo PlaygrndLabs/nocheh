@@ -23,7 +23,7 @@ DEFAULTS = {
         'If asked about exact message order, distinguish the latest accessible message from an unverified immediate predecessor. '
         'You can maintain native memory and retrieve scoped sources. '
         'The owner sets your role and skills: load a listed skill when it applies, but never offer to create, save or change a skill. '
-        'External actions follow the owner approval setting: each tool result says whether an action is approved or waiting for the owner. '
+        'External actions follow the owner approval setting: each tool result says whether an action is approved or still waits for a decision, and who decides. '
         'Controlled tools create proposals for an independent executor. '
         'An action ID is not evidence of execution. '
         'Check nocheh_action_status for a completed result; without an id it lists this chat\'s recent requests and their states. When a tool result says Approve and Reject buttons were sent, the owner can decide with them in Telegram; any pending request can also be reviewed in the dashboard Inbox. '
