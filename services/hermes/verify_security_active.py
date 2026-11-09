@@ -55,8 +55,7 @@ async def main():
         body={'channel':'browser','event_id':event,'text':text,'archive_credential':credential,'guard_mode':status['guard']['mode']}
         result=await run_process(Path(os.environ['HERMES_HOME']),scope,body,runtime['model'],SubscriptionCredentials(runtime['api_key'],runtime['base_url'],runtime['provider'],runtime['api_mode']),'security-acceptance-'+run)
         answer=result.get('text','').strip()
-        report['existing_memory_limitation_notice']='\n\nMemory is limited;' in answer
-        record('active_isolated_archive_recall',result.get('state')=='done' and answer.split('\n\nMemory is limited;',1)[0]==expected)
+        record('active_isolated_archive_recall',result.get('state')=='done' and answer==expected)
         if result.get('state')!='done':report['turn_error_code']=result.get('error_code')
         from hermes_state import SessionDB
         from .isolated_profile import database_path

@@ -252,7 +252,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     completion={'completed':True,'final_response':'   '};model_calls=[]
                     async def native_completion(event):
                         model_calls.append(event)
-                        result=conversation_result(completion,'synthetic-session',limited_memory=True)
+                        result=conversation_result(completion,'synthetic-session')
                         TURN.get()['agent_result']=result
                         return result.get('text')
                     adapter.set_message_handler(native_completion)
@@ -262,7 +262,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(await gateway.dispatch(empty),expected)
                     self.assertEqual(await gateway.dispatch(empty),expected)
                     self.assertEqual(len(model_calls),1,'same attempt reuses the failure receipt')
-                    self.assertEqual(len(request.sent),sent_before,'empty completion cannot send a memory notice')
+                    self.assertEqual(len(request.sent),sent_before,'an empty completion sends nothing')
                     completion['final_response']='Recovered synthetic answer';empty['attempt']=2
                     self.assertEqual(await gateway.dispatch(empty),{'state':'done'})
                     self.assertEqual(await gateway.dispatch(empty),{'state':'done'})
