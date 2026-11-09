@@ -139,6 +139,9 @@ class ProblemNoticeTests(unittest.TestCase):
         dropped = {**refusals(12, 0)[0], 'reasons': {'unknown': 12}, 'causes': {'unknown:connection': 12}}
         self.assertEqual(problems.why(dropped), '12 couldn’t reach the provider or lost the connection',
                          'a cause says why even when the reason alone is not known')
+        own = {**refusals(2, 0)[0], 'reasons': {'nocheh_error': 2}, 'causes': {'nocheh_error:detector_contract_rejected': 2}}
+        self.assertEqual(problems.why(own), '2 Nocheh’s own error (detector contract rejected)',
+                         'a refusal of Nocheh’s own says which, never that the provider rejected the call')
 
     def test_only_todays_model_failures_count(self):
         found = problems.problems(monitoring(), refusals(1, 1), TODAY)
@@ -146,6 +149,17 @@ class ProblemNoticeTests(unittest.TestCase):
         yesterday = problems.problems(monitoring(), [{**refusals(1, 1)[0], 'day': '2026-10-27'}], TODAY)
         self.assertEqual([problem for problem in yesterday if problem['kind'] == 'model'], [],
                          'yesterday’s failures are not today’s')
+
+    def test_a_run_nocheh_stopped_does_not_mark_a_model_working_again(self):
+        def busy(runs, stopped):
+            return [{**refusals(1, 0)[0], 'part': 'reply', 'label': 'Replies', 'runs': runs, 'stopped': stopped,
+                     'reasons': {'provider_error': 1}, 'causes': {'provider_error:overloaded:529': 1}}]
+        self.check(NOW, usage=busy(10, 0))
+        self.assertEqual(len(self.sent), 1)
+        self.check(NOW + 120, usage=busy(11, 1))
+        self.assertEqual(self.edits, [], 'a run cut by a new safety epoch is no call that worked')
+        self.check(NOW + 240, usage=busy(12, 1))
+        self.assertEqual(self.edits[-1]['resolved'], ['Working again since 12:04 UTC'])
 
     def test_a_notice_line_is_marked_when_its_model_works_again(self):
         def busy(failed, runs):
