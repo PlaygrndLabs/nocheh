@@ -16,11 +16,11 @@ test('Honcho ancestry maps only verified ingestion receipts and current authoriz
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),guards=new GuardRepository(stores,archive);
   const key='provenance:'+Date.now(),workspace=digest(key),conclusion='c'.repeat(21),message='m'.repeat(21),receipt=digest(key+':receipt');
   const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'-42',source_id:'1',revision:'1',occurred_at:null,text:'Synthetic evidence',payload:{}};
-  let mutate=false,calls=0;
+  let mutate=false,calls=0,cited:unknown=true;
   const call=async(path:string,body:any)=>{
     calls++;assert.equal(path,'/v3/workspaces/'+workspace+'/nocheh/provenance');assert.deepEqual(body,{conclusion_ids:[conclusion]});
     if(mutate)await stores.control.query('UPDATE guard_state SET epoch=epoch+1');
-    return {roots:[conclusion],nodes:[{id:conclusion,parents:[],deleted:false}],messages:[{message_id:message,receipt_id:receipt},{message_id:'x'.repeat(21),receipt_id:digest('unknown')}],limitations:[],exact_citations:true};
+    return {roots:[conclusion],nodes:[{id:conclusion,parents:[],deleted:false,exact_citations:cited}],messages:[{message_id:message,receipt_id:receipt},{message_id:'x'.repeat(21),receipt_id:digest('unknown')}],limitations:[],exact_citations:true};
   };
   const provenance=new HonchoProvenanceRepository(stores,archive,guards,call);
   try {
@@ -33,8 +33,16 @@ test('Honcho ancestry maps only verified ingestion receipts and current authoriz
     assert.equal(calls,0,'detached memory does not invoke native readers');
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true');
     const result=await provenance.read(workspace,'owner',[conclusion],binding);
-    assert.deepEqual(result.evidence,[source,related]);assert.equal(result.exact_citations,false,'ancestry never claims exact citation precision');
-    assert.ok(result.limitations.includes('ingestion_reference_unavailable'));
+    assert.deepEqual(result.evidence,[source,related]);assert.equal(result.exact_citations,true,'a conclusion that cites its messages is an exact citation');
+    assert.deepEqual(result.conclusions,[{id:conclusion,parents:[],deleted:false,exact_citations:true}]);
+    assert.ok(result.limitations.includes('ingestion_reference_unavailable'));assert.ok(!result.limitations.includes('ancestry_is_not_an_exact_citation'));
+    cited=false;
+    const batch=await provenance.read(workspace,'owner',[conclusion],binding);
+    assert.equal(batch.exact_citations,false,'a derivation batch is never an exact citation, whatever Honcho reports for the chain');
+    assert.ok(batch.limitations.includes('ancestry_is_not_an_exact_citation'));
+    cited=undefined;
+    await assert.rejects(provenance.read(workspace,'owner',[conclusion],binding),{code:'invalid_honcho_provenance'});
+    cited=true;
     const group=await provenance.read(workspace,'-42',[conclusion],binding);
     assert.deepEqual(group.evidence,[],'another audience cannot trace owner-private receipts');assert.ok(group.limitations.includes('ingestion_reference_unavailable'));
     mutate=true;

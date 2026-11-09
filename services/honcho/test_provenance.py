@@ -1,5 +1,5 @@
 import unittest
-from .provenance import DESCENDANTS_SQL, ancestry, failed_learning_count, failed_queue_items, retry_failed_learning, session_descendants
+from .provenance import DESCENDANTS_SQL, DOCUMENTS_SQL, ancestry, failed_learning_count, failed_queue_items, retry_failed_learning, session_descendants
 
 
 class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
@@ -64,7 +64,57 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['messages'], [{'message_id':'m'*21,'receipt_id':'f'*64}])
         self.assertIn('conclusion_unavailable', result['limitations'])
         self.assertIn('message_unavailable', result['limitations'])
+        self.assertEqual([n['exact_citations'] for n in result['nodes']], [None, False], 'a parent-only node brings no messages; a batch is not a citation')
+        self.assertIn('ancestry_is_not_an_exact_citation', result['limitations'])
         self.assertFalse(result['exact_citations'])
+
+    async def test_cited_messages_replace_the_batch_per_conclusion_and_come_first(self):
+        root, parent, other = 'r'*21, 'p'*21, 'o'*21
+        rows = {root: {'id': root, 'source_ids': [parent], 'cited_ids': [5,3], 'message_ids': [3,4,5,6]},
+                parent: {'id': parent, 'deleted': True, 'cited_ids': None, 'message_ids': [7]},
+                other: {'id': other, 'cited_ids': [], 'message_ids': [8]}}
+        async def documents(ids): return [rows[v] for v in ids if v in rows]
+        loads = []
+        async def messages(ids):
+            loads.append(ids)
+            return [{'id':v,'public_id':str(v).zfill(21),'receipt_id':str(v)*64} for v in reversed(ids)]
+        result = await ancestry([root], documents, messages)
+        self.assertEqual(loads, [[5,3,7]], 'a cited conclusion brings only the messages it cites, in citation order, before any batch')
+        self.assertEqual([m['message_id'] for m in result['messages']], ['5'.zfill(21),'3'.zfill(21),'7'.zfill(21)])
+        self.assertEqual(result['nodes'], [{'id':root,'parents':[parent],'deleted':False,'exact_citations':True},
+                                           {'id':parent,'parents':[],'deleted':True,'exact_citations':False}], 'a deleted ancestor still counts')
+        self.assertIn('ancestry_is_not_an_exact_citation', result['limitations'])
+        self.assertFalse(result['exact_citations'], 'one uncited conclusion makes the chain inexact')
+        rows[parent] = {'id': parent, 'source_ids': [], 'cited_ids': [7], 'message_ids': [7,9]}
+        result = await ancestry([root], documents, messages)
+        self.assertTrue(result['exact_citations'])
+        self.assertNotIn('ancestry_is_not_an_exact_citation', result['limitations'])
+        rows[root]['cited_ids'] = None
+        rows[parent] = {'id': parent, 'cited_ids': [7]}
+        self.assertFalse((await ancestry([root], documents, messages))['exact_citations'], 'an older conclusion without citations keeps its batch')
+        result = await ancestry([other], documents, messages)
+        self.assertEqual((result['nodes'][0]['exact_citations'], result['exact_citations'], loads[-1]), (False, False, [8]), 'no cited rows falls back')
+        rows[root] = {'id': root, 'source_ids': [parent]}
+        result = await ancestry([root], documents, messages)
+        self.assertEqual([n['exact_citations'] for n in result['nodes']], [None, True])
+        self.assertTrue(result['exact_citations'], 'a derived conclusion is exact through cited parents')
+
+    async def test_cited_messages_win_the_message_limit(self):
+        root, parent = 'r'*21, 'p'*21
+        rows = {root: {'id': root, 'source_ids': [parent], 'message_ids': [1,2]}, parent: {'id': parent, 'cited_ids': [9]}}
+        async def documents(ids): return [rows[v] for v in ids if v in rows]
+        loads = []
+        async def messages(ids): loads.append(ids); return []
+        result = await ancestry([root], documents, messages, max_messages=2)
+        self.assertEqual(loads, [[9,1]])
+        self.assertIn('message_limit', result['limitations'])
+
+    def test_documents_query_reads_citations_within_the_conclusions_tenant_and_workspace(self):
+        sql = ' '.join(DOCUMENTS_SQL.split())
+        self.assertIn('FROM documents d WHERE d.workspace_name=:workspace AND d.id=ANY(:ids)', sql)
+        self.assertIn('FROM conclusion_source_messages s JOIN messages m ON m.tenant_id=s.tenant_id AND m.public_id=s.message_id', sql)
+        self.assertIn('WHERE s.tenant_id=d.tenant_id AND s.conclusion_id=d.id ORDER BY s.position', sql)
+        self.assertIn('d.deleted_at IS NOT NULL AS deleted', sql, 'deleted ancestors are reported, not hidden')
 
     async def test_depth_node_queue_and_message_limits_are_bounded(self):
         reads = []
