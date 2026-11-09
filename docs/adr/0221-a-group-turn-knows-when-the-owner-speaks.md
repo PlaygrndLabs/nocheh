@@ -3,9 +3,10 @@
 <status>
 Accepted on 2026-11-09 after the owner asked for a web read in a group and the
 reply said the request was "waiting for the owner's approval". Extends
-[ADR-0157](0157-group-turns-see-recent-unaddressed-messages.md) and the
-owner-in-a-group card message of
-[ADR-0214](0214-allow-a-site-or-command-in-one-chat.md).
+[ADR-0157](0157-group-turns-see-recent-unaddressed-messages.md). Amends the
+group wording rule of
+[ADR-0212](0212-approved-operations-answer-in-the-chat-that-asked.md) for a
+request the owner made themselves.
 </status>
 
 <context>
@@ -23,8 +24,13 @@ owner" as someone else.
 
 - A group message the owner sent, by its captured Telegram sender ID, ends its
   speaker line with a separate `[the owner]` tag. This holds for the turn's
-  own message and for recent unaddressed messages. Names lose brackets, so a
-  member cannot write the tag. No numeric ID reaches the turn.
+  own message and for recent unaddressed messages. No numeric ID reaches the
+  turn.
+- A member cannot write the tag. Names lose brackets. In a group message's
+  text, a line that starts like a speaker line or the recent-messages frame
+  starts with `(` instead of `[`, and a `[the owner]` tag reads `(the owner)`.
+  The model sees these as text. The archive and the memory query keep the
+  original text.
 - The tool result after the owner's own card was sent to their private chat
   says the decision is theirs. It asks the agent to answer them as "you" and
   not to say the request waits for the owner or anyone else.

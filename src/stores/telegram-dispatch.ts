@@ -57,8 +57,9 @@ export function interruptedJournalDisposition(value:unknown):JournalDisposition 
  * Who sent a group message and when, as one line for the model. Names come
  * from the guarded representation, the time from the captured original, and
  * no numeric Telegram ID is ever included. The owner's own message ends with
- * a separate `[the owner]` tag, from the captured sender ID; a name cannot
- * contain brackets, so no one else can write it (ADR-0221).
+ * a separate `[the owner]` tag, from the captured sender ID. A name loses its
+ * brackets, and the runtime shows a look-alike line in message text as text,
+ * so no one else can write it (ADR-0221).
  */
 export function speakerLine(original:any,representation:any,owner?:string|null):string|null {
   const sender=representation?.message?.from??{},date=original?.message?.date,from=original?.message?.from?.id;

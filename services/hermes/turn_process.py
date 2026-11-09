@@ -55,6 +55,17 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             await asyncio.to_thread((profile/'.foreground').touch)
 
 
+# A line of message text that looks like this module's own group frame, or the owner tag of a speaker line.
+FRAME=re.compile(r'^([ \t]*)\[(?=(?:Group message from|Recent messages in this group|End of recent messages))',re.M|re.I)
+OWNER_TAG=re.compile(r'\[the owner\]',re.I)
+
+
+def unframed(text):
+    """Group message text as the model reads it: a look-alike speaker or recent-messages line, or an owner tag,
+    is shown as plain text, so only the line Nocheh puts before a message names its sender (ADR-0221)."""
+    return OWNER_TAG.sub('(the owner)',FRAME.sub(r'\1(',text))
+
+
 def recent_group(value):
     """The recent unaddressed group messages block, or '' when the input is absent or malformed."""
     if not isinstance(value,list) or not 0<len(value)<=20:return ''
@@ -64,7 +75,7 @@ def recent_group(value):
         if (not isinstance(speaker,str) or not speaker.startswith('[Group message from ') or not speaker.endswith(']')
                 or len(speaker)>200 or '\n' in speaker or not isinstance(item.get('text'),str) or len(item['text'])>1000
                 or not isinstance(item.get('id'),str) or not re.fullmatch(r'[a-f0-9]{64}',item['id'])):return ''
-        lines.append(speaker+' (source nocheh:event:'+item['id']+')\n'+item['text'])
+        lines.append(speaker+' (source nocheh:event:'+item['id']+')\n'+unframed(item['text']))
     lines.append('[End of recent messages]')
     return '\n\n'.join(lines)
 
@@ -98,7 +109,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     speaker=body.get('speaker')
     if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
         # Who spoke and when stays out of the memory query; the model and native history see it.
-        text = speaker + '\n' + text
+        text = speaker + '\n' + unframed(text)
     recent=recent_group(body.get('recent_group'))
     if recent:
         # Group messages since the last turn that did not address Nocheh never reached Hermes on their own.
