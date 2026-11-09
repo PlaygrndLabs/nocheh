@@ -3,6 +3,7 @@ from tools.paths import ROOT as REPO_ROOT
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 from pathlib import Path
@@ -112,7 +113,14 @@ def sources():
             # A lock key the Dockerfile no longer names would leave that image on a floating tag.
             if name not in text: raise SystemExit(f'{name}: build image is not in the Honcho Dockerfile; update the Honcho lock')
             text=text.replace(name,value)
+        # Every image the build pulls is pinned by digest; a new upstream base or tool needs a lock entry first.
+        stages=set(re.findall(r'^FROM\s+(?:--\S+\s+)*\S+\s+AS\s+(\S+)',text,re.M|re.I))
+        for image in re.findall(r'^FROM\s+(?:--\S+\s+)*(\S+)',text,re.M|re.I)+re.findall(r'^COPY\s.*?--from=(\S+)',text,re.M|re.I):
+            if '@sha256:' not in image and image not in stages:
+                raise SystemExit(f'{image}: Honcho build image is not pinned; update the Honcho lock')
         return text
+    # A Dockerfile from the previous pin never outlives a refused one.
+    (STATE/'honcho.Dockerfile').unlink(missing_ok=True)
     upstream=pinned((ROOT/'data/compat/upstreams/honcho/Dockerfile').read_text())
     (STATE/'honcho.Dockerfile').write_text(upstream+'\nENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache\nRUN python -c "import tiktoken; tiktoken.get_encoding(\'o200k_base\'); tiktoken.get_encoding(\'cl100k_base\')"\n')
 

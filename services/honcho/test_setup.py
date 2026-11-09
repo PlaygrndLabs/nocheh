@@ -69,8 +69,12 @@ class HonchoSetupTests(unittest.TestCase):
                 self.assertNotIn('# syntax=', built)
                 # Upstream moved to another tool tag: the lock no longer matches, so nothing is written.
                 dockerfile.write_text('FROM base:1\nCOPY --from=tool:3 /tool /bin/tool\n')
-                (state / 'honcho.Dockerfile').unlink()
                 with self.assertRaisesRegex(SystemExit, 'tool:2: build image is not in the Honcho Dockerfile'):
+                    honcho_setup.sources()
+                self.assertFalse((state / 'honcho.Dockerfile').exists())
+                # Upstream added another image: every FROM and COPY --from must still carry a digest.
+                dockerfile.write_text('FROM base:1 AS builder\nCOPY --from=tool:2 /tool /bin/tool\nFROM other:1\nCOPY --from=builder /app /app\n')
+                with self.assertRaisesRegex(SystemExit, 'other:1: Honcho build image is not pinned'):
                     honcho_setup.sources()
                 self.assertFalse((state / 'honcho.Dockerfile').exists())
 
