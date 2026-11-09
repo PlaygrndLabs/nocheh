@@ -757,7 +757,8 @@ export class NativeMemoryRepository {
     const known=!!speaker&&!!(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND retired_at IS NULL AND state='done'
       AND peer_ids ? $2 AND ($3::text IS NULL OR session_id=$3) LIMIT 1`,[workspace,speaker,audience==='owner'?null:session?.session_id??''])).rowCount;
     const base='/v3/workspaces/'+workspace,empty={text:'',session:session?.session_id??null,syncing:written.pending>0};
-    let configuration:Record<string,unknown>,summary='',representation='',card:string[]=[];
+    // A Honcho peer card summarizes a person across every session, so Nocheh never reads one, for any audience (ADR-0225).
+    let configuration:Record<string,unknown>,summary='',representation='';
     if(session&&written.done) {
       const query=new URLSearchParams({tokens:String(contextTokens),summary:'true'});
       if(known){query.set('peer_target',speaker!);if(audience!=='owner')query.set('limit_to_session','true');}
@@ -765,13 +766,12 @@ export class NativeMemoryRepository {
       const result=await this.call(base+'/sessions/'+session.session_id+'/context?'+query);
       summary=typeof result?.summary?.content==='string'?result.summary.content:'';
       representation=typeof result?.peer_representation==='string'?result.peer_representation:'';
-      card=Array.isArray(result?.peer_card)?result.peer_card.filter((line:unknown):line is string=>typeof line==='string'):[];
     } else if(audience==='owner'&&known) {
       configuration={workspace,audience,peer:speaker,include_most_frequent:true,max_conclusions:50};
       representation=string((await this.call(base+'/peers/'+speaker+'/representation',{include_most_frequent:true,max_conclusions:50})).representation,2*1024*1024);
     } else return empty;
-    const text=string([summary.trim()?'[conversation summary]\n'+summary:'',representation.trim()?'[what is known about the speaker]\n'+representation:'',
-      card.length?'[speaker card]\n'+card.map(line=>'- '+line).join('\n'):''].filter(Boolean).join('\n\n'),2*1024*1024);
+    const text=string([summary.trim()?'[conversation summary]\n'+summary:'',representation.trim()?'[what is known about the speaker]\n'+representation:'']
+      .filter(Boolean).join('\n\n'),2*1024*1024);
     if(!text)return empty;
     // Identical Honcho output reuses its guarded copy, so a prefetched context needs no new detection on arrival.
     const key='native-context:'+digest(canonical([configuration,digest(text)]));
