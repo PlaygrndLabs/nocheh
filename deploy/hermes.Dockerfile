@@ -16,8 +16,8 @@ ENV LD_LIBRARY_PATH=/opt/sqlite/lib PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
     UV_PROJECT_ENVIRONMENT=/opt/venv UV_PYTHON_DOWNLOADS=never \
     PYTHONPATH=/opt/hermes:/workspace PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
     HERMES_HOME=/workspace/data/local/hermes
-ARG HERMES_REVISION=bf0203a794a07aac3ff764972ab9087baa4e4f4e
-ARG HERMES_VERSION=0.22.5
+ARG HERMES_REVISION=2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19
+ARG HERMES_VERSION=0.23.0
 COPY --from=hermes_source . /opt/hermes
 COPY deploy/hermes-plugin-requirements.txt /tmp/hermes-plugin-requirements.txt
 # The pinned upstream supports only Python 3.14; keep the interpreter explicit

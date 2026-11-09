@@ -4,8 +4,8 @@
   "uv_tested": "0.13.5",
   "hermes": {
     "repository": "https://github.com/NousResearch/hermes-agent.git",
-    "revision": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
-    "version": "0.22.5",
+    "revision": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "version": "0.23.0",
     "dependencies": "uv.lock from the pinned revision"
   },
   "note": "Pins identify candidates under test. See the evidence report for actual compatibility results.",
