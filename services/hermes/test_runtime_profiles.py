@@ -21,7 +21,9 @@ class ControlFixture:
         logical = custom['id'] if custom else Scopes.profile(space)
         claims = {'generation': self.generation, 'guard_epoch': self.epoch, 'revision': self.epoch, 'logical_profile': logical}
         bound = Scopes.apply_revision(Scope(chat, '42', owner, Scopes.profile(space), space, self.epoch), claims)
-        return {'name': custom['name'] if custom else logical, 'logical_profile': logical,
+        # Control lists a chat's own profile under its chat's readable name (runtime-profiles.ts).
+        readable = {'42': ('private-chat', 'Private chat'), '-10': ('group-garden-club-a1b2c3', 'Garden club')}.get(space, (logical, ''))
+        return {'name': custom['name'] if custom else readable[0], 'display_name': '' if custom else readable[1], 'logical_profile': logical,
             'preference_profile': logical, 'native_profile': bound.profile, 'scope': chat, 'space': space,
             'owner': owner, 'managed': custom is None, 'is_default': owner and custom is None,
             'revision': custom['revision'] if custom else 0, 'policy_revision': self.epoch,
@@ -91,6 +93,19 @@ class RuntimeProfileTests(unittest.TestCase):
         (fake / 'nocheh-owner-profile.json').write_text('{"scope":"owner"}')
         with self.assertRaisesRegex(ValueError, 'profile_not_found'): self.app.profile('forged')
         with self.assertRaisesRegex(ValueError, 'profile_scope_denied'): self.app.profile('../forged')
+
+    def test_chats_are_listed_by_name_and_the_dashboard_shows_the_private_chat_once(self):
+        from hermes_cli import web_server_profiles
+        entries = {entry['name']: entry for entry in self.client.get('/api/profiles', headers=self.headers).json()['profiles']}
+        self.assertEqual(set(entries), {'private-chat', 'group-garden-club-a1b2c3'})
+        self.assertEqual((entries['private-chat']['display_name'], entries['private-chat']['description']), ('Private chat', 'Owner private'))
+        group = entries['group-garden-club-a1b2c3']
+        self.assertEqual((group['display_name'], group['description']), ('Garden club', 'Telegram group “Garden club”'))
+        self.assertEqual(self.app.profile('group-garden-club-a1b2c3'), self.app.profile(Scopes.profile('-10')), 'the name and the chat link find the same profile')
+        self.assertEqual(self.client.get('/api/profiles/active', headers=self.headers).json()['current'], 'private-chat')
+        # Hermes's own home is not a chat: the page names no profile of its own, so unnamed requests reach the private chat.
+        self.assertEqual(web_server_profiles.serving_profile_name(), '')
+        self.assertEqual(self.app.profile('')[0], self.app.profile('private-chat')[0])
 
     def test_crud_keeps_preferences_and_never_adopts_old_sessions(self):
         from .assistant_gateway import prepare_profile
