@@ -9,7 +9,7 @@ export function inspectionQuery(input:unknown){
   const b=object(input);
   if(typeof b.query!=='string'||b.query.length>65536||Object.keys(b).some(k=>!['query','variables','operationName'].includes(k)))throw new HttpError(400,'invalid_inspection_query');
   if(b.variables!==undefined&&b.variables!==null)object(b.variables);
-  let document;try{document=parse(b.query,{maxTokens:8192});}catch{throw new HttpError(400,'invalid_inspection_query');}
+  let document;try{document=parse(b.query,{maxLexicalTokens:8192});}catch{throw new HttpError(400,'invalid_inspection_query');}
   const operations=document.definitions.filter(d=>d.kind===Kind.OPERATION_DEFINITION);
   if(operations.length!==1||operations[0]!.operation!=='query'||b.operationName!=null&&b.operationName!==operations[0]!.name?.value)throw new HttpError(403,'inngest_inspection_only');
   const fragments=new Map<string,FragmentDefinitionNode>();
