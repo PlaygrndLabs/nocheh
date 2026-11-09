@@ -180,13 +180,19 @@ class RetiredHistoryTests(unittest.TestCase):
     def test_native_notes_lose_entries_written_through_memory_operations(self):
         add={'action':'add','content':'Kite: '+FACT};rain='Rain on Friday'
         # Hermes advertises operations[]; a model may still send it as a JSON string or one object.
-        for operations in ([{'action':'remove','old_text':'Old','content':rain},add],json.dumps([add]),add,
-                           [{'action':'patch','old_text':'Kite','new_text':'Kite: '+FACT}]):
+        # A patch swaps only its span (here FACT for 'Blue') and keeps the rest of the entry.
+        for operations in ([{'action':'remove','old_text':'Old','content':rain},add],json.dumps([add]),add,[json.dumps(add)],
+                           [{'action':'patch','old_text':'Blue','content':FACT}],[{'action':'patch','old_text':'Blue','new_text':FACT}]):
             with self.subTest(operations=operations),tempfile.TemporaryDirectory() as folder:
                 database=self.history(folder,{'target':'memory','operations':operations})
                 notes=self.notes(folder,MEMORY_md=['Kite: '+FACT,rain])
                 withhold_retired(database,Lookup(answered=()),notes)
                 self.assertEqual(self.entries(notes,'MEMORY.md'),[rain],'only add and patch text counts as written')
+        with tempfile.TemporaryDirectory() as folder:
+            database=self.history(folder,{'target':'memory','operations':[{'action':'patch','old_text':'Sat','content':'Fri'}]})
+            notes=self.notes(folder,MEMORY_md=['Kite: '+FACT,rain,'Sun'])
+            withhold_retired(database,Lookup(answered=()),notes)
+            self.assertEqual(self.entries(notes,'MEMORY.md'),['Kite: '+FACT,rain,'Sun'],'a span this short marks no entry')
 
     def test_owner_recall_skips_native_notes_citing_a_retired_message(self):
         import sys

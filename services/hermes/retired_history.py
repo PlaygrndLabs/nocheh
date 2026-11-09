@@ -41,6 +41,8 @@ SUMMARY_WITHHELD='[Earlier conversation summary withheld; it may include a retir
 DERIVED=('api_content','reasoning','reasoning_content','reasoning_details','codex_reasoning_items','codex_message_items','display_metadata')
 # Kept in Hermes's own key/value table so it travels and commits with the rows it describes.
 CHECKED_KEY='nocheh_retired_history_revision'
+# A patched span shorter than this would mark unrelated note entries.
+SPAN_MINIMUM=4
 LOOKUP_BATCH=200
 # Hermes' MemoryStore files and their entry delimiter (tools/memory_tool_store.py).
 NOTE_FILES=('MEMORY.md','USER.md')
@@ -116,26 +118,33 @@ def _lookup(lookup,event_ids):
 
 
 def _memory_writes(row):
-    """Entry text that a stored memory tool call added or wrote, as one top-level change or operations[]."""
+    """(whole entries, patched spans) that a stored memory tool call wrote, as one top-level change or operations[]."""
     try:calls=json.loads(row.get('tool_calls') or '[]')
-    except ValueError:return set()
-    written=set()
+    except ValueError:return set(),set()
+    written,spans=set(),set()
     for call in calls if isinstance(calls,list) else []:
         function=call.get('function') if isinstance(call,dict) else None
         if not isinstance(function,dict) or function.get('name')!='memory':continue
         try:arguments=json.loads(function.get('arguments') or '{}')
         except (TypeError,ValueError):continue
         if not isinstance(arguments,dict):continue
-        # Stored arguments are the model's raw ones; Hermes parses a JSON string and wraps a single object before running.
-        operations=arguments.get('operations')
-        if isinstance(operations,str):
-            try:operations=json.loads(operations)
-            except ValueError:operations=None
+        # Stored arguments are the model's raw ones; Hermes parses JSON strings (the list or each item) and wraps one object.
+        operations=_parsed(arguments.get('operations'))
         operations=[operations] if isinstance(operations,dict) else operations if isinstance(operations,list) else []
-        for change in [arguments]+[item for item in operations if isinstance(item,dict) and item.get('action') in ('add','patch')]:
+        for change in [arguments]+[_parsed(item) for item in operations]:
+            if not isinstance(change,dict):continue
             text=change.get('content') or change.get('new_text')
-            if isinstance(text,str) and text.strip():written.add(text.strip())
-    return written
+            if not isinstance(text,str) or not text.strip():continue
+            # A patch swaps one span and keeps the rest of the entry, so the span marks the entry it landed in.
+            if change.get('action')=='patch':spans.add(text.strip())
+            elif change.get('action')!='remove':written.add(text.strip())
+    return written,spans
+
+
+def _parsed(value):
+    if not isinstance(value,str):return value
+    try:return json.loads(value)
+    except ValueError:return None
 
 
 def _note_files(notes):
@@ -162,15 +171,18 @@ def note_citations(notes):
     return cited
 
 
-def withhold_notes(notes,retired,written=()):
+def withhold_notes(notes,retired,written=(),spans=()):
     """Remove native note entries derived from retired sources; return how many."""
+    # A very short span would match unrelated entries; such a patch is left to the entry's own citation.
+    spans=[span for span in spans if len(span)>=SPAN_MINIMUM]
     removed=0
     for file in _note_files(notes):
         # Hermes' own writers lock this sibling file and replace the note atomically.
         with file.with_name(file.name.split('.bak.')[0]+'.lock').open('a') as lock:
             fcntl.flock(lock,fcntl.LOCK_EX)
             entries=_note_entries(file)
-            kept=[entry for entry in entries if not set(IDENTIFIER.findall(entry))&retired and entry not in written]
+            kept=[entry for entry in entries if not set(IDENTIFIER.findall(entry))&retired and entry not in written
+                  and not any(span in entry for span in spans)]
             if len(kept)==len(entries):continue
             with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=file.parent,prefix='.mem_',delete=False) as output:
                 output.write(NOTE_DELIMITER.join(kept));output.flush();os.fsync(output.fileno())
@@ -270,7 +282,8 @@ def withhold_retired(database,lookup,notes=None):
         try:
             rows=_rows(connection)
             revision,changes=plan(rows,lookup)
-            written=set().union(*(_memory_writes(row) for row in rows if 'tool_calls' in changes.get(row['id'],{})))
+            writes=[_memory_writes(row) for row in rows if 'tool_calls' in changes.get(row['id'],{})]
+            written=set().union(*(entries for entries,_ in writes));spans=set().union(*(patched for _,patched in writes))
             for row_id,change in changes.items():
                 keys=sorted(change)
                 connection.execute('UPDATE messages SET '+','.join(key+'=?' for key in keys)+' WHERE id=?',[change[key] for key in keys]+[row_id])
@@ -282,7 +295,7 @@ def withhold_retired(database,lookup,notes=None):
             connection.execute('CREATE TABLE IF NOT EXISTS state_meta (key TEXT PRIMARY KEY, value TEXT)')
             connection.execute('INSERT INTO state_meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(CHECKED_KEY,revision))
             # Notes first: if this fails the revision stays unchecked and the next turn retries.
-            removed+=withhold_notes(notes,set(),written)
+            removed+=withhold_notes(notes,set(),written,spans)
             connection.execute('COMMIT')
         except BaseException:
             connection.execute('ROLLBACK');raise
