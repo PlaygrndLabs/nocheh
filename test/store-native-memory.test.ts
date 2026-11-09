@@ -394,6 +394,12 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     assert.match(correctedRecall.sources[0]!.text,/Checkmark means reviewed, not done\./);
     assert.equal(JSON.stringify(await services.memory.recall(fresh,'What does another symbol mean?')).includes('owner_corrected_interpretation'),false,
       'an unrelated question cannot receive the correction');
+    // Answering a suggestion card or renaming a person makes no write invalid, so neither holds Honcho (ADR-0222).
+    const card=await services.entities.suggest('person','Card Person',source,'A person named in this chat.');
+    const answered:any=await services.entities.decide(owner,card.id,{decision:'confirm',expected_revision:card.revision,operation_id:key+':remember'});
+    await services.entities.rename(owner,answered.entity.id,{name:'Renamed Person',expected_revision:answered.entity.revision,operation_id:key+':rename'});
+    assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM owner_commands WHERE NOT holds_memory')).rows[0].count,2);
+    assert.equal((await services.memory.context(await actor(source.id))).limited_memory,false,'Remember and a rename keep Honcho memory readable');
     await services.access.setConsent(owner,source,{enabled:false,expected_revision:0,operation_id:key+':consent-off'});
     const withdrawn=await actor(source.id);
     assert.equal((await services.memory.context(withdrawn)).syncing,true,'an owner change holds Honcho until a sweep at its epoch');

@@ -348,7 +348,8 @@ export class EntityRepository {
       await db.query('UPDATE memory_entity_suggestions SET status=$2,revision=revision+1,updated_at=now() WHERE id=$1 OR merged_into=$1 AND status=\'pending\'',
         [suggestionId,status]);
       return {id:suggestionId,status,entity,...(folded.length?{folded:folded.map(row=>row.id)}:{})};
-    });
+      // An answer only adds an active entity, project and bindings: no written receipt becomes invalid (ADR-0222).
+    },{holdsMemory:false});
   }
   async merge(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['target_id','expected_revision','operation_id']),source=entityId(id),target=entityId(body.target_id),expected=revision(body.expected_revision);
@@ -374,7 +375,8 @@ export class EntityRepository {
       if(row.kind!=='person'||row.state!=='active')throw new HttpError(409,'entity_rename_invalid');
       await db.query('UPDATE memory_entities SET name=$2,revision=revision+1,updated_at=now() WHERE id=$1',[target,name]);
       return {id:target,name,revision:expected+1};
-    });
+      // A new name keeps the entity active: no written receipt becomes invalid (ADR-0222).
+    },{holdsMemory:false});
   }
   async unmerge(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['expected_revision','operation_id']),source=entityId(id),expected=revision(body.expected_revision);
