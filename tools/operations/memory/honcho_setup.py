@@ -108,7 +108,10 @@ def sources():
     # tokenizer assets during the build, before any runtime credentials exist.
     def pinned(text):
         text='\n'.join(line for line in text.splitlines() if not line.startswith('# syntax='))+'\n'
-        for name,value in pins['build_images'].items(): text=text.replace(name,value)
+        for name,value in pins['build_images'].items():
+            # A lock key the Dockerfile no longer names would leave that image on a floating tag.
+            if name not in text: raise SystemExit(f'{name}: build image is not in the Honcho Dockerfile; update the Honcho lock')
+            text=text.replace(name,value)
         return text
     upstream=pinned((ROOT/'data/compat/upstreams/honcho/Dockerfile').read_text())
     (STATE/'honcho.Dockerfile').write_text(upstream+'\nENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache\nRUN python -c "import tiktoken; tiktoken.get_encoding(\'o200k_base\'); tiktoken.get_encoding(\'cl100k_base\')"\n')

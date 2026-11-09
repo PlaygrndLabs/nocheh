@@ -1,4 +1,5 @@
 """Production Honcho setup keeps acceptance and spending policy explicit."""
+import json
 import os
 import subprocess
 import sys
@@ -49,6 +50,29 @@ class HonchoSetupTests(unittest.TestCase):
                 self.assertEqual(read_env(path)['PEER_CARD_ENABLED'], 'true')
                 honcho_setup.initialize(state)
                 self.assertEqual(read_env(path)['PEER_CARD_ENABLED'], 'false')
+
+    def test_build_images_are_pinned_and_a_missing_one_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root, state = Path(folder) / 'root', Path(folder) / 'state'
+            (root / 'services/honcho').mkdir(parents=True)
+            (root / 'data/compat/upstreams/honcho').mkdir(parents=True)
+            state.mkdir()
+            (root / 'services/honcho/upstreams.lock.json').write_text(json.dumps({'build_images': {
+                'base:1': 'base:1@sha256:' + 'a' * 64, 'tool:2': 'tool:2@sha256:' + 'b' * 64}}))
+            dockerfile = root / 'data/compat/upstreams/honcho/Dockerfile'
+            dockerfile.write_text('# syntax=docker/dockerfile:1\nFROM base:1 AS builder\nCOPY --from=tool:2 /tool /bin/tool\nFROM base:1\n')
+            with patch.object(honcho_setup, 'ROOT', root), patch.object(honcho_setup, 'STATE', state):
+                honcho_setup.sources()
+                built = (state / 'honcho.Dockerfile').read_text()
+                self.assertEqual(built.count('base:1@sha256:' + 'a' * 64), 2)
+                self.assertIn('COPY --from=tool:2@sha256:' + 'b' * 64 + ' /tool', built)
+                self.assertNotIn('# syntax=', built)
+                # Upstream moved to another tool tag: the lock no longer matches, so nothing is written.
+                dockerfile.write_text('FROM base:1\nCOPY --from=tool:3 /tool /bin/tool\n')
+                (state / 'honcho.Dockerfile').unlink()
+                with self.assertRaisesRegex(SystemExit, 'tool:2: build image is not in the Honcho Dockerfile'):
+                    honcho_setup.sources()
+                self.assertFalse((state / 'honcho.Dockerfile').exists())
 
     def test_monthly_cutover_requires_live_acceptance_and_attachment(self):
         with tempfile.TemporaryDirectory() as folder:
