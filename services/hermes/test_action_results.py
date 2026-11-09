@@ -66,6 +66,21 @@ class ActionResultTests(unittest.TestCase):
         with patch.object(archive_tools, 'request', side_effect=HTTPError('/', 409, 'changed', {}, None)):
             self.assertEqual(json.loads(archive_tools.notion_tool({'operation': 'list'})), {'error': 'notion_is_off_or_changed'})
 
+    def test_a_summary_travels_beside_the_exact_arguments(self):
+        # The asker's words go to the owner's card, never into what runs (ADR-0224).
+        waiting = {'id': ID, 'state': 'proposed', 'message': 'Review the exact operation.'}
+        with patch.object(archive_tools, '_PROCESS_PREFERENCES', {'nocheh_tools.browser': 'on', 'nocheh_tools.mcp': 'on'}), \
+                patch.object(archive_tools, 'request', return_value=waiting) as request:
+            archive_tools.controlled_tool('browser', {'url': 'https://example.com/', 'summary': 'Read the made-up page.'})
+            archive_tools.controlled_tool('browser', {'url': 'https://example.com/', 'summary': '  '})
+            archive_tools.controlled_tool('browser', {'url': 'https://example.com/', 'summary': 5})
+            archive_tools.notion_tool({'operation': 'call', 'tool': 'notion-create-pages', 'input': {'pages': []}, 'summary': 'Add a made-up page.'})
+        self.assertEqual([call.args for call in request.call_args_list], [
+            ('/v1/tools/propose', {'kind': 'browser', 'arguments': {'url': 'https://example.com/'}, 'summary': 'Read the made-up page.'}),
+            ('/v1/tools/propose', {'kind': 'browser', 'arguments': {'url': 'https://example.com/'}}),
+            ('/v1/tools/propose', {'kind': 'browser', 'arguments': {'url': 'https://example.com/'}}),
+            ('/v1/tools/propose', {'kind': 'mcp', 'arguments': {'connection': 'notion', 'tool': 'notion-create-pages', 'input': {'pages': []}}, 'summary': 'Add a made-up page.'})])
+
     def test_an_operation_already_allowed_answers_in_this_turn(self):
         # A rule or the owner freedom setting lets it run now: the tool waits and returns the result (ADR-0215).
         value = {**view('Synthetic forecast'), 'kind': 'browser'}

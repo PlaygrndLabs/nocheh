@@ -322,6 +322,25 @@ class ProductScenarios(Scenarios):
         edited = self.wait('card_shows_rejection', lambda: (lambda row: row if 'Rejected' in row['message']['text'] and not self.buttons(row) else None)(self.card_message(card)), 120)
         self.gate('decided_card_keeps_its_formatting', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
                   entities=edited['message'].get('entities'))
+        # With the asker's own summary the card leads with it, and the exact fields fold under it into one quote that
+        # opens on a tap, their labels still bold and no quote inside it (ADR-0224).
+        said = 'Add a made-up page with two open items '+marker
+        request = self.f.message(OWNER, 'یک صفحه دیگر [[tool:nocheh_mcp '+json.dumps({**call, 'summary': said})+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('summary_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        text, entities = card['message']['text'], card['message'].get('entities') or []
+        wide = text.encode('utf-16-le')
+        folds = [span(entity) for entity in entities if entity['type'] == 'expandable_blockquote']
+        self.gate('card_leads_with_the_summary', text.startswith('⚙️ mcp.example.test · create-page\n📝 '+said+'\n\nExact details\nhttps://mcp.example.test/mcp\n'), card=text[:400])
+        self.gate('fields_fold_into_one_quote', len(folds) == 1 and folds[0] == text[text.index('Exact details'):] and 'properties › title: Open items '+marker in folds[0]
+                  and not [entity for entity in entities if entity['type'] in ('blockquote', 'pre')], entities=entities)
+        self.gate('labels_bold_inside_the_fold', sorted(span(entity) for entity in entities if entity['type'] == 'bold')
+                  == ['Exact details', 'mcp.example.test · create-page', 'pages › content:', 'pages › note:', 'pages › properties › title:'], entities=entities)
+        answer = self.press(card, 'reject')
+        self.gate('summary_card_rejected', 'Rejected' in (answer.get('text') or ''), answer=answer.get('text'))
+        edited = self.wait('summary_card_shows_rejection', lambda: (lambda row: row if 'Rejected' in row['message']['text'] and not self.buttons(row) else None)(self.card_message(card)), 120)
+        self.gate('decided_summary_card_keeps_its_fold', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
+                  entities=edited['message'].get('entities'))
 
     def same_group_post_goes_right_away(self):
         # A post the owner or an allowed member asks for in their own group and topic needs no approval.

@@ -28,6 +28,18 @@ test('controlled proposals and bounded permissions preserve guarded content outs
     assert.equal((await a.preview(owner,{action_id:proposal.id})).decision.outcome,'ask');
     await assert.rejects(a.propose({...actor,purpose:'memory-review'},body),{code:'external_effect_scope_denied'});
     await assert.rejects(a.propose(actor,{...body,profile:'owner'}),{code:'unknown_action_field'});
+    // The asker's summary travels beside the exact arguments: secret-checked, shown only to the owner, and never part of
+    // what runs, the action's identity or its fingerprint. A repeat keeps the words it was first asked with (ADR-0224).
+    const words={kind:'shell',arguments:{command:'printf summarized'}},noted=await a.propose(actor,{...words,summary:'Print a word,\n  not the fixture-secret one.'});
+    assert.deepEqual(await a.propose(actor,words),noted,'the same request without a summary is the same action');
+    assert.equal((await a.propose(actor,{...words,summary:'Other words.'})).id,noted.id);
+    const summarized=await a.inspect(owner,noted.id);
+    assert.ok(summarized.summary.startsWith('Print a word, not the ')&&!summarized.summary.includes('fixture-secret'),summarized.summary);
+    assert.deepEqual(summarized.arguments,words.arguments);assert.equal(summarized.fingerprint,noted.fingerprint);
+    assert.equal((await a.inspect(actor,noted.id) as any).summary,undefined,'the asker reads its operations by their arguments');
+    await assert.rejects(a.propose(actor,{...words,summary:5}),{code:'invalid_action_summary'});
+    for(const [command,summary] of [['printf long','x'.repeat(501)],['printf blank','  \n ']])
+      assert.equal((await a.inspect(owner,(await a.propose(actor,{kind:'shell',arguments:{command},summary})).id)).summary,null,'a summary too long or blank is left out');
     await assert.rejects(a.decide(actor,{id:proposal.id,fingerprint:proposal.fingerprint,decision:'approve'}),{status:403});
     await assert.rejects(a.decide(owner,{id:proposal.id,fingerprint:digest('wrong'),decision:'approve'}),{code:'action_changed'});
     const grantBody={action_id:proposal.id,fingerprint:proposal.fingerprint,uses:2,minutes:5};

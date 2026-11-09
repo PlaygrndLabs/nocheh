@@ -1,12 +1,15 @@
 import {canonical} from './archive.js';
 import {confusables} from './confusables.js';
-import {fillTemplate} from './prompts.js';
+import {fillTemplate,lineKept} from './prompts.js';
 
 /** While a card is filled, \u0001K\u0002text\u0003 marks text for one Telegram entity: K is the number of
- * a link's address, or b (bold), c (a quote shown whole), q (a quote that opens on a tap) or p (preformatted). These control
- * characters are removed from owner text and escaped in every argument, so nothing else can make one. */
-export const controls=/[\u0001-\u0003]/g;
-export const marked=/\u0001(\d+|[bcqp])\u0002([^\u0001-\u0003]*)\u0003/g;
+ * a link's address, or b (bold), c (a quote shown whole), q (a quote that opens on a tap) or p (preformatted).
+ * \u0004 and \u0005 open and close the part that folds into one quote, which opens on a tap; it holds only bold
+ * text. These control characters are removed from owner text and escaped in every argument and summary, so
+ * nothing else can make one. */
+export const controls=/[\u0001-\u0005]/g;
+export const marked=/\u0001(\d+|[bcqp])\u0002([^\u0001-\u0005]*)\u0003/g;
+const pieces=new RegExp(marked.source+'|[\\u0004\\u0005]','g');
 const mark=(kind:'b'|'c'|'q'|'p',text:string)=>text?`\u0001${kind}\u0002${text}\u0003`:'';
 /** Bold text on a card, such as a change's name on a list card. */
 export const heading=(text:string)=>mark('b',text);
@@ -18,15 +21,19 @@ const formats={b:'bold',c:'blockquote',q:'expandable_blockquote',p:'pre'} as con
 
 /** Plain card text with its Telegram entities; offsets count UTF-16 units, as Telegram's do. */
 export function linked(text:string,urls:string[]=[]):{text:string;links:Link[]} {
-  let shown='',last=0;const links:Link[]=[];
-  for(const match of text.matchAll(marked)) {
-    shown+=text.slice(last,match.index);
+  let shown='',last=0,fold:{type:'expandable_blockquote';offset:number;length:number}|null=null;const links:Link[]=[];
+  for(const match of text.matchAll(pieces)) {
+    shown+=text.slice(last,match.index);last=match.index+match[0].length;
+    if(match[0]==='\u0004'){fold??={type:'expandable_blockquote',offset:shown.length,length:0};links.push(fold);continue;}
+    if(match[0]==='\u0005'){if(fold)fold.length=shown.length-fold.offset;fold=null;continue;}
     const [key,label]=[match[1]!,match[2]!];
     if(label)links.push(key in formats?{type:formats[key as keyof typeof formats],offset:shown.length,length:label.length}:
       {offset:shown.length,length:label.length,url:urls[Number(key)]!});
-    shown+=label;last=match.index+match[0].length;
+    shown+=label;
   }
-  return {text:shown+text.slice(last),links};
+  shown+=text.slice(last);
+  if(fold)fold.length=shown.length-fold.offset;
+  return {text:shown,links:links.filter(link=>link.length>0)};
 }
 /** A card cut to `room` units, its entities cut to what is left; never between the two units of one character. */
 export function cut(card:{text:string;links:Link[]},room:number):{text:string;links:Link[]} {
@@ -37,10 +44,10 @@ export function cut(card:{text:string;links:Link[]},room:number):{text:string;li
 /** An operation is shown in words while it stays this short and plain; otherwise as its exact JSON. */
 const wordsLimit=3000,wordsEntities=90;
 
-/** The owner-editable words an operation's name is made of. */
-export type OperationWords={kind_shell:string;kind_browser:string;kind_tools:string};
-/** An operation as an approval card shows it: its name, and its exact arguments. */
-export type OperationText={title:string;body:string};
+/** The owner-editable words an operation's name is made of, and the heading of its folded exact arguments. */
+export type OperationWords={kind_shell:string;kind_browser:string;kind_tools:string;details:string};
+/** An operation as an approval card shows it: its name, what the asker says it does, and its exact arguments. */
+export type OperationText={title:string;summary:string|null;body:string};
 
 /** Characters a reader cannot see, or that change how the text around them reads: controls such as a tab,
  * format characters such as zero-width and direction marks, private-use and unassigned code points, lone
@@ -165,9 +172,13 @@ function walk(item:unknown,path:Step[],group:Group) {
   group.leaves.push({path,value:item});
 }
 
+/** A long value's lines in a fold, where Telegram allows no quote of its own: each one indented, so none of
+ * them starts a line as a label or a name does. */
+const indent='  ';
 /** A group's lines: each short value on one line after its bold label, then each long value under its
- * label in a quote, which opens on a tap only when it is long, then the groups inside it under their names. */
-function lines(group:Group,header:string):string[] {
+ * label in a quote, which opens on a tap only when it is long, or indented when the lines are folded, then
+ * the groups inside it under their names. */
+function lines(group:Group,header:string,folded:boolean):string[] {
   const out:string[]=header?[mark('b',header)]:[];
   for(const leaf of group.leaves.filter(leaf=>!isLong(leaf.value))) {
     const head=label(leaf.path)?mark('b',label(leaf.path)+':'):'';
@@ -179,9 +190,10 @@ function lines(group:Group,header:string):string[] {
     // of an inner line, which never shows, is quoted with its line breaks written out.
     const text=leaf.value as string,trimmed=text.replace(/^(?:[ \t]*\n)+|[ \t\n]+$/g,''),quoted=trimmed&&!trimmed.startsWith('"')&&!hidden(trimmed,true)?trimmed:exact(text);
     if(label(leaf.path))out.push(mark('b',label(leaf.path)+':'));
-    out.push(mark(quoted.length>quoteLimit?'q':'c',quoted));
+    if(folded)out.push(...quoted.split('\n').map(line=>indent+line));
+    else out.push(mark(quoted.length>quoteLimit?'q':'c',quoted));
   }
-  for(const inner of group.groups)out.push(...(out.length?['']:[]),...lines(inner,header?header+' › '+inner.name:inner.name));
+  for(const inner of group.groups)out.push(...(out.length?['']:[]),...lines(inner,header?header+' › '+inner.name:inner.name,folded));
   return out;
 }
 
@@ -212,10 +224,10 @@ function alike(item:unknown):boolean {
 }
 
 /** Every field of an input in words, with nothing left out. */
-export function fields(input:unknown):string {
+export function fields(input:unknown,folded=false):string {
   const group:Group={name:'',leaves:[],groups:[]};
   walk(input,[],group);
-  return lines(group,'').join('\n');
+  return lines(group,'',folded).join('\n');
 }
 
 /** A connected service's name: notion → Notion. */
@@ -265,27 +277,46 @@ export function operationTitle(kind:string,args:Record<string,any>,words:Operati
 /** An operation's exact arguments in words: a command as code, an address as it is, and a tool's
  * input field by field, its long text in a quote that opens on a tap. Text with a hidden character is
  * quoted with that character written out, so the card never shows less than what runs. */
-function words(kind:string,args:Record<string,any>):string {
+function words(kind:string,args:Record<string,any>,folded:boolean):string {
   if(kind==='shell'&&typeof args.command==='string')return mark('p',shown(args.command,true));
   if(kind==='browser'&&typeof args.url==='string')return location(args.url);
-  if(kind==='mcp')return [typeof args.url==='string'?location(args.url):'',args.operation==='list'?'':fields(args.input)].filter(Boolean).join('\n\n');
+  if(kind==='mcp')return [typeof args.url==='string'?location(args.url):'',args.operation==='list'?'':fields(args.input,folded)].filter(Boolean).join('\n\n');
   return exactJson(args);
 }
 
-/** An operation's card from the owner's template: its name in bold, and its arguments put in after the
- * template is filled, so filling never changes them. */
+/** What the asker says an operation does, as one line: as written, or quoted with its hidden characters
+ * written out when it hides one or could pass for a quote or a change on a list card. Left out when empty
+ * or, written out, too long for a card's line. */
+const summaryLimit=600;
+function said(text:string|null):string|null {
+  const line=(text??'').replace(/\s+/g,' ').trim();
+  const kept=line&&!line.startsWith('"')&&!line.includes('⚙')&&!hidden(line,false)?line:exact(line);
+  return line&&kept.length<=summaryLimit?kept:null;
+}
+
+/** An operation's card from the owner's template: its name in bold, what the asker says it does, and its
+ * arguments put in after the template is filled, so filling never changes them. A template without a place
+ * for the summary, or whose summary line is left out for another missing value, gets it on the line after
+ * the name, so folded arguments never come without it. */
 export function operationCard(template:string,operation:OperationText,origin:string|null):string {
-  const slot='\u0001\u0003';
-  return fillTemplate(template.replace(controls,''),{kind:heading(operation.title),origin,arguments:operation.body?slot:''}).replaceAll(slot,()=>operation.body);
+  const slot='\u0001\u0003',own=template.replace(controls,'');
+  const values={kind:heading(operation.title),summary:operation.summary,origin,arguments:operation.body?slot:''};
+  const shows=own.split('\n').some(line=>line.includes('{summary}')&&lineKept(line,values));
+  const placed=!operation.summary||shows?own:/\{kind\}/.test(own)?own.replace(/^(.*\{kind\}.*)$/m,'$1\n📝 {summary}'):'📝 {summary}\n'+own;
+  return fillTemplate(placed,values).replaceAll(slot,()=>operation.body);
 }
 
 /** What an approval card shows for an operation. Its arguments are in words while they fit a card
  * plainly; a very long or finely split input, or one whose keys read alike, is shown as its exact JSON
- * instead. Null when even that is too long for a card, as text with many characters written out can be. */
-export function operationText(kind:string,args:Record<string,any>,names:OperationWords):OperationText|null {
-  const title=operationTitle(kind,args,names),twins=alike(args),json=twins?mark('p',ascii(canonical(args))):exactJson(args);
+ * instead. Null when even that is too long for a card, as text with many characters written out can be.
+ * With a summary from the asker, the arguments fold under it into one quote that opens on a tap, unless
+ * they are code, which Telegram cannot put in a quote. */
+export function operationText(kind:string,args:Record<string,any>,names:OperationWords,note:string|null=null):OperationText|null {
+  const title=operationTitle(kind,args,names),summary=said(note),twins=alike(args),json=twins?mark('p',ascii(canonical(args))):exactJson(args);
   const length=(text:string)=>text.replace(marked,'$2').length;
-  let body=twins?json:words(kind,args);
+  let body=twins?json:words(kind,args,!!summary);
   if(length(body)>wordsLimit||[...body.matchAll(marked)].length>wordsEntities)body=json;
-  return length(body)<=wordsLimit?{title,body}:null;
+  if(length(body)>wordsLimit)return null;
+  const folded=!!summary&&!!body&&!/\u0001p\u0002/.test(body);
+  return {title,summary,body:folded?'\u0004'+heading(plain(names.details))+'\n'+body+'\u0005':body};
 }

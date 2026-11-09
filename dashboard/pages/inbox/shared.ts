@@ -15,6 +15,8 @@ export type Action = {
   profile?: string;
   logical_profile?: string;
   arguments: any;
+  /** What the assistant says the operation does, in its own words; the exact arguments are what runs. */
+  summary?: string | null;
   result?: unknown;
   state: string;
   revision?: number;

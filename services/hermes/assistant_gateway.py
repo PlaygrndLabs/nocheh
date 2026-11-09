@@ -168,7 +168,8 @@ def no_preview():
     return LinkPreviewOptions(is_disabled=True)
 
 
-# The formatting an approval card may carry: bold labels, a quote shown whole or one that opens on a tap, and a command as code.
+# The formatting an approval card may carry: bold labels, a quote shown whole or one that opens on a tap, such as an
+# operation's arguments folded under its summary, and a command as code.
 APPROVAL_FORMATS=frozenset({'bold','blockquote','expandable_blockquote','pre'})
 
 
@@ -190,6 +191,14 @@ def approval_links(links,length):
         elif kind in APPROVAL_FORMATS and set(link)=={'offset','length','type'}:
             entities.append(MessageEntity(kind,offset,size))
         else:raise ValueError('invalid_approval')
+    # They nest only as Telegram allows: bold inside a quote, such as a label in folded arguments, or around another
+    # entity; never a quote in a quote, anything with code, or a partial overlap, which Telegram refuses or reads its own way.
+    spans=[(link['offset'],link['offset']+link['length'],link.get('type') or 'text_link') for link in links]
+    for index,(start,end,kind) in enumerate(spans):
+        for other_start,other_end,other in spans[index+1:]:
+            if other_start>=end or start>=other_end:continue
+            nested=start<=other_start and other_end<=end or other_start<=start and end<=other_end
+            if not nested or 'pre' in (kind,other) or 'bold' not in (kind,other):raise ValueError('invalid_approval')
     return entities or None
 
 
