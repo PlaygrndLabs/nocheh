@@ -25,6 +25,8 @@ const buttonData=/^n([adscw])([a-f0-9]{40})([a-f0-9]{16})$/;
 const ruleButtons:Record<string,[ApprovalText,string][]>={
   browser:[['allow_once','a'],['allow_here','c'],['allow_always','w'],['reject','d']],
   shell:[['allow_once','a'],['allow_command','w'],['reject','d']]};
+/** The rule buttons an operation's card may offer: none for a job's operation, a follow-up's, or one without a rule key (ADR-0214). */
+const ruleChoices=(row:{job_id:string|null;match_key:string|null;kind:string})=>!row.job_id&&row.match_key?ruleButtons[row.kind]??null:null;
 /** The Retry failed button under a problem notice in the owner's private chat. */
 export const retryButton='nr';
 const reviewLimit=2200;
@@ -161,42 +163,57 @@ export class ActionCommandRepository {
     const [chat,topic]=reviewer.space.split('/topic/');
     return {chat:chat!,...(topic?{topic}:{}),reviewer:reviewer.user};
   }
-  /** A background job's run or a scheduled task that asked for an operation, by the job's name. */
-  private async work(source:any,line:Record<ApprovalText,string>):Promise<string|null> {
+  /** A background job's run or a scheduled task that asked for an operation, by the job's name; a scheduled task with the
+   *  chat it runs for, when `chat` names it. */
+  private async work(source:any,line:Record<ApprovalText,string>,chat?:()=>Promise<string>):Promise<string|null> {
     const kind=(await this.access.stores.control.query('SELECT kind FROM content_operations WHERE id=$1',[source.id])).rows[0]?.kind;
-    if(kind==='scheduled_trigger')return line.from_schedule;
+    if(kind==='scheduled_trigger')return chat?fillTemplate(line.from_schedule_in,{chat:await chat()}):line.from_schedule;
     const title=kind==='background_run'&&this.jobs?clean(await this.jobs.runJob(source.id)):null;
     return title?fillTemplate(line.from_job,{title}):null;
   }
-  /** The exact content to decide on, or null when it is too long to review in Telegram. */
-  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;links:Link[];fingerprint:string;state:string;code:string|null;started:boolean;resolution:string|null;line:Record<ApprovalText,string>}|null> {
+  /** The exact content to decide on, or null when it is too long to review in Telegram. `rules` says whether the card
+   *  may offer its operation's chat rule buttons. */
+  private async card(kind:ActionKind,id:string,source:any,reviewed=false):Promise<{text:string;links:Link[];fingerprint:string;state:string;code:string|null;started:boolean;resolution:string|null;line:Record<ApprovalText,string>;rules:boolean}|null> {
     const owner={admin:true,scope:null},texts=await this.texts(),urls:string[]=[];
     const line=Object.fromEntries(Object.entries(texts.line).map(([key,value])=>[key,value.replace(controls,'')])) as Record<ApprovalText,string>;
     const mark:Mark=(label,url)=>url?`\u0001${urls.push(url)-1}\u0002${label}\u0003`:label;
-    // The card under a request in its own chat does not say where it was asked.
+    // A chat rule covers everyone allowed where it was asked, so a card that offers one names that chat and its topic, and says
+    // so above its buttons; not in the owner's private chat, where only the owner asks (ADR-0225).
+    const row=kind==='controlled'?await this.tools.row(id):null,ruled=!!row&&!!ruleChoices(row);
+    const [space,spaceTopic]=String(row?.space_id??'').split('/topic/'),shared=ruled&&space!==this.access.policy().owner_id;
+    // The card under a request in its own chat does not say where it was asked. One that offers a rule always names the chat
+    // and topic it would cover, even for a request with no Telegram message to point to, such as a dashboard run for a group.
     const asked=reviewed?null:await this.asked(source);
-    const origin=asked&&asked.chat!==this.access.policy().owner_id?await this.where(asked.chat,line,mark,{topic:asked.topic,message:asked.message}):
-      source?.store==='control'?await this.work(source,line):null;
+    const origin=(asked&&asked.chat!==this.access.policy().owner_id?await this.where(asked.chat,line,mark,{topic:asked.topic,message:asked.message,showTopic:shared}):
+      source?.store==='control'?await this.work(source,line,shared?()=>this.where(space!,line,mark,{topic:spaceTopic,showTopic:true}):undefined):null)??
+      (shared?await this.where(space!,line,mark,{topic:spaceTopic,showTopic:true}):null);
     if(kind==='telegram') {
       const action=await this.telegram.inspect(owner,id),[chat,topic]=String(action.arguments.destination).split('/topic/');
       const place=await this.where(chat!,line,mark,{topic,showTopic:true});
       const filled=fillTemplate(texts.card.replace(controls,''),{destination:place,origin,text:String(action.arguments.text).replace(controls,'')});
-      return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,code:null,started:true,resolution:action.resolution,line};
+      return {...linked(filled,urls),fingerprint:action.fingerprint,state:action.state,code:null,started:true,resolution:action.resolution,line,rules:false};
     }
     const action=await this.tools.inspect(owner,id);
     const shown=operation(action,line);if(!shown)return null;
+    // Room is kept for the line that says how it ended, and for the note above a chat rule's buttons. A summary never keeps
+    // a card from Telegram: one that does not fit with it goes without it, before the note does.
+    const room=cardLimit-outcomeRoom,note=shared?'\n\n'+line.rule_note:'';
     let card=linked(operationCard(texts.action,shown,origin),urls);
-    // Room is kept for the line that says how it ended. A summary never keeps a card from Telegram: one that does
-    // not fit with it goes without it.
-    if(card.text.length>cardLimit-outcomeRoom&&shown.summary) {
+    if(card.text.length+note.length>room&&shown.summary) {
       const bare=operation({...action,summary:null},line);if(!bare)return null;
-      card=linked(operationCard(texts.action,bare,origin),urls);
+      const plain=linked(operationCard(texts.action,bare,origin),urls);
+      // The summary gives way to the note only when that makes room for it; a card the note cannot fit either way keeps its summary.
+      if(card.text.length>room||plain.text.length+note.length<=room)card=plain;
     }
-    if(card.text.length>cardLimit-outcomeRoom)return null;
+    if(card.text.length>room)return null;
+    // A card the note does not fit offers no chat rule, so a rule is never offered without saying whom it covers.
+    // The note goes last, so no entity before it moves.
+    const noted=!!note&&card.text.length+note.length<=room;
+    if(noted)card={...card,text:card.text+note};
     const code=action.error_code??(typeof action.result?.result?.error==='string'?action.result.result.error:null);
     // The executor runs only after its start is recorded, so an operation never started did not run.
     const started=!!(await this.tools.row(id)).started_at;
-    return {...card,fingerprint:action.fingerprint,state:action.state,code,started,resolution:action.resolution,line};
+    return {...card,fingerprint:action.fingerprint,state:action.state,code,started,resolution:action.resolution,line,rules:ruled&&(!shared||noted)};
   }
   private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>,code:string|null=null,started=true,resolution:string|null=null) {
     if(state==='proposed')return null;
@@ -243,7 +260,7 @@ export class ActionCommandRepository {
       // In the chat and topic where it was asked, the card answers the request itself.
       const asked=await this.asked(row.source_reference);
       const here=asked&&asked.chat===place.chat&&(asked.topic??'')===(place.topic??'')?asked.message??null:null;
-      const choices:[ApprovalText,string][]=(kind==='controlled'&&!row.job_id&&row.match_key&&ruleButtons[row.kind])||[['approve','a'],['reject','d']];
+      const choices:[ApprovalText,string][]=(kind==='controlled'&&card.rules&&ruleChoices(row))||[['approve','a'],['reject','d']];
       const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),...(here?{reply_to:here}:{}),id:result.id,
         text:card.text,links:card.links,buttons:choices.map(([label,choice])=>[card.line[label].slice(0,40),'n'+choice+result.id.slice(0,40)+card.fingerprint.slice(0,16)])});
       if(sent?.state!=='done')return result;

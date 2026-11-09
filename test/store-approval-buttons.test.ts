@@ -156,16 +156,18 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.match(last('settle').text,/\n\n❌ Rejected\. Nothing was sent\.$/);
     // A controlled operation from a group is never approved by the request; its card also goes to the owner.
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
-    assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group\n\nprintf ok');
-    assert.deepEqual(last('card').links,[{type:'bold',offset:3,length:13},{type:'pre',offset:last('card').text.length-9,length:9}],'the name is bold, the command is code');assert.match(tool.message,/asked the owner/);
+    // A card that offers a chat rule names the topic too, and says above its buttons that the rule covers everyone there.
+    const note='\n\n👥 “Where asked” covers everyone you allowed in that chat or topic, not only the person who asked.';
+    assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group › General\n\nprintf ok'+note);
+    assert.deepEqual(last('card').links,[{type:'bold',offset:3,length:13},{type:'pre',offset:last('card').text.indexOf('printf ok'),length:9}],'the name is bold, the command is code');assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
     // The asker's summary leads the card and the exact fields fold under it; a command stays open in code (ADR-0224).
     await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'browser',arguments:{url:'https://example.test/made-up'},summary:'Read the made-up page.'}));
     const folded=last('card'),details=folded.text.indexOf('Exact details');
-    assert.equal(folded.text,'⚙️ Open a web page · example.test\n📝 Read the made-up page.\n💬 Asked in a Telegram group\n\nExact details\nhttps://example.test/made-up');
-    assert.deepEqual(folded.links,[{type:'bold',offset:3,length:30},{type:'expandable_blockquote',offset:details,length:folded.text.length-details},{type:'bold',offset:details,length:13}]);
+    assert.equal(folded.text,'⚙️ Open a web page · example.test\n📝 Read the made-up page.\n💬 Asked in a Telegram group › General\n\nExact details\nhttps://example.test/made-up'+note);
+    assert.deepEqual(folded.links,[{type:'bold',offset:3,length:30},{type:'expandable_blockquote',offset:details,length:'Exact details\nhttps://example.test/made-up'.length},{type:'bold',offset:details,length:13}]);
     await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf said'},summary:'Print a word.'}));
-    assert.equal(last('card').text,'⚙️ Run a command\n📝 Print a word.\n💬 Asked in a Telegram group\n\nprintf said');
+    assert.equal(last('card').text,'⚙️ Run a command\n📝 Print a word.\n💬 Asked in a Telegram group › General\n\nprintf said'+note);
     // When the owner asks in the group, the reply tells them their card is in their private chat.
     const own=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'shell',arguments:{command:'printf mine'}}));
     assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner, so the decision is theirs:.*answer them as "you", briefly: their card is waiting in their private chat, and the answer will follow here\. Do not say it waits for the owner or anyone else/);
@@ -298,7 +300,9 @@ test('allowed members post freely in their own group; everything else waits for 
     await s.turns.register(scheduled,{logical_profile:'fixture-schedule'});
     const fromSchedule=await s.actionCommands.offer('controlled',await s.controlledActions.propose(scheduled,{kind:'shell',arguments:{command:'printf made-up-schedule'}}));
     assert.equal(fromSchedule.state,'proposed');assert.deepEqual([last('card').id,last('card').chat_id],[fromSchedule.id,'123']);
-    assert.match(last('card').text,/^⚙️ Run a command\n💬 Asked in a scheduled task\n\n\S/);assert.match(fromSchedule.message,/Do not wait for it/);
+    // Its rule would cover the chat it runs for, so the card names that chat.
+    assert.match(last('card').text,/^⚙️ Run a command\n💬 Asked in a scheduled task in a Telegram group › General\n\n\S/);assert.ok(last('card').text.endsWith(note));
+    assert.match(fromSchedule.message,/Do not wait for it/);
     // A waiting card whose guarded copy changes before it is approved did not run, and says why.
     const outdated=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message('made-up-outdated')).id,group),{kind:'shell',arguments:{command:'printf outdated'}}));
     const stored=await s.controlledActions.row(outdated.id),copy=await s.guards.read('derived_artifacts:'+stored.proposal_reference.id,await s.guards.state());
