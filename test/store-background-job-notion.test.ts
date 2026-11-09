@@ -79,11 +79,17 @@ test('a job the owner approved in their private chat reads Notion under the owne
     assert.equal(row.job_id,mine.id);assert.deepEqual(row.decision_reference,row.source_reference,'the step\'s own operation is the decision');
     assert.ok((await stores.control.query("SELECT 1 FROM security_events WHERE rule=$1 AND state='allowed'",['notion_setting:'+(await s.notion.get(owner)).revision])).rowCount);
     assert.equal((await notion(mine.reader,'notion-create-pages',create)).state,'proposed','a change asks the owner');
+    const table='collection://01234567-89ab-cdef-0123-456789abcdef';
+    assert.equal((await notion(mine.reader,'notion-query-data-sources',{data:{data_source_urls:[table],query:'SELECT * FROM "'+table+'"'}})).state,'approved',
+      'a query of the owner\'s own table is a read');
     await saveNotion({approval:'nothing'});
     assert.equal((await notion(mine.reader,'notion-create-pages',{pages:[{properties:{title:'وظیفه ۱۴'}}]})).state,'proposed',
       'even when nothing asks, a job\'s change asks: the job reads group text anyone there can write');
     assert.equal((await notion(mine.reader,'notion-fetch',{id:'0123456789abcdef0123456789abcdef'})).state,'approved');
     assert.equal((await notion(mine.reader,'notion-fetch',{id:'https://made-up.notion.site/Page'})).state,'proposed','a job fetches only by id or notion.so address without asking');
+    assert.equal((await notion(mine.reader,'notion-search',{query:'made-up tasks',page_url:'https://made-up.notion.site/Page'})).state,'proposed',
+      'outside addresses ask first, in any read');
+    assert.equal((await notion(mine.reader,'notion-query-data-sources',{data:{mode:'view',view_url:'https://made-up.notion.site/x?v=1'}})).state,'proposed');
     await saveNotion({approval:'everything'});
     assert.equal((await notion(mine.reader,'notion-search',{query:'other made-up tasks'})).state,'proposed');
     await saveNotion({approval:'changes'});

@@ -276,7 +276,7 @@ export function ConnectionSettings() {
         <SettingRow
           title="Ask me first"
           htmlFor="notion-approval"
-          description="A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs. Background jobs you approve read without asking unless everything asks, and their changes always ask. Scheduled tasks always ask. Deny rules still win."
+          description="A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs. A read of a page outside your Notion, such as a public notion.site page, asks like a change. Background jobs you approve read without asking unless everything asks, and their changes always ask. Scheduled tasks always ask. Deny rules still win."
         >
           <Select
             id="notion-approval"
