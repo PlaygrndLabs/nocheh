@@ -37,7 +37,7 @@ from tools.acceptance.owner_dashboard import FIXTURE_PASSWORD
 from tools.paths import ROOT
 
 IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
-          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:a92650bc', 'box': 'nocheh-box:local'}
+          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:3326373c', 'box': 'nocheh-box:local'}
 BROWSER_IMAGE = 'nocheh-tester-browser:local'
 
 # Plain-English names for the report, by scenario.
