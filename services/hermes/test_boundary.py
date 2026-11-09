@@ -133,16 +133,24 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                           ('uninspectable_model_request','GET','provider.example','/v1/files',[])])
         self.assertNotIn('planted-SECRET',json.dumps(details))
 
-    def test_model_refusals_name_only_refused_model_calls(self):
-        from .request_boundary import FAILURE_DETAILS, model_refusals
-        def changed(url,payload):raise GuardUnavailable('guard_context_changed')
-        self.setup_boundary(changed)
-        FAILURE_DETAILS.clear()
+    def test_model_refusals_name_only_model_calls_refused_since_the_last_one_sent(self):
+        from .request_boundary import MODEL_REFUSALS, model_refusals
+        answers=['service_unavailable',None,'guard_context_changed','audience_context_changed']
+        def check(url,payload):
+            code=answers.pop(0)
+            if code:raise GuardUnavailable(code)
+            return payload
+        self.setup_boundary(check)
+        MODEL_REFUSALS.clear()
         with httpx.Client(transport=httpx.MockTransport(lambda request:httpx.Response(200,json={}))) as client:
+            with self.assertRaises(GuardUnavailable):client.post('https://provider.example/v1/messages',json={'messages':[]})
+            self.assertEqual(model_refusals(),['service_unavailable'])
+            client.post('https://provider.example/v1/messages',json={'messages':[]})
+            self.assertEqual(model_refusals(),[],'a refusal Hermes got past by a retry did not end the run')
             with self.assertRaises(GuardUnavailable):client.get('https://resolver.example/resolve?name=provider.example')
             with self.assertRaises(GuardUnavailable):client.post('https://provider.example/v1/messages',json={'messages':[]})
             with self.assertRaises(GuardUnavailable):client.post('https://provider.example/v1/chat/completions/',json={'messages':[]})
-        self.assertEqual(model_refusals(),['guard_context_changed','guard_context_changed'],'a refused lookup is no model call')
+        self.assertEqual(model_refusals(),['guard_context_changed','audience_context_changed'],'a refused lookup is no model call')
 
     def test_a_bare_model_list_passes_without_content(self):
         sent=[]

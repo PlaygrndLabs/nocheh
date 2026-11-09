@@ -38,7 +38,7 @@ SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT N
 # cause, such as {"provider_error:overloaded:529": 1}, and `audio_seconds` the length of the
 # recordings voice-note transcription was sent.
 ADDED = {'refused': 'INTEGER NOT NULL DEFAULT 0', 'hidden': 'INTEGER NOT NULL DEFAULT 0', 'reasons': "TEXT NOT NULL DEFAULT '{}'",
-         'audio_seconds': 'REAL NOT NULL DEFAULT 0', 'causes': "TEXT NOT NULL DEFAULT '{}'"}
+         'audio_seconds': 'REAL NOT NULL DEFAULT 0', 'causes': "TEXT NOT NULL DEFAULT '{}'", 'stopped': 'INTEGER NOT NULL DEFAULT 0'}
 # Why a run failed. Codes only: never the provider's message or any content.
 REASONS = ('refused', 'rate_limited', 'key_rejected', 'model_not_found', 'too_long', 'timed_out',
            'provider_error', 'interrupted', 'empty_answer', 'bad_answer', 'nocheh_error', 'unknown')
@@ -166,9 +166,12 @@ def loop_failure(exit_reason):
         broker = LOOP_BROKER.search(detail)
         if broker:
             code, whole = broker.groups()
+            if code in CONTEXT_CHANGES:
+                # Hermes cuts the exit reason to 80 characters, so from call #10 the code may lose its closing quote.
+                return 'context_changed', None
             if not (code == PROVIDER_FAILED if whole else PROVIDER_FAILED.startswith(code)):
                 # A whole code is the broker's own refusal; one cut short says only which stop it was.
-                return ('context_changed', None) if whole and code in CONTEXT_CHANGES else ('nocheh_error', code if whole else stop)
+                return 'nocheh_error', code if whole else stop
             return (_status_reason(status), cause(None, status)) if status in PASSED_ON else ('provider_error', stop)
         if status:
             return _status_reason(status), cause(None, status)
@@ -432,12 +435,13 @@ def record(part, usage, model, failed=False, provider=None, path=None, now=None,
         cost = claude_cost(model, usage)
         if cost is not None:
             usage = {**usage, 'cost_usd': cost}
-    # A run Nocheh's own policy stopped counts as a run, not as a failure the owner is told of.
-    failed = bool(failed or refused) and reason not in STOPS
+    # A run Nocheh's own policy stopped counts as a run, not as a failure the owner is told of, nor as one that worked.
+    stopped = bool(failed or refused) and reason in STOPS
+    failed = bool(failed or refused) and not stopped
     reason = 'refused' if refused else reason if reason in REASONS else 'unknown'
     detail = f'{reason}:{cause}' if failed and isinstance(cause, str) and CAUSE.fullmatch(cause) else None
     _add(part, model, provider, path, now, reason if failed else None, runs=1, failed=int(failed), cause=detail,
-         refused=int(reason == 'refused' and failed), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
+         refused=int(reason == 'refused' and failed), stopped=int(stopped), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
          cost_usd=float(usage.get('cost_usd') or 0), priced_runs=int('cost_usd' in usage),
          **({'audio_seconds': float(usage.get('audio_seconds') or 0)} if part == 'transcription' else {}))
 

@@ -92,7 +92,6 @@ CHILD = ("import sys\nfrom unittest.mock import patch\n"
          "with patch.object(subscription,'BROKER_ANTHROPIC_URL',sys.argv[1]),"
          "patch.object(archive_tools,'request',lambda path,value:value if path=='/v1/context/prepare' else {'hits':[]}):\n"
          "    assistant_turn.main()\n")
-CHANGED = ('json', 409, {'error': 'guard_context_changed'})
 
 
 class TurnFailureCodeTests(unittest.TestCase):
@@ -125,11 +124,16 @@ class TurnFailureCodeTests(unittest.TestCase):
         # answer, and the secret check refuses the turn's next call. The provider client reports that refusal as a lost
         # connection, and Hermes names it by the secret check's 409 as a malformed request. It is no provider error:
         # Nocheh runs the reply again in the new epoch.
-        result, calls, checks = self.turn([('drop',)], [('pass',), CHANGED])
-        self.assertEqual(result['state'], 'failed')
-        self.assertEqual((calls, checks[:2]), ([('drop',)], [('pass',), CHANGED]), 'nothing of the old epoch reached the provider again')
-        self.assertEqual(result['failure_reason'], 'context_changed')
-        self.assertNotIn('failure_cause', result)
+        # The broker answers guard_transition_pending while the new epoch is being published, audience_context_changed for a
+        # turn of the old epoch once it is, and guard_context_changed when it is published during the check itself.
+        for code in ('audience_context_changed', 'guard_transition_pending', 'guard_context_changed'):
+            with self.subTest(code=code):
+                changed = ('json', 409, {'error': code})
+                result, calls, checks = self.turn([('drop',)], [('pass',), changed])
+                self.assertEqual(result['state'], 'failed')
+                self.assertEqual((calls, checks[:2]), ([('drop',)], [('pass',), changed]), 'nothing of the old epoch reached the provider again')
+                self.assertEqual(result['failure_reason'], 'context_changed')
+                self.assertNotIn('failure_cause', result)
 
     def test_a_refused_secret_check_names_nochehs_own_error(self):
         result, calls, checks = self.turn([('ok',)], [('json', 409, {'error': 'detector_contract_rejected'})])

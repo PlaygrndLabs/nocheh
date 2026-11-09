@@ -143,6 +143,9 @@ class UsageTests(unittest.TestCase):
                   # A short code fits whole.
                   (outer(2, 403, "{'error': 'turn_source_denied'}"), ('nocheh_error', 'turn_source_denied')),
                   (outer(2, 409, "{'error': 'runtime_turn_changed'}"), ('context_changed', None)),
+                  # From call #10 a context change loses its closing quote, and still names it.
+                  (outer(12, 409, "{'error': 'audience_context_changed'}"), ('context_changed', None)),
+                  (outer(12, 409, "{'error': 'guard_transition_pending'}"), ('context_changed', None)),
                   # A provider's refusal: the broker's status is the provider's own only for 401, 403 and 429.
                   (outer(3, 429, "{'error': 'provider_request_failed', 'provider_status': 429}"), ('rate_limited', 'rate_limit:429')),
                   (outer(3, 401, "{'error': 'provider_request_failed', 'provider_status': 401}"), ('key_rejected', 'auth:401')),
@@ -198,9 +201,9 @@ class UsageTests(unittest.TestCase):
             usage.record('reply', {'calls': 1}, 'm', failed=True, reason='nocheh_error', cause='detector_contract_rejected',
                          provider='anthropic', path=path, now=DAY)
             row = usage.rows('2026-10-13', path)[0]
-            self.assertEqual((row['runs'], row['failed'], row['reasons'], row['causes']),
-                             (2, 1, {'nocheh_error': 1}, {'nocheh_error:detector_contract_rejected': 1}),
-                             'a run the new epoch stopped counts as a run, not as a failure the owner is told of')
+            self.assertEqual((row['runs'], row['failed'], row['stopped'], row['reasons'], row['causes']),
+                             (2, 1, 1, {'nocheh_error': 1}, {'nocheh_error:detector_contract_rejected': 1}),
+                             'a run the new epoch stopped counts as a run, not as a failure the owner is told of, nor as one that worked')
 
     def test_failed_runs_keep_the_providers_exact_error_and_an_older_table_gains_it(self):
         with tempfile.TemporaryDirectory() as root:

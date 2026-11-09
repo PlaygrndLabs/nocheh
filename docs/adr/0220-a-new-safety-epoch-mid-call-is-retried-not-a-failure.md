@@ -35,10 +35,12 @@ Three things went wrong on that path:
 
 - A run whose model call Nocheh refused because the safety epoch moved on is a
   stop of Nocheh's own, `context_changed`, like a job's cost limit: it counts as a
-  run, not as a failure the owner is told of. It is known by the secret check's
-  refusal of a model call in the run's process, or by the broker's refusal, with
-  `guard_context_changed`, `guard_transition_pending`, `audience_context_changed`
-  or `runtime_turn_changed`.
+  run, but neither as a failure the owner is told of nor as a run that worked, so
+  it never marks a failing model as working again. It is known by the secret
+  check's refusal of a model call since the run's last model call sent, or by the
+  broker's refusal, with `guard_context_changed`, `guard_transition_pending`,
+  `audience_context_changed` or `runtime_turn_changed`. The secret check keeps
+  each of these codes; a refusal Hermes got past by a retry is not counted.
 - Any other refusal of the secret check, when the run ended on the lost connection
   the client reports for it, and any other broker refusal, is Nocheh's own error
   with the refusal's code as its cause, such as

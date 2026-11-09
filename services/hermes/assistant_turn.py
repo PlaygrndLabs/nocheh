@@ -372,7 +372,7 @@ def main():
     except Exception as error:
         import traceback
         frames=traceback.extract_tb(error.__traceback__)
-        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable'}
+        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','guard_transition_pending','audience_context_changed','runtime_turn_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable'}
         result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names

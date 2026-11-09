@@ -23,11 +23,15 @@ FAILURES = deque(maxlen=30)
 # names only. Never bodies, query values, headers or credentials.
 FAILURE_DETAILS = deque(maxlen=30)
 COUNTS = Counter()
+# Codes of the model calls refused since the last model call this process sent, oldest first.
+MODEL_REFUSALS = []
 
 
 def refused(request, error):
     import time
     FAILURES.append(str(error))
+    if model_call(request):
+        MODEL_REFUSALS.append(str(error))
     try:
         url=urlsplit(str(request.url))
         names=sorted({part.split('=',1)[0][:40] for part in url.query.split('&') if part})[:10]
@@ -40,11 +44,18 @@ def refused(request, error):
 MODEL_ROUTES = ('/messages', '/chat/completions', '/responses')
 
 
+def model_call(request):
+    try:
+        return urlsplit(str(request.url)).path.rstrip('/').endswith(MODEL_ROUTES)
+    except Exception:
+        return False
+
+
 def model_refusals():
-    """Codes of the model calls refused in this process, oldest first. A refused lookup that is not a model
-    call, such as a DNS-over-HTTPS query, is left out."""
-    return [item['code'] for item in FAILURE_DETAILS
-            if str(item.get('path') or '').rstrip('/').endswith(MODEL_ROUTES) and isinstance(item.get('code'), str)]
+    """Codes of the model calls refused since the last model call this process sent, oldest first: the refusals
+    that may have ended its run. One Hermes got past by a retry is left out, and so is a refused lookup that is no
+    model call, such as a DNS-over-HTTPS query."""
+    return list(MODEL_REFUSALS)
 
 
 class GuardUnavailable(RuntimeError):
@@ -136,7 +147,9 @@ def guard_rpc(destination,payload):
             code=json.loads(error.read(2048)).get('error')
         except Exception:
             code=None
-        allowed={'guard_context_changed','detector_contract_rejected','uninspectable_model_context','detector_input_too_large','guard_request_too_large','guarded_key_collision','service_unavailable','hermes_unavailable','quota_paused'}
+        # The safety epoch moved on: the broker answers guard_transition_pending while a publication is pending, then
+        # audience_context_changed or runtime_turn_changed for a run of the old epoch (ADR-0220).
+        allowed={'guard_context_changed','guard_transition_pending','audience_context_changed','runtime_turn_changed','detector_contract_rejected','uninspectable_model_context','detector_input_too_large','guard_request_too_large','guarded_key_collision','service_unavailable','hermes_unavailable','quota_paused'}
         raise GuardUnavailable(code if code in allowed else 'required_guard_unavailable') from None
     except Exception:
         # Do not include an upstream body, URL credentials, or original request.
@@ -207,6 +220,7 @@ def install(boundary=None):
         except GuardUnavailable as error:
             refused(request,error);raise
         COUNTS['sent']+=1
+        if model_call(request):MODEL_REFUSALS.clear()
         return original_sync(client,prepared)
     async def async_send(client,request):
         COUNTS['attempts']+=1
@@ -219,6 +233,7 @@ def install(boundary=None):
         except GuardUnavailable as error:
             refused(request,error);raise
         COUNTS['sent']+=1
+        if model_call(request):MODEL_REFUSALS.clear()
         return await original_async(client,guarded)
     sync_send._nocheh_boundary=True
     async_send._nocheh_boundary=True

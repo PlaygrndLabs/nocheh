@@ -150,6 +150,17 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual([problem for problem in yesterday if problem['kind'] == 'model'], [],
                          'yesterday’s failures are not today’s')
 
+    def test_a_run_nocheh_stopped_does_not_mark_a_model_working_again(self):
+        def busy(runs, stopped):
+            return [{**refusals(1, 0)[0], 'part': 'reply', 'label': 'Replies', 'runs': runs, 'stopped': stopped,
+                     'reasons': {'provider_error': 1}, 'causes': {'provider_error:overloaded:529': 1}}]
+        self.check(NOW, usage=busy(10, 0))
+        self.assertEqual(len(self.sent), 1)
+        self.check(NOW + 120, usage=busy(11, 1))
+        self.assertEqual(self.edits, [], 'a run cut by a new safety epoch is no call that worked')
+        self.check(NOW + 240, usage=busy(12, 1))
+        self.assertEqual(self.edits[-1]['resolved'], ['Working again since 12:04 UTC'])
+
     def test_a_notice_line_is_marked_when_its_model_works_again(self):
         def busy(failed, runs):
             return [{**refusals(failed, 0)[0], 'part': 'memory_review', 'label': 'Memory notes', 'runs': runs,
