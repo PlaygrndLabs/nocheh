@@ -55,6 +55,12 @@ test('a job the owner approved in their private chat reads Notion under the owne
     return {id:proposed.id,reader};
   };
   const notion=(reader:Reader,tool:string,input:Record<string,unknown>)=>s.controlledActions.propose(reader,{kind:'mcp',arguments:{connection:'notion',tool,input}});
+  /** The executor's claim of an operation, as the tools workflow makes it. */
+  const claim=async(id:string)=>{
+    const workflow=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[id])).rows[0];
+    const lease=await claimHostWorkflow(stores.control,{workflow_id:workflow.id,dispatch:workflow.dispatch,family:'tools',run_id:'fixture-'+workflow.id});
+    return s.controlledExecution.claim({id,actor:'wf-'+workflow.id,workflow_id:workflow.id,workflow_token:lease.token});
+  };
   const search={query:'made-up tasks'},create={pages:[{properties:{title:'وظیفه ۱۲'}}]};
   const saveNotion=async(change:Record<string,unknown>)=>s.notion.save(owner,{...change,expected_revision:(await s.notion.get(owner)).revision});
   try {
@@ -132,6 +138,13 @@ test('a job the owner approved in their private chat reads Notion under the owne
     assert.equal(await ownerApprovedJob(stores.control,'123',{store:'control',id:mine.reader.turnEvent!},stepTurn),true,'the job itself is still approved');
     assert.equal((await notion(mine.reader,'notion-search',{query:'made-up without reads'})).state,'proposed');
     await stores.control.query('UPDATE background_jobs SET notion_reads=true WHERE id=$1',[mine.id]);
+    // Right before a read the setting let through runs, its job must still be the owner's, approved with Notion reads.
+    for(const [change,undo] of [['notion_reads=false','notion_reads=true'],["decided_by='9'","decided_by='123'"]] as [string,string][]) {
+      const waiting=await notion(mine.reader,'notion-search',{query:'made-up check '+change});assert.equal(waiting.state,'approved');
+      await stores.control.query(`UPDATE background_jobs SET ${change} WHERE id=$1`,[mine.id]);
+      assert.deepEqual(await claim(waiting.id),{claimed:false,blocked:waiting.id,reason:'notion_job_not_approved'},change);
+      await stores.control.query(`UPDATE background_jobs SET ${undo} WHERE id=$1`,[mine.id]);
+    }
 
     // Stop: a read the setting let run but that has not run yet does not run, and no new read is let through.
     const pending=await notion(mine.reader,'notion-fetch',{id:'https://www.notion.so/Made-up-0123456789abcdef0123456789abcde2'});assert.equal(pending.state,'approved');
@@ -140,10 +153,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
     await notion(mine.reader,'notion-search',{query:'after stop'}).then(
       after=>assert.notEqual(after.state,'approved','a stopped job reads nothing without asking'),
       error=>assert.ok(['runtime_turn_changed','job_not_running'].includes(error.code),String(error.code)));
-    const workflow=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[pending.id])).rows[0];
-    const lease=await claimHostWorkflow(stores.control,{workflow_id:workflow.id,dispatch:workflow.dispatch,family:'tools',run_id:'fixture-'+workflow.id});
-    const claimed=await s.controlledExecution.claim({id:pending.id,actor:'wf-'+workflow.id,workflow_id:workflow.id,workflow_token:lease.token});
-    assert.deepEqual(claimed,{claimed:false,blocked:pending.id,reason:'job_stopped'});
+    assert.deepEqual(await claim(pending.id),{claimed:false,blocked:pending.id,reason:'job_stopped'});
     const stopped=(await stores.control.query('SELECT state,error_code FROM controlled_actions WHERE id=$1',[pending.id])).rows[0];
     assert.deepEqual([stopped.state,stopped.error_code],['rejected','job_stopped']);
     await stores.control.query("UPDATE managed_runs SET state='cancelled' WHERE job_id=$1",[mine.id]);

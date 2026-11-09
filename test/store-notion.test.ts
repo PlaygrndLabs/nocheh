@@ -8,7 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
-import {notionAddress,notionJobFetch,notionOwnInput,notionReads} from '../src/stores/notion.js';
+import {notionAddress,notionJobFetch,notionOwnInput,notionReads,notionRunRefusal} from '../src/stores/notion.js';
 
 test('a Notion read stays in the owner\'s Notion only when every address in its input is the owner\'s',()=>{
   const id='0123456789abcdef0123456789abcdef',uuid='01234567-89ab-cdef-0123-456789abcdef';
@@ -41,6 +41,28 @@ test('a Notion read stays in the owner\'s Notion only when every address in its 
     assert.ok(performance.now()-started<100,'took '+(performance.now()-started)+' ms');
     assert.equal(found,own);
   }
+});
+
+test('right before a Notion call runs, it must come from the owner\'s private chat or a job the owner approved there',async()=>{
+  const asked={store:'archive',id:'made-up-event'},pressed={store:'archive',id:'made-up-press'};
+  const job={scope:'123',requester:null,decided_by:'123',logical_profile:'job-made-up',notion_reads:true};
+  const db=(row:any)=>({query:async()=>({rows:row?[row]:[]})}) as any;
+  const call=(change:Record<string,unknown>={})=>({scope:'123',space_id:'123',job_id:null,logical_profile:'job-made-up',state:'approved',
+    source_reference:asked,decision_reference:asked,...change});
+  assert.equal(await notionRunRefusal(db(null),call(),'123'),null,'a live private turn');
+  assert.equal(await notionRunRefusal(db(null),call(),null),'notion_owner_private_only','no owner, no Notion');
+  assert.equal(await notionRunRefusal(db(null),call({space_id:'-100555'}),'123'),'notion_owner_private_only');
+  assert.equal(await notionRunRefusal(db(null),call({scope:'-100555'}),'123'),'notion_owner_private_only');
+  assert.equal(await notionRunRefusal(db(job),call({job_id:'made-up-job'}),'123'),null,'the owner\'s approved job, its read let through');
+  assert.equal(await notionRunRefusal(db({...job,notion_reads:false}),call({job_id:'made-up-job'}),'123'),'notion_job_not_approved');
+  assert.equal(await notionRunRefusal(db({...job,notion_reads:false}),call({job_id:'made-up-job',decision_reference:pressed}),'123'),null,
+    'a call the owner approved on its own card');
+  for(const change of [{requester:'9'},{decided_by:'9'},{scope:'-100555'},{logical_profile:'job-other'}])
+    assert.equal(await notionRunRefusal(db({...job,...change}),call({job_id:'made-up-job',decision_reference:pressed}),'123'),'notion_job_not_approved',JSON.stringify(change));
+  // A scheduled task's call has no background job: only its own card or an exact permission lets it run, never the setting.
+  assert.equal(await notionRunRefusal(db(null),call({job_id:'made-up-schedule',decision_reference:pressed}),'123'),null);
+  assert.equal(await notionRunRefusal(db(null),call({job_id:'made-up-schedule',state:'proposed',decision_reference:null}),'123'),null);
+  assert.equal(await notionRunRefusal(db(null),call({job_id:'made-up-schedule'}),'123'),'notion_job_not_approved');
 });
 
 test('Notion runs only from the owner\'s private chat while on, and the owner\'s setting decides which calls ask first',

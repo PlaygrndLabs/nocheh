@@ -2,6 +2,8 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {HttpError,object} from '../http.js';
 import {plainHost} from '../action-arguments.js';
+import {canonical} from '../archive.js';
+import {parentSpace} from '../spaces.js';
 
 export const notionSchema=`
 CREATE TABLE IF NOT EXISTS owner_notion (
@@ -122,4 +124,20 @@ export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:R
 export async function notionJobReads(db:Pick<pg.PoolClient,'query'>):Promise<boolean> {
   const row=(await db.query('SELECT enabled,approval FROM owner_notion WHERE singleton')).rows[0];
   return !!row?.enabled&&row.approval!=='everything';
+}
+
+/**
+ * Why a saved Notion call may not run, checked again right before it runs (ADR-0225): it is not from the owner's private
+ * chat, or its job is not one the owner asked for and approved there, or the setting let a job's read through that the
+ * job was not approved to make. A scheduled task's call, which has no background job, runs only by its own card or the
+ * owner's exact permission. Null when it may run.
+ */
+export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,owner:string|null):Promise<string|null> {
+  if(!owner||row.scope!==owner||(parentSpace(row.space_id)??row.space_id)!==owner)return 'notion_owner_private_only';
+  if(!row.job_id)return null;
+  const bySetting=row.state==='approved'&&canonical(row.decision_reference)===canonical(row.source_reference);
+  const job=(await db.query('SELECT scope,requester,decided_by,logical_profile,notion_reads FROM background_jobs WHERE id=$1',[row.job_id])).rows[0];
+  if(!job)return bySetting?'notion_job_not_approved':null;
+  return job.scope===owner&&job.requester===null&&job.decided_by===owner&&job.logical_profile===row.logical_profile&&(!bySetting||job.notion_reads)?
+    null:'notion_job_not_approved';
 }
