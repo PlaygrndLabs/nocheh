@@ -131,8 +131,9 @@ def problems(monitoring, usage_rows, today):
         add(f"model:{today}:{row['part']}:{row['provider']}:{row['model']}", failed + hidden, 'model',
             label=row.get('label') or row['part'], model=row['model'], failed=failed,
             refused=row.get('refused') or 0, hidden=hidden, reasons=row.get('reasons') or {}, causes=row.get('causes') or {},
-            # Calls that worked today, so a notice can say when the model works again.
-            ok=runs - failed if type(runs) is int else None)
+            # Calls that worked today, so a notice can say when the model works again. A run Nocheh stopped, such as
+            # one cut by a new safety epoch, did not work.
+            ok=runs - failed - (row.get('stopped') or 0) if type(runs) is int else None)
     # Nocheh's GitHub app: its key never expires, so only a refused one gives a notice.
     if (monitoring.get('github') or {}).get('reconnect'):
         add('github', 1, 'github', reason='reconnect')

@@ -91,6 +91,6 @@ def model_problems(state, now=None):
     day=(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')
     rows=(usage.hermes_rows(state,day) or [])+(usage.honcho_rows(state,day) or [])
     return [{'day':day,'part':row['part'],'label':usage.PARTS.get(row['part'],(row['part'],))[0],'provider':row['provider'],
-             'model':row['model'],'calls':row['calls'],'runs':row['runs'],'failed':row['failed'],'refused':row.get('refused') or 0,'hidden':row.get('hidden') or 0,
+             'model':row['model'],'calls':row['calls'],'runs':row['runs'],'failed':row['failed'],'stopped':row.get('stopped') or 0,'refused':row.get('refused') or 0,'hidden':row.get('hidden') or 0,
              'reasons':row.get('reasons') or {},'causes':row.get('causes') or {},'why':problems.why(row)}
             for row in rows if row['day']==day and (row['failed'] or row.get('hidden'))]

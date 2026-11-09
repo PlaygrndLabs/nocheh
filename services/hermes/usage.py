@@ -38,14 +38,18 @@ SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT N
 # cause, such as {"provider_error:overloaded:529": 1}, and `audio_seconds` the length of the
 # recordings voice-note transcription was sent.
 ADDED = {'refused': 'INTEGER NOT NULL DEFAULT 0', 'hidden': 'INTEGER NOT NULL DEFAULT 0', 'reasons': "TEXT NOT NULL DEFAULT '{}'",
-         'audio_seconds': 'REAL NOT NULL DEFAULT 0', 'causes': "TEXT NOT NULL DEFAULT '{}'"}
+         'audio_seconds': 'REAL NOT NULL DEFAULT 0', 'causes': "TEXT NOT NULL DEFAULT '{}'", 'stopped': 'INTEGER NOT NULL DEFAULT 0'}
 # Why a run failed. Codes only: never the provider's message or any content.
 REASONS = ('refused', 'rate_limited', 'key_rejected', 'model_not_found', 'too_long', 'timed_out',
            'provider_error', 'interrupted', 'empty_answer', 'bad_answer', 'nocheh_error', 'unknown')
 # Runs Nocheh's own policy ended, which are not model failures: a job's model call the broker refused past its
-# byte backstop (ADR-0206), known by the broker's exact refusal body in the run's error.
-STOPS = ('job_cost_limit',)
+# byte backstop (ADR-0206), known by the broker's exact refusal body in the run's error, and a run whose model call
+# Nocheh refused because the safety epoch moved on during the run, such as when the owner saved a memory, which
+# Nocheh runs again in the new epoch (ADR-0220).
+STOPS = ('job_cost_limit', 'context_changed')
 JOB_COST_LIMIT = '{"error":"job_cost_limit"}'
+# Nocheh's refusals, by its broker or its secret check, that say the run's safety context moved on.
+CONTEXT_CHANGES = ('guard_context_changed', 'guard_transition_pending', 'audience_context_changed', 'runtime_turn_changed')
 # Hermes's classified failure reasons, by the code Nocheh keeps.
 HERMES_REASONS = {
     'refused': ('content_policy_blocked', 'provider_policy_blocked', 'data_policy_denied'),
@@ -80,6 +84,9 @@ LOOP_STOP = re.compile(r'(pending_tool_result|local_processing_error|repeated_ou
 LOOP_REASONS = {'pending_tool_result': 'empty_answer', 'local_processing_error': 'nocheh_error',
                 'repeated_outer_errors': 'unknown', 'error_near_max_iterations': 'unknown',
                 'redirect_restart_limit_exceeded': 'interrupted', 'rebuilt_restart_limit_exceeded': 'interrupted'}
+# The text Hermes keeps for a call that lost its connection: the provider client's own words, never the provider's.
+# The client reports a model call Nocheh's secret check refused before it was sent the same way.
+LOST_CONNECTION = 'Connection error.'
 # What an API call's error says of the provider: Nocheh's broker's own refusal, the provider's status the broker
 # passed on, the status of a direct call, or a lost connection or timeout. Hermes keeps only the error's first
 # 80 characters, so a broker code may be cut short (no closing quote), and the provider_status after it never fits.
@@ -159,8 +166,12 @@ def loop_failure(exit_reason):
         broker = LOOP_BROKER.search(detail)
         if broker:
             code, whole = broker.groups()
+            if code in CONTEXT_CHANGES:
+                # Hermes cuts the exit reason to 80 characters, so from call #10 the code may lose its closing quote.
+                return 'context_changed', None
             if not (code == PROVIDER_FAILED if whole else PROVIDER_FAILED.startswith(code)):
-                return 'nocheh_error', stop
+                # A whole code is the broker's own refusal; one cut short says only which stop it was.
+                return 'nocheh_error', code if whole else stop
             return (_status_reason(status), cause(None, status)) if status in PASSED_ON else ('provider_error', stop)
         if status:
             return _status_reason(status), cause(None, status)
@@ -176,20 +187,49 @@ def _status_reason(status):
         status, 'provider_error')
 
 
-def failure(results):
+def _refused(result, error, refusals):
+    """A failed run that Nocheh's secret check stopped, from the codes of the model calls it refused in the run's
+    process: as (reason, cause), or None. Once the safety epoch moved on, every later call of the run is refused, so
+    any such refusal ends it. Any other refusal is known only by the lost connection the client reports for it."""
+    if not refusals or (result.get('completed') is True and not result.get('failed')):
+        return None
+    if any(code in CONTEXT_CHANGES for code in refusals):
+        return 'context_changed', None
+    found = LOOP_STOP.match(str(result.get('turn_exit_reason') or ''))
+    detail = (found.group(2) or '') if found else ''
+    if error.strip() == LOST_CONNECTION or detail.startswith('Error during API call #') and LOOP_CONNECTION.match(detail):
+        return 'nocheh_error', refusals[-1]
+    return None
+
+
+def nocheh_failure(code):
+    """Why a turn failed that ended on Nocheh's own error before any model run, from its error code."""
+    if code in CONTEXT_CHANGES:
+        return 'context_changed', None
+    return 'nocheh_error', code if isinstance(code, str) and CODE.fullmatch(code) else None
+
+
+def failure(results, refusals=()):
     """Why a Hermes turn failed, from the run results of its process: one of REASONS or STOPS, and the
-    provider's exact error as a cause, or None."""
+    provider's exact error, or the code of Nocheh's own refusal, as a cause, or None.
+    `refusals` are the codes of the model calls Nocheh's secret check refused in the same process
+    (request_boundary.model_refusals): the provider client reports such a refusal as a lost connection, and
+    Hermes may even name it by the status of the secret check's answer, as if the provider had sent it."""
+    refusals = [code for code in refusals or () if isinstance(code, str) and CODE.fullmatch(code)]
     for result in results or []:
         if not isinstance(result, dict):
             return 'unknown', None
         error = str(result.get('error') or '')
         if JOB_COST_LIMIT in error:
             return 'job_cost_limit', None
+        stopped = _refused(result, error, refusals)
+        if stopped:
+            return stopped
         broker = BROKER_ERROR.match(error)
         if broker and result.get('failed'):
             # Hermes named the broker's status, not the provider's, so only the provider's own status says what happened.
             if broker.group(1) != 'provider_request_failed':
-                return 'nocheh_error', None
+                return ('context_changed', None) if broker.group(1) in CONTEXT_CHANGES else ('nocheh_error', broker.group(1))
             status = int(broker.group(2)) if broker.group(2) else None
             return (_status_reason(status), cause(None, status)) if status else ('provider_error', None)
         code = str(result.get('failure_reason') or '')
@@ -395,12 +435,13 @@ def record(part, usage, model, failed=False, provider=None, path=None, now=None,
         cost = claude_cost(model, usage)
         if cost is not None:
             usage = {**usage, 'cost_usd': cost}
-    # A run Nocheh's own policy stopped counts as a run, not as a failure the owner is told of.
-    failed = bool(failed or refused) and reason not in STOPS
+    # A run Nocheh's own policy stopped counts as a run, not as a failure the owner is told of, nor as one that worked.
+    stopped = bool(failed or refused) and reason in STOPS
+    failed = bool(failed or refused) and not stopped
     reason = 'refused' if refused else reason if reason in REASONS else 'unknown'
     detail = f'{reason}:{cause}' if failed and isinstance(cause, str) and CAUSE.fullmatch(cause) else None
     _add(part, model, provider, path, now, reason if failed else None, runs=1, failed=int(failed), cause=detail,
-         refused=int(reason == 'refused' and failed), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
+         refused=int(reason == 'refused' and failed), stopped=int(stopped), calls=_count(usage.get('calls')), **{name: _count(usage.get(name)) for name in TOKENS},
          cost_usd=float(usage.get('cost_usd') or 0), priced_runs=int('cost_usd' in usage),
          **({'audio_seconds': float(usage.get('audio_seconds') or 0)} if part == 'transcription' else {}))
 

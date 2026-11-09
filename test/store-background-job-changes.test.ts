@@ -143,7 +143,7 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
     const inbox=await running('Inbox first'),[early,other]=[(await change(inbox.reader,'Made-up task 50','','Rename the made-up page to task 50.')).id,(await change(inbox.reader,'Made-up task 52')).id];
     assert.equal((await end(inbox,'Report: two made-up changes.')).state,'completed');
     const [both]=(await frozenCards(inbox.id)),bothCard=listCards().at(-1)!;
-    // A change with the asker's summary shows it under its name, its fields folded under it (ADR-0220).
+    // A change with the asker's summary shows it under its name, its fields folded under it (ADR-0224).
     assert.match(bothCard.text,/\n\n1\. ⚙️ Notion · update page\n📝 Rename the made-up page to task 50\.\nExact details\npage: made-up-page\nproperties › title: Made-up task 50\n\n2\. ⚙️ Notion · update page\npage: /);
     const fold=bothCard.links.find((link:any)=>link.type==='expandable_blockquote');
     assert.equal(bothCard.text.slice(fold.offset,fold.offset+fold.length),'Exact details\npage: made-up-page\nproperties › title: Made-up task 50');

@@ -159,7 +159,7 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group\n\nprintf ok');
     assert.deepEqual(last('card').links,[{type:'bold',offset:3,length:13},{type:'pre',offset:last('card').text.length-9,length:9}],'the name is bold, the command is code');assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
-    // The asker's summary leads the card and the exact fields fold under it; a command stays open in code (ADR-0220).
+    // The asker's summary leads the card and the exact fields fold under it; a command stays open in code (ADR-0224).
     await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'browser',arguments:{url:'https://example.test/made-up'},summary:'Read the made-up page.'}));
     const folded=last('card'),details=folded.text.indexOf('Exact details');
     assert.equal(folded.text,'⚙️ Open a web page · example.test\n📝 Read the made-up page.\n💬 Asked in a Telegram group\n\nExact details\nhttps://example.test/made-up');
@@ -168,7 +168,7 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(last('card').text,'⚙️ Run a command\n📝 Print a word.\n💬 Asked in a Telegram group\n\nprintf said');
     // When the owner asks in the group, the reply tells them their card is in their private chat.
     const own=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'shell',arguments:{command:'printf mine'}}));
-    assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner\..*tell them directly, briefly, that the card is waiting in their private chat and that the answer will follow here/);
+    assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner, so the decision is theirs:.*answer them as "you", briefly: their card is waiting in their private chat, and the answer will follow here\. Do not say it waits for the owner or anyone else/);
     assert.doesNotMatch(own.message,/you asked the owner/);
     // The press names the card's message, so a card whose send lost its answer still loses its buttons: here the card
     // reviewed in its own group. A press in another chat names none.

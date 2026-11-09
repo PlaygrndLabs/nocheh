@@ -1,4 +1,4 @@
-# ADR-0220: Operation cards lead with the asker's summary
+# ADR-0224: Operation cards lead with the asker's summary
 
 <status>
 Accepted on 2026-11-09, after the owner saw Notion cards that list every field,

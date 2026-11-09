@@ -323,7 +323,7 @@ class ProductScenarios(Scenarios):
         self.gate('decided_card_keeps_its_formatting', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
                   entities=edited['message'].get('entities'))
         # With the asker's own summary the card leads with it, and the exact fields fold under it into one quote that
-        # opens on a tap, their labels still bold and no quote inside it (ADR-0220).
+        # opens on a tap, their labels still bold and no quote inside it (ADR-0224).
         said = 'Add a made-up page with two open items '+marker
         request = self.f.message(OWNER, 'یک صفحه دیگر [[tool:nocheh_mcp '+json.dumps({**call, 'summary': said})+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)

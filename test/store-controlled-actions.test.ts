@@ -29,7 +29,7 @@ test('controlled proposals and bounded permissions preserve guarded content outs
     await assert.rejects(a.propose({...actor,purpose:'memory-review'},body),{code:'external_effect_scope_denied'});
     await assert.rejects(a.propose(actor,{...body,profile:'owner'}),{code:'unknown_action_field'});
     // The asker's summary travels beside the exact arguments: secret-checked, shown only to the owner, and never part of
-    // what runs, the action's identity or its fingerprint. A repeat keeps the words it was first asked with (ADR-0220).
+    // what runs, the action's identity or its fingerprint. A repeat keeps the words it was first asked with (ADR-0224).
     const words={kind:'shell',arguments:{command:'printf summarized'}},noted=await a.propose(actor,{...words,summary:'Print a word,\n  not the fixture-secret one.'});
     assert.deepEqual(await a.propose(actor,words),noted,'the same request without a summary is the same action');
     assert.equal((await a.propose(actor,{...words,summary:'Other words.'})).id,noted.id);

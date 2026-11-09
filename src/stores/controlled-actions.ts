@@ -23,7 +23,7 @@ import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
 const exact=(value:unknown,keys:string[])=>{const body=object(value);if(Object.keys(body).some(k=>!keys.includes(k)))throw new HttpError(400,'unknown_action_field');return body;};
-/** What the asker says an operation does, for its card (ADR-0220): text on one line, or none when it is empty
+/** What the asker says an operation does, for its card (ADR-0224): text on one line, or none when it is empty
  * or longer than this; it never changes what runs. */
 const summaryLength=500;
 const summaryOf=(value:unknown)=>{
@@ -147,7 +147,7 @@ export class ControlledActionRepository {
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   /** The asker's summary, kept as content beside the proposal and secret-checked as its arguments are, but never
-   * part of what runs, the action's identity or its fingerprint (ADR-0220). Each wording is its own record, so a
+   * part of what runs, the action's identity or its fingerprint (ADR-0224). Each wording is its own record, so a
    * repeat in other words never conflicts with the first. Null when its check cannot finish: the card then shows
    * the operation as it would without one. A job's run instead asks again in full, summary included, once a pending
    * publication or a quiet epoch passes, as it does for its arguments (ADR-0208). */

@@ -67,7 +67,7 @@ class ActionResultTests(unittest.TestCase):
             self.assertEqual(json.loads(archive_tools.notion_tool({'operation': 'list'})), {'error': 'notion_is_off_or_changed'})
 
     def test_a_summary_travels_beside_the_exact_arguments(self):
-        # The asker's words go to the owner's card, never into what runs (ADR-0220).
+        # The asker's words go to the owner's card, never into what runs (ADR-0224).
         waiting = {'id': ID, 'state': 'proposed', 'message': 'Review the exact operation.'}
         with patch.object(archive_tools, '_PROCESS_PREFERENCES', {'nocheh_tools.browser': 'on', 'nocheh_tools.mcp': 'on'}), \
                 patch.object(archive_tools, 'request', return_value=waiting) as request:

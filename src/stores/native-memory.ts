@@ -787,10 +787,11 @@ export class NativeMemoryRepository {
   /** An owner decision, such as retiring a message, can make Honcho writes invalid. Honcho keeps them until a
    * correction sweep at that decision's epoch or later rebuilds their sessions and Honcho deletes the old ones with
    * their conclusions. Summaries, representations and recall answers cite nothing, so none is read until then.
-   * Other epoch changes, such as learning publications, do not hold memory. */
+   * Other epoch changes, such as learning publications, do not hold memory, and neither do owner decisions that
+   * cannot make a write invalid, such as answering a suggestion card (ADR-0223). */
   private async correcting(current:Current):Promise<boolean> {
     const {generation,epoch}=current.binding;
-    const uncorrected=await this.control.query(`SELECT 1 FROM owner_commands c WHERE c.epoch<=$2 AND c.epoch>coalesce((SELECT max(guard_epoch)
+    const uncorrected=await this.control.query(`SELECT 1 FROM owner_commands c WHERE c.holds_memory AND c.epoch<=$2 AND c.epoch>coalesce((SELECT max(guard_epoch)
       FROM learning_refresh_sweeps WHERE installation_generation=$1 AND family='honcho' AND stage='done'),0) LIMIT 1`,[generation,epoch]);
     if(uncorrected.rowCount)return true;
     return !!(await this.control.query(`SELECT 1 FROM memory_session_deletions WHERE workspace=$1 AND state<>'done' LIMIT 1`,[current.row.id])).rowCount;

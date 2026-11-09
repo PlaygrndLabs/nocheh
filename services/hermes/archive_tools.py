@@ -357,7 +357,7 @@ UNAVAILABLE={'error':'controlled_action_unavailable','note':'Nothing was sent: a
 
 
 # What a controlled operation does, in the asker's words, for the owner's approval card. It travels beside the
-# exact arguments, never in them, so it never changes what runs (ADR-0220).
+# exact arguments, never in them, so it never changes what runs (ADR-0224).
 SUMMARY={'type':'string','maxLength':300,'description':'One short plain sentence for the owner, in the language of this conversation, saying what this call '
          'will do, with names instead of IDs, such as: Add 3 open tasks as rows in the table "Plans". The owner\'s approval card shows it above the exact call, '
          'which it never changes. Give it on every call that may wait for approval.'}

@@ -129,8 +129,9 @@ def install_tool_search_policy():
 RUNS=[]
 
 
-def conversation_result(result, session_id, limited_memory=False):
-    """Only explicit native completion with an answer or silence marker succeeds."""
+def conversation_result(result, session_id):
+    """Only explicit native completion with an answer or silence marker succeeds.
+    The reply is the agent's own text: memory status reaches the agent as context, never as added reply text (ADR-0221)."""
     if (not isinstance(result,dict) or result.get('completed') is not True
             or result.get('failed') or result.get('interrupted')):
         return {'state':'failed','error_code':'model_unavailable'}
@@ -139,8 +140,6 @@ def conversation_result(result, session_id, limited_memory=False):
         return {'state':'failed','error_code':'model_unavailable'}
     if text.strip()=='[NO_REPLY]':
         text=''
-    elif limited_memory:
-        text+='\n\nMemory is limited; current context, native notes and archive search remain available.'
     return {'state':'done','text':text,'session_id':session_id}
 
 
@@ -321,7 +320,7 @@ def run(body, emit=None, relay=None):
         if background:
             job_progress.finish(result)
             return job_result(result,agent.session_id)
-        return conversation_result(result,agent.session_id,memory.get('limited_memory',False))
+        return conversation_result(result,agent.session_id)
     finally:
         agent.close();database.close();restore_evidence()
 
@@ -372,17 +371,19 @@ def main():
     except Exception as error:
         import traceback
         frames=traceback.extract_tb(error.__traceback__)
-        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable'}
+        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','guard_transition_pending','audience_context_changed','runtime_turn_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable'}
         result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names
     record('total',started);result['timings']=safe(VALUES)
-    from .usage import combine,failure
+    from .usage import combine,failure,nocheh_failure
+    from .request_boundary import model_refusals
     measured=combine(RUNS)
     if measured:result['usage']=measured
-    # Why it failed, as codes for the usage tracker: a run's own reason and the provider's exact error, else Nocheh's error.
+    # Why it failed, as codes for the usage tracker: a run's own reason and the provider's exact error, or the code of
+    # Nocheh's own refusal, such as its secret check's; else Nocheh's error.
     if result.get('state')!='done':
-        result['failure_reason'],cause=failure(RUNS) if RUNS else ('nocheh_error',None)
+        result['failure_reason'],cause=failure(RUNS,model_refusals()) if RUNS else nocheh_failure(result.get('error_code'))
         if cause:result['failure_cause']=cause
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()
 
