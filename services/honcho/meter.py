@@ -4,6 +4,7 @@ import hmac
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -490,8 +491,9 @@ def handler(egress):
     return Handler
 
 
-# Archive refusals that describe a race with a concurrent change, not the request.
-RETRYABLE_PREPARATION=frozenset({'audience_context_changed','runtime_context_conflict'})
+# Archive refusals that describe a race with a concurrent change, not the request: among them the safety epoch
+# moving on or still being published during the request, as when the owner saves a memory (ADR-0220).
+RETRYABLE_PREPARATION=frozenset({'audience_context_changed','runtime_context_conflict','guard_context_changed','guard_transition_pending'})
 
 
 class ArchivePreparation:
@@ -513,7 +515,12 @@ class ArchivePreparation:
             # Only the archive's own refusals are final, such as a hidden message or a
             # request it may not prepare. Honcho drops a batch it is refused, but retries
             # an outage, and the guard epoch moving on mid-request is retried the same way.
-            if code>=500 or isinstance(reason,str) and reason in RETRYABLE_PREPARATION: raise PreparationUnavailable() from None
+            retry=code>=500 or isinstance(reason,str) and reason in RETRYABLE_PREPARATION
+            # Which answer it was, as the archive's own code: Honcho's task keeps only the gateway's word.
+            print(json.dumps({'event':'memory_preparation_'+('unavailable' if retry else 'refused'),'route':route,'status':code,
+                              'reason':reason if isinstance(reason,str) and re.fullmatch(r'[a-z][a-z0-9_]{0,63}',reason) else None}),
+                  file=sys.stderr,flush=True)
+            if retry: raise PreparationUnavailable() from None
             raise Rejected('memory_preparation_refused') from None
         except Exception: raise PreparationUnavailable() from None
         try:

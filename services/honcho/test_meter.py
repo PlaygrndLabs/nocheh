@@ -286,12 +286,24 @@ class BudgetTests(unittest.TestCase):
         def http(code,reason):
             return urllib.error.HTTPError('http://archive',code,'',{},io.BytesIO(json.dumps({'error':reason}).encode()))
         for error in [TimeoutError(),urllib.error.URLError('refused'),http(503,'service_unavailable'),http(503,'detector_contract_rejected'),
-                      http(409,'audience_context_changed'),http(409,'runtime_context_conflict')]:
+                      http(409,'audience_context_changed'),http(409,'runtime_context_conflict'),
+                      # The safety epoch moved on, or was still being published, while the batch was prepared: the
+                      # next try prepares it in the new epoch, so Honcho must not drop the batch.
+                      http(409,'guard_context_changed'),http(409,'guard_transition_pending')]:
             with self.assertRaises(PreparationUnavailable): failing(error)('current','/v1/embeddings',{'input':'fixture'})
         for error in [http(403,'bound_guard_context_required'),http(409,'memory_context_retired'),http(422,'guard_candidate_rejected')]:
             with self.assertRaises(Rejected) as refused: failing(error)('current','/v1/embeddings',{'input':'fixture'})
             self.assertNotIsInstance(refused.exception,PreparationUnavailable)
             self.assertEqual(str(refused.exception),'memory_preparation_refused')
+        # The gateway's log says which archive answer it was, by code only.
+        with patch('sys.stderr',new_callable=io.StringIO) as log:
+            with self.assertRaises(Rejected): failing(http(409,'memory_context_retired'))('current','/v1/embeddings',{'input':'fixture'})
+            with self.assertRaises(PreparationUnavailable): failing(http(409,'guard_context_changed'))('current','/v1/chat/completions',{})
+            with self.assertRaises(Rejected): failing(http(403,'Private Words'))('current','/v1/embeddings',{'input':'fixture'})
+        self.assertEqual([json.loads(line) for line in log.getvalue().splitlines()],[
+            {'event':'memory_preparation_refused','route':'/v1/embeddings','status':409,'reason':'memory_context_retired'},
+            {'event':'memory_preparation_unavailable','route':'/v1/chat/completions','status':409,'reason':'guard_context_changed'},
+            {'event':'memory_preparation_refused','route':'/v1/embeddings','status':403,'reason':None}])
 
     def test_preparation_outage_answers_503_and_refusal_answers_403_without_spending(self):
         def unavailable(workspace,route,payload,background): raise PreparationUnavailable()
