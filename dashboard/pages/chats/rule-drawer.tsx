@@ -3,7 +3,9 @@ import {useState} from 'react';
 import {Pencil, Search} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {chatFromId, chatName, formatDate, type Directory} from '../../lib/chats-model';
+import {href} from '../../lib/routes';
 import {Badge, Button, Details, Field, Input, Notice, Spinner, Textarea} from '../../ui/core';
+import {LinkButton} from '../../ui/link-button';
 import {Drawer, useFeedback} from '../../ui/overlay';
 import {modeText, ruleBody, type Rule} from './rule-dialog';
 import {ActionError, chatHref, useAction} from './shared';
@@ -59,10 +61,16 @@ export function RuleDrawer({
     <Drawer
       open={open}
       onOpenChange={onOpenChange}
-      title={rule?.name ?? 'Sharing rule'}
+      title={rule ? (rule.project_id ? 'Set by project ' + rule.name : rule.name) : 'Sharing rule'}
       description={rule ? modeText[rule.mode].hint : undefined}
       footer={
-        rule && (
+        rule &&
+        (rule.project_id ? (
+          // A project's own rule changes only from the project.
+          <LinkButton href={href('memory', {view: 'projects', project: rule.project_id})} size="md">
+            Open project
+          </LinkButton>
+        ) : (
           <>
             <Button onClick={() => onEdit(rule)}>
               <Pencil aria-hidden /> Edit
@@ -83,7 +91,7 @@ export function RuleDrawer({
               {rule.enabled ? 'Turn off' : 'Turn on'}
             </Button>
           </>
-        )
+        ))
       }
     >
       {!rule ? (
@@ -102,6 +110,20 @@ export function RuleDrawer({
             <dd>
               <Badge tone={rule.enabled ? 'good' : 'neutral'}>{rule.enabled ? 'On' : 'Off'}</Badge>
             </dd>
+            {rule.project_id && (
+              <>
+                <dt className="text-muted">Set by</dt>
+                <dd>
+                  <a
+                    href={href('memory', {view: 'projects', project: rule.project_id})}
+                    className="text-accent-text hover:underline"
+                    dir="auto"
+                  >
+                    Project {rule.name}
+                  </a>
+                </dd>
+              </>
+            )}
             <dt className="text-muted">From</dt>
             <dd className="flex flex-wrap gap-x-3 gap-y-1">
               {rule.sources.map(space => (
@@ -165,7 +187,11 @@ function ApprovedSharing({rule}: {rule: Rule}) {
           </Button>
         )}
       </div>
-      {!rule.enabled && <p className="text-[13px] text-muted">Turn the rule on to share texts.</p>}
+      {!rule.enabled && (
+        <p className="text-[13px] text-muted">
+          {rule.project_id ? 'This chat takes nothing from the project now.' : 'Turn the rule on to share texts.'}
+        </p>
+      )}
       {composing && (
         <ShareForm
           rule={rule}

@@ -18,6 +18,9 @@ export function errorWords(error: unknown): string {
     memory_workspace_missing: 'Long-term memory hasn’t learned anything yet.',
     invalid_memory_scope: 'Choose at least one chat, or every chat.',
     active_project_required: 'Choose a project that isn’t archived.',
+    sharing_rule_limit:
+      'That goes past a sharing limit: at most ten automatic rules and projects can share into one group, and at most 100 chats into one chat. Turn one off first.',
+    sharing_rule_project_managed: 'This rule is set by its project. Change it on the project.',
     memory_fact_not_found: 'This fact was retired or removed.',
     entity_rename_invalid: 'Only active people can be renamed.',
     memory_correction_required: 'Type the corrected wording first.',

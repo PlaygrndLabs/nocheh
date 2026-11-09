@@ -1,7 +1,8 @@
 /**
  * Memory › Projects: group chats into projects so Nocheh keeps related
  * knowledge together, and optionally let Nocheh organize them itself.
- * A project never shares one chat's messages with another.
+ * A project's chats share what they know only when the owner turns that on,
+ * and never their messages.
  */
 import {useState} from 'react';
 import {ChevronRight, FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
@@ -21,20 +22,32 @@ import {
   LoadError,
   LoadingRows,
   Notice,
+  Segmented,
   Switch,
   Textarea,
   type Tone,
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 import {ChatPicker} from '../chats/chat-picker';
+import {modeText, projectSharingWarning} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
 
-type Project = {id: string; name: string; description: string; state: 'active' | 'archived'; revision: number};
+type SharingMode = 'approved' | 'filtered';
+type Project = {
+  id: string;
+  name: string;
+  description: string;
+  state: 'active' | 'archived';
+  sharing_enabled?: boolean;
+  sharing_mode?: SharingMode;
+  revision: number;
+};
 type Assignment = {
   space_id: string;
   project_id: string | null;
   mode: 'assigned' | 'none' | 'inherit';
+  share_into?: boolean;
   revision: number;
 };
 type ContextChat = Conversation & {
@@ -105,7 +118,7 @@ export function Projects() {
       <Card>
         <CardHeader
           title="Projects"
-          description="Chats in one project share what Nocheh learns about the project, never their messages."
+          description="Chats in one project share what Nocheh learns about the project. They share what they know with each other only when you turn that on."
           action={
             <Button variant="primary" onClick={() => setEditing('new')}>
               <Plus aria-hidden /> New project
@@ -146,7 +159,10 @@ export function Projects() {
                       {project.state === 'archived' ? (
                         <Badge>Archived</Badge>
                       ) : (
-                        <Badge>{count === 1 ? '1 chat' : `${count} chats`}</Badge>
+                        <>
+                          {project.sharing_enabled && <Badge tone="accent">Shares</Badge>}
+                          <Badge>{count === 1 ? '1 chat' : `${count} chats`}</Badge>
+                        </>
                       )}
                       <ChevronRight className="size-4 shrink-0 text-muted" aria-hidden />
                     </button>
@@ -179,12 +195,17 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
   const command = useCommand();
   const [name, setName] = useState(project?.name ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
+  // Off for a new project; nothing is shared until the owner ticks it.
+  const [sharing, setSharing] = useState(project?.sharing_enabled ?? false);
+  const [mode, setMode] = useState<SharingMode>(project?.sharing_mode ?? 'filtered');
   const save = async () => {
     const result = await command.run<Project>('/projects', {
       ...(project ? {id: project.id} : {}),
       name: name.trim(),
       description,
       state: project?.state ?? 'active',
+      sharing_enabled: sharing,
+      sharing_mode: mode,
       expected_revision: project?.revision ?? 0,
     });
     if (result) {
@@ -237,6 +258,35 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
             onChange={event => setDescription(event.target.value)}
           />
         </Field>
+        <div className="space-y-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              className="size-4 accent-accent"
+              checked={sharing}
+              onChange={event => setSharing(event.target.checked)}
+            />
+            Chats in this project share what they know
+          </label>
+          {sharing && (
+            <div className="space-y-3 pl-6">
+              <Notice tone="warn">{projectSharingWarning}</Notice>
+              <div className="space-y-1.5">
+                <Segmented
+                  label="How chats share"
+                  value={mode}
+                  options={[
+                    {value: 'filtered', label: modeText.filtered.label},
+                    {value: 'approved', label: modeText.approved.label},
+                  ]}
+                  onChange={setMode}
+                />
+                <p className="text-xs text-muted">{modeText[mode].hint}</p>
+              </div>
+              <p className="text-xs text-muted">Only groups and topics share. Your private chat is never shared.</p>
+            </div>
+          )}
+        </div>
         {command.error && <Notice tone="bad">{command.error}</Notice>}
         <button type="submit" hidden />
       </form>
@@ -365,6 +415,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   const {projects, own} = useProjects();
   const [adding, setAdding] = useState('');
   const members = context.conversations;
+  const shares = project.state === 'active' && !!project.sharing_enabled;
   const ownOf = (space: string) => own.find(row => row.space_id === space);
   const elsewhere = (space: string) => {
     const assignment = ownOf(space);
@@ -396,6 +447,22 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
     }
   };
 
+  const leaveOut = async (chat: ContextChat, out: boolean) => {
+    const result = await command.run('/projects/assignments', {
+      space_id: chat.space_id,
+      mode: 'assigned',
+      project_id: project.id,
+      share_into: !out,
+      expected_revision: ownOf(chat.space_id)?.revision ?? chat.effective.own_assignment?.revision ?? 0,
+    });
+    if (result)
+      feedback.toast(
+        out
+          ? `Nothing from this project goes into ${chats.name(chat.space_id)} now.`
+          : `${chats.name(chat.space_id)} gets what the other chats know again.`,
+      );
+  };
+
   const remove = async (chat: ContextChat) => {
     const parent = chat.parent_space;
     // A topic that would fall back to this same project through its group is set to "no project" instead.
@@ -413,22 +480,57 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   return (
     <section>
       <h3 className="mb-2 text-sm font-semibold">Chats in this project</h3>
+      {shares && (
+        <div className="mb-3 space-y-2">
+          <p className="text-[13px] text-muted">
+            These chats share what they know ({modeText[project.sharing_mode ?? 'filtered'].label}).
+          </p>
+          <Notice tone="warn">{projectSharingWarning}</Notice>
+        </div>
+      )}
       {members.length === 0 ? (
         <p className="text-[13px] text-muted">No chats yet.</p>
       ) : (
         <ul className="divide-y divide-line rounded-lg border border-line">
-          {members.map(chat => (
-            <li key={chat.space_id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{chats.name(chat.space_id)}</span>
-                {chat.effective.inherited && <span className="text-xs text-muted">Through its group</span>}
-              </span>
-              <Button size="sm" variant="ghost" disabled={command.busy} onClick={() => void remove(chat)}>
-                Remove
-              </Button>
-            </li>
-          ))}
+          {members.map(chat => {
+            const out = chat.effective.own_assignment?.share_into === false;
+            return (
+              <li key={chat.space_id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{chats.name(chat.space_id)}</span>
+                  {chat.effective.inherited ? (
+                    <span className="text-xs text-muted">Through its group</span>
+                  ) : (
+                    shares &&
+                    chat.kind === 'private' && (
+                      <span className="text-xs text-muted">Private chats are never shared</span>
+                    )
+                  )}
+                </span>
+                {(shares || out) && !chat.effective.inherited && chat.kind !== 'private' && (
+                  <label className="flex items-center gap-2 text-xs text-muted">
+                    Don’t share into this chat
+                    <Switch
+                      label={'Don’t share into ' + chats.name(chat.space_id)}
+                      checked={out}
+                      disabled={command.busy}
+                      onChange={value => void leaveOut(chat, value)}
+                    />
+                  </label>
+                )}
+                <Button size="sm" variant="ghost" disabled={command.busy} onClick={() => void remove(chat)}>
+                  Remove
+                </Button>
+              </li>
+            );
+          })}
         </ul>
+      )}
+      {shares && members.length > 0 && (
+        <p className="mt-2 text-xs text-muted">
+          Leaving out any chat leaves its whole group, topics included, out of this project’s sharing. A chat you leave
+          out still shares what it knows, and still uses the project’s role, skills and tasks.
+        </p>
       )}
       {project.state === 'active' && (
         <div className="mt-3 space-y-2">

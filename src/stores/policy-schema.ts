@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS sharing_rules (
  updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS sharing_rules_destination ON sharing_rules(destination) WHERE enabled;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS sharing_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS sharing_mode text NOT NULL DEFAULT 'filtered' CHECK(sharing_mode IN ('approved','filtered'));
+ALTER TABLE project_assignments ADD COLUMN IF NOT EXISTS share_into boolean NOT NULL DEFAULT true;
+ALTER TABLE sharing_rules ADD COLUMN IF NOT EXISTS project_id text REFERENCES projects(id);
+CREATE INDEX IF NOT EXISTS sharing_rules_project ON sharing_rules(project_id,destination) WHERE project_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS learning_consent (
  event_id text PRIMARY KEY,enabled boolean NOT NULL,reason text NOT NULL,
  revision integer NOT NULL CHECK(revision>0),updated_at timestamptz NOT NULL DEFAULT now()

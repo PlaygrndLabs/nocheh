@@ -30,10 +30,12 @@ ORIGINAL = {
     'guard_mode': ('SELECT mode FROM guard_state WHERE singleton', ('mode',)),
     'runtime_configuration': ('SELECT c.name,v.document FROM runtime_configuration c '
                               'JOIN runtime_configuration_versions v USING(name,revision) ORDER BY c.name', ('name', 'document')),
-    'projects': ('SELECT id,name,description,state FROM projects ORDER BY id', ('id', 'name', 'description', 'state')),
-    'project_assignments': ('SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id', ('space_id', 'project_id', 'mode')),
-    'sharing_rules': ('SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules ORDER BY id',
-                      ('id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions')),
+    'projects': ('SELECT id,name,description,state,sharing_enabled,sharing_mode FROM projects ORDER BY id',
+                 ('id', 'name', 'description', 'state', 'sharing_enabled', 'sharing_mode')),
+    'project_assignments': ('SELECT space_id,project_id,mode,share_into FROM project_assignments ORDER BY space_id',
+                            ('space_id', 'project_id', 'mode', 'share_into')),
+    'sharing_rules': ('SELECT id,name,sources,destination,enabled,mode,instructions,project_id FROM sharing_rules ORDER BY id',
+                      ('id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions', 'project_id')),
     'memory_access_settings': ('SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination',
                                ('destination', 'suggestions', 'notify_owner', 'auto_followup', 'request_ttl_seconds', 'default_grant_mode')),
     'runtime_profiles': ("SELECT id,name,owner_id FROM runtime_profiles WHERE state='active' ORDER BY id", ('id', 'name', 'owner_id')),
@@ -141,7 +143,7 @@ def _legacy_rules(rows):
                        'sources': sources, 'destination': destination,
                        'enabled': mode == 'filtered' and bool(sources),
                        'mode': 'filtered' if mode == 'filtered' else 'approved',
-                       'instructions': instructions})
+                       'instructions': instructions, 'project_id': None})
     return sorted(result, key=lambda row: row['id'])
 
 

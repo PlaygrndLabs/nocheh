@@ -16,7 +16,7 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   const workspace=digest('installation-workspace'),groupSession=digest('group-session'),ownerSession=digest('owner-session');
   const root={store:'archive',kind:'event',id:digest('root'),revision:'1',input_hash:digest('root-hash')};
   const sessions:Record<string,{session_id:string;audience:string}>={[digest('group-key')]:{session_id:groupSession,audience:'-100'},[digest('owner-key')]:{session_id:ownerSession,audience:'owner'}};
-  let key=digest('group-key'),fail=false,uncorrected=false,deleting=false;const calls:string[]=[],records:string[]=[];let prepared=0;
+  let key=digest('group-key'),fail=false,uncorrected=false,deleting=false;const calls:string[]=[],records:string[]=[],contents:string[]=[];let prepared=0;
   const control={query:async(sql:string,values:any[]=[])=>{
     if(sql.includes('FROM owner_commands'))return {rowCount:uncorrected?1:0,rows:uncorrected?[{}]:[]};
     if(sql.includes('FROM memory_session_deletions'))return {rowCount:deleting?1:0,rows:deleting?[{}]:[]};
@@ -31,7 +31,7 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   const contexts={access:{stores:{control},policy:()=>({owner_id:'123'}),archive:{captured:async()=>({reference:root})}},
     entities:{context:async()=>({session_id:key,speaker:{id:'speaker',kind:'person'},project:null,mentioned_projects:[],mentioned_people:[]})},
     guards:{prepareContext:async()=>{prepared++;return null;},read:async()=>({value:{text:'Guarded Honcho context'}})}};
-  const derived={record:async(input:any)=>{records.push(input.operation_id);return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
+  const derived={record:async(input:any)=>{records.push(input.operation_id);contents.push(String(input.content));return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
   const audience={assert:async()=>({generation:'fixture',epoch:1,mode:'on'})};
   const memory=new NativeMemoryRepository(contexts as any,derived as any,{audience,allow:async()=>{}} as any,{} as any,async(path:string)=>{
     calls.push(path);if(fail)throw Error('honcho_down');
@@ -49,6 +49,9 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   key=digest('owner-key');
   const owner=await memory.context({admin:false,scope:null,space:'123',turnEvent:root.id} as Reader);
   assert.equal(owner.limited_memory,false);assert.match(calls.at(-1)!,new RegExp(ownerSession));assert.doesNotMatch(calls.at(-1)!,/limit_to_session/);
+  // A peer card summarizes a person across every session: no context Nocheh reads carries one, even one Honcho returned.
+  assert.ok(contents.some(text=>text.includes('What the speaker said')));
+  assert.ok(!contents.some(text=>text.includes('Prefers mornings')),'no peer card, for the owner or a group');
   const calledBefore=calls.length;
   const crossed=await memory.context(group);
   assert.deepEqual(crossed.sources,[],'a group turn cannot read an owner-private session');assert.equal(calls.length,calledBefore);

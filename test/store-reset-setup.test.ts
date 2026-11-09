@@ -27,25 +27,31 @@ test('reset setup restores only current configuration under a new generation and
     } finally {await db.end();}
   }
   const stores=connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords),profile='profile-'+'c'.repeat(48);
+  const projectRule=digest('project-sharing:'+'a'.repeat(64)+':-1002');
   const snapshot={format:'nocheh-reset-configuration-v1',layout:'original-only-v1',configuration:{
     security_policy:[{document:{version:1,rules:[{id:'fixture-deny-shell',kind:'shell',outcome:'deny'}]}}],
     installation_generation:[{generation:'11111111-1111-4111-8111-111111111111'}],guard_mode:[{mode:'off'}],
     runtime_configuration:[{name:'assistant',document:{enabled:true,owner_id:'123',group_ids:['-1001','-1002']}}],
-    projects:[{id:'a'.repeat(64),name:'Saved project',description:'Configuration only',state:'archived'}],
-    project_assignments:[{space_id:'-1001',project_id:'a'.repeat(64),mode:'assigned'}],
-    sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:'-1002',enabled:true,mode:'approved',instructions:'Share only approved text'}],
+    projects:[{id:'a'.repeat(64),name:'Saved project',description:'Configuration only',state:'archived',sharing_enabled:true,sharing_mode:'filtered'}],
+    project_assignments:[{space_id:'-1001',project_id:'a'.repeat(64),mode:'assigned',share_into:true},{space_id:'-1002',project_id:'a'.repeat(64),mode:'assigned',share_into:false}],
+    sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:'-1002',enabled:true,mode:'approved',instructions:'Share only approved text',project_id:null},
+      // The project is archived, so its own rule is off.
+      {id:projectRule,name:'Saved project',sources:['-1001'],destination:'-1002',enabled:false,mode:'filtered',instructions:'',project_id:'a'.repeat(64)}].sort((a,b)=>a.id<b.id?-1:1),
     memory_access_settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}],
     runtime_profiles:[{id:profile,name:'research',owner_id:'123'}]}} as const;
   const input={snapshot,generation:'22222222-2222-4222-8222-222222222222',reset_id:'44444444-4444-4444-8444-444444444444',
     profile_commands:[{id:profile,name:'research',state:'active',expected_revision:0,operation_id:'restore-preferences:'+profile}]};
   try {
     assert.deepEqual(resetSetupSnapshot(snapshot),snapshot);
+    const owned=snapshot.configuration.sharing_rules.find(rule=>rule.project_id)!;
+    for(const forged of [{...owned,project_id:'d'.repeat(64)},{...owned,destination:'-1003'}])
+      assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a project rule belongs to a saved project and its chat');
     await assert.rejects(restoreResetSetup(stores,{...input,unexpected:true} as any),/snapshot_invalid/);
     await assert.rejects(restoreResetSetup(stores,{...input,generation:snapshot.configuration.installation_generation[0].generation}),/generation_reused/);
     await assert.rejects(restoreResetSetup(stores,{...input,profile_commands:[{...input.profile_commands[0],operation_id:'forged'}]}),/profiles_invalid/);
     const first=await restoreResetSetup(stores,input),again=await restoreResetSetup(stores,input);
     assert.deepEqual(again,first);assert.equal(first.generation,input.generation);assert.equal(first.binding.generation,input.generation);
-    assert.equal(first.binding.mode,'off');assert.equal(first.binding.epoch,2);assert.equal(first.configuration_records,9);
+    assert.equal(first.binding.mode,'off');assert.equal(first.binding.epoch,2);assert.equal(first.configuration_records,11);
     assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events')).rows[0].count,0);
     assert.equal((await stores.derived.query('SELECT count(*)::int AS count FROM derived_artifacts')).rows[0].count,0);
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM owner_commands')).rows[0].count,1);

@@ -50,7 +50,7 @@ export class SharingContentRepository {
     if(binding.generation!==input.binding.generation||binding.mode!==input.binding.mode)throw new HttpError(409,'sharing_context_changed');
     for(const source of input.sources) {
       const space=await this.access.space(source);
-      if(!space||!rule.sources.includes(space))throw new HttpError(403,'sharing_source_not_selected');
+      if(!space||!await this.policies.covers(rule,space))throw new HttpError(403,'sharing_source_not_selected');
     }
     await this.learned.validateDependencies(input.dependencies,binding);return rule;
   }
@@ -58,7 +58,7 @@ export class SharingContentRepository {
     const sources:SourceReference[]=[],dependencies:PreparedDependency[]=[],candidates:Inputs['candidates']=[];
     for(const id of ids) {
       const source=(await this.access.archive.captured(id)).reference,space=await this.access.space(source);
-      if(!space||!rule.sources.includes(space))throw new HttpError(403,'sharing_source_not_selected');
+      if(!space||!await this.policies.covers(rule,space))throw new HttpError(403,'sharing_source_not_selected');
       const guarded=await this.guards.read('events:'+id,binding),text=[String((guarded.value as any).text??'')];
       sources.push(source);dependencies.push({source_id:'events:'+id,revision:guarded.revision,value_hash:digest(canonical(guarded.value))});
       const selected=(await this.stores.derived.query(`SELECT artifact_id,kind FROM derivative_selections WHERE event_id=$1
@@ -265,7 +265,7 @@ export class SharingContentRepository {
     const ids:string[]=[];
     for(const id of candidates) {
       const source=(await this.access.archive.captured(id)).reference,space=await this.access.space(source);
-      if(space&&rule.sources.includes(space))ids.push(id);if(ids.length===10)break;
+      if(space&&await this.policies.covers(rule,space))ids.push(id);if(ids.length===10)break;
     }
     if(!ids.length)return null;
     const operation='automatic-filter:'+digest(canonical([binding,rule.id,rule.revision,query,ids,Math.floor(Date.now()/600000)]));

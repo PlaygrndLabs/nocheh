@@ -169,10 +169,11 @@ function RulesInto({context}: {context: ChatContext | null}) {
                 className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 hover:bg-subtle"
               >
                 <span className="min-w-0 flex-1 truncate text-sm font-medium" dir="auto">
-                  {rule.name}
+                  {rule.project_id ? 'Set by project ' + rule.name : rule.name}
                 </span>
                 <span className="text-xs text-muted">
                   from {rule.sources.length} {rule.sources.length === 1 ? 'chat' : 'chats'}
+                  {rule.through_group ? ' · through its group' : ''}
                 </span>
                 <Badge tone={rule.enabled ? 'good' : 'neutral'}>{rule.enabled ? 'On' : 'Off'}</Badge>
               </a>

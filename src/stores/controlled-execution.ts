@@ -8,6 +8,7 @@ import {hostActionAuthority} from '../workflows/host-tools.js';
 import {covers,type ControlledActionRepository} from './controlled-actions.js';
 import {defaultLogicalProfile} from './runtime-profile.js';
 import {parentSpace} from '../spaces.js';
+import {notionRunRefusal} from './notion.js';
 
 /** The stable profile whose tool settings the executor checks. The action's own native profile is named
  *  after the epoch it was proposed in, so it no longer resolves once a later epoch carries the action
@@ -109,6 +110,9 @@ export class ControlledExecutionRepository {
       // Turning Notion off stops Notion calls that were approved but have not run yet.
       if('connection' in (args as object)&&!(await db.query('SELECT enabled FROM owner_notion WHERE singleton')).rows[0]?.enabled)
         {const result=await this.blocked(db,row,'notion_not_enabled');await db.query('COMMIT');this.closed(row.id);return result;}
+      // It must still come from the owner's private chat, or from a job the owner asked for and approved there (ADR-0225).
+      const refused='connection' in (args as object)?await notionRunRefusal(db,row,this.actions.access.policy().owner_id??null):null;
+      if(refused){const result=await this.blocked(db,row,refused);await db.query('COMMIT');this.closed(row.id);return result;}
       // Stop also stops what a job's Notion setting let run without a card but has not run yet (ADR-0203).
       // A call the owner approved on its own card stays approved.
       if(row.job_id&&row.state==='approved'&&canonical(row.decision_reference)===canonical(row.source_reference)&&

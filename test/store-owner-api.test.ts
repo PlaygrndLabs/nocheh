@@ -100,6 +100,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal((await request(guardPath+'/revisions/'+guard.active_revision)).content.text,'Generated reading');
 
     const project=await request('/v1/projects',{name:key,description:'Synthetic',state:'active',expected_revision:0,operation_id:key+':project'});
+    assert.equal(project.sharing_enabled,false,'a new project shares nothing');assert.equal(project.sharing_mode,'filtered');
     const space='-'+Date.now(),assignment={space_id:space,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign'};
     await request('/v1/projects/assignments',assignment);
     const inherited=await request('/v1/projects/effective?space='+encodeURIComponent(space+'/topic/77'));
@@ -109,7 +110,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const sharing=await request('/v1/sharing/rules',{name:key,sources:[space],destination:'123',enabled:true,mode:'approved',instructions:'Only the selected facts',expected_revision:0,operation_id:key+':share'});
     assert.equal(sharing.mode,'approved');assert.ok((await request('/v1/sharing/rules')).rules.some((r:any)=>r.id===sharing.id));
     const archived=await request('/v1/projects',{id:project.id,name:key,description:'Synthetic',state:'archived',expected_revision:project.revision,operation_id:key+':archive'});
-    assert.equal(archived.state,'archived');
+    assert.equal(archived.state,'archived');assert.equal(archived.sharing_enabled,false);
 
     await services.guards.prepare(file.event,'fixture',services.detect);
     const shareRule=await request('/v1/sharing/rules',{name:key+':source-share',sources:['123'],destination:space,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':source-share'});

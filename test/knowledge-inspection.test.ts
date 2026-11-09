@@ -13,8 +13,9 @@ test('runtime knowledge inspection guards contents and retains exact claims, dis
     if(sql.includes('FROM projects WHERE'))return {rows:[{id:entityId,name:'sensitive-fixture-text',revision:3}]};
     if(sql.includes('FROM memory_entities WHERE'))return {rows:[{id:entityId,kind:'person',name:'sensitive-fixture-text',revision:3}]};
     if(sql.includes('FROM organization_delegations'))return {rows:[]};
-    if(sql.includes('FROM project_assignments'))return {rows:[]};
+    // The rule list checks project assignments inside its own query.
     if(sql.includes('FROM sharing_rules'))return {rows:[{id:grantId,name:'sensitive-fixture-text',enabled:false,revision:4}]};
+    if(sql.includes('FROM project_assignments'))return {rows:[]};
     if(sql.includes('FROM memory_fact_grants'))return {rows:[{id:grantId,fact_id:factId,fact_revision:3,revision:2,state:'active',binding:{...binding,epoch:1},expires_at:null,guard_revision:1,text_hash:digest('wording'),representation_reference:{id:grantId}}]};
     throw Error('unexpected query '+sql);
   }},derived:{query:async(sql:string,args:unknown[])=>{queries.push({sql,args});return {rows:[fact]};}}},

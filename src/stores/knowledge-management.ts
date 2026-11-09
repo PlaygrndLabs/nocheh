@@ -18,7 +18,7 @@ import type {MemoryAccessRepository} from './memory-access.js';
 import type {SelectionRepository} from './selections.js';
 import {selectionId} from './selections.js';
 import type {SharingContentRepository} from './sharing.js';
-import {ProjectRepository,SharingPolicyRepository,writeProject,writeAssignment,type Assignment} from './projects.js';
+import {ProjectRepository,SharingPolicyRepository,listedRule,writeProject,writeAssignment,type Assignment} from './projects.js';
 import {foregroundReplyActive} from './automatic-publication.js';
 import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,organizationIdentity,
  type KnowledgeProposal,type OrganizationProposal,type ReviewProposal} from './knowledge-contract.js';
@@ -162,7 +162,7 @@ export class KnowledgeManagementRepository {
   const projects=(await this.stores.control.query(`SELECT * FROM projects WHERE id>$1 AND ($2='' OR name ILIKE '%'||$2||'%') ORDER BY id LIMIT 11`,[cursor('after'),query])).rows;
   const entityPage=await this.s.entities.list(principal,{query,after:cursor('entities_after')});
   const delegationPage=await this.delegations(owner,cursor('delegations_after'));
-  const rules=space?(await this.stores.control.query(`SELECT * FROM sharing_rules WHERE destination=$1 AND id>$2 ORDER BY id LIMIT 11`,[space,cursor('sharing_after')])).rows:[];
+  const rules=space?(await this.stores.control.query(`SELECT * FROM sharing_rules s WHERE s.destination=$1 AND s.id>$2 AND ${listedRule('s')} ORDER BY s.id LIMIT 11`,[space,cursor('sharing_after')])).rows:[];
   return prepared({projects:projects.slice(0,10),next:projects.length>10?projects[9].id:null,
    entities:{entities:entityPage.entities.slice(0,10),next:entityPage.entities.length>10?entityPage.entities[9]!.id:entityPage.next},
    ...(space?{assignment:await this.s.projects.effective(space),sharing_rules:rules.slice(0,10),sharing_next:rules.length>10?rules[9].id:null}:{}),
@@ -244,7 +244,14 @@ export class KnowledgeManagementRepository {
    await this.s.prepared.allow(principal,status);await this.s.turns.assertAudience(principal);return status;
   }
   const proposal=await this.content(row),decision_history=(await this.stores.control.query('SELECT operation_id,result,created_at FROM knowledge_decisions WHERE proposal_id=$1 ORDER BY created_at,operation_id',[row.id])).rows;
-  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},decision_history};}
+  // The owner's review and undo say when a project whose chats share what they know is involved now (ADR-0226).
+  const moves=proposal.kind==='organization'?proposal.assignments.map(a=>({space_id:a.space_id,mode:'assigned',project_id:a.project_id??null})):
+   proposal.kind==='project_assignment'?[{space_id:String(proposal.payload.space_id),mode:String(proposal.payload.mode),project_id:proposal.payload.project_id??null}]:[];
+  const sharing_projects=proposal.kind==='project_save'?proposal.payload.id?(await this.stores.control.query('SELECT id,name FROM projects WHERE id=$1 AND sharing_enabled',[proposal.payload.id])).rows:[]:
+   await this.sharingProjects(moves,this.stores.control);
+  const undo_sharing_projects=row.state==='applied'&&row.kind==='organization'?await this.sharingProjects((row.result?.assignments??[]).map((change:any)=>({space_id:change.after.space_id,
+   mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})),this.stores.control):[];
+  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,decision_history};}
  async proposals(principal:Reader,after=''){admin(principal);if(after)id(after);const rows=(await this.stores.control.query(`SELECT id FROM knowledge_proposals WHERE $1='' OR
   (created_at,id)<(SELECT created_at,id FROM knowledge_proposals WHERE id=$1) ORDER BY created_at DESC,id DESC LIMIT 101`,[after])).rows;
   return {proposals:await Promise.all(rows.slice(0,100).map(row=>this.proposal(principal,row.id))),next:rows.length>100?rows[99].id:null};}
@@ -306,6 +313,8 @@ export class KnowledgeManagementRepository {
     if(assignment.project_id&&!permission.project_ids.includes(assignment.project_id)&&!(await control.query('SELECT 1 FROM organization_project_origins WHERE project_id=$1 AND delegation_id=$2',[assignment.project_id,permission.id])).rowCount){permitted=false;break;}
     if(assignment.project_id&&(await control.query(`SELECT 1 FROM projects p JOIN projects other ON lower(other.name)=lower(p.name) AND other.id<>p.id
      WHERE p.id=$1 AND other.state='active' LIMIT 1`,[assignment.project_id])).rowCount){permitted=false;break;}
+    // Joining or leaving a project whose chats share what they know changes who knows what: only the owner does that (ADR-0226).
+    if((await this.sharingProjects([{space_id:assignment.space_id,mode:'assigned',project_id:assignment.project_id??null}],control)).length){permitted=false;break;}
     for(const topic of await this.affectedTopics(assignment.space_id,control)){
      if(!permission.scopes.includes(topic)||!await this.baselineMatches(permission,topic,control))permitted=false;
     }
@@ -313,6 +322,20 @@ export class KnowledgeManagementRepository {
    if(permitted)return permission;
   }
   return null;
+ }
+
+ /** The projects whose chats share what they know that these moves touch: the one each chat is in now and the one it would be in.
+  * A topic that follows its group is in the group's project, and one set to follow it would be (ADR-0226). */
+ private async sharingProjects(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string}[]>{
+  // One cheap check first: while no project shares, as by default, no move can involve one.
+  if(!moves.length||!(await db.query('SELECT 1 FROM projects WHERE sharing_enabled LIMIT 1')).rowCount)return [];
+  const ids=new Set<string>();
+  for(const move of moves){
+   const parent=parentSpace(move.space_id),rows=(await db.query('SELECT space_id,project_id,mode FROM project_assignments WHERE space_id=$1 OR space_id=$2',[move.space_id,parent])).rows;
+   const own=rows.find(r=>r.space_id===move.space_id),group=parent?rows.find(r=>r.space_id===parent&&r.mode==='assigned')?.project_id??null:null;
+   for(const project of [own&&own.mode!=='inherit'?own.project_id:group,move.mode==='assigned'?move.project_id:move.mode==='inherit'?group:null])if(project)ids.add(project);
+  }
+  return ids.size?(await db.query('SELECT id,name FROM projects WHERE id=ANY($1::text[]) AND sharing_enabled ORDER BY id',[[...ids]])).rows:[];
  }
 
  private async baselineMatches(permission:OrganizationDelegation,space:string,db:Pick<pg.PoolClient,'query'>){

@@ -771,6 +771,72 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await page.close();
 });
 
+test('a project’s chats share what they know only once it is ticked, and its rules change on the project', async () => {
+  const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
+  const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
+  await drawer.getByRole('button', {name: 'Edit'}).click();
+  const dialog = page.getByRole('dialog', {name: 'Edit project'});
+  const share = dialog.getByRole('checkbox', {name: 'Chats in this project share what they know'});
+  assert.equal(await share.isChecked(), false);
+  await share.check();
+  await dialog.getByText('Everyone allowed in any of these chats will see what the others know.').waitFor();
+  await dialog
+    .getByRole('radiogroup', {name: 'How chats share'})
+    .getByRole('radio', {name: 'Filter automatically', checked: true})
+    .waitFor();
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Project saved.'}).waitFor();
+  // The list behind the open drawer marks it.
+  await page.locator('li button', {hasText: 'Aurora field guide'}).getByText('Shares', {exact: true}).waitFor();
+  await drawer.getByText('These chats share what they know (Filter automatically).').waitFor();
+  await drawer.getByRole('switch', {name: 'Don’t share into Aurora planning'}).click();
+  await page
+    .getByRole('status')
+    .filter({hasText: 'Nothing from this project goes into Aurora planning now.'})
+    .waitFor();
+  await page.close();
+
+  // The chat's project card shows the same choice, and marks the projects that share.
+  const {page: chat, problems: chatProblems} = await open('chats?chat=-10042');
+  await chat.getByRole('switch', {name: 'Don’t share into this chat', checked: true}).waitFor();
+  await chat.getByText('Chats in Aurora field guide share what they know (Filter automatically).').waitFor();
+  assert.equal(await chat.locator('#chat-project option', {hasText: 'Aurora field guide · shares'}).count(), 1);
+  await chat.close();
+
+  // A topic set to follow its group into a project that shares asks first.
+  const {page: topic, problems: topicProblems} = await open('chats?chat=-10042%2Ftopic%2F7');
+  const choice = topic.locator('#chat-project');
+  await choice.selectOption({label: 'No project'});
+  await topic.getByRole('status').filter({hasText: 'Removed from its project.'}).waitFor();
+  await choice.selectOption({label: 'Same as the group (Aurora field guide · shares)'});
+  const ask = topic.getByRole('dialog', {name: 'Share with the chats in Aurora field guide?'});
+  await ask.getByText('Everyone allowed in any of these chats will see what the others know.').waitFor();
+  await ask.getByRole('button', {name: 'Cancel'}).click();
+  assert.equal(await choice.inputValue(), '__none');
+  await choice.selectOption({label: 'Same as the group (Aurora field guide · shares)'});
+  await ask.getByRole('button', {name: 'Follow the group'}).click();
+  await topic.getByRole('status').filter({hasText: 'Follows the group’s project now.'}).waitFor();
+  await topic.close();
+
+  // A suggested move out of it says so before the owner decides.
+  const {page: review, problems: reviewProblems} = await open('inbox?kind=knowledge&decision=' + 'f'.repeat(64));
+  await review.getByRole('dialog').getByText('A project here shares what its chats know').waitFor();
+  await review.close();
+
+  // A project's rule is read on Sharing and changed on the project.
+  const {page: rules, problems: ruleProblems} = await open('chats?view=rules');
+  const row = rules.getByRole('listitem').filter({hasText: 'Set by project Aurora field guide'});
+  await row.getByRole('link', {name: 'Open project'}).waitFor();
+  assert.equal(await row.getByRole('switch').count(), 0);
+  await row.getByRole('button', {name: /Set by project Aurora field guide/}).click();
+  const details = rules.getByRole('dialog', {name: /Set by project Aurora field guide/});
+  await details.getByRole('link', {name: 'Project Aurora field guide'}).waitFor();
+  await details.getByRole('link', {name: 'Open project'}).waitFor();
+  assert.equal(await details.getByRole('button', {name: 'Edit'}).count(), 0);
+  assert.deepEqual([...problems, ...chatProblems, ...topicProblems, ...reviewProblems, ...ruleProblems], []);
+  await rules.close();
+});
+
 test('usage shows calls, tokens and cost, and never prices an unknown cost as free', async () => {
   const {page, problems} = await open('usage');
   await page.getByRole('table', {name: 'Usage by part'}).waitFor();

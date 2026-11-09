@@ -129,6 +129,21 @@ test('host tool execution fences exact authority and repairs durable results wit
     await s.notion.save(owner,{enabled:false,expected_revision:on.revision});
     assert.deepEqual(await x.claim(nb),{claimed:false,blocked:search.id,reason:'notion_not_enabled'});
     assert.deepEqual(ended(),[search.id],'the Notion-off stop ends it');
+    // Right before it runs, a Notion call must still come from the owner's private chat: an unchanged one runs, and one whose
+    // space moved to a group does not; space_id is no part of its fingerprint.
+    const again=await s.notion.save(owner,{enabled:true,expected_revision:(await s.notion.get(owner)).revision}),later=await s.guards.state();
+    const mine={admin:false,scope:null,space:'123',turnEvent:privateSource.id,generation:later.generation,guard_epoch:later.epoch,revision:later.epoch};
+    const kept=await a.propose(mine,{kind:'mcp',arguments:{connection:'notion',tool:'notion-search',input:{query:'made-up list kept'}}});
+    assert.equal(kept.state,'approved');const kb=await host(kept.id);
+    assert.equal((await x.claim(kb)).claimed,true,'an unchanged call from the owner\'s private chat runs');assert.deepEqual(await x.start(kb),{started:true});
+    await x.finish({id:kept.id,actor:kb.actor,state:'done',result:{content:'made-up list'}});await finishHost(kb);
+    assert.equal((await a.row(kept.id)).state,'done');assert.deepEqual(ended(),[kept.id]);
+    const moved=await a.propose(mine,{kind:'mcp',arguments:{connection:'notion',tool:'notion-search',input:{query:'made-up list again'}}});
+    assert.equal(moved.state,'approved');const mb=await host(moved.id);
+    await stores.control.query('UPDATE controlled_actions SET space_id=$2 WHERE id=$1',[moved.id,group]);
+    assert.deepEqual(await x.claim(mb),{claimed:false,blocked:moved.id,reason:'notion_owner_private_only'});
+    assert.deepEqual(ended(),[moved.id]);
+    await s.notion.save(owner,{enabled:false,expected_revision:again.revision});
 
     const cancelled=await proposal('printf cancel',false),cw=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[cancelled.id])).rows[0];
     assert.equal((await workflowDetail(stores.control,cw.id)).can_cancel,true);

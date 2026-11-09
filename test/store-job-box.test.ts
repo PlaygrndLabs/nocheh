@@ -116,6 +116,8 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
 
     // Only the owner's own job, asked in their private chat, may ask for the box, and only while the switch is on.
     assert.equal((await s.jobs.settings()).box_tools,true,'the sealed box is on by default');
+    // Asked while Notion is on, so their cards offer Notion reads, which the box job keeps when it is approved.
+    await saveNotion({enabled:true});
     const boxed=await ask('Box task check',true);
     assert.equal(boxed.box,true);
     const card=(await s.jobs.card(boxed.id)).text;
@@ -123,7 +125,6 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     const plain=await ask('Plain task check');
     assert.equal(plain.box,false);assert.doesNotMatch((await s.jobs.card(plain.id)).text,/🧰/,'a job without the box says nothing about it');
     // A saved card without the Notion or box line still shows that line, at its end, before the owner approves.
-    await saveNotion({enabled:true});
     const notionLine='📒 It can read your Notion without asking. Changes still ask you.',boxLine='🧰 It can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads.';
     const savedCard=async(text:string)=>stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',[JSON.stringify({'background.card':text})]);
     await savedCard('Made-up card: {title}\n\n{instruction}');
@@ -135,9 +136,11 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     await savedCard('Made-up card: {title}\n📒 {notion} · 🧰 {box}\n\n{instruction}');
     assert.equal((await s.jobs.card(boxed.id)).text,'Made-up card: Box task check\n'+notionLine+' · '+boxLine+'\n\nList the made-up tasks the group agreed on.');
     assert.equal((await s.jobs.card(plain.id)).text,'Made-up card: Plain task check\n\nList the made-up tasks the group agreed on.\n\n'+notionLine,'no box: the Notion line is added');
-    await saveNotion({enabled:false});
+    const reads=(value:boolean)=>stores.control.query('UPDATE background_jobs SET notion_reads=$2 WHERE id=ANY($1)',[[boxed.id,plain.id],value]);
+    await reads(false);
     assert.equal((await s.jobs.card(boxed.id)).text,'Made-up card: Box task check\n\nList the made-up tasks the group agreed on.\n\n'+boxLine,'no Notion reads: the box line is added');
     assert.equal((await s.jobs.card(plain.id)).text,'Made-up card: Plain task check\n\nList the made-up tasks the group agreed on.','a line without a value is not added');
+    await reads(true);
     await stores.control.query("UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton");
     assert.notEqual(plain.fingerprint,boxed.fingerprint);
     const again=await message('123',123,'Read it again');
@@ -288,7 +291,6 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     for(const target of ['https://made-up.notion.site/Page-'+id,'https://www.notion.so.example.test/'+id,'https://www.notion.so@example.test/'+id,
       'http://www.notion.so/'+id,'collection://made-up','made-up-page'])assert.equal(notionJobFetch({id:target}),false,target);
     assert.equal(notionJobFetch({id,url:'https://example.test'}),false,'no other address rides along');
-    await saveNotion({enabled:true});
     const notion=async(tool:string,input:Record<string,unknown>)=>(await s.controlledActions.propose(step,{kind:'mcp',arguments:{connection:'notion',tool,input}})).state;
     assert.equal(await notion('notion-fetch',{id}),'approved');
     assert.equal(await notion('notion-fetch',{id:'https://www.notion.so/Made-up-'+id}),'approved');

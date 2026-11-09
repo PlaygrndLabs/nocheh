@@ -63,6 +63,9 @@ def initialize(provider_state=PROVIDER_STATE):
          'DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS':'0',
          'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS':'1',
          'DERIVER_POLLING_STARTUP_JITTER_SECONDS':'0','DERIVER_POLLING_BACKOFF_ENABLED':'false',
+         # A peer card is one summary of a person across every session, and a session-filtered chat still reads it, so Honcho
+         # neither writes nor uses one; dreams, which would write them, stay off too (ADR-0225). Rewritten on every setup.
+         'PEER_CARD_ENABLED':'false',
          'DREAM_ENABLED':'false','SUMMARY_ENABLED':'true','EMBED_MESSAGES':'true','LOG_LEVEL':'WARNING',
          'EMBEDDING_VECTOR_DIMENSIONS':str(embedding.dimensions),'EMBEDDING_MODEL_CONFIG__TRANSPORT':embedding.provider,
          'EMBEDDING_MODEL_CONFIG__MODEL':embedding.model,

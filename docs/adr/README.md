@@ -54,7 +54,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 ### Honcho memory
 
 - Honcho is primary long-term memory, on by default in fresh installs, run in the installation Compose project and attached once at startup; Nocheh is its only writer, and Hermes has no direct access ([0033](0033-guarded-projections-and-honcho-memory.md), [0045](0045-honcho-in-installation-compose.md), [0076](0076-honcho-enabled-local-default.md), [0061](0061-retire-isolated-honcho-comparison.md)).
-- One workspace per installation, stable peers for people and projects, and versioned sessions per conversation; Nocheh enforces audience on every read ([0056](0056-connected-entity-memory.md), [0109](0109-standard-honcho-entity-model.md), [0115](0115-honcho-session-revisions.md)).
+- One workspace per installation, stable peers for people and projects, and versioned sessions per conversation; Nocheh enforces audience on every read ([0056](0056-connected-entity-memory.md), [0109](0109-standard-honcho-entity-model.md), [0115](0115-honcho-session-revisions.md)); Honcho peer cards are off and Nocheh reads none ([0225](0225-member-safety-rules.md)).
 - Repeat names for one person or project wait on one suggestion card that learning or the owner folds them into; one answer covers every name ([0219](0219-repeat-names-wait-on-one-card.md)).
 - A reply reads its conversation's Honcho session context live when a message arrives, and context is prefetched when Honcho finishes work, never on a timer ([0044](0044-automatic-honcho-context.md), [0114](0114-event-driven-honcho-context.md), [0115](0115-honcho-session-revisions.md)).
 - Only the latest revision of an edited message stays in Honcho; only an uncorrected owner change or a replaced session pauses reads, and answering a suggestion card or renaming a person does not ([0154](0154-message-edits-replace-honcho-writes.md), [0148](0148-honcho-reads-wait-for-epoch-correction.md), [0149](0149-only-owner-changes-hold-honcho.md), [0223](0223-answering-a-suggestion-card-does-not-pause-memory.md)).
@@ -74,7 +74,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 ### Audience and sharing
 
 - Owner recall spans every chat Nocheh serves; each group has its own memory audience, and its topics share it unless `TELEGRAM_TOPIC_MEMORY=topic` ([0030](0030-configurable-space-memory.md), [0135](0135-group-topics-share-memory.md)).
-- Relationships never grant access; the owner approves one-time or lasting fact grants per group or topic ([0057](0057-memory-relationship-access-map.md)).
+- Relationships never grant access; the owner approves one-time or lasting fact grants per group or topic ([0057](0057-memory-relationship-access-map.md)); a project grants access only while its chats share what they know ([0226](0226-a-project-can-share-what-its-chats-know.md)).
 - A grant, its follow-up message and its workflow request commit together; delivery re-checks the exact grant; replays are serialized and keep expiry; an unstarted handoff resumes on an exact owner replay ([0093](0093-atomic-memory-approval-followups.md), [0094](0094-current-memory-authority-at-delivery.md), [0095](0095-recover-unstarted-memory-handoffs.md), [0096](0096-serialize-memory-decision-replays.md)).
 
 ### Actions and approvals
@@ -85,9 +85,9 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Topic destinations stay exact, a chat follows its own requests across turns, and waiting approvals carry across quiet epochs ([0092](0092-exact-topic-action-destinations.md), [0166](0166-a-chat-follows-its-own-message-requests.md), [0200](0200-waiting-approvals-survive-reaction-epochs.md)).
 - When an approved operation ends, the agent continues in the chat that asked and answers there as a reply to the request, at most three times per request; such a follow-up never acts under the owner's freedom setting ([0212](0212-approved-operations-answer-in-the-chat-that-asked.md)).
 - An operation a rule or the owner freedom setting already allows is waited for in the turn, up to a minute, and answers in that reply; no follow-up repeats it ([0215](0215-an-allowed-operation-answers-in-the-same-turn.md)).
-- A web read's card can allow its site in that chat or topic for 12 hours or 30 days, and a command's card that exact command for 30 days; rules survive epochs, deny rules still win, and connected tools and messages are decided one by one ([0214](0214-allow-a-site-or-command-in-one-chat.md)).
+- A web read's card can allow its site in that chat or topic for 12 hours or 30 days, and a command's card that exact command for 30 days; rules survive epochs, deny rules still win, and connected tools and messages are decided one by one ([0214](0214-allow-a-site-or-command-in-one-chat.md)); the card names the topic and says the rule covers everyone allowed there ([0225](0225-member-safety-rules.md)).
 - An operation or message whose outcome is unclear waits in the Inbox until the owner says it ran, says it did not, or dismisses it; an unclear web page read closes by itself. The receipt stays as observed and nothing runs again ([0218](0218-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md)).
-- Notion is optional, through its MCP server; only the owner's private chat proposes calls ([0175](0175-notion-through-its-mcp-server.md)).
+- Notion is optional, through its MCP server; only the owner's private chat proposes calls ([0175](0175-notion-through-its-mcp-server.md)); a read naming an address outside the owner's Notion, or holding one written with its scheme, asks like a change, and each call is checked again right before it runs ([0225](0225-member-safety-rules.md)).
 
 ### Background jobs and sealed box
 
@@ -95,7 +95,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Nocheh prices a job's model use itself at frozen rates, and the broker refuses requests past the cost limit ([0206](0206-nocheh-prices-a-jobs-model-use-itself.md)).
 - A running job and its report carry across quiet epochs, and each report part is sent once ([0208](0208-running-jobs-carry-across-quiet-epochs.md), [0201](0201-job-reports-survive-reaction-epochs.md)).
 - Jobs the owner asks for in their private chat may use a sealed box: no network, no keys, a read-only chat copy and a read-only GitHub copy fetched through Nocheh's own GitHub App ([0205](0205-owner-approved-jobs-work-in-a-sealed-box.md), [0209](0209-owner-approved-jobs-read-a-github-copy-in-their-box.md), [0210](0210-github-access-goes-through-nochehs-own-github-app.md)).
-- Owner-approved private-chat jobs read Notion as the owner allows; changes always ask, and group or member jobs never reach Notion ([0203](0203-owner-approved-jobs-read-notion.md)).
+- Owner-approved private-chat jobs read Notion as the owner allows; changes always ask, and group or member jobs never reach Notion ([0203](0203-owner-approved-jobs-read-notion.md)); a job keeps the Notion access it was approved with ([0225](0225-member-safety-rules.md)).
 - A job's changes come on list cards after its report ([0204](0204-a-jobs-changes-come-on-list-cards.md)).
 
 ### Workflows and schedules
@@ -113,6 +113,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The owner's tasks live in the control store as personal or project lists, with links, tags and Notion-like fields ([0160](0160-owner-task-list.md), [0164](0164-task-lists-links-and-tags.md), [0167](0167-tasks-like-a-notion-table.md)).
 - The agent proposes knowledge changes; delegated project creation and chat assignment apply later, with receipts and inbox review ([0091](0091-bounded-agent-knowledge-organization.md)).
 - A project has its own role and skills; a chat's role wins, and skills stack ([0196](0196-projects-have-their-own-role-and-skills.md)).
+- A project's chats share what they know only when the owner ticks it on the project, through rules the project keeps; a chat can be left out, private chats never take part, and automatic organization never moves a chat into or out of such a project ([0226](0226-a-project-can-share-what-its-chats-know.md)).
 
 ### Imports
 

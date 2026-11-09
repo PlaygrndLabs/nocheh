@@ -20,7 +20,8 @@ class ResetConfigurationTests(unittest.TestCase):
         self.values.update(security_policy=[{'document': {'version': 1, 'rules': []}}],
                            installation_generation=[{'generation': '11111111-1111-4111-8111-111111111111'}],
                            guard_mode=[{'mode': 'on'}])
-        self.values['projects'] = [{'id': 'a' * 64, 'name': 'Saved project', 'description': 'Private configuration', 'state': 'active'}]
+        self.values['projects'] = [{'id': 'a' * 64, 'name': 'Saved project', 'description': 'Private configuration', 'state': 'active',
+                                    'sharing_enabled': False, 'sharing_mode': 'filtered'}]
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False, 'content_copied': False,
             'blockers': [], 'containers': [], 'volumes': [], 'installation': {'root': str(self.state.parent), 'state': str(self.state),
             'state_anchor': reset_inventory.entry(self.state, 'retain_root', 'fixture'), 'memory_state': str(self.state / 'honcho'),
@@ -71,6 +72,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertTrue(rules['-10']['enabled']); self.assertEqual(rules['-10']['mode'], 'filtered')
         self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
         self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')
+        self.assertTrue(all(row['project_id'] is None for row in rules.values()))
         self.assertEqual(configuration.original_only(source, values, preferences, reset_id), result)
         values['TELEGRAM_GROUP_ACCESS'] = '{"-10":{"granted":["77"],"denied":["88"]}}'
         preserved = configuration.original_only(source, values, preferences, reset_id)

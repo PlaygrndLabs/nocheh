@@ -122,12 +122,14 @@ export class ControlledActionRepository {
       // Notion is used only from the owner's private chat while it is on; the
       // owner's Notion setting can let reads, or every call, run without a card,
       // from a live turn there or a run of a job the owner approved there
-      // (ADR-0203). It replaces the owner freedom setting for Notion calls; that
+      // (ADR-0203). A job's reads skip the card only when the job was approved
+      // with Notion reads on its card and the setting still allows them
+      // (ADR-0225). It replaces the owner freedom setting for Notion calls; that
       // setting never applies to jobs. A relaunched run of a job (attempt > 1) gets
       // no autonomy: every change it asks for waits for a card (ADR-0207), and
       // neither does a follow-up turn, which no owner request started (ADR-0212).
       const connected='connection' in args,live=source.store==='archive'&&!followUp,fresh=!turn.job||!await relaunchedRun(db,source.id);
-      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,this.access.policy().owner_id,source,turn):live):null;
+      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,this.access.policy().owner_id,source,turn,true):live):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')

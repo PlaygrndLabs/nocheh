@@ -76,6 +76,45 @@ full tester scenario `tool_card_reads_in_words`). Pending: the owner's yes on th
 mock, and a real Notion card with a summary on the owner's live install after the
 machine pull.
 
+Member safety (owner, 2026-11-09: asked whether a coworker they let use Nocheh can use
+their Notion or reach other groups, then "yes" to five safety fixes): a Notion read whose
+input names an address outside the owner's Notion asks like a change, in the private chat
+and in jobs; a job keeps the Notion reads its card offered, narrowed at Approve; the
+executor checks a Notion call's origin again right before it runs; a card that offers a
+chat rule for a group or topic names the topic and says the rule covers everyone allowed
+there; Honcho peer cards are off and Nocheh reads none
+([ADR-0225](docs/adr/0225-member-safety-rules.md), [addresses](test/store-notion.test.ts),
+[jobs](test/store-background-job-notion.test.ts), [executor](test/store-controlled-execution.test.ts),
+[cards](test/store-action-rules.test.ts), [setup](services/honcho/test_setup.py),
+[context](test/store-native-memory.test.ts)). Pending: the owner's yes on the new SPECS
+lines; after the machine pull, a live Notion read of an outside page that asks and a group
+card with the note. Owner steps: pull main in the operating checkout, run
+`./bin/nocheh init`, `make dev-stop` and `make dev`, then check that `PEER_CARD_ENABLED` is
+`false` in the honcho-api container (`make dev-status` names it); if Settings ›
+Assistant › Built-in instructions › Approval buttons and results was ever saved, update its `allowed_here` and
+`allowed_always` lines or reset it to the built-in text, since saved lines keep the old
+wording.
+
+Project sharing (owner, 2026-11-09: "isnt better to have check box to share entities
+in create/edit project to do it?", then "yes" to the checkbox and five safety fixes):
+a project's checkbox "Chats in this project share what they know", off by default,
+filtered or approved, keeps one project rule into each of its groups and topics from
+the others; "Don't share into this chat" leaves one chat's group out; the Sharing page
+shows these rules as "Set by project"; automatic organization never moves a chat into
+or out of such a project ([ADR-0226](docs/adr/0226-a-project-can-share-what-its-chats-know.md),
+[rules](test/store-projects.test.ts), [sharing](test/store-sharing.test.ts),
+[organization](test/store-knowledge-management.test.ts), [reset](test/store-reset-setup.test.ts)).
+Pending: two related groups sharing on the owner's live install. Open points for the
+owner: with `TELEGRAM_TOPIC_MEMORY=topic` a topic that follows its group into the
+project, or is assigned to the same project as its group, gets no project sharing and
+is a source only for the project's other groups; "Don't share into this chat" covers
+the whole group in both topic modes; the chat stays a source, so it may need an "also
+keep this chat's knowledge in" option; an approved text reaches one chat, so each chat
+needs its own approval; a topic that stops following a source group invalidates every
+approved text of the rules reading that group; an owner rule given a project rule's ID
+by hand blocks that chat from joining while the project shares; project rules have no
+privacy notes of their own.
+
 Secret check connection failures (2026-11-08): the owner's installation counted
 secret-check calls that failed with no provider status, 12 on one model and, after a
 switch, 26 on the next, with no refusals and no hidden texts; in the same window a
@@ -129,7 +168,8 @@ Still open: a shell approval that waits past its profile's 15 idle minutes fails
 without running, and another pending publication between claim and start ends an
 action as ambiguous.
 A step of a job the owner asked for and approved in their private chat reads
-Notion as the owner's setting allows; its changes always ask, even under "Nothing
+Notion without asking only when its card offered reads at Approve and the setting
+still allows them ([ADR-0225](docs/adr/0225-member-safety-rules.md)); its changes always ask, even under "Nothing
 asks me"; group and member jobs never reach Notion; scheduled tasks ask for every
 call; the job's card says what it may read without asking; Stop stops a read that
 has not started ([ADR-0203](docs/adr/0203-owner-approved-jobs-read-notion.md),
@@ -152,7 +192,8 @@ its manifest says `full`. A failed box job says `job_box_unavailable`, and a box
 request in the legacy runtime is refused. Those runs lose the approved shell, the
 browser, Hermes memory and subagents, and the tools are blocked in every other
 turn. Notion reads are an exact list of read tools, and
-a job's fetch by an address outside notion.so asks. Link previews are off for
+a read by an address outside the owner's Notion counts as a change, in a live turn or a job
+([ADR-0225](docs/adr/0225-member-safety-rules.md)). Link previews are off for
 every message the bot sends or edits
 ([ADR-0205](docs/adr/0205-owner-approved-jobs-work-in-a-sealed-box.md),
 [stores](test/store-job-box.test.ts), [launcher](services/hermes/test_box_launcher.py),

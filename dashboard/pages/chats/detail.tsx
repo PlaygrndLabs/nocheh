@@ -20,7 +20,15 @@ export type Permission = {
   expires_at: string;
   revoked_at?: string | null;
 };
-export type SharingRuleSummary = {id: string; name: string; enabled: boolean; sources: string[]; mode: string};
+export type SharingRuleSummary = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  sources: string[];
+  mode: string;
+  project_id?: string | null;
+  through_group?: boolean;
+};
 export type ChatContext = {
   knowledge_access?: {owner_access?: boolean; sharing_rules?: SharingRuleSummary[]};
   external_actions?: {permissions?: Permission[]};

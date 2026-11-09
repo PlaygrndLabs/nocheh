@@ -33,6 +33,23 @@ class HonchoSetupTests(unittest.TestCase):
             self.assertEqual(values['DERIVER_FLUSH_ENABLED'], 'true')
             self.assertEqual(values['DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS'], '0')
 
+    def test_setup_keeps_peer_cards_and_dreams_off(self):
+        from tools.operations.installation.configuration import initialize, read_env, write_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                honcho_setup.initialize(state)
+                path = state / 'honcho/honcho.env'
+                values = read_env(path)
+                self.assertEqual(values['PEER_CARD_ENABLED'], 'false')
+                self.assertEqual(values['DREAM_ENABLED'], 'false')
+                # A hand edit does not keep peer cards on: the next setup writes the file again.
+                write_env(path, {**values, 'PEER_CARD_ENABLED': 'true'})
+                self.assertEqual(read_env(path)['PEER_CARD_ENABLED'], 'true')
+                honcho_setup.initialize(state)
+                self.assertEqual(read_env(path)['PEER_CARD_ENABLED'], 'false')
+
     def test_monthly_cutover_requires_live_acceptance_and_attachment(self):
         with tempfile.TemporaryDirectory() as folder:
             ledger = Path(folder) / 'ledger/budget.sqlite'
