@@ -10,7 +10,7 @@
   },
   "note": "Pins identify candidates under test. See the evidence report for actual compatibility results.",
   "inngest": {
-    "sdk": "4.26.0",
+    "sdk": "4.26.2",
     "version": "1.51.0",
     "image": "inngest/inngest:v1.51.0@sha256:fcf9305f2e7ffbcfaba54e6a25104ca4860b91d24d3713563350769a2d4c625a"
   },
