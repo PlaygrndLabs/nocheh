@@ -65,7 +65,8 @@ def transcribe(body):
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (MEMORY, MEMORY))
     with tempfile.TemporaryDirectory(prefix='nocheh-voice-') as home:
-        Path(home, 'config.yaml').write_text(json.dumps({'stt': {'enabled': True, 'provider': 'openai', 'openai': {
+        # An empty language lets the model detect it; Hermes' default 'en' hint garbles other languages' voices.
+        Path(home, 'config.yaml').write_text(json.dumps({'stt': {'enabled': True, 'provider': 'openai', 'language': '', 'openai': {
             'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}'}}}))
         environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
                        'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'],
