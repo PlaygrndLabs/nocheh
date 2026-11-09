@@ -377,12 +377,14 @@ def main():
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names
     record('total',started);result['timings']=safe(VALUES)
-    from .usage import combine,failure
+    from .usage import combine,failure,nocheh_failure
+    from .request_boundary import model_refusals
     measured=combine(RUNS)
     if measured:result['usage']=measured
-    # Why it failed, as codes for the usage tracker: a run's own reason and the provider's exact error, else Nocheh's error.
+    # Why it failed, as codes for the usage tracker: a run's own reason and the provider's exact error, or the code of
+    # Nocheh's own refusal, such as its secret check's; else Nocheh's error.
     if result.get('state')!='done':
-        result['failure_reason'],cause=failure(RUNS) if RUNS else ('nocheh_error',None)
+        result['failure_reason'],cause=failure(RUNS,model_refusals()) if RUNS else nocheh_failure(result.get('error_code'))
         if cause:result['failure_cause']=cause
     output.write(json.dumps(result,ensure_ascii=False)+'\n');output.flush()
 

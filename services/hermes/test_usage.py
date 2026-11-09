@@ -120,9 +120,14 @@ class UsageTests(unittest.TestCase):
             ([{'failed': True, 'failure_reason': 'rate_limit', 'error': 'HTTP 429: {"error":"provider_request_failed","provider_status":429}'}],
              ('rate_limited', 'rate_limit:429')),
             ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"provider_request_failed"}'}], ('provider_error', None)),
-            # The broker's own refusals, such as an unavailable secret check or a changed policy, are Nocheh's errors.
-            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"required_guard_unavailable"}'}], ('nocheh_error', None)),
-            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"security_policy_changed"}'}], ('nocheh_error', None)),
+            # The broker's own refusals, such as an unavailable secret check or a changed policy, are Nocheh's errors, named by their code.
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 503: {"error":"required_guard_unavailable"}'}],
+             ('nocheh_error', 'required_guard_unavailable')),
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"security_policy_changed"}'}],
+             ('nocheh_error', 'security_policy_changed')),
+            # The safety epoch moved on during the run: Nocheh's own stop, which it runs again, not a failure.
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"runtime_turn_changed"}'}], ('context_changed', None)),
+            ([{'failed': True, 'failure_reason': 'format_error', 'error': 'HTTP 409: {"error":"guard_context_changed"}'}], ('context_changed', None)),
             ([{'completed': True, 'turn_exit_reason': 'text_response(finish_reason=refusal)', 'final_response': ''}], ('refused', None)),
             # Hermes stopped the loop itself: not a provider error, unless the error that stopped it says so. Only codes are kept.
             *[([{'failed': True, 'failure_reason': 'loop_error', 'turn_exit_reason': exit_reason, 'error': 'Private words'}], expected)
@@ -135,6 +140,9 @@ class UsageTests(unittest.TestCase):
                   (outer(2, 503, "{'error': 'required_guard_unavailable'}"), ('nocheh_error', 'repeated_outer_errors')),
                   (outer(2, 503, "{'error': 'security_service_unavailable'}"), ('nocheh_error', 'repeated_outer_errors')),
                   (outer(2, 403, "{'error': 'model_configuration_mismatch'}"), ('nocheh_error', 'repeated_outer_errors')),
+                  # A short code fits whole.
+                  (outer(2, 403, "{'error': 'turn_source_denied'}"), ('nocheh_error', 'turn_source_denied')),
+                  (outer(2, 409, "{'error': 'runtime_turn_changed'}"), ('context_changed', None)),
                   # A provider's refusal: the broker's status is the provider's own only for 401, 403 and 429.
                   (outer(3, 429, "{'error': 'provider_request_failed', 'provider_status': 429}"), ('rate_limited', 'rate_limit:429')),
                   (outer(3, 401, "{'error': 'provider_request_failed', 'provider_status': 401}"), ('key_rejected', 'auth:401')),
@@ -158,6 +166,41 @@ class UsageTests(unittest.TestCase):
         self.assertEqual([usage.error_cause(error) for error in (Status(529), Status(401), Status(418), Status('529'), APITimeoutError(),
                                                                  APIConnectionError(), ConnectionResetError(), ValueError('private words'))],
                          ['overloaded:529', 'auth:401', 'http_error:418', None, 'timeout', 'connection', 'connection', None])
+
+    def test_a_call_nochehs_secret_check_refused_is_named_by_its_code_not_as_a_provider_error(self):
+        # The provider client reports a call the secret check refused as a lost connection, and Hermes names it by the
+        # status of the secret check's answer, here 409 as a malformed request.
+        refused = {'failed': True, 'failure_reason': 'format_error', 'error': 'Connection error.'}
+        loop = {'failed': True, 'failure_reason': 'loop_error', 'error': 'private words',
+                'turn_exit_reason': 'repeated_outer_errors(Error during API call #3: Connection error.)'}
+        cases = [
+            ([refused], [], ('provider_error', 'format_error')),
+            ([refused], ['guard_context_changed'], ('context_changed', None)),
+            ([refused], ['guard_transition_pending'], ('context_changed', None)),
+            ([refused], ['required_guard_unavailable', 'detector_contract_rejected'], ('nocheh_error', 'detector_contract_rejected')),
+            ([loop], ['service_unavailable'], ('nocheh_error', 'service_unavailable')),
+            # Once the epoch moved on, every later call of the run is refused, whatever the run's own error says.
+            ([{'failed': True, 'failure_reason': 'timeout', 'error': 'Request timed out.'}], ['guard_context_changed'], ('context_changed', None)),
+            # Any other refusal says nothing of a provider's own error.
+            ([{'failed': True, 'failure_reason': 'overloaded', 'error': 'HTTP 529: Overloaded'}], ['required_guard_unavailable'],
+             ('provider_error', 'overloaded:529')),
+            ([refused], ['Private Words!'], ('provider_error', 'format_error')),
+            ([{'completed': True, 'final_response': 'fine'}, refused], ['detector_contract_rejected'], ('nocheh_error', 'detector_contract_rejected')),
+        ]
+        for results, refusals, expected in cases:
+            self.assertEqual(usage.failure(results, refusals), expected, (results, refusals))
+        # A turn that ended on Nocheh's own error before any model run keeps that error's code.
+        self.assertEqual([usage.nocheh_failure(code) for code in ('guard_context_changed', 'assistant_runtime_unavailable', 'Private Words!', None)],
+                         [('context_changed', None), ('nocheh_error', 'assistant_runtime_unavailable'), ('nocheh_error', None), ('nocheh_error', None)])
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'usage/usage.sqlite'
+            usage.record('reply', {'calls': 1}, 'm', failed=True, reason='context_changed', provider='anthropic', path=path, now=DAY)
+            usage.record('reply', {'calls': 1}, 'm', failed=True, reason='nocheh_error', cause='detector_contract_rejected',
+                         provider='anthropic', path=path, now=DAY)
+            row = usage.rows('2026-10-13', path)[0]
+            self.assertEqual((row['runs'], row['failed'], row['reasons'], row['causes']),
+                             (2, 1, {'nocheh_error': 1}, {'nocheh_error:detector_contract_rejected': 1}),
+                             'a run the new epoch stopped counts as a run, not as a failure the owner is told of')
 
     def test_failed_runs_keep_the_providers_exact_error_and_an_older_table_gains_it(self):
         with tempfile.TemporaryDirectory() as root:

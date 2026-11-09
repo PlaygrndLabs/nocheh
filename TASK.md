@@ -23,6 +23,14 @@ exact error as codes, such as overloaded with HTTP 529, and say it (owner,
 A run Hermes stopped itself (`loop_error`) is named by its stop and not called a
 provider error; the first live ones, three memory-notes runs on 2026-11-08, kept no more
 detail than `loop_error`.
+On 2026-11-09 the owner saved a memory while a reply and a notes review were running: the
+secret check refused their next model calls, and the notice called both a provider
+rejection (`provider_error:format_error`), while learning lost a batch to the same epoch
+change. A model call refused because the safety epoch moved on is now a stop that runs
+again, not a failure; Nocheh's other refusals keep their code; memory preparation retries
+an epoch change ([ADR-0220](docs/adr/0220-a-new-safety-epoch-mid-call-is-retried-not-a-failure.md);
+[turn](services/hermes/test_turn_failure_codes.py), [codes](services/hermes/test_usage.py),
+[learning](services/honcho/test_meter.py)). Pending: a check on a running install after merge.
 When a problem clears, its notice is edited in place: the line stays as sent and a short
 ✅ line under it says when it cleared, such as "Fixed at 12:06 UTC". The notice loses
 its buttons once all its problems cleared, and takes the ✅ line back if the problem returns

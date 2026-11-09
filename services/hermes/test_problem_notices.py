@@ -139,6 +139,9 @@ class ProblemNoticeTests(unittest.TestCase):
         dropped = {**refusals(12, 0)[0], 'reasons': {'unknown': 12}, 'causes': {'unknown:connection': 12}}
         self.assertEqual(problems.why(dropped), '12 couldn’t reach the provider or lost the connection',
                          'a cause says why even when the reason alone is not known')
+        own = {**refusals(2, 0)[0], 'reasons': {'nocheh_error': 2}, 'causes': {'nocheh_error:detector_contract_rejected': 2}}
+        self.assertEqual(problems.why(own), '2 Nocheh’s own error (detector contract rejected)',
+                         'a refusal of Nocheh’s own says which, never that the provider rejected the call')
 
     def test_only_todays_model_failures_count(self):
         found = problems.problems(monitoring(), refusals(1, 1), TODAY)

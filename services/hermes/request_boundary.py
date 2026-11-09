@@ -37,6 +37,16 @@ def refused(request, error):
         FAILURE_DETAILS.append({'code':str(error)})
 
 
+MODEL_ROUTES = ('/messages', '/chat/completions', '/responses')
+
+
+def model_refusals():
+    """Codes of the model calls refused in this process, oldest first. A refused lookup that is not a model
+    call, such as a DNS-over-HTTPS query, is left out."""
+    return [item['code'] for item in FAILURE_DETAILS
+            if str(item.get('path') or '').rstrip('/').endswith(MODEL_ROUTES) and isinstance(item.get('code'), str)]
+
+
 class GuardUnavailable(RuntimeError):
     pass
 

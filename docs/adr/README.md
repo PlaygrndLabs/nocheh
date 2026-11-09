@@ -135,6 +135,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The owner sets the monthly embedding cap ($0 to $15); spending settles from reported usage, definite HTTP errors release their holds, and old months fold into totals ([0078](0078-owner-honcho-budget-control.md), [0079](0079-separated-honcho-budgets-and-settlement.md), [0102](0102-separate-embedding-error-holds-from-spending.md), [0131](0131-honcho-meter-monthly-rollup.md)).
 - An exhausted pilot can move to the monthly cap for acceptance ([0077](0077-exhausted-pilot-honcho-acceptance-budget.md)).
 - Telegram polling is watched, and fatal errors restart it ([0038](0038-observed-telegram-health-and-local-oauth-callback.md)).
+- A model call Nocheh refused because the safety epoch moved on, as when the owner saves a memory, is run again and is no failure; Nocheh's other refusals keep their code and are never called the provider's rejection; memory preparation retries an epoch change ([0220](0220-a-new-safety-epoch-mid-call-is-retried-not-a-failure.md)).
 
 ### Installation and recovery
 

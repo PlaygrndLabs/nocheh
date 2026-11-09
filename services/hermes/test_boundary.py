@@ -133,6 +133,17 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                           ('uninspectable_model_request','GET','provider.example','/v1/files',[])])
         self.assertNotIn('planted-SECRET',json.dumps(details))
 
+    def test_model_refusals_name_only_refused_model_calls(self):
+        from .request_boundary import FAILURE_DETAILS, model_refusals
+        def changed(url,payload):raise GuardUnavailable('guard_context_changed')
+        self.setup_boundary(changed)
+        FAILURE_DETAILS.clear()
+        with httpx.Client(transport=httpx.MockTransport(lambda request:httpx.Response(200,json={}))) as client:
+            with self.assertRaises(GuardUnavailable):client.get('https://resolver.example/resolve?name=provider.example')
+            with self.assertRaises(GuardUnavailable):client.post('https://provider.example/v1/messages',json={'messages':[]})
+            with self.assertRaises(GuardUnavailable):client.post('https://provider.example/v1/chat/completions/',json={'messages':[]})
+        self.assertEqual(model_refusals(),['guard_context_changed','guard_context_changed'],'a refused lookup is no model call')
+
     def test_a_bare_model_list_passes_without_content(self):
         sent=[]
         self.setup_boundary(lambda url,payload:(_ for _ in ()).throw(AssertionError('a model list has nothing to guard')))
