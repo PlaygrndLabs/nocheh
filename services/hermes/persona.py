@@ -17,6 +17,7 @@ from pathlib import Path
 
 import yaml
 
+from .isolated_profile import database_path
 from .scopes import Scopes
 
 DEFAULT = 'nocheh-default'
@@ -117,7 +118,8 @@ def _skill_text(skill):
 
 
 def _install(path, role, skills):
-    """Replace SOUL.md and skills/ in `path` with exactly the given role and skills."""
+    """Replace SOUL.md and skills/ in `path` with exactly the given role and skills, then have Hermes
+    rebuild the stored prompt of each of the profile's sessions once, on its next turn."""
     path.mkdir(parents=True, exist_ok=True, mode=0o700); _safe(path)
     soul = _safe(path / 'SOUL.md')
     _write(soul, role + '\n' if role else '')
@@ -135,6 +137,20 @@ def _install(path, role, skills):
         if retired is not None: shutil.rmtree(retired)
     finally:
         if staged.exists(): shutil.rmtree(staged)
+    _refresh_prompts(path)
+
+
+def _refresh_prompts(path):
+    """Hermes reuses a continuing session's stored system prompt, so a new role or skills would never reach it.
+    Its own refresh request, made after the files are in place and under the caller's lock, rebuilds each of the
+    profile's sessions once and keeps their history and tools. A folder with no sessions, such as the default's
+    or a project's, is left as it is."""
+    database = database_path(path)
+    if not database.exists(): return
+    from hermes_state import SessionDB
+    sessions = SessionDB(database)
+    try: sessions.request_prompt_refresh()
+    finally: sessions.close()
 
 
 def save(path, role, skills, expected):
@@ -173,37 +189,3 @@ def materialize(root, profile, chat, project=''):
         if (profile / 'SOUL.md').is_file() and (profile / 'skills').is_dir() and read(profile) == value: return
         _install(profile, value['role'], value['skills'])
 
-
-# Sessions per profile whose prompt revision is remembered.
-PROMPT_SESSIONS = 500
-
-
-def refresh_prompt(profile, database, session_id):
-    """Rebuild a continuing session's system prompt after its role or skills changed.
-
-    Hermes reuses a session's stored system prompt (and tool order) on later
-    turns, so a role or skill saved after the session began would otherwise
-    never reach it. The revision that last built the prompt is kept beside the
-    session database, which stays writable in isolated turns.
-    """
-    current = revision(read(profile))
-    marker = Path(database.db_path).parent / 'persona-prompt.json'
-    try:
-        built = json.loads(marker.read_text()).get('sessions')
-    except (OSError, ValueError, AttributeError):
-        built = None
-    # The revision that built each session's prompt. Sessions of one profile, such as a
-    # group's topics, take turns; each keeps its stored prompt, so the provider's prompt
-    # cache still matches it.
-    built = built if isinstance(built, dict) else {}
-    if built.get(session_id) == current:
-        return False
-    changed = database.get_session(session_id) is not None
-    if changed:
-        database.update_system_prompt(session_id, None)
-        database.update_session_tool_names(session_id, None)
-    built.pop(session_id, None)
-    built[session_id] = current
-    # Bounded: a session dropped from the list only rebuilds its prompt once more.
-    _write(marker, json.dumps({'sessions': dict(list(built.items())[-PROMPT_SESSIONS:])}))
-    return changed

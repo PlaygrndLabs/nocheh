@@ -245,9 +245,6 @@ def run(body, emit=None, relay=None):
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
-    if not review:
-        from .persona import refresh_prompt
-        refresh_prompt(profile,database,session_id)
     history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
     record('history_prepare',phase);phase=perf_counter()
     from . import memory_evidence
