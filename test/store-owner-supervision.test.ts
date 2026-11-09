@@ -66,6 +66,17 @@ test('stored owner directory and decisions span every page without turning reads
       assert.deepEqual((await view.context(owner,group+'/topic/19')).knowledge_access.sharing_rules,[],'inherited project context never becomes sharing authority');
       assert.equal(detectorCalls,0,'directory, decisions and context do not call the runtime');
 
+      // A project whose chats share what they know shows its rule in the chat's context, and hides it once the chat leaves (ADR-0226).
+      const projectRule=digest('project-sharing:'+project.id+':'+second),fields={id:project.id,name:key+':project',description:'Synthetic project',state:'active'};
+      const sharing=await services.projects.save(owner,{...fields,sharing_enabled:true,expected_revision:project.revision,operation_id:key+':project-shares'});
+      await services.projects.assign(owner,{space_id:second,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign-second'});
+      assert.deepEqual((await view.context(owner,second)).knowledge_access.sharing_rules.map(row=>[row.id,row.project_id,row.enabled]),[[projectRule,project.id,true]]);
+      // A topic that follows its group reads the group's rule while the group's topics share memory, and its context says so.
+      assert.deepEqual((await view.context(owner,group+'/topic/19')).knowledge_access.sharing_rules.map(row=>[row.id,row.through_group]),[[digest('project-sharing:'+project.id+':'+group),true]]);
+      await services.projects.assign(owner,{space_id:second,project_id:null,mode:'inherit',expected_revision:1,operation_id:key+':second-leaves'});
+      assert.deepEqual((await view.context(owner,second)).knowledge_access.sharing_rules,[],'the turned-off rule of a chat that left is not listed');
+      await services.projects.save(owner,{...fields,sharing_enabled:false,expected_revision:sharing.revision,operation_id:key+':project-stops'});
+
       await services.guards.reconcile();await services.guards.setMode('on');await services.guards.prepare(source,'fixture',services.detect);
       const rule=await services.sharing.save(owner,{name:key+':share',sources:[group],destination:second,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':share-rule'});
       const release=async(label:string)=>{

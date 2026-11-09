@@ -9,7 +9,7 @@ import type {TelegramTopicRepository} from './telegram-topics.js';
 import type {StorePools} from './connections.js';
 import {carriesForward} from './guards.js';
 import {foldedNames} from './entities.js';
-import type {ProjectRepository} from './projects.js';
+import {listedRule,type ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {NativeMemoryRepository} from './native-memory.js';
@@ -241,7 +241,7 @@ export class OwnerSupervisionRepository {
     admin(principal);const space=validateSpace(spaceValue),parent=parentSpace(space)??space;
     const [directory,configuration,effective,rules,grants,releases,permissions,security,delegations,memory]=await Promise.all([
       this.directory(),this.assistantConfiguration(),this.services.projects.effective(space),
-      this.stores.control.query('SELECT * FROM sharing_rules WHERE destination=$1 ORDER BY id',[space]),
+      this.stores.control.query(`SELECT * FROM sharing_rules s WHERE (s.destination=$1 OR s.destination=$2 OR starts_with(s.destination,$2||'/topic/')) AND ${listedRule('s')} ORDER BY s.id`,[space,parent]),
       this.stores.control.query('SELECT id,fact_id,fact_revision,mode,state,revision,binding,expires_at,suspended_reason FROM memory_fact_grants WHERE destination=$1 ORDER BY id',[space]),
       this.stores.control.query(`SELECT r.id,r.preview_id,r.rule_id,r.rule_revision,r.state,r.revision,r.generation,r.guard_mode,r.guard_revision,r.text_hash,r.expires_at,p.revision AS current_rule_revision,p.enabled AS rule_enabled
         FROM sharing_releases r JOIN sharing_rules p ON p.id=r.rule_id WHERE p.destination=$1 ORDER BY r.id`,[space]),
@@ -252,6 +252,9 @@ export class OwnerSupervisionRepository {
       this.services.memory.status(),
     ]);
     const guard=memory.guard,policy=configuration?.policy,access=policy?.group_access?.[parent],owner=space===policy?.owner_id;
+    // While a group's topics share memory, a turn there reads the rules into the group and every one of its topics too.
+    const groupWide=(policy?.topic_memory??'group')==='group'&&/^-\d+$/.test(parent);
+    const sharingRules=rules.rows.filter(row=>row.destination===space||groupWide).map(row=>row.destination===space?row:{...row,through_group:true});
     const conversation=directory.find(item=>item.space_id===space)??{space_id:space,name:null,kind:parentSpace(space)?'topic':space.startsWith('-')?'group':'private',parent_space:parentSpace(space),parent_name:directory.find(item=>item.space_id===parent)?.name??null,observed_at:null,configured:false};
     const currentBinding=(binding:any)=>binding?.generation===guard.generation&&Number(binding?.epoch)===Number(guard.epoch);
     const factIds=grants.rows.map(row=>row.fact_id),facts=factIds.length?(await this.stores.derived.query('SELECT id,active_revision FROM entity_claims WHERE id=ANY($1::text[])',[factIds])).rows:[];
@@ -273,15 +276,15 @@ export class OwnerSupervisionRepository {
     return {conversation,observed_at:new Date().toISOString(),state:configuration&&security.rows[0]?'current':'partial',
       addressing:{state:configuration?'current':'unavailable',enabled:policy?.enabled??false,owner_id:policy?.owner_id??null,
         group_enabled:!!policy?.enabled&&!!policy.group_ids.includes(parent),granted:access?.granted??[],denied:access?.denied??[],revision:configuration?.revision??null},
-      knowledge_access:{source_scope:space,owner_access:owner,sharing_rules:rules.rows,
+      knowledge_access:{source_scope:space,owner_access:owner,sharing_rules:sharingRules,
         fact_grants:grants.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&factRevisions.get(row.fact_id)===row.fact_revision&&row.state==='active'&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
         sharing_releases:sharingReleases,
-        note:'Only exact conversation sources and valid published sharing or fact grants can be used. Project membership is not access; stored grants are rechecked on use.'},
+        note:'Only the sources of a sharing rule and valid published sharing or fact grants can be used. A project grants access only through its own rules, set while its chats share what they know, which also read the topics that follow its groups; stored grants are rechecked on use.'},
       // A permission is used with its action's own binding, which carries across quiet epochs (ADR-0200).
       external_actions:{policy:security.rows[0]??null,permissions:await Promise.all(permissions.rows.map(async({binding,...row})=>({...row,
         current:await carriesForward(this.stores.control,binding,guard)&&!row.revoked_at&&row.remaining>0&&new Date(row.expires_at).getTime()>Date.now()}))),
         note:'External actions require exact approval or a matching unexpired permission, and remain subject to the security policy. Authorization is not evidence of execution.'},
-      organization:{effective,delegations:delegations.rows,note:'Organization affects project context only. It grants no knowledge access, participant permission, or external-action authority.'},
+      organization:{effective,delegations:delegations.rows,note:'Organization affects project context, and knowledge access only in a project whose chats share what they know. It grants no participant permission or external-action authority.'},
       memory:{connection:{attached:connection?.attached??false,verified:connection?.verified??false,revision:connection?.revision??null},
         availability:ready?'available':attached?'limited':'unavailable',syncing,workspace,sessions,note:'Stored readiness is not a live retrieval test. Current context and permitted archive search remain separate.'}};
   }

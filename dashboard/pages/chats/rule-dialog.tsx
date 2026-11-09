@@ -14,7 +14,12 @@ export type Rule = {
   mode: 'approved' | 'filtered';
   instructions: string;
   revision: number;
+  /** Set when a project that shares owns this rule; it changes only from the project. */
+  project_id?: string | null;
 };
+
+/** Shown wherever the owner turns on, or sees, a project whose chats share what they know. */
+export const projectSharingWarning = 'Everyone allowed in any of these chats will see what the others know.';
 
 export const modeText: Record<Rule['mode'], {label: string; hint: string}> = {
   approved: {label: 'I approve each text', hint: 'You write or check the exact text before the chat can use it.'},
@@ -75,7 +80,7 @@ export function RuleDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={rule ? 'Edit sharing rule' : 'New sharing rule'}
-      description="Projects never share memory on their own. Only rules like this one do."
+      description="A project shares memory only when you turn that on in the project."
       className="max-w-xl"
       footer={
         <>

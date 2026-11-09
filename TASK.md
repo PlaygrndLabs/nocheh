@@ -95,6 +95,26 @@ Assistant › Built-in instructions › Approval buttons and results was ever sa
 `allowed_always` lines or reset it to the built-in text, since saved lines keep the old
 wording.
 
+Project sharing (owner, 2026-11-09: "isnt better to have check box to share entities
+in create/edit project to do it?", then "yes" to the checkbox and five safety fixes):
+a project's checkbox "Chats in this project share what they know", off by default,
+filtered or approved, keeps one project rule into each of its groups and topics from
+the others; "Don't share into this chat" leaves one chat's group out; the Sharing page
+shows these rules as "Set by project"; automatic organization never moves a chat into
+or out of such a project ([ADR-0226](docs/adr/0226-a-project-can-share-what-its-chats-know.md),
+[rules](test/store-projects.test.ts), [sharing](test/store-sharing.test.ts),
+[organization](test/store-knowledge-management.test.ts), [reset](test/store-reset-setup.test.ts)).
+Pending: two related groups sharing on the owner's live install. Open points for the
+owner: with `TELEGRAM_TOPIC_MEMORY=topic` a topic that follows its group into the
+project, or is assigned to the same project as its group, gets no project sharing and
+is a source only for the project's other groups; "Don't share into this chat" covers
+the whole group in both topic modes; the chat stays a source, so it may need an "also
+keep this chat's knowledge in" option; an approved text reaches one chat, so each chat
+needs its own approval; a topic that stops following a source group invalidates every
+approved text of the rules reading that group; an owner rule given a project rule's ID
+by hand blocks that chat from joining while the project shares; project rules have no
+privacy notes of their own.
+
 Secret check connection failures (2026-11-08): the owner's installation counted
 secret-check calls that failed with no provider status, 12 on one model and, after a
 switch, 26 on the next, with no refusals and no hidden texts; in the same window a

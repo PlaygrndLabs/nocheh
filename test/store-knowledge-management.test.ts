@@ -132,6 +132,26 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    const resumedTopicSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});inheritedAssignment.assignments[0]!.evidence_ids=[resumedTopicSource.id];
    assert.equal((await match(inheritedAssignment,resumedTopicSource,inheritedTopic)).id,delegation.id);
 
+   // A project whose chats share what they know is joined or left only with the owner's review.
+   const plain=await s.projects.save(owner,{name:key+':plain',description:'',state:'active',expected_revision:0,operation_id:key+':plain-project'});
+   const sharing=await s.projects.save(owner,{name:key+':sharing',description:'',state:'active',sharing_enabled:true,expected_revision:0,operation_id:key+':sharing-project'});
+   await save({scopes:[inheritedTopic],project_ids:[created.id,plain.id,sharing.id]},'sharing-projects');
+   const sharingSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});
+   const moveTo=(project:string):OrganizationProposal=>({...inheritedAssignment,assignments:[{...inheritedAssignment.assignments[0]!,project_id:project,evidence_ids:[sharingSource.id]}]});
+   assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
+   assert.equal(await match(moveTo(sharing.id),sharingSource,inheritedTopic),null,'automatic organization never moves a chat into a project that shares');
+   const current=(await stores.control.query('SELECT * FROM projects WHERE id=$1',[created.id])).rows[0],projectFields={id:created.id,name:current.name,description:current.description,state:'active'};
+   const shared=await s.projects.save(owner,{...projectFields,sharing_enabled:true,expected_revision:current.revision,operation_id:key+':created-shares'});
+   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'nor out of one, a topic that follows its group included');
+   // The owner's review and undo say so, also for a topic set to follow its group into a project that shares.
+   const follow=await persist('follow',{kind:'project_assignment',reason:'Synthetic: the topic belongs with its group',payload:{space_id:topic,mode:'inherit',expected_revision:1}} as any,sharingSource);
+   assert.equal(follow.state,'review');
+   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).sharing_projects,[{id:created.id,name:current.name}]);
+   assert.deepEqual((await s.knowledge.proposal(owner,pending.id)).undo_sharing_projects.map((p:any)=>p.id),[created.id],'undoing takes the group out of it');
+   await s.projects.save(owner,{...projectFields,sharing_enabled:false,expected_revision:shared.revision,operation_id:key+':created-stops'});
+   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).sharing_projects,[]);
+   assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
+
    // Clean undo restores the prior assignment and archives, rather than erases, the created project.
    delegation=null;await save({scopes:[other]},'other');const otherSource=await capture(other),otherDraft=await persist('other',proposal(otherSource,'other',other),otherSource,other);
    assert.equal((await s.knowledge.process('proposal:'+otherDraft.id)).state,'applied');

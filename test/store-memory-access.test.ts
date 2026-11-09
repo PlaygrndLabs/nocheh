@@ -69,6 +69,17 @@ test('fact grants authorize exact destinations while relationships only create r
       if(map.next)assert.notEqual(map.next,after,'memory map pagination must advance');after=map.next??'';
     }while(after&&(!relationship||!accessEdge));assert.ok(relationship);assert.ok(accessEdge);
     await assert.rejects(services.memoryMap.read(actor,{after:'',limit:10,focus:'',query:'',kind:'',state:''}),{code:'owner_required'});
+    // A project assignment grants access only while one of its project's rules reads from or into that chat (ADR-0226).
+    const contains=async()=>{const edge=(await services.memoryMap.read(owner,{after:'',limit:250,focus:'',query:group,kind:'conversation',state:''})).edges
+      .find(row=>row.id==='project_assignment:'+group)!;return {label:edge.label,authoritative:edge.authoritative};};
+    const fields={id:project.id,name:'Apollo',description:'Fixture',state:'active'},other=String(Number(group)-1);
+    assert.deepEqual(await contains(),{label:'contains',authoritative:false});
+    const sharing=await services.projects.save(owner,{...fields,sharing_enabled:true,expected_revision:project.revision,operation_id:key+':project-shares'});
+    assert.deepEqual(await contains(),{label:'contains',authoritative:false},'alone in its project, a chat shares with nobody');
+    await services.projects.assign(owner,{space_id:other,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign-other'});
+    assert.deepEqual(await contains(),{label:'contains · shares',authoritative:true});
+    await services.projects.save(owner,{...fields,sharing_enabled:false,expected_revision:sharing.revision,operation_id:key+':project-stops'});
+    assert.deepEqual(await contains(),{label:'contains',authoritative:false});
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.default_grant_mode,'one_time');
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.request_ttl_seconds,86400);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}

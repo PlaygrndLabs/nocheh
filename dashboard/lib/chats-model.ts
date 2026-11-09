@@ -201,6 +201,9 @@ export function chatError(error: unknown): string {
   if (/conflict|changed/.test(code)) return 'This changed somewhere else. Reload to see the latest, your text is kept.';
   if (code === 'sharing_source_not_selected')
     return 'One of the chosen messages isn’t from a chat this rule shares from.';
+  if (code === 'sharing_rule_limit')
+    return 'That goes past a sharing limit: at most ten automatic rules and projects can share into one group, and at most 100 chats into one chat. Turn one off first.';
+  if (code === 'sharing_rule_project_managed') return 'This rule is set by its project. Change it on the project.';
   if (code === 'telegram_refresh_unavailable') return 'Telegram couldn’t be reached. Try again shortly.';
   if (code === 'topic_name_required') return 'Give the topic a name.';
   if (/topic/.test(code) && /invalid/.test(code))

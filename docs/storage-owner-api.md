@@ -37,7 +37,7 @@ source identifiers and links do not change when a derivative is activated.
 | GET `/v1/learned/:id` | Active pointer and bounded version history |
 | GET `/v1/learned/:id/history` | Prior text, evidence, uncertainty, conflicts and provenance |
 | POST `/v1/learned/:id/correct` | Owner correction or retirement with an expected revision |
-| GET/POST `/v1/projects` | List or create/edit/archive a project |
+| GET/POST `/v1/projects` | List or create/edit/archive a project, and whether its chats share what they know |
 | GET/POST `/v1/projects/assignments` | Explicit chat/topic assignment, exclusion or inheritance |
 | GET `/v1/projects/effective?space=…` | Effective membership, with inheritance shown |
 | GET/POST `/v1/sharing/rules` | Selected source spaces, exact destination, mode and enabled state |
@@ -86,11 +86,23 @@ local API configuration without running setup or activating services.
   Archiving sets a project's state to `archived`; revocation disables the sharing rule.
 
 Project save fields: optional existing `id`, `name`, `description`, `state`,
-`expected_revision` (zero for create), `operation_id`. Assignment fields:
+optional `sharing_enabled` (false for a new project) and `sharing_mode`
+(`filtered`, the default, or `approved`), `expected_revision` (zero for create),
+`operation_id`; a sharing field left out keeps its saved value. Assignment fields:
 `space_id`, `mode` (`assigned`, `none`, or `inherit`), optional `project_id`,
-`expected_revision`, `operation_id`. Sharing fields: optional existing `id`,
-`name`, `sources`, `destination`, `enabled`, `mode` (`approved` or `filtered`),
-`instructions`, `expected_revision`, `operation_id`.
+optional `share_into` (only with `assigned`; false is "Don't share into this
+chat", kept when left out), `expected_revision`, `operation_id`. Sharing fields:
+optional existing `id`, `name`, `sources`, `destination`, `enabled`, `mode`
+(`approved` or `filtered`), `instructions`, `expected_revision`, `operation_id`.
+
+While a project shares what its chats know, Nocheh keeps its own sharing rules,
+listed with `project_id` set ([ADR-0226](adr/0226-a-project-can-share-what-its-chats-know.md)).
+They change only through the project and its assignments: saving one is refused
+with 409 `sharing_rule_project_managed`. A change that would give a rule more
+than 100 sources, or a group more than ten enabled filtered rules, is refused
+with 409 `sharing_rule_limit`. A knowledge proposal read by the owner lists in
+`sharing_projects` the projects that share which its change touches, and an
+applied organization lists in `undo_sharing_projects` those its undo touches.
 </cli>
 
 </owner_operations>
