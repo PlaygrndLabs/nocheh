@@ -23,7 +23,7 @@ services:
       timeout: 3s
       retries: 30
   inngest-server:
-    image: inngest/inngest:v1.49.0@sha256:ad551e89e493e34db74d155be37dc5549930fcb6eb8382e502c17da9762821c7
+    image: inngest/inngest:v1.51.0@sha256:fcf9305f2e7ffbcfaba54e6a25104ca4860b91d24d3713563350769a2d4c625a
     profiles: [native-checks]
     command: [inngest, start]
     environment:

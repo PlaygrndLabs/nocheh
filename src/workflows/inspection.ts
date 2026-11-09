@@ -19,6 +19,7 @@ export function inspectionQuery(input:unknown){
   }
   let count=0;
   function check(set:SelectionSetNode,depth=0,root=true,seen=new Set<string>()){
+    if(!set.selections.length)throw new HttpError(400,'invalid_inspection_query');
     if(depth>30)throw new HttpError(400,'inspection_query_too_complex');
     for(const item of set.selections){
       if(++count>3000)throw new HttpError(400,'inspection_query_too_complex');
@@ -54,7 +55,7 @@ const bootstrap=`<script>(()=>{document.addEventListener('DOMContentLoaded',()=>
 // The pinned Monaco viewers otherwise fetch an external editor before they display
 // anything. Inspection uses a local, accessible, read-only value instead.
 const localCode="function __NochehCode({header,tab,loading}){const h=__nochehJsx();return h.jsxs('section',{className:'border-subtle bg-canvasBase border-b',children:[header?.title&&h.jsx('p',{className:'text-subtle px-5 py-2.5 text-sm',children:header.title}),h.jsx('pre',{tabIndex:0,'aria-label':header?.title||'Execution data',style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',overflow:'auto',maxHeight:'65vh',padding:'16px',font:'13px/1.6 ui-monospace,monospace'},children:loading?'Loading…':String(tab?.content??'')})]});}__NochehCode.Wrapper=({children})=>__nochehJsx().jsx('div',{className:'border-subtle w-full overflow-hidden rounded-md border',children});";
-const localCodeImport='import{t as __nochehJsx}from"./jsx-runtime-D4MLZeW6.js";';
+const localCodeImport='import{o as __nochehJsx}from"./useSelector-C9d0AIS8.js";';
 function once(value:string,pattern:RegExp){
   const matches=[...value.matchAll(new RegExp(pattern.source,pattern.flags.includes('g')?pattern.flags:pattern.flags+'g'))];
   if(matches.length!==1)throw new HttpError(503,'inngest_ui_version_mismatch');
@@ -70,30 +71,31 @@ function exportLocalCode(value:string,binding:string){
   return localCodeImport+value.slice(0,block.index)+localCode+'export{'+entries.join(',')+'};';
 }
 
-const pinnedModules:Record<string,string>={index:'/assets/index-DGHUbgzG.js',_dashboard:'/assets/_dashboard-COvmTQM3.js',InvokeButton:'/assets/InvokeButton-BKoaQS3v.js',DragDivider:'/assets/DragDivider-j4FQFcES.js'};
+const pinnedModules:Record<string,string>={index:'/assets/index-DP5xzaet.js',baseApi:'/assets/baseApi-DCLi0VUa.js',devApi:'/assets/devApi-a-0vSebx.js',NewCodeBlock:'/assets/NewCodeBlock-Iha9tDmY.js'};
 export function rewriteInspection(path:string,type:string,body:Buffer):Buffer{
   if(path==='/assets/fonts-DQTamI_N.css')return Buffer.from('body{font-family:system-ui,sans-serif}');
   if(!/html|javascript|css/.test(type))return body;
   // Another Inngest build renames these modules; patching nothing would serve a broken page.
-  const asset=/^\/assets\/(index|_dashboard|InvokeButton|DragDivider)-[\w-]+\.js$/.exec(path);
+  const asset=/^\/assets\/(index|baseApi|devApi|NewCodeBlock)-[\w-]+\.js$/.exec(path);
   if(asset&&path!==pinnedModules[asset[1]!])throw new HttpError(503,'inngest_ui_version_mismatch');
   let value=body.toString().replace(/(["'`])\/assets\//g,'$1/inngest/assets/').replace(/(["'`])assets\//g,'$1inngest/assets/').replace(/(["'`])\/favicon-june-2025\.svg/g,'$1/inngest/favicon-june-2025.svg');
-  if(path==='/assets/InvokeButton-BKoaQS3v.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)\.Wrapper=\(\{children:e\}\)=>/)[1]!);
-  if(path==='/assets/DragDivider-j4FQFcES.js')value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)=\(\{header:e,tab:t,actions:n=\[\]/)[1]!);
-  if(path==='/assets/index-DGHUbgzG.js'){
-    once(value,/basepath:``,serializationAdapters:/);
-    value=value.replace('basepath:``,serializationAdapters:','basepath:`/inngest`,serializationAdapters:');
+  if(path===pinnedModules.NewCodeBlock)value=exportLocalCode(value,once(value,/(?<![\w$])([A-Za-z_$][\w$]*)=\(\{header:e,tab:t,actions:n=\[\]/)[1]!);
+  if(path===pinnedModules.baseApi){
     const client=once(value,/new ([A-Za-z_$][\w$]*)\(`\/v0\/gql`\)/);
-    value=value.replace(client[0],`new ${client[1]}(\`/inngest/v0/gql\`,{headers:()=>({'X-Nocheh-CSRF':window.__NOCHEH_CSRF__})})`).replaceAll('`/dev`','`/inngest/dev`');
+    value=value.replace(client[0],`new ${client[1]}(\`/inngest/v0/gql\`,{headers:()=>({'X-Nocheh-CSRF':window.__NOCHEH_CSRF__})})`);
   }
-  if(path==='/assets/_dashboard-COvmTQM3.js'){
-    const link=once(value,/href:([\w$]+)\?``:([\w$]+),to:\1\?void 0:([\w$]+),preload:([\w$]+)/);
-    value=value.replace(link[0],`href:${link[1]}?\`\`:${link[2]},to:${link[1]}?void 0:(${link[3]}??${link[2]}),"aria-label":e,preload:${link[4]}`);
-    // Only the Workflow group applies to Nocheh: AI, Setup and Cloud sandboxes stay hidden.
-    const groups=[...value.matchAll(/\{group:[\w$]+,collapsed:e\}/g)];
-    if(groups.length!==2)throw new HttpError(503,'inngest_ui_version_mismatch');
-    for(const group of groups)value=value.replace(group[0],'{group:{items:[]},collapsed:e}');
+  if(path===pinnedModules.devApi){once(value,/url:`\/dev`/);value=value.replaceAll('`/dev`','`/inngest/dev`');}
+  if(path===pinnedModules.index){
+    once(value,/basepath:``,serializationAdapters:/);
+    value=value.replace('basepath:``,serializationAdapters:','basepath:`/inngest`,serializationAdapters:').replaceAll('`/dev`','`/inngest/dev`');
+    const link=once(value,/href:([\w$]+)\?``:([\w$]+),to:\1\?void 0:([\w$]+),(onClick:[\w$]+,)?preload:([\w$]+)/);
+    value=value.replace(link[0],`href:${link[1]}?\`\`:${link[2]},to:${link[1]}?void 0:(${link[3]}??${link[2]}),${link[4]??''}"aria-label":e,preload:${link[5]}`);
+    // Only the Workflow group applies to Nocheh: AI, Cloud sandboxes and the footer's MCP setup link stay hidden.
+    value=value.replace(once(value,/\{group:[\w$]+,collapsed:e\}/)[0],'{group:{items:[]},collapsed:e}');
     value=value.replace(once(value,/,\{label:`Sandboxes`,href:`\/sandboxes`,Icon:[\w$]+\}/)[0],'');
+    value=value.replace(once(value,/\{label:`MCP`,href:`\/mcp\/setup`,external:!1\},/)[0],'');
+    // The Quickstart card in index still renders this Monaco viewer directly; the /dev answer's isSingleNodeService keeps Quickstart off.
+    value=exportLocalCode(value,once(value,/function ([A-Za-z_$][\w$]*)\(\{header:e,tab:t,actions:n=\[\],minLines:/)[1]!);
   }
   if(type.includes('text/html'))value=value.replace('</head>',bootstrap+'</head>');
   return Buffer.from(value);
@@ -108,7 +110,7 @@ export async function proxyInngestInspection(req:IncomingMessage,res:ServerRespo
   if(req.headers.origin||req.headers.cookie)throw new HttpError(403,'inspection_backend_only');
   if(!/^[a-f0-9]{64}$/.test(key))throw new HttpError(503,'workflows_unavailable');
   const query=selected.kind==='query'?inspectionQuery(await readJson(req,128*1024)):undefined;
-  if(selected.kind==='info'){res.writeHead(200,{...inspectionHeaders,'content-type':'application/json'});res.end(JSON.stringify({version:'1.49.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}}));return;}
+  if(selected.kind==='info'){res.writeHead(200,{...inspectionHeaders,'content-type':'application/json'});res.end(JSON.stringify({version:'1.51.0',isSingleNodeService:true,startOpts:{autodiscover:false},features:{}}));return;}
   const authorization='Bearer '+createHash('sha256').update(Buffer.from(key,'hex')).digest('hex');
   let response:Response;try{response=await fetch(new URL(selected.path,upstream),{method:req.method??'GET',headers:{authorization,'content-type':'application/json','accept-encoding':'identity'},...(query?{body:JSON.stringify(query)}:{}),redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new HttpError(503,'workflows_unavailable');}
   if(!response.ok){await response.body?.cancel();throw new HttpError(502,'inspection_unavailable');}
