@@ -1,5 +1,5 @@
-FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
-FROM python:3.14.9-slim-trixie@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS sqlite
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+FROM python:3.14.10-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS sqlite
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl ca-certificates && rm -rf /var/lib/apt/lists/*
 # Match the pinned upstream's SQLite WAL-corruption fix.
 RUN curl -fSL --retry 3 https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz -o /tmp/sqlite.tar.gz && \
@@ -8,7 +8,7 @@ RUN curl -fSL --retry 3 https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz -
     CFLAGS='-O2 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_RTREE -DSQLITE_THREADSAFE=1' \
     ./configure --prefix=/opt/sqlite --disable-static && make -j2 && make install
 
-FROM python:3.14.9-slim-trixie@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS native-runtime
+FROM python:3.14.10-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS native-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg ca-certificates libatomic1 && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=sqlite /opt/sqlite/lib /opt/sqlite/lib
@@ -45,7 +45,7 @@ USER nocheh
 CMD ["python", "-m", "services.hermes.runtime"]
 
 
-FROM node:26.12.1-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS tui-assets
+FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS tui-assets
 WORKDIR /opt/hermes
 COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.json ./
 COPY --from=native-runtime /opt/hermes/ui-tui ./ui-tui
@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.npm \
       --fetch-retries=5 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=20000 --fetch-timeout=120000 && \
     npm run build --workspace ui-tui && test -f /opt/hermes/ui-tui/dist/entry.js
 
-FROM node:26.12.1-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS dashboard-assets
+FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS dashboard-assets
 WORKDIR /opt/hermes
 COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.json ./
 COPY --from=native-runtime /opt/hermes/web ./web

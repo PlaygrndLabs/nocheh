@@ -257,7 +257,7 @@ services:
     volumes: [honcho_redis:/data]
     profiles: [honcho]
     restart: unless-stopped
-    image: redis:8.10.2-trixie@sha256:97ec88159e6d7cfb5ddef9015386087d58a912de80112f06ebdfa78fa5989901
+    image: redis:8.10.3-trixie@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53
     networks: [honcho-isolated]
     healthcheck:
       test: [CMD, redis-cli, ping]
@@ -299,7 +299,7 @@ services:
     environment: {NOCHEH_ARCHIVE_URL: "http://nocheh-app:8780", NOCHEH_MODEL: "${NOCHEH_MEMORY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}"}
     profiles: [honcho]
     restart: unless-stopped
-    image: python:3.14.9-slim-trixie@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8
+    image: python:3.14.10-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
     command: [python, /nocheh/meter.py]
     env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/meter.env", required: false}]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -431,7 +431,7 @@ services:
 
   inngest-redis:
     logging: *logging
-    image: redis:8.10.2-trixie@sha256:97ec88159e6d7cfb5ddef9015386087d58a912de80112f06ebdfa78fa5989901
+    image: redis:8.10.3-trixie@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53
     restart: unless-stopped
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
     command: [redis-server, --appendonly, "yes", --appendfsync, always, --save, "", --maxmemory-policy, noeviction]
@@ -523,7 +523,7 @@ services:
   # Its public hostname points to http://nocheh-miniapp:8788.
   nocheh-tunnel:
     logging: *logging
-    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    image: cloudflare/cloudflared:2026.10.7@sha256:4955524aeaa379e154023d5a027c250f7b35041a2e7e950cf13f144bc9b9c5ba
     profiles: [miniapp]
     command: [tunnel, --no-autoupdate, run]
     restart: unless-stopped

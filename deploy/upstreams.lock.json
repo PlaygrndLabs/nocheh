@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "python": "3.14.9",
-  "uv_tested": "0.13.5",
+  "python": "3.14.10",
+  "uv_tested": "0.13.7",
   "hermes": {
     "repository": "https://github.com/NousResearch/hermes-agent.git",
     "revision": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
@@ -15,7 +15,7 @@
     "image": "inngest/inngest:v1.51.0@sha256:fcf9305f2e7ffbcfaba54e6a25104ca4860b91d24d3713563350769a2d4c625a"
   },
   "workflow_redis": {
-    "version": "8.10.2",
-    "image": "redis:8.10.2-trixie@sha256:97ec88159e6d7cfb5ddef9015386087d58a912de80112f06ebdfa78fa5989901"
+    "version": "8.10.3",
+    "image": "redis:8.10.3-trixie@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53"
   }
 }
