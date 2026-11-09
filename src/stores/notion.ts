@@ -117,8 +117,9 @@ export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:R
   return row.approval==='nothing'&&!turn.job||row.approval!=='everything'&&read?'notion_setting:'+row.revision:null;
 }
 
-/** What an approved job may do in the owner's Notion without asking: read, or nothing when Notion is off or every call asks. */
-export async function notionJobReads(db:Pick<pg.Pool,'query'>):Promise<boolean> {
+/** What a newly asked private job's card offers in the owner's Notion: reads without asking, or nothing when Notion is off or
+ *  every call asks. The job row keeps it, narrowed again by this when the job is approved (ADR-0225). */
+export async function notionJobReads(db:Pick<pg.PoolClient,'query'>):Promise<boolean> {
   const row=(await db.query('SELECT enabled,approval FROM owner_notion WHERE singleton')).rows[0];
   return !!row?.enabled&&row.approval!=='everything';
 }

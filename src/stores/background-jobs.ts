@@ -86,6 +86,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS github_copies_repo ON github_copies(lower(repo
 CREATE TABLE IF NOT EXISTS github_removals (repo text PRIMARY KEY CHECK(repo=lower(repo)),removal integer NOT NULL CHECK(removal>0));
 -- The GitHub copy a box job reads, pinned when it is asked (ADR-0209).
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS repo jsonb CHECK(repo IS NULL OR box);
+-- Whether the job may read the owner's Notion without asking: what its card offered when it was asked, narrowed by the
+-- owner's setting when it was approved, so it never says more than the card did (ADR-0225).
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS notion_reads boolean NOT NULL DEFAULT false;
 `;
 
 const protocol='background-job-v1';
@@ -224,11 +227,12 @@ const privateJob=(row:any,owner:string|null|undefined)=>!!owner&&row.scope===own
  * waits for the caller's transaction and a later call sees the stop.
  */
 export async function ownerApprovedJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
-  turn:{owner?:boolean;job?:string|null;logical_profile?:string|null}):Promise<boolean> {
+  turn:{owner?:boolean;job?:string|null;logical_profile?:string|null},notion=false):Promise<boolean> {
   if(!owner||!turn.owner||!turn.job||source.store!=='control')return false;
+  // `notion` also asks that the job was approved with Notion reads on its card (ADR-0225).
   return !!(await db.query(`SELECT 1 FROM background_runs s JOIN background_jobs j ON j.id=s.job_id
     WHERE s.event_id=$1 AND j.id=$2 AND j.state='running' AND NOT j.cancel_requested AND j.scope=$3 AND j.requester IS NULL
-      AND j.decided_by=$3 AND j.logical_profile=$4 FOR SHARE OF j`,[source.id,turn.job,owner,turn.logical_profile??null])).rowCount;
+      AND j.decided_by=$3 AND j.logical_profile=$4${notion?' AND j.notion_reads':''} FOR SHARE OF j`,[source.id,turn.job,owner,turn.logical_profile??null])).rowCount;
 }
 
 /** SQL over a job row `j`: whether its box time has not passed yet. A box lasts until 5 minutes after the job's hard
@@ -332,6 +336,9 @@ export class BackgroundJobRepository {
     const pin=body.repo===undefined?null:box&&repoName(body.repo)?(await this.control.query('SELECT * FROM github_copies WHERE lower(repo)=lower($1)',[body.repo])).rows[0]??null:null;
     if(body.repo!==undefined&&!pin)throw new HttpError(409,'job_repo_not_allowed');
     const repo=pin?pinnedRepo(pin):null;
+    // Whether the card offers Notion reads, kept with the job so its card and its runs never say more (ADR-0225).
+    // Not part of the fingerprint: it only narrows, and a setting saved meanwhile must not turn a repeat into job_changed.
+    const notion=privateJob({scope,requester},owner)&&await notionJobReads(this.control);
     if(requester) {
       const today=Number((await this.control.query(`SELECT count(*) FROM background_jobs WHERE scope=$1 AND requester=$2
         AND state<>'rejected' AND created_at>date_trunc('day',now())`,[turn.scope,requester])).rows[0].count);
@@ -352,9 +359,9 @@ export class BackgroundJobRepository {
     // The pinned copy is part of what is approved; a job without one keeps the fingerprint it had before copies existed.
     const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes,...(repo?{repo}:{})}));
     const insert=(db:Pick<pg.PoolClient,'query'>)=>db.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
-      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT DO NOTHING`,
+      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo,notion_reads) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) ON CONFLICT DO NOTHING`,
       [id,source,proposal,representation.revision,binding,scope,space,size.chat,'job-'+id.slice(0,24),requester,approver,fingerprint,
-        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo]);
+        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo,notion]);
     if(!repo)await insert(this.control);
     else {
       // The copy row is locked before the job row exists, the order Remove takes them in: Remove waits for this short
@@ -396,7 +403,7 @@ export class BackgroundJobRepository {
       size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
       // Without a price only the time limit applies, and the card says so instead of a cost limit.
       cost_limit:jobPriced(row.rates)?money(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin:null,
-      notion:privateJob(row,this.access.policy().owner_id)&&await notionJobReads(this.control)?lines.notion_reads:null,box:row.box?(row.repo?lines.box_repo:lines.box):null,
+      notion:row.notion_reads?lines.notion_reads:null,box:row.box?(row.repo?lines.box_repo:lines.box):null,
       // From the job's own pin, so a card settled after Remove still shows what was asked.
       repo:row.repo?fillTemplate(lines.repo!,{repo_name:row.repo.name,repo_branch:row.repo.branch,repo_commit:row.repo.commit.slice(0,7),
         repo_copied:row.repo.copied_at.slice(0,16).replace('T',' ')+' UTC',repo_size:Math.ceil(row.repo.bytes/1e6)+' MB, '+count(row.repo.files,'file','files')}):null,
@@ -425,8 +432,11 @@ export class BackgroundJobRepository {
       const current=(await db.query('SELECT * FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
       if(current.state!=='proposed'||current.created_at<new Date(Date.now()-DECISION_HOURS*3600000))throw new HttpError(409,'job_already_decided');
       const approve=body.decision==='approve';
+      // Approve keeps the Notion reads its card offered only while the setting still allows them, so a job never gets more
+      // than its card said; Reject leaves the line its card showed (ADR-0225).
+      const reads=approve&&!!current.notion_reads&&await notionJobReads(db);
       await db.query(`UPDATE background_jobs SET state=$2,decision_reference=$3,decided_by=$4,finished_at=CASE WHEN $2='rejected' THEN now() END,
-        revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,approve?'approved':'rejected',source,by]);
+        notion_reads=CASE WHEN $2='approved' THEN $5::boolean ELSE notion_reads END,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,approve?'approved':'rejected',source,by,reads]);
       if(approve)await requestWorkflow(db,'background','job:'+row.id);
       await db.query('COMMIT');return {id:row.id,state:approve?'approved':'rejected'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
