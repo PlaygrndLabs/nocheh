@@ -187,7 +187,10 @@ export class ActionCommandRepository {
     let card=linked(operationCard(texts.action,shown,origin),urls);
     // Room is kept for the line that says how it ended. A summary never keeps a card from Telegram: one that does
     // not fit with it goes without it.
-    if(card.text.length>cardLimit-outcomeRoom&&shown.summary)card=linked(operationCard(texts.action,operation({...action,summary:null},line)!,origin),urls);
+    if(card.text.length>cardLimit-outcomeRoom&&shown.summary) {
+      const bare=operation({...action,summary:null},line);if(!bare)return null;
+      card=linked(operationCard(texts.action,bare,origin),urls);
+    }
     if(card.text.length>cardLimit-outcomeRoom)return null;
     const code=action.error_code??(typeof action.result?.result?.error==='string'?action.result.result.error:null);
     // The executor runs only after its start is recorded, so an operation never started did not run.
@@ -229,7 +232,7 @@ export class ActionCommandRepository {
       const job=kind==='controlled'&&row.job_id?(await control.query("SELECT * FROM background_jobs WHERE id=$1 AND state IN ('approved','running') AND changes IS NULL",[row.job_id])).rows[0]:null;
       if(job) {
         const {line}=await this.texts(),{room}=await this.listRoom(job,line);
-        return {...result,message:!listEntry(operation(await this.tools.inspect({admin:true,scope:null},row.id),line),room)?
+        return {...result,message:!listEntry(listed(await this.tools.inspect({admin:true,scope:null},row.id),line,room),room)?
           'Kept with this job\'s other changes. It is too long for a Telegram card, so the owner reviews it in the dashboard Inbox when the job ends. Do not wait for it. Say in your report what you asked for.':
           'Kept with this job\'s other changes. When the job ends, the owner approves them together on one card. Do not wait for it. Say in your report what you asked for.'};
       }

@@ -1,6 +1,6 @@
 import {canonical} from './archive.js';
 import {confusables} from './confusables.js';
-import {fillTemplate} from './prompts.js';
+import {fillTemplate,lineKept} from './prompts.js';
 
 /** While a card is filled, \u0001K\u0002text\u0003 marks text for one Telegram entity: K is the number of
  * a link's address, or b (bold), c (a quote shown whole), q (a quote that opens on a tap) or p (preformatted).
@@ -296,12 +296,14 @@ function said(text:string|null):string|null {
 
 /** An operation's card from the owner's template: its name in bold, what the asker says it does, and its
  * arguments put in after the template is filled, so filling never changes them. A template without a place
- * for the summary gets it on the line after the name, so folded arguments never come without it. */
+ * for the summary, or whose summary line is left out for another missing value, gets it on the line after
+ * the name, so folded arguments never come without it. */
 export function operationCard(template:string,operation:OperationText,origin:string|null):string {
   const slot='\u0001\u0003',own=template.replace(controls,'');
-  const placed=!operation.summary||own.includes('{summary}')?own:own.replace(/^(.*\{kind\}.*)$/m,'$1\n📝 {summary}');
-  const text=placed.includes('{summary}')?placed:'📝 {summary}\n'+placed;
-  return fillTemplate(text,{kind:heading(operation.title),summary:operation.summary,origin,arguments:operation.body?slot:''}).replaceAll(slot,()=>operation.body);
+  const values={kind:heading(operation.title),summary:operation.summary,origin,arguments:operation.body?slot:''};
+  const shows=own.split('\n').some(line=>line.includes('{summary}')&&lineKept(line,values));
+  const placed=!operation.summary||shows?own:/\{kind\}/.test(own)?own.replace(/^(.*\{kind\}.*)$/m,'$1\n📝 {summary}'):'📝 {summary}\n'+own;
+  return fillTemplate(placed,values).replaceAll(slot,()=>operation.body);
 }
 
 /** What an approval card shows for an operation. Its arguments are in words while they fit a card

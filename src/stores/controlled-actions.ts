@@ -149,14 +149,18 @@ export class ControlledActionRepository {
   /** The asker's summary, kept as content beside the proposal and secret-checked as its arguments are, but never
    * part of what runs, the action's identity or its fingerprint (ADR-0220). Each wording is its own record, so a
    * repeat in other words never conflicts with the first. Null when its check cannot finish: the card then shows
-   * the operation as it would without one. */
+   * the operation as it would without one. A job's run instead asks again in full, summary included, once a pending
+   * publication or a quiet epoch passes, as it does for its arguments (ADR-0208). */
   private async summarize(id:string,source:SourceReference|OperationReference,binding:GuardBinding,current:GuardBinding,principal:Reader,note:string) {
     try {
       const record=await this.derived.record({operation_id:'controlled-summary:'+digest(canonical([id,note])),source,kind:'controlled_action_summary',
         content:Buffer.from(note),producer:'nocheh',producer_version:protocol,configuration:{binding}});
       await this.guards.prepareContext(record,protocol,principal,this.prepared,this.detect);
       return {...record,revision:(await this.guards.read('derived_artifacts:'+record.id,current)).revision};
-    }catch(error){if(error instanceof HttpError)return null;throw error;}
+    }catch(error) {
+      if(error instanceof HttpError&&jobRun(principal)&&['guard_transition_pending','guard_context_changed'].includes(error.code))throw error;
+      return null;
+    }
   }
   /** An operation's summary as its check left it, or null when it has none or it no longer reads back whole. */
   async summary(row:any):Promise<string|null> {

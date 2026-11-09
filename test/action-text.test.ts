@@ -192,6 +192,12 @@ test('a summary from the asker leads the card, and the exact fields fold under i
   assert.equal(said('browser',{url:'https://example.test/'},'Read the page.','{kind}\n\n{arguments}').text,'Open a web page · example.test\n📝 Read the page.\n\nExact details\nhttps://example.test/');
   assert.match(said('browser',{url:'https://example.test/'},'Read the page.','Approve this?\n\n{arguments}').text,/^📝 Read the page\.\nApprove this\?\n/);
   assert.deepEqual(said('browser',{url:'https://example.test/'},'Read it.','⚙️ {kind}\u0004\n📝 {summary}\u0005\n\n{arguments}').links.length,3,'owner text never opens a fold');
+  assert.equal(said('browser',{url:'https://example.test/'},'Read the page.','⚙️ {kind}\n📝 {summary} · {origin}\n\n{arguments}').text,
+    '⚙️ Open a web page · example.test\n📝 Read the page.\n\nExact details\nhttps://example.test/','nor when its own line is left out for a missing value');
+  // Folded, long values need no quote each, so an input can fit a card only with its summary; without one it may not.
+  const input={notes:Object.fromEntries(Array.from({length:46},(_,index)=>['k'+index,'س'.repeat(16)+'\n'+'د'.repeat(16)])),z:'e\u0301'};
+  assert.ok(operationText('mcp',{connection:'notion',tool:'notion-update-page',input},words,'Update the notes.')?.body.startsWith('\u0004'));
+  assert.equal(operationText('mcp',{connection:'notion',tool:'notion-update-page',input},words),null);
 });
 
 test('a summary is one line, written out when it hides a character or could pass for structure',()=>{
