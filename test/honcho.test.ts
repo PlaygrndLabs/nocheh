@@ -1,5 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {once} from 'node:events';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
@@ -9,18 +11,20 @@ import {honchoClient} from '../src/memory/honcho.js';
 import {syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,memoryContext,refreshMemoryContext,prepareMemoryRequest,observeGeneration,type HonchoCall} from '../src/honcho.js';
 
 test('slow Honcho recall can finish while ordinary calls retain their deadline',async t=>{
- t.mock.timers.enable({apis:['setTimeout']});
- t.mock.method(AbortSignal,'timeout',(ms:number)=>{
-  const controller=new AbortController();setTimeout(()=>controller.abort(new DOMException('Synthetic deadline','TimeoutError')),ms/10000);return controller.signal;
- });
- t.mock.method(globalThis,'fetch',(_url:unknown,init:RequestInit)=>new Promise<Response>((resolve,reject)=>{
-  const timer=setTimeout(()=>resolve(Response.json({content:'Synthetic memory'})),25);
-  init.signal!.addEventListener('abort',()=>{clearTimeout(timer);reject(init.signal!.reason);},{once:true});
- }));
- const call=honchoClient('http://synthetic-honcho');
- const recall=call('/v3/workspaces/test/peers/source/chat',{});t.mock.timers.tick(25);
- assert.equal((await recall).content,'Synthetic memory');
- const rejected=assert.rejects(call('/v3/workspaces/test/queue/status'),{code:'memory_engine_unavailable'});t.mock.timers.tick(25);await rejected;
+ // A slow local Honcho answers every call after 300 ms. Deadlines shrink a thousandfold, so the recall's 480 s
+ // become 480 ms and an ordinary call's 120 s become 120 ms. Node's fetch, which gives up at 300 s, is never used.
+ const realTimeout=AbortSignal.timeout.bind(AbortSignal);
+ t.mock.method(AbortSignal,'timeout',(ms:number)=>realTimeout(ms/1000));
+ const fetches=t.mock.method(globalThis,'fetch',async()=>{throw Error('fetch_used');});
+ const server=createServer((_req,res)=>{const timer=setTimeout(()=>res.end(JSON.stringify({content:'Synthetic memory'})),300);res.on('close',()=>clearTimeout(timer));});
+ server.listen(0,'127.0.0.1');await once(server,'listening');
+ const address=server.address();assert.ok(address&&typeof address!=='string');
+ try {
+  const call=honchoClient('http://127.0.0.1:'+address.port);
+  assert.equal((await call('/v3/workspaces/test/peers/source/chat',{})).content,'Synthetic memory');
+  await assert.rejects(call('/v3/workspaces/test/queue/status'),{code:'memory_engine_unavailable'});
+  assert.equal(fetches.mock.callCount(),0);
+ }finally{server.closeAllConnections();server.close();await once(server,'close');}
 });
 
 test('durable Honcho receipts, consent, isolation, uncertain writes and current-only egress',{skip:!process.env.PGHOST},async()=>{
