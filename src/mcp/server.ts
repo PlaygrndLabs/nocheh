@@ -1,10 +1,10 @@
 import {createHash} from 'node:crypto';
-import type {IncomingMessage,ServerResponse} from 'node:http';
+import {request,type IncomingMessage,type ServerResponse} from 'node:http';
 import {HttpError,readJson} from '../http.js';
 import type {Reader} from '../access.js';
 import {mcpTools,type ToolContext,type Loopback} from './tools.js';
 
-/** MCP revisions this server speaks: JSON-only Streamable HTTP, no sessions, no server-to-client requests (ADR-0231). */
+/** MCP revisions this server speaks: Streamable HTTP without sessions or server-to-client requests (ADR-0231). */
 export const protocolVersions=['2025-11-25','2025-06-18','2025-03-26'];
 const serverInfo={name:'nocheh',title:'Nocheh',version:'1'};
 type Id=string|number;
@@ -13,33 +13,54 @@ const rpc=(res:ServerResponse,status:number,value:unknown)=>{
 };
 const failure=(id:Id|null,code:number,message:string)=>({jsonrpc:'2.0',id,error:{code,message}});
 
-/** A loop-back to this service's own routes with the caller's bearer, so each tool passes every check its route has today. */
-export function loopback(base:string,authorization:string,fetcher:typeof fetch=fetch):Loopback {
-  return async(method,path,body,timeoutMs)=>{
-    const response=await fetcher(base+path,{method,headers:{authorization,'content-type':'application/json'},
-      ...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(timeoutMs)});
-    // A tool reads at most 2 MiB, as the Python tools did.
-    const text=Buffer.from(await response.arrayBuffer());
-    if(text.length>2*1024*1024)throw new Error('archive_response_too_large');
-    let value:unknown=null;
-    try{value=text.length?JSON.parse(text.toString('utf8')):null;}catch{if(response.ok)throw new Error('invalid_archive_response');}
-    return {status:response.status,body:value};
-  };
+/** A loop-back to this service's own routes with the caller's bearer, so each tool passes every check its route has today.
+ * node:http sets no idle limit of its own, so a long memory recall keeps its whole budget; only `timeoutMs` ends a call. */
+export function loopback(base:string,authorization:string):Loopback {
+  return (method,path,body,timeoutMs)=>new Promise((resolve,reject)=>{
+    const signal=AbortSignal.timeout(timeoutMs),payload=body===undefined?undefined:Buffer.from(JSON.stringify(body));
+    let settled=false;
+    const fail=(error:unknown)=>{if(!settled){settled=true;reject(signal.aborted?signal.reason:error);}};
+    const outgoing=request(base+path,{method,signal,headers:{authorization,'content-type':'application/json',...(payload?{'content-length':payload.length}:{})}},response=>{
+      const status=response.statusCode??0;
+      if(status>=300&&status<400){response.resume();outgoing.destroy();return fail(new Error('archive_redirect_refused'));}
+      // A tool reads at most 2 MiB, as the Python tools did.
+      const chunks:Buffer[]=[];let size=0;
+      response.on('data',(chunk:Buffer)=>{
+        if(settled)return;
+        size+=chunk.length;
+        if(size>2*1024*1024){fail(new Error('archive_response_too_large'));outgoing.destroy();return;}
+        chunks.push(chunk);
+      });
+      response.on('error',fail);
+      response.on('end',()=>{
+        if(settled)return;
+        const text=Buffer.concat(chunks);let value:unknown=null;
+        try{value=text.length?JSON.parse(text.toString('utf8')):null;}catch{if(status>=200&&status<300)return fail(new Error('invalid_archive_response'));}
+        settled=true;resolve({status,body:value});
+      });
+    });
+    outgoing.on('error',fail);
+    outgoing.end(payload);
+  });
 }
 
 /** This service itself, on the port the request came in on. Both services listen on every interface. */
 export const selfBase=(req:IncomingMessage)=>'http://127.0.0.1:'+req.socket.localPort;
 
-/** The turn's own deadline, from the trusted turn process. It can only shorten a long memory recall; a bad value is ignored. */
+/** The turn's own deadline, from the trusted turn process. It can only shorten a long memory recall: one already past leaves
+ * no time for it, and a malformed value, or one more than an hour ahead, is ignored. */
 export function turnDeadline(req:IncomingMessage,now=Date.now()):number|undefined {
   const value=req.headers['x-nocheh-turn-deadline'];
   if(typeof value!=='string'||!/^\d{9,12}(?:\.\d{1,6})?$/.test(value))return undefined;
   const seconds=Number(value);
-  return seconds*1000>now&&seconds*1000<=now+3600000?seconds:undefined;
+  return seconds*1000<=now+3600000?seconds:undefined;
 }
 
+/** How often a long tool call tells the client it is still running. A client's own read limit is never shorter. */
+export const keepaliveMs=20000;
+
 /** One MCP request: POST with one JSON-RPC message. The caller has already authenticated `principal`. */
-export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{principal:Reader;call:Loopback;isolated:boolean}) {
+export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{principal:Reader;call:Loopback;isolated:boolean;keepalive?:number}) {
   if(req.method!=='POST'){res.writeHead(405,{allow:'POST','content-type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:'method_not_allowed'}));return;}
   // Brains reach this only from inside Nocheh's own network; a browser never does.
   if(req.headers.origin!==undefined)throw new HttpError(403,'origin_not_allowed');
@@ -69,10 +90,20 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
     const args=input.arguments===undefined?{}:input.arguments;
     if(!tool||!args||typeof args!=='object'||Array.isArray(args))return rpc(res,200,failure(id,-32602,tool?'Invalid arguments':'Unknown tool'));
     const context:ToolContext={call:options.call,principal:options.principal,isolated:options.isolated,deadline:turnDeadline(req)};
+    // A long call, such as a memory recall, would leave the connection silent past a client's read limit. A client that takes an
+    // event stream gets one after the first interval: a comment line each interval, then the answer as one message.
+    let streaming=false;
+    const timer=String(req.headers.accept??'').includes('text/event-stream')?setInterval(()=>{
+      if(!streaming){streaming=true;res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-store'});}
+      res.write(': running\n\n');
+    },options.keepalive??keepaliveMs):undefined;
     let text:string;
     // A tool's own failure is a normal result whose text says so, as the Python tools answered: a brain reads it and goes on.
-    try{text=await tool.run(args as Record<string,unknown>,context);}catch{text=JSON.stringify({error:'tool_unavailable'});}
-    return rpc(res,200,{jsonrpc:'2.0',id,result:{content:[{type:'text',text}],isError:false}});
+    try{text=await tool.run(args as Record<string,unknown>,context);}catch{text=JSON.stringify({error:'tool_unavailable'});}finally{clearInterval(timer);}
+    const answer={jsonrpc:'2.0',id,result:{content:[{type:'text',text}],isError:false}};
+    if(!streaming)return rpc(res,200,answer);
+    res.end('event: message\ndata: '+JSON.stringify(answer)+'\n\n');
+    return;
   }
   return rpc(res,200,failure(id,-32601,'Method not found'));
 }

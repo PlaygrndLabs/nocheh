@@ -29,11 +29,15 @@ tools is unchanged.
 </context>
 
 <decision>
-- Nocheh serves `/mcp`: one JSON-RPC message per POST, a JSON answer, no session,
-  no event stream and no request from the server to the client. It speaks
-  revisions 2025-11-25, 2025-06-18 and 2025-03-26 and answers `initialize`,
-  `ping`, `tools/list` and `tools/call`; a notification gets 202, and GET or
-  DELETE gets 405. It is written in `src/mcp`, without the MCP library.
+- Nocheh serves `/mcp`: one JSON-RPC message per POST, a JSON answer, no session
+  and no request from the server to the client. It speaks revisions 2025-11-25,
+  2025-06-18 and 2025-03-26 and answers `initialize`, `ping`, `tools/list` and
+  `tools/call`; a notification gets 202, and GET or DELETE gets 405. It is
+  written in `src/mcp`, without the MCP library.
+- A tool call still running after 20 seconds, such as a long memory recall, is
+  answered as an event stream when the client takes one: a comment line every 20
+  seconds, then the answer as one message. Hermes stops reading a silent answer
+  after 300 seconds, and a recall may take up to ten minutes.
 - The broker serves it for isolated turns, and `nocheh-app` for turns without the
   isolated runtime. Only a turn's own pass reaches it: the service token is
   refused (`turn_credential_required`), and so is any request with an `Origin`
@@ -53,7 +57,9 @@ tools is unchanged.
   refusal never trips the brain's failure limit.
 - The turn process may send its deadline in `X-Nocheh-Turn-Deadline` (epoch
   seconds). It only shortens a long memory recall, leaving 45 seconds for the
-  reply; a value more than an hour ahead or already past is ignored.
+  reply. A value already past leaves no time for a recall; a value more than an
+  hour ahead is ignored. The tool's own call back to the route has no read limit
+  but that budget.
 - A turn's pass names its brain in a `brain` claim, `hermes` by default; only a
   turn pass may carry one. The broker records it on each effect in
   `security_events.brain`.

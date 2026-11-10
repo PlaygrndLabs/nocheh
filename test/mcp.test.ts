@@ -108,6 +108,31 @@ test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async(
   }finally{await close(server);}
 });
 
+test('a long tool call keeps a client that takes an event stream reading until its answer',async()=>{
+  const principal:Reader={scope:'-1001',admin:false};let wait=0;
+  const server=createServer((req,res)=>{void serveMcp(req,res,{principal,isolated:false,keepalive:40,call:async(_method,path)=>{
+    if(path.startsWith('/v1/search'))await new Promise(resolve=>setTimeout(resolve,wait));
+    return {status:200,body:path.startsWith('/v1/imports')?{imports:[]}:[]};}});});
+  const base=await listen(server);
+  const call=(accept:string)=>fetch(base+'/mcp',{method:'POST',headers:{'content-type':'application/json',accept},
+    body:JSON.stringify({jsonrpc:'2.0',id:'slow',method:'tools/call',params:{name:'archive_search',arguments:{query:'Synthetic'}}})});
+  const answer={jsonrpc:'2.0',id:'slow',result:{content:[{type:'text',text:JSON.stringify({sources:[],filter_status:null})}],isError:false}};
+  try {
+    // A quick call is plain JSON.
+    const quick=await call('application/json, text/event-stream');
+    assert.match(quick.headers.get('content-type')!,/^application\/json/);assert.deepEqual(await quick.json(),answer);
+    // A long one turns into an event stream: comment lines while it runs, then the answer as one message.
+    wait=200;
+    const long=await call('application/json, text/event-stream'),body=await long.text();
+    assert.equal(long.headers.get('content-type'),'text/event-stream');
+    assert.match(body,/^(: running\n\n)+event: message\ndata: /);
+    assert.deepEqual(JSON.parse(body.split('\ndata: ')[1]!.trimEnd()),answer);
+    // A client that takes only JSON waits for plain JSON.
+    const plain=await call('application/json');
+    assert.match(plain.headers.get('content-type')!,/^application\/json/);assert.deepEqual(await plain.json(),answer);
+  }finally{await close(server);}
+});
+
 test('a loop-back sends the turn pass and reads a bounded answer',async()=>{
   const seen:{method:string;url:string;auth:string;body:string}[]=[];let big=false;
   const server=createServer((req,res)=>{let body='';req.on('data',chunk=>{body+=chunk;});req.on('end',()=>{
@@ -124,7 +149,7 @@ test('a loop-back sends the turn pass and reads a bounded answer',async()=>{
     assert.deepEqual(seen[0],{method:'POST',url:'/v1/tools/propose',auth:'Bearer turn.synthetic',body:'{"kind":"browser"}'});
     assert.deepEqual(await call('GET','/refused',undefined,5000),{status:403,body:{error:'tool_disabled_by_owner'}});
     await assert.rejects(call('GET','/broken',undefined,5000),/invalid_archive_response/);
-    await assert.rejects(call('GET','/redirect',undefined,5000));
+    await assert.rejects(call('GET','/redirect',undefined,5000),/archive_redirect_refused/);
     await assert.rejects(call('GET','/slow',undefined,20),{name:'TimeoutError'});
     big=true;await assert.rejects(call('GET','/v1/events/'+ID,undefined,5000),/archive_response_too_large/);
   }finally{await close(server);}
@@ -141,7 +166,10 @@ test('a long memory recall fits the turn, and the secret-checked routes get a mi
   // The turn process names its deadline; a value it could not have set is ignored.
   const header=(value:string)=>({headers:{'x-nocheh-turn-deadline':value}}) as unknown as IncomingMessage;
   assert.equal(turnDeadline(header(String((now+100000)/1000)),now),(now+100000)/1000);
-  for(const value of [String(now/1000-1),String((now+3700000)/1000),'soon','1e10',''])assert.equal(turnDeadline(header(value),now),undefined,value);
+  for(const value of [String((now+3700000)/1000),'soon','1e10',''])assert.equal(turnDeadline(header(value),now),undefined,value);
+  // A deadline already past leaves no time for a recall, rather than the whole budget.
+  const past=turnDeadline(header(String(now/1000-1)),now);assert.equal(past,now/1000-1);
+  assert.throws(()=>timeoutFor(memoryRoutes.recall,past,now),/memory_recall_turn_budget_exhausted/);
   assert.equal(turnDeadline({headers:{}} as unknown as IncomingMessage,now),undefined);
 });
 
@@ -272,6 +300,11 @@ test('a long action result comes in parts that join to the whole view',async()=>
   assert.doesNotMatch(parts.map(part=>part.text).join(''),/fingerprint/);
   assert.deepEqual(await run('action_status',{id:ID,part:first.parts+1},status.context),{id:ID,error:'no_such_part',parts:first.parts});
   assert.equal(JSON.parse(inParts(view('Synthetic short page'))).result.content,'Synthetic short page');
+  // Parts are counted in characters, so no boundary splits an emoji in two.
+  const emoji=view('🙂'.repeat(30000)),whole=JSON.stringify({id:ID,kind:'mcp',state:'done',resolution:null,result:emoji.result,error_code:null});
+  const pieces=[1,2].map(part=>JSON.parse(inParts(emoji,part)));
+  assert.equal(pieces[0].parts,2);assert.equal(pieces.map(part=>part.text).join(''),whole);
+  for(const piece of pieces)assert.doesNotMatch(piece.text,/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
   const idle=fake(()=>value);
   for(const part of [0,'2',true,1.5])assert.deepEqual(await run('action_status',{id:ID,part},idle.context),{error:'invalid_part'});
   for(const id of ['../tools',7])assert.deepEqual(await run('action_status',{id},idle.context),{error:'controlled_action_unavailable'});

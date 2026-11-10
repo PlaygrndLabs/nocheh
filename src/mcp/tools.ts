@@ -19,6 +19,9 @@ class Refused extends Error {constructor(readonly status:number,readonly body:un
 const code=(error:unknown)=>error instanceof Refused&&error.body&&typeof error.body==='object'?(error.body as Value).error:undefined;
 const timedOut=(error:unknown)=>(error as {name?:unknown}|null)?.name==='TimeoutError';
 const text=(value:unknown)=>JSON.stringify(value);
+/** Text is counted and cut by characters, as the Python tools did, so no cut splits an emoji in two. */
+const size=(value:string)=>value.length-(value.match(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g)?.length??0);
+const cut=(value:string,start:number,end:number)=>start===0&&value.length<=end?value:Array.from(value).slice(start,end).join('');
 const hex=/^[a-f0-9]{64}$/;
 const own=(args:Value,key:string)=>Object.hasOwn(args,key);
 const record=(value:unknown):Value=>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('expected_object');return value as Value;};
@@ -68,7 +71,7 @@ async function search(args:Value,context:ToolContext) {
     if(mode==='current_reactions')return text(await request(context,'/v1/search'+query({mode,limit:count})));
     if(mode!=='text')throw new Error('invalid_search_mode');
     const words=args.query;
-    if(typeof words!=='string'||!words.trim()||words.length>2000)throw new Error('invalid_query');
+    if(typeof words!=='string'||!words.trim()||size(words)>2000)throw new Error('invalid_query');
     const status=await importStatus(context);
     const rows=list(await request(context,'/v1/search'+query({q:words,limit:count})));
     const {space,scope}=context.principal;
@@ -95,7 +98,7 @@ async function page(args:Value,context:ToolContext) {
 async function memorySearch(args:Value,context:ToolContext) {
   try {
     const words=args.query;
-    if(typeof words!=='string'||!words.trim()||words.length>2000)throw new Error('invalid_query');
+    if(typeof words!=='string'||!words.trim()||size(words)>2000)throw new Error('invalid_query');
     return text(await request(context,memoryRoutes.search,{query:words,limit:clamp(integer(args.limit,5),1,10)}));
   }catch{return text({error:'memory_search_unavailable'});}
 }
@@ -140,14 +143,14 @@ async function archiveRead(args:Value,context:ToolContext) {
     if(!hex.test(source))throw new Error('invalid_source');
     const found=record(await request(context,'/v1/events/'+source)),event=record(found.event),body=String(event.text||'');
     // Full raw payloads stay in the authenticated archive and export. Model context is bounded and labels generated content apart.
-    return text({source:found.source,scope:event.scope,origin:event.origin,kind:event.kind,text:body.slice(0,12000),truncated:body.length>12000,
+    return text({source:found.source,scope:event.scope,origin:event.origin,kind:event.kind,text:cut(body,0,12000),truncated:size(body)>12000,
       reaction_observation:reactionObservation(event.payload),
       current_reactions:own(found,'current_reactions')?found.current_reactions:{sources:[],complete:false},
       artifacts:list(found.artifacts).slice(0,50).map(value=>{const item=record(value);return {id:item.id,kind:item.kind,state:item.state};}),
       derived:list(found.derived).slice(0,5).map(value=>{const item=record(value);
         if(typeof item.content_base64!=='string')throw new Error('invalid_derived');
-        return {id:item.id,kind:item.kind,text:Buffer.from(item.content_base64,'base64').toString('utf8').slice(0,2000),
-          provenance:(typeof item.provenance==='string'?item.provenance:String(text(item.provenance))).slice(0,1000)};})});
+        return {id:item.id,kind:item.kind,text:cut(Buffer.from(item.content_base64,'base64').toString('utf8'),0,2000),
+          provenance:cut(typeof item.provenance==='string'?item.provenance:String(text(item.provenance)),0,1000)};})});
   }catch{return text({error:'archive_source_unavailable'});}
 }
 
@@ -172,7 +175,7 @@ async function ownerRead(args:Value,context:ToolContext) {
     for(const key of ['space','q','after'])if(given(args[key]))values[key]=String(args[key]);
     const value=text(await request(context,'/v1/owner/'+view+query(values)));
     // Bound tool context; the dashboard keeps the complete owner views.
-    return value.length<=24000?value:text({view,excerpt:value.slice(0,22000),truncated:true});
+    return size(value)<=24000?value:text({view,excerpt:cut(value,0,22000),truncated:true});
   }catch{return text({error:'owner_read_unavailable',note:'Available only in the owner private conversation.'});}
 }
 
@@ -187,19 +190,19 @@ async function tasks(args:Value,context:ToolContext) {
       for(const key of ['state','when','scope','tag','group','person','status','priority','parent','q','sort','after'])if(args[key]!==undefined&&args[key]!==null&&args[key]!=='')values[key]=String(args[key]);
       const value=text(await request(context,'/v1/owner/tasks'+query(values)));
       // Bound tool context; the dashboard keeps the complete lists.
-      return value.length<=24000?value:text({excerpt:value.slice(0,22000),truncated:true,note:'Narrow the list with filters or after.'});
+      return size(value)<=24000?value:text({excerpt:cut(value,0,22000),truncated:true,note:'Narrow the list with filters or after.'});
     }
     if(action==='add')return text(await request(context,'/v1/owner/tasks',pick(args,taskFields)));
     const task=String(own(args,'id')?args.id:'');
     if((action==='get'||action==='update'||action==='comment')&&!hex.test(task))return text({error:'invalid_task_id'});
     if(action==='get') {
       const value=text(await request(context,'/v1/owner/tasks/'+task));
-      return value.length<=24000?value:text({excerpt:value.slice(0,22000),truncated:true});
+      return size(value)<=24000?value:text({excerpt:cut(value,0,22000),truncated:true});
     }
     if(action==='update')return text(await request(context,'/v1/owner/tasks/'+task,pick(args,['expected_revision',...taskFields,'archived','trashed'])));
     if(action==='comment') {
       const value=text(await request(context,'/v1/owner/tasks/'+task+'/comments',{text:own(args,'text')?args.text:''}));
-      return value.length<=24000?value:text({id:task,commented:true});
+      return size(value)<=24000?value:text({id:task,commented:true});
     }
     return text({error:'invalid_task_action'});
   }catch(error) {
@@ -249,11 +252,11 @@ const PART_CHARS=20000;
 /** An action's view, whole when it is short, otherwise one part of it; the parts joined give the whole view. */
 export function inParts(value:Value,part=1):string {
   const full=text(Object.fromEntries(RESULT_KEYS.map(key=>[key,value[key]??null])));
-  const parts=full.length<=24000?1:Math.ceil(full.length/PART_CHARS);
+  const length=size(full),parts=length<=24000?1:Math.ceil(length/PART_CHARS);
   if(parts===1&&part===1)return full;
   if(part>parts)return text({id:value.id??null,error:'no_such_part',parts});
   return text({id:value.id??null,state:value.state??null,part,parts,hash:createHash('sha256').update(full).digest('hex').slice(0,12),
-    text:full.slice((part-1)*PART_CHARS,part*PART_CHARS),
+    text:cut(full,(part-1)*PART_CHARS,part*PART_CHARS),
     note:'A long result in parts: join the text of every part, in order, before relying on it; read the others with mcp__nocheh__action_status and part.'});
 }
 
@@ -296,7 +299,7 @@ async function actionStatus(args:Value,context:ToolContext) {
       const listed=record(await request(context,'/v1/tools/actions'));
       const keys=['id','destination','state','error_code','resolution','created_at'],operationKeys=['id','kind','state','error_code','resolution','created_at'];
       const rows=(items:unknown,fields:string[])=>list(items).map(value=>{const item=record(value);return Object.fromEntries(fields.map(key=>[key,item[key]??null]));});
-      return text({requests:rows(listed.telegram,keys),operations:rows(listed.actions,operationKeys)}).slice(0,24000);
+      return cut(text({requests:rows(listed.telegram,keys),operations:rows(listed.actions,operationKeys)}),0,24000);
     }
     if(typeof id!=='string'||!hex.test(id))throw new Error('invalid_action');
     // A long result comes in parts; complete bytes remain in the archive and owner UI.
@@ -308,7 +311,7 @@ async function actionStatus(args:Value,context:ToolContext) {
 async function knowledge(context:ToolContext,path:string,body?:unknown) {
   try {
     const result=text(await request(context,path,body));
-    return result.length>64000?text({error:'knowledge_response_too_large',partial:true}):result;
+    return size(result)>64000?text({error:'knowledge_response_too_large',partial:true}):result;
   }catch(error) {
     const refused=code(error);
     if(typeof refused==='string'&&/^[a-z_]{1,96}$/.test(refused))return text({error:refused});
@@ -318,13 +321,13 @@ async function knowledge(context:ToolContext,path:string,body?:unknown) {
 const inspectKeys=['space','q','after','entity_id','fact_id','entities_after','delegations_after','sharing_after','grants_after','claims_after'];
 async function knowledgeInspect(args:Value,context:ToolContext) {
   const entries=Object.entries(args);
-  if(entries.some(([key,value])=>!inspectKeys.includes(key)||typeof value!=='string'||value.length>200||(key!=='space'&&key!=='q'&&value&&!hex.test(value))))
+  if(entries.some(([key,value])=>!inspectKeys.includes(key)||typeof value!=='string'||size(value)>200||(key!=='space'&&key!=='q'&&value&&!hex.test(value))))
     return text({error:'invalid_knowledge_query'});
   return knowledge(context,'/v1/knowledge/context'+query(args as Record<string,string>));
 }
 async function knowledgePropose(args:Value,context:ToolContext) {
   const keys=Object.keys(args).sort();
-  if(keys.join()!=='operation_id,proposal'||typeof args.operation_id!=='string'||args.operation_id.length<1||args.operation_id.length>200||
+  if(keys.join()!=='operation_id,proposal'||typeof args.operation_id!=='string'||args.operation_id.length<1||size(args.operation_id)>200||
     !args.proposal||typeof args.proposal!=='object'||Array.isArray(args.proposal))return text({error:'invalid_knowledge_proposal'});
   // Exact payload validation belongs to the independent repository: no reinterpreted content, no model-selected path.
   return knowledge(context,'/v1/knowledge/proposals',args);
