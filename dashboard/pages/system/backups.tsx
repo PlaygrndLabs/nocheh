@@ -1,6 +1,16 @@
 /** System › Backups: back up, restore, export, check and restart, with a history of past tasks. */
 import {useState, type ReactNode} from 'react';
-import {Archive, Download, HardDriveDownload, History, RotateCcw, Stethoscope, Undo2} from 'lucide-react';
+import {
+  Archive,
+  CloudUpload,
+  Download,
+  HardDriveDownload,
+  History,
+  RotateCcw,
+  ShieldCheck,
+  Stethoscope,
+  Undo2,
+} from 'lucide-react';
 import {apiPost, download} from '../../lib/api';
 import {useParam} from '../../lib/navigation';
 import {refreshResources, useResource} from '../../lib/resource';
@@ -41,7 +51,15 @@ type Job = {
   result?: any;
   automatic?: boolean;
 };
-type Backup = {id: string; created_at: string; files: number; automatic?: boolean};
+type Backup = {id: string; created_at: string; files: number; automatic?: boolean; offsite?: boolean};
+type OffsiteStatus = {
+  enabled: boolean;
+  keep: number;
+  bucket: string | null;
+  last?: {state: string; at: string; error?: string; bytes?: number; prune_error?: string} | null;
+  check?: {state: string; at: string; error?: string} | null;
+  last_sent?: {at: string; bytes?: number} | null;
+};
 type Schedule = {
   enabled: boolean;
   time: string;
@@ -50,8 +68,50 @@ type Schedule = {
   next_at: string | null;
   skipped?: string | null;
 };
-const taskName = (job: Job) => (job.automatic ? 'Automatic backup' : jobName(job.kind));
-type Action = 'backup' | 'export' | 'portable-export' | 'diagnose' | 'restart' | 'restore';
+const taskName = (job: Job) =>
+  job.automatic
+    ? job.kind === 'operations.offsite'
+      ? 'Automatic off-site copy'
+      : 'Automatic backup'
+    : jobName(job.kind);
+type Action =
+  'backup' | 'export' | 'portable-export' | 'diagnose' | 'restart' | 'restore' | 'offsite' | 'offsite-check';
+
+function offsiteSummary(offsite: OffsiteStatus | undefined, sending: boolean): string {
+  if (!offsite) return '';
+  if (!offsite.enabled) return 'Off. Copies stay only on this machine.';
+  const last = offsite.last,
+    good = offsite.last_sent;
+  const stored = good
+    ? `Last copy ${dateTime(good.at)}${good.bytes != null ? ` (${size(good.bytes)})` : ''}.`
+    : 'No copy sent yet.';
+  const latest = sending
+    ? 'Sending a copy now.'
+    : last?.state === 'failed'
+      ? `The last try failed ${dateTime(last.at)}: ${operationError(last.error ?? 'offsite_failed')}`
+      : last?.state === 'running'
+        ? `A copy started ${dateTime(last.at)} didn’t finish.`
+        : '';
+  return [latest, stored, `Keeping the last ${offsite.keep} in ${offsite.bucket ?? 'the bucket'}.`]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function checkSummary(offsite: OffsiteStatus | undefined): string {
+  const check = offsite?.check;
+  if (!offsite?.enabled) return '';
+  if (!check) return 'Not tested yet.';
+  return check.state === 'passed'
+    ? `Passed ${dateTime(check.at)}.`
+    : `Failed ${dateTime(check.at)}: ${operationError(check.error ?? 'offsite_failed')}`;
+}
+
+const size = (bytes: number) =>
+  bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
+    : bytes >= 1024 ** 2
+      ? `${Math.round(bytes / 1024 ** 2)} MB`
+      : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 const isExport = (job: Job) => job.kind === 'operations.export' || job.kind === 'operations.portable-export';
 const zipName = (job: Job) =>
@@ -75,7 +135,7 @@ function DownloadButton({job, size = 'sm'}: {job: Job; size?: 'sm' | 'md'}) {
 
 export function BackupsView() {
   const jobs = useResource<Job[]>('/jobs', 5000);
-  const listing = useResource<{backups: Backup[]; schedule?: Schedule}>('/operations', 10000);
+  const listing = useResource<{backups: Backup[]; schedule?: Schedule; offsite?: OffsiteStatus}>('/operations', 10000);
   const {toast, confirm} = useFeedback();
   const [busy, setBusy] = useState<Action | ''>('');
   const [problem, setProblem] = useState<{action: Action; text: string} | null>(null);
@@ -88,6 +148,7 @@ export function BackupsView() {
   const latest = (action: Action) => tasks.find(job => job.kind === 'operations.' + action);
   const backups = listing.data?.backups ?? [];
   const schedule = listing.data?.schedule;
+  const offsite = listing.data?.offsite;
 
   const start = async (action: Action, options?: Record<string, unknown>) => {
     setBusy(action);
@@ -132,6 +193,7 @@ export function BackupsView() {
     text: string,
     label: string,
     extra?: ReactNode,
+    unavailable = false,
   ) => {
     const last = latest(action);
     const state = last ? jobState(last.state) : null;
@@ -158,7 +220,7 @@ export function BackupsView() {
               {label}
             </Button>
           ) : (
-            <Button busy={busy === action} disabled={!!busy || !!active} onClick={() => ask(action)}>
+            <Button busy={busy === action} disabled={!!busy || !!active || unavailable} onClick={() => ask(action)}>
               {label}
             </Button>
           )}
@@ -217,6 +279,31 @@ export function BackupsView() {
                   ? `${backups.length} saved · newest ${dateTime(backups[0]!.created_at)}`
                   : 'No backups saved yet.'}
           </p>,
+        )}
+        {card(
+          'offsite',
+          CloudUpload,
+          'Off-site copy',
+          'Sends the newest backup, encrypted with your passphrase on this machine, to your own storage. The storage only sees scrambled data.',
+          'Send copy now',
+          offsite && (
+            <p className="mt-3 text-xs text-muted">
+              {offsiteSummary(offsite, !!latest('offsite') && running(latest('offsite')!))}{' '}
+              <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
+                {offsite.enabled ? 'Change' : 'Set up'}
+              </a>
+            </p>
+          ),
+          !offsite?.enabled || !backups.length,
+        )}
+        {card(
+          'offsite-check',
+          ShieldCheck,
+          'Test the off-site copy',
+          'Downloads the newest copy, opens it with your passphrase and checks every file. Nothing is restored.',
+          'Run test',
+          offsite?.enabled && <p className="mt-3 text-xs text-muted">{checkSummary(offsite)}</p>,
+          !offsite?.enabled,
         )}
         {card(
           'export',
