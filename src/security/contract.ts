@@ -14,6 +14,8 @@ export type Outcome = 'allow'|'deny'|'ask';
 export interface Effect {
   readonly id:string; readonly kind:EffectKind; readonly scope:string;
   readonly profile:string; readonly job?:string; readonly fingerprint:string;
+  /** The brain whose turn asked, from its pass; effects that no turn asks for have none. */
+  readonly brain?:string;
 }
 export interface Rule {
   id:string; kind:EffectKind; outcome:'deny'|'ask';
