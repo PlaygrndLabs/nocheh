@@ -4,8 +4,9 @@
 Accepted on 2026-11-10, as step 5 of the build that makes the brain and the
 memory engine swappable, after the owner said "start build." Extends the scoped
 turn processes of [ADR-0021](0021-scoped-native-assistant-processes.md), the
-controlled execution of [ADR-0029](0029-controlled-tool-execution.md) and the
-security service of [ADR-0037](0037-external-security-plugin-service.md).
+controlled execution of [ADR-0029](0029-controlled-tool-execution.md), the
+security service of [ADR-0037](0037-external-security-plugin-service.md) and the
+owner export of [ADR-0230](0230-portable-export-carries-owner-work.md).
 Replaces the Nocheh plugin's own Hermes tools and the shell, browser and MCP
 switches kept in each Hermes profile. Every route, check and approval behind the
 tools is unchanged.
@@ -82,7 +83,11 @@ tools is unchanged.
   /v1/chat-tools`; the dashboard shows them on a chat's page in Chats and, for
   every chat, in Settings › Assistant. Scheduled runs and background jobs follow
   their chat; a schedule has no switches of its own.
-- In development mode the old profile values are dropped, so every tool starts on.
+- In development mode the old profile values are not carried over, so every tool
+  starts on. An install that saved one removes it from Hermes's saved settings
+  once; Hermes refuses a setting it no longer knows, so its turns stop until then.
+- The owner export carries `chat_tool_settings` with the owner's other settings
+  ([ADR-0230](0230-portable-export-carries-owner-work.md)).
 </decision>
 
 <consequences>
