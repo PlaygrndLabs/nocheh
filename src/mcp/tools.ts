@@ -19,9 +19,18 @@ class Refused extends Error {constructor(readonly status:number,readonly body:un
 const code=(error:unknown)=>error instanceof Refused&&error.body&&typeof error.body==='object'?(error.body as Value).error:undefined;
 const timedOut=(error:unknown)=>(error as {name?:unknown}|null)?.name==='TimeoutError';
 const text=(value:unknown)=>JSON.stringify(value);
-/** Text is counted and cut by characters, as the Python tools did, so no cut splits an emoji in two. */
+/** Tool text is counted and cut by characters, as the Python tools did, so no cut splits an emoji in two. */
 const size=(value:string)=>value.length-(value.match(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g)?.length??0);
-const cut=(value:string,start:number,end:number)=>start===0&&value.length<=end?value:Array.from(value).slice(start,end).join('');
+function cut(value:string,start:number,end:number):string {
+  if(start===0&&value.length<=end)return value;
+  let count=0,index=0,from=value.length;
+  while(index<value.length&&count<end) {
+    if(count===start)from=index;
+    const unit=value.charCodeAt(index);
+    index+=unit>=0xD800&&unit<=0xDBFF&&(value.charCodeAt(index+1)&0xFC00)===0xDC00?2:1;count++;
+  }
+  return from<index?value.slice(from,index):'';
+}
 const hex=/^[a-f0-9]{64}$/;
 const own=(args:Value,key:string)=>Object.hasOwn(args,key);
 const record=(value:unknown):Value=>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('expected_object');return value as Value;};
@@ -71,7 +80,7 @@ async function search(args:Value,context:ToolContext) {
     if(mode==='current_reactions')return text(await request(context,'/v1/search'+query({mode,limit:count})));
     if(mode!=='text')throw new Error('invalid_search_mode');
     const words=args.query;
-    if(typeof words!=='string'||!words.trim()||size(words)>2000)throw new Error('invalid_query');
+    if(typeof words!=='string'||!words.trim()||words.length>2000)throw new Error('invalid_query');
     const status=await importStatus(context);
     const rows=list(await request(context,'/v1/search'+query({q:words,limit:count})));
     const {space,scope}=context.principal;
@@ -98,7 +107,7 @@ async function page(args:Value,context:ToolContext) {
 async function memorySearch(args:Value,context:ToolContext) {
   try {
     const words=args.query;
-    if(typeof words!=='string'||!words.trim()||size(words)>2000)throw new Error('invalid_query');
+    if(typeof words!=='string'||!words.trim()||words.length>2000)throw new Error('invalid_query');
     return text(await request(context,memoryRoutes.search,{query:words,limit:clamp(integer(args.limit,5),1,10)}));
   }catch{return text({error:'memory_search_unavailable'});}
 }
@@ -321,13 +330,13 @@ async function knowledge(context:ToolContext,path:string,body?:unknown) {
 const inspectKeys=['space','q','after','entity_id','fact_id','entities_after','delegations_after','sharing_after','grants_after','claims_after'];
 async function knowledgeInspect(args:Value,context:ToolContext) {
   const entries=Object.entries(args);
-  if(entries.some(([key,value])=>!inspectKeys.includes(key)||typeof value!=='string'||size(value)>200||(key!=='space'&&key!=='q'&&value&&!hex.test(value))))
+  if(entries.some(([key,value])=>!inspectKeys.includes(key)||typeof value!=='string'||value.length>200||(key!=='space'&&key!=='q'&&value&&!hex.test(value))))
     return text({error:'invalid_knowledge_query'});
   return knowledge(context,'/v1/knowledge/context'+query(args as Record<string,string>));
 }
 async function knowledgePropose(args:Value,context:ToolContext) {
   const keys=Object.keys(args).sort();
-  if(keys.join()!=='operation_id,proposal'||typeof args.operation_id!=='string'||args.operation_id.length<1||size(args.operation_id)>200||
+  if(keys.join()!=='operation_id,proposal'||typeof args.operation_id!=='string'||args.operation_id.length<1||args.operation_id.length>200||
     !args.proposal||typeof args.proposal!=='object'||Array.isArray(args.proposal))return text({error:'invalid_knowledge_proposal'});
   // Exact payload validation belongs to the independent repository: no reinterpreted content, no model-selected path.
   return knowledge(context,'/v1/knowledge/proposals',args);

@@ -87,14 +87,21 @@ tools is unchanged.
   starts on. An install that saved one removes it from Hermes's saved settings
   once; Hermes refuses a setting it no longer knows, so its turns stop until then.
 - The owner export carries `chat_tool_settings` with the owner's other settings
-  ([ADR-0230](0230-portable-export-carries-owner-work.md)).
+  ([ADR-0230](0230-portable-export-carries-owner-work.md)). A switch that was on
+  arrives inherited, so an import never turns a tool on.
 </decision>
 
 <consequences>
 - Another brain with an MCP client can use the same tools and checks; it needs a
   pass and its own way to connect.
-- A tool call makes one more local HTTP request, and connecting adds about a
-  second to the start of a turn, most of it loading Hermes's MCP library.
+- A tool call makes one more local HTTP request, on its own connection, and
+  connecting adds about a second to the start of a turn, most of it loading
+  Hermes's MCP library.
+- Two hops behind the tools still use Node's `fetch`, which stops waiting for an
+  answer's first byte after 300 seconds: the broker passing a route on to
+  storage, and each Honcho chat call. So a memory recall longer than five minutes
+  still fails in an isolated turn, and one Honcho call can last five minutes, not
+  its eight. This change leaves both as they were.
 - Hermes hands each answer to the model wrapped as `{"result": "<text>"}`, so the
   model reads the same JSON as before inside one more string. Answering with
   structured content only would avoid that in Hermes, but a brain that reads only

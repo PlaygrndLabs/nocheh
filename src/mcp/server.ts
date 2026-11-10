@@ -14,13 +14,14 @@ const rpc=(res:ServerResponse,status:number,value:unknown)=>{
 const failure=(id:Id|null,code:number,message:string)=>({jsonrpc:'2.0',id,error:{code,message}});
 
 /** A loop-back to this service's own routes with the caller's bearer, so each tool passes every check its route has today.
- * node:http sets no idle limit of its own, so a long memory recall keeps its whole budget; only `timeoutMs` ends a call. */
+ * node:http sets no idle limit of its own, so a long memory recall keeps its whole budget; only `timeoutMs` ends a call.
+ * Each call has its own connection: a route that refuses a body before reading all of it leaves no half-read socket for the next. */
 export function loopback(base:string,authorization:string):Loopback {
   return (method,path,body,timeoutMs)=>new Promise((resolve,reject)=>{
     const signal=AbortSignal.timeout(timeoutMs),payload=body===undefined?undefined:Buffer.from(JSON.stringify(body));
     let settled=false;
     const fail=(error:unknown)=>{if(!settled){settled=true;reject(signal.aborted?signal.reason:error);}};
-    const outgoing=request(base+path,{method,signal,headers:{authorization,'content-type':'application/json',...(payload?{'content-length':payload.length}:{})}},response=>{
+    const outgoing=request(base+path,{method,signal,agent:false,headers:{authorization,'content-type':'application/json',...(payload?{'content-length':payload.length}:{})}},response=>{
       const status=response.statusCode??0;
       if(status>=300&&status<400){response.resume();outgoing.destroy();return fail(new Error('archive_redirect_refused'));}
       // A tool reads at most 2 MiB, as the Python tools did.

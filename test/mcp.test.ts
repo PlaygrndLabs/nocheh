@@ -5,7 +5,7 @@ import pg from 'pg';
 import {defaultBrain,reader,scopeToken,turnToken,type Reader} from '../src/access.js';
 import {ingest} from '../src/archive.js';
 import {initialize} from '../src/database.js';
-import {HttpError} from '../src/http.js';
+import {HttpError,readJson} from '../src/http.js';
 import {brokerServer,jobErrors as relayedJobErrors} from '../src/security/broker.js';
 import {loopback,protocolVersions,serveMcp,toolSurface,turnDeadline} from '../src/mcp/server.js';
 import {inParts,jobErrors,mcpTools,memoryRoutes,timeoutFor,type ToolContext} from '../src/mcp/tools.js';
@@ -152,6 +152,17 @@ test('a loop-back sends the turn pass and reads a bounded answer',async()=>{
     await assert.rejects(call('GET','/redirect',undefined,5000),/archive_redirect_refused/);
     await assert.rejects(call('GET','/slow',undefined,20),{name:'TimeoutError'});
     big=true;await assert.rejects(call('GET','/v1/events/'+ID,undefined,5000),/archive_response_too_large/);
+  }finally{await close(server);}
+});
+
+test('a route that refuses a large body early leaves no stalled connection for the next call',async()=>{
+  // As the task routes do: read up to a limit, then refuse with the rest unread.
+  const server=createServer((req,res)=>{void readJson(req,64*1024).then(value=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:Boolean(value)}));},
+    error=>{res.writeHead(error instanceof HttpError?error.status:500,{'content-type':'application/json'});res.end(JSON.stringify({error:error.code}));});});
+  const base=await listen(server),call=loopback(base,'Bearer turn.synthetic');
+  try {
+    assert.equal((await call('POST','/v1/owner/tasks',{notes:'x'.repeat(600*1024)},5000)).status,413);
+    for(let n=0;n<3;n++)assert.deepEqual(await call('POST','/v1/owner/tasks',{title:'Synthetic'},2000),{status:200,body:{ok:true}});
   }finally{await close(server);}
 });
 
@@ -305,6 +316,10 @@ test('a long action result comes in parts that join to the whole view',async()=>
   const pieces=[1,2].map(part=>JSON.parse(inParts(emoji,part)));
   assert.equal(pieces[0].parts,2);assert.equal(pieces.map(part=>part.text).join(''),whole);
   for(const piece of pieces)assert.doesNotMatch(piece.text,/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
+  // A long mixed text cuts the same as counting characters one by one.
+  const mixed=view(('a🙂ب'.repeat(5000)+'\uD800z').repeat(2)),joined=JSON.stringify({id:ID,kind:'mcp',state:'done',resolution:null,result:mixed.result,error_code:null});
+  const count=JSON.parse(inParts(mixed,1)).parts,characters=Array.from(joined);
+  assert.ok(count>1);for(let part=1;part<=count;part++)assert.equal(JSON.parse(inParts(mixed,part)).text,characters.slice((part-1)*20000,part*20000).join(''));
   const idle=fake(()=>value);
   for(const part of [0,'2',true,1.5])assert.deepEqual(await run('action_status',{id:ID,part},idle.context),{error:'invalid_part'});
   for(const id of ['../tools',7])assert.deepEqual(await run('action_status',{id},idle.context),{error:'controlled_action_unavailable'});
