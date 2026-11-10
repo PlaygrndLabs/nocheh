@@ -30,7 +30,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     if(req.url?.startsWith('/v1/workflows/metrics?'))result={range:'7d',family:'browser',buckets:[],observed_at:'2026-09-16T12:00:00Z'};
     if(req.url?.startsWith('/v1/workflows?'))result={workflows:[{id:'a'.repeat(64),state:'waiting'}],next:null};
     if(req.url==='/v1/workflows/'+'a'.repeat(64)+'/retry')result={id:'a'.repeat(64),revision:body.revision+1};
-    if(req.url==='/v1/memory/honcho')result={connection:{attached:true,verified:true}};
+    if(req.url==='/v1/memory/longterm')result={connection:{attached:true,verified:true}};
     if(req.url==='/v1/workflows/imports/confirm'){
       confirmations.push(body);const previous=imports.get(body.id);
       const job={...previous,state:'queued',completed:previous?.completed??0,duplicates:previous?.duplicates??0};

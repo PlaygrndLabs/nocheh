@@ -12,6 +12,7 @@ import type {SourceReference} from '../src/stores/archive.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {policySnapshot,savePolicy} from '../src/security/store.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a card\'s Allow here and Always allow let the same site or command run in that chat without asking',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -30,7 +31,7 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
         return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:String(cards.length)}:{state:'done'};
       }
       return {state:'done'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const bot=String(Date.now()).slice(-8)+'3';let updates=0;
   const capture=async(label:string,payload:Record<string,unknown>,scope=group)=>{
     const event:Envelope={version:1,key:`telegram:${bot}:update:${payload.update_id}`,origin:'live',kind:'telegram_update',bot_id:bot,scope,source_id:String(payload.update_id),revision:'1',occurred_at:null,text:label,payload};

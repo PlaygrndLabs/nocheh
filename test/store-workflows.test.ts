@@ -13,6 +13,7 @@ import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {observation} from '../src/workflows/pipeline.js';
 import {requestWorkflow,retireSupersededSourceWorkflows,type WorkflowFamily} from '../src/workflows/store.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('storage workflow admission leaves pool capacity for nested publications',async()=>{
   let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let calls=0;
@@ -152,7 +153,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
         return {state:reviewRunning?'running':'done'};
       }
       throw Error('unexpected runtime operation');
-    },transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){engines++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Improved synthetic reading';}},honcho:async(path,body:any,method)=>{
+    },transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){engines++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Improved synthetic reading';}},memoryEngine:honchoEngine(async(path,body:any,method)=>{
       if(method==='DELETE')return {deleted:true};
       if(path.endsWith('/messages/list'))return {items:(remote.get(path.replace('/list',''))??[]).filter(record=>record.metadata.nocheh_receipt===body.filters.metadata.nocheh_receipt)};
       if(path.endsWith('/messages')){sends++;const record={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[...(remote.get(path)??[]),record]);if(loseReply){loseReply=false;throw Error('lost response');}return [record];}
@@ -164,7 +165,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       if(path.endsWith('/representation'))return {representation:'Synthetic review context'};
       if(path.endsWith('/chat')){reasoning++;return {content:JSON.stringify({interpretations:[{kind:'meaning',subject:'blue star',text:'A blue star may indicate review.',scope:{kind:'conversation',id:group},uncertainty:'uncertain',evidence_ids:targetIds,conflicts:[]}]})};}
       return {};
-    }});
+    })});
   const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});let run=0;
   const advance=async(family:WorkflowFamily,job:string,generation?:number)=>{
     generation??=(family==='memory_review'||family==='honcho')&&job.startsWith('source:')?(await services.guards.state()).epoch:1;

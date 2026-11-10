@@ -29,7 +29,7 @@ class ArchiveTests(unittest.TestCase):
         token=archive_tools.ARCHIVE_CREDENTIAL.set('signed-synthetic-credential')
         try:
             with patch.object(archive_tools,'_PROCESS_CREDENTIAL',None),patch('urllib.request.urlopen',side_effect=slow_read) as network:
-                result=archive_tools.request('/v1/memory/honcho/recall',{'query':'Synthetic recall'})
+                result=archive_tools.request('/v1/memory/longterm/recall',{'query':'Synthetic recall'})
                 self.assertEqual(result['sources'][0]['kind'],'memory_inference')
                 self.assertGreater(network.call_args.kwargs['timeout'],600)
                 archive_tools.request('/v1/context/prepare',{'text':'Synthetic context'})
@@ -44,7 +44,7 @@ class ArchiveTests(unittest.TestCase):
             with patch.object(archive_tools,'_PROCESS_CREDENTIAL',None),patch.object(
                     archive_tools,'_PROCESS_DEADLINE',time.time()+100),patch(
                     'urllib.request.urlopen',side_effect=lambda *args,**kwargs:io.BytesIO(b'{"sources":[]}')) as network:
-                archive_tools.request('/v1/memory/honcho/recall',{'query':'Synthetic recall'})
+                archive_tools.request('/v1/memory/longterm/recall',{'query':'Synthetic recall'})
                 self.assertGreater(network.call_args.kwargs['timeout'],50)
                 self.assertLess(network.call_args.kwargs['timeout'],56)
                 archive_tools.request('/v1/search?q=synthetic')
@@ -165,7 +165,7 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(json.loads(archive_tools.page_tool({})),{'error':'archive_page_unavailable'})
         with patch.object(archive_tools,'request',return_value={'sources':[],'learned':False}) as request:
             self.assertEqual(json.loads(archive_tools.meaning_tool({'query':'who sends the invoice','limit':50})),{'sources':[],'learned':False})
-        request.assert_called_once_with('/v1/memory/honcho/search',{'query':'who sends the invoice','limit':10})
+        request.assert_called_once_with('/v1/memory/longterm/search',{'query':'who sends the invoice','limit':10})
         with patch.object(archive_tools,'request') as request:
             self.assertEqual(json.loads(archive_tools.meaning_tool({'query':' '})),{'error':'memory_search_unavailable'})
             request.assert_not_called()

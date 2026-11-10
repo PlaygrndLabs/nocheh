@@ -6,6 +6,7 @@ import {observedSource} from '../src/observed-source.js';
 import {sourceObjectId} from '../src/source-model.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 const desktop=(scope:string,chat:{id:number;type:string},message:Record<string,unknown>,label=''):Envelope=>({version:1,
   key:`telegram-desktop:${chat.type}:${chat.id}:${message.id}:${label}`,origin:'import',bot_id:'desktop-export',kind:'telegram_desktop_message',
@@ -65,7 +66,7 @@ test('imported copies of live messages are marked and lose to the live copy; new
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),bare=Date.now(),group='-100'+bare,owner={admin:true,scope:null};
   const s=storageServices(stores,{dataDir:'/tmp/nocheh-desktop-identity-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
-    runtime:async()=>{throw Error('runtime_not_expected');},honcho:async()=>{throw Error('honcho_not_expected');}});
+    runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const chat={id:bare,type:'public_supergroup'};
   const record=async(value:Envelope)=>await s.imports.record(owner,{event:value,artifacts:[],derived:[]}) as any;
   try{

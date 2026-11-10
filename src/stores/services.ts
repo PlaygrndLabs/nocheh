@@ -6,7 +6,7 @@ import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
-import type {HonchoCall} from '../honcho.js';
+import type {MemoryEngine} from '../memory/engine.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository} from './archive.js';
 import {OperationRepository} from './operations.js';
@@ -24,7 +24,7 @@ import {ProjectRepository,SharingPolicyRepository} from './projects.js';
 import {LearnedMemoryRepository} from './learned.js';
 import {LearningContextRepository} from './learning-context.js';
 import {ContextualLearningRepository} from './learning-engine.js';
-import {HonchoProvenanceRepository} from './honcho-provenance.js';
+import {MemoryProvenanceRepository} from './memory-provenance.js';
 import {PreparedContextRepository} from './prepared-context.js';
 import {HttpError} from '../http.js';
 import {RuntimeTurnRepository} from './turns.js';
@@ -59,7 +59,7 @@ import {BackgroundJobRepository} from './background-jobs.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
-  runtime:RuntimeCall;honcho:HonchoCall;transcription?:DerivationEngine;serviceToken?:string}) {
+  runtime:RuntimeCall;memoryEngine:MemoryEngine;transcription?:DerivationEngine;serviceToken?:string}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
   const transcription=options.transcription??voiceTranscription(options.runtime),extraction=documentExtraction(options.runtime);
@@ -81,7 +81,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   },options.detectorVersion);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
   const projects=new ProjectRepository(stores.control),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
-  const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new HonchoProvenanceRepository(stores,archive,guards,options.honcho);
+  const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
   const turns=new RuntimeTurnRepository(access,prepared);
@@ -97,7 +97,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
-  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.honcho,detect);
+  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's private chat reaches every list; a project's chat only that project's own list.
@@ -136,7 +136,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.runtime,options.serviceToken??''),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
-    learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
+    learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),
     shared,

@@ -3,10 +3,15 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {digest} from '../src/archive.js';
 import {HttpError} from '../src/http.js';
-import {honchoInputTokens,honchoQueryBytes,honchoQueryCharacters,learningQuery} from '../src/stores/learning-engine.js';
+import {learningQuery as askWithin} from '../src/stores/learning-engine.js';
+import {HonchoEngine,honchoInputTokens,honchoQueryBytes,honchoQueryCharacters} from '../src/memory/honcho.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {observation} from '../src/workflows/pipeline.js';
+
+/** The learning query within Honcho's question limits, as the learning engine asks it. */
+const learningQuery=(instruction:Parameters<typeof askWithin>[0],context:Parameters<typeof askWithin>[1])=>
+  askWithin(instruction,context,new HonchoEngine(async()=>({})).questionLimits);
 
 test('an unusable saved learning result closes its workflow while other learning failures stay retryable',async()=>{
   let failure:Error=new HttpError(422,'invalid_interpretation_result');
@@ -19,8 +24,8 @@ test('an unusable saved learning result closes its workflow while other learning
   failure=new HttpError(413,'learning_query_limit');
   const oversized=await operations.memory_review!(job,authority);
   assert.deepEqual([oversized.state,oversized.waiting_reason],['failed','input_limit'],'an input too large to ask is not retried');
-  failure=new HttpError(503,'honcho_unavailable');
-  await assert.rejects(operations.memory_review!(job,authority),{code:'honcho_unavailable'},'provider outages keep the normal retry path');
+  failure=new HttpError(503,'memory_engine_unavailable');
+  await assert.rejects(operations.memory_review!(job,authority),{code:'memory_engine_unavailable'},'provider outages keep the normal retry path');
   failure=new HttpError(422,'unavailable_interpretation_evidence');
   await assert.rejects(operations.memory_review!(job,authority),{code:'unavailable_interpretation_evidence'});
 });

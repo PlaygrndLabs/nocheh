@@ -14,6 +14,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {storageServer} from '../src/stores/server.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 // The job tool's own list of codes it may relay; the broker relays exactly these.
 test('the broker relays the job codes the job tool names, the GitHub copy\'s among them',()=>{
@@ -51,7 +52,7 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
       }
       if(operation.startsWith('telegram.'))return {state:'done',chat_id:input.chat_id,message_id:'5'};
       throw Error('unexpected runtime call '+operation);
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let refuse=(_url:string):Response|null=>null;
   const mock:typeof fetch=async(url,init)=>{
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',api_key:'synthetic-credential',model_context_length:100000});

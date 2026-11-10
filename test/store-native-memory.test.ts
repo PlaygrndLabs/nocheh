@@ -11,6 +11,7 @@ import {storageServices} from '../src/stores/services.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
 import {HttpError} from '../src/http.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('reply context reads Honcho on arrival, limits other audiences to their own session and reuses identical guarded results',async()=>{
   const workspace=digest('installation-workspace'),groupSession=digest('group-session'),ownerSession=digest('owner-session');
@@ -33,10 +34,10 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
     guards:{prepareContext:async()=>{prepared++;return null;},read:async()=>({value:{text:'Guarded Honcho context'}})}};
   const derived={record:async(input:any)=>{records.push(input.operation_id);contents.push(String(input.content));return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
   const audience={assert:async()=>({generation:'fixture',epoch:1,mode:'on'})};
-  const memory=new NativeMemoryRepository(contexts as any,derived as any,{audience,allow:async()=>{}} as any,{} as any,async(path:string)=>{
+  const memory=new NativeMemoryRepository(contexts as any,derived as any,{audience,allow:async()=>{}} as any,{} as any,honchoEngine(async(path:string)=>{
     calls.push(path);if(fail)throw Error('honcho_down');
     return {summary:{content:'Conversation summary'},peer_representation:'What the speaker said',peer_card:['Prefers mornings'],messages:[{content:'never used'}]};
-  },async()=>[]);
+  }),async()=>[]);
   (memory as any).current=async()=>({row:{id:workspace,root_reference:root,state:'ready'},binding:{generation:'fixture',epoch:1,mode:'on'},principal:{}});
   const group={admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader;
   const first=await memory.context(group);
@@ -82,12 +83,12 @@ test('recall asks every connected peer side by side, keeps each inside the group
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
   const provenance={sessions:async(id:string,audience:string,_limit:number,group:string|null)=>{
     assert.equal(id,workspace);assert.equal(audience,'-100');assert.equal(group,'-100','a group recall spans every topic of its group');return groupSessions;}};
-  const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,async(path:string,body:any)=>{
+  const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,honchoEngine(async(path:string,body:any)=>{
     const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;asked.push({peer,body});
     // Hold every answer until all peers were asked, then release the first peer last.
     await new Promise<void>(resolve=>{waiting.push(resolve);if(waiting.length===peers.length)[...waiting.slice(1),waiting[0]!].forEach(release=>release());});
     return {content:'Answer from '+peer};
-  },async()=>[]);
+  }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
     current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
     connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
@@ -114,10 +115,10 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   const provenance={sessions:async()=>sessions,read:async(id:string,audience:string,ids:string[],current:unknown)=>{
     reads.push({id,audience,ids,current});if(failRead)throw Error('provenance_down');
     return {conclusions:ids.map(item=>({id:item,parents:[],deleted:false,exact_citations:true})),evidence:[archived],limitations:[],exact_citations:true};}};
-  const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,async(path:string,body:any)=>{
+  const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,honchoEngine(async(path:string,body:any)=>{
     bodies.push(body);const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;
     return {content:'Answer from '+peer,evidence:{conclusions:peer==='person_a'?[{id:first},{id:second},{id:'not-a-conclusion'}]:[{id:first}],messages:[],tool_calls:[]}};
-  },async()=>[]);
+  }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
     current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
     connectedPeers:async()=>({items:['person_a','person_b'].map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
@@ -147,11 +148,11 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:'-100'})},guards:{}};
   const binding={generation:'fixture',epoch:1,mode:'on'};
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>{asked.push(query);return 'checked: '+query;},allow:async()=>{}};
-  const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,{sessions:async()=>learned} as any,async(path:string,body:any)=>{
+  const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,{sessions:async()=>learned} as any,honchoEngine(async(path:string,body:any)=>{
     bodies.push({path,body});
     return [{id:'A'.repeat(21),metadata:{nocheh_receipt:digest('receipt-a')}},{id:'B'.repeat(21),metadata:{nocheh_receipt:digest('receipt-b')}},
       {id:'not-native',metadata:{nocheh_receipt:digest('receipt-a')}},{id:'C'.repeat(21),metadata:{nocheh_receipt:digest('receipt-c')}}];
-  },async()=>[]);
+  }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
   const group={admin:false,scope:'-100',space:'-100/topic/3',turnEvent:digest('turn')} as Reader;
   assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
@@ -176,13 +177,13 @@ test('terminal Honcho derivation errors cannot mark a generation ready',async()=
     throw Error('unexpected_control_query');
   }};
   const paths:string[]=[];let checkedAt:Date|null=null;
-  const memory=new NativeMemoryRepository({access:{stores:{control}}} as any,{} as any,{} as any,{} as any,
+  const memory=new NativeMemoryRepository({access:{stores:{control}}} as any,{} as any,{} as any,{} as any,honchoEngine(
     async(path:string)=>{paths.push(path);return path.endsWith('/queue/status')?{pending_work_units:0,in_progress_work_units:0}:
-      {failed_items:valid?failed:undefined};},async()=>[]);
+      {failed_items:valid?failed:undefined};}),async()=>[]);
   (memory as any).current=async()=>({row:{work_revision:3,derivation_checked_at:checkedAt}});
   assert.equal(await memory.observe(id),false);
   assert.deepEqual(updates[0]!.values.slice(0,5),[id,'building',3,true,true]);
-  assert.match(updates[0]!.sql,/honcho_derivation_failed/);
+  assert.match(updates[0]!.sql,/memory_learning_failed/);
   assert.ok(paths.at(-1)!.endsWith('/nocheh/queue-health'),'the first check reads every failure');
   // Honcho keeps a failure for 30 days; once seen with the queue drained, only newer work counts.
   checkedAt=updates[0]!.values[5] as Date;
@@ -195,7 +196,7 @@ test('terminal Honcho derivation errors cannot mark a generation ready',async()=
 
 test('native memory dates a Honcho message by its event, not by a retried write',async()=>{
   const archive={query:async()=>({rows:[{occurred_at:'1760785619',received_at:new Date('2026-10-18T14:06:00Z')}]})};
-  const memory=new NativeMemoryRepository({access:{stores:{archive}}} as any,{} as any,{} as any,{} as any,async()=>({}),async()=>[]);
+  const memory=new NativeMemoryRepository({access:{stores:{archive}}} as any,{} as any,{} as any,{} as any,honchoEngine(async()=>({})),async()=>[]);
   const occurred=(row:unknown)=>(memory as any).occurredAt(row);
   assert.equal(await occurred({source_reference:{id:'fixture'},projection_reference:null}),'2025-10-18T11:06:59.000Z');
   assert.equal(await occurred({source_reference:{id:'fixture'},projection_reference:{id:'learned',revision:1}}),undefined,'an interpretation keeps the time it was learned');
@@ -213,7 +214,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   const priorities:unknown[]=[];
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(_operation,input)=>{priorities.push(input.priority);return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},
-    honcho:async(path,body:any,method)=>{
+    memoryEngine:honchoEngine(async(path,body:any,method)=>{
       calls.push({path,body,...(method?{method}:{})});
       const session=/^\/v3\/workspaces\/([^/]+)\/sessions(?:\/([^/?]+))?/.exec(path);
       if(method==='DELETE'){if(session?.[2])active.get(session[1]!)?.delete(session[2]);return {deleted:true};}
@@ -223,7 +224,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       if(path.endsWith('/messages/list'))return {items:remote.get(path.replace('/list',''))??[]};
       if(path.endsWith('/messages')) {
         const message={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[message]);
-        if(rejectWrite){rejectWrite=false;remote.delete(path);throw new HttpError(503,'honcho_upstream_rejected');}
+        if(rejectWrite){rejectWrite=false;remote.delete(path);throw new HttpError(503,'memory_engine_rejected');}
         if(loseReply){loseReply=false;throw Error('synthetic_lost_acknowledgment');}return [message];
       }
       if(path.includes('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
@@ -232,7 +233,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       if(path.endsWith('/representation'))return {representation:'Stored conclusion saffronpass. '+ownerApproved};
       if(path.endsWith('/chat'))return {content:'Recalled conclusion saffronpass.'};
       return {};
-    }});
+    })});
   const actor=async(source:string):Promise<Reader>=>{
     const binding=await services.guards.state();return {admin:false,scope:group,space:group,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
   };
@@ -311,15 +312,15 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     remote.delete(entityPath);
     await stores.control.query("UPDATE memory_ingestion_receipts SET state='uncertain',uncertain_at=now()-interval '11 minutes' WHERE id=$1",[entityReceiptId]);
     assert.equal(await services.memory.reconcileReceipt(entityReceiptId),false);
-    assert.deepEqual(await receiptState(),{state:'pending',error_code:'honcho_write_absent'});
+    assert.deepEqual(await receiptState(),{state:'pending',error_code:'memory_write_absent'});
     const beforeRewrite=calls.filter(c=>c.path.endsWith('/messages')).length;
     assert.equal(await services.memory.syncReceipt(entityReceiptId,authority),true);
     assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,beforeRewrite+1);
     // Honcho answering a write with an error means nothing landed, so the receipt stays retryable.
     remote.delete(entityPath);rejectWrite=true;
     await stores.control.query("UPDATE memory_ingestion_receipts SET state='pending' WHERE id=$1",[entityReceiptId]);
-    await assert.rejects(services.memory.syncReceipt(entityReceiptId,authority),/honcho_upstream_rejected/);
-    assert.deepEqual(await receiptState(),{state:'pending',error_code:'honcho_upstream_rejected'});
+    await assert.rejects(services.memory.syncReceipt(entityReceiptId,authority),/memory_engine_rejected/);
+    assert.deepEqual(await receiptState(),{state:'pending',error_code:'memory_engine_rejected'});
     assert.equal(await services.memory.syncReceipt(entityReceiptId,authority),true);
     assert.equal(await services.memory.observe(workspace),true);
     assert.equal(await services.memory.settled(queued[0]!.receipts),true);
@@ -478,7 +479,7 @@ test('foreground recall requires independent source evidence while background co
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-current-question-')),key='current-question:'+Date.now(),group='-'+Date.now();
   const calls:string[]=[];let sequence=0;
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
-    runtime:async()=>({literals:[]}),honcho:async(path,body:any)=>{
+    runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
       calls.push(path);
       if(path.endsWith('/messages/list'))return {items:[]};
       if(path.endsWith('/messages'))return [{...body.messages[0],id:String(++sequence).padStart(21,'r')}];
@@ -488,7 +489,7 @@ test('foreground recall requires independent source evidence while background co
       if(path.endsWith('/representation'))return {representation:'The current question asks for the meeting time.'};
       if(path.endsWith('/chat'))return {content:'The independently recorded meeting time is 18:00.'};
       return {};
-    }});
+    })});
   // Stands in for the honcho refresh workflow finishing this epoch's correction sweep.
   const swept=async()=>{const binding=await services.guards.state();await stores.control.query(`INSERT INTO learning_refresh_sweeps(installation_generation,guard_epoch,family,stage)
     VALUES($1,$2,'honcho','done') ON CONFLICT(installation_generation,guard_epoch,family) DO UPDATE SET stage='done'`,[binding.generation,binding.epoch]);};

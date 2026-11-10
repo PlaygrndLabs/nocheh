@@ -12,6 +12,7 @@ import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src
 import {storageServices} from '../src/stores/services.js';
 import {SharingContentRepository} from '../src/stores/sharing.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('sharing publishes exact prepared text with private provenance, revocation and durable filter checkpoints',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -37,7 +38,7 @@ test('sharing publishes exact prepared text with private provenance, revocation 
       if(mode==='instruction')return {items:[],grant_admin:true,producer};
       return {producer,items:[{text:mode==='citation'?'Private reference '+candidates[0]!.id:'copperbridge Planning summary',
         source_ids:[mode==='outside'?digest('not a selected source'):candidates[0]!.id]}]};
-    },honcho:async()=>{throw Error('no provider calls');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const api=new OwnerStorageApi(services),request=(path:string,body?:unknown)=>api.request(owner,body===undefined?'GET':'POST',new URL(path,'http://fixture'),body) as Promise<any>;
   const source=async(scope:string,n:number,unknown=false,voice=false)=>{
     const event:Envelope={version:1,key:key+':source:'+n,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(n),revision:'1',occurred_at:null,
@@ -169,7 +170,7 @@ test('a project whose chats share what they know filters or publishes only the o
       const candidates=input.candidates as {id:string;text:string}[];filterInputs.push(candidates.map(c=>c.text).join('\n'));
       return {producer:{name:'fixture',version:'deterministic-1',model:'fixture',provider:'offline',api_mode:'fixture'},
         items:[{text:'tidewater summary from the other chat',source_ids:[candidates[0]!.id]}]};
-    },honcho:async()=>{throw Error('no provider calls');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const api=new OwnerStorageApi(services),request=(path:string,body?:unknown)=>api.request(owner,body===undefined?'GET':'POST',new URL(path,'http://fixture'),body) as Promise<any>;
   const source=async(scope:string,n:number,text:string,extra:Record<string,unknown>={})=>{
     const event:Envelope={version:1,key:key+':source:'+n,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(n),revision:'1',occurred_at:null,

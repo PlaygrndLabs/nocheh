@@ -120,7 +120,7 @@ async function confirmMemoryRebuild(
   model: string,
   current: string,
 ): Promise<boolean> {
-  const estimate = await apiGet<{replace?: {saved_messages: number}}>('/memory/honcho/rebuild').catch(() => null);
+  const estimate = await apiGet<{replace?: {saved_messages: number}}>('/memory/longterm/rebuild').catch(() => null);
   const saved = estimate?.replace?.saved_messages;
   return confirm({
     title: `Switch memory search to ${model}?`,
@@ -128,7 +128,7 @@ async function confirmMemoryRebuild(
       <div className="space-y-2">
         <p>
           Long-term memory is stored with {current || 'the current model'}, and {model} can’t search it. Saving replaces
-          Honcho memory with a new one that learns again from your saved messages
+          long-term memory with a new one that learns again from your saved messages
           {typeof saved === 'number' ? ` (up to ${saved.toLocaleString()})` : ''}.
         </p>
         <p>

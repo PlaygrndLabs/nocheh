@@ -19,6 +19,7 @@ import {OwnerCommands} from '../src/stores/owner-commands.js';
 import {storageServer} from '../src/stores/server.js';
 import {storageServices} from '../src/stores/services.js';
 import type {Settings} from '../src/config.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a running job run carries across reaction and learning epochs, any other change still ends it, and a relaunch keeps a binding that carries',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -41,7 +42,7 @@ test('a running job run carries across reaction and learning epochs, any other c
       if(operation==='run.resume')return {state:native.has(String(input.event_id))?'running':'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       assert.equal(operation,'telegram.approval');return {state:'done',chat_id:input.chat_id,message_id:'5'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let updates=0,sent=100,reactions=0,noted=0,learned=0,revision=0;
   const capture=async(chat:string,payload:Record<string,any>)=>{
     const update=++updates,event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,

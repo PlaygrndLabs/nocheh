@@ -405,6 +405,9 @@ test('a built-in instruction is replaced, checked and reset to the built-in text
 
 test('long-term memory is re-run or replaced only after the owner sees what it would send', async () => {
   const {page, problems} = await open('memory?view=longterm');
+  const status = page.locator('section').filter({has: page.getByRole('heading', {name: 'Long-term memory'})});
+  await status.getByText('Engine: Honcho').waitFor();
+  await page.getByRole('heading', {name: 'What it remembers'}).waitFor();
   const card = page.locator('section').filter({has: page.getByRole('heading', {name: 'Re-run or replace'})});
   await card.getByText('3 learning tasks failed.').waitFor();
   await card.getByRole('button', {name: 'Retry failed learning'}).click();

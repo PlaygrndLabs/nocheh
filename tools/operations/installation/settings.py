@@ -124,9 +124,9 @@ def rebuild_memory(state, values, honcho):
         from tools.operations.provider.embedding_config import embeddings
         Ledger(state_for(state) / 'ledger/budget.sqlite').switch_embedding(embeddings(values))
         api = API()
-        revision = api.call('/v1/memory/honcho')['connection']['revision']
+        revision = api.call('/v1/memory/longterm')['connection']['revision']
         # The operation ID is fixed at confirmation, so a retry after a lost answer replaces memory once.
-        api.call('/v1/memory/honcho/fresh-start', {'expected_revision': revision, 'operation_id': pending['operation_id'],
+        api.call('/v1/memory/longterm/fresh-start', {'expected_revision': revision, 'operation_id': pending['operation_id'],
                                                    'from_archive': True})
     except Exception:
         return 'failed'

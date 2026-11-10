@@ -449,8 +449,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));
   if(route==='/prompts')return json(res,200,prompts);
-  if(route==='/memory/honcho')return json(res,200,{connection:{attached:memoryAttached,verified:true,revision:memoryRevision,include_history:memoryIncludeHistory},workspace:{id:'synthetic-workspace',state:'building',last_ready_at:minutesAgo(30),error_code:null},limited_memory:!memoryAttached,syncing:true,generations:[{id:'fixture',state:'ready',mode:'on'}],receipts:[{state:'done',count:176},{state:'pending',count:4}]});
-  if(route==='/memory/honcho/rebuild'){const chosen=url.searchParams.getAll('space').length;
+  if(route==='/memory/longterm')return json(res,200,{engine:{id:'honcho',name:'Honcho',capabilities:{inspect:true,evidence:true,retry_failed_learning:true}},connection:{attached:memoryAttached,verified:true,revision:memoryRevision,include_history:memoryIncludeHistory},workspace:{id:'synthetic-workspace',state:'building',last_ready_at:minutesAgo(30),error_code:null},limited_memory:!memoryAttached,syncing:true,generations:[{id:'fixture',state:'ready',mode:'on'}],receipts:[{state:'done',count:176},{state:'pending',count:4}]});
+  if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
     return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
   if(route==='/runtime')return json(res,200,{status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'run.start':true,'memory.recall':true,'lifecycle':false}});
@@ -528,10 +528,10 @@ const server=createServer((req,res)=>{void(async()=>{
  if(req.method==='POST'){
   const body=await readJson(req) as any;
   if(/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await controlWorkflow(pool,route.split('/')[2]!,route.split('/')[3]!,body));
-  if(route==='/memory/honcho/retry-failed'){const retried=failedLearning;failedLearning=0;return json(res,200,{retried});}
-  if(route==='/memory/honcho/rebuild'){return json(res,200,body.spaces?{conversations:body.spaces.length,sessions:2,messages:12*body.spaces.length,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4});}
-  if(route==='/memory/honcho/fresh-start'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryIncludeHistory=body.from_archive===true;memoryRevision++;return json(res,200,{ok:true});}
-  if(route==='/memory/honcho'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryAttached=body.attached;memoryIncludeHistory=body.include_history;memoryRevision++;return json(res,200,{ok:true});}
+  if(route==='/memory/longterm/retry-failed'){const retried=failedLearning;failedLearning=0;return json(res,200,{retried});}
+  if(route==='/memory/longterm/rebuild'){return json(res,200,body.spaces?{conversations:body.spaces.length,sessions:2,messages:12*body.spaces.length,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4});}
+  if(route==='/memory/longterm/fresh-start'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryIncludeHistory=body.from_archive===true;memoryRevision++;return json(res,200,{ok:true});}
+  if(route==='/memory/longterm'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryAttached=body.attached;memoryIncludeHistory=body.include_history;memoryRevision++;return json(res,200,{ok:true});}
   const learnedCorrect=route.match(/^\/learned\/([a-f0-9]{64})\/correct$/);
   if(learnedCorrect){const entry=learned.find(e=>e.id===learnedCorrect[1]);if(!entry)throw new HttpError(404,'learned_memory_not_found');if(entry.active_revision!==body.expected_revision)throw new HttpError(409,'learned_revision_conflict');
    const text=body.retired?entry.text:String(body.text??'').trim();if(!text)throw new HttpError(400,'memory_correction_required');

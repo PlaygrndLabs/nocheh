@@ -48,7 +48,7 @@ async def main():
         while any(p['state']!='ready' for p in call('/v1/data/'+event+'/guarded')['projections']):
             if time.monotonic()>deadline:raise ValueError('question_preparation_pending')
             await asyncio.sleep(1)
-        status=call('/v1/memory/honcho');epoch=status['guard']['epoch'];revision=status['policy']
+        status=call('/v1/memory/longterm');epoch=status['guard']['epoch'];revision=status['policy']
         claims={'scope':None,'event_id':event,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant','guard_epoch':epoch,'space':scope_id,'revision':revision}
         payload=base64.urlsafe_b64encode(json.dumps(claims,separators=(',',':')).encode()).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),payload.encode(),hashlib.sha256).digest()).decode().rstrip('=');credential='turn.'+payload+'.'+signature

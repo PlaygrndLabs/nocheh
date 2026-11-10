@@ -60,7 +60,7 @@ def parser_for():
     workflow = commands.add_parser("workflow", help="One workflow, attempts and receipts")
     workflow.add_argument("id")
     commands.add_parser("workflow-health", help="Workflow ownership and backlog health")
-    commands.add_parser("honcho", help="Connection, generations and receipt counts")
+    commands.add_parser("longterm", help="Long-term memory: engine, connection and receipt counts")
     learned = commands.add_parser("learned", help="Learned interpretations")
     learned.add_argument("--after", default="")
     learned.add_argument("--scope-kind", choices=("conversation", "project"))
@@ -101,7 +101,7 @@ def path_for(parser, args):
         return "/v1/workflows?" + urlencode({"family": args.family or "", "state": args.state or "", "event": args.event or "", "after": args.after, "limit": args.limit})
     if command == "workflow": return "/v1/workflows/" + identity(parser, args.id)
     if command == "workflow-health": return "/v1/workflows/health"
-    if command == "honcho": return "/v1/memory/honcho"
+    if command == "longterm": return "/v1/memory/longterm"
     if command == "learned":
         if bool(args.scope_kind) != bool(args.scope_id): parser.error("--scope-kind and --scope-id must be used together")
         return "/v1/learned?" + urlencode({"after": args.after, **({"scope_kind": args.scope_kind, "scope_id": args.scope_id} if args.scope_kind else {})})
@@ -132,13 +132,13 @@ def redact(value):
         "next_attempt", "observed_at", "seen_at", "refreshed_at", "next", "revision", "active_revision", "guard_epoch",
         "policy_revision", "owner_epoch", "fingerprint", "content_hash", "file_hash", "byte_size", "count", "events",
         "total", "completed", "duplicates", "pending", "ready", "syncing", "limited_memory", "attached", "verified",
-        "active_step", "can_retry", "can_cancel", "retired", "representation", "primary", "storage_layout", "guard_mode",
+        "active_step", "can_retry", "can_cancel", "retired", "representation", "storage_layout", "guard_mode",
         "service", "mode", "admission", "dispatch", "format", "scope_kind", "truncated",
         "started_at", "ended_at", "reply_ms", "complete", "label", "category", "ms", "calls", "unmeasured_ms",
         "messages", "reply_ms_p50", "reply_ms_p95", "ms_p50", "ms_p95",
     }
     containers = {"records", "events", "workflows", "receipts", "event", "reply_messages", "runs", "outbox", "controls", "services",
-                  "archive", "workers", "connection", "generations", "guard", "policy", "jobs", "artifacts", "derived",
+                  "archive", "workers", "connection", "engine", "generations", "guard", "policy", "jobs", "artifacts", "derived",
                   "actions", "permissions", "telegram", "versions", "items", "counts", "effects", "result", "stages", "recent"}
     if isinstance(value, list): return [redact(item) for item in value]
     if isinstance(value, dict):

@@ -37,7 +37,7 @@ export function Rebuild({revision, attached}: {revision: number; attached: boole
   const [chats, setChats] = useState<string[]>([]);
   const chosen = scope === 'chosen' ? chats : [];
   const estimate = useResource<Estimate>(
-    '/memory/honcho/rebuild' +
+    '/memory/longterm/rebuild' +
       (chosen.length ? '?' + chosen.map(id => 'space=' + encodeURIComponent(id)).join('&') : ''),
     30000,
   );
@@ -112,7 +112,7 @@ function Retry({failed, attached}: {failed: number | null; attached: boolean}) {
   const feedback = useFeedback();
   const command = useCommand();
   const retry = async () => {
-    const result = await command.run<{retried: number}>('/memory/honcho/retry-failed', {});
+    const result = await command.run<{retried: number}>('/memory/longterm/retry-failed', {});
     if (result)
       feedback.toast(
         result.retried
@@ -184,7 +184,7 @@ function Relearn({
     )
       return;
     const result = await command.run<Estimate['relearn']>(
-      '/memory/honcho/rebuild',
+      '/memory/longterm/rebuild',
       scope === 'all' ? {} : {spaces: chats},
     );
     if (result) feedback.toast(`Re-learning ${count(result.messages, 'saved message', 'saved messages')}.`);
@@ -229,7 +229,7 @@ function Replace({saved, revision, cost}: {saved: number; revision: number; cost
   const [typed, setTyped] = useState('');
   const confirmed = typed.trim().toLowerCase() === CONFIRM_WORD;
   const replace = async () => {
-    const result = await command.run('/memory/honcho/fresh-start', {
+    const result = await command.run('/memory/longterm/fresh-start', {
       expected_revision: revision,
       from_archive: from === 'archive',
     });

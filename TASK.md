@@ -402,6 +402,16 @@ development-machine installation ran the fresh start (H5) and live acceptance
 (H6) on the Claude provider; see item 7. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
+Swappable memory (owner, 2026-11-10: "the main things in nocheh should be data
+and hermes and honcho should be replace able with other things like claude code
+or mem0"): long-term memory now sits behind one memory socket, and Honcho is the
+only engine plugged in. Nocheh keeps receipts, sessions, sharing rules and
+deletions; routes moved to `/v1/memory/longterm/*`, the admin command to
+`memory longterm`, and the dashboard shows the engine
+([decision](docs/adr/0229-memory-engine-socket.md),
+[socket](src/memory/engine.ts), [Honcho engine checks](test/memory-engine.test.ts)).
+Pending: a second engine, such as mem0, when the owner wants one.
+
 Retired sources now leave Hermes' own stored history. The real-Claude simulator
 run found an owner-private answer repeating a fact 30 seconds after every source
 of it was retired: Honcho memory and archive search had dropped it, but Hermes
@@ -925,7 +935,7 @@ Pending: a live album, an edit and a small group-export import on the owner's
 installation.
 
 Re-running and replacing Honcho memory (October 19): Memory › Long-term memory
-and `./bin/nocheh memory honcho` can retry failed Honcho learning in place,
+and `./bin/nocheh memory longterm` can retry failed Honcho learning in place,
 re-learn every chat or chosen chats from their saved messages, or replace the
 workspace with a new one that learns the archive again or starts empty, each
 after an estimate ([decision](docs/adr/0153-owner-reruns-and-replaces-honcho-memory.md),

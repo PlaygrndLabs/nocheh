@@ -12,8 +12,8 @@ import {advanceReactionEpoch} from './reaction-state.js';
 import {outsideChat} from '../assistant-policy.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
-const superseded=new Set(['native_review_missing','learning_job_missing','guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','honcho_receipt_missing']);
-const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','honcho_sync_busy','memory_session_rebuilt']);
+const superseded=new Set(['native_review_missing','learning_job_missing','guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','memory_receipt_missing']);
+const pending=new Set(['guard_transition_pending','guard_preparation_pending','guard_source_pending','derivative_selection_pending','learning_context_pending','learning_job_busy','learning_publication_pending','native_review_busy','memory_sync_busy','memory_session_rebuilt']);
 
 /** Initial replies and their prerequisites, and the jobs people approved; every other storage family shares the background slot. */
 export const foregroundFamilies:ReadonlySet<WorkflowFamily>=new Set(['preparation','telegram','browser','schedules','actions','background']);
@@ -95,7 +95,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     const saved=await control.query(`UPDATE learning_refresh_sweeps SET stage=$3,learned_after=$4,updated_at=now()
       WHERE installation_generation=$1 AND guard_epoch=$2 AND family='honcho' AND stage=$5 AND learned_after=$6`,
       [binding.generation,binding.epoch,stage,after,row.stage,row.learned_after]);
-    if(!saved.rowCount)throw new HttpError(409,'honcho_sync_busy');
+    if(!saved.rowCount)throw new HttpError(409,'memory_sync_busy');
     return stage==='done'?observation('completed','sync'):waiting('sync','prerequisite',100);
   });
   /** Persist bounded sweep progress alongside deterministic requests in control. */
@@ -279,7 +279,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       // The owner asked to learn this session again; a session already rebuilt since then has nothing left to do.
       if(kind==='relearn')return fenced('honcho',authority,async()=>{await s.memory.relearnSession(id);return observation('completed','sync');});
       const load=async()=>{const row=(await control.query('SELECT state,attempts,next_attempt,retired_at FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
-        if(!row)throw new HttpError(404,'honcho_receipt_missing');return row;};
+        if(!row)throw new HttpError(404,'memory_receipt_missing');return row;};
       let row=await load();if(row.state==='done')return observation('completed','sync',row.attempts);
       if(row.retired_at&&row.state!=='uncertain')return observation('skipped','sync',row.attempts,Date.now(),'superseded');
       if(row.next_attempt>new Date())return observation('waiting','sync',row.attempts,row.next_attempt.getTime(),'prerequisite');

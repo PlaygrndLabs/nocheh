@@ -5,7 +5,8 @@ import {digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {GuardRepository} from '../src/stores/guards.js';
-import {HonchoProvenanceRepository} from '../src/stores/honcho-provenance.js';
+import {MemoryProvenanceRepository} from '../src/stores/memory-provenance.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('Honcho ancestry maps only verified ingestion receipts and current authorized workspaces to original evidence',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -22,7 +23,7 @@ test('Honcho ancestry maps only verified ingestion receipts and current authoriz
     if(mutate)await stores.control.query('UPDATE guard_state SET epoch=epoch+1');
     return {roots:[conclusion],nodes:[{id:conclusion,parents:[],deleted:false,exact_citations:cited}],messages:[{message_id:message,receipt_id:receipt},{message_id:'x'.repeat(21),receipt_id:digest('unknown')}],limitations:[],exact_citations:true};
   };
-  const provenance=new HonchoProvenanceRepository(stores,archive,guards,call);
+  const provenance=new MemoryProvenanceRepository(stores,archive,guards,honchoEngine(call));
   try {
     const source=(await archive.capture(event)).source.reference,related=(await archive.capture({...event,key:key+':related',source_id:'2'})).source.reference,binding=await guards.state();
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[workspace,binding.generation,binding.epoch,'owner']);

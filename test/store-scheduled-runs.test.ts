@@ -12,6 +12,7 @@ import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('scheduled execution uses guarded operation roots and stages exact delivery without reopening a closed turn',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -42,7 +43,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     native.set(id,{state:'done'});if(mode==='ack_lost'){mode='done';throw Error('lost native acknowledgement');}return {state:'done'};
   };
   const s=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:['-123']}),runtime,
-    honcho:async()=>{throw Error('no providers');}}),owner={admin:true,scope:null};
+    memoryEngine:honchoEngine(async()=>{throw Error('no providers');})}),owner={admin:true,scope:null};
   const authority=async()=>({owner:'inngest' as const,epoch:(await s.schedules.ownership()).epoch});
   const capture=async(options:Record<string,unknown>={})=>{
     const scope=String(options.scope??'123'),profile='nocheh-'+digest(scope).slice(0,24),job='execution-'+base+'-'+(++serial);

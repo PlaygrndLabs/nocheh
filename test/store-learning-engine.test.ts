@@ -15,8 +15,9 @@ import {SourceAccessRepository} from '../src/stores/access.js';
 import {LearningContextRepository} from '../src/stores/learning-context.js';
 import {ContextualLearningRepository,terminalLearningCodes} from '../src/stores/learning-engine.js';
 import {learningResultSchema} from '../src/interpretations.js';
-import {HonchoProvenanceRepository} from '../src/stores/honcho-provenance.js';
+import {MemoryProvenanceRepository} from '../src/stores/memory-provenance.js';
 import {requestStrandedSources} from '../src/stores/native-review.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('silent Honcho learning uses authorized relationship evidence and recovers output/activation without duplicate reasoning',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -47,7 +48,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await stores.control.query(`INSERT INTO memory_ingestion_receipts(id,generation,audience,source_reference,guard_source_id,prepared_id,content_hash,state,session_id)
       VALUES($1,$2,$3,'{}','fixture','fixture',$4,'done',$5)`,[digest(key+':receipt:'+label),workspace,space,digest('fixture'),session]);
   };
-  const provenance=new HonchoProvenanceRepository(stores,archive,guards,call),learning=new ContextualLearningRepository(contexts,derived,guards,learned,provenance,call);
+  const provenance=new MemoryProvenanceRepository(stores,archive,guards,honchoEngine(call)),learning=new ContextualLearningRepository(contexts,derived,guards,learned,provenance,honchoEngine(call));
   try {
     await guards.setMode('on');
     const reaction=(await archive.capture(event('reaction',{update_id:30,message_reaction:{chat:{id:group},message_id:1,date:1700000010,user:{id:7},old_reaction:[],new_reaction:[{type:'emoji',emoji:'✅'}]}}))).source.reference;

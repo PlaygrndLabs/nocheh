@@ -11,6 +11,7 @@ import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src
 import {storageServices} from '../src/stores/services.js';
 import {NativeReviewRepository,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('native review preserves profile waits, guarded inputs, durable completion and uncertain execution identity',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -33,7 +34,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
       if(mode==='busy')return {state:'waiting',error_code:'profile_busy'};
       if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');
       receipts.add(String(input.id));writes++;if(mode==='lose')throw Error('synthetic_lost_completion');return {state:'done'};
-    },honcho:async()=>{throw Error('no provider calls');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const makeSource=async(index:number)=>{
     const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
       text:'Guarded native notes saffronpass',payload:{message:{message_id:index,date:1,chat:{id:Number(group),type:'group'},from:{id:123},text:'Guarded native notes saffronpass'}}};
@@ -101,7 +102,7 @@ test('native review runs once per source across authorization epochs and stops o
       assert.equal(operation,'memory.review');
       if(input.observe_only){observations++;return {state:mode==='running'?'running':mode==='failed'?'failed':'ambiguous'};}
       starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:['running','failed'].includes(mode)?'running':'done'};
-    },honcho:async()=>{throw Error('no provider calls');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const makeSource=async(index:number,text='Synthetic note '+index,reply?:number)=>{
     const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
       text,payload:{message:{message_id:index,date:1,chat:{id:Number(group),type:'group'},from:{id:123},text,...(reply?{reply_to_message:{message_id:reply}}:{})}}};

@@ -87,10 +87,10 @@ newer than the reset backlog boundary.
 
 For the detached Honcho preflight, an owner-authenticated operator may issue a
 thirty-minute synthetic acceptance workspace at
-`POST /v1/memory/honcho/acceptance-session`. Use only synthetic content in that
+`POST /v1/memory/longterm/acceptance-session`. Use only synthetic content in that
 workspace. Its metered chat and embedding requests still pass through guarded
 preparation. Close it with
-`DELETE /v1/memory/honcho/acceptance-session/WORKSPACE_ID` after the six checks;
+`DELETE /v1/memory/longterm/acceptance-session/WORKSPACE_ID` after the six checks;
 the live acceptance report must name that closed workspace and retain its
 provider and budget evidence. This path cannot create an accepted production
 memory generation or satisfy owner learned-recall and reset validation by itself.

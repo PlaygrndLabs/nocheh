@@ -41,7 +41,7 @@ async def main():
         # A synthetic owner edit verifies ADR-0033's exact-copy contract and
         # separates detector false positives from the new transport's behavior.
         call('/v1/data/'+event+'/guarded',{'source_id':'events:'+event,'expected_revision':projection['active_revision'],'content':{'text':expected,'payload':{}}})
-        status=call('/v1/memory/honcho')
+        status=call('/v1/memory/longterm')
         claims={'scope':None,'event_id':event,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant','guard_epoch':status['guard']['epoch'],'space':owner,'revision':status['policy']}
         encoded=base64.urlsafe_b64encode(json.dumps(claims,separators=(',',':')).encode()).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=');credential='turn.'+encoded+'.'+signature
