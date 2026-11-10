@@ -17,7 +17,7 @@ configuration cannot inspect the operating installation by assumption.
 
 For a live turn, start with its saved event ID and timestamp. Run
 `./bin/nocheh admin trace EVENT_ID --json`, then `./bin/nocheh admin workflow WORKFLOW_ID
---json` for each relevant workflow. `events --after CURSOR`, `honcho`,
+--json` for each relevant workflow. `events --after CURSOR`, `longterm`,
 `learned`, `learning ID`, `reviews`, and `approvals` cover the other common
 checks. The CLI rejects a running API revision that lacks event tracing rather
 than treating an unfiltered result as evidence.
@@ -29,4 +29,4 @@ owner interaction; other incoming traffic may be newer.
 Compare the observations with [release acceptance](../../../docs/release-acceptance.md)
 and [current status](../../../TASK.md). A receipt, healthy service, or CLI
 response alone never passes a live gate. The CLI has no authority to send
-Telegram traffic, approve actions, attach Honcho, or activate a candidate.
+Telegram traffic, approve actions, attach long-term memory, or activate a candidate.

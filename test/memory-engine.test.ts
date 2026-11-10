@@ -118,6 +118,9 @@ test('a trace must answer for exactly the facts asked about',async()=>{
   await assert.rejects(fake(()=>({...good,nodes:[{id:id(1),parents:[]}]})).engine.trace('space',[id(1)]),{code:'invalid_honcho_provenance'},
     'every fact says whether it cites its writes');
   await assert.rejects(fake(()=>({...good,messages:[{message_id:id(3),receipt_id:'short'}]})).engine.trace('space',[id(1)]),{code:'invalid_honcho_provenance'});
+  const asked=fake(()=>good);
+  await assert.rejects(asked.engine.trace('space',['abc']),{code:'invalid_provenance_request',status:400});
+  assert.equal(asked.calls.length,0,'a malformed fact id never reaches Honcho');
 });
 
 test('progress reads Honcho queue state and checks its answers',async()=>{

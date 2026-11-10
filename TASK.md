@@ -410,7 +410,9 @@ deletions; routes moved to `/v1/memory/longterm/*`, the admin command to
 `memory longterm`, and the dashboard shows the engine
 ([decision](docs/adr/0229-memory-engine-socket.md),
 [socket](src/memory/engine.ts), [Honcho engine checks](test/memory-engine.test.ts)).
-Pending: a second engine, such as mem0, when the owner wants one.
+The development stack reloads the changed routes on its own after a pull; a stack
+not in development mode needs a full restart, so the Honcho gateway and Hermes use
+the new routes. Pending: a second engine, such as mem0, when the owner wants one.
 
 Retired sources now leave Hermes' own stored history. The real-Claude simulator
 run found an owner-private answer repeating a fact 30 seconds after every source

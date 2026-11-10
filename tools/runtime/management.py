@@ -6,20 +6,25 @@ from pathlib import Path
 from tools.operations.installation.configuration import ROOT, load
 
 
+def api_call(path,body,unavailable):
+    """Call the storage API and pass its plain error code on, so the dashboard can name the problem."""
+    from tools.operations.archive.archive import API
+    from urllib.error import HTTPError
+    import re
+    try:return API().call(path,body)
+    except HTTPError as error:
+        try:code=json.load(error).get('error')
+        except Exception:code=None
+        raise ValueError(code if isinstance(code,str) and re.fullmatch('[a-z_]{1,80}',code) else unavailable) from None
+
+
 def dispatch(body):
     state = Path(os.environ.get('NOCHEH_STATE_DIR', ROOT / 'data/local')).resolve()
     operation = body['operation']
     if operation=='knowledge.api':
         from tools.operations.archive.knowledge import allowed_path
-        from tools.operations.archive.archive import API
-        from urllib.error import HTTPError
         if not allowed_path(body['path']):raise ValueError('knowledge_route_denied')
-        try:return API().call(body['path'],body.get('body'))
-        except HTTPError as error:
-            try:code=json.load(error).get('error')
-            except Exception:code=None
-            import re
-            raise ValueError(code if isinstance(code,str) and re.fullmatch('[a-z_]{1,80}',code) else 'knowledge_operation_unavailable') from None
+        return api_call(body['path'],body.get('body'),'knowledge_operation_unavailable')
     if operation=='archive.connection':
         config=load(state)
         from tools.operations.installation.configuration import archive_url
@@ -78,12 +83,11 @@ def dispatch(body):
         host,port=native_endpoint(state)
         return {'host':host,'port':port,'token':load(state)['SERVICE_TOKEN']}
     if operation == 'memory.api':
-        from tools.operations.archive.archive import API
         from urllib.parse import urlsplit
         path=body['path'];parsed=urlsplit(path)
         if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/longterm','/v1/memory/longterm/rebuild','/v1/memory/longterm/retry-failed','/v1/memory/longterm/fresh-start','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview'):
             raise ValueError('memory_route_denied')
-        return API().call(path,body.get('body'))
+        return api_call(path,body.get('body'),'memory_operation_unavailable')
     if operation == 'operations.list':
         from tools.operations.installation.admin_operations import backups
         from tools.operations.installation.backup_schedule import status

@@ -130,6 +130,8 @@ export class HonchoEngine implements MemoryEngine {
     return {done:false,removed:sessions.length};
   }
   async trace(space:string,facts:string[]):Promise<EngineTrace> {
+    // Honcho names a conclusion with a 21-character id; anything else is the asker's mistake, not Honcho's.
+    if(facts.some(fact=>!nativeId(fact)))throw new HttpError(400,'invalid_provenance_request');
     const result=await this.call(this.base(space)+'/nocheh/provenance',{conclusion_ids:facts});
     if(!result||!Array.isArray(result.nodes)||result.nodes.length>128||!Array.isArray(result.messages)||result.messages.length>256||
       !Array.isArray(result.limitations)||result.limitations.length>20||result.limitations.some((v:unknown)=>typeof v!=='string'||v.length>100)||
