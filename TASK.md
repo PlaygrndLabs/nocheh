@@ -468,6 +468,15 @@ The development stack reloads the changed routes on its own after a pull; a stac
 not in development mode needs a full restart, so the Honcho gateway and Hermes use
 the new routes. Pending: a second engine, such as mem0, when the owner wants one.
 
+Long recalls (2026-11-10): a long-term recall slower than five minutes failed as
+"memory unavailable". Node's fetch stops waiting for an answer after 300 s,
+whatever deadline it gets, and Hermes stops any tool after 420 s. The Honcho
+client and the broker's archive relay now use [longFetch](src/long-fetch.ts),
+where only the caller's deadline (480 s and 600 s) ends a call, and the recall
+tool asks Hermes for 660 s ([checks](test/long-fetch.test.ts); the
+310-second check runs with `NOCHEH_LONG_WAIT_TEST=1`). Only background jobs wait
+that long: replies stop at 230 s.
+
 Retired sources now leave Hermes' own stored history. The real-Claude simulator
 run found an owner-private answer repeating a fact 30 seconds after every source
 of it was retired: Honcho memory and archive search had dropped it, but Hermes

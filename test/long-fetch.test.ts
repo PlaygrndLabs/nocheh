@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer,type IncomingMessage,type Server,type ServerResponse} from 'node:http';
+import {createServer as createTcpServer,type Socket} from 'node:net';
 import {once} from 'node:events';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {longFetch} from '../src/long-fetch.js';
@@ -64,6 +65,29 @@ test('a redirect is refused and an empty answer has no body',async()=>{
     assert.equal(empty.status,204);assert.equal(empty.body,null);
     await assert.rejects(longFetch('ftp://127.0.0.1/'),{message:'long_fetch_protocol'});
   }finally{await server.close();}
+});
+
+test('an abort after the whole answer arrived is still an error, and a protocol switch settles the call',async()=>{
+  // A raw server that keeps the connection open after its answer, so the client holds the unread rest of the body.
+  const sockets=new Set<Socket>();
+  const server=createTcpServer(socket=>{
+    sockets.add(socket);socket.on('error',()=>{});
+    socket.once('data',data=>{
+      if(data.toString().startsWith('GET /switch '))socket.write('HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: synthetic\r\n\r\n');
+      else socket.write('HTTP/1.1 200 OK\r\ncontent-length: 200000\r\n\r\n'+'x'.repeat(200000));
+    });
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  const address=server.address();assert.ok(address&&typeof address!=='string');const base='http://127.0.0.1:'+address.port;
+  try {
+    const controller=new AbortController(),response=await longFetch(base+'/whole',{signal:controller.signal});
+    const reader=response.body!.getReader();let received=(await reader.read()).value!.length;
+    await sleep(200);controller.abort();
+    await assert.rejects((async()=>{for(;;){const part=await reader.read();if(part.done)return;received+=part.value.length;}})(),{name:'AbortError'});
+    assert.ok(received<200000);
+    const switched=new AbortController();setTimeout(()=>switched.abort(),2000).unref();
+    await assert.rejects(longFetch(base+'/switch',{signal:switched.signal}),{message:'long_fetch_closed'});
+  }finally{for(const socket of sockets)socket.destroy();server.close();await once(server,'close');}
 });
 
 // Takes five minutes and ten seconds, so it runs only on request: NOCHEH_LONG_WAIT_TEST=1.

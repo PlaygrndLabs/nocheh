@@ -1,4 +1,4 @@
-import {request as httpRequest} from 'node:http';
+import {request as httpRequest,type IncomingMessage} from 'node:http';
 import {request as httpsRequest} from 'node:https';
 import {Readable} from 'node:stream';
 
@@ -13,9 +13,10 @@ export function longFetch(input:string|URL,init:LongFetchInit={}):Promise<Respon
     const url=new URL(input),signal=init.signal;
     if(url.protocol!=='http:'&&url.protocol!=='https:')return reject(new TypeError('long_fetch_protocol'));
     if(signal?.aborted)return reject(signal.reason);
+    let answered:IncomingMessage|undefined;
     const headers={...init.headers,...(init.body===undefined?{}:{'content-length':String(Buffer.byteLength(init.body))})};
     const outgoing=(url.protocol==='https:'?httpsRequest:httpRequest)(url,{method:init.method??'GET',headers,agent:false},incoming=>{
-      const status=incoming.statusCode??0,empty=bodiless.has(status)||init.method==='HEAD';
+      answered=incoming;const status=incoming.statusCode??0,empty=bodiless.has(status)||init.method==='HEAD';
       try {
         if(redirects.has(status))throw new TypeError('long_fetch_redirect');
         const answer=new Headers();
@@ -24,9 +25,12 @@ export function longFetch(input:string|URL,init:LongFetchInit={}):Promise<Respon
         if(empty){incoming.on('error',()=>{});incoming.resume();}
       }catch(error){incoming.on('error',()=>{});incoming.destroy();reject(error);}
     });
-    const abort=()=>outgoing.destroy(signal!.reason);
+    // The answer is ended with the reason too: once its last byte has arrived, ending only the request would let
+    // a body not yet read end early without an error.
+    const abort=()=>{answered?.destroy(signal!.reason);outgoing.destroy(signal!.reason);};
     signal?.addEventListener('abort',abort,{once:true});
-    outgoing.on('close',()=>signal?.removeEventListener('abort',abort));
+    // A connection that closes without an answer, such as after a protocol switch, still settles the call.
+    outgoing.on('close',()=>{signal?.removeEventListener('abort',abort);reject(new TypeError('long_fetch_closed'));});
     outgoing.on('error',reject);
     outgoing.end(init.body);
   });
