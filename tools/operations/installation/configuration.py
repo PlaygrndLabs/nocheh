@@ -49,6 +49,19 @@ def owns_project(state):
     return Path(state).resolve() == DEFAULT_STATE or bool(read_env(env_path(state)).get('COMPOSE_PROJECT_NAME'))
 
 
+def image_tag(values):
+    """The tag of this installation's own images (nocheh-hermes:<tag> and the rest); `local` unless set."""
+    return values.get('NOCHEH_IMAGE_TAG') or 'local'
+
+
+def separate_installation(values):
+    """The settings that keep a second installation's images and networks apart from the `nocheh` one.
+    Its builds then never replace the images another installation's turns, boxes and tools run."""
+    project=values.get('COMPOSE_PROJECT_NAME') or 'nocheh'
+    if project=='nocheh': return {}
+    return {'NOCHEH_IMAGE_TAG':project,'NOCHEH_AGENT_NETWORK':project+'-agent','NOCHEH_MEMORY_NETWORK':project+'-memory'}
+
+
 def honcho_volumes(project):
     """The Honcho volume names for `project`; for `nocheh` they equal docker-compose.yml's defaults."""
     return {'NOCHEH_HONCHO_DATABASE_VOLUME': project + '_honcho_database',
@@ -232,6 +245,7 @@ def validate(values):
     for name in ('INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'):
         if values.get(name) and not re.fullmatch('[a-f0-9]{64}',values[name]):raise ValueError('Invalid '+name)
         if not values.get(name):raise ValueError('Missing '+name)
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,127}',image_tag(values)):raise ValueError('NOCHEH_IMAGE_TAG must be lowercase letters, digits, dots, dashes or underscores')
     if values.get('NOCHEH_SECURITY_RUNTIME','legacy') not in ('legacy','isolated'):raise ValueError('NOCHEH_SECURITY_RUNTIME must be legacy or isolated')
     if values.get('NOCHEH_MEMORY_CONTEXT','legacy') not in ('legacy','evidence'):raise ValueError('NOCHEH_MEMORY_CONTEXT must be legacy or evidence')
     if values['TELEGRAM_ENABLED'] not in ('true', 'false'): raise ValueError('TELEGRAM_ENABLED must be true or false')
@@ -298,6 +312,10 @@ def initialize(state):
         # names: it must never name the installation's volumes.
         volumes=honcho_volumes(values.get('COMPOSE_PROJECT_NAME') or 'nocheh')
         values.update({key:name for key,name in volumes.items() if not values.get(key)})
+    if state == DEFAULT_STATE:
+        # An installation's own checkout that names another project gets its own image tag and networks.
+        # Other states (restores, rehearsals) run this checkout's images and set their own networks.
+        values.update({key:value for key,value in separate_installation(values).items() if not values.get(key)})
     validate(values)
     (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
     if values != existing: write_env(path, values)

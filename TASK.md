@@ -7,6 +7,10 @@ clean install once the MVP checks pass (stuck notes-review fix, full tester on
 main, one clean day of use); dev-mode rules end at the move. Daily automatic
 backups come first ([ADR-0187](docs/adr/0187-daily-automatic-backups.md));
 pending: a live scheduled backup on a running installation.
+The production installation runs beside the development stack on one host: its own
+checkout and `COMPOSE_PROJECT_NAME` give it its own image tag (`NOCHEH_IMAGE_TAG`),
+networks, ports, state and Telegram bot ([second installation](docs/deploy.md#a-second-installation-on-the-same-host),
+[test](services/hermes/test_configuration.py)); pending: that installation.
 
 Problem notices (owner, 2026-10-28: "I want notice about each failed and issue to
 can fix it in MVP"): the dashboard checks every two minutes and sends the owner's

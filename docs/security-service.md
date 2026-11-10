@@ -108,7 +108,7 @@ with success, the launcher replaces that job's box at its next run.
 
 | Variable | Purpose |
 | --- | --- |
-| `NOCHEH_BOX_IMAGE` | Box image, `nocheh-box:local` by default. `./bin/nocheh up`, `./bin/nocheh build` and `make dev` build it; the launcher pins its image ID at every box it makes |
+| `NOCHEH_BOX_IMAGE` | Box image, `nocheh-box:<NOCHEH_IMAGE_TAG>` (`nocheh-box:local`) by default. `./bin/nocheh up`, `./bin/nocheh build` and `make dev` build it; the launcher pins its image ID at every box it makes |
 | `NOCHEH_BOX_LIMIT` | Boxes that may exist at once, 2 to 8, default 2, since two jobs can run at once. The launcher does not start with less |
 | `NOCHEH_BOX_TOKEN` | Lets the launcher ask the broker which boxes may exist and read a box's chat copy. Only `nocheh-security` and `hermes-agent-sb` receive it. `./bin/nocheh init`, `up` and `make dev` generate it when it is missing; it has at least 32 characters, differs from `SERVICE_TOKEN`, and Settings never shows it |
 

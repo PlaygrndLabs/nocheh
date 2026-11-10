@@ -165,6 +165,19 @@ For an isolated rehearsal, set `NOCHEH_STATE_DIR` to a separate absolute directo
 and `COMPOSE_PROJECT_NAME` to a separate project name. A fresh environment requires
 its own `.env` in that state directory and its own login; do not duplicate a refresh token between concurrently running stacks.
 
+### A second installation on the same host
+
+A second installation, such as an everyday installation next to the `make dev`
+stack, uses its own checkout. Before its first `./bin/nocheh init`, its root `.env`
+names its own `COMPOSE_PROJECT_NAME` and a free `NOCHEH_PORT` (the dashboard uses
+the port plus 3 and the native admin port plus 5). `init` then saves
+`NOCHEH_IMAGE_TAG` and the agent and memory network names from the project name.
+Its builds tag only `nocheh-*:<project>` images, and its turns, boxes and tools run
+only those, so a rebuild in the other checkout never changes them. Honcho images
+are tagged by their pinned revision and shared between installations at the same pin.
+Only one installation may poll a given Telegram bot; give the other its own bot or
+turn its Telegram off.
+
 ## Backup and restore
 
 ```sh
