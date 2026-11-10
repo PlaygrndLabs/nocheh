@@ -7,6 +7,15 @@ clean install once the MVP checks pass (stuck notes-review fix, full tester on
 main, one clean day of use); dev-mode rules end at the move. Daily automatic
 backups come first ([ADR-0187](docs/adr/0187-daily-automatic-backups.md));
 pending: a live scheduled backup on a running installation.
+Off-site copies (owner, 2026-11-10: "start build"): encrypted copies of each automatic
+backup go to the owner's own S3-compatible storage
+([ADR-0229](docs/adr/0229-encrypted-off-site-backup-copies.md),
+[tests](services/hermes/test_offsite.py)); pending: a first live copy, a passed "Test the
+off-site copy", and a fetch and restore on another machine. The portable export now
+carries the owner's tasks, sharing rules, settings and Hermes scheduled jobs
+([ADR-0230](docs/adr/0230-portable-export-carries-owner-work.md),
+[check](test/store-owner-portability.test.ts)); pending: a full export and import between
+two running installations.
 
 Problem notices (owner, 2026-10-28: "I want notice about each failed and issue to
 can fix it in MVP"): the dashboard checks every two minutes and sends the owner's
@@ -408,7 +417,7 @@ or mem0"): long-term memory now sits behind one memory socket, and Honcho is the
 only engine plugged in. Nocheh keeps receipts, sessions, sharing rules and
 deletions; routes moved to `/v1/memory/longterm/*`, the admin command to
 `memory longterm`, and the dashboard shows the engine
-([decision](docs/adr/0229-memory-engine-socket.md),
+([decision](docs/adr/0231-memory-engine-socket.md),
 [socket](src/memory/engine.ts), [Honcho engine checks](test/memory-engine.test.ts)).
 The development stack reloads the changed routes on its own after a pull; a stack
 not in development mode needs a full restart, so the Honcho gateway and Hermes use

@@ -31,7 +31,7 @@ type SessionKind='conversation'|'entity_evidence'|'projection';
 const workspaceId=(protocol:string,generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
 type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
 
-/** Long-term memory behind the memory socket (ADR-0229). The engine, Honcho today, stores and learns; Nocheh owns guarded
+/** Long-term memory behind the memory socket (ADR-0231). The engine, Honcho today, stores and learns; Nocheh owns guarded
  * inputs, immutable results, recoverable receipts, sharing rules, corrections and deletions.
  * One memory space serves the installation; sessions bound conversations; guard epochs never rebuild it. */
 export class NativeMemoryRepository {

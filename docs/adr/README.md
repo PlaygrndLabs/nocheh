@@ -54,7 +54,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 
 ### Honcho memory
 
-- Long-term memory sits behind a memory socket; Nocheh keeps receipts, sessions, sharing rules and deletions, and Honcho is the only engine plugged in today ([0229](0229-memory-engine-socket.md)).
+- Long-term memory sits behind a memory socket; Nocheh keeps receipts, sessions, sharing rules and deletions, and Honcho is the only engine plugged in today ([0231](0231-memory-engine-socket.md)).
 - Honcho is primary long-term memory, on by default in fresh installs, run in the installation Compose project and attached once at startup; Nocheh is its only writer, and Hermes has no direct access ([0033](0033-guarded-projections-and-honcho-memory.md), [0045](0045-honcho-in-installation-compose.md), [0076](0076-honcho-enabled-local-default.md), [0061](0061-retire-isolated-honcho-comparison.md)).
 - One workspace per installation, stable peers for people and projects, and versioned sessions per conversation; Nocheh enforces audience on every read ([0056](0056-connected-entity-memory.md), [0109](0109-standard-honcho-entity-model.md), [0115](0115-honcho-session-revisions.md)); Honcho peer cards are off and Nocheh reads none ([0225](0225-member-safety-rules.md)).
 - Repeat names for one person or project wait on one suggestion card that learning or the owner folds them into; one answer covers every name ([0219](0219-repeat-names-wait-on-one-card.md)).
@@ -151,7 +151,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The dashboard and executor are services with owner-approved Docker socket access; agents never get the socket ([0048](0048-containerized-management.md)).
 - nocheh-db creates the archive, derived, control and workflow databases before it reports healthy; root Compose owns its volumes ([0054](0054-postgres-owned-store-bootstrap.md), [0075](0075-clean-development-setup.md)).
 - One root `.env` is the editable configuration ([0024](0024-single-environment-configuration.md)).
-- Backups are quiesced, verified and daily; a restore starts inactive; upgrades are checked offline first, and the archive and Hermes native notes export in a portable form ([0023](0023-consistent-backups-and-inactive-restore.md), [0187](0187-daily-automatic-backups.md), [0081](0081-bounded-workflow-backup-fingerprints.md), [0032](0032-isolated-upgrades-and-portable-memory.md)).
+- Backups are quiesced, verified and daily; a restore starts inactive; upgrades are checked offline first, and the archive and Hermes native notes export in a portable form ([0023](0023-consistent-backups-and-inactive-restore.md), [0187](0187-daily-automatic-backups.md), [0229](0229-encrypted-off-site-backup-copies.md), [0230](0230-portable-export-carries-owner-work.md), [0081](0081-bounded-workflow-backup-fingerprints.md), [0032](0032-isolated-upgrades-and-portable-memory.md)).
 
 ### Dev process
 

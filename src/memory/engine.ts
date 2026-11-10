@@ -1,7 +1,7 @@
 import {HttpError} from '../http.js';
 
 /**
- * The memory socket (ADR-0229). Nocheh keeps the receipts, sessions, guarding, sharing rules, corrections and
+ * The memory socket (ADR-0231). Nocheh keeps the receipts, sessions, guarding, sharing rules, corrections and
  * deletion bookkeeping; a memory engine only stores what Nocheh feeds it, learns from it and answers reads.
  * Brains never see this socket: they ask Nocheh for memory, and Nocheh asks the engine.
  *

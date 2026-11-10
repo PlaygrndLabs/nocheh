@@ -262,6 +262,8 @@ const jobs: Record<string, string> = {
   'operations.backup': 'Backup',
   'operations.restart': 'Restart',
   'operations.restore': 'Restore',
+  'operations.offsite': 'Off-site copy',
+  'operations.offsite-check': 'Off-site restore test',
 };
 export const jobName = (kind: string): string => jobs[kind] ?? readable(kind.replace(/^operations\./, ''));
 
@@ -307,6 +309,10 @@ export function jobOutcome(job: {kind: string; state: string; error?: string | n
       );
     case 'restarted':
       return 'Services restarted and answering.';
+    case 'offsite_sent':
+      return 'Encrypted copy stored off-site.' + (result.prune_error ? ' Old copies couldn’t be removed.' : '');
+    case 'offsite_checked':
+      return 'The newest off-site copy opened with your passphrase and every file checked out.';
     case 'applied':
       return 'New settings are in use.';
     case 'apply_failed':
@@ -317,6 +323,22 @@ export function jobOutcome(job: {kind: string; state: string; error?: string | n
   return 'Finished.';
 }
 
+const offsiteErrors: Record<string, string> = {
+  offsite_not_configured: 'Off-site copies are off. Turn them on in Settings › Privacy & data.',
+  offsite_no_backup: 'There is no finished backup to copy yet.',
+  offsite_no_copy: 'No off-site copy was found in the bucket.',
+  offsite_storage_unreachable: 'The storage couldn’t be reached. Check the address and the internet connection.',
+  offsite_wrong_passphrase_or_damaged:
+    'The copy couldn’t be opened: the passphrase is different, or the copy is damaged.',
+  offsite_copy_truncated: 'The off-site copy is incomplete.',
+  offsite_copy_damaged: 'The off-site copy is damaged.',
+  offsite_backup_invalid: 'The copy opened, but a file inside didn’t match its checksum.',
+  offsite_passphrase_too_short: 'The passphrase is too short.',
+  offsite_low_disk: 'Not enough free disk space to make the encrypted copy. Free some space, then try again.',
+  offsite_copy_too_large: 'The backup is too large for one off-site copy.',
+  offsite_needs_cryptography: 'This computer needs the Python cryptography package to open off-site copies.',
+};
+
 export function operationError(code: string): string {
   if (code === 'wait_for_active_jobs') return 'Another task is running. Try again when it finishes.';
   if (code === 'installation_maintenance') return 'A backup is running. Try again when it finishes.';
@@ -324,6 +346,9 @@ export function operationError(code: string): string {
   if (code === 'export_not_ready') return 'The export isn’t ready yet.';
   if (code === 'dashboard_restarted') return 'Stopped when the dashboard restarted.';
   if (code === 'operation_failed') return 'The task failed. Run a service check for details.';
+  if (code in offsiteErrors) return offsiteErrors[code]!;
+  if (code.startsWith('offsite_storage_'))
+    return 'The storage refused the request (' + code.slice(16) + '). Check the address, bucket and keys.';
   return readable(code).replace(/^./, c => c.toUpperCase()) + '.';
 }
 

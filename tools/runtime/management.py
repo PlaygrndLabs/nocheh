@@ -91,11 +91,19 @@ def dispatch(body):
     if operation == 'operations.list':
         from tools.operations.installation.admin_operations import backups
         from tools.operations.installation.backup_schedule import status
-        schedule=status(state);automatic=set(schedule.pop('automatic'))
-        return {'backups':[{**row,'automatic':row['id'] in automatic} for row in backups(state)],'schedule':schedule}
+        from tools.operations.installation import offsite
+        from tools.operations.installation.configuration import load as load_settings
+        schedule=status(state);automatic=set(schedule.pop('automatic'));remote=offsite.status(state,load_settings(state))
+        sent=remote.pop('sent')
+        return {'backups':[{**row,'automatic':row['id'] in automatic,'offsite':any(row['id'] in key for key in sent)} for row in backups(state)],
+                'schedule':schedule,'offsite':remote}
     if operation == 'backups.due':
         from tools.operations.installation.backup_schedule import due
         return due(state)
+    if operation == 'offsite.due':
+        from tools.operations.installation.offsite import due as offsite_due
+        from tools.operations.installation.configuration import load as load_settings
+        return offsite_due(state,load_settings(state))
     if operation == 'backups.started':
         from tools.operations.installation.backup_schedule import started
         return started(state,body['job'])

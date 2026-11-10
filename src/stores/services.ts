@@ -35,6 +35,7 @@ import {ImportRepository} from './imports.js';
 import {LegacyImportRepository} from './legacy-import.js';
 import {SourcePortabilityRepository} from './source-portability.js';
 import {DerivativePortabilityRepository} from './derivative-portability.js';
+import {OwnerPortabilityRepository} from './owner-portability.js';
 import {RuntimeConfigurationRepository} from './runtime-configuration.js';
 import {TelegramActionRepository} from './telegram-actions.js';
 import {TelegramDispatchRepository} from './telegram-dispatch.js';
@@ -135,7 +136,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     controlledActions,controlledExecution,memoryAccess,memoryMap,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.runtime,options.serviceToken??''),
-    capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
+    capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),
