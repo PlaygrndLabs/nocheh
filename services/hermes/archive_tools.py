@@ -203,6 +203,17 @@ def read_tool(args, **kwargs):
         return json.dumps({'error':'archive_source_unavailable'})
 
 
+# Hermes stops a tool call after 420 s unless the tool's registry entry asks for more time. A long-term recall may
+# wait 615 s, then 15 s more for the owner's native recall, so its entry asks for 660 s.
+RECALL_TOOL_SECONDS=660.0
+
+
+def _allow_long_recall():
+    from tools.registry import registry
+    entry=registry.get_entry('nocheh_memory_recall')
+    if entry is not None:entry.execution_timeout=RECALL_TOOL_SECONDS
+
+
 def register(ctx):
     from .knowledge_tools import register as register_knowledge
     register_knowledge(ctx)
@@ -246,6 +257,7 @@ def register(ctx):
         ctx.register_tool(name=name,toolset='nocheh_archive',description=description,
             schema={'name':name,'description':description,'parameters':{'type':'object','properties':properties,'required':required,'additionalProperties':False}},
             handler=handler)
+    _allow_long_recall()
     for kind,description,properties,required in (
         ('shell','Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval, a standing permission or a rule the owner set for this chat is required; when one already allows it, this call returns its result.',
          {'command':{'type':'string','maxLength':16000}},['command']),
