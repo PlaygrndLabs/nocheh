@@ -89,7 +89,11 @@ def initialize(provider_state=PROVIDER_STATE):
                     prefix+'__OVERRIDES__BASE_URL':'http://meter:8790/v1',
                     prefix+'__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'})
     env['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
-    for level in ('minimal','low','medium','high','max'): env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
+    for level in ('minimal','low','medium','high','max'):
+        env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
+        # A chat asked for a response_format, as learning is, otherwise sends a non-strict json_schema with its tools,
+        # which an OpenAI-compatible endpoint can refuse; json_object puts the schema in the prompt and Honcho repairs and checks the answer.
+        env[f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
     (state/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
     for name in ('honcho.env','meter.env'): (state/name).chmod(0o600)
     if values.get('NOCHEH_HONCHO_ENABLED')=='true':

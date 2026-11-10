@@ -3,7 +3,7 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {parentSpace,validateSpace} from '../spaces.js';
-import {learningResult} from '../interpretations.js';
+import {learningResult,withoutNulls} from '../interpretations.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {StorePools} from './connections.js';
 import type {SourceReference} from './archive.js';
@@ -357,7 +357,10 @@ export class KnowledgeManagementRepository {
   let proposal:OrganizationProposal,context:any;
   try{context=JSON.parse(contextRow.content.toString());const parsed:any=learningResult(result.content.toString());
    if(!parsed.organization)return null;
-   proposal=parseKnowledgeProposal({...parsed.organization,kind:'organization',reason:parsed.organization.reason??'Organize the permitted conversation evidence.'}) as OrganizationProposal;
+   // Honcho answers an absent field as null, such as the unused one of project_id and project_key.
+   const organization=parsed.organization,items=(value:unknown)=>Array.isArray(value)?value.map(withoutNulls):value;
+   proposal=parseKnowledgeProposal({...organization,creates:items(organization.creates),assignments:items(organization.assignments),kind:'organization',
+    reason:organization.reason??'Organize the permitted conversation evidence.'}) as OrganizationProposal;
   }catch{return null;}
   const captured=await this.s.access.archive.verify(job.source_reference);
   if(captured.origin!=='live')return null;

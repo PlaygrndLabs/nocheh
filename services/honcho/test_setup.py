@@ -49,6 +49,18 @@ class HonchoSetupTests(unittest.TestCase):
                 # A summary needs room for twice its longest output (6,000 tokens), or Honcho does not start.
                 self.assertGreaterEqual(int(values[name]), 12000)
 
+    def test_setup_asks_every_dialectic_level_for_json_through_the_prompt(self):
+        from tools.operations.installation.configuration import initialize, read_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                honcho_setup.initialize(state)
+            values = read_env(state / 'honcho/honcho.env')
+            # Learning asks peer chat for a response_format; a json_schema sent alongside tools can be refused.
+            for level in ('minimal', 'low', 'medium', 'high', 'max'):
+                self.assertEqual(values[f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG__STRUCTURED_OUTPUT_MODE'], 'json_object')
+
     def test_setup_keeps_peer_cards_and_dreams_off(self):
         from tools.operations.installation.configuration import initialize, read_env, write_env
         with tempfile.TemporaryDirectory() as folder:

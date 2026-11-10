@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
-import {learningResult,parseInterpretations,triggeredInterpretations,applicableInterpretations,type Interpretation,type InterpretationVersion} from '../src/interpretations.js';
+import {learningResult,learningResultSchema,parseInterpretations,triggeredInterpretations,applicableInterpretations,type Interpretation,type InterpretationVersion} from '../src/interpretations.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
@@ -45,25 +45,27 @@ test('reaction learning ignores unrelated conclusions and keeps strict original-
   assert.deepEqual(unavailable.values.map(v=>v.subject),['kept'],'an unavailable citation drops only its own item');
   assert.deepEqual(unavailable.rejected,[{section:'interpretations',code:'unavailable_interpretation_evidence'}]);
 });
-test('a saved reasoning result is read from plain, fenced or sentence-wrapped JSON and unusable output is rejected',()=>{
-  const value={interpretations:[{kind:'state',subject:'a {brace} "quoted"',text:'Synthetic.'}],entity_claims:[]};
-  const json=JSON.stringify(value,null,2);
-  for(const text of [json,'```json\n'+json+'\n```','Here is the result:\n```\n'+json+'\n```\nDone.','Based on the evidence, '+json+' is my answer.'])
-    assert.deepEqual(learningResult(text),value);
-  assert.deepEqual(learningResult('Example {"note":1} then '+json),value,'an unrelated object is not the result');
-  for(const text of ['No learnable content.','```json\n{"interpretations":[\n```','[]','{"notes":"none"}','{"interpretations":[{"kind":"state","subject":"cut'])
+test('a saved reasoning result is the JSON object Honcho returned for the learning schema, and anything else is unusable',()=>{
+  // Honcho returns every schema field, an absent one as null.
+  const evidence=digest('strict-trigger'),sources=[{reference:{store:'archive' as const,kind:'event' as const,id:evidence,revision:'1',input_hash:digest(evidence)},text:'Synthetic source.',space:'-42'}];
+  const value={interpretations:[{kind:'state',subject:'a {brace} "quoted"',text:'Synthetic.',scope:{kind:'conversation',id:'-42'},uncertainty:'supported',
+    quote:null,conflicts:null,evidence_ids:[evidence]}],entity_suggestions:null,entity_claims:[],organization:null};
+  const json=JSON.stringify(value);
+  assert.deepEqual(learningResult(json),value);
+  assert.equal(parseInterpretations(learningResult(json),sources,'-42',[]).values.length,1);
+  for(const text of ['No learnable content.','```json\n'+json+'\n```','Based on the evidence, '+json,'[]','null','{"notes":"none"}',json.slice(0,-20)])
     assert.throws(()=>learningResult(text),{code:'invalid_interpretation_result'});
-  // An answer cut off at the output limit keeps only its whole leading items.
-  const whole={kind:'state',subject:'a [bracket] "quoted" {brace}',text:'Synthetic.',evidence_ids:['e1']};
-  const cut=JSON.stringify({interpretations:[whole,whole],entity_suggestions:[{kind:'person',name:'Synthetic person',reason:'cut here'}]});
-  for(const end of [cut.indexOf('cut here'),cut.lastIndexOf('{"kind":"person"')+5])
-    assert.deepEqual(learningResult('```json\n'+cut.slice(0,end)),{interpretations:[whole,whole]});
-  const second=JSON.stringify({interpretations:[whole,{...whole,subject:'unfinished'}]});
-  assert.deepEqual(learningResult(second.slice(0,second.indexOf('unfinished'))),{interpretations:[whole]});
-  assert.deepEqual(learningResult(cut.slice(0,cut.indexOf(',"entity_suggestions"')+5)),{interpretations:[whole,whole]});
-  const person={kind:'person',name:'Synthetic person',reason:'Synthetic.',evidence_ids:['e1']};
-  const later=JSON.stringify({interpretations:[whole],entity_suggestions:[person,{...person,reason:'cut here'}]},null,2);
-  assert.deepEqual(learningResult(later.slice(0,later.indexOf('cut here'))),{interpretations:[whole],entity_suggestions:[person]});
+});
+test('the learning schema leaves item checks to Nocheh and puts evidence last in each item',()=>{
+  const sections=learningResultSchema.properties,fields=(section:{items:{properties:object}})=>Object.keys(section.items.properties);
+  assert.deepEqual(Object.keys(sections),['interpretations','entity_suggestions','entity_claims','organization']);
+  assert.deepEqual([sections.interpretations,sections.entity_suggestions,sections.entity_claims].map(section=>section.maxItems),[12,12,20]);
+  // An item cut off at the output limit has no evidence yet, so it is dropped.
+  for(const section of [sections.interpretations,sections.entity_suggestions,sections.entity_claims,sections.organization.properties.creates,sections.organization.properties.assignments])
+    assert.equal(fields(section).at(-1),'evidence_ids');
+  assert.deepEqual(fields(sections.organization.properties.assignments).sort(),['evidence_ids','expected_revision','project_id','project_key','purpose_evidence','reason','space_id']);
+  // Nothing in it is an enum, which Honcho would enforce for the whole answer instead of Nocheh dropping one item.
+  assert.ok(!JSON.stringify(learningResultSchema).includes('"enum"'));
 });
 test('learning result sections keep valid leading items and record what was dropped',()=>{
   const source=digest('limit-trigger'),evidence=[{reference:{store:'archive' as const,kind:'event' as const,id:source,revision:'1',input_hash:digest(source)},text:'Synthetic source',space:'-42'}];

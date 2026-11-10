@@ -3,7 +3,7 @@ import {canonical,digest} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {learningInstruction,ownerPrompts} from '../prompts.js';
 import type {HonchoCall} from '../honcho.js';
-import {learningResult,parseInterpretations,triggeredInterpretations,type LearningRejection} from '../interpretations.js';
+import {learningResult,learningResultSchema,parseInterpretations,triggeredInterpretations,type LearningRejection} from '../interpretations.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
@@ -167,7 +167,8 @@ export class ContextualLearningRepository {
           const peer=context.entities.speaker?honchoPeerId(context.entities.speaker):evidencePeerId(context.source);
           // A group or topic interpretation reasons only over that audience's own sessions.
           const scope=await this.provenance.chatScope(job.workspace,job.audience);
-          const response=await this.call('/v3/workspaces/'+job.workspace+'/peers/'+peer+'/chat',{query,reasoning_level:'low',stream:false,...scope});
+          const response=await this.call('/v3/workspaces/'+job.workspace+'/peers/'+peer+'/chat',{query,reasoning_level:'low',stream:false,
+            response_format:learningResultSchema,...scope});
           // Preserve the completed reasoning result before validation, publication or job completion.
           const output=await this.derived.record({operation_id:operation,source:job.source_reference,parents:[job.input_reference],kind:'learning_result',
             content:Buffer.from(string(response.content,200000)),producer:'honcho',producer_version:protocol,configuration:{reasoning_level:'low',peer},
