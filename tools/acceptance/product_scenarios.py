@@ -127,6 +127,32 @@ class ProductScenarios(Scenarios):
         _, text = self.turn(self.f.message(GROUP, 'و حالا؟ [[turn:UNADDR42]]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
         self.gate('shown_only_once', 'absent' in text, answer=text)
 
+    def late_messages_get_no_reply(self):
+        # Telegram delivers what it held while Nocheh was offline: messages sent three hours ago.
+        # They are saved without a reply, the next group reply still sees them, and the owner
+        # gets one summary once the backlog settles.
+        sent, before = int(time.time())-3*3600, len(self.f.sent())
+        private = self.f.message(OWNER, 'هنوز هستی؟ LATEPRIV71', extra={'date': sent})
+        asked = self.f.message(GROUP, 'ناهار ساعت دوازده رزرو کن LATEGRP72', sender=MEMBER, topic=TEAM_TOPIC, extra={'date': sent})
+        chatter = self.f.message(GROUP, 'من دیر می‌رسم LATECHAT73', sender=MEMBER, mention=False, topic=TEAM_TOPIC, extra={'date': sent+60})
+        self.f.inject(private, asked, chatter)
+        for update, error in ((private, 'too_old'), (asked, 'too_old'), (chatter, 'not_addressed')):
+            row = self.finished(self.captured(update))
+            self.gate('late_message_saved_without_reply', row['state'] == 'suppressed' and row['error'] == error, state=row['state'], error=row['error'], expected=error)
+        time.sleep(3)
+        self.gate('no_reply_to_late_messages', not self.replies(before, OWNER) and not self.replies(before, GROUP, TEAM_TOPIC),
+                  private=len(self.replies(before, OWNER)), group=len(self.replies(before, GROUP, TEAM_TOPIC)))
+        summary = 'Nocheh got these messages late'
+        notices = lambda: [row for row in self.f.sent()[before:] if row['message']['chat']['id'] == OWNER and summary in (row['message'].get('text') or '')]
+        text = self.wait('one_summary_to_the_owner', notices, 300)[0]['message']['text']
+        self.gate('summary_lists_each_chat', '• Your private chat: 1' in text and '• Synthetic Forum '+str(GROUP)+': 1' in text, text=text[:300])
+        # Hermes puts recent group messages in front of the turn's own text.
+        _, answer = self.turn(self.f.message(GROUP, 'چه گفتند؟ [[turn:LATEGRP72]]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+        self.gate('next_reply_sees_late_message', 'present' in answer, answer=answer)
+        self.turn(self.f.message(OWNER, 'حالا جواب بده'), OWNER)
+        time.sleep(40)
+        self.gate('summary_sent_once', len(notices()) == 1, count=len(notices()))
+
     def typing_shows_while_working(self):
         # Telegram shows "typing…" in the chat or topic while Nocheh works, and it stops with the reply.
         def calls(since, chat):
@@ -1673,7 +1699,7 @@ class ProductScenarios(Scenarios):
         return Dashboard(self.f)
 
 
-PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
+PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'late_messages_get_no_reply', 'typing_shows_while_working',
                  'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',

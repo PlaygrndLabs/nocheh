@@ -186,7 +186,7 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
                 wait('rate_limit_wait_and_durable_receipts',rate_receipts,60)
             sent_before=len(sent)
         number=base+len(probes)
-        denied={'update_id':number,'message':{'message_id':number,'date':base,'chat':{'id':456,'type':'private'},
+        denied={'update_id':number,'message':{'message_id':number,'date':int(time.time()),'chat':{'id':456,'type':'private'},
             'from':{'id':456,'is_bot':False,'first_name':'Unselected'},'text':'Unselected synthetic private message'}}
         http('/fixture/telegram',{'updates':[denied]})
         denied_id=wait('unselected_private_captured',lambda:query('nocheh_archive',"SELECT id FROM events WHERE kind='telegram_update' AND source_id='"+str(number)+"' AND scope='456'"))

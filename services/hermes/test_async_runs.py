@@ -101,6 +101,9 @@ class AsyncRunTests(unittest.TestCase):
             body=self.body(2);runs.start(body);self.assertNotIn('error_type',self.wait(runs,body))
             runs=AsyncRuns(folder,lambda *args:{'state':'failed','error_code':'unexpected_profile_tool'},lambda body:None)
             body=self.body(3);runs.start(body);self.assertEqual(self.wait(runs,body)['error_code'],'unexpected_profile_tool')
+            # A late message's suppression keeps its cause, so Nocheh can list it for the owner.
+            runs=AsyncRuns(folder,lambda *args:{'state':'suppressed','error_code':'too_old'},lambda body:None)
+            body=self.body(4);runs.start(body);self.assertEqual(self.wait(runs,body),{'run_id':identity(body),'state':'suppressed','error_code':'too_old'})
 
     def test_continuation_attempt_is_a_separate_run(self):
         attempt='c1-'+'a'*40

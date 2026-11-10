@@ -66,6 +66,12 @@ addresses Nocheh in a selected group without a grant, or anyone else who writes
 privately (at most once a UTC day), gets the owner's fixed reply without a model;
 messages from chats Nocheh does not serve are archived but never prepared. Bot
 senders, edits and historical replay do not trigger new replies.
+Telegram holds updates while Nocheh is offline and delivers them when polling
+resumes. A message that reaches Nocheh later than **Messages that arrive late**
+(Settings › Telegram, 30 minutes by default, or **Always answer**) after it was
+sent is archived without a reply, refusal or owner command; the next group reply
+still sees it, and the owner's private chat gets one list per backlog, with each
+chat and its count ([ADR-0228](adr/0228-messages-that-arrive-late-get-no-reply.md)).
 In a group, a message starts a turn only when it addresses Nocheh: a reply to
 one of its messages, its @username, or one of its names opening the message
 (**Names that call Nocheh**). Other messages reach the next reply as context;

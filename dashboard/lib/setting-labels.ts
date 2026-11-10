@@ -11,6 +11,7 @@ export const settingLabels: Record<string, string> = {
   TELEGRAM_TYPING: 'Show typing while working',
   TELEGRAM_REACTIONS: 'React while working',
   TELEGRAM_PROBLEM_NOTICES: 'Tell me about problems',
+  TELEGRAM_LATE_MINUTES: 'Messages that arrive late',
   NOCHEH_DASHBOARD_URL: 'Dashboard address',
   NOCHEH_MINI_APP_URL: 'Mini app address',
   CLOUDFLARE_TUNNEL_TOKEN: 'Mini app tunnel token',

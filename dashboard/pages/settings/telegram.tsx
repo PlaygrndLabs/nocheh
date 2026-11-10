@@ -1,7 +1,7 @@
 import {useResource} from '../../lib/resource';
 import {useSettings} from '../../lib/settings';
 import {href} from '../../lib/routes';
-import {Badge, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
+import {Badge, Card, CardHeader, Input, Notice, Segmented, Select, SettingRow, Switch} from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
 import {FindIdButton, FoundPeople, useFindTelegramId} from './telegram-id';
 
@@ -17,6 +17,7 @@ export const telegramKeys = [
   'TELEGRAM_TYPING',
   'TELEGRAM_REACTIONS',
   'TELEGRAM_PROBLEM_NOTICES',
+  'TELEGRAM_LATE_MINUTES',
   'NOCHEH_DASHBOARD_URL',
   'NOCHEH_MINI_APP_URL',
   'CLOUDFLARE_TUNNEL_TOKEN',
@@ -117,6 +118,20 @@ export function TelegramSettings() {
                 disabled={s.busy}
                 onChange={on => s.set('TELEGRAM_REACTIONS', on ? 'true' : 'false')}
               />
+            </div>
+          </SettingRow>
+          <SettingRow
+            title={
+              <>
+                Messages that arrive late
+                <Unsaved show={s.changed('TELEGRAM_LATE_MINUTES')} />
+              </>
+            }
+            description="Telegram keeps messages while Nocheh is offline and delivers them when it is back. A message that arrives later than this after it was sent is saved without a reply, and your private chat gets one list of them instead."
+            htmlFor="telegram-late-minutes"
+          >
+            <div className="flex sm:justify-end">
+              <LateMinutes />
             </div>
           </SettingRow>
           <SettingRow
@@ -398,5 +413,38 @@ export function TelegramSettings() {
         </div>
       </Card>
     </>
+  );
+}
+
+const lateChoices: [string, string][] = [
+  ['15', 'Later than 15 minutes'],
+  ['30', 'Later than 30 minutes'],
+  ['60', 'Later than 1 hour'],
+  ['180', 'Later than 3 hours'],
+  ['720', 'Later than 12 hours'],
+  ['0', 'Always answer'],
+];
+
+/** Minutes after which a message that arrives late gets no reply; 0 always answers. */
+function LateMinutes() {
+  const s = useSettings();
+  const value = s.value('TELEGRAM_LATE_MINUTES') || '30';
+  const choices = lateChoices.some(([minutes]) => minutes === value)
+    ? lateChoices
+    : [[value, `Later than ${value} minutes`] as [string, string], ...lateChoices];
+  return (
+    <Select
+      id="telegram-late-minutes"
+      aria-label="Messages that arrive late"
+      value={value}
+      disabled={s.busy}
+      onChange={e => s.set('TELEGRAM_LATE_MINUTES', e.target.value)}
+    >
+      {choices.map(([minutes, label]) => (
+        <option key={minutes} value={minutes}>
+          {label}
+        </option>
+      ))}
+    </Select>
   );
 }

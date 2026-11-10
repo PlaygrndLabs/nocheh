@@ -63,6 +63,7 @@ TITLES = {
     'granted_participant': 'Allowing and removing a member', 'storage_report': 'Storage report', 'stage_timings': 'Reply timings',
     'group_members': 'Set up allowed members', 'group_name_addresses': 'Groups: calling Nocheh by name',
     'unaddressed_messages_reach_next_reply': 'Groups: unaddressed messages inform the next reply',
+    'late_messages_get_no_reply': 'Messages that arrive late: saved, not answered, one summary',
     'typing_shows_while_working': 'Typing shows while Nocheh works',
     'reactions_show_while_working': 'Reactions show while Nocheh works',
     'not_allowed_person_gets_fixed_reply': 'People not allowed get the fixed reply',

@@ -128,6 +128,8 @@ export function replyStatus(row: MessageRow): Status | null {
       return {label: 'Rejected by Telegram', tone: 'bad', note: 'Not retried automatically'};
     if (row.assistant_error === 'invalid_transcription_response')
       return {label: 'Speech not recognized', tone: 'bad', note: 'Original audio is kept'};
+    if (row.assistant_error === 'too_old')
+      return {label: 'Arrived late, not answered', tone: 'neutral', note: 'Listed in one summary to you'};
     if (hasSpeech(row.content_types) && !row.transcript_preview)
       return {label: 'Archived without transcription', tone: 'neutral', note: 'Original audio is kept'};
     if (row.assistant_error === 'not_addressed') return {label: 'Not addressed to the assistant', tone: 'neutral'};

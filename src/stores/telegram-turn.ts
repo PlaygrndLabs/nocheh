@@ -14,7 +14,7 @@ export const closedTurnStates=new Set(['done','failed','ambiguous','suppressed',
 /** `failed` is retried, so only these end a turn for good. */
 export const terminalTurnStates=new Set(['done','ambiguous','suppressed','cancelled']);
 export const turnResultCodes=new Set(['model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
-  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','provider_not_configured',
+  'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed','too_old','provider_not_configured',
   'unexpected_profile_tool','required_guard_unavailable','profile_scope_denied','invalid_process_scope_binding','unsupported_memory_compaction_revision']);
 export type TurnInput={binding:GuardBinding;principal:Reader;body:Record<string,unknown>};
 

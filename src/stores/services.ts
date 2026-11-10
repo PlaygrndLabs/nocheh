@@ -4,6 +4,7 @@ import {TaskRepository,type TaskActor} from './tasks.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
+import {LateMessageNotices} from './late-messages.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {HonchoCall} from '../honcho.js';
@@ -135,6 +136,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     controlledActions,controlledExecution,memoryAccess,memoryMap,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.runtime,options.serviceToken??''),
+    lateMessages:new LateMessageNotices(stores.control,stores.archive,options.runtime,options.policy),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.honcho),
     memory,knowledge,supervision,

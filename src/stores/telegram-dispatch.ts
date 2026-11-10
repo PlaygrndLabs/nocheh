@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS dispatches (
  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS reconciliation_checked_at timestamptz;
+ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS late_notice text;
+ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS late_notice_state text CHECK(late_notice_state IN ('sending','sent','uncertain','skipped'));
+CREATE INDEX IF NOT EXISTS dispatches_late_unreported ON dispatches(updated_at) WHERE state='suppressed' AND error_code='too_old' AND late_notice IS NULL;
+CREATE INDEX IF NOT EXISTS dispatches_late_notice ON dispatches(late_notice) WHERE late_notice IS NOT NULL;
 `;
 const protocol='telegram-dispatch-v2';
 const conversationOrderWaitMs=120000;
@@ -51,6 +55,18 @@ export function interruptedJournalDisposition(value:unknown):JournalDisposition 
   const last=events.at(-1);
   if(last.state!=='ambiguous'||last.stage!=='assistant'||!assistant)return 'invalid';
   return delivery?'uncertain':'pre_delivery';
+}
+
+/**
+ * Whether a message reached Nocheh more than the owner's limit after it was
+ * sent, for example while Nocheh's computer was off and Telegram held it. The
+ * send time is the one capture recorded from Telegram (whole seconds); it is
+ * compared with the time the archive saved the message, never with now, so a
+ * reply that failed and is retried later still goes out.
+ */
+export function arrivedLate(occurred:string|null|undefined,received:Date,minutes:number|undefined):boolean {
+  if(!minutes||typeof occurred!=='string'||!/^\d{1,12}$/.test(occurred))return false;
+  return received.getTime()-Number(occurred)*1000>minutes*60000;
 }
 
 /**
@@ -214,21 +230,31 @@ export class TelegramDispatchRepository {
    * and cites its source so retiring it withholds the turn that carried it.
    */
   private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string}[]> {
-    const own=(await this.archive.pool.query('SELECT scope,received_at FROM events WHERE id=$1',[source.id])).rows[0];
-    if(!own)return [];
-    const rows=(await this.archive.pool.query(`SELECT id,payload FROM events WHERE scope=$1 AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
-      AND received_at<=$3 AND received_at>$3::timestamptz-interval '12 hours' AND convert_from(payload,'UTF8')::jsonb ? 'message'
-      ORDER BY received_at DESC,id DESC LIMIT 100`,[own.scope,source.id,own.received_at])).rows;
+    const own=(await this.archive.pool.query(`SELECT scope,received_at,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE id=$1`,[source.id])).rows[0];
+    if(!own||!/^\d{1,19}$/.test(String(own.update_id)))return [];
+    // Telegram update order, as for starting turns: messages Telegram held while Nocheh was
+    // offline are saved together in any order, some just after this one although sent before it.
+    const rows=(await this.archive.pool.query(`SELECT id,payload,occurred_at,received_at FROM (SELECT id,payload,occurred_at,received_at,
+        convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE scope=$1 AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
+        AND received_at>$3::timestamptz-interval '12 hours' AND received_at<=$3::timestamptz+interval '2 minutes' AND convert_from(payload,'UTF8')::jsonb ? 'message') recent
+      WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$4::numeric ORDER BY update_id::numeric DESC LIMIT 100`,[own.scope,source.id,own.received_at,own.update_id])).rows;
     if(!rows.length)return [];
     const states=new Map((await this.control.query('SELECT event_id,state,error_code FROM dispatches WHERE event_id=ANY($1::text[])',
       [rows.map(row=>row.id)])).rows.map(row=>[row.event_id as string,row]));
-    const recent:{id:string;speaker:string;text:string}[]=[];
+    const recent:{id:string;speaker:string;text:string}[]=[],limit=this.access.policy().late_minutes;
     for(const row of rows) {
       // Members who may not talk to Nocheh are still part of the conversation. Album parts went with
       // their album's turn; any other outcome is the last turn, already in Hermes' history.
       const state=states.get(row.id);
-      if(!state||state.state==='suppressed'&&state.error_code==='album_member')continue;
-      if(state.state!=='suppressed'||!['not_addressed','not_allowed','conversation_not_selected'].includes(state.error_code))break;
+      if(state?.state==='suppressed'&&state.error_code==='album_member')continue;
+      const passed=state?.state==='suppressed'&&['not_addressed','not_allowed','conversation_not_selected','too_old'].includes(state.error_code);
+      if(arrivedLate(row.occurred_at,row.received_at,limit)) {
+        // A late message gets no turn of its own, even while its dispatch is still open.
+        if(state&&!passed&&!['pending','running','failed'].includes(state.state))break;
+      } else {
+        if(!state)continue;
+        if(!passed)break;
+      }
       try {
         if(await this.access.space((await this.archive.captured(row.id)).reference)!==space)continue;
         const guarded=await this.sources.read(principal,row.id),text=typeof guarded.event.text==='string'&&guarded.event.text?guarded.event.text.slice(0,1000):'[A message without text]';
@@ -287,10 +313,12 @@ export class TelegramDispatchRepository {
     catch{/* Best effort: the message stays archived either way. */}
   }
   private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation> {
-    const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
+    const original=(await this.archive.pool.query('SELECT source_key,payload,scope,occurred_at,received_at FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
+    // Saved, but not answered: no reply, no fixed refusal and no owner command runs (ADR-0228).
+    const late=arrivedLate(original.occurred_at,original.received_at,this.access.policy().late_minutes);
     if(!scope) {
-      await this.refuse(source.id,original.source_key,original.scope,payload);
+      if(!late)await this.refuse(source.id,original.source_key,original.scope,payload);
       // Someone's own message that Nocheh may not answer them, as opposed to an
       // edit, a reaction, a bot, or the owner writing in a chat they didn't select.
       const sender=payload?.message?.from,refused=!!sender?.id&&sender.is_bot!==true&&String(sender.id)!==this.access.policy().owner_id;
@@ -326,7 +354,7 @@ export class TelegramDispatchRepository {
       }
     }
     // Command authority comes from the original owner DM, never a guarded edit.
-    const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
+    const reply=late?null:await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
     const botId=/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'';
     let addressing=groupAddressing(payload,botId);
@@ -335,11 +363,11 @@ export class TelegramDispatchRepository {
       const other=groupAddressing(JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString()),botId);
       if(addressing&&other)addressing={direct:addressing.direct||other.direct,handles:[...new Set([...addressing.handles,...other.handles])].sort().slice(0,20)};
     }
-    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
+    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner||late?[]:await this.recentGroup(source,space,principal);
     // An album's caption usually sits on one part; the turn reads every part's text in order.
     const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
+      ...(late?{late:true}:{}),...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,recent_group:recent});await currentTurn(this,input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,

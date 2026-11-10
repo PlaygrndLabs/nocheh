@@ -19,7 +19,7 @@ DEFAULTS = {
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}', 'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true',
-    'TELEGRAM_PROBLEM_NOTICES': 'true', 'NOCHEH_DASHBOARD_URL': '',
+    'TELEGRAM_PROBLEM_NOTICES': 'true', 'TELEGRAM_LATE_MINUTES': '30', 'NOCHEH_DASHBOARD_URL': '',
     'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
@@ -244,6 +244,8 @@ def validate(values):
     if values.get('TELEGRAM_TYPING','true') not in ('true','false'):raise ValueError('TELEGRAM_TYPING must be true or false')
     if values.get('TELEGRAM_REACTIONS','true') not in ('true','false'):raise ValueError('TELEGRAM_REACTIONS must be true or false')
     if values.get('TELEGRAM_PROBLEM_NOTICES','true') not in ('true','false'):raise ValueError('TELEGRAM_PROBLEM_NOTICES must be true or false')
+    late=str(values.get('TELEGRAM_LATE_MINUTES','30'))
+    if not re.fullmatch(r'[0-9]{1,4}',late) or int(late)>1440:raise ValueError('TELEGRAM_LATE_MINUTES must be 0 (always answer) or 1-1440 minutes')
     if values.get('NOCHEH_DASHBOARD_URL') and not re.fullmatch(r'https?://[^\s/?#]+(?:/[^\s?#]*)?',values['NOCHEH_DASHBOARD_URL'][:300]):
         raise ValueError('NOCHEH_DASHBOARD_URL must be an http or https address such as https://nocheh.example.com')
     names=[name.strip() for name in str(values.get('TELEGRAM_BOT_NAMES','')).split(',') if name.strip()]

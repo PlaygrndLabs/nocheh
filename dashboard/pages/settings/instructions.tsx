@@ -86,6 +86,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent to the agent, not to the chat, when operations a message asked for have ended, so it answers in that chat as a reply to the message. {actions} lists each operation’s ID, tool and state.',
   },
   {
+    key: 'telegram.late_messages',
+    title: 'Messages that arrived late',
+    hint: 'Sent to your private chat after Nocheh saved messages without answering because it got them late, for example while it was offline. {chats} lists each chat and how many, {minutes} is the number of minutes set in Settings › Telegram and {count} is the total. A line whose value is missing is left out.',
+  },
+  {
     key: 'tasks.reminder',
     title: 'Task reminder',
     hint: 'Sent to your private chat when a task reminder is due. {title} is the task, {due} its due day, {list} its project and {notes} its notes. A line whose value is missing is left out.',

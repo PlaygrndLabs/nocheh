@@ -49,6 +49,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The owner's instruction texts ride on each runtime call; defaults stay in code ([0152](0152-owner-editable-built-in-instructions.md)).
 - A group turn also sees up to 20 recent unaddressed messages, masked and cited; an album gets one turn on its first part ([0157](0157-group-turns-see-recent-unaddressed-messages.md), [0155](0155-albums-answered-once.md)).
 - A group message from the owner carries a `[the owner]` tag on its speaker line, so replies speak to the owner directly ([0222](0222-a-group-turn-knows-when-the-owner-speaks.md)).
+- A message that reaches Nocheh later than the owner's limit after it was sent, such as one Telegram held while Nocheh was offline, is saved without a reply; the next group reply still sees it, and the owner gets one summary ([0228](0228-messages-that-arrive-late-get-no-reply.md)).
 - A new guard epoch's profile starts with the recent conversation, and old profiles are removed after 15 idle minutes ([0163](0163-chat-conversation-carries-into-new-guard-epochs.md), [0168](0168-superseded-epoch-profiles-are-removed.md)).
 
 ### Honcho memory

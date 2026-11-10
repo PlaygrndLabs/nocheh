@@ -2,6 +2,18 @@
 
 <current>
 
+Messages that arrive late (2026-11-10): after Nocheh's computer was offline
+overnight, it answered every message Telegram had held, including hours-old group
+messages. A message that reaches Nocheh more than **Messages that arrive late**
+after it was sent (Settings › Telegram, 30 minutes by default, or Always answer)
+is now saved without a reply, refusal or owner command; the next group reply still
+sees it, in update order; the owner gets one summary per backlog with each chat
+and its count ([ADR-0228](docs/adr/0228-messages-that-arrive-late-get-no-reply.md);
+[dispatch and summary](test/store-late-messages.test.ts),
+[gateway](services/hermes/test_continuation.py); fake-Telegram tester scenario `late_messages_get_no_reply` passes). Pending: the owner's choice of
+policy and default, and a live check after a real offline gap on a running
+installation.
+
 Production move (owner, 2026-10-28): Nocheh moves to an always-on server as a
 clean install once the MVP checks pass (stuck notes-review fix, full tester on
 main, one clean day of use); dev-mode rules end at the move. Daily automatic

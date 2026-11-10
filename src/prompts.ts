@@ -11,13 +11,13 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_texts','telegram.action_continued','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
+  'telegram.approval_texts','telegram.action_continued','telegram.late_messages','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.action_continued':['{actions}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.action_continued':['{actions}'],'telegram.late_messages':['{chats}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}']};
 
 /** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
@@ -126,6 +126,10 @@ export function fillTemplate(template:string,values:Record<string,string|null|un
 export const taskReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
 /** Sent to the owner's private chat once an import's messages are all prepared. */
 export const importReady='✅ Import ready: {chats}\n{messages} messages are saved, read and checked for secrets. You can ask about them now.\n⚠️ {failed} of them could not be prepared; see System › Health.';
+/** Sent to the owner's private chat after Nocheh got messages late and saved them
+ * without answering: one line per chat with its count, and the owner's limit. */
+export const lateMessages=['Nocheh got these messages late, for example while it was offline, and saved them without answering:','{chats}',
+  'It answers only messages it gets within {minutes} minutes of sending.','Ask again if one still needs an answer.'].join('\n');
 /** A message to the owner's private chat about new or worse problems, one line each. */
 export const problemNotice='⚠️ Nocheh found a problem:\n{problems}\n\nSee System › Health in the dashboard.';
 /** The buttons under a problem notice and the short answers to a press. */
@@ -179,7 +183,7 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'repo_removed: 🚫 Withdrawn: its GitHub copy was removed. Nothing runs.'].join('\n');
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,'telegram.late_messages':lateMessages,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo};
 

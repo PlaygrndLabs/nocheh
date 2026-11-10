@@ -72,6 +72,19 @@ class ContinuationDispatchTests(unittest.IsolatedAsyncioTestCase):
                          {'state':'suppressed','error_code':'not_addressed'},'a plain group message still needs addressing')
         self.assertEqual(self.runs,[('continuation',attempt(1))],'the message turn never ran')
 
+    async def test_a_late_message_gets_no_turn_but_a_late_continuation_still_runs(self):
+        addressed,unaddressed={'direct':True,'handles':[]},{'direct':False,'handles':[]}
+        self.assertEqual(await self.gateway.dispatch(self.body(group_addressing=addressed,continuation=None,attempt=1,late=True)),
+                         {'state':'suppressed','error_code':'too_old'},'a late message addressed to Nocheh is saved without a reply')
+        self.assertEqual(await self.gateway.dispatch(self.body(group_addressing=unaddressed,continuation=None,attempt=2,late=True)),
+                         {'state':'suppressed','error_code':'not_addressed'},'chatter stays not addressed, so only messages for Nocheh count as skipped')
+        self.assertEqual(self.runs,[],'no turn, typing or reaction ran')
+        self.assertEqual(list(self.gateway.receipts.glob('*')),[],'nothing is claimed, so the outcome is not a delivery')
+        # The follow-up of an approved operation reuses the old asking message; it always answers.
+        self.assertEqual(await self.gateway.dispatch(self.body(group_addressing=unaddressed,late=True)),{'state':'done','runner':'continuation'})
+        self.assertEqual(await self.gateway.dispatch(self.body(group_addressing=addressed,continuation=None,attempt=3,late=False)),{'state':'done','runner':'turn'})
+        self.assertEqual(self.runs,[('continuation',attempt(1)),('turn',3)])
+
     async def test_a_continuation_attempt_has_its_own_receipt(self):
         turn=self.body(continuation=None,attempt=1,group_addressing={'direct':True,'handles':[]})
         self.assertEqual(await self.gateway.dispatch(turn),{'state':'done','runner':'turn'})

@@ -55,7 +55,14 @@ class GroupTriggerTests(unittest.TestCase):
         validate(base)
         validate({**base, 'TELEGRAM_GROUP_REPLIES': 'all', 'TELEGRAM_BOT_NAMES': ''})
         validate({**base, 'TELEGRAM_TOPIC_MEMORY': 'topic', 'TELEGRAM_TYPING': 'false', 'TELEGRAM_REACTIONS': 'false'})
-        for key, bad in (('TELEGRAM_GROUP_REPLIES', 'some'), ('TELEGRAM_BOT_NAMES', 'n' * 33), ('TELEGRAM_TOPIC_MEMORY', 'chat'), ('TELEGRAM_TYPING', 'yes'), ('TELEGRAM_REACTIONS', 'on')):
+        # The app decides which late messages get no reply; Apply recreates only the app for it.
+        app = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())['services']['nocheh-app']['environment']
+        self.assertEqual((app['TELEGRAM_LATE_MINUTES'], DEFAULTS['TELEGRAM_LATE_MINUTES']), ('${TELEGRAM_LATE_MINUTES:-30}', '30'))
+        self.assertIn('TELEGRAM_LATE_MINUTES', EDITABLE)
+        for minutes in ('0', '15', '1440'):
+            validate({**base, 'TELEGRAM_LATE_MINUTES': minutes})
+        for key, bad in (('TELEGRAM_GROUP_REPLIES', 'some'), ('TELEGRAM_BOT_NAMES', 'n' * 33), ('TELEGRAM_TOPIC_MEMORY', 'chat'), ('TELEGRAM_TYPING', 'yes'), ('TELEGRAM_REACTIONS', 'on'),
+                         ('TELEGRAM_LATE_MINUTES', '1441'), ('TELEGRAM_LATE_MINUTES', '-5'), ('TELEGRAM_LATE_MINUTES', '30m'), ('TELEGRAM_LATE_MINUTES', ''), ('TELEGRAM_LATE_MINUTES', '\u06f6\u06f0')):
             with self.assertRaises(ValueError, msg=key):
                 validate({**base, key: bad})
 

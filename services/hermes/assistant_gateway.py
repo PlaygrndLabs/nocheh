@@ -491,6 +491,9 @@ class AssistantGateway:
         # A group message nobody addressed to the bot stays archived without a turn.
         # The asking turn was already admitted; its follow-up answers it.
         if not scope.owner and continuation is None and not self.group_turn(body):return {'state':'suppressed','error_code':'not_addressed'}
+        # Nocheh got the message late, for example while it was offline: it stays saved and the
+        # owner hears about it in one summary instead of a reply hours after it was sent (ADR-0228).
+        if continuation is None and body.get('late') is True:return {'state':'suppressed','error_code':'too_old'}
         name=digest(body['event_id']+':'+str(body['attempt']))
         # Turns in one conversation keep their arrival order; different chats
         # and different topics of one group run side by side, up to

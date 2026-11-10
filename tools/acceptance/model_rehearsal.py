@@ -226,7 +226,9 @@ def main():
         nonlocal counter
         counter += 1
         number = base + counter
-        message = {'message_id': message_id or number, 'date': now, 'chat': {'id': chat, 'type': 'private' if chat > 0 else 'supergroup'},
+        # Each update carries the time it is sent, so a long rehearsal is never answered as late.
+        sent = int(time.time())
+        message = {'message_id': message_id or number, 'date': now if edited else sent, 'chat': {'id': chat, 'type': 'private' if chat > 0 else 'supergroup'},
                    'from': {'id': 123, 'is_bot': False, 'first_name': 'Synthetic Owner'}, 'text': text}
         if chat < 0:
             message['chat'].update(title='Synthetic Forum' if chat == -10042 else 'Synthetic Team', is_forum=True)
@@ -235,11 +237,11 @@ def main():
         if text and text.startswith('@synthetic_fixture_bot'):
             message['entities'] = [{'type': 'mention', 'offset': 0, 'length': len('@synthetic_fixture_bot')}]
         if edited:
-            message['edit_date'] = now + counter
+            message['edit_date'] = max(sent, now + counter)
         body = {'update_id': number, 'edited_message' if edited else 'message': message}
         if reaction is not None:
             old, new = reaction
-            body = {'update_id': number, 'message_reaction': {'message_id': message_id, 'date': now + counter,
+            body = {'update_id': number, 'message_reaction': {'message_id': message_id, 'date': max(sent, now + counter),
                 'chat': message['chat'], 'user': message['from'], 'old_reaction': old, 'new_reaction': new}}
         fixture.telegram({'updates': [body]})
         event = wait('source_captured', lambda: fixture.query('nocheh_archive', "SELECT id FROM events WHERE source_key='telegram:123456:update:" + str(number) + "' AND scope='" + str(chat) + "'"))
