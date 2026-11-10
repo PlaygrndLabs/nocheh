@@ -51,6 +51,9 @@ class ScriptedBrain:
     TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
              'owner': 'mcp__nocheh__owner_read'}
     NOCHEH = 'mcp__nocheh__'
+    # Hermes frames every MCP tool's result as untrusted data (agent/tool_dispatch_helpers.py): an opening tag, one
+    # paragraph telling the model to treat it as data, a blank line, the content and the closing tag. A notice may follow.
+    FRAMED = re.compile(r'<untrusted_tool_result source="([^"]*)">\n[^\n]*\n\n(.*)\n</untrusted_tool_result>', re.S)
 
     def __init__(self, counts, canary):
         self.counts, self.canary, self.events, self.emptied, self.seen = counts, canary, [], set(), set()
@@ -65,10 +68,13 @@ class ScriptedBrain:
 
     def result(self, name, content):
         """A tool's result as the tool gave it. Hermes's MCP client hands the model a Nocheh tool's text as
-        {"result": <text>}, and a job's notice may follow it; scenarios read the tool's own JSON."""
+        {"result": <text>} inside its untrusted-data frame, and a job's notice may follow it; scenarios read the tool's own JSON."""
         text = self.text(content)
         if not name.startswith(self.NOCHEH):
             return text
+        framed = self.FRAMED.match(text)
+        if framed and framed[1] == name:
+            text = framed[2] + text[framed.end():]
         try:
             value, end = json.JSONDecoder().raw_decode(text)
         except ValueError:

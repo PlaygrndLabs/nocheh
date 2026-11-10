@@ -106,6 +106,11 @@ tools is unchanged.
   model reads the same JSON as before inside one more string. Answering with
   structured content only would avoid that in Hermes, but a brain that reads only
   text would then see nothing.
+- Hermes also frames every MCP tool's answer of 32 characters or more as
+  untrusted data: the model is told to treat it as data, not instructions. The
+  plugin tools' answers had no such frame. It fits what the tools return, which is
+  mostly what other people wrote, and Hermes has no setting to leave it out. The
+  scripted model fixture reads the tool's text inside the frame.
 - The broker now also relays this chat's action list (`GET /v1/tools/actions`) and
   passes `tool_disabled_by_owner` back from a proposal; other refusals stay opaque.
 - Prompts, the scripted model fixture and the acceptance scenarios name tools by
