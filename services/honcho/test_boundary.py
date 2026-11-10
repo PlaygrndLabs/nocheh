@@ -13,6 +13,25 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await Manager().process_work_unit('guarded'), 'guarded')
         self.assertIsNone(WORKSPACE.get())
 
+    async def test_malformed_work_unit_reaches_honcho_unbound_and_frees_the_slot(self):
+        def parse(key):
+            if key.count(':')!=3: raise ValueError('Invalid work_unit_key format')
+            return SimpleNamespace(workspace_name=key.split(':')[1])
+        class Manager:
+            seen=[];released=[]
+            async def process_work_unit(self,key,worker):
+                try:
+                    try: parse(key)
+                    except ValueError: Manager.seen.append(('errored',WORKSPACE.get()));return
+                    Manager.seen.append(('processed',WORKSPACE.get()))
+                finally: Manager.released.append(worker)
+        bind_worker(Manager,parse)
+        await Manager().process_work_unit('representation:broken','worker-1')
+        await Manager().process_work_unit('representation:current:conversation:owner','worker-2')
+        self.assertEqual(Manager.seen,[('errored',None),('processed','current')])
+        self.assertEqual(Manager.released,['worker-1','worker-2'])
+        self.assertIsNone(WORKSPACE.get())
+
     async def test_real_httpx_attempts_require_and_forward_workspace(self):
         import httpx
         original=httpx.AsyncClient._send_single_request;requests=[]

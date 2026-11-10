@@ -154,6 +154,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         media_body['transcripts']=['Separately archived transcript.']
                         self.assertEqual(await gateway.dispatch(media_body),{'state':'done'},str(media.keys()))
                         self.assertEqual(handled[-1].text,msg['caption'])
+                        if 'video_note' in media:self.assertEqual(handled[-1].message_type.name,'VIDEO','the native handler takes round video notes')
                     self.assertEqual(len(handled),8)
                     unaddressed={**envelope(50,'Who wants lunch?'),'group_addressing':{'direct':False,'handles':['someone_else']}}
                     self.assertEqual(await gateway.dispatch(unaddressed),{'state':'suppressed','error_code':'not_addressed'})

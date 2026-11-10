@@ -14,7 +14,9 @@ then run:
 
 Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
 Open Assistant console from the sidebar for Hermes's native dashboard at `/hermes/nocheh`;
-its return link brings you back to Nocheh. Old `/nocheh#…` bookmarks still work.
+its return link brings you back to Nocheh. Chat, second in the sidebar, opens its chat
+at `/hermes/chat` directly; the profile picker there chooses your private chat or a
+group. Old `/nocheh#…` bookmarks still work.
 Settings › Models holds the model providers and keeps their keys server-side; see
 [model providers](provider.md).
 
@@ -31,6 +33,7 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Page | Use it for |
 | --- | --- |
 | Home | What needs you (decisions waiting, problems), a Get started checklist until setup is done, today's replies, cost, kept messages and long-term memory, and where things are. |
+| Chat | Talk to the assistant in the browser. It opens the assistant console's chat, where the profile picker chooses your private chat or a group. |
 | Inbox | Waiting: decide approvals, memory-access requests, identity suggestions and organization changes. Allowed actions: standing permissions you can revoke. History: earlier decisions and their outcomes. |
 | Tasks | Personal and per-project to-do lists, also filled by telling Nocheh in chat: Open, Today, Upcoming, Board, Done, Dropped, Archive and Trash. |
 | Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there, its role and skills, and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: let one chat use knowledge from another, with previews of exactly what is shared, and access defaults; rules a project sets are shown there and changed on the project. |
@@ -122,8 +125,8 @@ file, and creating a new password on the next visit.
 
 ## Native browser chat
 
-Open Hermes → Chat. The context banner identifies the owner-private default or
-selected group profile. Changing the native profile selector changes the scope of
+Open Chat in the sidebar (or Assistant console → Chat). The context banner
+identifies the owner-private default or selected group profile. Changing the native profile selector changes the scope of
 archive retrieval, native sessions and memory. Chat does not send replies to Telegram.
 The selector lists the private chat as `private-chat` and each allowed group as
 `group-` plus its name and a short code of its own (the username or the code
@@ -176,7 +179,7 @@ truncation. A note's presence does not establish source provenance.
 
 Honcho lifecycle (`init`, `up`, `down`, `status`, `login`) targets the installation
 Compose project. Initialize its pinned source before starting Honcho. Inspection uses official
-`honcho-cli==0.2.1` / `honcho-ai==2.7.0`, pinned dependencies and an internal-only
+`honcho-cli==0.4.0` / `honcho-ai==2.8.0`, pinned dependencies and an internal-only
 Compose runner with a fresh CLI config directory. Ambient Honcho accounts are
 ignored. A narrow transport changes SDK get-or-create lookups into exact-ID list
 queries and rejects writes, model-backed search/chat and unexpected endpoints.

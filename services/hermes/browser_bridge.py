@@ -1,6 +1,6 @@
 """Native browser chat bridge: the PTY command for Nocheh's browser TUI.
 
-Hermes 0.22.5's TUI reaches its gateway only over a WebSocket. This process runs Nocheh's stdio
+Hermes 0.23.0's TUI reaches its gateway only over a WebSocket. This process runs Nocheh's stdio
 browser gateway, serves one token-guarded loopback socket that relays the legacy newline JSON-RPC
 wire to and from it, and runs the TUI on the PTY with HERMES_TUI_GATEWAY_URL pointing at that socket.
 """

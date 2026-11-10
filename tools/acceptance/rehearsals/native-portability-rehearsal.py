@@ -31,12 +31,13 @@ try:
         for table in TABLES:
             assert before['tables'][table]==after['tables'][table],table
             assert (Path(folder)/'source'/f'{table}.ndjson').read_bytes()==(Path(folder)/'target'/f'{table}.ndjson').read_bytes(),table
-        assert target_export.restore_inactive(Path(folder)/'source')['restored_tables']==9
+        assert target_export.restore_inactive(Path(folder)/'source')['restored_tables']==10
         assert query(target,"SELECT count(*) FROM documents WHERE deleted_at IS NOT NULL")=='1'
         assert query(target,"SELECT count(*) FROM document_sources s JOIN messages m ON s.source_id=m.public_id")=='1'
+        assert query(target,"SELECT count(*) FROM conclusion_source_messages c JOIN messages m ON c.message_id=m.public_id")=='1'
         assert query(target,'SELECT count(*) FROM queue')=='0'
         assert query(target,'SELECT count(*) FROM webhook_endpoints')=='0'
-        print(json.dumps({'passed':True,'native_tables':9,'pinned_migrations':True,'native_orm_seed':True,'pgvector_dimensions':1536,
+        print(json.dumps({'passed':True,'native_tables':10,'pinned_migrations':True,'native_orm_seed':True,'pgvector_dimensions':1536,
             'exact_round_trip':True,'citation_ancestry_preserved':True,'retired_history_preserved':True,'idempotent_replay':True,'provider_calls':0}))
 finally:
     for database in reversed(created):query('honcho_experiment','DROP DATABASE '+database)
