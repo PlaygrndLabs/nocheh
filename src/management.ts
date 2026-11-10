@@ -236,7 +236,7 @@ export async function startManagement() {
     operationBusy=true;
     let coordinator:string|undefined,job:Job|undefined;
     try {job=await newJob('operations.'+action);job.state='running';if(automatic)job.automatic=true;await putJob(job);
-      if(automatic)await python({operation:'backups.started',job:job.id});
+      if(automatic&&action==='backup')await python({operation:'backups.started',job:job.id});
       if(action==='backup'){
         const draining=maintenance.begin(job.id,request);
         live.closeAll();
@@ -338,7 +338,7 @@ export async function startManagement() {
       if(req.method==='GET' && route==='/operations')return json(res,200,await python({operation:'operations.list'}));
       if(req.method==='POST' && route==='/operations') return exclusive('writer-start', async () => {
         const body=object(await readJson(req));const action=string(body.action,30);
-        if(!['diagnose','backup','restore','restart','export','portable-export'].includes(action))throw new HttpError(400,'operation_denied');
+        if(!['diagnose','backup','restore','restart','export','portable-export','offsite','offsite-check'].includes(action))throw new HttpError(400,'operation_denied');
         return json(res,202,await startOperation(action,body.options??{},tracked.id));
       });
       if (route === '/policy' && ['GET','POST'].includes(req.method??'')) {
@@ -538,8 +538,14 @@ export async function startManagement() {
   const automaticBackup=async()=>{
     const blocked=()=>operationBlocked({busy:operationBusy,active:active.size,locked});
     if(stopping||maintenance.active||locked.has('writer-start')||blocked())return;
-    if(object(await python({operation:'backups.due'})).due!==true)return;
-    await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('backup',{},Symbol('schedule'),true);});
+    if(object(await python({operation:'backups.due'})).due===true){
+      await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('backup',{},Symbol('schedule'),true);});
+      return;
+    }
+    // A finished backup that has no off-site copy yet gets one at a later check (ADR-0227). Sending reads
+    // the finished folder only, so writers keep running; each backup is tried once by the schedule.
+    if(object(await python({operation:'offsite.due'})).due!==true)return;
+    await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('offsite',{},Symbol('schedule'),true);});
   };
   const schedule=setInterval(()=>void automaticBackup().catch(()=>{}),5*60*1000);schedule.unref();
   // Every two minutes, new or worse problems go to the owner's private chat. Backups, restores

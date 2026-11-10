@@ -45,6 +45,10 @@ def run(state,action,job,options=None):
             'events':manifest['archive']['events'],'files':manifest['archive']['files'],'export_files':len(manifest['files']),
             'native_profiles':len(manifest['native_profiles']),'job':job}
         return {'status':'exported',**manifest,'job':job}
+    if action in ('offsite','offsite-check'):
+        from tools.operations.installation import offsite
+        from tools.operations.installation.configuration import load
+        return (offsite.send if action=='offsite' else offsite.check)(state,load(state))
     # The dashboard image has the tools but no bin/ launcher, so run the CLI module directly.
     args=[sys.executable,'-m','tools.cli.main']
     if action=='diagnose':args+=['diagnose']
