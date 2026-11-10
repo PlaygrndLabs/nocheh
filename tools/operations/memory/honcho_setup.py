@@ -14,10 +14,12 @@ from tools.operations.installation.configuration import DEFAULTS,read_env,env_pa
 STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
            (PROVIDER_STATE/'honcho')).resolve()
 # Peer chat takes Honcho's longest query. Nocheh's guard refuses a model request over 512 KiB (src/guard.ts), and Honcho
-# keeps each dialectic round's and each summary's messages within an input token budget. At up to 8 bytes a token
-# (Persian measures 6.7) 61,440 tokens fill 480 KiB, leaving 32 KiB for the tool and answer schemas Honcho adds outside
-# the budget (12 KiB) and the request's JSON. src/stores/learning-engine.ts sizes the learning query from both; a test
-# keeps them equal.
+# keeps each dialectic round's and each summary's messages within an input token budget. At 8 bytes a token 61,440
+# tokens fill 480 KiB, leaving 32 KiB for the tool and answer schemas Honcho adds outside the budget (12 KiB) and the
+# request's JSON. English, Persian and Russian measure about 5 to 6.7 bytes a token. Indic scripts (Hindi about 10,
+# Bengali and Tamil about 9) and text with long runs of spaces (up to about 15) can pass 512 KiB at a full budget; the
+# guard then refuses that request. src/stores/learning-engine.ts sizes the learning query from both; a test keeps
+# them equal.
 QUERY_CHARACTERS=200000
 INPUT_TOKENS=61440
 

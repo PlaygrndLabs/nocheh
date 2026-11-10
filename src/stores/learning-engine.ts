@@ -22,8 +22,9 @@ const queued=`EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='memory_re
   AND w.state IN ('queued','waiting','running','retryable_failed'))`;
 /** Honcho's peer chat takes a query of up to 200,000 characters and keeps each reasoning round's messages within
  * 61,440 tokens (tools/operations/memory/honcho_setup.py sets both; a test keeps them equal). Honcho never shortens
- * the query, so it takes at most half of those tokens and leaves the rest for what Honcho gathers. Learning queries
- * measure 3.4 (dense JSON) to 6.4 (Persian text) UTF-8 bytes a token, so at 3 bytes a token that half is 92,160 bytes. */
+ * the query, so Nocheh gives it about half of those tokens and leaves the rest for what Honcho gathers: 92,160 UTF-8
+ * bytes, half the tokens at 3 bytes a token. Learning queries measure about 2.4 (id-heavy JSON) to 6.4 (Persian text)
+ * bytes a token, so an id-heavy query can take up to about 61% of the tokens; the request stays far below the guard. */
 export const honchoQueryCharacters=200000,honchoInputTokens=61440,honchoQueryBytes=honchoInputTokens/2*3;
 /** The learning query within Honcho's limits. Waiting cards give up their other names and then leave
  * from the end first, as they only help join repeat names. Then other evidence keeps only its text, then rules

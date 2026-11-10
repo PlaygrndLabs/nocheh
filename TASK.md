@@ -682,8 +682,9 @@ named in the query's limitations; an input that still cannot fit closes as
 `input_limit` instead of retrying ([learning engine](src/stores/learning-engine.ts),
 [check](test/learning-workflow.test.ts)). Honcho rejections now log their status,
 route and failing field without content ([client](src/honcho.ts)). Since
-November 10 the query uses Honcho's full question size within the guard's
-512 KiB instead of 10,000 characters, and the same trimming is only the fallback
+November 10 the query can use 92,160 UTF-8 bytes, about half of Honcho's input
+budget sized to the guard's 512 KiB, instead of 10,000 characters, and the same
+trimming applies only past that
 ([decision](docs/adr/0227-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 
 Deep check for hidden data and failure gaps (October 18), verified locally with

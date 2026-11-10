@@ -79,37 +79,43 @@ Exact citations:
 Question size:
 
 - Setup writes `DIALECTIC_MAX_QUERY_LENGTH=200000`, Honcho's maximum, and
-  `DIALECTIC_MAX_INPUT_TOKENS` and `SUMMARY_MAX_INPUT_TOKENS` of 61,440. At up to
-  8 bytes a token they fill 480 KiB, leaving 32 KiB of the guard's 512 KiB for
+  `DIALECTIC_MAX_INPUT_TOKENS` and `SUMMARY_MAX_INPUT_TOKENS` of 61,440. At 8
+  bytes a token they fill 480 KiB, leaving 32 KiB of the guard's 512 KiB for
   the tool and answer schemas Honcho adds outside its budget and the request's
-  JSON.
-- The learning query takes at most half that input budget at 3 bytes a token,
-  92,160 UTF-8 bytes, and 200,000 characters. The trimming ladder stays as the
-  fallback, and a test keeps the TypeScript and setup numbers equal. Nocheh adds
-  no other limit to the question.
+  JSON. English, Persian and Russian measure about 5 to 6.7 bytes a token.
+- The learning query gets about half that input budget, counted at 3 bytes a
+  token: 92,160 UTF-8 bytes, within 200,000 characters. The rest is left for
+  what Honcho gathers. Learning queries measure about 2.4 to 6.4 bytes a token,
+  so an id-heavy query can take about 61% of the tokens. The trimming ladder
+  shortens a query only past that size, and a test keeps the TypeScript and
+  setup numbers equal.
 - The meter sends archive preparation requests as plain UTF-8.
 
 Strict JSON for learning:
 
 - Learning sends `response_format` with the learning result's schema. Item
   fields stay optional, allowed values are only described, and `evidence_ids`
-  comes last in each item, so Nocheh still drops one invalid item, or one Honcho's
-  repair kept after a cut, on its own. The top level requires `interpretations`.
+  comes last in each item of the schema and of the prompt, which also asks the
+  model to write it last. Nocheh still drops one invalid item on its own, and an
+  item Honcho's repair kept after a cut has no evidence when the model wrote
+  `evidence_ids` last. The top level requires `interpretations`.
 - Every dialectic level uses `STRUCTURED_OUTPUT_MODE=json_object`, which puts the
   schema in the prompt instead of sending a non-strict `json_schema` beside the
   round's tools, which an OpenAI-compatible endpoint can refuse.
 - The saved result is parsed as one strict JSON object. Nocheh's fence, sentence
   and cut-off recovery is removed. An unusable result is still
   `invalid_interpretation_result` and closes the job. Honcho's nulls mean absent
-  fields, also in organization creates and assignments.
+  fields, also in organization creates and assignments; a null creates or
+  assignments list is empty.
 
 </decision>
 
 <consequences>
 - A role or skill change reaches continuing sessions without Nocheh tracking
-  each one. If the refresh request fails after the files are written, the save or
-  turn fails, and later materializes see the files as current and do not ask
-  again: continuing sessions keep the old prompt until the next change. Hermes'
+  each one. If the refresh request fails after a turn profile's files are
+  written, the turn fails and its derived `SOUL.md` is removed, so the next turn
+  installs the role again and asks again. A failed save of the owner's own
+  files reports the error to the owner and is not undone. Hermes'
   rebuild does not fire `on_session_start`; Nocheh registers no such hook.
 - Memory evidence can show the exact messages a memory came from. Conclusions
   from before Honcho 3.5, and ones whose model left out citations, still show
@@ -117,9 +123,10 @@ Strict JSON for learning:
   rebuilding Honcho memory gives existing conclusions theirs.
 - `/nocheh/provenance` and `/v1/memory/provenance` carry `exact_citations` on
   each conclusion, and the top-level value is a real boolean.
-- Learning can ask about far more evidence at once. Scripts at about 8 or more
-  UTF-8 bytes a token can still reach 512 KiB at a full input budget, and the
-  guard refuses that request.
+- Learning can ask about far more evidence at once. Indic scripts (Hindi about
+  10, Bengali and Tamil about 9 bytes a token) and text with long runs of spaces
+  can still pass 512 KiB at a full input budget, and the guard refuses that
+  request. Lowering the budget to cover them would cost every language context.
 - An answer that still fails the schema after Honcho's retries comes back as
   Honcho's 422, which Nocheh treats as a retryable `honcho_upstream_rejected`.
   Saved learning results that were fenced, wrapped or cut off fail the strict
