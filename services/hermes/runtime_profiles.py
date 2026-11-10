@@ -68,15 +68,11 @@ class ProfileCatalog:
         except (KeyError, TypeError, ValueError):
             raise ValueError('profile_scope_denied') from None
 
-    def resolve(self, name=None, space=None):
+    def resolve(self, name=None):
         selected = name or ''
         if selected and not NAME.fullmatch(selected): raise ValueError('profile_scope_denied')
         body = {'profile': selected}
-        if space is not None:
-            # A named space is also only a lookup: control checks it against current policy.
-            if not isinstance(space, str) or not 0 < len(space) <= 200: raise ValueError('profile_scope_denied')
-            body['space'] = space
-        elif selected:
+        if selected:
             marker = self.path(selected) / 'space.json'
             # A topic marker is only a lookup hint. The control service must
             # resolve it against current policy and the current native identity.

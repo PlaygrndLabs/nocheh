@@ -2,6 +2,7 @@ import {blockingPublications} from './publications.js';
 import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
 import {followUpLeft} from './action-continuations.js';
 import {notionAuthority} from './notion.js';
+import {chatToolAllowed} from './chat-tools.js';
 import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
@@ -80,7 +81,10 @@ export class ControlledActionRepository {
   private async proposeOnce(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
     const body=exact(value,['kind','arguments','summary']),raw=actionArguments(body.kind,body.arguments),note=summaryOf(body.summary);
-    const turn=await this.turns.binding(principal),current=await this.guards.state();
+    const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=this.access.policy().owner_id??null;
+    // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
+    // Its switch is the chat's, never the asking turn's: a job or a scheduled task follows the chat it belongs to.
+    if(!await chatToolAllowed(this.control,body.kind as string,principal.space!,owner))throw new HttpError(403,'tool_disabled_by_owner');
     // Bound to the asking turn's own binding: the current one, or the earlier one of a job's run that carries to it (ADR-0208).
     // It carries from there; its profile, the run's own, holds the run's workspace and lets the run read it back.
     const binding={...current,generation:turn.generation??current.generation,epoch:turn.guard_epoch};
@@ -106,6 +110,9 @@ export class ControlledActionRepository {
       // first is ended by Stop's sweep (ADR-0204). A scheduled task's job is no background job.
       const job=turn.job?(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR SHARE',[turn.job])).rows[0]:null;
       if(job&&(job.state!=='running'||job.cancel_requested))throw new HttpError(409,'job_not_running');
+      // Again with the rows share-locked, as the Notion setting is. A switch first saved meanwhile is caught by the claim,
+      // which checks once more before anything runs.
+      if(!await chatToolAllowed(db,body.kind as string,principal.space!,owner,true))throw new HttpError(403,'tool_disabled_by_owner');
       // A follow-up was started by Nocheh after a result came back, not asked by anyone: like a job's operation, what it
       // asks for has no rule key, so no chat rule covers it and its card offers no rule (ADR-0212, ADR-0214).
       const followUp=source.store==='archive'&&await followUpTurn(db,principal);

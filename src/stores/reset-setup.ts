@@ -17,12 +17,14 @@ type SetupSnapshot={format:'nocheh-reset-configuration-v1';layout:'original-only
   project_assignments:{space_id:string;project_id:string|null;mode:'assigned'|'none'|'inherit';share_into:boolean}[];
   sharing_rules:{id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;project_id:string|null}[];
   memory_access_settings:{destination:string;suggestions:'related'|'off'|null;notify_owner:boolean|null;auto_followup:boolean|null;request_ttl_seconds:number|null;default_grant_mode:'one_time'|'persistent'|null}[];
+  chat_tool_settings:{space_id:string;shell:boolean|null;browser:boolean|null;mcp:boolean|null}[];
   runtime_profiles:{id:string;name:string;owner_id:string}[];
 }};
 type ProfileCommand={id:string;name:string;state:'active';expected_revision:0;operation_id:string};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const ID=/^[a-f0-9]{64}$/;
 const PROFILE=/^profile-[a-f0-9]{48}$/;
+const TOOL_SPACE=/^(?:\*|-?[1-9]\d{0,18}(?:\/topic\/[1-9]\d{0,15})?)$/;
 const exact=(value:unknown,keys:string[])=>{
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('\0')!==[...keys].sort().join('\0'))
     throw Error('reset_setup_snapshot_invalid');
@@ -52,7 +54,7 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
   const snapshot=exact(input,['format','layout','configuration']);
   if(snapshot.format!=='nocheh-reset-configuration-v1'||snapshot.layout!=='original-only-v1')throw Error('reset_setup_snapshot_invalid');
   const c=exact(snapshot.configuration,['security_policy','installation_generation','guard_mode','runtime_configuration',
-    'projects','project_assignments','sharing_rules','memory_access_settings','runtime_profiles']);
+    'projects','project_assignments','sharing_rules','memory_access_settings','chat_tool_settings','runtime_profiles']);
   for(const value of Object.values(c))if(!Array.isArray(value)||value.length>10000)throw Error('reset_setup_snapshot_invalid');
   if((c.security_policy as unknown[]).length!==1||(c.installation_generation as unknown[]).length!==1||
     (c.guard_mode as unknown[]).length!==1||(c.runtime_configuration as unknown[]).length!==1)throw Error('reset_setup_snapshot_invalid');
@@ -84,6 +86,11 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
       row.request_ttl_seconds!==null&&(!Number.isSafeInteger(row.request_ttl_seconds)||Number(row.request_ttl_seconds)<60||Number(row.request_ttl_seconds)>2592000)||
       row.default_grant_mode!==null&&!['one_time','persistent'].includes(String(row.default_grant_mode))||destination==='*'&&Object.values(row).some(value=>value===null))throw Error('reset_setup_snapshot_invalid');destinations.add(destination);}
   if(!destinations.has('*'))throw Error('reset_setup_snapshot_invalid');
+  // Tool switches: '*', a chat or a topic; no row means every switch inherits, down to the built-in on.
+  const toolSpaces=new Set<string>();
+  for(const item of c.chat_tool_settings as unknown[]) {const row=exact(item,['space_id','shell','browser','mcp']);
+    if(typeof row.space_id!=='string'||!TOOL_SPACE.test(row.space_id)||toolSpaces.has(row.space_id)||
+      [row.shell,row.browser,row.mcp].some(value=>value!==null&&typeof value!=='boolean'))throw Error('reset_setup_snapshot_invalid');toolSpaces.add(row.space_id);}
   const profiles=new Set<string>(),names=new Set<string>();
   for(const item of c.runtime_profiles as unknown[]) {const row=exact(item,['id','name','owner_id']),id=identifier(row.id,PROFILE),name=text(row.name,64);
     if(row.owner_id!==owner||profiles.has(id)||names.has(name))throw Error('reset_setup_snapshot_invalid');profiles.add(id);names.add(name);}
@@ -102,7 +109,8 @@ export async function setupRows(control:pg.Pool|pg.PoolClient) {
   const queries={projects:'SELECT id,name,description,state,sharing_enabled,sharing_mode FROM projects ORDER BY id',
     project_assignments:'SELECT space_id,project_id,mode,share_into FROM project_assignments ORDER BY space_id',
     sharing_rules:'SELECT id,name,sources,destination,enabled,mode,instructions,project_id FROM sharing_rules ORDER BY id',
-    memory_access_settings:'SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination'};
+    memory_access_settings:'SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination',
+    chat_tool_settings:'SELECT space_id,shell,browser,mcp FROM chat_tool_settings ORDER BY space_id'};
   const result:Record<string,unknown[]>={};for(const [key,sql] of Object.entries(queries))result[key]=(await control.query(sql)).rows;return result;
 }
 
@@ -150,6 +158,8 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     for(const row of configuration.memory_access_settings)await db.query(`INSERT INTO memory_access_settings(destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode,revision)
       VALUES($1,$2,$3,$4,$5,$6,1) ON CONFLICT(destination) DO UPDATE SET suggestions=$2,notify_owner=$3,auto_followup=$4,request_ttl_seconds=$5,default_grant_mode=$6,revision=1,updated_at=now()`,
       [row.destination,row.suggestions,row.notify_owner,row.auto_followup,row.request_ttl_seconds,row.default_grant_mode]);
+    for(const row of configuration.chat_tool_settings)await db.query('INSERT INTO chat_tool_settings(space_id,shell,browser,mcp,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',
+      [row.space_id,row.shell,row.browser,row.mcp]);
     const updated=await setupRows(db);for(const name of Object.keys(updated))if(!same(updated[name],(configuration as any)[name]))throw Error('reset_setup_target_changed');
     await db.query('COMMIT');
   } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
@@ -158,7 +168,8 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
   const admitted=[];for(const command of commands)admitted.push(await profiles.save(owner,command));
   const restored=await setupRows(stores.control),runtimeProfiles=(await stores.control.query('SELECT id,name,owner_id FROM runtime_profiles WHERE state=\'active\' ORDER BY id')).rows;
   if(!same(restored.projects,configuration.projects)||!same(restored.project_assignments,configuration.project_assignments)||
-    !same(restored.sharing_rules,configuration.sharing_rules)||!same(restored.memory_access_settings,configuration.memory_access_settings)||!same(runtimeProfiles,configuration.runtime_profiles))throw Error('reset_setup_verification_failed');
+    !same(restored.sharing_rules,configuration.sharing_rules)||!same(restored.memory_access_settings,configuration.memory_access_settings)||
+    !same(restored.chat_tool_settings,configuration.chat_tool_settings)||!same(runtimeProfiles,configuration.runtime_profiles))throw Error('reset_setup_verification_failed');
   const binding=await guards.state();if(binding.generation!==generation||binding.mode!==configuration.guard_mode[0]!.mode)throw Error('reset_setup_verification_failed');
   return {reset_id:resetId,generation,binding,configuration_records:Object.values(configuration).reduce((count,rows)=>count+rows.length,0),
     projects:configuration.projects.length,assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,memory_access_settings:configuration.memory_access_settings.length,

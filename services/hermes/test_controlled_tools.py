@@ -69,30 +69,6 @@ class ToolTests(unittest.TestCase):
             api=API();tick(folder,api,'actor',lambda state,action:result,action_id='action',workflow={'workflow_id':'workflow','workflow_token':'token'})
         self.assertEqual([api.finished['state'],api.finished['result']['error']],['failed','tool_reported_error'])
 
-    def test_the_settings_check_names_the_chat_profile_not_the_proposal_epoch(self):
-        asked=[]
-        def native(state,path):
-            asked.append(path)
-            return {'values':{'nocheh_tools.shell':'off' if 'off' in path else 'on'}}
-        action={'kind':'shell','profile':'nocheh-epoch-bound','preference':{'profile':'nocheh-chat','space':'-10/topic/7'},'arguments':{}}
-        ready=patch('tools.operations.security.tool_receipts.sandbox_ready',return_value=True);ready.start();self.addCleanup(ready.stop)
-        with patch('tools.operations.security.native.call',native),patch('tools.operations.security.tool_receipts.bounded_execute',lambda state,action:{'stdout':'ran'}):
-            self.assertEqual(permitted_execute('/state',action),{'stdout':'ran'})
-            self.assertEqual(asked,['/api/nocheh/preferences?profile=nocheh-chat&space=-10%2Ftopic%2F7'])
-            self.assertEqual(permitted_execute('/state',{**action,'preference':{'profile':'nocheh-off','space':'42'}}),{'exit_code':1,'error':'tool_disabled_by_owner'})
-        def down(state,path):raise ValueError('native_administration_unavailable')
-        with patch('tools.operations.security.native.call',down),patch('tools.operations.security.tool_receipts.time.sleep') as wait:
-            self.assertEqual(permitted_execute('/state',action),{'exit_code':1,'error':'tool_policy_unavailable'})
-            self.assertEqual(wait.call_count,2,'it reads the settings three times before it gives up')
-        answers=[ValueError('native_administration_unavailable'),{'values':{'nocheh_tools.shell':'on'}}]
-        def once(state,path):
-            answer=answers.pop(0)
-            if isinstance(answer,Exception):raise answer
-            return answer
-        with patch('tools.operations.security.native.call',once),patch('tools.operations.security.tool_receipts.time.sleep'),\
-             patch('tools.operations.security.tool_receipts.bounded_execute',lambda state,action:{'stdout':'ran'}):
-            self.assertEqual(permitted_execute('/state',action),{'stdout':'ran'},'a read that fails once, as during a new epoch, is read again')
-
     def test_a_missing_sandbox_image_stops_before_anything_is_sent(self):
         from tools.operations.security import tool_execution
         asked=[]
@@ -103,13 +79,12 @@ class ToolTests(unittest.TestCase):
         self.assertTrue(tool_execution.sandbox_ready(lambda command,**kwargs:type('Done',(),{'returncode':0})()))
         def unreachable(command,**kwargs):raise FileNotFoundError('docker')
         self.assertFalse(tool_execution.sandbox_ready(unreachable),'without Docker there is no sandbox either')
-        native=lambda state,path:{'values':{'nocheh_tools.browser':'on','nocheh_tools.mcp':'on'}}
-        action={'kind':'browser','profile':'nocheh-chat','preference':{'profile':'nocheh-chat','space':'-10'},'arguments':{'url':'https://example.com/'}}
+        action={'kind':'browser','profile':'nocheh-chat','arguments':{'url':'https://example.com/'}}
         def never(*args):raise AssertionError('nothing may be sent without the sandbox')
-        with patch('tools.operations.security.native.call',native),patch('tools.operations.security.tool_receipts.sandbox_ready',return_value=False),\
+        with patch('tools.operations.security.tool_receipts.sandbox_ready',return_value=False),\
              patch('tools.operations.security.tool_receipts.bounded_execute',never):
             self.assertEqual(permitted_execute('/state',action),{'exit_code':1,'error':'tool_sandbox_missing'})
-        with patch('tools.operations.security.native.call',native),patch('tools.operations.security.tool_receipts.sandbox_ready',side_effect=AssertionError('mcp needs no sandbox')),\
+        with patch('tools.operations.security.tool_receipts.sandbox_ready',side_effect=AssertionError('mcp needs no sandbox')),\
              patch('tools.operations.security.tool_receipts.bounded_execute',lambda state,action:{'response':{}}):
             self.assertEqual(permitted_execute('/state',{**action,'kind':'mcp'}),{'response':{}})
         class API:

@@ -130,20 +130,17 @@ class SchedulerTests(unittest.TestCase):
         second=Scheduler(self.admin,lambda:None,self.call,self.runner);second.start();second.thread.join(timeout=2)
         self.assertEqual(second.status,'already_supervised');self.assertEqual(self.executions,0)
 
-    def test_job_preferences_are_ephemeral_and_disable_proposals(self):
+    def test_job_preferences_are_ephemeral(self):
         from .profile_config import configure_profile
         from .policy_config import save,view
         from .turn_process import scheduled_preferences
-        from . import archive_tools
         home=self.root/'profiles'/Scopes.profile('42');configure_profile(home,'gpt-5.6-sol')
         before=(home/'config.yaml').read_bytes()
         save(self.root,{'agent.max_iterations':3},view(self.root)['revision'],'job-one')
-        values=scheduled_preferences(home,{'job_id':'job-one','job_preferences':{'memory.memory_char_limit':500,'nocheh_tools.shell':'off'}})
+        values=scheduled_preferences(home,{'job_id':'job-one','job_preferences':{'memory.memory_char_limit':500,'agent.reasoning_effort':'high'}})
         self.assertEqual(values['agent.max_iterations'],3);self.assertEqual(values['memory.memory_char_limit'],500)
+        self.assertEqual(values['agent.reasoning_effort'],'high')
         self.assertEqual((home/'config.yaml').read_bytes(),before)
-        with patch.dict(os.environ,{'HERMES_HOME':str(home)}),patch.object(archive_tools,'_PROCESS_PREFERENCES',values),patch.object(archive_tools,'request') as request:
-            self.assertEqual(json.loads(archive_tools.controlled_tool('shell',{'command':'pwd'}))['error'],'tool_disabled_by_owner')
-            request.assert_not_called()
 
     def migrate(self):
         from .managed_async import ManagedAsync

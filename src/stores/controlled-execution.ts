@@ -6,18 +6,8 @@ import type {Decision} from '../security/contract.js';
 import {enterFamily,leaveFamily,releaseOperation} from '../workflows/store.js';
 import {hostActionAuthority} from '../workflows/host-tools.js';
 import {covers,type ControlledActionRepository} from './controlled-actions.js';
-import {defaultLogicalProfile} from './runtime-profile.js';
-import {parentSpace} from '../spaces.js';
 import {notionRunRefusal} from './notion.js';
-
-/** The stable profile whose tool settings the executor checks. The action's own native profile is named
- *  after the epoch it was proposed in, so it no longer resolves once a later epoch carries the action
- *  (ADR-0200). A job's own profile is not a chat profile, so a job follows its chat's settings. The
- *  owner's private chat has no settings per topic. */
-export function preferenceProfile(row:{logical_profile:string;space_id:string},owner:string|null) {
-  const space=owner&&parentSpace(row.space_id)===owner?owner:row.space_id;
-  return {profile:/^profile-[a-f0-9]{48}$/.test(row.logical_profile)?row.logical_profile:defaultLogicalProfile({admin:false,scope:null,space}),space};
-}
+import {chatToolAllowed} from './chat-tools.js';
 
 const protocol='controlled-execution-v2';
 const operation=(id:string)=>'controlled-result:'+id;
@@ -107,6 +97,10 @@ export class ControlledExecutionRepository {
         if(error.code==='guard_transition_pending'){await db.query('COMMIT');return {claimed:false};}
         const result=await this.blocked(db,row,error.code);await db.query('COMMIT');this.closed(row.id);return result;
       }
+      // Turning a tool off for a chat or topic stops what was asked there and has not run yet, approved or not. It is
+      // the chat's switch, also for a job's or a scheduled task's operation; a Notion call is an outside tool call.
+      if(!await chatToolAllowed(db,row.kind,row.space_id,this.actions.access.policy().owner_id??null,true))
+        {const result=await this.blocked(db,row,'tool_disabled_by_owner');await db.query('COMMIT');this.closed(row.id);return result;}
       // Turning Notion off stops Notion calls that were approved but have not run yet.
       if('connection' in (args as object)&&!(await db.query('SELECT enabled FROM owner_notion WHERE singleton')).rows[0]?.enabled)
         {const result=await this.blocked(db,row,'notion_not_enabled');await db.query('COMMIT');this.closed(row.id);return result;}
@@ -135,7 +129,7 @@ export class ControlledExecutionRepository {
       await recordEffect(db,this.actions.effect(row),'claimed',decision,row.source_reference,grant?.id);
       await db.query(`UPDATE controlled_actions SET state='running',actor=$2,permission_id=$3,security_decision=$4,lease_until=now()+interval '120 seconds',
         execution_owner='inngest',owner_epoch=$5,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,b.actor,grant?.id??null,decision,authority.epoch]);
-      await db.query('COMMIT');return {claimed:true,id:row.id,profile:row.profile,preference:preferenceProfile(row,this.actions.access.policy().owner_id??null),kind:row.kind,arguments:args,fingerprint:row.fingerprint};
+      await db.query('COMMIT');return {claimed:true,id:row.id,profile:row.profile,kind:row.kind,arguments:args,fingerprint:row.fingerprint};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{await releaseOperation(db,async()=>{if(held)await leaveFamily(db,'tools');});}
   }
   async start(value:unknown) {

@@ -38,6 +38,7 @@ test('reset setup restores only current configuration under a new generation and
       // The project is archived, so its own rule is off.
       {id:projectRule,name:'Saved project',sources:['-1001'],destination:'-1002',enabled:false,mode:'filtered',instructions:'',project_id:'a'.repeat(64)}].sort((a,b)=>a.id<b.id?-1:1),
     memory_access_settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}],
+    chat_tool_settings:[{space_id:'*',shell:false,browser:null,mcp:null},{space_id:'-1001/topic/3',shell:null,browser:null,mcp:false}],
     runtime_profiles:[{id:profile,name:'research',owner_id:'123'}]}} as const;
   const input={snapshot,generation:'22222222-2222-4222-8222-222222222222',reset_id:'44444444-4444-4444-8444-444444444444',
     profile_commands:[{id:profile,name:'research',state:'active',expected_revision:0,operation_id:'restore-preferences:'+profile}]};
@@ -46,18 +47,22 @@ test('reset setup restores only current configuration under a new generation and
     const owned=snapshot.configuration.sharing_rules.find(rule=>rule.project_id)!;
     for(const forged of [{...owned,project_id:'d'.repeat(64)},{...owned,destination:'-1003'}])
       assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a project rule belongs to a saved project and its chat');
+    for(const forged of [{space_id:'every',shell:false,browser:null,mcp:null},{space_id:'-1001',shell:'off',browser:null,mcp:null},{space_id:'-1001',shell:null,browser:null}])
+      assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,chat_tool_settings:[forged]}}),/snapshot_invalid/,'a tool switch row is exact');
     await assert.rejects(restoreResetSetup(stores,{...input,unexpected:true} as any),/snapshot_invalid/);
     await assert.rejects(restoreResetSetup(stores,{...input,generation:snapshot.configuration.installation_generation[0].generation}),/generation_reused/);
     await assert.rejects(restoreResetSetup(stores,{...input,profile_commands:[{...input.profile_commands[0],operation_id:'forged'}]}),/profiles_invalid/);
     const first=await restoreResetSetup(stores,input),again=await restoreResetSetup(stores,input);
     assert.deepEqual(again,first);assert.equal(first.generation,input.generation);assert.equal(first.binding.generation,input.generation);
-    assert.equal(first.binding.mode,'off');assert.equal(first.binding.epoch,2);assert.equal(first.configuration_records,11);
+    assert.equal(first.binding.mode,'off');assert.equal(first.binding.epoch,2);assert.equal(first.configuration_records,13);
     assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events')).rows[0].count,0);
     assert.equal((await stores.derived.query('SELECT count(*)::int AS count FROM derived_artifacts')).rows[0].count,0);
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM owner_commands')).rows[0].count,1);
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family IN ('honcho','memory_review')")).rows[0].count,2);
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM security_policy_versions')).rows[0].count,2);
     assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM runtime_configuration_versions')).rows[0].count,1);
+    assert.deepEqual((await stores.control.query('SELECT space_id,shell,browser,mcp,revision FROM chat_tool_settings ORDER BY space_id')).rows,
+      snapshot.configuration.chat_tool_settings.map(row=>({...row,revision:1})),'the tool switches come back as saved');
     const baseline=await verifyResetBaseline(stores,input);
     assert.equal(baseline.generation,input.generation);assert.equal(baseline.archive_rows,0);assert.equal(baseline.derived_rows,0);
     // Schema comments are not tables, but an unexpected real table must still

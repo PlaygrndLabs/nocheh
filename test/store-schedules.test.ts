@@ -36,6 +36,10 @@ test('schedule definitions and fires are recoverable control operations with dur
   try{
     await s.guards.reconcile();await s.guards.setMode('on');
     await assert.rejects(s.schedules.definition({admin:false,scope:'123'},{}),{status:403});
+    // A schedule follows its chat's tool switches; it carries none of its own.
+    for(const key of ['nocheh_tools.shell','nocheh_tools.browser','nocheh_tools.mcp'])
+      await assert.rejects(s.schedules.definition(owner,{scope:'123',profile,job_id:job,definition:{...definition,preferences:{[key]:'off'}},
+        workflow_cursor:digest('tools-'+key),workflow_sequence:1}),{status:400,code:'invalid_schedule_preference'},key);
     const before=Number((await stores.archive.query('SELECT count(*) FROM events')).rows[0].count);
     const record=s.derived.record.bind(s.derived);let missing=true;
     s.derived.record=async value=>{if(missing&&value.kind==='scheduled_prompt'){missing=false;throw Error('derived outage');}return record(value);};

@@ -216,12 +216,12 @@ class BrowserBoundaryTests(unittest.TestCase):
             with patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':str(root)}):
                 logical=root/'profiles'/Scopes.profile('-10')
                 original=configure_profile(logical,'model')
-                configure_profile(logical,'model',{'nocheh_tools.shell':'off','agent.max_iterations':7},original['revision'])
+                configure_profile(logical,'model',{'agent.reasoning_effort':'high','agent.max_iterations':7},original['revision'])
                 admin=Administration(None,root,'model',policy,'fixture',True,lambda _:2)
                 name,home=admin.profile(logical.name);home.mkdir(parents=True)
                 (home/'space.json').write_text(json.dumps({'space':'-10','revision':2,'owner':False}))
                 values=configure_profile(home,'model')['values']
-                self.assertEqual(values['nocheh_tools.shell'],'off');self.assertEqual(values['agent.max_iterations'],7)
+                self.assertEqual(values['agent.reasoning_effort'],'high');self.assertEqual(values['agent.max_iterations'],7)
                 self.assertEqual(admin.preference_home(name,home),logical)
                 current=inspect_profile(logical,'model')
                 configure_profile(logical,'model',{'agent.max_iterations':4},current['revision'])

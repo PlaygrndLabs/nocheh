@@ -1,4 +1,4 @@
-/** Settings › Assistant: how much Nocheh may do without asking, its role and skills, limits for each chat and for background jobs, the sealed box for jobs, and its built-in instructions. */
+/** Settings › Assistant: how much Nocheh may do without asking, its role and skills, the tools every chat may use, limits for each chat and for background jobs, the sealed box for jobs, and its built-in instructions. */
 import {useEffect, useState} from 'react';
 import {RotateCcw} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
@@ -7,6 +7,7 @@ import {refreshResources, useResource} from '../../lib/resource';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardHeader, Field, Input, LoadError, LoadingRows, Select} from '../../ui/core';
 import {RoleAndSkills} from '../chats/role-skills';
+import {ToolSwitches} from '../chats/tools';
 import {BuiltInInstructions} from './instructions';
 import {BackgroundJobLimits} from '../system/jobs';
 
@@ -24,12 +25,6 @@ const freedom = [
 ];
 
 const names: Record<string, [string, string]> = {
-  'nocheh_tools.shell': [
-    'Commands',
-    'Propose commands in an isolated workspace. Each run needs your yes or a saved permission.',
-  ],
-  'nocheh_tools.browser': ['Web pages', 'Read an approved public page. No logins.'],
-  'nocheh_tools.mcp': ['Outside tools', 'Propose an exact call to a public tool server.'],
   'agent.reasoning_effort': ['Thinking effort', 'More effort can give better answers but takes longer.'],
   'agent.max_iterations': ['Steps per answer', 'Most tool and thinking steps in one answer.'],
   'agent.run_budget_seconds': ['Time per answer (seconds)', 'Longest time one answer may take.'],
@@ -263,6 +258,12 @@ export function AssistantSettings() {
         scope="default"
         where="every chat"
         description="Every chat starts from these. A chat’s own role replaces this one; set it on the chat’s page in Chats."
+      />
+      <ToolSwitches
+        space="*"
+        title="Tools in every chat"
+        where="every chat"
+        description="What Nocheh may use in every chat. A chat or topic can set its own on its page in Chats. No restart needed."
       />
       <Limits />
       <BackgroundJobLimits />

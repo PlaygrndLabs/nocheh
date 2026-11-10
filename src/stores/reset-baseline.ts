@@ -79,7 +79,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
   only(control,{...defaults(storeSchemas.control),installation:1,security_policy:1,security_policy_versions:[1,2],runtime_configuration:1,runtime_configuration_versions:1,
     workflow_owners:families.length,projects:configuration.projects.length,
     project_assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,
-    memory_access_settings:configuration.memory_access_settings.length,
+    memory_access_settings:configuration.memory_access_settings.length,chat_tool_settings:configuration.chat_tool_settings.length,
     runtime_profiles:profileCount,owner_commands:profileCount,workflow_registry:profileCount*2,workflow_outbox:profileCount*2});
   const installed=(await stores.control.query('SELECT generation::text AS generation FROM installation WHERE singleton')).rows;
   if(!same(installed,[{generation}]))throw Error('reset_baseline_generation_changed');

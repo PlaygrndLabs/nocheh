@@ -151,7 +151,7 @@ class ResetInitializationTests(unittest.TestCase):
             'memory_access_settings': [{'destination': '*', 'suggestions': 'related', 'notify_owner': True,
                                         'auto_followup': True, 'request_ttl_seconds': 86400,
                                         'default_grant_mode': 'one_time'}],
-            'runtime_profiles': []}}
+            'chat_tool_settings': [], 'runtime_profiles': []}}
         preferences = preference_transfer.capture(self.state / 'hermes',
                                                   SimpleNamespace(owner='42', groups=[]), [])
         self.artifacts = {'receipt': {'format': 'fixture'},

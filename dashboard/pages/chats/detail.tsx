@@ -1,4 +1,4 @@
-/** One chat: where Nocheh answers, who may talk, what it remembers and may do, and its project. */
+/** One chat: where Nocheh answers, who may talk, what it remembers and may do, the tools it may use, and its project. */
 import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
@@ -11,6 +11,7 @@ import {NochehHere} from './presence';
 import {ProjectCard} from './project';
 import {RoleAndSkills} from './role-skills';
 import {chatHref, useChat, useChats, type Telegram} from './shared';
+import {ToolSwitches} from './tools';
 import {TopicsCard} from './topics';
 
 export type Permission = {
@@ -51,6 +52,10 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
   const owner = chat.kind === 'private' && space === telegram.owner;
   const group = chat.kind === 'group';
   const forum = group && telegram.isOn(space) && /^-100/.test(space);
+  // The owner's own topics follow the private chat, so only its chat, served groups and their topics have switches.
+  const tools =
+    owner || (group && telegram.isOn(space)) || (chat.kind === 'topic' && !!parentId && telegram.isOn(parentId));
+  const where = owner ? 'your private chat' : chatName(chat, telegram.owner);
 
   return (
     <div className="space-y-4">
@@ -92,7 +97,7 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       {(owner || (group && telegram.isOn(space))) && (
         <RoleAndSkills
           scope={space}
-          where={owner ? 'your private chat' : chatName(chat, telegram.owner)}
+          where={where}
           description={
             group
               ? 'Only you set these. Every topic in this group uses them, on top of its project’s if it has one. Defaults are in Settings › Assistant.'
@@ -110,6 +115,20 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       )}
       <MemoryCard chat={chat} telegram={telegram} context={context.data} />
       <AllowedActions chat={chat} context={context.data} />
+      {tools && (
+        <ToolSwitches
+          space={space}
+          title="Tools"
+          where={where}
+          description={
+            chat.kind === 'topic'
+              ? 'Only you set these. Default follows its group, one tool at a time.'
+              : group
+                ? 'Only you set these. Every topic in this group follows them unless it sets its own. Defaults are in Settings › Assistant.'
+                : 'Only you set these, for this chat and its topics. Defaults for every chat are in Settings › Assistant.'
+          }
+        />
+      )}
       <ProjectCard chat={chat} />
       {forum && <TopicsCard group={chat} topics={topics} />}
     </div>
