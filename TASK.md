@@ -122,6 +122,21 @@ approved text of the rules reading that group; an owner rule given a project rul
 by hand blocks that chat from joining while the project shares; project rules have no
 privacy notes of their own.
 
+Hermes dashboard names (owner, 2026-11-09: "what are thesse?", "naming is not well",
+"ints not clear what is it", then "yes" to the fix): the native profile selector lists
+`private-chat` once with no other-profile warning and each group as `group-<name>-<code>`,
+with the full title as Hermes display name; Telegram sessions are titled with their
+chat's name and memory reviews are hidden. The owner's installation showed a chat
+opened in the dashboard before its next Telegram message starting its new guard epoch
+with no conversation and its old copies never removed; carrying and removal now treat
+both kinds of preparation as the same chat
+([ADR-0227](docs/adr/0227-hermes-lists-chats-by-their-names.md),
+[carry](services/hermes/test_profile_history.py), [titles](services/hermes/test_session_titles.py),
+[names](test/store-runtime-profiles.test.ts), [dashboard](services/hermes/test_runtime_profiles.py)).
+Pending: after the merge, restore the affected group's carried conversation on the
+owner's installation and remove its empty October profile folders; existing review
+rows disappear with their copy at the next guard epoch.
+
 Secret check connection failures (2026-11-08): the owner's installation counted
 secret-check calls that failed with no provider status, 12 on one model and, after a
 switch, 26 on the next, with no refusals and no hidden texts; in the same window a

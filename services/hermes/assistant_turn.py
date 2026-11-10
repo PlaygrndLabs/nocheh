@@ -87,6 +87,13 @@ def retired_content_question(text):
 RETIRED_CONTENT_UNAVAILABLE="I can't access the retired message's content, so I can't tell what it was about."
 
 
+def untitled_telegram():
+    """Hermes titles a session after its first message. A Telegram session holds a whole chat, so
+    Nocheh names it after the chat once the turn ends (assistant_gateway.title_session)."""
+    from agent import turn_context
+    turn_context._UNTITLED_PLATFORMS=turn_context._UNTITLED_PLATFORMS|{'telegram'}
+
+
 def restrict_session_search():
     # Native reads stay in the caller's own store; only a named profile opens another.
     from tools import session_search_tool as search
@@ -210,7 +217,7 @@ def run(body, emit=None, relay=None):
     from services.hermes.compatibility_patch import install as native_gate
     from run_agent import AIAgent
     from hermes_state import SessionDB
-    install();native_gate();restrict_session_search()
+    install();native_gate();restrict_session_search();untitled_telegram()
     review = body.get('review') is True
     background = body.get('channel')=='background' and not review
     iterations = background_limits(body) if background else None
@@ -322,7 +329,11 @@ def run(body, emit=None, relay=None):
             return job_result(result,agent.session_id)
         return conversation_result(result,agent.session_id)
     finally:
-        agent.close();database.close();restore_evidence()
+        agent.close()
+        if review:
+            # A memory review leaves an empty native session behind; Hermes's own hidden flag keeps it out of the session list.
+            with contextlib.suppress(Exception):database.set_session_hidden(session_id,True)
+        database.close();restore_evidence()
 
 
 def main():

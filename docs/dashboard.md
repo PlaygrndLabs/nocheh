@@ -128,6 +128,10 @@ file, and creating a new password on the next visit.
 Open Chat in the sidebar (or Assistant console → Chat). The context banner
 identifies the owner-private default or selected group profile. Changing the native profile selector changes the scope of
 archive retrieval, native sessions and memory. Chat does not send replies to Telegram.
+The selector lists the private chat as `private-chat` and each allowed group as
+`group-` plus its name and a short code of its own (the username or the code
+alone when the name has no Latin letters); Profiles shows each group's full name. Sessions titles a Telegram
+conversation with its chat's name and leaves out memory reviews.
 The terminal, its model turn and the sidebar metadata connection have distinct roles;
 only the managed turn runner can invoke a model.
 

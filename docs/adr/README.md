@@ -49,7 +49,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The owner's instruction texts ride on each runtime call; defaults stay in code ([0152](0152-owner-editable-built-in-instructions.md)).
 - A group turn also sees up to 20 recent unaddressed messages, masked and cited; an album gets one turn on its first part ([0157](0157-group-turns-see-recent-unaddressed-messages.md), [0155](0155-albums-answered-once.md)).
 - A group message from the owner carries a `[the owner]` tag on its speaker line, so replies speak to the owner directly ([0222](0222-a-group-turn-knows-when-the-owner-speaks.md)).
-- A new guard epoch's profile starts with the recent conversation, and old profiles are removed after 15 idle minutes ([0163](0163-chat-conversation-carries-into-new-guard-epochs.md), [0168](0168-superseded-epoch-profiles-are-removed.md)).
+- A new guard epoch's profile starts with the recent conversation, and old profiles are removed after 15 idle minutes, whether the chat was last opened from Telegram or the dashboard ([0163](0163-chat-conversation-carries-into-new-guard-epochs.md), [0168](0168-superseded-epoch-profiles-are-removed.md), [0227](0227-hermes-lists-chats-by-their-names.md)).
 
 ### Honcho memory
 
@@ -126,6 +126,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The dashboard has plain pages with Save in the sticky page header, and every settings apply is followed to its end ([0145](0145-rebuilt-owner-dashboard.md), [0146](0146-save-in-page-header.md), [0147](0147-save-always-present.md), [0178](0178-settings-apply-is-followed-to-its-end.md)).
 - It uses shared components, workflow charts, the pixel brain logo and its colours, and a read-only database browser ([0050](0050-dashboard-components-and-workflow-metrics.md), [0180](0180-pixel-brain-logo-and-logo-colours.md), [0063](0063-owner-database-browser.md)).
 - The mini app is a credential-free service behind an outgoing tunnel that checks Telegram launch data; one owner password covers it and the dashboard ([0162](0162-telegram-mini-app.md), [0189](0189-mini-app-password.md), [0190](0190-one-owner-login.md)).
+- The native Hermes dashboard lists chats by name (`private-chat`, `group-<title>-<code>`, the full title as display name), titles Telegram sessions with their chat's name and hides memory-review sessions ([0227](0227-hermes-lists-chats-by-their-names.md)).
 
 ### Providers and models
 
