@@ -49,6 +49,13 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
 
+Chat in the sidebar (owner, 2026-11-10: "how can start chat????", then "start build."
+on a build plan whose step 4 adds a Chat item to the sidebar): Chat, second in the
+sidebar, opens the assistant console's chat at `/hermes/chat` directly; its profile
+picker chooses the private chat or a group ([sidebar](dashboard/app.tsx),
+[browser](test/dashboard-pages.browser.mjs)). Pending: the owner's look on the running
+installation.
+
 One waiting card per person or project (owner, 2026-11-08: "all <project name> arent same?
 isnt auto or manual merge them to one waiting item"): a new name for a person or
 project already waiting joins that card when learning names it as `same_as` or the

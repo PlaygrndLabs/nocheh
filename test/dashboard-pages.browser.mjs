@@ -104,20 +104,26 @@ test('every page and tab opens with its heading and without errors', async () =>
   }
 });
 
-test('navigation lists each page once, in order, links to the assistant console and collapses', async () => {
+test('navigation lists each page once, in order, links to the assistant chat and console and collapses', async () => {
   const {page} = await open('home');
   const nav = page.getByRole('navigation', {name: 'Main'});
+  const [home, ...rest] = pages.map(([, title]) => title);
   assert.deepEqual(
     (await nav.getByRole('link').allTextContents()).map(text => text.trim().replace(/\d+$/, '')),
-    pages.map(([, title]) => title),
+    [home, 'Chat', ...rest],
   );
+  // Chat opens the assistant console's chat directly.
+  assert.equal(await nav.getByRole('link', {name: 'Chat', exact: true}).getAttribute('href'), '/hermes/chat');
   assert.equal(await page.locator('a[href="/hermes/nocheh"]', {hasText: 'Assistant console'}).count(), 1);
   assert.equal(await page.locator('a[href^="/providers"]').count(), 0);
   await page.getByRole('button', {name: 'Collapse navigation'}).click();
   await page.getByRole('button', {name: 'Expand navigation'}).waitFor();
-  // Collapsed, every page is still a named link.
+  // Collapsed, every page and Chat are still named links.
   assert.equal(await nav.getByRole('link', {name: 'Settings'}).count(), 1);
+  assert.equal(await nav.getByRole('link', {name: 'Chat', exact: true}).count(), 1);
   await page.getByRole('button', {name: 'Expand navigation'}).click();
+  await nav.getByRole('link', {name: 'Chat', exact: true}).click();
+  await page.waitForURL(origin + '/hermes/chat');
   await page.close();
 });
 
