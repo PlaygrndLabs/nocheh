@@ -51,7 +51,7 @@ def export_native(root,directory):
         lock=lock_path.open('rb') if lock_path.exists() else None
         try:
             if lock:fcntl.flock(lock,fcntl.LOCK_SH)
-            for name in ('memories/MEMORY.md','memories/USER.md','space.json','nocheh-owner-profile.json'):
+            for name in ('memories/MEMORY.md','memories/USER.md','space.json','nocheh-owner-profile.json','cron/jobs.json'):
                 source=profile/name
                 if source.is_symlink() or not source.resolve().is_relative_to(profile.resolve()):raise ValueError('native_export_path_denied')
                 if not source.is_file():continue
@@ -80,8 +80,10 @@ def export_all(state,directory,api=None,*,honcho_export=None):
     manifest['archive']=export_archive(api,directory/'archive',source_only=separated)
     if separated:
         from tools.operations.archive.derivative_transfer import export_derivatives
+        from tools.operations.archive.owner_transfer import export_owner
         from tools.operations.memory.honcho_portable import export_honcho
         manifest['derivatives']=export_derivatives(api,directory/'derivatives')
+        manifest['owner']=export_owner(api,directory/'owner')
         manifest['honcho']=(honcho_export or export_honcho)(state,directory/'honcho')
     manifest['native_profiles']=export_native(Path(state)/'hermes',directory/'native')
     manifest['files']={}
@@ -127,13 +129,15 @@ def _validate_package(directory,manifest):
     for name,item in files.items():
         path=directory/_relative(name)
         if not isinstance(item,dict) or type(item.get('size')) is not int or path.stat().st_size!=item['size'] or sha(path)!=item.get('sha256'):raise ValueError('portable_integrity_failed')
-        if name.split('/')[0] not in (('archive','native') if legacy else ('archive','derivatives','native','honcho')):raise ValueError('portable_domain_invalid')
+        if name.split('/')[0] not in (('archive','native') if legacy else ('archive','derivatives','owner','native','honcho')):raise ValueError('portable_domain_invalid')
     archive=validate_archive(directory/'archive')
     if archive.get('format')!=('nocheh-archive-v1' if legacy else 'nocheh-sources-v1') or archive!=manifest.get('archive'):raise ValueError('portable_archive_manifest_mismatch')
     if not legacy:
         from tools.operations.archive.derivative_transfer import validate_derivatives,validate_references
         if validate_derivatives(directory/'derivatives')!=manifest.get('derivatives'):raise ValueError('portable_derivatives_manifest_mismatch')
         validate_references(directory/'derivatives',directory/'archive')
+        from tools.operations.archive.owner_transfer import validate_owner
+        if validate_owner(directory/'owner')!=manifest.get('owner'):raise ValueError('portable_owner_manifest_mismatch')
     profiles=manifest.get('native_profiles')
     if not isinstance(profiles,list) or len(profiles)>10000:raise ValueError('portable_profiles_invalid')
     seen=set();allowed=set()
@@ -144,7 +148,7 @@ def _validate_package(directory,manifest):
         notes=item.get('notes')
         if not isinstance(notes,list) or len(set(notes))!=len(notes) or any(note not in ('memories/MEMORY.md','memories/USER.md') for note in notes):raise ValueError('portable_notes_invalid')
         allowed.update('native/'+name+'/'+note for note in notes)
-        for marker in ('space.json','nocheh-owner-profile.json'):
+        for marker in ('space.json','nocheh-owner-profile.json','cron/jobs.json'):
             if 'native/'+name+'/'+marker in files:allowed.add('native/'+name+'/'+marker)
         if item['sessions']:
             path=directory/'native'/name/'state.db';allowed.add('native/'+name+'/state.db')
@@ -234,7 +238,9 @@ def import_all(directory,native_output,api=None,*,restore_guarded=False):
     legacy=manifest['format']=='nocheh-portable-v1'
     sources=import_archive(api,directory/'archive',restore_guarded=restore_guarded if legacy else False)
     derivatives={'included_with_legacy_records':True,'automatic_activation':False} if legacy else import_derivatives(api,directory/'derivatives')
-    result=save(True,sources=sources,derivatives=derivatives,native_profiles=len(manifest['native_profiles']),honcho_included=manifest.get('honcho',{}).get('included',False))
+    from tools.operations.archive.owner_transfer import import_owner
+    owner=None if legacy else import_owner(api,directory/'owner')
+    result=save(True,sources=sources,derivatives=derivatives,owner=owner,native_profiles=len(manifest['native_profiles']),honcho_included=manifest.get('honcho',{}).get('included',False))
     return {**result,'native_path':str(target),'telegram_replies':0}
 
 

@@ -11,6 +11,15 @@ The production installation runs beside the development stack on one host: its o
 checkout and `COMPOSE_PROJECT_NAME` give it its own image tag (`NOCHEH_IMAGE_TAG`),
 networks, ports, state and Telegram bot ([second installation](docs/deploy.md#a-second-installation-on-the-same-host),
 [test](services/hermes/test_configuration.py)); pending: that installation.
+Off-site copies (owner, 2026-11-10: "start build"): encrypted copies of each automatic
+backup go to the owner's own S3-compatible storage
+([ADR-0229](docs/adr/0229-encrypted-off-site-backup-copies.md),
+[tests](services/hermes/test_offsite.py)); pending: a first live copy, a passed "Test the
+off-site copy", and a fetch and restore on another machine. The portable export now
+carries the owner's tasks, sharing rules, settings and Hermes scheduled jobs
+([ADR-0230](docs/adr/0230-portable-export-carries-owner-work.md),
+[check](test/store-owner-portability.test.ts)); pending: a full export and import between
+two running installations.
 
 Problem notices (owner, 2026-10-28: "I want notice about each failed and issue to
 can fix it in MVP"): the dashboard checks every two minutes and sends the owner's

@@ -218,8 +218,27 @@ kept (default 7). Older automatic backups are deleted; backups started by hand
 are never deleted. A machine that was off at the set time backs up at the
 dashboard's next five-minute check, and a backup is skipped while free disk
 space is under twice the newest automatic backup (at least 1 GiB). Copies stay
-on the same disk; use the host's own backups or copy a backup elsewhere to
-survive losing the machine. See [ADR-0187](adr/0187-daily-automatic-backups.md).
+on the same disk. See [ADR-0187](adr/0187-daily-automatic-backups.md).
+
+To survive losing the machine, turn on Off-site copies in the same settings.
+Each new automatic backup is then encrypted on this machine with your
+passphrase and sent to S3-compatible storage you choose; the storage only ever
+holds scrambled data. Keep the passphrase somewhere other than this machine:
+without it no copy can be opened. System › Backups shows the last copy, sends
+one now, and tests that the newest copy opens and checks out. A copy is
+written to this disk before upload, so it is skipped while free space is under
+the backup's size plus 1 GiB. On a new machine, install the Python
+`cryptography` package (for example `pip install cryptography`), then get a
+backup folder back and restore it; the passphrase is asked for:
+
+```sh
+NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… \
+NOCHEH_OFFSITE_ACCESS_KEY_ID=… NOCHEH_OFFSITE_SECRET_ACCESS_KEY=… \
+./bin/nocheh offsite fetch --output ./recovered-backup
+./bin/nocheh restore ./recovered-backup --state ./data/restored --project nocheh-restored
+```
+
+See [ADR-0229](adr/0229-encrypted-off-site-backup-copies.md).
 
 For a planned cutover, use `backup --leave-stopped` to keep the source writers
 stopped after its final snapshot. First reconcile pending work against deliveries
