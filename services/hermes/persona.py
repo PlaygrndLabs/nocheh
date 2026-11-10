@@ -187,5 +187,8 @@ def materialize(root, profile, chat, project=''):
     with (profile / '.persona.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if (profile / 'SOUL.md').is_file() and (profile / 'skills').is_dir() and read(profile) == value: return
-        _install(profile, value['role'], value['skills'])
+        try: _install(profile, value['role'], value['skills'])
+        except BaseException:
+            # These are derived copies: without SOUL.md the next turn installs them again and asks Hermes again.
+            (profile / 'SOUL.md').unlink(missing_ok=True); raise
 

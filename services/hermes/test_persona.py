@@ -64,6 +64,22 @@ class PersonaTests(unittest.TestCase):
                 {**COOKING, 'name': 'reminders', 'body': 'Default reminders.'}, COOKING]})
             self.assertEqual(persona.read(chat)['skills'], [], 'the owner source is never rewritten by a turn')
 
+    def test_a_turn_profile_whose_refresh_request_failed_asks_again_on_the_next_turn(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            chat = persona.chat_path(root, '-20')
+            persona.save(chat, 'Group role', [], persona.view(chat)['revision'])
+            turn = root / 'profiles' / Scopes.profile('-20:policy:3'); turn.mkdir(parents=True)
+            with patch.object(persona, '_refresh_prompts', side_effect=OSError('database is locked')):
+                with self.assertRaises(OSError): persona.materialize(root, turn, '-20')
+            self.assertFalse((turn / 'SOUL.md').exists())
+            self.assertEqual(persona.read(chat)['role'], 'Group role', 'the owner source is never removed')
+            with patch.object(persona, '_refresh_prompts') as refresh:
+                persona.materialize(root, turn, '-20')
+                persona.materialize(root, turn, '-20')
+            refresh.assert_called_once_with(turn)
+            self.assertEqual(persona.read(turn)['role'], 'Group role')
+
     def test_a_chats_project_adds_its_role_and_skills_between_the_default_and_the_chats_own(self):
         project = 'a' * 64
         with tempfile.TemporaryDirectory() as folder:
