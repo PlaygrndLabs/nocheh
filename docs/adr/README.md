@@ -15,7 +15,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 
 - Nocheh is a personal AI brain, not a task bot; outward actions need owner approval ([0007](0007-personal-ai-brain-roadmap.md)).
 - Nocheh owns the archive, rules, secret check, approvals and dashboard; Hermes is a replaceable runtime behind an adapter ([0018](0018-hermes-owned-archive-subscription-rebuild.md), [0027](0027-native-hermes-dashboard-integration.md)).
-- Where Hermes or Honcho has a built-in, Nocheh uses it instead of its own copy and keeps its safety layer around it: the secret check, audience filtering and archive provenance ([0227](0227-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
+- Where Hermes or Honcho has a built-in, Nocheh uses it instead of its own copy and keeps its safety layer around it: the secret check, audience filtering and archive provenance ([0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 
 ### Archive and sources
 
@@ -44,13 +44,13 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 
 ### Replies and turns
 
-- Hermes polls and sends for Telegram; each chat has its own Hermes profile with a fixed tool set and its own role (SOUL.md) and skills; a role or skill change reaches continuing sessions through Hermes' own prompt refresh ([0021](0021-scoped-native-assistant-processes.md), [0151](0151-chat-role-and-skills-in-hermes-profiles.md), [0227](0227-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
+- Hermes polls and sends for Telegram; each chat has its own Hermes profile with a fixed tool set and its own role (SOUL.md) and skills; a role or skill change reaches continuing sessions through Hermes' own prompt refresh ([0021](0021-scoped-native-assistant-processes.md), [0151](0151-chat-role-and-skills-in-hermes-profiles.md), [0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 - Each turn runs in its own sealed container; browser TUI turns use the same isolation, and abandoned leases are reclaimed under the profile lock ([0028](0028-isolated-native-browser-turns.md), [0098](0098-isolated-native-lease-recovery.md)).
 - Turns start in Telegram update order per chat or topic; chats and topics run in parallel up to owner limits (3 replies, 4 agent runs) ([0104](0104-telegram-update-order-and-untransmitted-sends.md), [0125](0125-per-chat-telegram-dispatch-lanes.md), [0136](0136-per-topic-dispatch-lanes.md), [0126](0126-owner-set-parallel-replies-and-runs.md)).
 - The owner's instruction texts ride on each runtime call; defaults stay in code ([0152](0152-owner-editable-built-in-instructions.md)).
 - A group turn also sees up to 20 recent unaddressed messages, masked and cited; an album gets one turn on its first part ([0157](0157-group-turns-see-recent-unaddressed-messages.md), [0155](0155-albums-answered-once.md)).
 - A group message from the owner carries a `[the owner]` tag on its speaker line, so replies speak to the owner directly ([0222](0222-a-group-turn-knows-when-the-owner-speaks.md)).
-- A new guard epoch's profile starts with the recent conversation, and old profiles are removed after 15 idle minutes ([0163](0163-chat-conversation-carries-into-new-guard-epochs.md), [0168](0168-superseded-epoch-profiles-are-removed.md)).
+- A new guard epoch's profile starts with the recent conversation, and old profiles are removed after 15 idle minutes, whether the chat was last opened from Telegram or the dashboard ([0163](0163-chat-conversation-carries-into-new-guard-epochs.md), [0168](0168-superseded-epoch-profiles-are-removed.md), [0227](0227-hermes-lists-chats-by-their-names.md)).
 
 ### Honcho memory
 
@@ -59,7 +59,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Repeat names for one person or project wait on one suggestion card that learning or the owner folds them into; one answer covers every name ([0219](0219-repeat-names-wait-on-one-card.md)).
 - A reply reads its conversation's Honcho session context live when a message arrives, and context is prefetched when Honcho finishes work, never on a timer ([0044](0044-automatic-honcho-context.md), [0114](0114-event-driven-honcho-context.md), [0115](0115-honcho-session-revisions.md)).
 - Only the latest revision of an edited message stays in Honcho; only an uncorrected owner change or a replaced session pauses reads, and answering a suggestion card or renaming a person does not ([0154](0154-message-edits-replace-honcho-writes.md), [0148](0148-honcho-reads-wait-for-epoch-correction.md), [0149](0149-only-owner-changes-hold-honcho.md), [0223](0223-answering-a-suggestion-card-does-not-pause-memory.md)).
-- Memory evidence shows the exact messages Honcho records a conclusion citing, else its derivation batch marked inexact ([0227](0227-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
+- Memory evidence shows the exact messages Honcho records a conclusion citing, else its derivation batch marked inexact ([0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 - Limited, syncing or paused memory reaches the agent as context; Nocheh adds no text to a reply about it ([0221](0221-limited-memory-is-context-not-reply-text.md)).
 - Historical recall needs evidence beyond the current question; terminal queue errors block readiness; preparation outages answer 503 so Honcho retries; recall checks run at reply priority ([0099](0099-independent-evidence-for-historical-recall.md), [0101](0101-honcho-terminal-queue-errors-block-readiness.md), [0174](0174-memory-preparation-outages-are-retried.md), [0150](0150-honcho-recall-checks-take-reply-priority.md)).
 - The owner can retry learning, re-learn chosen chats or start a fresh workspace; changing the memory search model rebuilds memory; a 30-minute synthetic workspace allows checks while memory is detached ([0153](0153-owner-reruns-and-replaces-honcho-memory.md), [0122](0122-honcho-fresh-start.md), [0181](0181-memory-search-model-change-rebuilds-memory.md), [0068](0068-detached-honcho-acceptance-workspace.md)).
@@ -69,7 +69,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Each live source gets at most one native notes review, run in a supervised thread outside workflow admission, after Honcho ingestion's first attempt ([0097](0097-durable-native-review-handoff.md), [0124](0124-native-review-once-per-source.md), [0088](0088-primary-ingestion-before-native-note-review.md)).
 - A review that failed or timed out without changing notes runs again, up to four attempts ([0183](0183-failed-native-review-without-effect-runs-again.md), [0185](0185-review-stopped-at-its-time-limit-runs-again.md)).
 - Waiting reviews, including failed ones waiting to run again, keep their place and an open workflow across epochs; stopped learning is asked again, and stranded work is picked up at start ([0173](0173-waiting-native-reviews-keep-their-place.md), [0216](0216-failed-reviews-keep-their-place-across-epochs.md), [0217](0217-waiting-fragments-keep-their-place.md), [0176](0176-stopped-learning-is-asked-again.md), [0177](0177-stranded-memory-work-is-picked-up-at-start.md)).
-- Learning asks Honcho questions of up to 92,160 bytes, about half of Honcho's input budget sized to the guard's 512 KiB, and gets schema-checked JSON from Honcho's structured output; it keeps valid items and reuses results unless real evidence changes ([0128](0128-learning-results-keep-valid-items.md), [0227](0227-hermes-and-honcho-built-ins-replace-nocheh-copies.md), [0082](0082-evidence-based-learning-deduplication.md)).
+- Learning asks Honcho questions of up to 92,160 bytes, about half of Honcho's input budget sized to the guard's 512 KiB, and gets schema-checked JSON from Honcho's structured output; it keeps valid items and reuses results unless real evidence changes ([0128](0128-learning-results-keep-valid-items.md), [0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md), [0082](0082-evidence-based-learning-deduplication.md)).
 - Automatic publication waits while a reply is active; privacy revocations apply at once ([0083](0083-defer-automatic-memory-publication-during-replies.md)).
 - A retired source leaves Hermes history and notes: history rows become notices naming the retired ID, and notes citing it are removed ([0123](0123-retired-sources-leave-native-history.md), [0132](0132-retired-history-placeholders.md), [0129](0129-retired-sources-leave-native-notes.md)).
 
@@ -128,6 +128,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The dashboard has plain pages with Save in the sticky page header, and every settings apply is followed to its end ([0145](0145-rebuilt-owner-dashboard.md), [0146](0146-save-in-page-header.md), [0147](0147-save-always-present.md), [0178](0178-settings-apply-is-followed-to-its-end.md)).
 - It uses shared components, workflow charts, the pixel brain logo and its colours, and a read-only database browser ([0050](0050-dashboard-components-and-workflow-metrics.md), [0180](0180-pixel-brain-logo-and-logo-colours.md), [0063](0063-owner-database-browser.md)).
 - The mini app is a credential-free service behind an outgoing tunnel that checks Telegram launch data; one owner password covers it and the dashboard ([0162](0162-telegram-mini-app.md), [0189](0189-mini-app-password.md), [0190](0190-one-owner-login.md)).
+- The native Hermes dashboard lists chats by name (`private-chat`, `group-<title>-<code>`, the full title as display name), titles Telegram sessions with their chat's name and hides memory-review sessions ([0227](0227-hermes-lists-chats-by-their-names.md)).
 
 ### Providers and models
 
@@ -173,7 +174,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Retry-order hints for background admission ([0085](0085-fair-background-workflow-admission.md)) -> live admission handoff ([0087](0087-live-background-admission-handoff.md)).
 - Background jobs as a chain of sealed steps ([0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md)) -> one Hermes run ([0207](0207-a-background-job-is-one-hermes-run.md)).
 - Separate mini app password ([0189](0189-mini-app-password.md)) -> one owner login ([0190](0190-one-owner-login.md)).
-- Nocheh's own reading of fenced, wrapped and cut-off learning results ([0128](0128-learning-results-keep-valid-items.md), [0140](0140-truncated-learning-results-keep-whole-items.md)) -> Honcho's structured output ([0227](0227-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
+- Nocheh's own reading of fenced, wrapped and cut-off learning results ([0128](0128-learning-results-keep-valid-items.md), [0140](0140-truncated-learning-results-keep-whole-items.md)) -> Honcho's structured output ([0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 
 ## How to add or interpret an ADR
 

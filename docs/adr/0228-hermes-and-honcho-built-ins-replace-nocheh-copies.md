@@ -1,4 +1,4 @@
-# ADR-0227: Hermes and Honcho built-ins replace Nocheh's own copies
+# ADR-0228: Hermes and Honcho built-ins replace Nocheh's own copies
 
 <status>
 Accepted on 2026-11-10, after the November 9 upgrade to Hermes 0.23.0 and

@@ -21,11 +21,12 @@ class ProfileHistoryTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def profile(self,epoch,chat='123',generation=GENERATION,purpose='assistant'):
+    def profile(self,epoch,chat='123',generation=GENERATION,purpose='assistant',logical=None):
         from .assistant_gateway import prepare_profile
         from .scopes import Scope, Scopes
-        scope=Scopes.apply_revision(Scope(chat,chat,chat=='123','unused',chat),
-                                    {'generation':generation,'guard_epoch':epoch,'revision':1,'purpose':purpose})
+        claims={'generation':generation,'guard_epoch':epoch,'revision':1,'purpose':purpose}
+        if logical is not None:claims['logical_profile']=logical
+        scope=Scopes.apply_revision(Scope(chat,chat,chat=='123','unused',chat),claims)
         return prepare_profile(self.root,scope,'subscription-model')
 
     def converse(self,profile,session='nocheh-chat',thread='a'*64):
@@ -67,6 +68,19 @@ class ProfileHistoryTests(unittest.TestCase):
         # Preparing the same profile again copies nothing more.
         self.profile(6)
         self.assertEqual(len(self.replay(new)),4)
+
+    def test_a_chat_opened_by_name_or_without_one_keeps_its_conversation(self):
+        """The dashboard names a chat's own profile; Telegram turns leave the name blank. Both are the same chat."""
+        import time
+        from .profile_history import IDLE_SECONDS, prune
+        from .scopes import Scopes
+        old=self.profile(5);self.converse(old)
+        named=self.profile(6,logical=Scopes.profile('123'))
+        self.assertEqual(len(self.replay(named)),4,'opening the chat in the dashboard first still carries it')
+        self.assertEqual(prune(named,now=time.time()+IDLE_SECONDS+60),[old.name],'and the earlier copy is cleaned up')
+        blank=self.profile(7)
+        self.assertEqual(len(self.replay(blank)),4,'a Telegram turn after the dashboard carries it too')
+        self.assertEqual(self.replay(self.profile(8,logical='profile-'+'b'*48)),[],'an owner-made profile keeps its own sessions')
 
     def test_a_message_hidden_since_is_withheld_before_the_first_turn(self):
         from .isolated_profile import database_path
