@@ -41,9 +41,15 @@ export class HonchoProvenanceRepository {
     const result=await this.call('/v3/workspaces/'+workspace+'/nocheh/provenance',{conclusion_ids:conclusionIds});
     if(!result||!Array.isArray(result.nodes)||result.nodes.length>128||!Array.isArray(result.messages)||result.messages.length>256||
       !Array.isArray(result.limitations)||result.limitations.length>20||result.limitations.some((v:unknown)=>typeof v!=='string'||v.length>100)||
-      canonical(result.roots)!==canonical(conclusionIds)||result.nodes.some((v:any)=>!nativeId(v.id)||!Array.isArray(v.parents)||v.parents.length>128||v.parents.some((p:unknown)=>!nativeId(p))))
+      canonical(result.roots)!==canonical(conclusionIds)||result.nodes.some((v:any)=>!nativeId(v.id)||!Array.isArray(v.parents)||v.parents.length>128||v.parents.some((p:unknown)=>!nativeId(p))||
+        ![true,false,null].includes(v.exact_citations)))
       throw new HttpError(502,'invalid_honcho_provenance');
-    const limitations=new Set<string>(result.limitations);limitations.add('ancestry_is_not_an_exact_citation');
+    // Each conclusion brings the messages it cites (true), its whole derivation batch when it has no citations
+    // (false), or none (null). The chain is exact only when every conclusion that brought messages cites them.
+    const nodes:{id:string;parents:string[];deleted:boolean;exact_citations:boolean|null}[]=
+      result.nodes.map((n:any)=>({id:n.id,parents:n.parents,deleted:n.deleted===true,exact_citations:n.exact_citations}));
+    const exact=nodes.some(n=>n.exact_citations===true)&&nodes.every(n=>n.exact_citations!==false);
+    const limitations=new Set<string>(result.limitations);if(nodes.some(n=>n.exact_citations===false))limitations.add('ancestry_is_not_an_exact_citation');
     const evidence=new Map<string,SourceReference>();
     for(const message of result.messages) {
       if(!nativeId(message.message_id)||typeof message.receipt_id!=='string'||!/^[a-f0-9]{64}$/.test(message.receipt_id))throw new HttpError(502,'invalid_honcho_provenance');
@@ -59,7 +65,6 @@ export class HonchoProvenanceRepository {
       }
     }
     await this.current(workspace,audience,binding);
-    return {conclusions:result.nodes.map((n:any)=>({id:n.id,parents:n.parents,deleted:n.deleted===true})),evidence:[...evidence.values()],
-      limitations:[...limitations].sort(),exact_citations:false as const};
+    return {conclusions:nodes,evidence:[...evidence.values()],limitations:[...limitations].sort(),exact_citations:exact};
   }
 }

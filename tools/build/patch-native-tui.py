@@ -1,4 +1,4 @@
-"""Pinned TUI changes: capture before interpretation, stable IDs, no external processes.
+"""Pinned TUI changes: capture before interpretation, stable IDs, no external processes, no history rewind.
 
 The managed gateway entry lives in services/hermes/browser_bridge.py (the TUI attaches over WebSocket)."""
 from pathlib import Path
@@ -67,6 +67,11 @@ patch('ui-tui/src/lib/externalCli.ts', [
 ])
 patch('ui-tui/src/lib/editor.ts', [
     ("    status = spawnSync(cmd!, [...args, file], { stdio: 'inherit' }).status", "    status = null // External editor processes require the managed tools boundary."),
+])
+# The managed gateway never rewrites or forks history; Esc Esc on an empty composer dispatches this same command.
+patch('ui-tui/src/app/slash/commands/core.ts', [
+    ('    run: (_arg, ctx) => openRewindPicker(ctx)',
+     "    run: (_arg, ctx) => ctx.transcript.sys('Rewind is unavailable: Nocheh keeps sent prompts as archived. Send a new message instead.')"),
 ])
 patch('ui-tui/src/app/useComposerState.ts', [
     ("      exitCode = spawnSync(cmd!, [...args, file], { stdio: 'inherit' }).status", "      exitCode = null // Keep editing in the managed browser composer."),

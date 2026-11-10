@@ -2826,3 +2826,44 @@ could not load on a real installation. The unused 3D graph module, its build and
 the `three` dependency were removed from both images and the development stack.
 
 </entry>
+
+
+<entry date="2026-10-19" area="Dependency upgrades">
+
+Every dependency moved to its latest release: TypeScript 7, React 19.3, esbuild
+0.28 and Inngest SDK 4.25; Node 26.12, PostgreSQL 18.6 with pgvector 0.8.7,
+Redis 8.8.3, Docker CLI 29.9 and the Inngest server 1.46 on Debian trixie images;
+Honcho v3.3.0 (`honcho-ai` 2.6.0, `honcho-cli` 0.2.0); Hermes v0.22.2 on Python
+3.14.8 and uv 0.13.2. PostgreSQL services set PGDATA to their mounted data
+directory, and the installation started with fresh databases, as the owner
+accepted. Provenance, session-descendant reads and the portable memory export
+read Honcho's `document_sources`; the provider gateway allows Honcho's
+6,000-token long summaries; the Inngest inspection rewrite found the 1.46 viewers
+by pattern. Hermes' Telegram admission records the polled update once Nocheh's
+committed-only gate accepts it, and Nocheh's dispatch receipts stay the
+exactly-once authority. The native skill curator, SOUL.md seeding and config
+backups are off for managed profiles. A new pin moves an untouched Hermes or
+Honcho source checkout, and `make dev` builds the pinned images when a pin moves;
+the store image installs libatomic and the Hermes image PyYAML. Checked: the Node
+suite on PostgreSQL 18 (190 pass, 77 skipped), Honcho v3.3.0 migrations,
+provenance and export, the Inngest 1.46 inspection pages in Chromium, and the
+Hermes tests in the new image (505 run, one pre-existing failure). On October 23
+the fresh-database rebuild on the development machine ran with all services
+healthy and one poller, and a live reply and attaching Honcho memory passed.
+
+</entry>
+
+
+<entry date="2026-10-26" area="Dependency upgrades">
+
+Hermes v0.22.5, Honcho v3.4.1 (built with uv 0.13.5 as its lockfile requires,
+`honcho-ai` 2.7.0, `honcho-cli` 0.2.1), Inngest server 1.49 with SDK 4.26, Node
+26.12.1, Python 3.14.9, uv 0.13.5, Redis 8.10.2, cloudflared 2026.10.3 and Docker
+CLI 29.9.2; PostgreSQL stayed on 18.6, because 19 was a release candidate with no
+pgvector build. The v0.22.5 browser TUI attaches to a gateway only over
+WebSocket, so a loopback [bridge](../services/hermes/browser_bridge.py) serves
+Nocheh's browser gateway, and the dashboard plugin allowance followed its new
+home in Hermes. Honcho 3.4.0 added a migration that Honcho runs itself at
+startup. Superseded by the November 9 upgrade in [TASK.md](../TASK.md).
+
+</entry>

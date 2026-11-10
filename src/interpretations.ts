@@ -13,55 +13,29 @@ export interface LearningEvidence {reference:SourceReference;text:string;space:s
 export type LearningRejection={section:'interpretations'|'entity_suggestions'|'entity_claims';code:string};
 const resultKeys=['interpretations','entity_suggestions','entity_claims','organization'];
 
-/** Find the end of the JSON object that starts at `start`, honoring strings. */
-function objectEnd(text:string,start:number):number {
-  let depth=0,quoted=false,escaped=false;
-  for(let index=start;index<text.length;index++) {
-    const char=text[index];
-    if(quoted){if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')quoted=false;continue;}
-    if(char==='"')quoted=true;else if(char==='{')depth++;else if(char==='}'&&--depth===0)return index;
-  }
-  return -1;
-}
-/** Reasoning models can wrap the requested JSON in a Markdown fence or a sentence.
- * The first complete top-level object carrying a requested section is the result. */
+const plain={type:'string'},ids={type:'array',maxItems:30,items:plain},oneOf=(description:string)=>({type:'string',description});
+const list=(maxItems:number,properties:Record<string,unknown>)=>({type:'array',maxItems,items:{type:'object',properties}});
+/** The answer Honcho's peer chat gives for learning. Honcho checks and repairs the model's JSON against it and
+ * returns every field, an absent one as null. Fields stay optional and allowed values are only described, so the
+ * checks below still drop one invalid item on its own. Honcho's repair keeps an item cut off at the output limit;
+ * evidence_ids comes last, so such an item has none and is dropped too. */
+export const learningResultSchema={type:'object',required:['interpretations'],properties:{
+  interpretations:list(12,{kind:oneOf('meaning, state or convention'),subject:plain,text:plain,
+    scope:{type:'object',properties:{kind:oneOf('conversation or project'),id:plain}},uncertainty:oneOf('uncertain, supported or explicit'),
+    quote:{type:'object',properties:{source_id:plain,text:plain}},conflicts:ids,evidence_ids:ids}),
+  entity_suggestions:list(12,{kind:oneOf('person, project or binding'),name:plain,candidate_id:plain,same_as:plain,reason:plain,evidence_ids:ids}),
+  entity_claims:list(20,{subject_id:plain,predicate:plain,content:plain,object_entity_id:plain,
+    relationship_kind:oneOf('contextual, participates, responsible, depends_on or associated'),attribution:oneOf('direct, reported or inferred'),
+    speaker_entity_id:plain,uncertainty:oneOf('uncertain, supported or explicit'),evidence_ids:ids}),
+  organization:{type:'object',properties:{reason:plain,creates:list(8,{key:plain,name:plain,description:plain,evidence_ids:ids}),
+    assignments:list(20,{space_id:plain,project_id:plain,project_key:plain,expected_revision:{type:'integer'},reason:plain,
+      purpose_evidence:{type:'boolean'},evidence_ids:ids})}}}};
+/** A saved answer is the JSON object Honcho returned for learningResultSchema. */
 export function learningResult(text:string):Record<string,unknown> {
-  const candidates=[text.trim()];
-  for(const match of text.matchAll(/```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)```/g))candidates.push(match[1]!.trim());
-  for(let start=text.indexOf('{');start>=0;) {
-    const end=objectEnd(text,start);if(end<0)break;
-    candidates.push(text.slice(start,end+1));start=text.indexOf('{',end+1);
-  }
-  for(const candidate of candidates) {
-    let value:unknown;try{value=JSON.parse(candidate);}catch{continue;}
-    if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).some(key=>resultKeys.includes(key)))return value as Record<string,unknown>;
-  }
-  const truncated=truncatedResult(text);if(truncated)return truncated;
-  throw new HttpError(422,'invalid_interpretation_result');
-}
-/** An answer cut off at the reasoning output limit keeps its complete leading
- * section items; the unfinished item and everything after it are dropped. */
-function truncatedResult(text:string):Record<string,unknown>|null {
-  for(const match of text.matchAll(/\{\s*"(?:interpretations|entity_suggestions|entity_claims|organization)"/g)) {
-    const stack:string[]=[];let quoted=false,escaped=false,cut=-1,closing='';
-    for(let index=match.index;index<text.length;index++) {
-      const char=text[index]!;
-      if(quoted){if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')quoted=false;continue;}
-      if(char==='"')quoted=true;else if(char==='{'||char==='[')stack.push(char);
-      else if(char==='}'||char===']') {
-        stack.pop();if(!stack.length)break;
-        // Cut only after a whole section item or a whole section.
-        const parent=stack[stack.length-1];
-        if(char==='}'&&parent==='['||char===']'&&stack.length===1){cut=index;closing=stack.map(open=>open==='{'?'}':']').reverse().join('');}
-      }
-    }
-    if(!stack.length||cut<0)continue;
-    try{
-      const value=JSON.parse(text.slice(match.index,cut+1)+closing);
-      if(value&&typeof value==='object'&&!Array.isArray(value))return value as Record<string,unknown>;
-    }catch{continue;}
-  }
-  return null;
+  let value:unknown;try{value=JSON.parse(text);}catch{value=null;}
+  if(!value||typeof value!=='object'||Array.isArray(value)||!Object.keys(value).some(key=>resultKeys.includes(key)))
+    throw new HttpError(422,'invalid_interpretation_result');
+  return value as Record<string,unknown>;
 }
 /** Bounded model sections keep their valid leading items; null or absent means none. */
 export function resultItems(value:unknown,limit:number,section:LearningRejection['section'],rejected:LearningRejection[]):unknown[] {

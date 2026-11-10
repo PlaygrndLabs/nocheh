@@ -1,4 +1,5 @@
 """Production Honcho setup keeps acceptance and spending policy explicit."""
+import json
 import os
 import subprocess
 import sys
@@ -33,6 +34,33 @@ class HonchoSetupTests(unittest.TestCase):
             self.assertEqual(values['DERIVER_FLUSH_ENABLED'], 'true')
             self.assertEqual(values['DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS'], '0')
 
+    def test_setup_takes_the_longest_query_and_keeps_model_inputs_within_the_guard(self):
+        from tools.operations.installation.configuration import initialize, read_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                honcho_setup.initialize(state)
+            values = read_env(state / 'honcho/honcho.env')
+            # Honcho's own maximum query; its input budgets fill at most 480 KiB of the guard's 512 KiB at 8 bytes a token.
+            self.assertEqual(values['DIALECTIC_MAX_QUERY_LENGTH'], '200000')
+            for name in ('DIALECTIC_MAX_INPUT_TOKENS', 'SUMMARY_MAX_INPUT_TOKENS'):
+                self.assertLessEqual(int(values[name]) * 8 + 32 * 1024, 512 * 1024)
+                # A summary needs room for twice its longest output (6,000 tokens), or Honcho does not start.
+                self.assertGreaterEqual(int(values[name]), 12000)
+
+    def test_setup_asks_every_dialectic_level_for_json_through_the_prompt(self):
+        from tools.operations.installation.configuration import initialize, read_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                honcho_setup.initialize(state)
+            values = read_env(state / 'honcho/honcho.env')
+            # Learning asks peer chat for a response_format; a json_schema sent alongside tools can be refused.
+            for level in ('minimal', 'low', 'medium', 'high', 'max'):
+                self.assertEqual(values[f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG__STRUCTURED_OUTPUT_MODE'], 'json_object')
+
     def test_setup_keeps_peer_cards_and_dreams_off(self):
         from tools.operations.installation.configuration import initialize, read_env, write_env
         with tempfile.TemporaryDirectory() as folder:
@@ -49,6 +77,33 @@ class HonchoSetupTests(unittest.TestCase):
                 self.assertEqual(read_env(path)['PEER_CARD_ENABLED'], 'true')
                 honcho_setup.initialize(state)
                 self.assertEqual(read_env(path)['PEER_CARD_ENABLED'], 'false')
+
+    def test_build_images_are_pinned_and_a_missing_one_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root, state = Path(folder) / 'root', Path(folder) / 'state'
+            (root / 'services/honcho').mkdir(parents=True)
+            (root / 'data/compat/upstreams/honcho').mkdir(parents=True)
+            state.mkdir()
+            (root / 'services/honcho/upstreams.lock.json').write_text(json.dumps({'build_images': {
+                'base:1': 'base:1@sha256:' + 'a' * 64, 'tool:2': 'tool:2@sha256:' + 'b' * 64}}))
+            dockerfile = root / 'data/compat/upstreams/honcho/Dockerfile'
+            dockerfile.write_text('# syntax=docker/dockerfile:1\nFROM base:1 AS builder\nCOPY --from=tool:2 /tool /bin/tool\nFROM base:1\n')
+            with patch.object(honcho_setup, 'ROOT', root), patch.object(honcho_setup, 'STATE', state):
+                honcho_setup.sources()
+                built = (state / 'honcho.Dockerfile').read_text()
+                self.assertEqual(built.count('base:1@sha256:' + 'a' * 64), 2)
+                self.assertIn('COPY --from=tool:2@sha256:' + 'b' * 64 + ' /tool', built)
+                self.assertNotIn('# syntax=', built)
+                # Upstream moved to another tool tag: the lock no longer matches, so nothing is written.
+                dockerfile.write_text('FROM base:1\nCOPY --from=tool:3 /tool /bin/tool\n')
+                with self.assertRaisesRegex(SystemExit, 'tool:2: build image is not in the Honcho Dockerfile'):
+                    honcho_setup.sources()
+                self.assertFalse((state / 'honcho.Dockerfile').exists())
+                # Upstream added another image: every FROM and COPY --from must still carry a digest.
+                dockerfile.write_text('FROM base:1 AS builder\nCOPY --from=tool:2 /tool /bin/tool\nFROM other:1\nCOPY --from=builder /app /app\n')
+                with self.assertRaisesRegex(SystemExit, 'other:1: Honcho build image is not pinned'):
+                    honcho_setup.sources()
+                self.assertFalse((state / 'honcho.Dockerfile').exists())
 
     def test_monthly_cutover_requires_live_acceptance_and_attachment(self):
         with tempfile.TemporaryDirectory() as folder:

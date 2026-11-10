@@ -1,4 +1,4 @@
-# ADR-0228: Portable export carries the owner's work and choices
+# ADR-0230: Portable export carries the owner's work and choices
 
 <status>
 Accepted on 2026-11-10, after the owner asked for a full export that includes

@@ -43,12 +43,16 @@ source identifiers and links do not change when a derivative is activated.
 | GET/POST `/v1/sharing/rules` | Selected source spaces, exact destination, mode and enabled state |
 | POST `/v1/sharing/preview`; GET `/v1/sharing/previews[/:id]`; POST `/v1/sharing/previews/:id/approve` | Prepare, inspect or approve a release from chosen sources |
 | GET `/v1/sharing/releases`; POST `/v1/sharing/releases/:id/revoke` | List or revoke releases |
-| POST `/v1/memory/provenance` | Bounded native conclusion ancestry and confirmed ingestion references |
+| POST `/v1/memory/provenance` | Bounded Honcho conclusion ancestry, each conclusion's exact cited messages or derivation batch, and confirmed ingestion references |
 
 List cursors use `after`; histories use `before`. Learned filters use both
 `scope_kind=conversation|project` and `scope_id`. Sharing rules configure preparation;
-they never grant direct reads of another conversation. Native ancestry explicitly
-reports missing provenance and is not labeled an exact quote citation.
+they never grant direct reads of another conversation. Provenance lists the
+messages each Honcho conclusion cites, first and in citation order, and marks each
+conclusion's `exact_citations`: true for its cited messages, false when it has no
+citations and brings its whole derivation batch, null when it brings none. The
+answer is exact only when some conclusion is true and none is false; a false one
+adds `ancestry_is_not_an_exact_citation` to its limitations. Missing provenance is reported explicitly.
 
 Learning consent uses `enabled`, `expected_revision` (zero for the first explicit
 decision), and `operation_id`. A successful change revokes previous contexts and

@@ -39,11 +39,18 @@ def _receipt(profile):
     return value if isinstance(value,dict) else None
 
 
+def _logical(receipt):
+    """A chat's own profile, whether a turn named it (the dashboard, a job) or left it blank (Telegram)."""
+    from .scopes import Scopes
+    space=receipt.get('space')
+    return receipt.get('logical_profile') or (Scopes.profile(space) if isinstance(space,str) else None)
+
+
 def _same_chat(current,other):
     """Same chat, owner flag, installation and logical profile; reviews share the assistant profile, filtering does not."""
-    keys=('space','owner','generation','logical_profile')+(() if current.get('generation') else ('revision',))
+    keys=('space','owner','generation')+(() if current.get('generation') else ('revision',))
     kind=lambda value:'filter' if value.get('purpose')=='filter' else 'assistant'
-    return all(current.get(key)==other.get(key) for key in keys) and kind(current)==kind(other)
+    return all(current.get(key)==other.get(key) for key in keys) and _logical(current)==_logical(other) and kind(current)==kind(other)
 
 
 def _cursors(profile):

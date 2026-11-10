@@ -9,11 +9,11 @@ backups come first ([ADR-0187](docs/adr/0187-daily-automatic-backups.md));
 pending: a live scheduled backup on a running installation.
 Off-site copies (owner, 2026-11-10: "start build"): encrypted copies of each automatic
 backup go to the owner's own S3-compatible storage
-([ADR-0227](docs/adr/0227-encrypted-off-site-backup-copies.md),
+([ADR-0229](docs/adr/0229-encrypted-off-site-backup-copies.md),
 [tests](services/hermes/test_offsite.py)); pending: a first live copy, a passed "Test the
 off-site copy", and a fetch and restore on another machine. The portable export now
 carries the owner's tasks, sharing rules, settings and Hermes scheduled jobs
-([ADR-0228](docs/adr/0228-portable-export-carries-owner-work.md),
+([ADR-0230](docs/adr/0230-portable-export-carries-owner-work.md),
 [check](test/store-owner-portability.test.ts)); pending: a full export and import between
 two running installations.
 
@@ -57,6 +57,13 @@ Settings › Telegram finds the owner's ID by running `discover-telegram` inside
 [discovery](services/hermes/test_telegram_directory.py),
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
 clean server install.
+
+Chat in the sidebar (owner, 2026-11-10: "how can start chat????", then "start build."
+on a build plan whose step 4 adds a Chat item to the sidebar): Chat, second in the
+sidebar, opens the assistant console's chat at `/hermes/chat` directly; its profile
+picker chooses the private chat or a group ([sidebar](dashboard/app.tsx),
+[browser](test/dashboard-pages.browser.mjs)). Pending: the owner's look on the running
+installation.
 
 One waiting card per person or project (owner, 2026-11-08: "all <project name> arent same?
 isnt auto or manual merge them to one waiting item"): a new name for a person or
@@ -123,6 +130,21 @@ needs its own approval; a topic that stops following a source group invalidates 
 approved text of the rules reading that group; an owner rule given a project rule's ID
 by hand blocks that chat from joining while the project shares; project rules have no
 privacy notes of their own.
+
+Hermes dashboard names (owner, 2026-11-09: "what are thesse?", "naming is not well",
+"ints not clear what is it", then "yes" to the fix): the native profile selector lists
+`private-chat` once with no other-profile warning and each group as `group-<name>-<code>`,
+with the full title as Hermes display name; Telegram sessions are titled with their
+chat's name and memory reviews are hidden. The owner's installation showed a chat
+opened in the dashboard before its next Telegram message starting its new guard epoch
+with no conversation and its old copies never removed; carrying and removal now treat
+both kinds of preparation as the same chat
+([ADR-0227](docs/adr/0227-hermes-lists-chats-by-their-names.md),
+[carry](services/hermes/test_profile_history.py), [titles](services/hermes/test_session_titles.py),
+[names](test/store-runtime-profiles.test.ts), [dashboard](services/hermes/test_runtime_profiles.py)).
+Pending: after the merge, restore the affected group's carried conversation on the
+owner's installation and remove its empty October profile folders; existing review
+rows disappear with their copy at the next guard epoch.
 
 Secret check connection failures (2026-11-08): the owner's installation counted
 secret-check calls that failed with no provider status, 12 on one model and, after a
@@ -683,7 +705,11 @@ rules are left out from the end, then the trigger keeps only its text, each
 named in the query's limitations; an input that still cannot fit closes as
 `input_limit` instead of retrying ([learning engine](src/stores/learning-engine.ts),
 [check](test/learning-workflow.test.ts)). Honcho rejections now log their status,
-route and failing field without content ([client](src/honcho.ts)).
+route and failing field without content ([client](src/honcho.ts)). Since
+November 10 the query can use 92,160 UTF-8 bytes, about half of Honcho's input
+budget sized to the guard's 512 KiB, instead of 10,000 characters, and the same
+trimming applies only past that
+([decision](docs/adr/0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 
 Deep check for hidden data and failure gaps (October 18), verified locally with
 synthetic PostgreSQL, not yet run on the owner's installation:
@@ -922,55 +948,92 @@ messages on either side link to Honcho conclusions at the usual rate, so no
 re-learn is needed. Re-learning or replacing the owner's live memory waits for
 the owner's word.
 
-Upgrades (October 19): every dependency is on its latest release. The npm
-packages include TypeScript 7, React 19.3, esbuild 0.28 and Inngest SDK 4.25;
-the services run Node 26.12, PostgreSQL 18.6 with pgvector 0.8.7, Redis 8.8.3,
-Docker CLI 29.9 and the Inngest server 1.46, on Debian trixie images. Every
-PostgreSQL service sets PGDATA to its mounted data directory, because the 18+
-images default elsewhere; a PostgreSQL 17 volume does not start on 18, so the
-installation starts with fresh databases, as the owner accepted. Honcho is
-pinned to the v3.3.0 release with `honcho-ai` 2.6.0 and `honcho-cli` 0.2.0.
-Honcho keeps conclusion parent links in its `document_sources` table, so the
-provenance and session-descendant reads, and the portable memory export, use
-that table, and the provider gateway allows Honcho's 6,000-token long summaries
-([plugin checks](services/honcho/test_provenance.py),
-[gateway checks](services/honcho/test_meter.py)). The Inngest inspection
-rewrite finds the 1.46 viewers and GraphQL client by pattern
-([inspection checks](test/workflow-inspection.test.ts)). Hermes is pinned to
-v0.22.2 on Python 3.14.8 and uv 0.13.2. Its Telegram update admission records
-the polled update when Nocheh's committed-only gate accepts it, so committed
-turns now enter PTB's own dispatch beneath that admission, and Nocheh's dispatch
-receipts stay the exactly-once authority
-([gateway check](services/hermes/test_gateway.py)). The native skill curator is
-off for managed profiles, because roles and skills are set only by the owner
-([profile check](services/hermes/test_profile_config.py)). The TUI and dashboard
-patches are re-anchored, moved Hermes symbols are followed, and Hermes' direct
-`state.db` opens map to the profile's native state. A new pin moves an untouched
-Hermes or Honcho source checkout. Checked here: the Node suite on Node 26 with
-PostgreSQL 18 (190 pass, 77 skipped), Honcho v3.3.0 migrations, provenance and
-export on PostgreSQL with pgvector, and the Inngest 1.46 inspection pages in
-Chromium. On the owner's development machine (October 23) the fresh-database rebuild runs on
-PostgreSQL 18.6 and Honcho 3.3.0 with all services healthy and one poller. The
-store image installs libatomic for Node 26, the Hermes image installs PyYAML,
-which Hermes 0.22 no longer ships, and both builds check for them. `make dev`
-builds the pinned images when a pin moves. Hermes 0.22's own SOUL.md seeding and
-config backups are off, because Nocheh owns each profile's role and config.
-Hermes Python tests in the new image: 505 run, one pre-existing failure
-(`test_telegram_http_fixture`). A live reply and attaching Honcho memory on the
-fresh databases passed on October 23.
-
-Upgrades (October 26): Hermes v0.22.5, Honcho v3.4.1 (built with uv 0.13.5 as
-its lockfile requires, `honcho-ai` 2.7.0 and `honcho-cli` 0.2.1), Inngest server
-1.49 with SDK 4.26, Node 26.12.1, Python 3.14.9, uv 0.13.5, Redis 8.10.2,
-cloudflared 2026.10.3 and Docker CLI 29.9.2. PostgreSQL stays on 18.6, because
-19 is still a release candidate and pgvector has no build for it; Python stays
-on 3.14, because Hermes does not support 3.15. The Hermes v0.22.5 browser TUI
-only attaches to a gateway over WebSocket, so a small bridge
-([bridge](services/hermes/browser_bridge.py),
-[checks](services/hermes/test_browser_bridge.py)) serves Nocheh's browser
-gateway on a loopback socket, and the dashboard plugin allowance follows its
-new home in Hermes. Honcho 3.4.0 adds a database migration that Honcho runs
-itself at startup.
+Upgrades (November 9, owner: "want to update hermes + honcho and other packages,
+for services check the change log to understand what is new and can use it and
+what is changed and need code update in our side"): Hermes v0.23.0, Honcho v3.6.0
+(`honcho-ai` 2.8.0, `honcho-cli` 0.4.0; built on the Python 3.13.18 digest with
+uv 0.13.5, as Honcho's Dockerfile names), Inngest server 1.51 with SDK 4.26.2,
+Node 26.13.0, Python 3.14.10, uv 0.13.7, Redis 8.10.3, cloudflared 2026.10.7,
+Docker CLI 29.9.3, the Playwright 1.65 tester image, graphql 17.1, lucide-react
+1.70 and Tailwind 4.3.5. PostgreSQL 18.6, pgvector 0.8.7 and pgweb have no newer
+release; Python stays on 3.14, because Hermes does not support 3.15; typer stays
+on 0.28.0. Nocheh's own PDF reader and unpdf are removed (owner: "yes remove ours
+and use hermes"): Hermes' document reader reads every PDF. What the new versions
+changed on Nocheh's side: Hermes' memory tool now sends its writes inside
+`operations[]` (as a list, a JSON string, or JSON-string items), so retiring a
+turn also withholds the native notes it added that way and the entries its
+patches landed in (spans of 4 or more characters)
+([check](services/hermes/test_retired_history.py)); the tester saves its note in
+that shape; Hermes takes round video
+notes itself, so Nocheh's extra handler is gone
+([check](services/hermes/test_gateway.py)); the browser TUI's `/rewind` says
+rewind is unavailable, inline pictures are off
+([profile check](services/hermes/test_profile_config.py)), and the dashboard
+patch follows the new Vite config. The Honcho memory export carries the new
+citation table (`conclusion_source_messages`), setup stops when a locked Honcho
+build image no longer matches Honcho's Dockerfile or any build image lacks a
+digest, and a malformed work unit is
+left to Honcho, which now frees its worker ([setup](services/honcho/test_setup.py),
+[boundary](services/honcho/test_boundary.py)). The Workflows page rewrite
+follows the 1.51 modules and still fails closed on any other build, and its
+query gate refuses empty selection sets, which graphql 17.1 parses
+([inspection checks](test/workflow-inspection.test.ts)). Checked here without
+Docker or PostgreSQL: the Node build and suite on Node 26.13.0 (359 tests, 214
+pass, 141 skipped; the 4 failures need PostgreSQL or a service token, as before
+the upgrade), dashboard format, Hermes plugin tests on 0.23.0 (848 run; the 3
+errors are environment-only, as on 0.22.5), Honcho tests (52 pass), the pin
+consistency check, the patched Hermes dashboard and TUI builds, and the page
+rewrite against the real Inngest 1.51 assets.
+Pending: a real build of every image (with the Hermes native contract tests, the
+browser tester image and Compose 5.7 in the management image) and the full
+fake-Telegram tester run; the PostgreSQL-backed Node tests in the development
+image's runner (they pass on the host, below), the Inngest 1.51
+inspection fixture test and the Honcho export rehearsals; a rebuild on the
+owner's development machine and a live reply; Honcho's first boot running its
+new migrations on existing data; the Workflows page in a real browser (assets under
+`/inngest`, no root `/v0/gql` or `/dev` calls, Monaco and Quickstart off);
+`/rewind` and pictures in the browser TUI, `/new` while a turn is running, and a
+TUI reconnect on uvicorn 0.54's WebSocket stack; isolated Anthropic and OpenAI
+turns on the new SDKs (anthropic 0.125, openai 2.54).
+Second change on the same branch (owner: "I like this one, dont apply limit use
+memory fully and use all features." and "yes" to the Hermes instruction refresh,
+exact memory sources, the bigger question limit and the Persian voice fix;
+[decision](docs/adr/0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)):
+a role or skill change asks Hermes' own prompt refresh for the profile instead of
+Nocheh's per-session marker ([check](services/hermes/test_persona.py)); memory
+evidence follows Honcho's exact message citations per conclusion and marks a
+conclusion that only has its derivation batch as inexact
+([plugin check](services/honcho/test_provenance.py),
+[reader](test/store-provenance.test.ts)); setup sets Honcho's longest question
+(200,000 characters) and 61,440-token reasoning and summary inputs within the
+guard's 512 KiB, and the learning query fits 92,160 UTF-8 bytes instead of 10,000
+characters ([setup](services/honcho/test_setup.py),
+[check](test/learning-workflow.test.ts)); learning asks Honcho for its result
+schema with every dialectic level in `json_object` mode, and Nocheh's own JSON
+recovery is gone ([check](test/store-learned.test.ts),
+[engine](test/store-learning-engine.test.ts)); the meter sends archive preparation
+as UTF-8 ([check](services/honcho/test_meter.py)); voice transcription sends no
+language hint ([check](services/hermes/test_voice_text.py)). Checked here: the
+Node suite (361 tests, 216 pass, 141 skipped without PostgreSQL, the same 4
+PostgreSQL failures), every compiled Node test file on the host against its own
+fresh synthetic PostgreSQL 18.6 (155 files: 361 pass, none fail, 4 skipped that
+need a container, workflow or Inngest fixture), Hermes plugin tests (849 run,
+the same 3 environment errors), Honcho tests (58 pass), and Honcho 3.6.0's own migrations and models
+under the provenance query (citation order, batch fallback, deleted ancestors,
+workspace scoping). Pending: a live Honcho deriver writing citations under
+`json_object` and how often its model leaves them out; recall through Hermes
+listing the cited messages first; learning against the live memory provider with
+`response_format` (Honcho's repair and retries, `json_object` beside tools) and
+the archive's preparation round trip; a role change reaching a continuing chat
+in a real isolated turn, where the gateway writes the turn profile's `state.db`;
+a Persian voice note transcribed without the hint. Existing conclusions get
+citations only when Honcho memory is rebuilt. Also
+next: pin PostgreSQL 18.7 and the rebuilt pgvector 0.8.7 digest after its
+2026-11-12 release; the subscription compatibility setup needs host uv 0.13.6 or
+newer for Python 3.14.10; audit typer 0.29; `/rewind` still shows in the TUI's
+command list, which comes from Hermes' server-side catalog; the host's Docker
+engine needs its own security update, which the CLI image does not carry.
+Earlier upgrades are in [task history](docs/task-history.md).
 
 </current>
 
@@ -2125,8 +2188,9 @@ activation remains separate.
    - PDF attachments: preparation now reads a PDF's text layer (pinned
      `unpdf` 1.8.1, in a worker thread with a heap limit and 30-second
      deadline), whole pages up to 200,000 bytes, and records an explicit
-     status for unreadable or scanned PDFs
-     ([checks](test/pdf-text.test.ts)). Scanned pages are not read (no OCR).
+     status for unreadable or scanned PDFs. Scanned pages are not read (no OCR).
+     Since November 9 Hermes' document reader reads every PDF instead
+     ([ADR-0192](docs/adr/0192-files-are-read-by-the-runtime-document-reader.md)).
      Pending: the simulator's document scenario now also checks the extracted
      text.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)

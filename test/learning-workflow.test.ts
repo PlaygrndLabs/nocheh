@@ -1,8 +1,9 @@
+import {readFileSync} from 'node:fs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {digest} from '../src/archive.js';
 import {HttpError} from '../src/http.js';
-import {learningQuery} from '../src/stores/learning-engine.js';
+import {honchoInputTokens,honchoQueryBytes,honchoQueryCharacters,learningQuery} from '../src/stores/learning-engine.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {observation} from '../src/workflows/pipeline.js';
@@ -29,7 +30,8 @@ test('closing workflow reasons pass the workflow data boundary',()=>{
   assert.throws(()=>safeMetadata(observation('failed','review',1,Date.now(),'unlisted_reason')));
 });
 
-test('a learning query fits Honcho\'s limit by trimming other evidence, then rules, then the trigger\'s payload, then leaving out other evidence',()=>{
+test('a learning query fits Honcho\'s limits by trimming other evidence, then rules, then the trigger\'s payload, then leaving out other evidence',()=>{
+  const limit=honchoQueryBytes;
   const observation=(id:string,size:number)=>({source:{id,revision:1},value:{text:'Synthetic note '+id,payload:{padding:'p'.repeat(size)}},derivatives:[]});
   const rule=(index:number)=>({scope:'conversation',kind:'meaning',subject:'s'+index,conflict:false,text:'r'.repeat(400),selected:['v'+index],superseded:[]});
   const context=(trigger:number,other:number,rules:number)=>({source:{id:'trigger',revision:1},space:'synthetic',projects:[],entities:{} as any,limitations:[],
@@ -37,37 +39,47 @@ test('a learning query fits Honcho\'s limit by trimming other evidence, then rul
   const parse=(query:string)=>JSON.parse(query.slice(query.indexOf('\n')+1));
   const small=learningQuery('Instruction',context(100,100,2));
   assert.deepEqual(parse(small).limitations,[],'a query within the limit is unchanged');
-  const trimmed=parse(learningQuery('Instruction',context(1000,8000,6)));
+  const trimmed=parse(learningQuery('Instruction',context(limit/10,limit,6)));
   assert.equal(trimmed.observations[1].value.payload,undefined);assert.equal(trimmed.observations[1].value.text,'Synthetic note other');
-  assert.equal(trimmed.observations[0].value.payload.padding.length,1000,'the trigger keeps its payload while it fits');
+  assert.equal(trimmed.observations[0].value.payload.padding.length,limit/10,'the trigger keeps its payload while it fits');
   assert.equal(trimmed.rules.length,6);assert.deepEqual(trimmed.limitations,['other_evidence_text_only']);
-  const ruled=learningQuery('Instruction',context(1000,8000,30));
-  assert.ok(Array.from(ruled).length<=10000);assert.ok(parse(ruled).rules.length<30&&parse(ruled).rules.length>0);
+  const ruled=learningQuery('Instruction',context(limit/10,limit,300));
+  assert.ok(Buffer.byteLength(ruled)<=limit);assert.ok(parse(ruled).rules.length<300&&parse(ruled).rules.length>0);
   assert.deepEqual(parse(ruled).limitations,['other_evidence_text_only','rules_omitted']);
-  const bare=parse(learningQuery('Instruction',context(12000,0,1)));
+  const bare=parse(learningQuery('Instruction',context(limit+1000,0,1)));
   assert.equal(bare.observations[0].value.payload,undefined);assert.equal(bare.observations[0].value.text,'Synthetic note trigger');
   assert.deepEqual(bare.rules,[]);assert.deepEqual(bare.limitations,['other_evidence_text_only','rules_omitted','trigger_text_only']);
+  // The budget counts bytes: Persian text takes two a character, so it is trimmed far below Honcho's character limit.
+  const persian=parse(learningQuery('Instruction',{...context(0,0,0),observations:[{...observation('trigger',0),value:{text:'Synthetic note',payload:{padding:'ی'.repeat(limit/2)}}}]}));
+  assert.deepEqual(persian.limitations,['other_evidence_text_only','trigger_text_only']);
   // Many related messages that don't fit even as text are left out from the end; the instruction cites only those shown.
-  const crowded={...context(12000,0,1),observations:[observation('trigger',12000),...Array.from({length:30},(_,index)=>
-    ({source:{id:'other'+index,revision:1},value:{text:'t'.repeat(500)},derivatives:[]}))]};
+  const crowded={...context(limit+1000,0,1),observations:[observation('trigger',limit+1000),...Array.from({length:30},(_,index)=>
+    ({source:{id:'other'+index,revision:1},value:{text:'t'.repeat(limit/20)},derivatives:[]}))]};
   let cited:string[]=[];
   const omitted=learningQuery(ids=>{cited=ids;return 'Instruction '+ids.join(',');},crowded);
-  assert.ok(Array.from(omitted).length<=10000);
+  assert.ok(Buffer.byteLength(omitted)<=limit);
   const kept=parse(omitted).observations.map((item:{source:{id:string}})=>item.source.id);
   assert.ok(kept.length>1&&kept.length<31);assert.equal(kept[0],'trigger');assert.deepEqual(kept,crowded.observations.slice(0,kept.length).map((item:any)=>item.source.id));
   assert.deepEqual(cited,kept);
   assert.deepEqual(parse(omitted).limitations,['other_evidence_text_only','rules_omitted','trigger_text_only','other_evidence_omitted']);
-  assert.throws(()=>learningQuery('i'.repeat(10001),context(0,0,0)),{code:'learning_query_limit'});
+  assert.throws(()=>learningQuery('i'.repeat(limit+1),context(0,0,0)),{code:'learning_query_limit'});
   // Waiting cards give way first: other names, then cards from the end, before any evidence is trimmed.
-  const card=(index:number)=>({id:digest('card:'+index),kind:'project',name:'Synthetic card '+index,also_called:['n'.repeat(200)]});
-  const withWaiting=(count:number)=>({...context(1000,3000,2),entities:{waiting:Array.from({length:count},(_,index)=>card(index))}});
+  const card=(index:number)=>({id:digest('card:'+index),kind:'project',name:'Synthetic card '+index,also_called:['n'.repeat(limit/50)]});
+  const withWaiting=(count:number)=>({...context(limit/10,limit/10*7,2),entities:{waiting:Array.from({length:count},(_,index)=>card(index))}});
   const roomy=parse(learningQuery('Instruction',withWaiting(2)));
   assert.equal(roomy.entities.waiting[0].also_called.length,1,'cards that fit keep their other names');
-  const shed=parse(learningQuery('Instruction',withWaiting(80)));
-  assert.ok(shed.entities.waiting.length>0&&shed.entities.waiting.length<80);
+  const shed=parse(learningQuery('Instruction',withWaiting(300)));
+  assert.ok(shed.entities.waiting.length>0&&shed.entities.waiting.length<300);
   assert.ok(shed.entities.waiting.every((item:{also_called:string[]})=>item.also_called.length===0));
   assert.equal(shed.entities.waiting[0].name,'Synthetic card 0','the newest cards stay');
-  assert.deepEqual(shed.limitations,['waiting_omitted']);assert.equal(shed.observations[1].value.payload.padding.length,3000);
+  assert.deepEqual(shed.limitations,['waiting_omitted']);assert.equal(shed.observations[1].value.payload.padding.length,limit/10*7);
+});
+
+test('the learning query budget follows the Honcho limits that setup writes',()=>{
+  const setup=readFileSync(new URL('../../tools/operations/memory/honcho_setup.py',import.meta.url),'utf8');
+  assert.equal(Number(setup.match(/^QUERY_CHARACTERS=(\d+)$/m)?.[1]),honchoQueryCharacters);
+  assert.equal(Number(setup.match(/^INPUT_TOKENS=(\d+)$/m)?.[1]),honchoInputTokens);
+  assert.ok(honchoQueryBytes<=honchoQueryCharacters,'a query within the byte budget is within Honcho\'s character limit');
 });
 
 test('sources outside any conversation close instead of waiting, and refresh sweeps leave wire batches out',async()=>{

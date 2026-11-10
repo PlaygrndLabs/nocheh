@@ -114,9 +114,12 @@ class Administration:
             result = []
             for entry in self.profile_catalog.list():
                 path = self.profile_catalog.path(entry['native_profile'])
+                # A chat's own profile carries its chat's name, which Hermes shows beside the profile name.
+                label = entry.get('display_name') if isinstance(entry.get('display_name'), str) else ''
                 result.append({**entry, 'path': str(path), 'model': self.model, 'provider': 'openai',
                     'has_env': False, 'skill_count': 0, 'gateway_running': False, 'has_alias': False,
-                    'description': 'Owner private' if entry['owner'] else 'Managed Telegram group',
+                    'description': 'Owner private' if entry['owner'] else ('Telegram group “' + label + '”' if label else 'Managed Telegram group'),
+                    'display_name': label, 'description_auto': False,
                     'scope': 'owner' if entry['owner'] else 'group', 'exists': path.exists()})
             return {'profiles': result}
         names = [Scopes.profile(chat) for chat in [self.policy.owner, *self.policy.groups] if chat]
@@ -419,7 +422,7 @@ class Administration:
                     import urllib.request
                     with urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=3) as response: live = json.load(response)
                     running = live.get('telegram') == 'connected'
-                    result = {'version': '0.22.5', 'release_date': '', 'active_sessions': 0,
+                    result = {'version': '0.23.0', 'release_date': '', 'active_sessions': 0,
                               'config_version': 1, 'latest_config_version': 1, 'config_path': str(home / 'config.yaml'),
                               'env_path': 'Managed by Nocheh', 'hermes_home': str(home),
                               'gateway_running': running, 'gateway_state': 'running' if running else 'stopped',
@@ -458,6 +461,9 @@ def create_app(root, model, policy, token, browser_enabled=False, revision_reade
     from .presentation import install
     install(presentation_home or Path(root)/'dashboard-presentation')
     web_server_profiles._resolve_profile_dir = lambda name: app.profile(name)[1]
+    # Hermes would name its own home "default" here. That home is not a chat: every unnamed request
+    # already reaches the owner's private chat, so the page shows it once, without an other-profile warning.
+    web_server_profiles.serving_profile_name = lambda: ''
     web_server_cron._cron_profile_home = lambda profile: app.profile(profile)
     # Inspection must never create/migrate native state.
     from .isolated_profile import database_path

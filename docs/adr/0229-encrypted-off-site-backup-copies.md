@@ -1,4 +1,4 @@
-# ADR-0227: Encrypted off-site backup copies
+# ADR-0229: Encrypted off-site backup copies
 
 <status>
 Accepted on 2026-11-10, after the owner asked for backups that survive losing

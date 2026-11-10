@@ -20,7 +20,7 @@ import {selectionId} from './selections.js';
 import type {SharingContentRepository} from './sharing.js';
 import {ProjectRepository,SharingPolicyRepository,listedRule,writeProject,writeAssignment,type Assignment} from './projects.js';
 import {foregroundReplyActive} from './automatic-publication.js';
-import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,organizationIdentity,
+import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,learnedOrganization,organizationIdentity,
  type KnowledgeProposal,type OrganizationProposal,type ReviewProposal} from './knowledge-contract.js';
 
 const protocol='knowledge-management-v1';
@@ -357,7 +357,7 @@ export class KnowledgeManagementRepository {
   let proposal:OrganizationProposal,context:any;
   try{context=JSON.parse(contextRow.content.toString());const parsed:any=learningResult(result.content.toString());
    if(!parsed.organization)return null;
-   proposal=parseKnowledgeProposal({...parsed.organization,kind:'organization',reason:parsed.organization.reason??'Organize the permitted conversation evidence.'}) as OrganizationProposal;
+   proposal=learnedOrganization(parsed.organization);
   }catch{return null;}
   const captured=await this.s.access.archive.verify(job.source_reference);
   if(captured.origin!=='live')return null;

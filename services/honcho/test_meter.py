@@ -277,6 +277,20 @@ class BudgetTests(unittest.TestCase):
         preparation('current','/v1/embeddings',{'input':'fixture'},True)
         self.assertNotIn('background',sent[0]);self.assertIs(sent[1]['background'],True)
 
+    def test_archive_preparation_sends_text_as_utf8(self):
+        # A dialectic round at its full input budget of Persian text fits the archive's 1 MiB body limit only unescaped.
+        sent=[]
+        class Response(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+        preparation=ArchivePreparation('http://archive','internal')
+        preparation.opener=SimpleNamespace(open=lambda request,timeout:sent.append(request.data) or Response(b'{"payload":{}}'))
+        text='یادداشت مصنوعی '*14000
+        preparation('current','/v1/chat/completions',{'messages':[{'role':'user','content':text}]})
+        self.assertLess(len(sent[0]),1024*1024)
+        self.assertNotIn(b'\\u06',sent[0])
+        self.assertEqual(json.loads(sent[0])['payload']['messages'][0]['content'],text)
+
     def test_archive_preparation_outage_is_retryable_and_refusal_is_final(self):
         def failing(error):
             preparation=ArchivePreparation('http://archive','internal')

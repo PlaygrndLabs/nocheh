@@ -3,7 +3,7 @@ import {canonical,digest} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {learningInstruction,ownerPrompts} from '../prompts.js';
 import type {HonchoCall} from '../honcho.js';
-import {learningResult,parseInterpretations,triggeredInterpretations,type LearningRejection} from '../interpretations.js';
+import {learningResult,learningResultSchema,parseInterpretations,triggeredInterpretations,type LearningRejection} from '../interpretations.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
@@ -20,9 +20,13 @@ export const terminalLearningCodes=new Set(['invalid_interpretation_result','lea
 const terminalRenewalCodes=new Set(['invalid_interpretation_result']);
 const queued=`EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='memory_review' AND w.job_id='interpret:'||j.id
   AND w.state IN ('queued','waiting','running','retryable_failed'))`;
-/** Honcho rejects a longer reasoning query before any model call. */
-const honchoQueryLimit=10000;
-/** The learning query within Honcho's limit. Waiting cards give up their other names and then leave
+/** Honcho's peer chat takes a query of up to 200,000 characters and keeps each reasoning round's messages within
+ * 61,440 tokens (tools/operations/memory/honcho_setup.py sets both; a test keeps them equal). Honcho never shortens
+ * the query, so Nocheh gives it about half of those tokens and leaves the rest for what Honcho gathers: 92,160 UTF-8
+ * bytes, half the tokens at 3 bytes a token. Learning queries measure about 2.4 (id-heavy JSON) to 6.4 (Persian text)
+ * bytes a token, so an id-heavy query can take up to about 61% of the tokens; the request stays far below the guard. */
+export const honchoQueryCharacters=200000,honchoInputTokens=61440,honchoQueryBytes=honchoInputTokens/2*3;
+/** The learning query within Honcho's limits. Waiting cards give up their other names and then leave
  * from the end first, as they only help join repeat names. Then other evidence keeps only its text, then rules
  * are left out from the end, then the trigger keeps only its text, then other evidence is left out from
  * the end; anything longer cannot be asked. The instruction lists the evidence the query still shows. */
@@ -33,7 +37,7 @@ export function learningQuery(instruction:string|((citable:string[])=>string),co
   const entities=()=>waiting===undefined?context.entities:{...context.entities,waiting};
   const query=()=>(typeof instruction==='string'?instruction:instruction(observations.map(item=>item.source.id)))+
     `\n${canonical({space:context.space,projects:context.projects,organization_context:context.organization_context,entities:entities(),observations,rules,limitations})}`;
-  const fits=()=>Array.from(query()).length<=honchoQueryLimit;
+  const fits=()=>{const text=query();return Buffer.byteLength(text)<=honchoQueryBytes&&Array.from(text).length<=honchoQueryCharacters;};
   if(fits())return query();
   if(waiting?.length) {
     limitations.push('waiting_omitted');waiting=waiting.map(card=>({...card,also_called:[]}));
@@ -164,7 +168,8 @@ export class ContextualLearningRepository {
           const peer=context.entities.speaker?honchoPeerId(context.entities.speaker):evidencePeerId(context.source);
           // A group or topic interpretation reasons only over that audience's own sessions.
           const scope=await this.provenance.chatScope(job.workspace,job.audience);
-          const response=await this.call('/v3/workspaces/'+job.workspace+'/peers/'+peer+'/chat',{query,reasoning_level:'low',stream:false,...scope});
+          const response=await this.call('/v3/workspaces/'+job.workspace+'/peers/'+peer+'/chat',{query,reasoning_level:'low',stream:false,
+            response_format:learningResultSchema,...scope});
           // Preserve the completed reasoning result before validation, publication or job completion.
           const output=await this.derived.record({operation_id:operation,source:job.source_reference,parents:[job.input_reference],kind:'learning_result',
             content:Buffer.from(string(response.content,200000)),producer:'honcho',producer_version:protocol,configuration:{reasoning_level:'low',peer},

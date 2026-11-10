@@ -14,6 +14,7 @@ import {LearnedMemoryRepository} from '../src/stores/learned.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {LearningContextRepository} from '../src/stores/learning-context.js';
 import {ContextualLearningRepository,terminalLearningCodes} from '../src/stores/learning-engine.js';
+import {learningResultSchema} from '../src/interpretations.js';
 import {HonchoProvenanceRepository} from '../src/stores/honcho-provenance.js';
 import {requestStrandedSources} from '../src/stores/native-review.js';
 
@@ -37,6 +38,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(body.query.includes('message_reaction'));assert.ok(!body.query.includes('fixture-secret'));
     assert.ok(!body.query.includes('nested-unverified-target'));
     assert.ok(Array.isArray(body.filters?.session_id)&&body.filters.session_id.length>0,'topic learning reasons only over that topic\'s own sessions');
+    assert.deepEqual(body.response_format,learningResultSchema,'Honcho checks and repairs the answer\'s JSON');
     return {content:typeof response==='string'?response:JSON.stringify(response)};
   };
   const readable=async(workspace:string,label:string)=>{
@@ -176,14 +178,14 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await learned.correct({admin:true,scope:null},ruleId,{expected_revision:3,operation_id:key+':retire-owner-rule',text:'',retired:true},detect);
     const retiredWorkspace=await workspaceNow('retired-rule');
     assert.notEqual(await learning.request(removed,retiredWorkspace,space),ownerJob,'retiring owner guidance must not reuse that guidance');
-    // Claude through Honcho can fence the JSON; one invalid item is dropped and recorded.
+    // Honcho answers absent fields as null; one invalid item is dropped and recorded.
     const thumbs=(await archive.capture(event('thumbs',{update_id:50,message_reaction:{chat:{id:group},message_id:1,date:1700000020,user:{id:7},
       old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}}))).source.reference;
     await guards.prepare(thumbs,'fixture',detect);
     const item=(subject:string,evidence_ids:string[])=>({kind:'state',subject,text:'The packet was acknowledged.',scope:{kind:'conversation',id:space},
       uncertainty:'uncertain',evidence_ids,conflicts:null,quote:null});
-    response='Here is the interpretation:\n```json\n'+JSON.stringify({interpretations:[item('acknowledged packet',[thumbs.id,parent.id]),
-      item('invented source',[thumbs.id,digest('not-in-context')])],entity_suggestions:null,entity_claims:[]})+'\n```';
+    response={interpretations:[item('acknowledged packet',[thumbs.id,parent.id]),
+      item('invented source',[thumbs.id,digest('not-in-context')])],entity_suggestions:null,entity_claims:[],organization:null};
     const partialJob=await learning.request(thumbs,retiredWorkspace,space);
     assert.equal((await learning.run(partialJob,detect,authority)).length,1);assert.equal(calls,6);
     assert.deepEqual((await stores.control.query('SELECT state,rejected FROM interpretation_jobs WHERE id=$1',[partialJob])).rows[0],

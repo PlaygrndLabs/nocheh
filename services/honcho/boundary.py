@@ -17,7 +17,10 @@ def bind_worker(manager,parse):
     original=manager.process_work_unit
     @functools.wraps(original)
     async def run(self,key,*args,**kwargs):
-        token=WORKSPACE.set(parse(key).workspace_name)
+        # A malformed key binds no workspace; Honcho's own handler marks its items errored and frees the worker slot.
+        try: workspace=parse(key).workspace_name
+        except ValueError: workspace=None
+        token=WORKSPACE.set(workspace)
         try: return await original(self,key,*args,**kwargs)
         finally: WORKSPACE.reset(token)
     manager.process_work_unit=run

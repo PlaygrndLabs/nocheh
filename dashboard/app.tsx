@@ -13,6 +13,7 @@ import {
   LockKeyhole,
   LogOut,
   Menu,
+  MessageCircle,
   MessagesSquare,
   Monitor,
   Moon,
@@ -36,9 +37,13 @@ import {FeedbackProvider} from './ui/overlay';
 import {SaveWatcher} from './ui/save-bar';
 import {LogoMark, Wordmark} from './ui/logo';
 
-type NavItem = {id: PageId; title: string; Icon: React.ComponentType<{className?: string}>};
+type NavIcon = React.ComponentType<{className?: string}>;
+/** A Nocheh page, or a link to a page of the assistant console. */
+type NavItem = {id: PageId; title: string; Icon: NavIcon} | {href: string; title: string; Icon: NavIcon};
 const nav: NavItem[] = [
   {id: 'home', title: 'Home', Icon: Home},
+  // The assistant console's chat; its profile picker chooses the private chat or a group.
+  {href: '/hermes/chat', title: 'Chat', Icon: MessageCircle},
   {id: 'inbox', title: 'Inbox', Icon: Inbox},
   {id: 'tasks', title: 'Tasks', Icon: ListChecks},
   {id: 'chats', title: 'Chats', Icon: Users},
@@ -168,6 +173,12 @@ function Navigation({
   const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
   const themeName = theme === 'system' ? 'Match device' : theme === 'dark' ? 'Dark' : 'Light';
   const label = (text: string) => <span className={collapsed ? 'sr-only' : 'flex-1 truncate'}>{text}</span>;
+  const navItem = (active: boolean) =>
+    cn(
+      'relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+      collapsed ? 'justify-center px-0' : 'px-3',
+      active ? 'bg-accent-soft text-accent-text' : 'text-fg/80 hover:bg-subtle hover:text-fg',
+    );
   const footerItem = cn(
     'flex items-center gap-2.5 rounded-lg py-2 text-[13px] text-muted hover:bg-subtle hover:text-fg',
     collapsed ? 'justify-center px-0' : 'px-3',
@@ -194,7 +205,17 @@ function Navigation({
         {toggle}
       </div>
       <nav aria-label="Main" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 pb-3">
-        {nav.map(({id, title, Icon}) => {
+        {nav.map(item => {
+          const {title, Icon} = item;
+          if ('href' in item)
+            return (
+              <a key={item.href} href={item.href} title={collapsed ? title : undefined} className={navItem(false)}>
+                <Icon className="size-[18px] shrink-0" />
+                {label(title)}
+                {!collapsed && <ArrowUpRight aria-hidden className="size-3.5 text-muted" />}
+              </a>
+            );
+          const {id} = item;
           const tabs = collapsed ? [] : tabLinks(id);
           const open = tabs.length > 0 && isOpen(id);
           const activeTab = page === id ? (tabs.find(tab => tab.id === view) ?? tabs[0])?.id : undefined;
@@ -206,12 +227,7 @@ function Navigation({
                   onClick={onNavigate}
                   title={collapsed ? title : undefined}
                   aria-current={page === id ? 'page' : undefined}
-                  className={cn(
-                    'relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
-                    collapsed ? 'justify-center px-0' : 'px-3',
-                    tabs.length && 'pr-9',
-                    page === id ? 'bg-accent-soft text-accent-text' : 'text-fg/80 hover:bg-subtle hover:text-fg',
-                  )}
+                  className={cn(navItem(page === id), tabs.length && 'pr-9')}
                 >
                   <Icon className="size-[18px] shrink-0" />
                   {label(title)}

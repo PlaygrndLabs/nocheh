@@ -15,29 +15,51 @@ CREATE TABLE IF NOT EXISTS runtime_profiles (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS active_runtime_profile_name ON runtime_profiles(owner_id,name) WHERE state='active';
 `;
+// A chat's own profile is listed as private-chat or group-<its name>-<its code>; those names stay reserved for chats.
+const reserved=(value:string)=>/^(private-chat$|group-)/i.test(value);
 const name=(value:unknown)=>{const result=string(value,64);
-  if(!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(result)||result.startsWith('nocheh-')||/^profile-[a-f0-9]{48}$/.test(result)||['default','current','all'].includes(result))
+  if(!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(result)||result.startsWith('nocheh-')||/^profile-[a-f0-9]{48}$/.test(result)||['default','current','all'].includes(result)||reserved(result))
     throw new HttpError(400,'invalid_profile_name');return result;};
+/** A chat name as a profile name's letters, digits, - and _; empty when it has none (for example, a Persian name). */
+const slug=(value:unknown)=>typeof value==='string'?value.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+  .replace(/[^a-z0-9_-]+/g,'-').replace(/^[-_]+/,'').slice(0,32).replace(/[-_]+$/,''):'';
+type Label={name:string;display_name:string};
 
 /** Stable configuration identity is separate from generation-bound native state. */
 export class RuntimeProfileRepository {
   constructor(readonly access:SourceAccessRepository){}
   private get control(){return this.access.stores.control;}
   private owner(){const id=this.access.policy().owner_id;if(!id)throw new HttpError(409,'owner_profile_unavailable');return id;}
-  private entry(space:string,binding:GuardBinding,custom?:any){
+  private entry(space:string,binding:GuardBinding,custom?:any,label?:Label){
     const owner=this.owner(),chat=parentSpace(space)??space;
     if(chat!==owner&&!this.access.policy().group_ids.includes(chat))throw new HttpError(403,'profile_scope_denied');
     const audience:Reader={admin:false,scope:chat===owner?null:chat,space,revision:binding.epoch};
     const principal:Reader={...audience,logical_profile:custom?.id??defaultLogicalProfile(audience)};
-    return {name:custom?.name??'nocheh-'+digest(space).slice(0,24),logical_profile:principal.logical_profile,
+    return {name:custom?.name??label?.name??'nocheh-'+digest(space).slice(0,24),display_name:custom?'':label?.display_name??'',logical_profile:principal.logical_profile,
       native_profile:runtimeProfile(principal,binding),preference_profile:custom?.id??'nocheh-'+digest(space).slice(0,24),
       scope:chat,space,owner:chat===owner,managed:!custom,is_default:!custom&&chat===owner,
       revision:custom?.revision??0,policy_revision:binding.epoch,generation:binding.generation,guard_epoch:binding.epoch,guard_mode:binding.mode};
   }
+  /** Readable names for the owner's chat and each group. The name is only how the dashboard finds a
+   * profile; the chat link stays its logical_profile, so a renamed group keeps its profile. */
+  private async labels(owner:string,groups:string[],taken:Set<string>):Promise<Map<string,Label>>{
+    const seen=new Map((await this.control.query("SELECT chat_id,title,username FROM telegram_chat_observations WHERE state='available' AND chat_id=ANY($1)",[groups])).rows
+      .map(row=>[row.chat_id as string,row]));
+    const labels=new Map<string,Label>([[owner,{name:'private-chat',display_name:'Private chat'}]]);taken.add('private-chat');
+    for(const group of groups){if(group===owner)continue;
+      const chat=seen.get(group),code=digest(group),readable=slug(chat?.title)||slug(chat?.username);
+      // The chat's own code ends the name, so a renamed group never takes over another group's name.
+      const label=[6,12,24].map(size=>'group-'+(readable?readable+'-':'')+code.slice(0,size)).find(value=>!taken.has(value))??'nocheh-'+code.slice(0,24);
+      taken.add(label);
+      labels.set(group,{name:label,display_name:chat?.title||(chat?.username?'@'+chat.username:'')});}
+    return labels;
+  }
   async list(principal:Reader){admin(principal);const owner=this.owner(),binding=await this.access.guards.state();
     const rows=(await this.control.query("SELECT * FROM runtime_profiles WHERE owner_id=$1 AND state='active' ORDER BY name LIMIT 101",[owner])).rows;
     if(rows.length>100)throw new HttpError(409,'profile_limit');
-    const profiles=[...new Set([owner,...this.access.policy().group_ids])].map(space=>this.entry(space,binding));
+    const spaces=[...new Set([owner,...this.access.policy().group_ids])];
+    const labels=await this.labels(owner,spaces,new Set(rows.map(row=>String(row.name).toLowerCase())));
+    const profiles=spaces.map(space=>this.entry(space,binding,undefined,labels.get(space)));
     profiles.push(...rows.map(row=>this.entry(owner,binding,row)));await this.access.guards.assertCurrent(binding);
     return {profiles,revision:binding.epoch,generation:binding.generation};
   }

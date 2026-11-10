@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {digest} from '../src/archive.js';
-import {parseKnowledgeProposal,organizationIdentity,type OrganizationProposal} from '../src/stores/knowledge-contract.js';
+import {parseKnowledgeProposal,learnedOrganization,organizationIdentity,type OrganizationProposal} from '../src/stores/knowledge-contract.js';
 
 const source=digest('original-evidence'),project=digest('existing-project');
 const organization=():OrganizationProposal=>({kind:'organization',reason:'Evidence identifies a project',creates:[{key:'new_project',name:'Project Aurora',description:'Evidence-backed project',evidence_ids:[source]}],
@@ -45,4 +45,13 @@ test('review proposals cannot smuggle owner operation routing or grant whole pro
   assert.throws(()=>parseKnowledgeProposal({...rename,kind:'call_owner_api'}),{code:'unsupported_knowledge_operation'});
   assert.throws(()=>parseKnowledgeProposal({kind:'fact_grant',reason:'Share project',payload:{project_id:project,destination:'-1000',wording:'Whole project'}}),{code:'unknown_knowledge_field'});
   assert.throws(()=>parseKnowledgeProposal({kind:'sharing_rule',reason:'Invalid scope expansion',payload:{name:'Same source and destination',sources:['-1000'],destination:'-1000',enabled:true,mode:'filtered',expected_revision:0}}),{code:'invalid_sharing_rule'});
+});
+
+test('a learning answer\'s null lists and fields mean absent, so a lone assignment is kept',()=>{
+  const assignment={space_id:'-1000/topic/7',project_id:project,project_key:null,expected_revision:2,reason:'This topic exists for that project',purpose_evidence:true,evidence_ids:[source]};
+  const proposal=learnedOrganization({reason:'Evidence identifies a project',creates:null,assignments:[assignment]});
+  assert.deepEqual(proposal.creates,[]);
+  assert.deepEqual(proposal.assignments,[{space_id:'-1000/topic/7',project_id:project,expected_revision:2,evidence_ids:[source],reason:'This topic exists for that project',purpose_evidence:true}]);
+  assert.equal(learnedOrganization({reason:null,creates:[{key:'new_project',name:'Project Aurora',description:null,evidence_ids:[source]}],assignments:null}).creates.length,1);
+  assert.throws(()=>learnedOrganization({reason:'Nothing to organize',creates:null,assignments:null}),{code:'organization_batch_limit'});
 });

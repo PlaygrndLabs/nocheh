@@ -35,7 +35,7 @@ class ProfileConfigurationTests(unittest.TestCase):
                                        first['revision'])
             self.assertEqual(configure_profile(profile, 'subscription-model'), second)
             path = profile / 'config.yaml'; raw = read(path)
-            raw['display'] = {'skin': 'personal'}
+            raw['display'] = {'skin': 'personal', 'inline_images': 'auto'}
             raw['model'] = {'provider': 'untrusted'}
             raw['memory']['provider'] = 'honcho'
             raw['plugins']['enabled'].append('unapproved')
@@ -47,7 +47,8 @@ class ProfileConfigurationTests(unittest.TestCase):
             atomic_yaml(path, raw)
             configure_profile(profile, 'subscription-model')
             saved = read(path)
-            self.assertEqual(saved['display']['skin'], 'personal')
+            # The browser TUI never asks the gateway to draw pictures it does not serve.
+            self.assertEqual(saved['display'], {'skin': 'personal', 'inline_images': 'off'})
             self.assertEqual(saved['agent']['reasoning_effort'], 'high')
             self.assertEqual(saved['model']['provider'], 'openai')
             # Voice notes are archived; native Hermes never transcribes them.

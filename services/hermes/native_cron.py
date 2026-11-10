@@ -93,7 +93,8 @@ def fields(body,model):
 
 def profiles(admin):
     for item in admin.profiles()['profiles']:
-        name,home=admin.profile(item['name']);bound=admin.binding(name)
+        # The logical profile is the chat link; the listed name is only how the dashboard finds it.
+        name,home=admin.profile(item.get('logical_profile') or item['name']);bound=admin.binding(name)
         logical=admin.preference_home(name,home)
         yield name,logical,bound
 

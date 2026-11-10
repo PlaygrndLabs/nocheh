@@ -502,7 +502,9 @@ class ArchivePreparation:
         self.opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
     def __call__(self,workspace,route,payload,background=False):
         body={'workspace':workspace,'route':route,'payload':payload,**({'background':True} if background else {})}
-        request=urllib.request.Request(self.url,data=json.dumps(body).encode(),
+        # Plain UTF-8, as Honcho sent it: escaped, Persian text takes three times the bytes, and a request within
+        # the archive's 512 KiB guard could exceed its 1 MiB body limit.
+        request=urllib.request.Request(self.url,data=json.dumps(body,ensure_ascii=False).encode(),
             headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
         try:
             with self.opener.open(request,timeout=180) as response:

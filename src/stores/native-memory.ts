@@ -840,8 +840,9 @@ export class NativeMemoryRepository {
     await this.guards.assertCurrent(binding);
     return sources;
   }
-  /** Honcho lists the conclusions it read while answering. Their archived messages let the agent check a claim
-   * against the original; a conclusion that was read is not proof the answer relied on it. */
+  /** Honcho lists the conclusions it read while answering. The archived messages they cite, listed first, let the
+   * agent check a claim against the original; a conclusion without citations brings its whole derivation batch and
+   * says so in the limitations. A conclusion that was read is not proof the answer relied on it. */
   private async evidence(workspace:string,audience:string,responses:any[],binding:GuardBinding):Promise<{references:SourceReference[];limitations:string[]}> {
     const ids=[...new Set(responses.flatMap(response=>Array.isArray(response?.evidence?.conclusions)?response.evidence.conclusions.map((item:any)=>item?.id):[]))]
       .filter((value):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value));

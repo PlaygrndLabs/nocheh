@@ -113,7 +113,7 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
   const provenance={sessions:async()=>sessions,read:async(id:string,audience:string,ids:string[],current:unknown)=>{
     reads.push({id,audience,ids,current});if(failRead)throw Error('provenance_down');
-    return {conclusions:ids.map(item=>({id:item,parents:[],deleted:false})),evidence:[archived],limitations:['ancestry_is_not_an_exact_citation'],exact_citations:false};}};
+    return {conclusions:ids.map(item=>({id:item,parents:[],deleted:false,exact_citations:true})),evidence:[archived],limitations:[],exact_citations:true};}};
   const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,async(path:string,body:any)=>{
     bodies.push(body);const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;
     return {content:'Answer from '+peer,evidence:{conclusions:peer==='person_a'?[{id:first},{id:second},{id:'not-a-conclusion'}]:[{id:first}],messages:[],tool_calls:[]}};
@@ -127,8 +127,9 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   assert.deepEqual(reads,[{id:workspace,audience:'-100',ids:[first,second],current:binding}],'conclusions are read once, deduplicated, within the audience');
   const source=result.sources.at(-1);
   assert.deepEqual(source.evidence_sources,['nocheh:event:'+archived.id]);
-  assert.equal(source.exact_citations,false,'what Honcho read is not what the answer relied on');
+  assert.equal(source.exact_citations,false,'what Honcho read is not what the answer relied on, even when its conclusions cite exact messages');
   assert.ok(source.limitations.includes('evidence_lists_conclusions_read_not_relied_on'));
+  assert.ok(!source.limitations.includes('ancestry_is_not_an_exact_citation'),'cited evidence is not called inexact');
   assert.deepEqual(outputs[0].provenance.evidence,[archived],'the recorded answer keeps its archive evidence');
   failRead=true;
   const fallback=await memory.recall(reader,'Who planned the trip?') as any;

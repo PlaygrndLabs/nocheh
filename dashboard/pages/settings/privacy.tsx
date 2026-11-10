@@ -35,7 +35,7 @@ function zones(): string[] {
   }
 }
 
-/** Encrypted off-site copies of finished backups in the owner's own S3-compatible storage (ADR-0227). */
+/** Encrypted off-site copies of finished backups in the owner's own S3-compatible storage (ADR-0229). */
 function OffsiteSettings() {
   const s = useSettings();
   const on = s.value('NOCHEH_OFFSITE') === 's3';

@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "python": "3.14.9",
-  "uv_tested": "0.13.5",
+  "python": "3.14.10",
+  "uv_tested": "0.13.7",
   "hermes": {
     "repository": "https://github.com/NousResearch/hermes-agent.git",
-    "revision": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
-    "version": "0.22.5",
+    "revision": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "version": "0.23.0",
     "dependencies": "uv.lock from the pinned revision"
   },
   "note": "Pins identify candidates under test. See the evidence report for actual compatibility results.",
   "inngest": {
-    "sdk": "4.26.0",
-    "version": "1.49.0",
-    "image": "inngest/inngest:v1.49.0@sha256:ad551e89e493e34db74d155be37dc5549930fcb6eb8382e502c17da9762821c7"
+    "sdk": "4.26.2",
+    "version": "1.51.0",
+    "image": "inngest/inngest:v1.51.0@sha256:fcf9305f2e7ffbcfaba54e6a25104ca4860b91d24d3713563350769a2d4c625a"
   },
   "workflow_redis": {
-    "version": "8.10.2",
-    "image": "redis:8.10.2-trixie@sha256:97ec88159e6d7cfb5ddef9015386087d58a912de80112f06ebdfa78fa5989901"
+    "version": "8.10.3",
+    "image": "redis:8.10.3-trixie@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53"
   }
 }

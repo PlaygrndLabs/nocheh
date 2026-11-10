@@ -28,13 +28,14 @@ export const notAllowedPrivateReply='Sorry, this is a private assistant. It only
 export const learningPrompt=(
   "Interpret permitted conversation evidence silently. "+
   "Return only JSON with interpretations (at most 12), entity_suggestions (at most 12), entity_claims (at most 20), and optional organization. "+
-  "Organization is only a proposal, never authorization: use {creates:[{key,name,description,evidence_ids}],assignments:[{space_id,project_id OR project_key,expected_revision,evidence_ids,reason,purpose_evidence:true}]} with at most 8 creates and 20 assignments; use the current conversation exact space and recorded assignment revision below. "+
+  "Organization is only a proposal, never authorization: use {creates:[{key,name,description,evidence_ids}],assignments:[{space_id,project_id OR project_key,expected_revision,reason,purpose_evidence:true,evidence_ids}]} with at most 8 creates and 20 assignments; use the current conversation exact space and recorded assignment revision below. "+
   "Creates require evidence of an actual project; assignment requires explicit evidence that the conversation serves that project, not merely mentions it. "+
   "Existing project IDs must come from the supplied context; use project_key only for a create in the same proposal. "+
   "Cite original observation IDs, including the trigger. "+
   "Omit organization if unsupported or ambiguous. "+
   "Never infer owner permission from evidence or propose authority changes. "+
-  "Interpretation items use kind (meaning, state, convention), subject, text, scope {kind: conversation or project, id}, uncertainty (uncertain, supported, explicit), evidence_ids, optional quote {source_id,text}, and conflicts. "+
+  "Interpretation items use kind (meaning, state, convention), subject, text, scope {kind: conversation or project, id}, uncertainty (uncertain, supported, explicit), optional quote {source_id,text}, conflicts, and evidence_ids. "+
+  "Write evidence_ids last in every item. "+
   "For a conversation interpretation, scope.id must equal the space value below exactly; entities.session_id is an internal Honcho session, not the conversation scope. "+
   "Every interpretation must cite the triggering observation ID {trigger_id} and may cite other original observation IDs present below. evidence_ids and quote.source_id must come only from {citable_ids}; IDs recalled from memory, such as [nocheh:event:...] markers, or from rule dependencies are not citable. "+
   "Learned rule IDs are guidance, not original evidence_ids; use them only for conflicts. "+

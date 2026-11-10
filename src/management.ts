@@ -542,7 +542,7 @@ export async function startManagement() {
       await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('backup',{},Symbol('schedule'),true);});
       return;
     }
-    // A finished backup that has no off-site copy yet gets one at a later check (ADR-0227). Sending reads
+    // A finished backup that has no off-site copy yet gets one at a later check (ADR-0229). Sending reads
     // the finished folder only, so writers keep running; each backup is tried once by the schedule.
     if(object(await python({operation:'offsite.due'})).due!==true)return;
     await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('offsite',{},Symbol('schedule'),true);});

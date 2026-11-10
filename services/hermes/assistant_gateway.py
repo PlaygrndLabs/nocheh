@@ -253,7 +253,39 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
             try:os.fsync(directory)
             finally:os.close(directory)
         await asyncio.to_thread(save_cursor)
+        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner)
+        except Exception:pass # A missing title is cosmetic; the next turn tries again.
     return result
+
+
+def session_title(message,owner):
+    """The chat a Telegram session belongs to, as the dashboard's session list shows it."""
+    chat=message.get('chat') if isinstance(message.get('chat'),dict) else {}
+    title=chat.get('title') if isinstance(chat.get('title'),str) else ''
+    name='Private chat' if owner else title.strip() or 'Telegram group'
+    topic=topic_id(message)
+    if topic is not None:
+        # A message in a forum topic answers the topic's opening message, which carries the topic's name.
+        opening=message.get('reply_to_message') if isinstance(message.get('reply_to_message'),dict) else {}
+        created=opening.get('forum_topic_created') if isinstance(opening.get('forum_topic_created'),dict) else {}
+        label=created.get('name') if isinstance(created.get('name'),str) and created.get('name').strip() else 'topic '+str(topic)
+        name+=' › '+label.strip()
+    # Hermes allows 100 characters; leave room for its " #2" when another session already has the name.
+    return name[:90]
+
+
+def title_session(profile,session_id,message,owner):
+    """Name a Telegram session after its chat. It is Hermes's top automatic title: it replaces a first-message
+    title and stays once set, and Hermes keeps a title set by hand over it."""
+    from hermes_state import SessionDB
+    from .isolated_profile import database_path
+    title=session_title(message,owner)
+    db=SessionDB(database_path(profile))
+    try:
+        if not db.get_session(session_id) or db.get_session_title_source(session_id) in (SessionDB.TITLE_SOURCE_LLM,SessionDB.TITLE_SOURCE_USER):return
+        try:db.set_auto_title(session_id,title,source=SessionDB.TITLE_SOURCE_LLM)
+        except ValueError:db.set_auto_title(session_id,db.get_next_title_in_lineage(title),source=SessionDB.TITLE_SOURCE_LLM)
+    finally:db.close()
 
 
 def committed_adapter_class():
@@ -284,7 +316,7 @@ def committed_adapter_class():
             self._claim_tasks('_pending_photo_batch_tasks',lambda:super(CommittedAdapter,self)._enqueue_photo_event(batch_key,event))
         def _register_handlers(self,app):
             from telegram import Update
-            from telegram.ext import TypeHandler, ApplicationHandlerStop, MessageHandler, filters
+            from telegram.ext import TypeHandler, ApplicationHandlerStop
             super()._register_handlers(app)
             async def command_as_text(update,context):
                 msg=update.effective_message
@@ -294,15 +326,11 @@ def committed_adapter_class():
             # Native administrative command/callback menus are not an
             # authority boundary for a shared group. Commands are data.
             app.add_handler(TypeHandler(Update,command_as_text),group=-90)
-            # The pinned native handler's media filter omits round video notes.
-            app.add_handler(MessageHandler(filters.VIDEO_NOTE,self._handle_media_message))
         async def _handle_media_message(self,update,context):
             if TURN.get() is None:raise RuntimeError('uncommitted_media')
             msg=update.effective_message
             if msg is None:return
-            from gateway.platforms.base import MessageType
-            kind=MessageType.VIDEO if msg.video_note else self._media_message_type(msg)
-            event=self._build_message_event(msg,kind,update_id=update.update_id)
+            event=self._build_message_event(msg,self._media_message_type(msg),update_id=update.update_id)
             event.text=msg.caption or ''
             # Original bytes and transcripts are already committed by Nocheh.
             # Native media preprocessing would re-download files and can invoke

@@ -309,7 +309,7 @@ Honcho queue state, and webhooks are excluded. An unavailable configured native
 store leaves the bundle incomplete. The manifest states that independently read
 stores are not a coordinated recovery point; use backup for that requirement.
 
-Honcho uses one exported PostgreSQL repeatable-read snapshot across its eight
+Honcho uses one exported PostgreSQL repeatable-read snapshot across its ten
 pinned memory tables. The package stores data-only JSON, column/type metadata,
 and the producer source revision. A reader does not execute SQL supplied by the
 bundle. Verify exact native values and embeddings under a concurrent update with

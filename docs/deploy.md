@@ -225,7 +225,7 @@ NOCHEH_OFFSITE_ACCESS_KEY_ID=… NOCHEH_OFFSITE_SECRET_ACCESS_KEY=… \
 ./bin/nocheh restore ./recovered-backup --state ./data/restored --project nocheh-restored
 ```
 
-See [ADR-0227](adr/0227-encrypted-off-site-backup-copies.md).
+See [ADR-0229](adr/0229-encrypted-off-site-backup-copies.md).
 
 For a planned cutover, use `backup --leave-stopped` to keep the source writers
 stopped after its final snapshot. First reconcile pending work against deliveries

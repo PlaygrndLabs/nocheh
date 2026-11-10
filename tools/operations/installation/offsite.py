@@ -1,4 +1,4 @@
-"""Encrypted off-site copies of finished backups (ADR-0227).
+"""Encrypted off-site copies of finished backups (ADR-0229).
 
 A copy is the backup folder as one tar stream, encrypted on this machine with a key derived from the
 owner's passphrase, then uploaded to S3-compatible storage such as Cloudflare R2. The storage only
