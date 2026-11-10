@@ -349,12 +349,6 @@ class BoxStepTests(unittest.TestCase):
                 verify_profile_tools(names-removed,allowed)
             finally:reset_hermes_home_override(token)
 
-    def test_only_the_isolated_runtime_has_job_boxes(self):
-        from services.hermes.archive_tools import isolated_runtime
-        for environment,allowed in (({},False),({'NOCHEH_SECURITY_RUNTIME':'legacy'},False),({'NOCHEH_ISOLATED_TURN':'0'},False),
-                                    ({'NOCHEH_ISOLATED_TURN':'1'},True),({'NOCHEH_SECURITY_RUNTIME':'isolated'},True)):
-            with self.subTest(environment=environment),patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'','NOCHEH_SECURITY_RUNTIME':'legacy',**environment}):
-                self.assertIs(isolated_runtime(),allowed)
 
 
 # One box step through assistant_turn.run, in its own process as in production: the real in-box

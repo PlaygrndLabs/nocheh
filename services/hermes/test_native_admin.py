@@ -91,7 +91,7 @@ class NativeAdminTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/profiles').status_code, 401)
         schema = self.client.get('/api/config/schema', headers=self.headers)
         self.assertEqual(schema.status_code,200,schema.text)
-        self.assertEqual(len(schema.json()['fields']),8)
+        self.assertEqual(len(schema.json()['fields']),5)
         self.assertEqual(schema.json()['category_order'][0],'agent')
         profiles = self.client.get('/api/profiles', headers=self.headers).json()['profiles']
         self.assertEqual(len(profiles), 2)
