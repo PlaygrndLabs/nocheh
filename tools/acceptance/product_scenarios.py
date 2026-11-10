@@ -424,9 +424,10 @@ class ProductScenarios(Scenarios):
     # Native notes ------------------------------------------------------------------------------
 
     def native_notes_reach_later_turns(self):
-        # A note the assistant saves reaches the model on the chat's later turns. Hermes reads its
-        # native notes only when it builds a session's prompt, and later turns reuse that prompt.
-        self.turn(self.f.message(OWNER, 'این را یادداشت کن [[tool:memory {"action":"add","target":"memory","content":"NOTEMARK52: the owner keeps synthetic notes."}]]'), OWNER)
+        # A note the assistant saves (in the operations[] shape Hermes advertises) reaches the model on the
+        # chat's later turns. Hermes reads its native notes only when it builds a session's prompt, and later
+        # turns reuse that prompt.
+        self.turn(self.f.message(OWNER, 'این را یادداشت کن [[tool:memory {"target":"memory","operations":[{"action":"add","content":"NOTEMARK52: the owner keeps synthetic notes."}]}]]'), OWNER)
         saved = [event for event in self.f.brain() if event.get('tool') == 'memory' and event['phase'] == 'final'][-1]
         try:
             result = json.loads(saved['result'])

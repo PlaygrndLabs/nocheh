@@ -56,7 +56,7 @@ class Lookup:
 
 
 class RetiredHistoryTests(unittest.TestCase):
-    def history(self,folder):
+    def history(self,folder,memory={'content':'Kite: '+FACT}):
         """A private chat whose earlier turns stated and then repeated a fact."""
         database=Path(folder)/'native-state'/'state.db';database.parent.mkdir()
         connection=sqlite3.connect(database);connection.executescript(SCHEMA)
@@ -64,7 +64,7 @@ class RetiredHistoryTests(unittest.TestCase):
         rows=[
             ('private','user','[CONTEXT SUMMARY]: earlier small talk.',None,None,1.0,1),
             ('private','user','My kite is named '+FACT+'.'+marker(PRIVATE),None,None,2.0,0),
-            ('private','assistant','',call('memory',{'content':'Kite: '+FACT}),None,2.1,0),
+            ('private','assistant','',call('memory',memory),None,2.1,0),
             ('private','tool','{"success": true, "entry": "Kite: '+FACT+'"}',None,'call-memory',2.2,0),
             ('private','assistant','Noted, your kite is '+FACT+'.',None,None,2.3,0),
             ('private','user','What is my kite called?'+marker(QUESTION),None,None,3.0,0),
@@ -176,6 +176,23 @@ class RetiredHistoryTests(unittest.TestCase):
             lookup=Lookup(answered=())
             self.assertEqual(withhold_retired(database,lookup,notes),1)
             self.assertEqual(self.entries(notes,'MEMORY.md'),[rain]);self.assertEqual(lookup.calls,[[PRIVATE,UNRELATED]])
+
+    def test_native_notes_lose_entries_written_through_memory_operations(self):
+        add={'action':'add','content':'Kite: '+FACT};rain='Rain on Friday'
+        # Hermes advertises operations[]; a model may still send it as a JSON string or one object.
+        # A patch swaps only its span (here FACT for 'Blue') and keeps the rest of the entry.
+        for operations in ([{'action':'remove','old_text':'Old','content':rain},add],json.dumps([add]),add,[json.dumps(add)],
+                           [{'action':'patch','old_text':'Blue','content':FACT}],[{'action':'patch','old_text':'Blue','new_text':FACT}]):
+            with self.subTest(operations=operations),tempfile.TemporaryDirectory() as folder:
+                database=self.history(folder,{'target':'memory','operations':operations})
+                notes=self.notes(folder,MEMORY_md=['Kite: '+FACT,rain])
+                withhold_retired(database,Lookup(answered=()),notes)
+                self.assertEqual(self.entries(notes,'MEMORY.md'),[rain],'only add and patch text counts as written')
+        with tempfile.TemporaryDirectory() as folder:
+            database=self.history(folder,{'target':'memory','operations':[{'action':'patch','old_text':'Sat','content':'Fri'}]})
+            notes=self.notes(folder,MEMORY_md=['Kite: '+FACT,rain,'Sun'])
+            withhold_retired(database,Lookup(answered=()),notes)
+            self.assertEqual(self.entries(notes,'MEMORY.md'),['Kite: '+FACT,rain,'Sun'],'a span this short marks no entry')
 
     def test_owner_recall_skips_native_notes_citing_a_retired_message(self):
         import sys

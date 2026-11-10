@@ -63,9 +63,9 @@ path.write_text(source)
 path = root / 'web/vite.config.ts'
 source = path.read_text()
 replace('''export default defineConfig({
-  plugins: [''', '''export default defineConfig({
+''', '''export default defineConfig({
   base: "/hermes/",
-  plugins: [''')
+''')
 path.write_text(source)
 path = root / 'web/src/pages/ChatPage.tsx'
 source = path.read_text()

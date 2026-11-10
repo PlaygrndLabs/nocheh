@@ -16,7 +16,7 @@ import {CaptureCoordinator} from './capture.js';
 import {GuardRepository} from './guards.js';
 import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
-import {ReprocessingRepository,archivedVoice,documentExtraction,textExtraction,voiceTranscription,type DerivationEngine} from './reprocessing.js';
+import {ReprocessingRepository,archivedVoice,documentExtraction,voiceTranscription,type DerivationEngine} from './reprocessing.js';
 import {PreparationRepository} from './preparation.js';
 import {SourceAccessRepository} from './access.js';
 import {SourceRepository} from './retrieval.js';
@@ -63,8 +63,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
   const transcription=options.transcription??voiceTranscription(options.runtime),extraction=documentExtraction(options.runtime);
-  // Files and voice notes read before the runtime's readers keep their readings; an earlier request still completes.
-  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction,textExtraction(),...(options.transcription?[]:[archivedVoice()])]);
+  // Voice notes archived before transcription was set up keep their readings; an earlier request still completes.
+  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction,...(options.transcription?[]:[archivedVoice()])]);
   const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction);
   const retirements=new SourceRetirementRepository(stores,archive);
   const reactions=new ReactionStateRepository(archive,stores.control);

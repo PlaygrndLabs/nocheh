@@ -20,9 +20,9 @@ async def main():
         db.add(models.MessageEmbedding(content=message.content,embedding=vector,message_id=message.public_id,
             workspace_name='fixture',session_name='conversation',peer_name='owner'));await db.flush()
         db.add(models.Collection(observer='owner',observed='owner',workspace_name='fixture'));await db.flush()
-        # Honcho fills each parent link's workspace from workspace_name, so it is passed before source_ids.
+        # Honcho fills each parent link's and citation's workspace from workspace_name, so it is passed before source_ids.
         parent=models.Document(content='Contextual native meaning',embedding=vector,workspace_name='fixture',source_ids=[message.public_id],
-            observer='owner',observed='owner',session_name='conversation')
+            source_message_ids=[message.public_id],observer='owner',observed='owner',session_name='conversation')
         db.add(parent);await db.flush()
         db.add(models.Document(content='Retired native interpretation',embedding=vector,workspace_name='fixture',source_ids=[parent.id],
             observer='owner',observed='owner',session_name='conversation',deleted_at=datetime.datetime(2026,9,1,tzinfo=datetime.timezone.utc)))

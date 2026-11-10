@@ -10,7 +10,7 @@ import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {SelectionRepository} from '../src/stores/selections.js';
-import {ReprocessingRepository,RECORDINGS,VOICE_ARCHIVED,textExtraction,voiceTranscription} from '../src/stores/reprocessing.js';
+import {ReprocessingRepository,RECORDINGS,VOICE_ARCHIVED,documentExtraction,voiceTranscription} from '../src/stores/reprocessing.js';
 import {AttachmentRepository} from '../src/stores/attachments.js';
 import {PreparationRepository} from '../src/stores/preparation.js';
 import {CaptureCoordinator} from '../src/stores/capture.js';
@@ -52,8 +52,8 @@ test('voice notes saved before a transcription key are transcribed once one is a
     if(!configured)return {state:'not_configured'};
     transcribed++;return {state:'done',text:'Synthetic note: water the garden'};
   });
-  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[transcription,textExtraction()]);
-  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,textExtraction()),authority={owner:'inngest' as const,epoch:1};
+  const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[transcription,documentExtraction(async()=>({state:'unsupported'}))]);
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,documentExtraction(async()=>({state:'unsupported'}))),authority={owner:'inngest' as const,epoch:1};
   const check=async()=>configured;
   const fetch=async()=>Buffer.from('synthetic Ogg bytes');
   const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:key,revision:'1',occurred_at:null,text:null,

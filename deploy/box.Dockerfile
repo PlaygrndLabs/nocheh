@@ -1,6 +1,6 @@
 # The sealed job box: no network, keys or Hermes; only shell tools, git and Python for a job's commands. The GitHub
 # fetcher runs this image too (ADR-0209). In the box, git has no network and only reads the copy in /repo.
-FROM python:3.14.9-slim-trixie@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS box
+FROM python:3.14.10-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS box
 # Box commands (uid 65532) read /repo/code, which uid 65531 owns. Symlinks stay the small files the writer made, nothing
 # runs from git, and git shares the box's one CPU and its memory with the writer.
 RUN apt-get update && apt-get install -y --no-install-recommends bash coreutils findutils grep gawk tar procps ripgrep git ca-certificates && \

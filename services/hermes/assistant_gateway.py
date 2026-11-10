@@ -284,7 +284,7 @@ def committed_adapter_class():
             self._claim_tasks('_pending_photo_batch_tasks',lambda:super(CommittedAdapter,self)._enqueue_photo_event(batch_key,event))
         def _register_handlers(self,app):
             from telegram import Update
-            from telegram.ext import TypeHandler, ApplicationHandlerStop, MessageHandler, filters
+            from telegram.ext import TypeHandler, ApplicationHandlerStop
             super()._register_handlers(app)
             async def command_as_text(update,context):
                 msg=update.effective_message
@@ -294,15 +294,11 @@ def committed_adapter_class():
             # Native administrative command/callback menus are not an
             # authority boundary for a shared group. Commands are data.
             app.add_handler(TypeHandler(Update,command_as_text),group=-90)
-            # The pinned native handler's media filter omits round video notes.
-            app.add_handler(MessageHandler(filters.VIDEO_NOTE,self._handle_media_message))
         async def _handle_media_message(self,update,context):
             if TURN.get() is None:raise RuntimeError('uncommitted_media')
             msg=update.effective_message
             if msg is None:return
-            from gateway.platforms.base import MessageType
-            kind=MessageType.VIDEO if msg.video_note else self._media_message_type(msg)
-            event=self._build_message_event(msg,kind,update_id=update.update_id)
+            event=self._build_message_event(msg,self._media_message_type(msg),update_id=update.update_id)
             event.text=msg.caption or ''
             # Original bytes and transcripts are already committed by Nocheh.
             # Native media preprocessing would re-download files and can invoke
