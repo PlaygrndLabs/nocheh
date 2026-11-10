@@ -37,6 +37,8 @@ test('owner data travels with its types, and nothing imported acts by itself',
     await source.query("INSERT INTO owner_task_people(task_id,entity_id,role) VALUES($1,$2,'assignee')",[parent,person]);
     await source.query("INSERT INTO owner_task_reminders(id,task_id,remind_at,state) VALUES($1,$2,'2020-01-01T00:00:00Z','pending'),($3,$2,'2099-01-01T00:00:00Z','pending')",['c'.repeat(64),parent,'d'.repeat(64)]);
     await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard','{\"title\":\"Plan the beds\"}')",[parent]);
+    // Twelve history entries: as text, 10 would sort before 2.
+    for(let step=2;step<=12;step++)await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard',$2)",[parent,JSON.stringify({step})]);
     await source.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,revision,project_id) VALUES('rule-1','Garden to studio','[\"-10042\"]','-10073',true,'filtered',1,$1)",[project]);
     await source.query("UPDATE background_settings SET cost_limit_usd=7.5,revision=1");
     await source.query("UPDATE owner_prompts SET texts='{\"greeting\":\"Hello there\"}',revision=2");
@@ -68,6 +70,9 @@ test('owner data travels with its types, and nothing imported acts by itself',
     // A changed setting on the target wins; an untouched one takes the imported value.
     assert.equal((await target.query('SELECT texts FROM owner_prompts')).rows[0].texts.greeting,'Target wording');
     assert.equal(Number((await target.query('SELECT cost_limit_usd FROM background_settings')).rows[0].cost_limit_usd),7.5);
+    // History keeps its order.
+    const steps=async(pool:pg.Pool)=>(await pool.query('SELECT changes FROM owner_task_activity ORDER BY id')).rows.map(r=>JSON.stringify(r.changes));
+    assert.deepEqual(await steps(target),await steps(source));
     // New activity keeps counting after the imported rows.
     const next=(await target.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{}','dashboard','{}') RETURNING id",[parent])).rows[0].id;
     assert.ok(Number(next)>1);

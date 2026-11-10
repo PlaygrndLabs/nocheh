@@ -212,8 +212,11 @@ Each new automatic backup is then encrypted on this machine with your
 passphrase and sent to S3-compatible storage you choose; the storage only ever
 holds scrambled data. Keep the passphrase somewhere other than this machine:
 without it no copy can be opened. System › Backups shows the last copy, sends
-one now, and tests that the newest copy opens and checks out. On a new
-machine, get a backup folder back and restore it:
+one now, and tests that the newest copy opens and checks out. A copy is
+written to this disk before upload, so it is skipped while free space is under
+the backup's size plus 1 GiB. On a new machine, install the Python
+`cryptography` package (for example `pip install cryptography`), then get a
+backup folder back and restore it; the passphrase is asked for:
 
 ```sh
 NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… \

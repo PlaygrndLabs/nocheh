@@ -66,6 +66,8 @@ def validate(values):
     if region and not re.fullmatch(r'[a-z0-9-]{1,32}', region): raise ValueError('NOCHEH_OFFSITE_REGION must be a region such as auto or eu-central-1')
     passphrase = str(values.get('NOCHEH_OFFSITE_PASSPHRASE', ''))
     if passphrase and len(passphrase) < MINIMUM_PASSPHRASE: raise ValueError(f'NOCHEH_OFFSITE_PASSPHRASE must be at least {MINIMUM_PASSPHRASE} characters')
+    # Settings files read quotes and backslashes differently; refuse them rather than save a passphrase that reads back changed.
+    if any(c in passphrase for c in '\'"\\'): raise ValueError('NOCHEH_OFFSITE_PASSPHRASE cannot contain quotes or backslashes')
     if mode == 's3':
         missing = [key for key in ('NOCHEH_OFFSITE_ENDPOINT', 'NOCHEH_OFFSITE_BUCKET', 'NOCHEH_OFFSITE_ACCESS_KEY_ID',
                                    'NOCHEH_OFFSITE_SECRET_ACCESS_KEY', 'NOCHEH_OFFSITE_PASSPHRASE') if not values.get(key)]
@@ -76,7 +78,7 @@ def validate(values):
 
 def _key(passphrase, kdf):
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-    if kdf.get('name') != 'scrypt' or type(kdf.get('n')) is not int or not (2 ** 14 <= kdf['n'] <= 2 ** 20) or kdf.get('r') != 8 or kdf.get('p') != 1:
+    if kdf.get('name') != 'scrypt' or type(kdf.get('n')) is not int or kdf['n'] != KDF['n'] or kdf.get('r') != 8 or kdf.get('p') != 1:
         raise OffsiteError('offsite_unsupported_format')
     salt = base64.b64decode(kdf['salt'])
     if len(salt) != 16: raise OffsiteError('offsite_unsupported_format')
@@ -269,17 +271,25 @@ class Storage:
             upload = ElementTree.fromstring(self.request('POST', key, 'uploads=')).findtext('{*}UploadId')
             if not upload: raise OffsiteError('offsite_storage_upload_refused')
             parts = []
+            # S3 allows 10,000 parts; larger copies get larger parts instead of being cut short.
+            part = max(PART, -(-size // 10000))
             try:
                 for number in range(1, 10001):
-                    body = file.read(PART)
+                    body = file.read(part)
                     if not body: break
                     response = self.request('PUT', key, f'partNumber={number}&uploadId={_quote(upload)}', body=body, stream=True)
                     with response: etag = response.headers.get('ETag'); response.read()
                     if not etag: raise OffsiteError('offsite_storage_upload_refused')
                     parts.append((number, etag))
+                if file.read(1): raise OffsiteError('offsite_copy_too_large')
                 done = ''.join(f'<Part><PartNumber>{n}</PartNumber><ETag>{e}</ETag></Part>' for n, e in parts)
-                self.request('POST', key, f'uploadId={_quote(upload)}', body=f'<CompleteMultipartUpload>{done}</CompleteMultipartUpload>'.encode(),
-                             headers={'content-type': 'application/xml'})
+                answer = self.request('POST', key, f'uploadId={_quote(upload)}', body=f'<CompleteMultipartUpload>{done}</CompleteMultipartUpload>'.encode(),
+                                      headers={'content-type': 'application/xml'})
+                # S3 can report a failed completion inside an HTTP 200 answer.
+                try: root = ElementTree.fromstring(answer)
+                except ElementTree.ParseError: raise OffsiteError('offsite_storage_upload_refused') from None
+                if root.tag.endswith('Error'): raise OffsiteError('offsite_storage_' + (root.findtext('{*}Code') or root.findtext('Code') or 'upload_refused'))
+                if not root.tag.endswith('CompleteMultipartUploadResult'): raise OffsiteError('offsite_storage_upload_refused')
             except BaseException:
                 try: self.request('DELETE', key, f'uploadId={_quote(upload)}')
                 except OffsiteError: pass
@@ -334,7 +344,18 @@ def _finished(state):
     """Finished local backups, newest first, as (id, created_at, path)."""
     from tools.operations.installation.admin_operations import backups
     root = Path(state) / 'admin/backups'
-    return [(row['id'], row['created_at'], root / row['id']) for row in backups(Path(state))]
+    rows = sorted(backups(Path(state)), key=lambda row: row['created_at'], reverse=True)
+    return [(row['id'], row['created_at'], root / row['id']) for row in rows]
+
+
+def _room(state, needed):
+    """The encrypted copy is written next to the data first; leave the same margin automatic backups keep."""
+    from tools.operations.installation.backup_schedule import MINIMUM_FREE
+    return shutil.disk_usage(Path(state) / 'admin').free >= needed + MINIMUM_FREE
+
+
+def _size(path):
+    return sum(file.stat().st_size for file in Path(path).rglob('*') if file.is_file() and not file.is_symlink())
 
 
 def object_key(backup, created_at):
@@ -349,7 +370,9 @@ def due(state, values):
     finished = _finished(state)
     if not finished: return {'due': False}
     record = read_record(state)
-    return {'due': finished[0][0] not in record['sent'] and finished[0][0] not in record.get('attempted', [])}
+    if finished[0][0] in record['sent'] or finished[0][0] in record.get('attempted', []): return {'due': False}
+    if not _room(state, _size(finished[0][2])): return {'due': False, 'skipped': 'low_disk'}
+    return {'due': True}
 
 
 def send(state, values, opener=None):
@@ -359,6 +382,7 @@ def send(state, values, opener=None):
     finished = _finished(state)
     if not finished: raise OffsiteError('offsite_no_backup')
     backup, created_at, path = finished[0]
+    if not _room(state, _size(path)): raise OffsiteError('offsite_low_disk')
     record = read_record(state); record['attempted'] = (record.get('attempted', []) + [backup])[-50:]
     record['last'] = {'state': 'running', 'at': _now().isoformat(), 'backup': backup}; write_record(state, record)
     work = Path(state) / 'admin/offsite-work'; work.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -400,6 +424,8 @@ def check(state, values, opener=None):
             elif leftover.exists(): leftover.unlink()
         storage = Storage(config, opener); copies = storage.list()
         if not copies: raise OffsiteError('offsite_no_copy')
+        # The download and the opened backup both sit on this disk until the test ends.
+        if not _room(state, 2 * int(copies[-1].get('size') or 0)): raise OffsiteError('offsite_low_disk')
         key = copies[-1]['key']; storage.get(key, copy)
         manifest = decrypt_backup(copy, target, config['passphrase'])
         result = {'state': 'passed', 'at': _now().isoformat(), 'key': key, 'created_at': manifest.get('created_at'), 'copies': len(copies)}
@@ -422,6 +448,8 @@ def status(state, values):
     config = settings(values); record = read_record(state)
     return {'enabled': config['enabled'], 'keep': config['keep'], 'bucket': config['bucket'] or None,
             'last': record.get('last'), 'check': record.get('check'),
+            # The newest copy that did reach the storage, for when the latest attempt is running or failed.
+            'last_sent': max(record['sent'].values(), key=lambda entry: entry['at'], default=None),
             'sent': [entry['key'] for entry in record['sent'].values()][-config['keep']:]}
 
 
@@ -438,6 +466,11 @@ def main(state, rest):
     decrypt = sub.add_parser('decrypt', help='Turn a downloaded copy back into a backup folder')
     decrypt.add_argument('copy', type=Path); decrypt.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(rest)
+    try: import cryptography  # noqa: F401  (opening a copy needs it; check before any download)
+    except ImportError:
+        print(json.dumps({'status': 'failed', 'error': 'offsite_needs_cryptography',
+                          'hint': 'Install the Python cryptography package (for example: pip install cryptography), then run this again.'}))
+        return 1
     from tools.operations.installation.configuration import load, env_path
     saved = load(state) if env_path(state).exists() else {}
     values = {**saved, **{key: value for key, value in os.environ.items() if key.startswith('NOCHEH_OFFSITE')}}

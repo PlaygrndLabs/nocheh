@@ -58,6 +58,7 @@ type OffsiteStatus = {
   bucket: string | null;
   last?: {state: string; at: string; error?: string; bytes?: number; prune_error?: string} | null;
   check?: {state: string; at: string; error?: string} | null;
+  last_sent?: {at: string; bytes?: number} | null;
 };
 type Schedule = {
   enabled: boolean;
@@ -76,17 +77,24 @@ const taskName = (job: Job) =>
 type Action =
   'backup' | 'export' | 'portable-export' | 'diagnose' | 'restart' | 'restore' | 'offsite' | 'offsite-check';
 
-function offsiteSummary(offsite: OffsiteStatus | undefined): string {
+function offsiteSummary(offsite: OffsiteStatus | undefined, sending: boolean): string {
   if (!offsite) return '';
   if (!offsite.enabled) return 'Off. Copies stay only on this machine.';
-  const last = offsite.last;
-  const sent =
-    !last || last.state === 'running'
-      ? 'No copy sent yet.'
-      : last.state === 'sent'
-        ? `Last copy ${dateTime(last.at)}${last.bytes != null ? ` (${size(last.bytes)})` : ''}.`
-        : `The last copy failed ${dateTime(last.at)}: ${operationError(last.error ?? 'offsite_failed')}`;
-  return `${sent} Keeping the last ${offsite.keep} in ${offsite.bucket ?? 'the bucket'}.`;
+  const last = offsite.last,
+    good = offsite.last_sent;
+  const stored = good
+    ? `Last copy ${dateTime(good.at)}${good.bytes != null ? ` (${size(good.bytes)})` : ''}.`
+    : 'No copy sent yet.';
+  const latest = sending
+    ? 'Sending a copy now.'
+    : last?.state === 'failed'
+      ? `The last try failed ${dateTime(last.at)}: ${operationError(last.error ?? 'offsite_failed')}`
+      : last?.state === 'running'
+        ? `A copy started ${dateTime(last.at)} didn’t finish.`
+        : '';
+  return [latest, stored, `Keeping the last ${offsite.keep} in ${offsite.bucket ?? 'the bucket'}.`]
+    .filter(Boolean)
+    .join(' ');
 }
 
 function checkSummary(offsite: OffsiteStatus | undefined): string {
@@ -280,7 +288,7 @@ export function BackupsView() {
           'Send copy now',
           offsite && (
             <p className="mt-3 text-xs text-muted">
-              {offsiteSummary(offsite)}{' '}
+              {offsiteSummary(offsite, !!latest('offsite') && running(latest('offsite')!))}{' '}
               <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
                 {offsite.enabled ? 'Change' : 'Set up'}
               </a>

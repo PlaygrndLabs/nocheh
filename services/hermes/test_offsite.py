@@ -218,6 +218,38 @@ class SendAndCheckTests(unittest.TestCase):
         offsite.send(self.state, self.values)
         self.assertEqual(offsite.status(self.state, self.values)['last']['state'], 'sent')
 
+    def test_the_newest_backup_is_the_latest_made_not_the_highest_folder_name(self):
+        # Folder names are random job ids: here the older backup has the higher name.
+        older, newer = 'f' + JOBS[0][1:], '0' + JOBS[1][1:]
+        self.backup(older, 1); offsite.send(self.state, self.values)
+        self.backup(newer, 2)
+        self.assertTrue(offsite.due(self.state, self.values)['due'])
+        self.assertEqual(offsite.send(self.state, self.values)['backup'], newer)
+
+    def test_a_copy_waits_while_the_disk_is_nearly_full(self):
+        self.backup(JOBS[0], 1)
+        full = offsite.shutil.disk_usage(self.state)._replace(free=10)
+        with patch.object(offsite.shutil, 'disk_usage', return_value=full):
+            self.assertEqual(offsite.due(self.state, self.values), {'due': False, 'skipped': 'low_disk'})
+            with self.assertRaisesRegex(offsite.OffsiteError, 'offsite_low_disk'): offsite.send(self.state, self.values)
+        self.assertNotIn(JOBS[0], offsite.read_record(self.state).get('attempted', []))
+
+    def test_a_refused_completion_inside_a_success_answer_fails_the_copy(self):
+        self.backup(JOBS[0], 1, payload=bytes(range(256)) * 20000)
+        original = Bucket.do_POST
+        def refuse(handler):
+            if 'uploadId=' in handler.path: return (handler._parts(), handler._body(), handler._send(200, b'<Error><Code>InternalError</Code></Error>'))
+            return original(handler)
+        with patch.object(Bucket, 'do_POST', refuse), patch.object(offsite, 'PART', 1024 * 1024):
+            with self.assertRaisesRegex(offsite.OffsiteError, 'offsite_storage_InternalError'): offsite.send(self.state, self.values)
+        self.assertEqual(Bucket.objects, {}); self.assertEqual(Bucket.uploads, {})
+        status = offsite.status(self.state, self.values)
+        self.assertEqual(status['last']['state'], 'failed'); self.assertIsNone(status['last_sent'])
+
+    def test_a_copy_cannot_ask_for_a_costlier_key_derivation(self):
+        with self.assertRaisesRegex(offsite.OffsiteError, 'offsite_unsupported_format'):
+            offsite._key(PASSPHRASE, {**offsite.KDF, 'n': 2 ** 20, 'salt': offsite.base64.b64encode(bytes(16)).decode()})
+
     def test_wrong_passphrase_fails_the_restore_test(self):
         self.backup(JOBS[0], 1); offsite.send(self.state, self.values)
         with self.assertRaisesRegex(offsite.OffsiteError, 'wrong_passphrase'):

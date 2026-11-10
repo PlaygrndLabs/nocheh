@@ -40,6 +40,8 @@ function OffsiteSettings() {
   const s = useSettings();
   const on = s.value('NOCHEH_OFFSITE') === 's3';
   const configured = (key: string) => !!s.field(key)?.configured;
+  const keep = s.value('NOCHEH_OFFSITE_KEEP') || '14';
+  const customKeep = !keepPresets.includes(keep);
   const text = (key: string, title: string, description: string, placeholder: string, secret = false) => (
     <SettingRow
       htmlFor={key}
@@ -58,7 +60,8 @@ function OffsiteSettings() {
         placeholder={secret && configured(key) ? 'Saved. Type to replace.' : placeholder}
         value={s.value(key)}
         disabled={s.busy}
-        onChange={e => s.set(key, e.target.value.trim())}
+        // A secret is kept exactly as typed: trimming on every key would drop the spaces between words.
+        onChange={e => s.set(key, secret ? e.target.value : e.target.value.trim())}
       />
     </SettingRow>
   );
@@ -118,7 +121,7 @@ function OffsiteSettings() {
             {text(
               'NOCHEH_OFFSITE_PASSPHRASE',
               'Passphrase',
-              'At least 16 characters. Write it down somewhere safe away from this machine: without it, no copy can be opened, not even by us. Changing it applies to new copies only.',
+              'At least 16 characters, without quotes or backslashes. Write it down somewhere safe away from this machine: without it, no copy can be opened, not even by us. Changing it applies to new copies only.',
               'A long phrase you will not forget',
               true,
             )}
@@ -132,23 +135,30 @@ function OffsiteSettings() {
               }
               description="Older copies in the bucket are deleted after each new one."
             >
-              <div className="flex sm:justify-end">
+              <div className="flex gap-2 sm:justify-end">
                 <Select
                   id="NOCHEH_OFFSITE_KEEP"
                   aria-label="Off-site copies to keep"
-                  value={
-                    keepPresets.includes(s.value('NOCHEH_OFFSITE_KEEP') || '14')
-                      ? s.value('NOCHEH_OFFSITE_KEEP') || '14'
-                      : '14'
-                  }
+                  value={customKeep ? 'custom' : keep}
                   disabled={s.busy}
-                  onChange={e => s.set('NOCHEH_OFFSITE_KEEP', e.target.value)}
+                  onChange={e => s.set('NOCHEH_OFFSITE_KEEP', e.target.value === 'custom' ? '10' : e.target.value)}
                 >
                   <option value="3">Last 3</option>
                   <option value="7">Last 7</option>
                   <option value="14">Last 14</option>
                   <option value="30">Last 30</option>
+                  <option value="custom">Other…</option>
                 </Select>
+                {customKeep && (
+                  <Input
+                    aria-label="Off-site copies to keep, number"
+                    className="w-20"
+                    inputMode="numeric"
+                    value={keep}
+                    disabled={s.busy}
+                    onChange={e => s.set('NOCHEH_OFFSITE_KEEP', e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  />
+                )}
               </div>
             </SettingRow>
           </>

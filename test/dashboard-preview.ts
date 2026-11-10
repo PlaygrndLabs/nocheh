@@ -432,7 +432,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/jobs')return json(res,200,jobs);
   const jobRead=/^\/jobs\/([a-f0-9-]{36})$/.exec(route);
   if(jobRead){const job=jobs.find(j=>j.id===jobRead[1]);if(!job)throw new HttpError(404,'job_not_found');return json(res,200,job);}
-  if(route==='/operations')return json(res,200,{backups:[{id:'synthetic-backup',created_at:'2026-09-16T12:00:00Z',files:28,offsite:true}],offsite:{enabled:true,keep:14,bucket:'example-backups',last:{state:'sent',at:'2026-09-16T12:05:00Z',bytes:52428800},check:{state:'passed',at:'2026-09-16T12:10:00Z'}}});
+  if(route==='/operations')return json(res,200,{backups:[{id:'synthetic-backup',created_at:'2026-09-16T12:00:00Z',files:28,offsite:true}],offsite:{enabled:true,keep:14,bucket:'example-backups',last:{state:'sent',at:'2026-09-16T12:05:00Z',bytes:52428800},check:{state:'passed',at:'2026-09-16T12:10:00Z'},last_sent:{at:'2026-09-16T12:05:00Z',bytes:52428800}}});
   if(route==='/scopes')return json(res,200,{scopes:[{scope:'42',events:180},{scope:'-10042',events:32}],next:null});
   if(route==='/data')return json(res,200,{records:[{...voice.event,id:voiceId,content_types:['voice'],ready:2,total:2},{...source.event,id,ready:1,total:1}],next:null});
   if(route==='/search')return json(res,200,[{...source.event,id}]);

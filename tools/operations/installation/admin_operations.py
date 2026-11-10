@@ -23,7 +23,8 @@ def backups(state):
             manifest=json.loads((path/'manifest.json').read_text())
             result.append({'id':path.name,'created_at':manifest['created_at'],'files':len(manifest['files'])})
         except (ValueError,KeyError,OSError):continue
-    return result[:100]
+    # Folder names are random job ids, so order by when each backup was made.
+    return sorted(result,key=lambda row:row['created_at'],reverse=True)[:100]
 
 
 def run(state,action,job,options=None):

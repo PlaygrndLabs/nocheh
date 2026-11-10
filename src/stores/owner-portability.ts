@@ -72,10 +72,11 @@ export class OwnerPortabilityRepository {
     let cursor:string[]|null=null;
     if(after) {
       try{cursor=JSON.parse(string(after,4096));}catch{cursor=null;}
-      if(!Array.isArray(cursor)||cursor.length!==definition.key.length||cursor.some(part=>typeof part!=='string'))throw new HttpError(400,'invalid_export_cursor');
+      if(!Array.isArray(cursor)||cursor.length!==definition.key.length||cursor.some(part=>typeof part!=='string')||definition.serial&&!/^\d{1,18}$/.test(cursor[0]!))throw new HttpError(400,'invalid_export_cursor');
     }
-    const keys=definition.key.map(name=>`t.${quote(name)}::text COLLATE "C"`),
-      where=cursor?`WHERE (${keys.join(',')})>(${cursor.map((_,i)=>`$${i+2}::text COLLATE "C"`).join(',')})`:'',
+    // A log keeps its numeric order, so the destination numbers its rows in the same order.
+    const keys=definition.serial?[`t.${quote(definition.serial)}`]:definition.key.map(name=>`t.${quote(name)}::text COLLATE "C"`),
+      where=cursor?`WHERE (${keys.join(',')})>(${cursor.map((_,i)=>definition.serial?`$${i+2}::bigint`:`$${i+2}::text COLLATE "C"`).join(',')})`:'',
       rows=(await this.stores.control.query(`SELECT row_to_json(t)::text AS row FROM ${table} t ${where} ORDER BY ${keys.join(',')} LIMIT $1`,[count,...(cursor??[])])).rows;
     const records=rows.map(r=>{const row=JSON.parse(r.row as string) as Record<string,unknown>;return seal(table,definition.key.map(name=>String(row[name])),row);});
     return {format:'nocheh-owner-data-v1',table,records,next:rows.length===count?JSON.stringify(records.at(-1)!.key):null};

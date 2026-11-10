@@ -333,6 +333,9 @@ const offsiteErrors: Record<string, string> = {
   offsite_copy_damaged: 'The off-site copy is damaged.',
   offsite_backup_invalid: 'The copy opened, but a file inside didn’t match its checksum.',
   offsite_passphrase_too_short: 'The passphrase is too short.',
+  offsite_low_disk: 'Not enough free disk space to make the encrypted copy. Free some space, then try again.',
+  offsite_copy_too_large: 'The backup is too large for one off-site copy.',
+  offsite_needs_cryptography: 'This computer needs the Python cryptography package to open off-site copies.',
 };
 
 export function operationError(code: string): string {
