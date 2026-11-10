@@ -5,6 +5,7 @@ import {limit} from '../retrieval.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {StorageServices} from './services.js';
 import {portableDerivativeTypes} from './derivative-portability.js';
+import {portableOwnerTables} from './owner-portability.js';
 import {taskQuery} from './tasks.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
@@ -15,7 +16,7 @@ export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
   owns(path:string):boolean {
     // The GitHub copies are management's alone: never an ownerStoragePath, which a browser reaches through the dashboard.
-    return /^\/v1\/imports\/legacy(?:\/[a-f0-9]{64}|\/files\/[a-f0-9]{64}\/bytes)?$/.test(path)||ownerStoragePath(path)||/^\/v1\/(?:exports\/(?:sources|derivatives(?:\/types)?|derivative-history)|imports\/(?:sources|derivatives(?:\/verify)?)|original-files\/[a-f0-9]{64}\/bytes)$/.test(path)||path==='/v1/background-jobs/copies';
+    return /^\/v1\/imports\/legacy(?:\/[a-f0-9]{64}|\/files\/[a-f0-9]{64}\/bytes)?$/.test(path)||ownerStoragePath(path)||/^\/v1\/(?:exports\/(?:sources|derivatives(?:\/types)?|derivative-history|owner-data(?:\/tables)?)|imports\/(?:sources|derivatives(?:\/verify)?|owner-data)|original-files\/[a-f0-9]{64}\/bytes)$/.test(path)||path==='/v1/background-jobs/copies';
   }
   async request(principal:Reader,method:string,url:URL,input?:unknown):Promise<unknown> {
     admin(principal);const path=url.pathname,s=this.services,q=url.searchParams;
@@ -74,6 +75,9 @@ export class OwnerStorageApi {
       const body=exact(input,['records']);
       return path.endsWith('/verify')?s.derivativePortability.verify(principal,body.records as unknown[]):s.derivativePortability.restore(principal,body.records as unknown[]);
     }
+    if(path==='/v1/exports/owner-data/tables'&&method==='GET')return {format:'nocheh-owner-data-v1',tables:portableOwnerTables};
+    if(path==='/v1/exports/owner-data'&&method==='GET')return s.ownerPortability.page(principal,q.get('table')??'',q.get('after')||null,limit(q.get('limit'),50,100));
+    if(path==='/v1/imports/owner-data'&&method==='POST')return s.ownerPortability.restore(principal,exact(input,['records']).records as unknown[]);
     const originalFile=path.match(/^\/v1\/original-files\/([a-f0-9]{64})\/bytes$/);
     if(originalFile)return method==='GET'?s.sourcePortability.bytes(principal,originalFile[1]!):s.sourcePortability.upload(principal,originalFile[1]!,input);
     if(path==='/v1/entities/suggestions'&&method==='GET')return s.entities.suggestions(principal,q.get('after')??'');

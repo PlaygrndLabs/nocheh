@@ -147,7 +147,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The dashboard and executor are services with owner-approved Docker socket access; agents never get the socket ([0048](0048-containerized-management.md)).
 - nocheh-db creates the archive, derived, control and workflow databases before it reports healthy; root Compose owns its volumes ([0054](0054-postgres-owned-store-bootstrap.md), [0075](0075-clean-development-setup.md)).
 - One root `.env` is the editable configuration ([0024](0024-single-environment-configuration.md)).
-- Backups are quiesced, verified and daily; a restore starts inactive; upgrades are checked offline first, and the archive and Hermes native notes export in a portable form ([0023](0023-consistent-backups-and-inactive-restore.md), [0187](0187-daily-automatic-backups.md), [0227](0227-encrypted-off-site-backup-copies.md), [0081](0081-bounded-workflow-backup-fingerprints.md), [0032](0032-isolated-upgrades-and-portable-memory.md)).
+- Backups are quiesced, verified and daily; a restore starts inactive; upgrades are checked offline first, and the archive and Hermes native notes export in a portable form ([0023](0023-consistent-backups-and-inactive-restore.md), [0187](0187-daily-automatic-backups.md), [0227](0227-encrypted-off-site-backup-copies.md), [0228](0228-portable-export-carries-owner-work.md), [0081](0081-bounded-workflow-backup-fingerprints.md), [0032](0032-isolated-upgrades-and-portable-memory.md)).
 
 ### Dev process
 

@@ -13,12 +13,16 @@ class API:
         self.record={'id':'a'*64,'event':self.event,'artifacts':[{'id':'b'*64,'state':'ready','file_hash':digest(self.bytes),'byte_size':len(self.bytes)}]}
         value={'id':'c'*64,'content':'owner-edited guarded history','source_id':'events:'+self.record['id'],'revision':1,'operation_id':'fixture'}
         self.guard={'format':'nocheh-derivative-record-v1','type':'guard_sources','key':'events:'+self.record['id'],'value':{'id':'events:'+self.record['id'],'kind':'events','source_id':self.record['id'],'event_id':self.record['id'],'active_revision':1},'sha256':'d'*64}
+        task={'id':'e'*64,'title':'Send the garden plan','tags':['home'],'due_on':'2026-12-01','position':1.5}
+        self.task={'format':'nocheh-owner-record-v1','table':'owner_tasks','key':[task['id']],'row':task,'sha256':digest(canonical({'table':'owner_tasks','key':[task['id']],'row':task}))}
         self.derived={'format':'nocheh-derivative-record-v1','type':'guard_revisions','key':value['id'],'value':value,'sha256':digest(canonical({'type':'guard_revisions','key':value['id'],'value':value}))}
     def call(self,path,body=None,binary=False):
         if path.startswith('/v1/exports/sources?'):return {'format':'nocheh-sources-v1','records':[self.record],'next':None}
         if path.endswith('/bytes') and body is None:return self.bytes
         if path.endswith('/types'):return {'format':'nocheh-derivatives-v1','types':['guard_sources','guard_revisions']}
         if path.startswith('/v1/exports/derivatives?'):return {'format':'nocheh-derivatives-v1','records':[self.guard if 'type=guard_sources' in path else self.derived],'next':None}
+        if path=='/v1/exports/owner-data/tables':return {'format':'nocheh-owner-data-v1','tables':['owner_task_settings','owner_tasks']}
+        if path.startswith('/v1/exports/owner-data?'):return {'format':'nocheh-owner-data-v1','table':'owner_tasks','records':[self.task],'next':None} if 'table=owner_tasks' in path else {'format':'nocheh-owner-data-v1','table':'owner_task_settings','records':[],'next':None}
         if path.startswith('/v1/exports/derivative-history?'):return {'format':'nocheh-derivative-history-v1','records':[],'next':None}
         if self.fail and path=='/v1/imports/derivatives':self.fail=False;raise RuntimeError('lost derivative acknowledgment')
         self.calls.append((path,body));return {}
@@ -41,6 +45,7 @@ class PortableBundleTests(unittest.TestCase):
         home=root/'state/hermes/profiles'/('nocheh-'+'a'*24);(home/'memories').mkdir(parents=True)
         (home/'.memory.lock').touch();(home/'memories/USER.md').write_bytes(b'Native notes\r\n')
         (home/'space.json').write_text('{"space":"123","generation":"retired"}')
+        (home/'cron').mkdir();(home/'cron/jobs.json').write_text('{"jobs":[{"id":"morning","schedule":"0 8 * * *"}]}')
         database=sqlite3.connect(home/'state.db');database.execute('CREATE TABLE messages(text text)');database.execute('INSERT INTO messages VALUES(?)',('Saved native conversation',));database.commit();database.close()
         (home/'auth.json').write_text('SECRET_TOKEN_NOT_EXPORTABLE')
         api=API();manifest=export_all(root/'state',root/'package',api,honcho_export=native_honcho)
@@ -67,6 +72,9 @@ class PortableBundleTests(unittest.TestCase):
             self.assertEqual(import_all(root/'package',root/'inactive',api)['bundle'],result['bundle'])
             self.assertIn(('/v1/imports/sources',api.record),api.calls)
             self.assertIn(('/v1/imports/derivatives',{'records':[api.derived]}),api.calls)
+            self.assertIn(('/v1/imports/owner-data',{'records':[api.task]}),api.calls)
+            self.assertEqual(manifest['owner']['records'],1)
+            self.assertIn('morning',(root/'inactive/native'/profile/'cron/jobs.json').read_text())
             # User changes to staged native notes must survive a later replay.
             (root/'inactive/native'/profile/'memories/USER.md').write_text('Owner correction')
             with self.assertRaisesRegex(ValueError,'destination_conflict'):import_all(root/'package',root/'inactive',api)
