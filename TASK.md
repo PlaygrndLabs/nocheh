@@ -417,7 +417,7 @@ or mem0"): long-term memory now sits behind one memory socket, and Honcho is the
 only engine plugged in. Nocheh keeps receipts, sessions, sharing rules and
 deletions; routes moved to `/v1/memory/longterm/*`, the admin command to
 `memory longterm`, and the dashboard shows the engine
-([decision](docs/adr/0231-memory-engine-socket.md),
+([decision](docs/adr/0232-memory-engine-socket.md),
 [socket](src/memory/engine.ts), [Honcho engine checks](test/memory-engine.test.ts)).
 The development stack reloads the changed routes on its own after a pull; a stack
 not in development mode needs a full restart, so the Honcho gateway and Hermes use

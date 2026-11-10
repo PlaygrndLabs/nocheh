@@ -1,4 +1,4 @@
-# ADR-0231: Long-term memory sits behind a memory socket
+# ADR-0232: Long-term memory sits behind a memory socket
 
 <status>
 Accepted on 2026-11-10, after the owner said: "the main things in nocheh should

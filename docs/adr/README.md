@@ -54,7 +54,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 
 ### Honcho memory
 
-- Long-term memory sits behind a memory socket; Nocheh keeps receipts, sessions, sharing rules and deletions, and Honcho is the only engine plugged in today ([0231](0231-memory-engine-socket.md)).
+- Long-term memory sits behind a memory socket; Nocheh keeps receipts, sessions, sharing rules and deletions, and Honcho is the only engine plugged in today ([0232](0232-memory-engine-socket.md)).
 - Honcho is primary long-term memory, on by default in fresh installs, run in the installation Compose project and attached once at startup; Nocheh is its only writer, and Hermes has no direct access ([0033](0033-guarded-projections-and-honcho-memory.md), [0045](0045-honcho-in-installation-compose.md), [0076](0076-honcho-enabled-local-default.md), [0061](0061-retire-isolated-honcho-comparison.md)).
 - One workspace per installation, stable peers for people and projects, and versioned sessions per conversation; Nocheh enforces audience on every read ([0056](0056-connected-entity-memory.md), [0109](0109-standard-honcho-entity-model.md), [0115](0115-honcho-session-revisions.md)); Honcho peer cards are off and Nocheh reads none ([0225](0225-member-safety-rules.md)).
 - Repeat names for one person or project wait on one suggestion card that learning or the owner folds them into; one answer covers every name ([0219](0219-repeat-names-wait-on-one-card.md)).

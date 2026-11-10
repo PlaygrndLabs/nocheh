@@ -10,7 +10,7 @@ import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '
 import type {HonchoCall} from './memory/honcho.js';
 
 export type {HonchoCall};
-/** The older Honcho layer, reached only by tests and the legacy database module. The live path is src/memory/ (ADR-0231). */
+/** The older Honcho layer, reached only by tests and the legacy database module. The live path is src/memory/ (ADR-0232). */
 
 export const honchoSchema=`
 CREATE TABLE IF NOT EXISTS honcho_connection(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
