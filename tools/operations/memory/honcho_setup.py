@@ -13,6 +13,13 @@ PROVIDER_STATE=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local')).resolv
 from tools.operations.installation.configuration import DEFAULTS,read_env,env_path
 STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
            (PROVIDER_STATE/'honcho')).resolve()
+# Peer chat takes Honcho's longest query. Nocheh's guard refuses a model request over 512 KiB (src/guard.ts), and Honcho
+# keeps each dialectic round's and each summary's messages within an input token budget. At up to 8 bytes a token
+# (Persian measures 6.7) 61,440 tokens fill 480 KiB, leaving 32 KiB for the tool and answer schemas Honcho adds outside
+# the budget (12 KiB) and the request's JSON. src/stores/learning-engine.ts sizes the learning query from both; a test
+# keeps them equal.
+QUERY_CHARACTERS=200000
+INPUT_TOKENS=61440
 
 
 def state_for(provider_state):
@@ -68,6 +75,8 @@ def initialize(provider_state=PROVIDER_STATE):
          # neither writes nor uses one; dreams, which would write them, stay off too (ADR-0225). Rewritten on every setup.
          'PEER_CARD_ENABLED':'false',
          'DREAM_ENABLED':'false','SUMMARY_ENABLED':'true','EMBED_MESSAGES':'true','LOG_LEVEL':'WARNING',
+         'DIALECTIC_MAX_QUERY_LENGTH':str(QUERY_CHARACTERS),'DIALECTIC_MAX_INPUT_TOKENS':str(INPUT_TOKENS),
+         'SUMMARY_MAX_INPUT_TOKENS':str(INPUT_TOKENS),
          'EMBEDDING_VECTOR_DIMENSIONS':str(embedding.dimensions),'EMBEDDING_MODEL_CONFIG__TRANSPORT':embedding.provider,
          'EMBEDDING_MODEL_CONFIG__MODEL':embedding.model,
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL':'http://meter:8790/v1',

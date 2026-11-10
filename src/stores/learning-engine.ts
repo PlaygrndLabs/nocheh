@@ -20,9 +20,12 @@ export const terminalLearningCodes=new Set(['invalid_interpretation_result','lea
 const terminalRenewalCodes=new Set(['invalid_interpretation_result']);
 const queued=`EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='memory_review' AND w.job_id='interpret:'||j.id
   AND w.state IN ('queued','waiting','running','retryable_failed'))`;
-/** Honcho rejects a longer reasoning query before any model call. */
-const honchoQueryLimit=10000;
-/** The learning query within Honcho's limit. Waiting cards give up their other names and then leave
+/** Honcho's peer chat takes a query of up to 200,000 characters and keeps each reasoning round's messages within
+ * 61,440 tokens (tools/operations/memory/honcho_setup.py sets both; a test keeps them equal). Honcho never shortens
+ * the query, so it takes at most half of those tokens and leaves the rest for what Honcho gathers. Learning queries
+ * measure 3.4 (dense JSON) to 6.4 (Persian text) UTF-8 bytes a token, so at 3 bytes a token that half is 92,160 bytes. */
+export const honchoQueryCharacters=200000,honchoInputTokens=61440,honchoQueryBytes=honchoInputTokens/2*3;
+/** The learning query within Honcho's limits. Waiting cards give up their other names and then leave
  * from the end first, as they only help join repeat names. Then other evidence keeps only its text, then rules
  * are left out from the end, then the trigger keeps only its text, then other evidence is left out from
  * the end; anything longer cannot be asked. The instruction lists the evidence the query still shows. */
@@ -33,7 +36,7 @@ export function learningQuery(instruction:string|((citable:string[])=>string),co
   const entities=()=>waiting===undefined?context.entities:{...context.entities,waiting};
   const query=()=>(typeof instruction==='string'?instruction:instruction(observations.map(item=>item.source.id)))+
     `\n${canonical({space:context.space,projects:context.projects,organization_context:context.organization_context,entities:entities(),observations,rules,limitations})}`;
-  const fits=()=>Array.from(query()).length<=honchoQueryLimit;
+  const fits=()=>{const text=query();return Buffer.byteLength(text)<=honchoQueryBytes&&Array.from(text).length<=honchoQueryCharacters;};
   if(fits())return query();
   if(waiting?.length) {
     limitations.push('waiting_omitted');waiting=waiting.map(card=>({...card,also_called:[]}));
