@@ -82,7 +82,7 @@ class VoiceTextTests(unittest.TestCase):
                 rows = usage.rows('2000-01-01', target)
         self.assertNotIn('SERVICE_TOKEN', seen['env'])
         self.assertEqual(seen['env'][voice_text.KEY], 'synthetic-voice-key')
-        self.assertEqual(seen['config']['stt'], {'enabled': True, 'provider': 'openai', 'openai': {
+        self.assertEqual(seen['config']['stt'], {'enabled': True, 'provider': 'openai', 'language': '', 'openai': {
             'model': 'gpt-transcribe', 'base_url': 'https://transcribe.example.test/v1', 'api_key': '${env:' + voice_text.KEY + '}'}},
             'the key is read from the environment, never written to the file')
         self.assertEqual(seen['timeout'], voice_text.SECONDS)

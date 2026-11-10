@@ -34,6 +34,33 @@ class HonchoSetupTests(unittest.TestCase):
             self.assertEqual(values['DERIVER_FLUSH_ENABLED'], 'true')
             self.assertEqual(values['DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS'], '0')
 
+    def test_setup_takes_the_longest_query_and_keeps_model_inputs_within_the_guard(self):
+        from tools.operations.installation.configuration import initialize, read_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                honcho_setup.initialize(state)
+            values = read_env(state / 'honcho/honcho.env')
+            # Honcho's own maximum query; its input budgets fill at most 480 KiB of the guard's 512 KiB at 8 bytes a token.
+            self.assertEqual(values['DIALECTIC_MAX_QUERY_LENGTH'], '200000')
+            for name in ('DIALECTIC_MAX_INPUT_TOKENS', 'SUMMARY_MAX_INPUT_TOKENS'):
+                self.assertLessEqual(int(values[name]) * 8 + 32 * 1024, 512 * 1024)
+                # A summary needs room for twice its longest output (6,000 tokens), or Honcho does not start.
+                self.assertGreaterEqual(int(values[name]), 12000)
+
+    def test_setup_asks_every_dialectic_level_for_json_through_the_prompt(self):
+        from tools.operations.installation.configuration import initialize, read_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                honcho_setup.initialize(state)
+            values = read_env(state / 'honcho/honcho.env')
+            # Learning asks peer chat for a response_format; a json_schema sent alongside tools can be refused.
+            for level in ('minimal', 'low', 'medium', 'high', 'max'):
+                self.assertEqual(values[f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG__STRUCTURED_OUTPUT_MODE'], 'json_object')
+
     def test_setup_keeps_peer_cards_and_dreams_off(self):
         from tools.operations.installation.configuration import initialize, read_env, write_env
         with tempfile.TemporaryDirectory() as folder:

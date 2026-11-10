@@ -1,5 +1,6 @@
 import {HttpError,object,string} from '../http.js';
 import {validateSpace} from '../spaces.js';
+import {withoutNulls} from '../interpretations.js';
 
 export const knowledgeId=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_knowledge_identity');return id;};
 export const knowledgeRevision=(value:unknown):number=>{if(!Number.isSafeInteger(value)||Number(value)<0)throw new HttpError(400,'invalid_revision');return Number(value);};
@@ -20,6 +21,13 @@ const payloadKeys:Record<ReviewKind,string[]>={
  sharing_rule:['id','name','sources','destination','enabled','mode','instructions','expected_revision'],
  fact_grant:['fact_id','fact_revision','destination','wording','expires_at'],fact_revoke:['expected_revision']
 };
+/** The organization part of a learning answer. Honcho answers an absent field as null: a null list is empty, and an
+ * item's null field, such as the unused one of project_id and project_key, is left out. */
+export function learnedOrganization(organization:Record<string,unknown>):OrganizationProposal {
+ const items=(value:unknown)=>Array.isArray(value)?value.map(withoutNulls):value??[];
+ return parseKnowledgeProposal({...organization,creates:items(organization.creates),assignments:items(organization.assignments),kind:'organization',
+  reason:organization.reason??'Organize the permitted conversation evidence.'}) as OrganizationProposal;
+}
 export function parseKnowledgeProposal(input:unknown):KnowledgeProposal {
  const head=object(input);
  if(head.kind==='organization') {

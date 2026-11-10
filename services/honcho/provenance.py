@@ -45,12 +45,18 @@ async def retry_failed_learning(workspace_id, db):
 
 
 async def ancestry(roots, load_documents, load_messages, max_nodes=128, max_depth=8, max_messages=256):
+    """Follow conclusions to the messages behind them.
+
+    Honcho 3.5+ records the messages an explicit conclusion cites. A conclusion without citations (written before,
+    or whose model left them out) falls back to its whole derivation batch, which is not an exact citation. Each
+    node says which it used: true for citations, false for a batch, null when it brought no messages. The answer is
+    exact only when every node that brought messages cites them, and cited messages come first."""
     if (not isinstance(roots, list) or not 1 <= len(roots) <= 32
             or any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in roots)
             or not 1 <= max_nodes <= 128 or not 1 <= max_depth <= 8 or not 1 <= max_messages <= 256):
         raise ValueError('invalid_provenance_request')
     pending = deque((v, 0) for v in dict.fromkeys(roots))
-    seen, nodes, message_ids, limitations = set(), [], set(), {'ancestry_is_not_an_exact_citation'}
+    seen, nodes, limitations, cited, batch = set(), [], set(), {}, {}
     while pending and len(seen) < max_nodes:
         identifier, depth = pending.popleft()
         if identifier in seen:
@@ -70,19 +76,23 @@ async def ancestry(roots, load_documents, load_messages, max_nodes=128, max_dept
         if len(parents) > max_nodes or row.get('parents_truncated'):
             limitations.add('ancestry_limit')
         parents = [v for v in parents[:max_nodes] if isinstance(v, str) and NATIVE_ID.fullmatch(v)]
-        ids = row.get('message_ids') or []
+        exact = isinstance(row.get('cited_ids'), list) and bool(row['cited_ids'])
+        ids = row['cited_ids'] if exact else row.get('message_ids') or []
         if not isinstance(ids, list):
             ids = []
             limitations.add('message_links_unavailable')
-        if len(ids) > max_messages or row.get('messages_truncated'):
+        if len(ids) > max_messages or row.get('citations_truncated' if exact else 'messages_truncated'):
             limitations.add('message_limit')
-        for value in ids[:max_messages]:
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                if len(message_ids) < max_messages:
-                    message_ids.add(value)
-                elif value not in message_ids:
-                    limitations.add('message_limit')
-        nodes.append({'id': identifier, 'parents': parents, 'deleted': bool(row.get('deleted'))})
+        links = cited if exact else batch
+        valid = [v for v in ids[:max_messages] if isinstance(v, int) and not isinstance(v, bool) and v > 0]
+        for value in valid:
+            if len(links) < max_messages:
+                links[value] = None
+            elif value not in links:
+                limitations.add('message_limit')
+        if valid and not exact:
+            limitations.add('ancestry_is_not_an_exact_citation')
+        nodes.append({'id': identifier, 'parents': parents, 'deleted': bool(row.get('deleted')), 'exact_citations': exact if valid else None})
         if not parents and not ids:
             limitations.add('message_links_unavailable')
         if depth >= max_depth and parents:
@@ -97,20 +107,42 @@ async def ancestry(roots, load_documents, load_messages, max_nodes=128, max_dept
                     pending.append((parent, depth + 1))
     if pending:
         limitations.add('ancestry_limit')
-    messages = await load_messages(sorted(message_ids)) if message_ids else []
-    found, references = set(), []
+    wanted = [*cited, *(v for v in batch if v not in cited)]
+    if len(wanted) > max_messages:
+        limitations.add('message_limit')
+        wanted = wanted[:max_messages]
+    messages = await load_messages(wanted) if wanted else []
+    found, references = {}, []
     for row in messages[:max_messages]:
-        if row.get('id') not in message_ids:
+        if row.get('id') not in wanted:
             raise ValueError('provenance_message_mismatch')
-        found.add(row['id'])
-        public_id, receipt = row.get('public_id'), row.get('receipt_id')
+        found[row['id']] = row
+    for value in wanted:
+        if value not in found:
+            limitations.add('message_unavailable')
+            continue
+        public_id, receipt = found[value].get('public_id'), found[value].get('receipt_id')
         if isinstance(public_id, str) and NATIVE_ID.fullmatch(public_id) and isinstance(receipt, str) and re.fullmatch(r'[a-f0-9]{64}', receipt):
             references.append({'message_id': public_id, 'receipt_id': receipt})
         else:
             limitations.add('ingestion_reference_unavailable')
-    if found != message_ids:
-        limitations.add('message_unavailable')
-    return {'roots': roots, 'nodes': nodes, 'messages': references, 'limitations': sorted(limitations), 'exact_citations': False}
+    exact = any(node['exact_citations'] for node in nodes) and all(node['exact_citations'] is not False for node in nodes)
+    return {'roots': roots, 'nodes': nodes, 'messages': references, 'limitations': sorted(limitations), 'exact_citations': exact}
+
+
+# Scope every ancestor independently. Return neither conclusion text nor vectors. Parent links live in Honcho's
+# document_sources table and cited messages in conclusion_source_messages, each in its recorded order.
+DOCUMENTS_SQL = '''SELECT d.id, d.deleted_at IS NOT NULL AS deleted,
+    COALESCE((SELECT jsonb_agg(p.source_id ORDER BY p.position) FROM (SELECT source_id, position FROM document_sources
+        WHERE derived_id=d.id ORDER BY position LIMIT 128) p), '[]'::jsonb) AS source_ids,
+    jsonb_path_query_array(d.internal_metadata->'message_ids', '$[0 to 255]') AS message_ids,
+    (SELECT jsonb_agg(c.id ORDER BY c.position, c.message_id) FROM (SELECT m.id, s.message_id, s.position FROM conclusion_source_messages s
+        JOIN messages m ON m.tenant_id=s.tenant_id AND m.public_id=s.message_id
+        WHERE s.tenant_id=d.tenant_id AND s.conclusion_id=d.id ORDER BY s.position, s.message_id LIMIT 256) c) AS cited_ids,
+    EXISTS (SELECT 1 FROM document_sources WHERE derived_id=d.id OFFSET 128) AS parents_truncated,
+    EXISTS (SELECT 1 FROM conclusion_source_messages WHERE tenant_id=d.tenant_id AND conclusion_id=d.id OFFSET 256) AS citations_truncated,
+    CASE WHEN jsonb_typeof(d.internal_metadata->'message_ids')='array' THEN jsonb_array_length(d.internal_metadata->'message_ids')>256 ELSE false END AS messages_truncated
+    FROM documents d WHERE d.workspace_name=:workspace AND d.id=ANY(:ids) LIMIT 128'''
 
 
 SESSION_ID = re.compile(r'^[a-f0-9]{64}$')
@@ -175,16 +207,7 @@ def install(app):
     @router.post('/provenance')
     async def read(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):
         async def documents(ids):
-            # Scope every ancestor independently. Return neither conclusion text nor vectors.
-            # Parent links live in Honcho's document_sources table, in their derivation order.
-            result = await db.execute(text('''SELECT d.id, d.deleted_at IS NOT NULL AS deleted,
-                COALESCE((SELECT jsonb_agg(p.source_id ORDER BY p.position) FROM (SELECT source_id, position FROM document_sources
-                    WHERE derived_id=d.id ORDER BY position LIMIT 128) p), '[]'::jsonb) AS source_ids,
-                jsonb_path_query_array(d.internal_metadata->'message_ids', '$[0 to 255]') AS message_ids,
-                EXISTS (SELECT 1 FROM document_sources WHERE derived_id=d.id OFFSET 128) AS parents_truncated,
-                CASE WHEN jsonb_typeof(d.internal_metadata->'message_ids')='array' THEN jsonb_array_length(d.internal_metadata->'message_ids')>256 ELSE false END AS messages_truncated
-                FROM documents d WHERE d.workspace_name=:workspace AND d.id=ANY(:ids) LIMIT 128'''),
-                {'workspace': workspace_id, 'ids': ids})
+            result = await db.execute(text(DOCUMENTS_SQL), {'workspace': workspace_id, 'ids': ids})
             return [dict(row) for row in result.mappings()]
 
         async def messages(ids):

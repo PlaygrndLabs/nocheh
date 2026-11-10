@@ -696,7 +696,11 @@ rules are left out from the end, then the trigger keeps only its text, each
 named in the query's limitations; an input that still cannot fit closes as
 `input_limit` instead of retrying ([learning engine](src/stores/learning-engine.ts),
 [check](test/learning-workflow.test.ts)). Honcho rejections now log their status,
-route and failing field without content ([client](src/honcho.ts)).
+route and failing field without content ([client](src/honcho.ts)). Since
+November 10 the query can use 92,160 UTF-8 bytes, about half of Honcho's input
+budget sized to the guard's 512 KiB, instead of 10,000 characters, and the same
+trimming applies only past that
+([decision](docs/adr/0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 
 Deep check for hidden data and failure gaps (October 18), verified locally with
 synthetic PostgreSQL, not yet run on the owner's installation:
@@ -973,19 +977,48 @@ consistency check, the patched Hermes dashboard and TUI builds, and the page
 rewrite against the real Inngest 1.51 assets.
 Pending: a real build of every image (with the Hermes native contract tests, the
 browser tester image and Compose 5.7 in the management image) and the full
-fake-Telegram tester run; the PostgreSQL-backed Node tests, the Inngest 1.51
+fake-Telegram tester run; the PostgreSQL-backed Node tests in the development
+image's runner (they pass on the host, below), the Inngest 1.51
 inspection fixture test and the Honcho export rehearsals; a rebuild on the
 owner's development machine and a live reply; Honcho's first boot running its
-new migrations on existing data, and learning still getting parseable JSON under
-the v3.5 dialectic prompt; the Workflows page in a real browser (assets under
+new migrations on existing data; the Workflows page in a real browser (assets under
 `/inngest`, no root `/v0/gql` or `/dev` calls, Monaco and Quickstart off);
 `/rewind` and pictures in the browser TUI, `/new` while a turn is running, and a
 TUI reconnect on uvicorn 0.54's WebSocket stack; isolated Anthropic and OpenAI
-turns on the new SDKs (anthropic 0.125, openai 2.54). Next (owner yes, a second
-PR): Hermes' built-in prompt refresh for role and skill edits, Honcho's exact
-message citations for provenance, `DIALECTIC_MAX_QUERY_LENGTH` at Honcho's
-maximum with Nocheh trimming only to fit the guard's 512 KB, strict JSON answers
-for learning, and voice transcription without Hermes' default English hint. Also
+turns on the new SDKs (anthropic 0.125, openai 2.54).
+Second change on the same branch (owner: "I like this one, dont apply limit use
+memory fully and use all features." and "yes" to the Hermes instruction refresh,
+exact memory sources, the bigger question limit and the Persian voice fix;
+[decision](docs/adr/0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)):
+a role or skill change asks Hermes' own prompt refresh for the profile instead of
+Nocheh's per-session marker ([check](services/hermes/test_persona.py)); memory
+evidence follows Honcho's exact message citations per conclusion and marks a
+conclusion that only has its derivation batch as inexact
+([plugin check](services/honcho/test_provenance.py),
+[reader](test/store-provenance.test.ts)); setup sets Honcho's longest question
+(200,000 characters) and 61,440-token reasoning and summary inputs within the
+guard's 512 KiB, and the learning query fits 92,160 UTF-8 bytes instead of 10,000
+characters ([setup](services/honcho/test_setup.py),
+[check](test/learning-workflow.test.ts)); learning asks Honcho for its result
+schema with every dialectic level in `json_object` mode, and Nocheh's own JSON
+recovery is gone ([check](test/store-learned.test.ts),
+[engine](test/store-learning-engine.test.ts)); the meter sends archive preparation
+as UTF-8 ([check](services/honcho/test_meter.py)); voice transcription sends no
+language hint ([check](services/hermes/test_voice_text.py)). Checked here: the
+Node suite (361 tests, 216 pass, 141 skipped without PostgreSQL, the same 4
+PostgreSQL failures), every compiled Node test file on the host against its own
+fresh synthetic PostgreSQL 18.6 (155 files: 361 pass, none fail, 4 skipped that
+need a container, workflow or Inngest fixture), Hermes plugin tests (849 run,
+the same 3 environment errors), Honcho tests (58 pass), and Honcho 3.6.0's own migrations and models
+under the provenance query (citation order, batch fallback, deleted ancestors,
+workspace scoping). Pending: a live Honcho deriver writing citations under
+`json_object` and how often its model leaves them out; recall through Hermes
+listing the cited messages first; learning against the live memory provider with
+`response_format` (Honcho's repair and retries, `json_object` beside tools) and
+the archive's preparation round trip; a role change reaching a continuing chat
+in a real isolated turn, where the gateway writes the turn profile's `state.db`;
+a Persian voice note transcribed without the hint. Existing conclusions get
+citations only when Honcho memory is rebuilt. Also
 next: pin PostgreSQL 18.7 and the rebuilt pgvector 0.8.7 digest after its
 2026-11-12 release; the subscription compatibility setup needs host uv 0.13.6 or
 newer for Python 3.14.10; audit typer 0.29; `/rewind` still shows in the TUI's
@@ -2146,8 +2179,9 @@ activation remains separate.
    - PDF attachments: preparation now reads a PDF's text layer (pinned
      `unpdf` 1.8.1, in a worker thread with a heap limit and 30-second
      deadline), whole pages up to 200,000 bytes, and records an explicit
-     status for unreadable or scanned PDFs
-     ([checks](test/pdf-text.test.ts)). Scanned pages are not read (no OCR).
+     status for unreadable or scanned PDFs. Scanned pages are not read (no OCR).
+     Since November 9 Hermes' document reader reads every PDF instead
+     ([ADR-0192](docs/adr/0192-files-are-read-by-the-runtime-document-reader.md)).
      Pending: the simulator's document scenario now also checks the extracted
      text.
 8. Stage timing: steps T1 to T5 of the [stage timing plan](docs/stage-timing-plan.md)

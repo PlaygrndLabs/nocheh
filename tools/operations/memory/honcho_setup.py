@@ -13,6 +13,15 @@ PROVIDER_STATE=Path(os.environ.get('NOCHEH_STATE_DIR',ROOT/'data/local')).resolv
 from tools.operations.installation.configuration import DEFAULTS,read_env,env_path
 STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
            (PROVIDER_STATE/'honcho')).resolve()
+# Peer chat takes Honcho's longest query. Nocheh's guard refuses a model request over 512 KiB (src/guard.ts), and Honcho
+# keeps each dialectic round's and each summary's messages within an input token budget. At 8 bytes a token 61,440
+# tokens fill 480 KiB, leaving 32 KiB for the tool and answer schemas Honcho adds outside the budget (12 KiB) and the
+# request's JSON. English, Persian and Russian measure about 5 to 6.7 bytes a token. Indic scripts (Hindi about 10,
+# Bengali and Tamil about 9) and text with long runs of spaces (up to about 15) can pass 512 KiB at a full budget; the
+# guard then refuses that request. src/stores/learning-engine.ts sizes the learning query from both; a test keeps
+# them equal.
+QUERY_CHARACTERS=200000
+INPUT_TOKENS=61440
 
 
 def state_for(provider_state):
@@ -68,6 +77,8 @@ def initialize(provider_state=PROVIDER_STATE):
          # neither writes nor uses one; dreams, which would write them, stay off too (ADR-0225). Rewritten on every setup.
          'PEER_CARD_ENABLED':'false',
          'DREAM_ENABLED':'false','SUMMARY_ENABLED':'true','EMBED_MESSAGES':'true','LOG_LEVEL':'WARNING',
+         'DIALECTIC_MAX_QUERY_LENGTH':str(QUERY_CHARACTERS),'DIALECTIC_MAX_INPUT_TOKENS':str(INPUT_TOKENS),
+         'SUMMARY_MAX_INPUT_TOKENS':str(INPUT_TOKENS),
          'EMBEDDING_VECTOR_DIMENSIONS':str(embedding.dimensions),'EMBEDDING_MODEL_CONFIG__TRANSPORT':embedding.provider,
          'EMBEDDING_MODEL_CONFIG__MODEL':embedding.model,
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL':'http://meter:8790/v1',
@@ -80,7 +91,11 @@ def initialize(provider_state=PROVIDER_STATE):
                     prefix+'__OVERRIDES__BASE_URL':'http://meter:8790/v1',
                     prefix+'__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'})
     env['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
-    for level in ('minimal','low','medium','high','max'): env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
+    for level in ('minimal','low','medium','high','max'):
+        env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
+        # A chat asked for a response_format, as learning is, otherwise sends a non-strict json_schema with its tools,
+        # which an OpenAI-compatible endpoint can refuse; json_object puts the schema in the prompt and Honcho repairs and checks the answer.
+        env[f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
     (state/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
     for name in ('honcho.env','meter.env'): (state/name).chmod(0o600)
     if values.get('NOCHEH_HONCHO_ENABLED')=='true':

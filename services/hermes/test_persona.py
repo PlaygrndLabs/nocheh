@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,6 +63,22 @@ class PersonaTests(unittest.TestCase):
             self.assertEqual(persona.read(turn), {'role': 'Group role', 'skills': [
                 {**COOKING, 'name': 'reminders', 'body': 'Default reminders.'}, COOKING]})
             self.assertEqual(persona.read(chat)['skills'], [], 'the owner source is never rewritten by a turn')
+
+    def test_a_turn_profile_whose_refresh_request_failed_asks_again_on_the_next_turn(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            chat = persona.chat_path(root, '-20')
+            persona.save(chat, 'Group role', [], persona.view(chat)['revision'])
+            turn = root / 'profiles' / Scopes.profile('-20:policy:3'); turn.mkdir(parents=True)
+            with patch.object(persona, '_refresh_prompts', side_effect=OSError('database is locked')):
+                with self.assertRaises(OSError): persona.materialize(root, turn, '-20')
+            self.assertFalse((turn / 'SOUL.md').exists())
+            self.assertEqual(persona.read(chat)['role'], 'Group role', 'the owner source is never removed')
+            with patch.object(persona, '_refresh_prompts') as refresh:
+                persona.materialize(root, turn, '-20')
+                persona.materialize(root, turn, '-20')
+            refresh.assert_called_once_with(turn)
+            self.assertEqual(persona.read(turn)['role'], 'Group role')
 
     def test_a_chats_project_adds_its_role_and_skills_between_the_default_and_the_chats_own(self):
         project = 'a' * 64
@@ -149,47 +164,92 @@ class PersonaTurnTests(unittest.TestCase):
             self.assertEqual(agent.valid_tool_names, {'skills_list', 'skill_view'})
             self.assertIn(COOKING['body'], viewed)
 
-    def test_a_continuing_session_rebuilds_its_prompt_after_the_role_or_skills_change(self):
+    def test_a_role_or_skill_change_rebuilds_each_continuing_sessions_prompt_once(self):
+        from contextvars import copy_context
+        from hermes_state import SessionDB
+        from run_agent import AIAgent
+        from agent import conversation_loop
+        from .assistant_turn import ALLOWED_TOOLS, OWNER_SET_TOOLS, bind_profile_home, install_tool_search_policy, verify_profile_tools
+        from .isolated_profile import database_path
+        self.addCleanup(install_tool_search_policy())
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            default, chat = persona.default_path(root), persona.chat_path(root, '-20')
+            persona.save(chat, 'You are role A.', [COOKING], persona.view(chat)['revision'])
+            turn = root / 'profiles' / Scopes.profile('-20:policy:2'); turn.mkdir(parents=True)
+            (turn / 'native-state').mkdir()
+            persona.materialize(root, turn, '-20')
+            rebuilds = []
+
+            def prompt(session):
+                # What a turn's run_conversation sends: the session's stored prompt, or a new one it stores.
+                def build():
+                    bind_profile_home(turn)
+                    database = SessionDB(database_path(turn))
+                    continuing = database.get_session(session) is not None
+                    if not continuing: database.create_session(session, source='telegram')
+                    agent = AIAgent(provider='openai', api_mode='chat_completions', model='synthetic', api_key='synthetic',
+                                    base_url='http://127.0.0.1:9/v1', enabled_toolsets=['memory', 'session_search', 'skills'],
+                                    fallback_model=None, session_db=database, session_id=session, platform='telegram',
+                                    chat_id='-20', user_id='5', chat_type='group', skip_context_files=True,
+                                    load_soul_identity=True, skip_background_review=True, quiet_mode=True, save_trajectories=False)
+                    agent.tools = [t for t in agent.tools if t['function']['name'] not in OWNER_SET_TOOLS]
+                    agent.valid_tool_names = set(agent.valid_tool_names) - OWNER_SET_TOOLS
+                    try:
+                        conversation_loop._restore_or_build_system_prompt(
+                            agent, None, [{'role': 'user', 'content': 'hello'}, {'role': 'assistant', 'content': 'hi'}] if continuing else [])
+                        verify_profile_tools(agent.valid_tool_names, ALLOWED_TOOLS)
+                        self.assertEqual(database.get_session(session)['system_prompt'], agent._cached_system_prompt)
+                        return agent._cached_system_prompt, [t['function']['name'] for t in agent.tools]
+                    finally: agent.close(); database.close()
+                rebuild = conversation_loop.rebuild_for_refresh
+                with patch.dict('os.environ', {'HERMES_HOME': str(turn)}), patch.object(
+                        conversation_loop, 'rebuild_for_refresh', lambda agent, *rest: (rebuilds.append(agent.session_id), rebuild(agent, *rest))):
+                    return copy_context().run(build)
+
+            def epoch():
+                database = SessionDB(database_path(turn))
+                try: return database.prompt_refresh_epoch('s')
+                finally: database.close()
+
+            first, tools = prompt('s')
+            self.assertTrue(first.startswith('You are role A.'))
+            self.assertEqual(prompt('s'), (first, tools), 'a continuing session reuses its prompt and tools byte for byte')
+            self.assertEqual(prompt('t')[0], first, 'another topic of the same profile')
+            persona.save(chat, 'You are role B.', [COOKING, {**COOKING, 'name': 'groceries', 'body': 'List what is missing.'}],
+                         persona.view(chat)['revision'])
+            self.assertEqual(epoch(), 0, 'the owner\'s source folder has no sessions; the turn profile is not changed yet')
+            persona.materialize(root, turn, '-20')
+            persona.materialize(root, turn, '-20')
+            self.assertEqual(epoch(), 1, 'Hermes is asked once, when the turn profile\'s files change')
+            second, kept = prompt('s')
+            self.assertTrue(second.startswith('You are role B.'))
+            self.assertIn('- groceries: ', second)
+            self.assertEqual(kept, tools, 'the session keeps its tools')
+            self.assertEqual([prompt('s'), prompt('s')], [(second, tools)] * 2, 'later turns reuse the new prompt byte for byte')
+            self.assertEqual(prompt('t')[0], second)
+            self.assertEqual(prompt('t')[0], second)
+            self.assertEqual(rebuilds, ['s', 't'], 'each session rebuilds once')
+            persona.save(default, '', [{**COOKING, 'name': 'reminders', 'body': 'Remind the family.'}], persona.view(default)['revision'])
+            persona.materialize(root, turn, '-20')
+            self.assertIn('- reminders: ', prompt('s')[0], 'a change to the default reaches the chat\'s sessions too')
+            self.assertEqual((epoch(), rebuilds), (2, ['s', 't', 's']))
+            self.assertFalse(any(database_path(path).exists() for path in (default, chat)), 'a save never creates a session database')
+
+    def test_a_save_into_a_profile_that_runs_turns_asks_hermes_to_refresh_its_prompts(self):
         from hermes_state import SessionDB
         from .isolated_profile import database_path
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            chat = persona.chat_path(root, '-20')
-            turn = root / 'profiles' / Scopes.profile('-20:policy:2'); turn.mkdir(parents=True)
-            (turn / 'native-state').mkdir()
-            persona.materialize(root, turn, '-20')
-            database = SessionDB(database_path(turn))
-            database.create_session('s', source='telegram')
-            database.update_system_prompt('s', 'Prompt built before any role')
-            database.update_session_tool_names('s', ['memory'])
-            stored = lambda: (database.get_session('s').get('system_prompt'), database.get_session('s').get('tool_names'))
-            self.assertTrue(persona.refresh_prompt(turn, database, 's'), 'a session never checked is rebuilt once')
-            self.assertEqual(stored(), (None, None))
-            database.update_system_prompt('s', 'Prompt with the current role')
-            self.assertFalse(persona.refresh_prompt(turn, database, 's'))
-            self.assertEqual(stored()[0], 'Prompt with the current role')
-            persona.save(chat, 'Group role', [COOKING], persona.view(chat)['revision'])
-            persona.materialize(root, turn, '-20')
-            self.assertTrue(persona.refresh_prompt(turn, database, 's'))
-            self.assertEqual(stored()[0], None)
-            self.assertFalse(persona.refresh_prompt(turn, database, 'new-session'), 'a new session builds its own prompt')
-            database.update_system_prompt('s', 'Prompt with the group role')
-            database.create_session('t', source='telegram')
-            database.update_system_prompt('t', 'Prompt of another topic')
-            self.assertTrue(persona.refresh_prompt(turn, database, 't'), 'a session never checked is rebuilt once')
-            database.update_system_prompt('t', 'Prompt of another topic')
-            for session in ('s', 't', 's', 't'):
-                self.assertFalse(persona.refresh_prompt(turn, database, session),
-                                 'sessions of one profile taking turns keep their prompts, and their prompt cache')
-            self.assertEqual(stored()[0], 'Prompt with the group role')
-            persona.save(chat, 'Newer role', [COOKING], persona.view(chat)['revision'])
-            persona.materialize(root, turn, '-20')
-            self.assertEqual([persona.refresh_prompt(turn, database, session) for session in ('s', 't', 's', 't')],
-                             [True, True, False, False], 'a role change rebuilds each session once')
-            with patch.object(persona, 'PROMPT_SESSIONS', 2):
-                for session in ('a', 'b', 'c'):
-                    persona.refresh_prompt(turn, database, session)
-                self.assertEqual(list(json.loads((turn / 'native-state' / 'persona-prompt.json').read_text())['sessions']), ['b', 'c'])
+            chat = persona.chat_path(root, '-20'); (chat / 'native-state').mkdir(parents=True)
+            database = SessionDB(database_path(chat))
+            try:
+                database.create_session('s', source='telegram')
+                persona.save(chat, 'Group role', [], persona.view(chat)['revision'])
+                self.assertEqual(database.prompt_refresh_epoch('s'), 1)
+                persona.materialize(root, chat, '-20')
+                self.assertEqual(database.prompt_refresh_epoch('s'), 1, 'a turn in the chat\'s own profile reads its files as saved')
+            finally: database.close()
 
 if __name__ == '__main__':
     unittest.main()
