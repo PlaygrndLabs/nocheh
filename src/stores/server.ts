@@ -36,6 +36,7 @@ import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
 import {afterPending,jobRun} from './guards.js';
+import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -70,6 +71,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.memory.prepareRequest(body));
     }
     const principal=reader(req,config.token);
+    // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0231).
+    // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
+    if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
     if(req.method==='GET'&&path==='/v1/runtime') {
       admin(principal);
       const runtimeStatus=await call('status',{},5000).catch(()=>({ok:false,error:'runtime_unavailable'}));

@@ -15,6 +15,8 @@ import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
 import {RuntimeTurnRepository} from '../stores/turns.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
+import {jobErrors} from '../mcp/tools.js';
+import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 
 export interface TurnBinding {
   event_id:string;scope:string;profile:string;logical_profile:string;owner:boolean;
@@ -29,7 +31,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 /** A fixed label for preparation-only guard requests; nothing is sent there. */
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
-  ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions\/[a-f0-9]{64}|telegram\/destinations)$/],
+  ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations)$/],
   ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context|search))|jobs\/(start|status|stop)|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
@@ -86,8 +88,9 @@ export async function turnBinding(pool:pg.Pool,principal:Reader):Promise<TurnBin
 export class ProviderFailure extends HttpError {
   constructor(readonly providerStatus:number){super([401,403,429].includes(providerStatus)?providerStatus:503,'provider_request_failed');}
 }
-/** What a job request may be told to correct, as services/hermes/archive_tools.py JOB_ERRORS names it; any other refusal stays opaque. */
-export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed']);
+export {jobErrors};
+/** What a proposal may be told: the owner turned this tool off for the chat. */
+const proposeErrors=new Set(['tool_disabled_by_owner']);
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
 async function refusalCode(response:Response,max=4096):Promise<string|null> {
   const chunks=[];let size=0;
@@ -126,6 +129,8 @@ export function brokerServer(options:BrokerOptions) {
     }
     const principal=reader(req,options.token),job=jobRun(principal);
     await afterPending(job,async()=>options.assertReady?.());
+    // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0231).
+    if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:true});
     // The box's chat copy also needs the launcher's box token, and is never read with an owner credential.
     const copy=path==='/v1/box/chat'&&req.method==='GET';
     if(copy&&(principal.admin||!box||!boxTokenValid(req.headers['x-nocheh-box-token'])))throw new HttpError(403,'job_box_not_allowed');
@@ -143,7 +148,7 @@ export function brokerServer(options:BrokerOptions) {
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
     const timings:ModelTimings={};
     const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{
-      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{})};
+      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{}),...(principal.brain?{brain:principal.brain}:{})};
       const decision=await evaluate(options.pool,effect);
       trace={effect,decision,started:false,closed:false};
       await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);
@@ -188,9 +193,10 @@ export function brokerServer(options:BrokerOptions) {
         if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/start','/v1/jobs/stop'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok) {
-          // A job request is told what to correct, such as a member's daily limit or a box it may not have.
-          const code=relay.startsWith('/v1/jobs/')&&response.status>=400&&response.status<500?await refusalCode(response):(await response.body?.cancel(),null);
-          throw new HttpError(response.status,code&&jobErrors.has(code)?code:'scoped_archive_unavailable');
+          // A job request is told what to correct, such as a member's daily limit or a box it may not have; a proposal, that the owner turned its tool off here.
+          const told=relay.startsWith('/v1/jobs/')?jobErrors:relay==='/v1/tools/propose'?proposeErrors:null;
+          const code=told&&response.status>=400&&response.status<500?await refusalCode(response):(await response.body?.cancel(),null);
+          throw new HttpError(response.status,code&&told?.has(code)?code:'scoped_archive_unavailable');
         }
         // A box page holds at most 600,000 characters of message texts, which stays well within 8 MiB.
         await stream(response,principal,res,file?26*1024*1024:8*1024*1024);
@@ -206,7 +212,7 @@ export function brokerServer(options:BrokerOptions) {
         if(payload.model!==options.model)throw new HttpError(403,'model_configuration_mismatch');
       }catch(error){
         if(error instanceof HttpError){
-          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{})};
+          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...(principal.brain?{brain:principal.brain}:{})};
           const current=await evaluate(options.pool,effect);
           const decision:Decision={outcome:'deny',origin:'mandatory',revision:current.revision,rule:error.code};
           await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);

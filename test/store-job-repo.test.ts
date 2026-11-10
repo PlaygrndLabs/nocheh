@@ -1,6 +1,5 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync,readFileSync} from 'node:fs';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -10,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {backgroundCard} from '../src/prompts.js';
 import {brokerServer,jobErrors} from '../src/security/broker.js';
+import {jobErrors as toolJobErrors} from '../src/mcp/tools.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {storageServer} from '../src/stores/server.js';
@@ -17,10 +17,7 @@ import {storageServices} from '../src/stores/services.js';
 
 // The job tool's own list of codes it may relay; the broker relays exactly these.
 test('the broker relays the job codes the job tool names, the GitHub copy\'s among them',()=>{
-  const places=[new URL('../../services/hermes/archive_tools.py',import.meta.url).pathname,join(process.env.PYTHONPATH??'/nonexistent','services/hermes/archive_tools.py')];
-  const source=readFileSync(places.find(place=>existsSync(place))!,'utf8'),tuple=source.match(/^JOB_ERRORS=\(([^)]*)\)$/m);
-  assert.ok(tuple,'JOB_ERRORS is one tuple line');
-  assert.deepEqual([...jobErrors].sort(),[...tuple[1]!.matchAll(/'([a-z_]+)'/g)].map(match=>match[1]!).sort());
+  assert.equal(jobErrors,toolJobErrors);
   assert.ok(jobErrors.has('job_repo_not_allowed'));
 });
 
