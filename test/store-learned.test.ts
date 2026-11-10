@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {learningResult,learningResultSchema,parseInterpretations,triggeredInterpretations,applicableInterpretations,type Interpretation,type InterpretationVersion} from '../src/interpretations.js';
+import {learningPrompt} from '../src/prompts.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
@@ -66,6 +67,14 @@ test('the learning schema leaves item checks to Nocheh and puts evidence last in
   assert.deepEqual(fields(sections.organization.properties.assignments).sort(),['evidence_ids','expected_revision','project_id','project_key','purpose_evidence','reason','space_id']);
   // Nothing in it is an enum, which Honcho would enforce for the whole answer instead of Nocheh dropping one item.
   assert.ok(!JSON.stringify(learningResultSchema).includes('"enum"'));
+  // The prompt describes each item's fields in the schema's order, so the model writes evidence_ids last too.
+  const described:[RegExp,{items:{properties:object}}][]=[[/Interpretation items use [^.]*\./,sections.interpretations],[/Entity suggestions use [^.]*\./,sections.entity_suggestions],
+    [/Entity claims use [^.]*\./,sections.entity_claims],[/creates:\[\{[^}]*\}/,sections.organization.properties.creates],[/assignments:\[\{[^}]*\}/,sections.organization.properties.assignments]];
+  for(const [pattern,section] of described){
+    const text=learningPrompt.match(pattern)![0],last=Math.max(...fields(section).map(field=>text.lastIndexOf(field)));
+    assert.equal(last,text.lastIndexOf('evidence_ids'),text);
+  }
+  assert.ok(learningPrompt.includes('Write evidence_ids last in every item.'));
 });
 test('learning result sections keep valid leading items and record what was dropped',()=>{
   const source=digest('limit-trigger'),evidence=[{reference:{store:'archive' as const,kind:'event' as const,id:source,revision:'1',input_hash:digest(source)},text:'Synthetic source',space:'-42'}];
