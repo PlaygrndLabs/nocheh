@@ -1,11 +1,12 @@
-"""Native Hermes plugin entry point; no bot or agent implementation lives here."""
+"""Native Hermes plugin entry point; no bot or agent implementation lives here.
+
+Nocheh's data tools are not plugin tools: each turn connects Nocheh's MCP endpoint (assistant_turn.connect_data_tools).
+"""
 
 
 def register(ctx):
     # Hermes loads plugins under hermes_plugins.NAME. Import runtime context
-    # modules by their stable name so dispatcher and tool share one ContextVar.
-    from services.hermes.archive_tools import register as register_archive
-    register_archive(ctx)
+    # modules by their stable name so the turn and its hooks share one module state.
     import os
     # Hermes's own terminal, file and code tools run only in a job's sealed box: the hook
     # blocks them everywhere else, and the box backend exists only where its socket is mounted.

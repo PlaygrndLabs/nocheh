@@ -14,13 +14,13 @@ from .scopes import Scopes,verify_capability
 from .assistant_gateway import AssistantGateway,prepare_profile
 from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,BACKGROUND_TOOLS,BACKGROUND_TOOLSETS,OWNER_SET_TOOLS,TURN_TOOLSETS,UnexpectedProfileTool,turn_tools,verify_profile_tools
 from .capture import canonical,immutable_file
+from . import mcp_fixture
 
 # The exact tools of a reply turn and of a job's plain and box steps. A job's turns never have the job tool.
-REPLY_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_archive_page','nocheh_memory_search','nocheh_action_request',
-             'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall','nocheh_knowledge_inspect','nocheh_knowledge_propose',
-             'nocheh_knowledge_status','nocheh_owner_read','nocheh_telegram_destinations','nocheh_tasks','nocheh_notion','nocheh_background_job','skills_list','skill_view'}
-JOB_TOOLS=(REPLY_TOOLS-{'nocheh_background_job'})|{'todo_list'}
-JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','nocheh_shell','nocheh_browser'})|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
+# Nocheh's data tools come from its MCP endpoint; Hermes names each one mcp__nocheh__<tool>.
+REPLY_TOOLS={'memory','session_search','skills_list','skill_view',*('mcp__nocheh__'+name for name in mcp_fixture.TOOLS)}
+JOB_TOOLS=(REPLY_TOOLS-{'mcp__nocheh__background_job'})|{'todo_list'}
+JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','mcp__nocheh__shell','mcp__nocheh__browser'})|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
 
 
 class ScopeTests(unittest.TestCase):
@@ -131,7 +131,12 @@ class ScopeTests(unittest.TestCase):
             token=set_hermes_home_override(str(profile))
             try:
                 discover_plugins()
+                # Without Nocheh's endpoint the turn has none of the data tools; the plugin registers none.
                 definitions=get_tool_definitions(enabled_toolsets=TURN_TOOLSETS,quiet_mode=True)
+                self.assertFalse({item['function']['name'] for item in definitions}&mcp_fixture.NAMES)
+                # Connected as a turn connects them, through Hermes's own MCP client.
+                with mcp_fixture.connected():
+                    definitions=get_tool_definitions(enabled_toolsets=TURN_TOOLSETS,quiet_mode=True)
                 names={item['function']['name'] for item in definitions}
                 # Hermes offers a skill-writing tool too; turns drop it because the owner sets skills.
                 self.assertEqual(names&OWNER_SET_TOOLS,OWNER_SET_TOOLS)
@@ -142,10 +147,10 @@ class ScopeTests(unittest.TestCase):
 
     def test_turn_tools_are_exact_and_job_turns_have_no_job_tool(self):
         self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
-        self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'nocheh_background_job'},JOB_TOOLS))
-        self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'nocheh_background_job','nocheh_shell','nocheh_browser'},JOB_BOX_TOOLS))
-        self.assertIn('nocheh_background_job',REPLY_TOOLS)
-        for tools in (JOB_TOOLS,JOB_BOX_TOOLS):self.assertNotIn('nocheh_background_job',tools)
+        self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job'},JOB_TOOLS))
+        self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
+        self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
+        for tools in (JOB_TOOLS,JOB_BOX_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
 
     def test_background_job_steps_add_only_the_native_todo_list(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
@@ -156,11 +161,12 @@ class ScopeTests(unittest.TestCase):
             token=set_hermes_home_override(str(profile))
             try:
                 discover_plugins()
-                definitions=get_tool_definitions(enabled_toolsets=BACKGROUND_TOOLSETS,quiet_mode=True)
+                with mcp_fixture.connected():
+                    definitions=get_tool_definitions(enabled_toolsets=BACKGROUND_TOOLSETS,quiet_mode=True)
                 names={item['function']['name'] for item in definitions}
                 removed,allowed=turn_tools(True,False)
                 self.assertEqual(names-removed,JOB_TOOLS);self.assertEqual(allowed,JOB_TOOLS);self.assertEqual(BACKGROUND_TOOLS,JOB_TOOLS)
-                self.assertEqual(BACKGROUND_TOOLS^ALLOWED_TOOLS,{'todo_list','nocheh_background_job'})
+                self.assertEqual(BACKGROUND_TOOLS^ALLOWED_TOOLS,{'todo_list','mcp__nocheh__background_job'})
                 verify_profile_tools(names-removed,allowed)
             finally:reset_hermes_home_override(token)
 
@@ -183,7 +189,9 @@ class ScopeTests(unittest.TestCase):
                 try:
                     self.assertEqual(tool_search.load_config().enabled,'off')
                     self.assertEqual(tool_search.load_config_readonly().enabled,'off')
-                    definitions=get_tool_definitions(enabled_toolsets=TURN_TOOLSETS,quiet_mode=False)
+                    # Hermes would put every MCP tool behind its search bridge; the turn keeps them in view.
+                    with mcp_fixture.connected():
+                        definitions=get_tool_definitions(enabled_toolsets=TURN_TOOLSETS,quiet_mode=False)
                     names={item['function']['name'] for item in definitions}
                     self.assertEqual(names-OWNER_SET_TOOLS,ALLOWED_TOOLS)
                 finally:restore()

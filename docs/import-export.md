@@ -86,8 +86,9 @@ credential without receiving administrative API authority.
 | POST `/v1/imports/sources` | Source-export record; no historical dispatch |
 | GET `/v1/status` | Service heartbeats, pending/failed archive work |
 
-The `nocheh_archive_search`, `nocheh_archive_read`, `nocheh_archive_page`
+The `archive_search`, `archive_read`, `archive_page`
 (one chat in time order, GET `/v1/archive/page?chat=&from=&to=&after=&limit=`)
-and `nocheh_memory_search` (Honcho search by meaning in learned chats) native
-Hermes tools carry source references and bounded context. Their scope credential must be bound by
-the trusted dispatcher; an unbound invocation fails before network access.
+and `memory_search` (Honcho search by meaning in learned chats) tools of Nocheh's
+MCP endpoint (`/mcp`), which Hermes offers as `mcp__nocheh__archive_search` and so on,
+carry source references and bounded context. Each Hermes turn connects with its own turn
+credential, held only in that turn's memory; a call without it is refused.

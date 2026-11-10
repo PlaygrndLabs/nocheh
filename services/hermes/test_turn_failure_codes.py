@@ -9,6 +9,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from . import mcp_fixture
 
 
 def sse(event, data):
@@ -95,21 +96,24 @@ CHILD = ("import sys\nfrom unittest.mock import patch\n"
 
 
 class TurnFailureCodeTests(unittest.TestCase):
-    def turn(self, script, guard):
+    def turn(self, script, guard, tools=mcp_fixture.TOOLS, down=False):
         server, calls, checks = broker(script, guard)
         root = Path(__file__).resolve().parents[2]
         url = 'http://127.0.0.1:%d' % server.server_address[1]
         try:
-            with tempfile.TemporaryDirectory() as folder:
+            with tempfile.TemporaryDirectory() as folder, mcp_fixture.Endpoint(tools=tools) as endpoint:
                 profile = Path(folder) / 'profile'
                 (profile / 'native-state').mkdir(parents=True)
                 (profile / 'memories').mkdir()
+                if down:
+                    endpoint.server.shutdown()
+                    endpoint.server.server_close()
                 body = {'session_id': 's', 'chat_id': '-20', 'user_id': '5', 'owner': True, 'text': 'weather?', 'channel': 'telegram',
                         'memory_context': 'evidence', 'model': 'synthetic', 'api_key': 'synthetic', 'stream': True,
                         'base_url': url + '/anthropic', 'provider': 'anthropic', 'api_mode': 'anthropic_messages',
                         'archive_credential': 'turn.synthetic', 'turn_deadline_epoch': time.time() + 120}
                 process = subprocess.run([sys.executable, '-c', CHILD, url + '/anthropic'], input=json.dumps(body), cwd=root,
-                                         env={**os.environ, 'HERMES_HOME': str(profile), 'GUARD_URL': url},
+                                         env={**os.environ, 'HERMES_HOME': str(profile), 'GUARD_URL': url, 'ARCHIVE_URL': endpoint.url},
                                          capture_output=True, text=True, timeout=240)
                 self.assertEqual(process.returncode, 0, process.stderr[-3000:])
                 # Hermes writes some notices to the terminal itself; the turn's own lines are JSON.
@@ -139,6 +143,16 @@ class TurnFailureCodeTests(unittest.TestCase):
         result, calls, checks = self.turn([('ok',)], [('json', 409, {'error': 'detector_contract_rejected'})])
         self.assertEqual((result['state'], calls), ('failed', []))
         self.assertEqual((result['failure_reason'], result.get('failure_cause')), ('nocheh_error', 'detector_contract_rejected'))
+
+    def test_a_turn_without_nochehs_data_tools_stops_before_the_model(self):
+        # Nocheh's endpoint is down, or it lists fewer tools than the turn expects: the turn names the cause and no model call runs.
+        for case in ({'down': True}, {'tools': mcp_fixture.TOOLS[:-1]}):
+            with self.subTest(**case):
+                started = time.monotonic()
+                result, calls, checks = self.turn([('ok',)], [('pass',)], **case)
+                self.assertEqual((result['state'], result['error_code'], calls, checks), ('failed', 'data_tools_unavailable', [], []))
+                self.assertEqual((result['failure_reason'], result.get('failure_cause')), ('nocheh_error', 'data_tools_unavailable'))
+                self.assertLess(time.monotonic() - started, 60)
 
     def test_a_turn_that_answered_keeps_no_failure(self):
         result, calls, checks = self.turn([('ok',)], [('pass',)])

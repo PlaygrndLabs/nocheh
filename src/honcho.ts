@@ -189,7 +189,7 @@ export async function memoryContext(pool:pg.Pool,principal:Reader) {
   await allowPrepared(pool,principal,{text});await currentGeneration(pool,current.id);await assertAudience(pool,principal);
   return {sources:text?[{source:'nocheh:honcho:'+current.id,kind:'memory_inference',text}]:[],limited_memory:false,
    syncing:current.state==='building',context_refreshed_at:cached.refreshed_at.toISOString(),
-   note:'Bounded stored Honcho context. Use nocheh_memory_recall when relevant details are missing; absence here does not mean the memory is absent.'};
+   note:'Bounded stored Honcho context. Use mcp__nocheh__memory_recall when relevant details are missing; absence here does not mean the memory is absent.'};
  }catch{await assertAudience(pool,principal);return limited;}
 }
 export async function reconcileHonchoReceipt(pool:pg.Pool,id:string,call:HonchoCall):Promise<boolean> {

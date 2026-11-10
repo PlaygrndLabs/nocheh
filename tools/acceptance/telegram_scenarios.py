@@ -362,7 +362,7 @@ class Scenarios:
         self.state['fact'] = fact
         self.state['fact_event'], _ = self.turn(fact, OWNER)
         _, text = self.turn(self.f.message(OWNER, 'دنبالش بگرد [[search:PRIVFACT91]]'), OWNER)
-        self.gate('archive_tool_called', any(event.get('tool') == 'nocheh_archive_search' and event['phase'] == 'final'
+        self.gate('archive_tool_called', any(event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'
                                               and 'PRIVFACT91' in event.get('argument', '') for event in self.f.brain()))
         self.gate('owner_private_search_finds_fact', 'PRIVFACT91' in text and 'فیروزه' in text, excerpt=text[:300])
 
@@ -374,7 +374,7 @@ class Scenarios:
         _, text = self.turn(self.f.message(GROUP, 'دنبالش بگرد [[search:PRIVFACT91]]', topic=11), GROUP, 11)
         self.gate('group_search_withholds_private_fact', 'فیروزه' not in text and 'PRIVFACT91 ' not in text.replace('[[search:PRIVFACT91]]', ''),
                   excerpt=text[:300])
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_archive_search' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
         self.gate('group_tool_result_withholds_fact', 'فیروزه' not in final['result'], result=final['result'][:300])
         _, text = self.turn(self.f.message(GROUP, 'چه می‌دانی؟ [[context:فیروزه]]', topic=11), GROUP, 11)
         events = [event for event in self.f.brain() if event.get('directive') == 'context']
@@ -384,7 +384,7 @@ class Scenarios:
 
     def owner_recall(self):
         _, text = self.turn(self.f.message(OWNER, 'یادت هست؟ [[recall:رنگ مورد علاقه خواهر]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_memory_recall' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
         self.gate('recall_tool_returned', 'error' not in final['result'][:40] or 'limited' in final['result'], result=final['result'][:400])
 
     def secret_is_guarded(self):
@@ -409,7 +409,7 @@ class Scenarios:
         self.gate('retired', result.get('retired') is True, revision=result.get('revision'))
         self.wait('retirement_visible', lambda: self.f.app('/v1/sources/'+event_id+'/retirement')['retired'] is True, 60)
         _, text = self.turn(self.f.message(OWNER, 'دوباره بگرد [[search:PRIVFACT91]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_archive_search' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
         sources = json.loads(final['result'])['sources']
         self.gate('retired_source_not_retrieved', all(row['id'] != event_id for row in sources),
                   returned=[row['kind'] for row in sources])
@@ -419,7 +419,7 @@ class Scenarios:
             self.f.app('/v1/sources/'+reply['event_id']+'/retirement', {'retired': True, 'expected_revision': reply['revision'],
                        'operation_id': 'scenario-retire-reply-'+reply['event_id'][:16]})
         _, again = self.turn(self.f.message(OWNER, 'یک بار دیگر [[search:PRIVFACT91]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_archive_search' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
         retired = {reply['event_id'] for reply in quoting}
         self.gate('retired_replies_not_retrieved', all(row['id'] not in retired for row in json.loads(final['result'])['sources']))
         # Assistant replies that quoted the fact are separate delivered sources;
@@ -677,13 +677,13 @@ class Scenarios:
         root = {'message_id': topic, 'date': 1, 'chat': {'id': GROUP, 'type': 'supergroup', 'is_forum': True}, 'forum_topic_created': {'name': name, 'icon_color': 7322096}}
         self.turn(self.f.message(GROUP, 'سلام از تاپیک برنامه‌ریزی', topic=topic, reply_to=root), GROUP, topic)
         _, text = self.turn(self.f.message(OWNER, 'گروه‌ها و تاپیک‌هایم را فهرست کن [[owner:conversations]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_owner_read' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
         items = json.loads(final['result'])['items']
         named = {item['space_id']: item['name'] for item in items}
         self.gate('owner_sees_groups', str(GROUP) in named and str(OTHER_GROUP) in named, groups=sorted(k for k in named if '/topic/' not in k))
         self.gate('topic_named_from_root_message', named.get(str(GROUP)+'/topic/'+str(topic)) == name, name=named.get(str(GROUP)+'/topic/'+str(topic)))
         self.turn(self.f.message(GROUP, 'فهرست گروه‌ها [[owner:conversations]]', topic=11), GROUP, 11)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_owner_read' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
         self.gate('group_turn_cannot_read_owner_directory', 'owner_read_unavailable' in final['result'] and 'items' not in final['result'])
 
     def unparseable_update_does_not_wedge_polling(self):

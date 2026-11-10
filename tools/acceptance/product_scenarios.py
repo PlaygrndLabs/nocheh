@@ -234,7 +234,7 @@ class ProductScenarios(Scenarios):
         self.gate('nothing_else_sent', not [item for item in self.new(before) if item['message']['chat']['id'] not in (STRANGER,)])
         # The owner's own search and chat list never surface what the stranger wrote or named.
         self.turn(self.f.message(OWNER, 'دنبالش بگرد [[search:STRANGER61]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_archive_search' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
         # The owner's own question carries the marker too; only the stranger's message must stay out.
         found = json.loads(final['result']).get('sources', [])
         self.gate('owner_search_never_finds_it', not [row for row in found if row.get('scope') == str(STRANGER) or 'owner secrets' in (row.get('text') or '')],
@@ -244,7 +244,7 @@ class ProductScenarios(Scenarios):
         self.finished(self.captured(outside))
         for view in ('conversations', 'telegram-identities'):
             self.turn(self.f.message(OWNER, 'گفتگوها [[owner:'+view+']]'), OWNER)
-            final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_owner_read' and event['phase'] == 'final'][-1]
+            final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
             self.gate('owner_list_hides_strangers_'+view, 'STRANGER' not in final['result'] and '"'+str(STRANGER)+'"' not in final['result']
                       and '"'+str(UNSELECTED_GROUP)+'"' not in final['result'], excerpt=final['result'][:300])
         # The dashboard still shows the owner what was tried.
@@ -302,7 +302,7 @@ class ProductScenarios(Scenarios):
         note = 'Short line one\nShort line two'
         call = {'url': 'https://mcp.example.test/mcp', 'tool': 'create-page',
                 'input': {'pages': [{'properties': {'title': 'Open items '+marker}, 'content': content, 'note': note}]}}
-        request = self.f.message(OWNER, 'یک صفحه [[tool:nocheh_mcp '+json.dumps(call)+']] [[after:silent]]')
+        request = self.f.message(OWNER, 'یک صفحه [[tool:mcp__nocheh__mcp '+json.dumps(call)+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         text, entities = card['message']['text'], card['message'].get('entities') or []
@@ -325,7 +325,7 @@ class ProductScenarios(Scenarios):
         # With the asker's own summary the card leads with it, and the exact fields fold under it into one quote that
         # opens on a tap, their labels still bold and no quote inside it (ADR-0224).
         said = 'Add a made-up page with two open items '+marker
-        request = self.f.message(OWNER, 'یک صفحه دیگر [[tool:nocheh_mcp '+json.dumps({**call, 'summary': said})+']] [[after:silent]]')
+        request = self.f.message(OWNER, 'یک صفحه دیگر [[tool:mcp__nocheh__mcp '+json.dumps({**call, 'summary': said})+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('summary_card_posted', lambda: self.cards(before, OWNER), 120)[0]
         text, entities = card['message']['text'], card['message'].get('entities') or []
@@ -602,9 +602,9 @@ class ProductScenarios(Scenarios):
         voices = self.f.http('/fixture/stats')['transcriptions']
         transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id IN ("+listed(ids)+")")
         self.gate('off_voice_note_transcribed', transcript != '0', count=transcript)
-        found = self.tool_call('nocheh_archive_search', {'query': off+'W'}, OTHER_GROUP)
+        found = self.tool_call('mcp__nocheh__archive_search', {'query': off+'W'}, OTHER_GROUP)
         self.gate('off_found_by_words_in_its_group', off+'M' in json.dumps(found, ensure_ascii=False), result=str(found)[:300])
-        page = self.tool_call('nocheh_archive_page', {}, OTHER_GROUP)
+        page = self.tool_call('mcp__nocheh__archive_page', {}, OTHER_GROUP)
         self.gate('off_read_in_order_in_its_group', off+'M' in json.dumps(page, ensure_ascii=False), items=len(page.get('items', [])))
         live = 'LRNLIVE'+str(self.f.ids())
         self.turn(self.f.message(OTHER_GROUP, 'پیام تازه '+live), OTHER_GROUP)
@@ -616,14 +616,14 @@ class ProductScenarios(Scenarios):
         # Ten results, the most a search returns: the fixture's vectors come from a hash of the text, so beside the
         # word match, ranking by meaning is random, and a group with many earlier messages can push the export
         # out of five. The word match keeps it within the first ten.
-        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W', 'limit': 10}, OTHER_GROUP)
+        meaning = self.tool_call('mcp__nocheh__memory_search', {'query': off+'W', 'limit': 10}, OTHER_GROUP)
         self.gate('off_not_found_by_meaning', off+'M' not in json.dumps(meaning, ensure_ascii=False), result=str(meaning)[:300])
 
         # 2. Box on, chat kept private to the owner.
         self.run_import(self.learning_export(20044, private), None, True, ready=True)
         kept = imported(private)
         self.gate('private_choice_recorded', len(kept) == 2 and consent(kept) == '2', messages=len(kept), consent=consent(kept))
-        owner = self.tool_call('nocheh_archive_search', {'query': private+'W'}, OWNER)
+        owner = self.tool_call('mcp__nocheh__archive_search', {'query': private+'W'}, OWNER)
         self.gate('private_found_by_words_in_owner_chat', private+'M' in json.dumps(owner, ensure_ascii=False), result=str(owner)[:300])
         later = 'LRNLIVE'+str(self.f.ids())
         self.turn(self.f.message(OWNER, 'پیام تازه '+later), OWNER)
@@ -655,7 +655,7 @@ class ProductScenarios(Scenarios):
         notes = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE source_reference->>'id' IN ("+listed(ids)+")")
         questions = self.f.query('nocheh_control', "SELECT count(*) FROM interpretation_jobs WHERE source_reference->>'id' IN ("+listed(ids)+")")
         self.gate('again_no_notes_or_learning_questions', notes == '0' and questions == '0', notes=notes, questions=questions)
-        meaning = self.tool_call('nocheh_memory_search', {'query': off+'W', 'limit': 10}, OTHER_GROUP)
+        meaning = self.tool_call('mcp__nocheh__memory_search', {'query': off+'W', 'limit': 10}, OTHER_GROUP)
         self.gate('again_found_by_meaning', off+'M' in json.dumps(meaning, ensure_ascii=False), result=str(meaning)[:300])
 
     # Memory search model ----------------------------------------------------------------------------
@@ -722,8 +722,8 @@ class ProductScenarios(Scenarios):
     # Tasks ---------------------------------------------------------------------------------------
 
     def task_tool(self, arguments, chat=OWNER, topic=None):
-        _, text = self.turn(self.f.message(chat, 'کارها [[tool:nocheh_tasks '+json.dumps(arguments, ensure_ascii=False)+']]', topic=topic), chat, topic)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_tasks' and event['phase'] == 'final'][-1]
+        _, text = self.turn(self.f.message(chat, 'کارها [[tool:mcp__nocheh__tasks '+json.dumps(arguments, ensure_ascii=False)+']]', topic=topic), chat, topic)
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]
         try:
             return json.loads(final['result'])
         except ValueError:
@@ -756,8 +756,8 @@ class ProductScenarios(Scenarios):
     # Reading a chat --------------------------------------------------------------------------------------
 
     def page_tool(self, arguments, chat, topic=None):
-        self.turn(self.f.message(chat, 'مرور [[tool:nocheh_archive_page '+json.dumps(arguments)+']]', topic=topic), chat, topic)
-        final = [event for event in self.f.brain() if event.get('tool') == 'nocheh_archive_page' and event['phase'] == 'final'][-1]
+        self.turn(self.f.message(chat, 'مرور [[tool:mcp__nocheh__archive_page '+json.dumps(arguments)+']]', topic=topic), chat, topic)
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_page' and event['phase'] == 'final'][-1]
         try:
             return json.loads(final['result'])
         except ValueError:
@@ -787,7 +787,7 @@ class ProductScenarios(Scenarios):
         """The owner's message asking for a job. ]] is escaped in the job's JSON, so the scripted model reads the
         job's directives only in the job's own run."""
         encoded = json.dumps({'action': 'start', **job}).replace(']]', '\\u005d\\u005d')
-        return self.f.message(OWNER, text+' [[tool:nocheh_background_job '+encoded+']] [[after:silent]]')
+        return self.f.message(OWNER, text+' [[tool:mcp__nocheh__background_job '+encoded+']] [[after:silent]]')
 
     @staticmethod
     def hidden(word):
@@ -803,13 +803,13 @@ class ProductScenarios(Scenarios):
 
     def searches(self, mark, count):
         """Archive searches for mark+'X0' to mark+'X<count-1>', none of which any message says."""
-        return ' '.join('[[tool:nocheh_archive_search {"mode":"text","query":"%s","limit":1}]]' % self.hidden(mark+'X'+str(index))
+        return ' '.join('[[tool:mcp__nocheh__archive_search {"mode":"text","query":"%s","limit":1}]]' % self.hidden(mark+'X'+str(index))
                         for index in range(count))
 
     @staticmethod
     def called(events, word, first=False):
         """The index of the last (or first) brain event that called the search for `word`, or None."""
-        found = [index for index, event in enumerate(events) if event.get('phase') == 'call' and event.get('tool') == 'nocheh_archive_search'
+        found = [index for index, event in enumerate(events) if event.get('phase') == 'call' and event.get('tool') == 'mcp__nocheh__archive_search'
                  and word[1:]+'"' in (event.get('argument') or '')]
         return (found[0] if first else found[-1]) if found else None
 
@@ -838,7 +838,7 @@ class ProductScenarios(Scenarios):
 
     def search_lines(self, before):
         """How many search results the job's report quotes, over every part it was sent in."""
-        return sum((row['message'].get('text') or '').count('[brain] nocheh_archive_search:') for row in self.job_replies(before))
+        return sum((row['message'].get('text') or '').count('[brain] mcp__nocheh__archive_search:') for row in self.job_replies(before))
 
     def stop_button(self, card):
         """The card's buttons while it shows exactly one: the job's Stop."""
@@ -878,7 +878,7 @@ class ProductScenarios(Scenarios):
         self.gate('job_press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
         stop = self.wait('job_card_has_stop_button', lambda: self.stop_button(card), 60, 1)
         self.gate('stop_button_named', stop[0]['text'] == '🛑 Stop', button=stop[0]['text'])
-        report = self.wait('job_report_sent', lambda: [row for row in self.job_replies(before) if 'nocheh_archive_search' in (row['message'].get('text') or '')], 420)
+        report = self.wait('job_report_sent', lambda: [row for row in self.job_replies(before) if 'mcp__nocheh__archive_search' in (row['message'].get('text') or '')], 420)
         self.gate('job_report_once', len(report) == 1, count=len(report))
         self.gate('job_report_read_the_archive', 'JOBMARK1' in report[0]['message']['text'], report=report[0]['message']['text'][:300])
         self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
@@ -993,9 +993,9 @@ class ProductScenarios(Scenarios):
         # Inside the proposal's own directive the instruction's braces are JSON escapes, so its directives stay whole.
         encoded = json.dumps(instruction).replace('{', '\\u007b').replace('}', '\\u007d')
         proposal = '{"action": "start", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
-        request = self.f.message(OWNER, 'کار در جعبه JOBMARK2 [[tool:nocheh_background_job '+proposal+']] [[after:silent]]')
+        request = self.f.message(OWNER, 'کار در جعبه JOBMARK2 [[tool:mcp__nocheh__background_job '+proposal+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
-        proposed = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
+        proposed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__background_job' and event['phase'] == 'final'
                     and 'Box count JOB2' in event.get('argument', '')]
         self.gate('job_proposed_with_box', bool(proposed) and re.search(r'"box":\s*true', proposed[-1]['result']) is not None,
                   result=proposed[-1]['result'][:300] if proposed else None)
@@ -1198,8 +1198,8 @@ class ProductScenarios(Scenarios):
             fetchers = self.docker('ps', '-a', '-q', '--filter', 'name=nocheh-repo-fetch-', '--filter', 'label=nocheh.repo-fetch.project='+self.f.project).stdout.split()
             self.gate('no_fetcher_left', not fetchers, fetchers=fetchers)
             # The agent sees the copy in the job tool's status, in the owner's private chat.
-            self.silent_turn(self.f.message(OWNER, 'کپی‌ها REPOSTATUS [[tool:nocheh_background_job {"action":"status"}]] [[after:silent]]'), OWNER)
-            listed = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
+            self.silent_turn(self.f.message(OWNER, 'کپی‌ها REPOSTATUS [[tool:mcp__nocheh__background_job {"action":"status"}]] [[after:silent]]'), OWNER)
+            listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__background_job' and event['phase'] == 'final'
                       and '"status"' in event.get('argument', '')][-1]
             repos = json.loads(listed['result']).get('repos') or []
             self.gate('status_lists_the_copy', [item.get('name') for item in repos] == [self.REPO] and repos[0].get('commit') == commit[:12]
@@ -1288,8 +1288,8 @@ class ProductScenarios(Scenarios):
             self.box_removed(job, list(seen['boxes']))
             # 11. Only a copied repository.
             refused = {'action': 'start', 'title': 'Repo JOB17', 'instruction': 'Read another copy.', 'box': True, 'repo': 'example-org/other', **self.EMPTY}
-            self.silent_turn(self.f.message(OWNER, 'کپی دیگر [[tool:nocheh_background_job '+json.dumps(refused)+']] [[after:silent]]'), OWNER)
-            result = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
+            self.silent_turn(self.f.message(OWNER, 'کپی دیگر [[tool:mcp__nocheh__background_job '+json.dumps(refused)+']] [[after:silent]]'), OWNER)
+            result = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__background_job' and event['phase'] == 'final'
                       and 'Repo JOB17' in event.get('argument', '')][-1]['result']
             self.gate('other_repo_not_allowed', 'job_repo_not_allowed' in result, result=result[:300])
             # 12. Remove withdraws a waiting card and deletes the file; a later Copy is a new copy that old jobs never get.
@@ -1357,7 +1357,7 @@ class ProductScenarios(Scenarios):
         # A card waits while a reaction starts a new epoch. Approve still runs the exact command:
         # the executor checks the chat's settings, not the profile of the epoch it was asked in.
         marker = 'CARRYMARK1'
-        request = self.f.message(OWNER, 'یک فرمان [[tool:nocheh_shell {"command":"printf '+marker+'"}]] [[after:silent]]')
+        request = self.f.message(OWNER, 'یک فرمان [[tool:mcp__nocheh__shell {"command":"printf '+marker+'"}]] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('card_shows_command', marker in card['message']['text'], card=card['message']['text'])
@@ -1370,13 +1370,13 @@ class ProductScenarios(Scenarios):
             row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == request['message']['message_id']]
         answer = self.wait('follow_up_answered', answers, 240)[0]['message']['text']
         time.sleep(3)
-        self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] nocheh_action_status' in answer and marker in answer, text=answer[:500])
+        self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] mcp__nocheh__action_status' in answer and marker in answer, text=answer[:500])
 
     def group_operation_answers_in_topic(self):
         # A member asks for a command in a group topic. The owner approves it in their private chat,
         # and one follow-up answers the request in that topic as a reply to it (ADR-0212).
         marker = 'TOPICMARK1'
-        request = self.f.message(GROUP, 'یک فرمان [[tool:nocheh_shell {"command":"printf '+marker+'"}]] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
+        request = self.f.message(GROUP, 'یک فرمان [[tool:mcp__nocheh__shell {"command":"printf '+marker+'"}]] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
         card = self.wait('card_posted_to_owner', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('card_shows_command', marker in card['message']['text'], card=card['message']['text'])
@@ -1386,14 +1386,14 @@ class ProductScenarios(Scenarios):
             row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') == request['message']['message_id']]
         answer = self.wait('follow_up_answered_in_topic', answers, 240)[0]['message']['text']
         time.sleep(3)
-        self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] nocheh_action_status' in answer and marker in answer, text=answer[:500])
+        self.gate('one_follow_up_read_the_result', len(answers()) == 1 and '[brain] mcp__nocheh__action_status' in answer and marker in answer, text=answer[:500])
         self.gate('nothing_else_in_owner_chat', not [row for row in self.replies(before, OWNER) if not self.is_card(row)])
 
     def allowed_command_runs_without_a_card(self):
         # The owner taps Always allow on a member's command in a group topic (ADR-0214). The same command asked
         # there again runs without a card, and the turn waits for it, so its answer comes in one reply (ADR-0215).
         marker = 'RULEMARK1'
-        command = '[[tool:nocheh_shell {"command":"printf '+marker+'"}]]'
+        command = '[[tool:mcp__nocheh__shell {"command":"printf '+marker+'"}]]'
         request = self.f.message(GROUP, 'یک فرمان '+command+' [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
         card = self.wait('card_posted_to_owner', lambda: self.cards(before, OWNER), 120)[0]
@@ -1408,7 +1408,7 @@ class ProductScenarios(Scenarios):
         later = len(self.f.sent())
         _, text = self.turn(again, GROUP, TEAM_TOPIC)
         self.gate('ran_without_a_card', not self.cards(later), cards=[row['message']['text'][:80] for row in self.cards(later)])
-        self.gate('answered_in_one_reply', '[brain] nocheh_shell' in text and marker in text, text=text[:500])
+        self.gate('answered_in_one_reply', '[brain] mcp__nocheh__shell' in text and marker in text, text=text[:500])
         time.sleep(20)
         self.gate('no_follow_up_repeats_it', len(replied(again, later)) == 1, replies=len(replied(again, later)))
         rules = [row for row in self.f.app('/v1/tools/actions').get('permissions', []) if row.get('grain') == 'chat' and row.get('kind') == 'shell']
@@ -1418,7 +1418,7 @@ class ProductScenarios(Scenarios):
         # A job's run asks to run a command; the owner approves it on its card after the job reported.
         # The run's own profile is the job's, so the executor checks the job's chat settings.
         marker = 'JOBRUNMARK1'
-        request = self.job_request('کار با فرمان JOBRUN', {'title': 'Command JOB2', 'instruction': 'Check with a command [[tool:nocheh_shell {"command":"printf '+marker+'"}]]'})
+        request = self.job_request('کار با فرمان JOBRUN', {'title': 'Command JOB2', 'instruction': 'Check with a command [[tool:mcp__nocheh__shell {"command":"printf '+marker+'"}]]'})
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('job_card_shows_job', 'Command JOB2' in card['message']['text'], card=card['message']['text'])
@@ -1462,7 +1462,7 @@ class ProductScenarios(Scenarios):
         # no report is sent, the card says it stopped and loses the button, and the change the job asked for is rejected.
         nonce = str(self.f.ids())
         marker = 'STOPMARK'+nonce
-        instruction = ('Check, then search, run '+nonce+' [[delay:60]] [[tool:nocheh_shell {"command":"printf '+marker+'"}]] '
+        instruction = ('Check, then search, run '+nonce+' [[delay:60]] [[tool:mcp__nocheh__shell {"command":"printf '+marker+'"}]] '
                        +self.searches('STOPSEARCH'+nonce, 1))
         _, before = self.silent_turn(self.job_request('کار با توقف JOBSTOP', {'title': 'Stoppable JOB10', 'instruction': instruction, **self.EMPTY}), OWNER)
         card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
