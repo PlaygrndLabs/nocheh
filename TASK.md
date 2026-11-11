@@ -11,7 +11,12 @@ Off-site copies (owner, 2026-11-10: "start build"): encrypted copies of each aut
 backup go to the owner's own S3-compatible storage
 ([ADR-0229](docs/adr/0229-encrypted-off-site-backup-copies.md),
 [tests](services/hermes/test_offsite.py)); pending: a first live copy, a passed "Test the
-off-site copy", and a fetch and restore on another machine. The portable export now
+off-site copy", and a fetch and restore on another machine. Setup connects from one
+pasted Cloudflare token or Backblaze key (owner, 2026-11-11: "it should configable and can
+use cloudflare connect/login or better way"; chose one Cloudflare token plus a storage list;
+[ADR-0236](docs/adr/0236-off-site-storage-from-one-pasted-credential.md),
+[tests](services/hermes/test_offsite_connect.py)); pending: a first live connect against a
+real Cloudflare account. The portable export now
 carries the owner's tasks, sharing rules, settings and Hermes scheduled jobs
 ([ADR-0230](docs/adr/0230-portable-export-carries-owner-work.md),
 [check](test/store-owner-portability.test.ts)); pending: a full export and import between
