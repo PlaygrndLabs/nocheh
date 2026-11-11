@@ -5,9 +5,10 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
-import {turnToken} from '../src/access.js';
-import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute} from '../src/security/broker.js';
-import type {IncomingMessage} from 'node:http';
+import {turnToken,type Reader} from '../src/access.js';
+import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute,type TurnBinding} from '../src/security/broker.js';
+import {createServer,type IncomingMessage} from 'node:http';
+import {once} from 'node:events';
 import {effectLog} from '../src/security/store.js';
 
 // Hermes's machine backend has words for every code a machine command may come back with; a cleanup's own code never reaches it.
@@ -79,6 +80,36 @@ test("Anthropic's Messages API is reachable only when Anthropic is the configure
   assert.equal('anthropic-beta' in anthropicHeaders('provider-key','mcp-client-2025-04-04'),false);
   assert.equal('authorization' in anthropicHeaders('provider-key',undefined),false);
 });
+test('a long-term recall reaches a slow archive without Node fetch, which gives up after five minutes',async t=>{
+  const secret='synthetic-test-secret',source='a'.repeat(64),asked:string[]=[];
+  const pool={query:async(sql:string)=>({rows:sql.includes('SELECT p.revision')?[{revision:1,document:{version:1,rules:[]}}]:[],rowCount:1})} as unknown as pg.Pool;
+  const binding=async(principal:Reader):Promise<TurnBinding>=>({event_id:principal.turnEvent!,scope:principal.scope??'42',profile:'synthetic',logical_profile:'synthetic',owner:principal.scope===null,guard_epoch:1});
+  // The archive answers after 300 ms, standing in for a recall that takes longer than five minutes.
+  const archive=createServer(async(req,res)=>{
+    let text='';for await(const part of req)text+=part;asked.push([req.method,req.url,req.headers.authorization,text].join(' '));
+    const timer=setTimeout(()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({sources:[{text:'Synthetic memory'}]}));},300);
+    res.on('close',()=>clearTimeout(timer));
+  });
+  archive.listen(0,'127.0.0.1');await once(archive,'listening');
+  const archiveAddress=archive.address();assert.ok(archiveAddress&&typeof archiveAddress!=='string');
+  const realFetch=globalThis.fetch,fetches=t.mock.method(globalThis,'fetch',async()=>{throw Error('fetch_used');});
+  const broker=brokerServer({pool,token:secret,archive:'http://127.0.0.1:'+archiveAddress.port,hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),
+    storage:{binding,assertAudience:async()=>{},turnFile:async()=>{throw Error();}}});
+  broker.listen(0,'127.0.0.1');await once(broker,'listening');
+  try {
+    const address=broker.address();assert.ok(address&&typeof address!=='string');
+    const credential=turnToken(secret,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
+    const response=await realFetch('http://127.0.0.1:'+address.port+'/v1/memory/longterm/recall',{method:'POST',
+      headers:{authorization:'Bearer '+credential,'content-type':'application/json'},body:JSON.stringify({query:'Synthetic question'})});
+    assert.equal(response.status,200);
+    assert.deepEqual(await response.json(),{sources:[{text:'Synthetic memory'}]});
+    assert.deepEqual(asked,['POST /v1/memory/longterm/recall Bearer '+credential+' {"query":"Synthetic question"}']);
+    assert.equal(fetches.mock.callCount(),0);
+  }finally{
+    for(const server of [broker,archive]){server.closeAllConnections();server.close();await once(server,'close');}
+  }
+});
+
 test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async t=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_broker_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);

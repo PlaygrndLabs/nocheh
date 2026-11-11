@@ -104,11 +104,11 @@ tools is unchanged.
 - A tool call makes one more local HTTP request, on its own connection, and
   connecting adds about a second to the start of a turn, most of it loading
   Hermes's MCP library.
-- Two hops behind the tools still use Node's `fetch`, which stops waiting for an
-  answer's first byte after 300 seconds: the broker passing a route on to
-  storage, and each Honcho chat call. So a memory recall longer than five minutes
-  still fails in an isolated turn, and one Honcho call can last five minutes, not
-  its eight. This change leaves both as they were.
+- The hops behind the tools no longer use Node's `fetch`, which stops waiting
+  for an answer's first byte after 300 seconds: the loop-back uses `node:http`,
+  and the broker's relay and the Honcho client use `longFetch`. Hermes stops one
+  tool call after 420 seconds unless the tool asks for more, so the connection
+  asks 660 seconds for every Nocheh tool; each route still keeps its own limit.
 - Hermes hands each answer to the model wrapped as `{"result": "<text>"}`, so the
   model reads the same JSON as before inside one more string. Answering with
   structured content only would avoid that in Hermes, but a brain that reads only

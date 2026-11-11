@@ -73,8 +73,9 @@ def data_tools_server(credential,deadline):
     call with it, as the routes behind it do."""
     return {'url':os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/mcp',
             'headers':{'Authorization':'Bearer '+credential,'X-Nocheh-Turn-Deadline':str(int(deadline))},
-            # A memory recall may take up to ten minutes; the endpoint fits it into the turn's deadline.
-            'timeout':620,'connect_timeout':15,
+            # A memory recall may wait 615 s for long-term memory and 15 s more for the owner's native notes; the endpoint
+            # fits it into the turn's deadline. This also lifts Hermes's 420 s limit on one tool call for these tools.
+            'timeout':660,'connect_timeout':15,
             # The preflight probe would go through the guarded plain HTTP client, which refuses it.
             'skip_preflight':True,'strict_redirect_headers':True,'trust':'full',
             'sampling':{'enabled':False},'elicitation':{'enabled':False},'events':False,

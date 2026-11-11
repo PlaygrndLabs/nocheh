@@ -1,5 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {once} from 'node:events';
 import {engineErrors,engineSummary} from '../src/memory/engine.js';
 import {HonchoEngine,honchoClient,type HonchoCall} from '../src/memory/honcho.js';
 
@@ -22,14 +24,21 @@ test('the Honcho engine describes itself through the socket',()=>{
 
 test('the Honcho client turns transport and upstream failures into socket codes',async t=>{
   assert.throws(()=>honchoClient('http://user:pass@synthetic-honcho'),/invalid_honcho_url/);
-  const call=honchoClient('http://synthetic-honcho');
-  t.mock.method(console,'warn',()=>{});
-  const fetches=t.mock.method(globalThis,'fetch',async()=>{throw Error('synthetic_network_down');});
+  const warnings=t.mock.method(console,'warn',()=>{});
+  const server=createServer((req,res)=>{
+    if(req.method==='DELETE'){res.writeHead(404);res.end();return;}
+    res.writeHead(422,{'content-type':'application/json'});res.end(JSON.stringify({detail:[{loc:['body','id'],type:'missing',input:'private text'}]}));
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  const address=server.address();assert.ok(address&&typeof address!=='string');
+  const call=honchoClient('http://127.0.0.1:'+address.port);
+  try {
+    await assert.rejects(call('/v3/workspaces',{id:'x'}),{code:engineErrors.rejected,status:503});
+    assert.doesNotMatch(String(warnings.mock.calls[0]!.arguments[0]),/private text/,'a rejection names fields, never their input');
+    assert.deepEqual(await call('/v3/workspaces/x',undefined,'DELETE'),{deleted:false});
+  }finally{server.closeAllConnections();server.close();await once(server,'close');}
+  // Nothing listens on the closed port any more.
   await assert.rejects(call('/v3/workspaces'),{code:engineErrors.unavailable,status:503});
-  fetches.mock.mockImplementation(async()=>new Response(JSON.stringify({detail:[{loc:['body','id'],type:'missing',input:'private text'}]}),{status:422}));
-  await assert.rejects(call('/v3/workspaces',{id:'x'}),{code:engineErrors.rejected,status:503});
-  fetches.mock.mockImplementation(async()=>new Response('',{status:404}));
-  assert.deepEqual(await call('/v3/workspaces/x',undefined,'DELETE'),{deleted:false});
 });
 
 test('participants and sessions map roles to Honcho observation',async()=>{

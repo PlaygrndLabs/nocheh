@@ -1,5 +1,6 @@
 import {canonical} from '../archive.js';
 import {HttpError,string} from '../http.js';
+import {longFetch} from '../long-fetch.js';
 import {engineInvalid,engineRejected,engineUnavailable,type EngineTrace,type EngineWrite,type EngineWriteInput,type ForgetStep,
   type MemoryEngine,type ParticipantRole} from './engine.js';
 
@@ -9,8 +10,9 @@ export type HonchoCall=(path:string,body?:unknown,method?:'DELETE')=>Promise<any
 export function honchoClient(base:string):HonchoCall {
  const url=new URL(base);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('invalid_honcho_url');
  return async(path,body,method)=>{
-  // Recall includes guarded query preparation, embeddings and subscription reasoning.
-  let response:Response;try{response=await fetch(url.origin+path,{method:method??(body===undefined?'GET':'POST'),redirect:'error',signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
+  // Recall includes guarded query preparation, embeddings and subscription reasoning, so a chat may take longer
+  // than Node's own fetch waits; longFetch ends a call only at this deadline.
+  let response:Response;try{response=await longFetch(url.origin+path,{method:method??(body===undefined?'GET':'POST'),signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
    headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});}catch{throw engineUnavailable();}
   if(method==='DELETE'&&response.status===404)return {deleted:false};
   if(!response.ok) {

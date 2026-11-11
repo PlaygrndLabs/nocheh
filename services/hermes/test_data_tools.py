@@ -33,6 +33,10 @@ class DataToolTests(unittest.TestCase):
                 for path in Path(home).rglob('*'):
                     if path.is_file():
                         self.assertNotIn(credential.encode(), path.read_bytes(), path.name)
+                # Hermes stops a tool call after 420 s unless its entry asks for more: a recall may wait 615 s, then 15 s more.
+                from agent.tool_dispatch_helpers import _extend_tool_timeout
+                self.assertGreaterEqual(_extend_tool_timeout('mcp__nocheh__memory_recall', 420.0), 630)
+                self.assertEqual(_extend_tool_timeout('memory', 420.0), 420.0)
             # No preflight probe or event stream: a stateless endpoint answers only these.
             self.assertEqual([request['method'] for request in endpoint.requests], ['initialize', 'notifications/initialized', 'tools/list'])
             self.assertEqual({(request['authorization'], request['deadline']) for request in endpoint.requests},
