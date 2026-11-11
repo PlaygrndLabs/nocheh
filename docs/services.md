@@ -52,8 +52,9 @@ image on the default network, with `host.docker.internal` mapped to the host, an
 reports unhealthy when `ssh` cannot run as `NOCHEH_UID`. A job's commands reach it
 from its sealed turn through `nocheh-security` and `nocheh-app`. It caps a command's
 output frames at 8 MiB, their headers included, and runs one cleanup at a time for
-each machine. Every command carries its job's id in its environment, and a cleanup
-ends only the processes with that tag; see
+each machine. Every command carries its job's id in its environment and holds the
+job's marker file (`~/.nocheh/jobs/<job id>`) open, and a cleanup ends only the
+processes with that tag or marker and those they started; see
 [ADR-0231](adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md) and
 [ADR-0237](adr/0237-stop-ends-only-the-programs-a-machine-job-started.md).
 

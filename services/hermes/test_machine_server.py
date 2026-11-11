@@ -55,7 +55,7 @@ elif not os.path.exists(known):
     sys.stderr.write('Host key verification failed.\\n');sys.exit(255)
 sys.stdout.write(scenario.get('noise',''));sys.stdout.flush()
 shell=scenario.get('shell','sh');env=dict(os.environ,**scenario.get('env',{{}}))
-if 'NOCHEH_CLEANUP=' in remote:
+if 'lsof' in remote:
     os.execvpe(shell,[shell,'-c',remote.split(';',1)[0]+'; %s; exit %d'%(scenario.get('cleanup',':'),scenario.get('code',0))],env)
 if mode=='killed':os.execvpe(shell,[shell,'-c',remote.split(';',1)[0]+'; echo ending; kill -9 $$'],env)
 os.execvpe(shell,[shell,'-c',remote],env)
@@ -85,9 +85,12 @@ class MachineServerTests(unittest.TestCase):
         self.bin=base/'bin';self.bin.mkdir();self.root=base/'machines';self.root.mkdir(mode=0o700)
         (self.bin/'ssh').write_text(FAKE.format(python=sys.executable));(self.bin/'ssh').chmod(0o755)
         self.control=base/'control';self.control.mkdir()
-        for name,value in (('CONTROL',self.control),('GRACE',1),('SHORT',5)):
+        for name,value in (('CONTROL',self.control),('GRACE',1),('SHORT',5),('CLEANING',5)):
             patcher=patch.object(ms,name,value);patcher.start();self.addCleanup(patcher.stop)
-        patcher=patch.dict(os.environ,{'PATH':str(self.bin)+os.pathsep+os.environ.get('PATH','')});patcher.start();self.addCleanup(patcher.stop)
+        # The machine's login: its home holds the jobs' marker files.
+        self.home=base/'home';self.home.mkdir()
+        patcher=patch.dict(os.environ,{'PATH':str(self.bin)+os.pathsep+os.environ.get('PATH',''),'HOME':str(self.home)});patcher.start()
+        self.addCleanup(patcher.stop)
         self.scenario({})
         self.server=self.serve(TOKEN)
 
@@ -195,8 +198,12 @@ class MachineServerTests(unittest.TestCase):
         self.assertRegex(argv[end+2],r"^printf '%s' '\x1enocheh-[0-9a-f]{16}\x1e'; exec env NOCHEH_STARTED="+JOB+" bash --norc -c '")
         self.assertTrue(argv[end+2].endswith(" nocheh 30 '' "+ms.quote(b"printf 'it'\"'\"'s here\\n'; printf 'err\\n' >&2; exit 3").decode()))
         self.assertIn(ms.quote(ms.WRAP).decode(),argv[end+2])
-        # The job's tag is in the command's environment and in that of the programs it starts.
-        self.assertEqual(result(self.run_script('echo $NOCHEH_STARTED; sh -c \'echo $NOCHEH_STARTED\'')[1]),(((JOB+'\n')*2).encode(),0))
+        # The job's tag is in the command's environment and in that of the programs it starts, and so is fd 7 on the job's
+        # marker file, which stays; a marker older than 30 days goes.
+        old=self.home/'.nocheh'/'jobs'/('e'*64);old.parent.mkdir(parents=True,exist_ok=True);old.touch();os.utime(old,(time.time()-31*86400,)*2)
+        self.assertEqual(result(self.run_script('echo $NOCHEH_STARTED; sh -c \'echo $NOCHEH_STARTED; [ /dev/fd/7 -ef ~/.nocheh/jobs/$NOCHEH_STARTED ] && echo held\'')[1]),
+                         (((JOB+'\n')*2+'held\n').encode(),0))
+        self.assertEqual(sorted(path.name for path in old.parent.iterdir()),[JOB]);self.assertEqual(oct(old.parent.stat().st_mode&0o777),'0o700')
         # stdin goes to the command; a remote 255 stays 255; -l asks for a login shell.
         status,data=self.run_script('cat; exit 255',stdin='from stdin ✓')
         self.assertEqual((status,result(data)),(200,('from stdin ✓'.encode(),255)))
@@ -253,7 +260,7 @@ class MachineServerTests(unittest.TestCase):
         # A script that closes its own output, or execs another program.
         self.assertEqual(result(self.run_script('exec >&- 2>&-; sleep 1; exit 5')[1]),(b'',5))
         self.assertEqual(result(self.run_script("exec sh -c 'echo from exec; exit 6'")[1]),(b'from exec\n',6))
-        self.assertEqual(result(self.run_script('ls /proc/$$/fd; exit 0')[1]),(b'0\n1\n2\n',0),'only stdin, stdout and stderr')
+        self.assertEqual(result(self.run_script('ls /proc/$$/fd; exit 0')[1]),(b'0\n1\n2\n7\n',0),'only stdin, stdout, stderr and the marker')
         # set -e and set -u from an exported SHELLOPTS hold for the script, and the wrapper still ends the reply.
         self.scenario({'env':{'SHELLOPTS':'errexit:nounset'}})
         self.assertEqual(result(self.run_script('false; echo never')[1]),(b'',1))
@@ -374,7 +381,7 @@ class MachineServerTests(unittest.TestCase):
         self.machine()
         self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY,'job':JOB}),(200,{'ok':True}))
         remote=self.calls()[-1][-1]
-        self.assertRegex(remote,r"^printf '%s' '\x1enocheh-[0-9a-f]{16}\x1e'; exec env NOCHEH_CLEANUP=\$\$ sh -c '")
+        self.assertRegex(remote,r"^printf '%s' '\x1enocheh-[0-9a-f]{16}\x1e'; exec bash --norc -c '")
         self.assertTrue(remote.endswith("' nocheh "+JOB));self.assertIn(ms.CLEANUP,remote.replace("'\\''","'"))
         self.assertIn('StrictHostKeyChecking=yes',self.calls()[-1])
         self.scenario({'code':3})
@@ -382,63 +389,88 @@ class MachineServerTests(unittest.TestCase):
         self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':OTHER,'job':JOB}),(200,{'ok':False,'error':'machine_host_key_changed'}))
         self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':None,'job':JOB}),(400,{'error':'invalid_machine_request'}))
 
-    def cleanup_here(self,script,path=None):
+    def cleanup_here(self,script=None,path=None,home=None):
         """Runs a cleanup script here as the remote command does, for JOB: its exit code."""
-        env={**os.environ,**({'PATH':path} if path else {})}
-        return subprocess.run(['sh','-c','exec env NOCHEH_CLEANUP=$$ sh -c "$1" nocheh "$2"','sh',script,JOB],env=env,timeout=60).returncode
+        env={**os.environ,'HOME':str(home or self.home),**({'PATH':path} if path else {})}
+        return subprocess.run(['bash','--norc','-c',script or ms.CLEANUP,'nocheh',JOB],env=env,timeout=60).returncode
 
-    def tagged(self,tag,folder,name):
-        """A program that keeps running, started from a shell that ends at once; with tag, under that job's tag."""
+    def launch(self,job,folder,name,script='sleep 600',tag=True):
+        """A program that keeps running, started in the background by a command of job as WRAP runs it (with its tag and
+        marker), or with job's tag only (tag=True and no WRAP: job=None uses JOB's tag), or neither (tag=False)."""
         env={k:v for k,v in os.environ.items() if k!=ms.TAG}
-        if tag:env[ms.TAG]=tag
-        subprocess.run(['sh','-c',f'sleep 600 & echo $! > {folder}/{name}'],env=env,check=True,timeout=10)
+        line=f'{script} </dev/null >/dev/null 2>&1 & echo $! > {folder}/{name}'
+        if job:command=['bash','--norc','-c',ms.WRAP,'nocheh','30','',line];env[ms.TAG]=job
+        else:
+            command=['sh','-c',line]
+            if tag:env[ms.TAG]=JOB
+        subprocess.run(command,env=env,check=True,timeout=30)
         return int((Path(folder)/name).read_text())
 
+    def ended(self,pids):
+        for pid in pids:
+            try:os.kill(pid,9)
+            except OSError:pass
+
     def test_cleanup_ends_only_the_programs_of_its_job(self):
-        # The script itself, here: it ends the programs started under the job's tag, also one in a new session, and leaves
-        # the login's other programs: one without a tag, as the owner's own, and one of another job.
+        # The script itself, here: it ends the programs of the job, found by its marker, its tag or as started by one
+        # of them, also one in a new session, and leaves the login's other programs: one with neither, as the owner's
+        # own, and one of another job. Nothing of the job left: it ends at once, and the marker is gone.
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
         with tempfile.TemporaryDirectory() as folder:
-            mine=self.tagged(JOB,folder,'mine');own=self.tagged(None,folder,'own');other=self.tagged('e'*64,folder,'other')
-            env={**os.environ,ms.TAG:JOB};subprocess.run(['setsid','sh','-c',f'sleep 600 & echo $! > {folder}/detached'],env=env,check=True,timeout=10)
-            detached=int((Path(folder)/'detached').read_text())
+            job={'both':self.launch(JOB,folder,'both'),'marker':self.launch(JOB,folder,'marker','env -i sleep 600'),
+                 'tag':self.launch(None,folder,'tag'),'session':self.launch(JOB,folder,'session','setsid sleep 600'),
+                 'started':self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)')}
+            job['child']=int((Path(folder)/'child').read_text())
+            if shutil.which('perl'):job['renamed']=self.launch(JOB,folder,'renamed',"perl -e '$0=q(worker); sleep 600'")
+            others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other')]
             try:
-                self.assertEqual(self.cleanup_here(ms.CLEANUP),0)
-                for pid in (mine,detached):self.assertFalse(alive(pid),pid)
-                for pid in (own,other):self.assertTrue(alive(pid),pid)
-                # Nothing of the job left: it ends at once.
-                self.assertEqual(self.cleanup_here(ms.CLEANUP),0)
-            finally:
-                for pid in (mine,own,other,detached):
-                    try:os.kill(pid,9)
-                    except OSError:pass
+                self.assertTrue((self.home/'.nocheh'/'jobs'/JOB).exists())
+                self.assertEqual(self.cleanup_here(),0)
+                for name,pid in job.items():self.assertFalse(alive(pid),name)
+                for pid in others:self.assertTrue(alive(pid),pid)
+                self.assertEqual(sorted(path.name for path in (self.home/'.nocheh'/'jobs').iterdir()),['e'*64])
+                self.assertEqual(self.cleanup_here(),0)
+                # Where it cannot keep a probe file, it cannot prove it finds programs: it fails and ends nothing.
+                mine=self.launch(JOB,folder,'mine');other=self.home/'readonly';other.mkdir(mode=0o500)
+                if os.geteuid()!=0:
+                    self.assertEqual(self.cleanup_here(home=other),3);self.assertTrue(alive(mine))
+                self.assertEqual(self.cleanup_here(),0);self.assertFalse(alive(mine))
+            finally:self.ended([*job.values(),*others])
 
-    def test_cleanup_reads_environments_with_ps_where_proc_has_none(self):
-        # As on macOS: no /proc, and `ps -E` prints a process's command line, which may span lines, then its environment.
+    def test_cleanup_finds_programs_with_lsof_and_ps_where_there_is_no_proc(self):
+        # As on macOS: no /proc; `lsof` names the holders of the marker, `ps -E` prints a process's command line, which may
+        # span lines, then its environment, and shows none for the system's own programs (here: sleep).
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
-        check='[ -r /proc/$$/environ ]';self.assertEqual(ms.CLEANUP.count(check),1)
+        check='[ -r /proc/$$/stat ]';self.assertEqual(ms.CLEANUP.count(check),1)
         script=ms.CLEANUP.replace(check,'[ -r /nonexistent/$$ ]')
         with tempfile.TemporaryDirectory() as folder:
-            here=Path(folder);(here/'bin').mkdir();ps=here/'bin'/'ps'
-            ps.write_text('#!/bin/sh\n'
-                          'case " $* " in *" -E "*) for p; do :; done; [ -r /proc/$p/environ ] || exit 1\n'
-                          '  printf \'%s %s\\n\' "$(tr \'\\0\' \' \' </proc/$p/cmdline)" "$(tr \'\\0\' \' \' </proc/$p/environ)"; exit 0;; esac\n'
-                          'for e in /proc/[0-9]*; do echo "  ${e#/proc/}"; done\n')
-            ps.chmod(0o755);path=str(here/'bin')+':'+os.environ['PATH']
-            mine=self.tagged(JOB,folder,'mine');own=self.tagged(None,folder,'own')
+            here=Path(folder);(here/'bin').mkdir();ps,lsof=here/'bin'/'ps',here/'bin'/'lsof'
+            ps.write_text('#!/bin/bash\n'
+                          'shown() { case $(readlink /proc/$1/exe) in *sleep) ;; *) tr \'\\0\' \' \' </proc/$1/environ;; esac; }\n'
+                          'case " $* " in\n'
+                          '  *" -p "*) for p; do :; done; [ -r /proc/$p/environ ] || exit 1; printf \'%s %s\\n\' "$(tr \'\\0\' \' \' </proc/$p/cmdline)" "$(shown $p)";;\n'
+                          '  *" -E "*) for e in /proc/[0-9]*; do [ -O $e ] && printf \'%6s %s %s\\n\' ${e#/proc/} "$(tr \'\\0\' \' \' <$e/cmdline)" "$(shown ${e#/proc/})"; done;;\n'
+                          '  *) for e in /proc/[0-9]*; do [ -O $e ] && read -r s <$e/stat && s=${s##*) } && set -- $s && echo "${e#/proc/} $2 $1"; done;;\n'
+                          'esac\n')
+            lsof.write_text('#!/bin/bash\nfor f; do :; done; for e in /proc/[0-9]*; do for d in $e/fd/*; do [ "$d" -ef "$f" ] && { echo ${e#/proc/}; break; }; done; done\n')
+            for path in (ps,lsof):path.chmod(0o755)
+            path=str(here/'bin')+':'+os.environ['PATH']
+            job=[self.launch(JOB,folder,'mine'),self.launch(None,folder,'tagged','tail -f /dev/null'),
+                 self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)')]
+            # A command line that spans lines, then the environment with the tag.
+            job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'tail -f /dev/null; :' 'one\n2 two'")]
+            others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other')]
             try:
                 self.assertEqual(self.cleanup_here(script,path),0)
-                self.assertFalse(alive(mine));self.assertTrue(alive(own))
-                # A ps that shows no environments: the cleanup cannot find even itself, so it fails rather than claim it
-                # ended something.
-                mine=self.tagged(JOB,folder,'mine')
-                ps.write_text('#!/bin/sh\ncase " $* " in *" -E "*) echo sh;; *) echo "  $$";; esac\n')
+                for pid in job:self.assertFalse(alive(pid),pid)
+                for pid in others:self.assertTrue(alive(pid),pid)
+                # Where lsof finds nothing (or is missing), or ps lists nothing, it cannot find its probe: it fails and ends
+                # nothing.
+                mine=self.launch(JOB,folder,'mine');lsof.write_text('#!/bin/sh\nexit 1\n')
                 self.assertEqual(self.cleanup_here(script,path),3);self.assertTrue(alive(mine))
-                ps.unlink();self.assertEqual(self.cleanup_here(script,str(here/'bin')+':/usr/bin:/bin'),3)
-            finally:
-                for pid in (mine,own):
-                    try:os.kill(pid,9)
-                    except OSError:pass
+                lsof.unlink();ps.write_text('#!/bin/sh\nexit 0\n')
+                self.assertEqual(self.cleanup_here(script,path),3);self.assertTrue(alive(mine))
+            finally:self.ended([*job,*others,mine])
 
     def test_cleanups_of_one_machine_run_one_at_a_time(self):
         # Cleanups of one machine run one at a time; those of two machines at once.
