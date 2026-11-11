@@ -18,7 +18,8 @@ import subprocess
 import time
 from urllib.parse import urlsplit
 from tools.paths import ROOT
-from tools.acceptance.telegram_rehearsal import archived_delivery, MODEL_EGRESS
+from tools.acceptance.telegram_mock import TOKEN
+from tools.acceptance.telegram_rehearsal import archived_delivery, MODEL_EGRESS, TELEGRAM_SERVICE, wait_telegram_connected
 
 CASES = ('reaction_removed', 'corrected_fact', 'private_isolation', 'topic_shared', 'group_isolation',
          'recall_after_restart', 'retired_fact')
@@ -84,7 +85,7 @@ def selected_cases(start, stop=None):
 
 
 def next_update_base(state, now):
-    """Start above every queued or acknowledged update: the adapter drops anything below its offset."""
+    """Start above every queued or acknowledged update: the poller drops anything below its offset."""
     return max([item['update_id'] for item in state['updates']] + [state['offset'], now]) + 1000
 
 
@@ -128,7 +129,7 @@ class Fixture:
         homes = [v for v in native['volumes'] if v.get('target') == '/workspace/data/local/hermes']
         if len(homes) != 1 or Path(homes[0]['source']).resolve() != self.directory / 'state/hermes':
             raise ValueError('owned_native_state_required')
-        if native['environment'].get('TELEGRAM_BOT_TOKEN') != '123456:synthetic':
+        if manifest['services'][TELEGRAM_SERVICE]['environment'].get('TELEGRAM_BOT_TOKEN') != TOKEN:
             raise ValueError('synthetic_telegram_required')
         if self.query('nocheh_control', "SELECT current_setting('cluster_name')") != 'nocheh-installation-fixture':
             raise ValueError('synthetic_database_required')
@@ -291,7 +292,7 @@ def main():
         save()
         print(json.dumps({'case': label, 'delivery_pass': row['delivery_pass'], 'error': row.get('error')}), flush=True)
 
-    wait('native_polling_connected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
+    wait_telegram_connected(wait, fixture.command, 'telegram_polling_connected')
     fixture.query('nocheh_control', "UPDATE memory_engine_connection SET attached=true,verified=true,include_history=true,attached_at=now(),acceptance='{\"fixture_only\":true,\"live_acceptance\":false}'::jsonb WHERE singleton")
     # Ordinary conversational sources; no test prefix or tool name is required.
     if args.reuse_seeds:
@@ -347,9 +348,10 @@ def main():
     if 'recall_after_restart' in selected:
         if counter:
             wait('updates_acknowledged', lambda: fixture.telegram()['offset'] > base + counter, 60)
-        fixture.run('restart', '--no-deps', 'hermes')
-        fixture.run('up', '-d', '--no-build', '--no-deps', '--wait', 'hermes')
-        wait('polling_reconnected', lambda: fixture.http('/health', host='hermes', port=8781)['telegram'] == 'connected', 120)
+        # Restart the brain and the Telegram service: recall must come from stored evidence, not a live process.
+        fixture.run('restart', '--no-deps', TELEGRAM_SERVICE, 'hermes')
+        fixture.run('up', '-d', '--no-build', '--no-deps', '--wait', TELEGRAM_SERVICE, 'hermes')
+        wait_telegram_connected(wait, fixture.command, 'polling_reconnected')
         question('recall_after_restart', 'قبلاً اسم بادبادکم را گفته بودم؛ اسمش چیست؟',
                  'Recall the synthetic private fact after restart using authorized evidence.', chat=123, topic=None)
     if 'retired_fact' in selected:

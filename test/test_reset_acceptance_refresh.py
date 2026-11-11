@@ -34,7 +34,7 @@ class AcceptanceRefreshTests(unittest.TestCase):
         configuration.write_env(configuration.env_path(self.state), values)
         self.journal = Journal(self.state)
         self.before = [{'service': name, 'id': name + '-old'} for name in
-                       ('hermes', 'nocheh-app', 'nocheh-dashboard', 'nocheh-db', 'nocheh-security')]
+                       ('hermes', 'nocheh-app', 'nocheh-dashboard', 'nocheh-db', 'nocheh-security', 'nocheh-telegram')]
         self.activation = {'format': reset_acceptance.FORMAT, 'stage': 'acceptance_running',
                            'reset_id': self.journal.value['reset_id'], 'generation': self.journal.value['generation'],
                            'plan': {'desired': [row['service'] for row in self.before],

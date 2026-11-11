@@ -45,7 +45,7 @@ def main():
     project='nocheh-reset-stop-'+uuid.uuid4().hex[:12];sentinel=project+'-sentinel'
     config=configuration.initialize(state);config.update(COMPOSE_PROJECT_NAME=project)
     configuration.write_env(state/'.env',config)
-    writers=('hermes','nocheh-executor','hermes-agent-sb','nocheh-app','nocheh-security',
+    writers=('nocheh-telegram','hermes','nocheh-executor','hermes-agent-sb','nocheh-app','nocheh-security',
              'nocheh-dashboard','nocheh-machines','honcho-deriver')
     services={'nocheh-db': {
         'image':'postgres:18.6-trixie@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6',

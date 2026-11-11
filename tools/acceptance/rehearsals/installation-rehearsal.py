@@ -136,7 +136,7 @@ def main():
             owned.append(volume)
         rendered = json.loads(subprocess.check_output(compose_command(state, project) + ['config', '--format', 'json'], env=env, text=True))
         selected = {'nocheh-db', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
-            'hermes', 'hermes-agent-sb', 'honcho-postgres', 'honcho-redis',
+            'hermes', 'hermes-agent-sb', 'nocheh-telegram', 'honcho-postgres', 'honcho-redis',
             'honcho-api', 'honcho-deriver', 'honcho-provider-gateway', 'nocheh-dashboard', 'nocheh-executor', 'nocheh-machines'}
         rendered['services'] = {name: value for name, value in rendered['services'].items() if name in selected}
         for network in rendered['networks'].values():
@@ -146,15 +146,16 @@ def main():
             service.pop('ports', None)
             service.pop('profiles', None)
             service['restart'] = 'no'
-            if name in ('nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb', 'nocheh-dashboard', 'nocheh-executor'):
+            if name in ('nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb', 'nocheh-telegram', 'nocheh-dashboard', 'nocheh-executor'):
                 service['environment']['NOCHEH_INSTALLATION_FIXTURE'] = '1'
             if name in ('nocheh-app', 'nocheh-security'):
                 service['image'] = images['services']
                 service['entrypoint'] = []
                 if name == 'nocheh-app':
                     service['command'] = ['node', 'dist/src/main.js']
-                # Allow the capture policy while keeping the native Telegram
-                # adapter disabled: fixture observations enter /v1/ingest.
+                # Allow the capture policy while the Telegram service keeps polling
+                # off (the saved setting stays false): fixture observations enter
+                # /v1/ingest until telegram_rehearsal connects the fake Bot API.
                 service['environment']['TELEGRAM_ENABLED'] = 'true'
             if name == 'nocheh-db':
                 service['image'] = images['postgres']
@@ -168,7 +169,8 @@ def main():
                 # The GitHub fetcher runs the box image, and copies come from the fake GitHub on the fixture's internal network.
                 service['environment'].update(NOCHEH_BOX_IMAGE=images['box'], NOCHEH_GITHUB_URL=FIXTURE_GITHUB_URL,
                                               NOCHEH_GITHUB_FIXTURE_NETWORK=rendered['networks']['default']['name'])
-            if name in ('hermes', 'hermes-agent-sb'):
+            # The Telegram service runs the native image too; it reaches the fake Bot API on the default network.
+            if name in ('hermes', 'hermes-agent-sb', 'nocheh-telegram'):
                 service['image'] = images['native']
             if name == 'hermes':
                 # The scripted model has no price anywhere, so a background job's cost limit could never be reached:

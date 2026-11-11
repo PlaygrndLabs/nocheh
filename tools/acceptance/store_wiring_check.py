@@ -34,7 +34,7 @@ def check():
         marker_mount=[v for v in services['nocheh-security']['volumes'] if v['target']=='/data/spool']
         assert len(marker_mount)==1 and marker_mount[0]['read_only'] is True
         assert services['hermes']['environment']['NOCHEH_STORAGE_LAYOUT']=='original-only-v1'
-        assert all('NOCHEH_ARCHIVE_PASSWORD' not in services[name].get('environment',{}) for name in ('hermes','hermes-agent-sb'))
+        assert all('NOCHEH_ARCHIVE_PASSWORD' not in services[name].get('environment',{}) for name in ('hermes','hermes-agent-sb','nocheh-telegram'))
         return {'status':'pass','layout':'original-only-v1','services_started':0,'credentials':'synthetic','runtime_administrator_credentials':False}
 
 

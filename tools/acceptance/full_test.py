@@ -2,11 +2,12 @@
 
 It starts a separate synthetic copy of Nocheh (its own Compose project, volumes
 and internal networks; no published port except a localhost dashboard relay),
-connects the real Hermes Telegram adapter to a fake Telegram, then plays the
+connects Nocheh's own Telegram service to a fake Telegram, then plays the
 owner, group members and strangers: private messages, group posts, replies,
-reactions, button presses, imports and dashboard pages. Hermes, Honcho, Inngest
-and the stores are the real services; Telegram and the model are fake, and the
-model follows an explicit script, so results repeat and nothing is spent.
+reactions, button presses, imports and dashboard pages. The Telegram service,
+Hermes, Honcho, Inngest and the stores are the real services; Telegram's Bot API
+and the model are fake, and the model follows an explicit script, so results
+repeat and nothing is spent.
 
 The owner allowed this copy to run beside the live installation. It never reads
 the live state, credentials or volumes.
@@ -206,7 +207,7 @@ def write_report(directory, steps, scenarios, exited=()):
     revision = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip() or 'unknown'
     lines = ['# Nocheh full test', '', 'Revision: '+revision,
              'Date: '+time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()), '',
-             f'**{len(passed)} passed, {len(failed)} failed** out of {len(scenarios)} checks. Telegram and the model are fake; Hermes, Honcho and Inngest are real.', '']
+             f'**{len(passed)} passed, {len(failed)} failed** out of {len(scenarios)} checks. The Telegram Bot API and the model are fake; the Telegram service, Hermes, Honcho and Inngest are real.', '']
     broken = [row for row in steps if not row['passed']]
     if broken:
         lines += ['Setup steps that failed: '+', '.join(row['step'] for row in broken), '']

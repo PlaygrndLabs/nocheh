@@ -1,9 +1,10 @@
 """Personal-use Telegram scenarios on an owned HTTP Bot API fixture.
 
 Extends tools.acceptance.telegram_rehearsal on the same synthetic installation:
-actual Hermes polling, three stores, workflows, Honcho and the scripted fixture
-brain. Directives such as ``[[search:...]]`` make the fixture model request
-real Nocheh tools; they test plumbing, isolation and effects, not judgement.
+actual polling by Nocheh's Telegram service, Hermes, three stores, workflows,
+Honcho and the scripted fixture brain. Directives such as ``[[search:...]]``
+make the fixture model request real Nocheh tools; they test plumbing,
+isolation and effects, not judgement.
 Each scenario is recorded separately and later scenarios still run after a
 failure. Nothing here establishes live Telegram or model acceptance.
 """
@@ -17,7 +18,8 @@ import subprocess
 import time
 import traceback
 from tools.paths import ROOT
-from tools.acceptance.telegram_rehearsal import archived_delivery, validate_fixture
+from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_delivery, telegram_health, validate_fixture,
+                                                 wait_telegram_connected)
 
 OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, -10099, 777
 MENTION = '@synthetic_fixture_bot'
@@ -258,11 +260,11 @@ class Scenarios:
 
     def reply_during_polling_reconnect(self):
         # Recreating the fixture endpoint also loads current fixture code. The
-        # native adapter then reconnects polling; a reply ready in that window
+        # Telegram service then reconnects polling; a reply ready in that window
         # was never transmitted and must be retried, then delivered once.
         started = time.time()
         self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', 'model-fixture')
-        self.wait('polling_connected', lambda: self.f.http('/health', service='hermes', port=8781)['telegram'] == 'connected', 120)
+        wait_telegram_connected(self.wait, self.f.command, 'polling_connected')
         update = self.f.message(OWNER, 'سلام، هنوز وصلی؟')
         _, _ = self.turn(update, OWNER, attempts=None)
         row = self.f.dispatch(self.f.event(update['update_id']))
@@ -592,7 +594,7 @@ class Scenarios:
         self.f.control({'faults': [{'method': 'getUpdates', 'code': 502, 'description': 'Bad Gateway'},
                                    {'method': 'getUpdates', 'code': 500, 'description': 'Internal Server Error'}]})
         self.wait('polling_faults_consumed', lambda: not [fault for fault in self.f.telegram()['faults'] if fault['method'] == 'getUpdates'], 120)
-        # The adapter restarts polling after the faults. A reply ready before that
+        # The Telegram service restarts polling after the faults. A reply ready before that
         # restart is never transmitted and is retried by design, which is covered
         # by reply_during_polling_reconnect; this scenario measures recovery after it.
         def reconnected():
@@ -701,7 +703,7 @@ class Scenarios:
         broken_row = self.finished(self.captured(broken))
         self.current['broken_original'] = {'state': broken_row['state'], 'error': broken_row['error'], 'replies': len(self.replies(before, GROUP, 32))}
         self.gate('broken_original_answered_at_most_once', len(self.replies(before, GROUP, 32)) <= 1)
-        health = self.f.http('/health', service='hermes', port=8781)
+        health = telegram_health(self.f.command)
         self.gate('unparseable_update_visible', (health.get('telegram_details') or {}).get('unparseable_updates', 0) >= 1, health=health.get('telegram_details'))
 
     def telegram_refresh_names(self):
@@ -755,9 +757,10 @@ class Scenarios:
     def restart_preserves_receipts(self):
         sent = len(self.f.sent())
         self.wait('updates_acknowledged', lambda: not self.f.telegram()['updates'], 120)
-        self.f.run('restart', '--no-deps', 'hermes')
-        self.f.run('up', '-d', '--no-build', '--no-deps', '--wait', 'hermes')
-        self.wait('polling_reconnected', lambda: self.f.http('/health', service='hermes', port=8781)['telegram'] == 'connected', 120)
+        # The whole runtime restarts: the Telegram service with its delivery receipts, and the brain.
+        self.f.run('restart', '--no-deps', TELEGRAM_SERVICE, 'hermes')
+        self.f.run('up', '-d', '--no-build', '--no-deps', '--wait', TELEGRAM_SERVICE, 'hermes')
+        wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected')
         time.sleep(10)
         self.gate('restart_sends_nothing', len(self.f.sent()) == sent)
         self.turn(self.f.message(OWNER, 'بعد از راه‌اندازی دوباره'), OWNER)
@@ -773,7 +776,7 @@ class Scenarios:
             names = [name for name, service in self.f.manifest['services'].items()
                      if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment']]
             self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
-            self.wait('polling_reconnected', lambda: self.f.http('/health', service='hermes', port=8781)['telegram'] == 'connected', 180)
+            wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
             return names
         names = apply({str(GROUP): {'granted': [str(PARTICIPANT)], 'denied': []}})
         self.current['recreated'] = names
@@ -860,7 +863,7 @@ def run(directory, names, scenarios_class=Scenarios):
     fixture = Fixture(directory)
     if fixture.query('nocheh_control', "SELECT current_setting('cluster_name')") != 'nocheh-installation-fixture':
         raise ValueError('synthetic_cluster_required')
-    if fixture.manifest['services']['hermes'].get('command') != ['python', '-m', 'tools.acceptance.telegram_runtime']:
+    if fixture.manifest['services'][TELEGRAM_SERVICE].get('command') != ['python', '-m', 'tools.acceptance.telegram_runtime']:
         raise ValueError('run_telegram_rehearsal_first')
     report = directory/('telegram-scenarios-'+str(time.time_ns()))
     report.mkdir(mode=0o700)

@@ -1,7 +1,8 @@
 """Extend an owned synthetic installation with actual Telegram HTTP polling.
 
-Reuses the installation's stores, Hermes, Honcho and deterministic inference.
-Only Telegram's transport URL changes; no public port or external network opens.
+Reuses the installation's stores, Telegram service, Hermes, Honcho and deterministic
+inference. Only the Telegram service's Bot API address changes; no public port or
+external network opens.
 """
 import argparse
 import base64
@@ -17,6 +18,24 @@ from tools.acceptance.telegram_mock import TOKEN
 
 # The real-model rehearsal's only egress, attached to the model relay alone.
 MODEL_EGRESS='model-egress'
+# Nocheh's own Telegram service holds the bot token, polls, sends and reports the
+# Telegram state on its health; Hermes keeps only the brain.
+TELEGRAM_SERVICE='nocheh-telegram'
+TELEGRAM_HEALTH='http://nocheh-telegram:8784/health'
+# The service's folders that must be this fixture's: its incident file and the capture spool.
+TELEGRAM_STATE={'/telegram-state':'state/telegram','/data/spool':'state/spool'}
+
+
+def telegram_health(command):
+    """The Telegram service's health, read from inside nocheh-app: the fixture publishes no port."""
+    script="""const response=await fetch(process.argv[1],{signal:AbortSignal.timeout(30000)});
+if(!response.ok)throw Error('telegram_health_'+response.status);console.log(JSON.stringify(await response.json()));"""
+    return json.loads(subprocess.check_output(command+['exec','-T','nocheh-app','node','--input-type=module','-e',script,TELEGRAM_HEALTH],text=True))
+
+
+def wait_telegram_connected(wait,command,label,seconds=120):
+    """Wait, through the caller's own wait(label,check,seconds), until the service polls the fake Bot API."""
+    return wait(label,lambda:telegram_health(command)['telegram']=='connected',seconds)
 
 
 def validate_fixture(directory,info,manifest):
@@ -41,10 +60,15 @@ def validate_fixture(directory,info,manifest):
             or not value.get('name','').startswith(project) for value in networks.values()):raise ValueError('isolated_fixture_required')
     if any((service.get('ports') and name!='fixture-preview') or service.get('network_mode')=='host'
            for name,service in manifest['services'].items()):raise ValueError('isolated_fixture_required')
-    native=manifest['services']['hermes'];provider=manifest['services']['model-fixture']
-    if native['image']!=info['images']['native'] or provider['environment'].get('NOCHEH_INSTALLATION_FIXTURE')!='1':raise ValueError('synthetic_fixture_required')
-    homes=[v for v in native['volumes'] if v.get('target')=='/workspace/data/local/hermes']
-    if len(homes)!=1 or homes[0].get('type')!='bind' or Path(homes[0]['source']).resolve()!=directory/'state/hermes':raise ValueError('owned_native_state_required')
+    native=manifest['services']['hermes'];bot=manifest['services'][TELEGRAM_SERVICE];provider=manifest['services']['model-fixture']
+    if (native['image']!=info['images']['native'] or bot['image']!=info['images']['native']
+            or provider['environment'].get('NOCHEH_INSTALLATION_FIXTURE')!='1'):raise ValueError('synthetic_fixture_required')
+    owned=[(native,'/workspace/data/local/hermes','state/hermes')]+[(bot,target,source) for target,source in TELEGRAM_STATE.items()]
+    for service,target,source in owned:
+        mounts=[v for v in service['volumes'] if v.get('target')==target]
+        if len(mounts)!=1 or mounts[0].get('type')!='bind' or Path(mounts[0]['source']).resolve()!=directory/source:raise ValueError('owned_native_state_required')
+    # Only the Telegram service may hold the bot token: a second holder could poll beside it.
+    if any(key.startswith('TELEGRAM_BOT_TOKEN') for key in native.get('environment') or {}):raise ValueError('telegram_token_outside_telegram_service')
     return project
 
 
@@ -85,7 +109,8 @@ headers:{'content-type':'application/json',Authorization:'Bearer '+process.env.S
 if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.stringify(await response.json()));"""
         return json.loads(subprocess.check_output(command+['exec','-T','nocheh-app','node','--input-type=module','-e',script,service,str(port),path,json.dumps(body)],text=True))
     report_directory=directory/('telegram-http-'+str(time.time_ns()));report_directory.mkdir(mode=0o700)
-    state_path=directory/'state/telegram/telegram.json'
+    # The fake's own folder: state/telegram belongs to the Telegram service.
+    state_path=directory/'state/telegram-mock/telegram.json'
     prior_unknown=json.loads(state_path.read_text())['unknown'] if state_path.exists() else []
     gates=[]
     def wait(label,check,seconds=300):
@@ -101,14 +126,16 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
     try:
         if not args.verify_only:
             # Preserve the exact previous executable manifest before changing
-            # only this fixture's provider and Telegram parent process.
+            # only this fixture's provider, Telegram service and Hermes's Telegram scopes.
             (report_directory/'compose.before.json').write_text(json.dumps(manifest))
-            provider=manifest['services']['model-fixture'];native=manifest['services']['hermes']
+            provider=manifest['services']['model-fixture'];bot=manifest['services'][TELEGRAM_SERVICE]
+            # Hermes answers Telegram turns only with Telegram enabled; it never gets the token.
+            manifest['services']['hermes']['environment']['TELEGRAM_ENABLED']='true'
             provider['environment']['NOCHEH_TELEGRAM_FIXTURE_STATE']='/fixture-state/telegram.json'
             # The fake Telegram keeps its state in a folder only this host user
             # can open; on Linux root without capabilities cannot read it.
             provider['user']=str(os.getuid())+':'+str(os.getgid())
-            state=directory/'state/telegram';state.mkdir(exist_ok=True,mode=0o700)
+            state=state_path.parent;state.mkdir(exist_ok=True,mode=0o700)
             def mount(service,source,target,readonly=True):
                 service['volumes']=[value for value in service['volumes'] if value.get('target')!=target]
                 service['volumes'].append({'type':'bind','source':str(source),'target':target,'read_only':readonly})
@@ -116,22 +143,18 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
             mount(provider,ROOT/'tools/__init__.py','/fixture/tools/__init__.py')
             mount(provider,ROOT/'tools/acceptance/telegram_mock.py','/fixture/tools/acceptance/telegram_mock.py')
             for name in ('telegram_runtime.py','telegram_mock.py'):
-                mount(native,ROOT/'tools/acceptance'/name,'/workspace/tools/acceptance/'+name)
-            native['command']=['python','-m','tools.acceptance.telegram_runtime']
-            native['environment'].update(TELEGRAM_ENABLED='true',TELEGRAM_BOT_TOKEN=TOKEN,NOCHEH_INSTALLATION_FIXTURE='1')
-            # The credential-free cached image can have a different built-in
-            # UID from this fixture's host UID. Use upstream's explicit lock
-            # directory, owned by this installation, instead of Path.home().
-            native['environment']['HERMES_GATEWAY_LOCK_DIR']='/workspace/data/local/hermes/gateway-locks'
-            native['environment']['HERMES_TELEGRAM_DISABLE_FALLBACK_IPS']='1'
+                mount(bot,ROOT/'tools/acceptance'/name,'/workspace/tools/acceptance/'+name)
+            bot['command']=['python','-m','tools.acceptance.telegram_runtime']
+            bot['environment'].update(TELEGRAM_ENABLED='true',TELEGRAM_BOT_TOKEN=TOKEN,NOCHEH_INSTALLATION_FIXTURE='1')
             for path in (directory/'compose.json',directory/'installation/docker-compose.yml'):
                 path.write_text(json.dumps(manifest));path.chmod(0o600)
             run('config','--quiet')
-            run('stop','-t','120','hermes')
+            run('stop','-t','60',TELEGRAM_SERVICE)
             prior_unknown=json.loads(state_path.read_text())['unknown'] if state_path.exists() else []
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait','model-fixture')
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait','hermes')
-        wait('native_polling_connected',lambda:http('/health',service='hermes',port=8781)['telegram']=='connected',120)
+            run('up','-d','--no-build','--no-deps','--force-recreate','--wait',TELEGRAM_SERVICE)
+        wait_telegram_connected(wait,command,'telegram_polling_connected')
         initial=http('/fixture/telegram');sent_before=len(initial['sent']);base=int(time.time())
         assert not initial['faults'],'previous fixture faults remain pending'
         probes=[('owner_private',123,None),('named_topic',-10042,7),('general_topic',-10042,None)]
@@ -201,9 +224,9 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
         # must be observed before restart; an empty durable server queue and
         # unchanged sends then prove that restart did not resurrect updates.
         wait('confirmed_updates_acknowledged',lambda:http('/fixture/telegram')['offset']>number,60)
-        run('restart','--no-deps','hermes')
-        run('up','-d','--no-build','--no-deps','--wait','hermes')
-        wait('polling_reconnected',lambda:http('/health',service='hermes',port=8781)['telegram']=='connected',120)
+        run('restart','--no-deps',TELEGRAM_SERVICE)
+        run('up','-d','--no-build','--no-deps','--wait',TELEGRAM_SERVICE)
+        wait_telegram_connected(wait,command,'polling_reconnected')
         after=http('/fixture/telegram');assert len(after['sent'])==sent_before and after['unknown']==prior_unknown
         assert not after['updates'],'acknowledged updates reappeared after restart'
         assert not after['faults'],'fixture fault was not exercised'
