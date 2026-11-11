@@ -22,6 +22,7 @@ import {storageWorkflowSchema} from './workflow-schema.js';
 import {runtimeConfigurationSchema} from './runtime-configuration.js';
 import {telegramActionSchema} from './telegram-action-schema.js';
 import {telegramDispatchSchema} from './telegram-dispatch.js';
+import {chatSendSchema} from './chat-sends.js';
 import {storageWorkflowOwnerSchema} from './workflow-owner.js';
 import {controlledActionSchema} from './controlled-action-schema.js';
 import {actionContinuationSchema} from './action-continuations.js';
@@ -131,6 +132,7 @@ ${storageWorkflowSchema}
 ${runtimeConfigurationSchema}
 ${telegramActionSchema}
 ${telegramDispatchSchema}
+${chatSendSchema}
 ${controlledActionSchema}
 ${actionContinuationSchema}
 ${controlGuardSchema}

@@ -60,6 +60,16 @@ test('separated application captures through control outages, exposes owner repo
     const initialStatus=await request('/v1/status');
     assert.equal(initialStatus.guard_mode,'on');assert.equal(initialStatus.storage_layout,'original-only-v1');
     assert.equal(typeof initialStatus.archive.events,'number');assert.ok(Array.isArray(initialStatus.archive.artifacts));
+    assert.deepEqual(initialStatus.chat_sends,{window_hours:24,sent:0,failed:0,uncertain:0,not_sent:0,problems:0,problem_kinds:{},last_problem_at:null,latest_problems:[]});
+    // The worker takes the front door's send records; Health and the owner's list show what failed.
+    const send={version:1,key:'send:telegram:4242:'+digest(key).slice(0,32),channel:'telegram',account:'4242',at:new Date().toISOString(),kind:'reaction',
+      method:'setMessageReaction',chat:'-42',topic:null,message_id:5,detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed',reference:null,ms:80};
+    await mkdir(join(root,'spool/sends'),{recursive:true});await writeFile(join(root,'spool/sends',digest(send.key)+'.json'),canonical(send));
+    await until(async()=>!(await readdir(join(root,'spool/sends'))).length);
+    const sendStatus=(await request('/v1/status')).chat_sends;
+    assert.equal(sendStatus.problems,1);assert.deepEqual(sendStatus.problem_kinds,{reaction:1});assert.equal(sendStatus.latest_problems[0].error_code,'reaction_not_allowed');
+    assert.deepEqual((await request('/v1/chat-sends?filter=problems')).records.map((row:any)=>[row.kind,row.detail,row.chat]),[['reaction','👀','-42']]);
+    await request('/v1/chat-sends?limit=101',undefined,400);
     const runtimeStatus=await request('/v1/runtime');
     assert.equal(runtimeStatus.status.telegram,'connected');assert.equal(runtimeStatus.brain.id,'hermes');assert.equal(runtimeStatus.brain.capabilities.persona,true);
     await request('/v1/runtime',undefined,403,scopeToken(token,'123',Date.now()+60000));
@@ -119,6 +129,7 @@ test('separated application captures through control outages, exposes owner repo
     const mismatched=await services.prepared.audience.turn(token,{scope:'-42',space:'-42'},digest(key),Date.now()+60000);
     assert.equal((await request('/v1/memory/check',undefined,200,mismatched)).valid,false);
     await request('/v1/status',undefined,403,credential);
+    await request('/v1/chat-sends',undefined,403,credential);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
     // The owner's list and detail say who wrote it, whether its assistant copy is ready and its reply state.
     const ownerRead=await request('/v1/events/'+digest(key));

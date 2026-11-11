@@ -237,8 +237,8 @@ class ConfigurationTests(unittest.TestCase):
         from tools.operations.installation.configuration import ROOT,validate
         from tools.operations.installation.settings import EDITABLE
         compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
-        # One owner setting prunes Hermes's managed-run receipts and the bot's delivery journals.
-        for service in ('hermes','nocheh-telegram'):
+        # One owner setting prunes Hermes's managed-run receipts, the bot's delivery journals and the app's send records.
+        for service in ('hermes','nocheh-telegram','nocheh-app'):
             self.assertEqual(compose[service]['environment']['NOCHEH_HERMES_JOURNAL_RETENTION_DAYS'],'${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}',service)
         self.assertIn('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS',EDITABLE)
         with tempfile.TemporaryDirectory() as folder:
