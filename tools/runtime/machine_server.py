@@ -265,6 +265,7 @@ class Machines:
                 chunk=os.read(output,65536)
                 if not chunk:poller.unregister(output);open_=False;continue
                 held+=chunk;at=held.find(marker)
+                if at>NOISE:return held,'noise'
                 if at>=0:return held[at+len(marker):],None
                 if len(held)>NOISE+len(marker):return held,'noise'
             if proc.poll() is not None:
