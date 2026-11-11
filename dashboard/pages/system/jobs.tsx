@@ -157,7 +157,7 @@ export function BackgroundJobs() {
         ' What it already spent stays spent.' +
         (job.machine
           ? begun
-            ? ` Nocheh also ends every program its login runs on ${job.machine.name}.`
+            ? ` Nocheh also ends the programs it started on ${job.machine.name}.`
             : ` Nothing has run on ${job.machine.name} yet.`
           : ''),
       confirm: 'Stop',

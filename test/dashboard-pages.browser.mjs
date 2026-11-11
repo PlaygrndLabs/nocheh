@@ -997,7 +997,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   // Stop says that it ends the programs on the machine too; Cancel leaves the job running.
   await job.getByRole('button', {name: 'Stop'}).click();
   const stop = page.getByRole('dialog', {name: 'Stop this job?'});
-  await stop.getByText('Nocheh also ends every program its login runs on build-vm.', {exact: false}).waitFor();
+  await stop.getByText('Nocheh also ends the programs it started on build-vm.', {exact: false}).waitFor();
   await stop.getByRole('button', {name: 'Cancel'}).click();
   // A machine job still waiting has run nothing there, and Stop says so.
   const waiting = page
@@ -1008,7 +1008,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   await stop.getByText('The job is cancelled before it starts.', {exact: false}).waitFor();
   await stop.getByText('Nothing has run on build-vm yet.', {exact: false}).waitFor();
   assert.equal(await stop.getByText('The running job', {exact: false}).count(), 0);
-  assert.equal(await stop.getByText('ends every program', {exact: false}).count(), 0);
+  assert.equal(await stop.getByText('ends the programs it started', {exact: false}).count(), 0);
   await stop.getByRole('button', {name: 'Cancel'}).click();
   // Programs Nocheh couldn't end are the owner's to end.
   await page

@@ -7,8 +7,8 @@ host key live in /machines/<id>/ (key, key.pub, known_hosts); no route returns o
 
 ssh runs with fixed options only: the request names a machine id, address, port and login, each checked against a
 fixed pattern, never an option. The remote command prints a random marker and then execs bash with a fixed wrapper
-(WRAP) and the script as one argument; what comes before the marker (shell start-up noise, ssh's own warnings) is
-dropped and, when ssh ends before it, tells why the connection failed. POST /exec answers 502 {error} for such a
+(WRAP) and the script as one argument, with the job's tag (TAG) in its environment; what comes before the marker (shell
+start-up noise, ssh's own warnings) is dropped and, when ssh ends before it, tells why the connection failed. POST /exec answers 502 {error} for such a
 failure; once the marker came it answers 200 with frames, as tools/runtime/box_server.py does: b'O', a 4-byte length
 and output bytes, then b'X', 4 and the exit code as a signed 4-byte int (124 at the time limit). A client that goes
 away ends ssh. A machine whose key file is missing (keys are not in backups) answers machine_key_missing.
@@ -33,6 +33,8 @@ from pathlib import Path
 
 PORT=8789
 ID=re.compile(r'[a-f0-9]{32}')
+# A background job's id: the tag of the programs its commands start.
+JOB=re.compile(r'[a-f0-9]{64}')
 ADDRESS=re.compile(r'[A-Za-z0-9][A-Za-z0-9.:-]{0,252}')
 LOGIN=re.compile(r'[a-z_][a-z0-9_-]{0,31}')
 HOST_KEY=re.compile(r'SHA256:[A-Za-z0-9+/]{43}')
@@ -61,15 +63,16 @@ TAIL=.3
 # its PID over the pipe that tells WRAP when cat ends (cat holds its write end as fd 4). Once the script's bash has ended,
 # cat stops when it has copied everything (end of file, the only case it is not killed), or after 0.3 s while a program
 # the script started still runs, or after at most 10 s when none does, which leaves time for output still on its way. Where coreutils'
-# timeout exists, the script runs under `timeout -k 5`: at the time limit it ends the script and the programs it started,
-# all in timeout's own process group (whose id is that PID), and the command ends with 124. Without that timeout the cat
+# timeout exists (or gtimeout, its name from Homebrew on macOS), the script runs under `timeout -k 5`: at the time limit it
+# ends the script and the programs it started, all in timeout's own process group (whose id is that PID), and the command
+# ends with 124. Without that timeout the cat
 # gets 0.3 s; without mkfifo, mktemp or bash 4 the script runs as it did before, its programs holding the reply. stdin and
 # exit codes pass through. WRAP itself never prints (its stderr goes to /dev/null at once) and does not rely on set -e or
 # set -u being off, which an exported SHELLOPTS could turn on. --norc: a bash that sshd started would read ~/.bashrc again,
 # after the marker. The login's shell only parses `exec bash ... 'WRAP' ...`, so a dash or busybox login shell works too.
 WRAP=b'''exec 8>&2 2>/dev/null
 t= d= c= p= r=0 s=0
-if v=$(timeout --version) && [[ $v == *coreutils* ]]; then t="timeout -k 5 $1"; fi
+for x in timeout gtimeout; do if v=$($x --version) && [[ $v == *coreutils* ]]; then t="$x -k 5 $1"; break; fi; done
 if ((BASH_VERSINFO[0]<4)) || ! d=$(mktemp -d "${TMPDIR:-/tmp}/nocheh.XXXXXXXXXX") || ! mkfifo -m 600 "$d/o"; then
 if [ -n "$d" ]; then rm -rf -- "$d"; fi
 exec $t bash --norc $2 -c "$3" 2>&8 8>&-
@@ -87,13 +90,34 @@ exit $r
 SHORT=30
 # Multiplexed connections live in the container's own /tmp, one set per machine.
 CONTROL=Path('/tmp')
-# Ends every program of the login except this shell and its sshd: what a stopped job left running there.
-# Without ps it fails rather than claim it ended something.
-CLEANUP=('me=$$; up=$PPID; pids=$(ps -o pid= -u "$(id -u)") || exit 3; '
-         'for p in $pids; do [ "$p" = "$me" ] || [ "$p" = "$up" ] || kill -KILL "$p" 2>/dev/null; done; true')
+# Every command of a job runs with TAG=<the job's id> in its environment, and the programs it starts inherit it. A program that
+# clears its environment, or one the system starts for it (launchd, `open`, systemd), has no tag.
+TAG='NOCHEH_STARTED'
+# Ends the programs a job started as the login, which carry its tag ($1 is the job's id), and nothing else the login
+# runs: not the owner's own, since the login may be one the owner uses, nor what other jobs left. A process's environment is read from /proc where it has them (Linux,
+# busybox too), else from `ps -E` one process at a time (macOS, BSD), as words, since a command line may span lines.
+# This shell runs with NOCHEH_CLEANUP=<its own PID>, which its text never spells out, and must find that first: where
+# neither way works it fails rather than claim it ended something. Up to five rounds end the programs started meanwhile;
+# if tagged programs are still there after them it fails too.
+CLEANUP=r'''proc=; [ -r /proc/$$/environ ] && proc=1
+has() {
+  if [ -n "$proc" ]; then tr '\0' '\n' 2>/dev/null <"/proc/$1/environ"; else ps -E -ww -o command= -p "$1" 2>/dev/null | tr ' ' '\n'; fi |
+    grep -qxF "$2"
+}
+has $$ "NOCHEH_CLEANUP=$$" || exit 3
+n=0
+while :; do
+  if [ -n "$proc" ]; then all=; for e in /proc/[0-9]*; do all="$all ${e#/proc/}"; done
+  else all=$(ps -x -U "$(id -un)" -o pid= 2>/dev/null) || exit 3; fi
+  pids=; for p in $all; do [ "$p" = "$$" ] || ! has "$p" "NOCHEH_STARTED=$1" || pids="$pids $p"; done
+  [ -n "$pids" ] || exit 0
+  [ $n -lt 5 ] || exit 4
+  kill -KILL $pids 2>/dev/null
+  n=$((n+1)); sleep 1
+done'''
 REQUESTS={'/keys':('id','comment'),'/test':('id','address','port','login','host_key'),
-          '/exec':('id','address','port','login','host_key','script','stdin','timeout','login_shell'),
-          '/cleanup':('id','address','port','login','host_key'),'/forget':('id',),'/remove':('id',)}
+          '/exec':('id','address','port','login','host_key','job','script','stdin','timeout','login_shell'),
+          '/cleanup':('id','address','port','login','host_key','job'),'/forget':('id',),'/remove':('id',)}
 KEYS=threading.Lock()
 
 
@@ -162,6 +186,13 @@ def target(value,exec_=False):
             or host_key is not None and not (isinstance(host_key,str) and HOST_KEY.fullmatch(host_key))
             or exec_ and host_key is None):raise Refused(400,'invalid_machine_request')
     return ident,address,port,login,host_key
+
+
+def job_of(value):
+    """The job a command or cleanup is for, checked: its id goes on the machine as the programs' tag."""
+    job=value.get('job')
+    if not (isinstance(job,str) and JOB.fullmatch(job)):raise Refused(400,'invalid_machine_request')
+    return job
 
 
 def kill(proc):
@@ -312,12 +343,12 @@ class Machines:
         return {'ok':True,'host_key':next(iter(found)),'system':line(result[0])}
 
     def cleanup(self,value):
-        ident,address,port,login,host_key=target(value,exec_=True)
+        ident,address,port,login,host_key=target(value,exec_=True);job=job_of(value)
         self.folder(ident)
-        # A cleanup ends every program of the login but its own: two at once on one machine would end each other.
+        # Cleanups of one machine run one at a time, each over its own connection.
         with self.cleaning.setdefault(ident,threading.Lock()):
             if refused:=self.untrusted(ident,host_key):return {'ok':False,'error':refused}
-            code,*result=self.short(ident,address,port,login,b'exec sh -c '+quote(CLEANUP.encode()))
+            code,*result=self.short(ident,address,port,login,b'exec env NOCHEH_CLEANUP=$$ sh -c '+quote(CLEANUP.encode())+b' nocheh '+job.encode())
         if code is None:return {'ok':False,'error':result[0]}
         return {'ok':True} if code==0 else {'ok':False,'error':'machine_cleanup_failed'}
 
@@ -384,14 +415,14 @@ class Handler(BaseHTTPRequestHandler):
     def chunk(self,data):self.wfile.write(b'%x\r\n%s\r\n'%(len(data),data))
 
     def execute(self,value):
-        machines=self.server.machines;ident,address,port,login,host_key=target(value,exec_=True)
+        machines=self.server.machines;ident,address,port,login,host_key=target(value,exec_=True);job=job_of(value)
         script,stdin,timeout,login_shell=value['script'],value['stdin'],value['timeout'],value['login_shell']
         if (not isinstance(script,str) or '\x00' in script or stdin is not None and not isinstance(stdin,str)
                 or type(timeout) is not int or not 1<=timeout<=3600 or type(login_shell) is not bool):raise Refused(400,'invalid_machine_request')
         data=raw(script);given=None if stdin is None else raw(stdin)
         if given is not None and len(given)>MAX_STDIN:raise Refused(400,'invalid_machine_request')
         marker=('\x1enocheh-'+secrets.token_hex(8)+'\x1e').encode()
-        remote=(b"printf '%s' '"+marker+b"'; exec bash --norc -c "+quote(WRAP)+b' nocheh %d '%timeout+(b'-l' if login_shell else b"''")
+        remote=(b"printf '%s' '"+marker+b"'; exec env "+TAG.encode()+b'='+job.encode()+b" bash --norc -c "+quote(WRAP)+b' nocheh %d '%timeout+(b'-l' if login_shell else b"''")
                 +b' '+quote(data))
         if len(data)>MAX_SCRIPT or len(remote)>MAX_REMOTE:raise Refused(409,'machine_script_too_long')
         machines.folder(ident)

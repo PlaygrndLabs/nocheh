@@ -79,9 +79,8 @@ ask for a machine job with a short plan; its one plan card always goes to the pr
 chat, and after Approve the job's Hermes terminal and file tools run on the machine
 through Nocheh for at most 50 minutes. Every command is logged in System › Machine log;
 a command ends when its shell ends, and past its time limit on the machine too when the
-machine has `timeout`; Stop, limits, a failed run and the off switches end every program
-of the job's login there, which needs `ps` (a failed cleanup shows as
-`machine_cleanup_failed`); a job that ends normally leaves its programs running and
+machine has `timeout`; Stop, limits, a failed run and the off switches end the
+programs the job started there (a failed cleanup shows as `machine_cleanup_failed`); a job that ends normally leaves its programs running and
 names them. A machine is Ready only while its last Test passed, and only then can a job
 ask for it. Every job card that would not fit Telegram is now refused with
 `job_card_too_long` instead of never arriving. The review round of 2026-11-11 added
@@ -102,12 +101,21 @@ and the full tester scenarios `machine_job_runs_after_one_approval` and
 `machine_job_refused_for_members_and_stopped` passed against a made-up SSH machine
 ([scenarios](tools/acceptance/product_scenarios.py)). Pending: a real job on the
 owner's VM with a real model.
+
+Machine jobs on the owner's own login (owner, 2026-11-11: "I want access to main user",
+then "ok so still want use main"): every command of a job carries `NOCHEH_STARTED=<job
+id>` in its environment, and the cleanup ends only the login's processes with that tag,
+read from `/proc` or, on macOS, `ps -E`, after it finds its own `NOCHEH_CLEANUP=<pid>`;
+the wrapper also takes Homebrew's `gtimeout`
+([ADR-0237](docs/adr/0237-stop-ends-only-the-programs-a-machine-job-started.md),
+[service](services/hermes/test_machine_server.py), [stores](test/store-machines.test.ts),
+[scenarios](tools/acceptance/product_scenarios.py)). Pending: the cleanup on a real
+macOS machine.
 Owner steps: say which VM app you will use, so its network can be checked; after the
 pull, run `./bin/nocheh up` (or `make dev-build`, since the management image now carries
-the SSH client), which makes `NOCHEH_MACHINE_TOKEN` and starts `nocheh-machines`; make a
-separate login for Nocheh on the VM, with bash as its shell and `ps` (procps) installed,
-since Stop ends every program it runs; add the VM in Settings › Machines, put the public
-key in that login's `~/.ssh/authorized_keys`, and press Test to check that Nocheh
+the SSH client), which makes `NOCHEH_MACHINE_TOKEN` and starts `nocheh-machines`; pick a
+login on the VM that has bash, also your own, since Stop ends only what a job started;
+add the VM in Settings › Machines, put the public key in that login's `~/.ssh/authorized_keys`, and press Test to check that Nocheh
 reaches it. A VM on the same computer is `host.docker.internal`, not `localhost`; a
 VM on a network only its host can reach may need a port forward or a bridged network.
 Open by design: the log's command text is what the run reports, and the script's hash

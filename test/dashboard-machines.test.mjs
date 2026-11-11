@@ -188,7 +188,7 @@ test('error codes become plain words and a next step', () => {
     /aren’t kept in backups\. Remove this machine and add it again\./,
   );
   assert.equal(machineErrorWords('machine_cleanup_failed'), 'Nocheh couldn’t end the job’s programs');
-  assert.match(commandAdvice('machine_cleanup_failed'), /end them yourself.*Install ps \(procps\)/);
+  assert.match(commandAdvice('machine_cleanup_failed'), /may still run on the machine, so end them yourself\.$/);
   assert.match(commandAdvice('machine_key_missing'), /Remove the machine in Settings › Machines and add it again\./);
   assert.equal(commandAdvice('machine_unreachable'), '');
   assert.equal(commandAdvice(null), '');

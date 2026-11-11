@@ -47,9 +47,9 @@ import {LinkButton} from '../../ui/link-button';
 import {Dialog, useFeedback} from '../../ui/overlay';
 
 const loginHint =
-  'Use a separate login for Nocheh, with bash as its shell, because Stop ends every program it runs. Install ps (procps) on the machine so Stop can do that.';
+  'Nocheh may use your own login: Stop ends only the programs a job started there, never yours. The machine needs bash; bash 4 or later and GNU timeout work best.';
 const offText =
-  'Cards waiting for your approval are withdrawn. Running machine jobs stop, and every program their login runs on the machine is ended.';
+  'Cards waiting for your approval are withdrawn. Running machine jobs stop, and the programs they started on the machine are ended.';
 const removeText = (machine: Machine) =>
   `Nocheh deletes its key for ${machine.name}. Cards waiting for your approval are withdrawn, and running jobs on it stop and their programs there end. The machine log keeps its commands. Remove the key line from ~${machine.login}/.ssh/authorized_keys on the machine too.`;
 const jobsText = (machine: Machine) =>

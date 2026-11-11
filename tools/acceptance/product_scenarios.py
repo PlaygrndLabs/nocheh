@@ -1811,8 +1811,8 @@ class ProductScenarios(Scenarios):
 
     def machine_job_refused_for_members_and_stopped(self):
         # A member asks in the group for a job on the owner's machine: Nocheh refuses it before any card. Then the owner's
-        # machine job starts a program that keeps running there, and Stop on its card ends the job; the cleanup ends every
-        # program of that login on the machine and is logged.
+        # machine job starts a program that keeps running there, and Stop on its card ends the job; the cleanup ends the
+        # program the job started and is logged, while the owner's own program of the same login keeps running.
         dashboard = self.dashboard()
         machine = self.ready_machine(dashboard)
         access = next(json.loads(service['environment']['TELEGRAM_GROUP_ACCESS']) for service in self.f.manifest['services'].values()
@@ -1830,6 +1830,10 @@ class ProductScenarios(Scenarios):
         time.sleep(3)
         self.gate('no_card_and_no_job_for_the_member', not self.cards(before) and not [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
                                                                                    if item.get('title') == asked])
+        # The owner's own program, as the same login, which no job started.
+        own = lambda: self.vm('pgrep', '-u', VM_LOGIN, '-x', 'tail').stdout.split()
+        started = self.vm('runuser', '-u', VM_LOGIN, '--', 'sh', '-c', 'setsid tail -f /dev/null </dev/null >/dev/null 2>&1 &')
+        self.wait('owner_program_runs', own, 30, 1)
         # The owner's job starts a program that keeps running, then waits; every scripted answer waits 30 s.
         title, program = 'Machine program JOB13', 'sleep 3600'
         instruction = ('Start the program and check on it. [[delay:30]] [[tool:terminal '+json.dumps({'command': program, 'background': True})+']] '
@@ -1849,10 +1853,12 @@ class ProductScenarios(Scenarios):
         cleanup = lambda: self.f.query('nocheh_control', "SELECT coalesce(machine_cleanup,'none') FROM background_jobs WHERE id='%s'" % found['id'])
         self.wait('cleanup_done', lambda: cleanup() in ('done', 'failed'), 180)
         self.gate('cleanup_ended_its_programs', cleanup() == 'done', cleanup=cleanup())
-        self.gate('program_gone', not running(), left=self.vm('ps', '-u', VM_LOGIN, '-o', 'pid=,comm=').stdout.split('\n')[:10])
+        self.gate('program_gone', not running(), left=self.vm('ps', '-u', VM_LOGIN, '-o', 'pid=,args=').stdout.split('\n')[:10])
+        self.gate('owner_program_kept', bool(own()), started=started.returncode, left=self.vm('ps', '-u', VM_LOGIN, '-o', 'pid=,args=').stdout.split('\n')[:10])
+        self.vm('pkill', '-u', VM_LOGIN, '-x', 'tail')
         rows = self.machine_log(dashboard, found['id'])
         self.current['observed'] = {'log': [{key: row.get(key) for key in ('kind', 'state', 'exit_code', 'error_code')} for row in rows]}
-        self.gate('cleanup_logged', any(row['kind'] == 'cleanup' and row['state'] == 'done' and row['command'] == 'end all programs of '+VM_LOGIN for row in rows),
+        self.gate('cleanup_logged', any(row['kind'] == 'cleanup' and row['state'] == 'done' and row['command'] == 'end the programs this job started as '+VM_LOGIN for row in rows),
                   kinds=[[row['kind'], row['state']] for row in rows])
         self.gate('program_start_logged', any(row['kind'] == 'command' and program in row['command'] for row in rows), commands=[row['command'][:80] for row in rows if row['kind'] == 'command'])
         self.wait('card_says_stopped', lambda: '🚫 Stopped. Nothing more runs.' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)

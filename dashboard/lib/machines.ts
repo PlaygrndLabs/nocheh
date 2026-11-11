@@ -156,7 +156,7 @@ export function machineErrorPhrase(code: string | null | undefined): string {
 
 const keyMissing = 'Machine keys aren’t kept in backups. Remove this machine and add it again.';
 const cleanupFailed =
-  'Programs the job started may still run on the machine, so end them yourself. Install ps (procps) there so Nocheh can end them next time.';
+  'Programs the job started may still run on the machine, so end them yourself.';
 
 /** What to do after a test or an action failed with this code. */
 export function machineAdvice(code: string, login: string): string {

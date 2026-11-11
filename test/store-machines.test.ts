@@ -138,7 +138,7 @@ test('only the owner\'s own request in their private chat or an active project\'
   };
   const rows=async(where:string,params:unknown[]=[])=>(await stores.control.query('SELECT * FROM machine_commands WHERE '+where+' ORDER BY id',params)).rows;
   const settledWith=(id:string,line:string)=>until(()=>approvals.some(input=>input.kind==='settle'&&input.id===id&&String(input.text).endsWith('\n\n'+line)),'the card of '+id+' says '+line);
-  const machineLine='🖥 It works on build-vm (nocheh@192.0.2.10) over SSH: one approval covers every command it runs there. Stop ends every program that login runs there.';
+  const machineLine='🖥 It works on build-vm (nocheh@192.0.2.10) over SSH: one approval covers every command it runs there. Stop ends the programs it started there.';
   const planLine='📋 Plan:\n1. Install the made-up tool\n2. Run its tests',withdrawn='🚫 Withdrawn: its machine was turned off or changed. Nothing runs.';
   try {
     await s.guards.reconcile();await s.guards.setMode('on');await s.configuration.configure(policy,'on');
@@ -294,7 +294,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     const ran=await exec(brokerBase,a.credential,execBody());
     assert.deepEqual([ran.status,ran.type],[200,'application/octet-stream']);
     assert.deepEqual(frames(ran.bytes).map(item=>[item.type,item.type==='O'?item.data.toString():item.data.readInt32BE(0)]),[['O','hello\n'],['X',0]]);
-    assert.deepEqual(calls,[{path:'/exec',body:{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey,script:'printf hello',stdin:null,timeout:60,login_shell:false}}]);
+    assert.deepEqual(calls,[{path:'/exec',body:{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey,job:asked.id,script:'printf hello',stdin:null,timeout:60,login_shell:false}}]);
     const logged=(await rows('job_id=$1',[asked.id])).at(-1);
     assert.deepEqual([logged.machine_id,logged.machine_name,logged.run_event_id,logged.kind,logged.command,logged.state,logged.exit_code,logged.output_sha256,Number(logged.output_bytes),logged.script_sha256,logged.error_code],
       [build,'build-vm',a.step,'command','printf hello','done',0,sha('hello\n'),6,sha('printf hello'),null]);
@@ -375,9 +375,9 @@ test('only the owner\'s own request in their private chat or an active project\'
     assert.deepEqual([ended.state,ended.exit_code,ended.error_code,Number(ended.output_bytes),ended.output_sha256],['cancelled',137,'job_stopped',8,sha('started\n')]);
     assert.deepEqual([(await job(asked.id)).cancel_requested,(await job(asked.id)).machine_cleanup],[true,'pending']);
     calls.length=0;await s.machines.cleanupTick();
-    assert.deepEqual(calls,[{path:'/cleanup',body:{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey}}]);
+    assert.deepEqual(calls,[{path:'/cleanup',body:{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey,job:asked.id}}]);
     assert.equal((await job(asked.id)).machine_cleanup,'done');
-    assert.deepEqual((await rows("job_id=$1 AND kind='cleanup'",[asked.id])).map(row=>[row.command,row.state]),[['end all programs of nocheh','done']]);
+    assert.deepEqual((await rows("job_id=$1 AND kind='cleanup'",[asked.id])).map(row=>[row.command,row.state]),[['end the programs this job started as nocheh','done']]);
     await finishStopped(asked.id);
     assert.deepEqual([(await job(asked.id)).state,(await job(asked.id)).machine_cleanup],['stopped','done'],'cleaned once');
     await s.jobs.stop(owner,{id:plainJob.id});await finishStopped(plainJob.id);
@@ -448,7 +448,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     assert.deepEqual([moved.body.address,moved.body.host_key,moved.body.tested_at],['192.0.2.11',null,null]);
     assert.deepEqual(frames((await inFlight).bytes).map(item=>item.type==='O'?item.data.toString():item.data.readInt32BE(0)),['started\n','\n[nocheh: the job was stopped]\n',137]);
     assert.deepEqual(events,['exec ended','/cleanup','/forget']);
-    assert.deepEqual(calls,[{path:'/cleanup',body:{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey}},{path:'/forget',body:{id:build}}]);
+    assert.deepEqual(calls,[{path:'/cleanup',body:{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey,job:busy.id}},{path:'/forget',body:{id:build}}]);
     assert.deepEqual([(await job(busy.id)).cancel_requested,(await job(busy.id)).machine_cleanup],[true,'done']);
     execMode='echo';await finishStopped(busy.id);
     assert.deepEqual([(await job(moving.id)).state,(await job(moving.id)).error_code],['stopped','job_machine_off']);await settledWith(moving.id,withdrawn);
@@ -473,7 +473,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     calls.length=0;
     const forgot=await route('POST','/v1/machines/'+build+'/forget-host-key');
     assert.deepEqual([forgot.status,forgot.body.host_key,forgot.body.tested_at,forgot.body.test_error],[200,null,null,null]);
-    assert.deepEqual(calls,[{path:'/cleanup',body:{id:build,address:'192.0.2.11',port:22,login:'nocheh',host_key:hostKey}},{path:'/forget',body:{id:build}}]);
+    assert.deepEqual(calls,[{path:'/cleanup',body:{id:build,address:'192.0.2.11',port:22,login:'nocheh',host_key:hostKey,job:leftover.id}},{path:'/forget',body:{id:build}}]);
     assert.deepEqual([(await job(leftover.id)).machine_cleanup,(await job(leftover.id)).machine_cleanup_attempts],['done',1]);
     assert.equal((await job(forgetting.id)).error_code,'job_machine_off','a job pinned to the old key is withdrawn');
     await s.machines.test(owner,build);
@@ -492,7 +492,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     release();await looping;
     assert.deepEqual(await removed,{status:200,body:{id:spare,removed:true}});cleanupMode='ok';
     assert.deepEqual(events,['/cleanup','cleanup answered','/remove']);
-    assert.deepEqual(calls,[{path:'/cleanup',body:{id:spare,address:'host.docker.internal',port:2222,login:'nocheh',host_key:hostKey}},{path:'/remove',body:{id:spare}}]);
+    assert.deepEqual(calls,[{path:'/cleanup',body:{id:spare,address:'host.docker.internal',port:2222,login:'nocheh',host_key:hostKey,job:lingering.id}},{path:'/remove',body:{id:spare}}]);
     assert.equal((await job(lingering.id)).machine_cleanup,'done');
     assert.equal((await job(removing.id)).error_code,'job_machine_off');
     assert.deepEqual((await s.machines.list(owner)).machines.map(row=>row.name),['Build-VM']);
