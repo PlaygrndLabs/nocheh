@@ -504,11 +504,14 @@ export function Pager({
   hasNext,
   onPage,
   summary,
+  labels = ['Previous', 'Next'],
 }: {
   page: number;
   hasNext: boolean;
   onPage: (page: number) => void;
   summary?: React.ReactNode;
+  /** The two buttons' words, such as Newer and Older for a log. */
+  labels?: [string, string];
 }) {
   if (page === 0 && !hasNext) return summary ? <p className="px-5 py-3 text-xs text-muted">{summary}</p> : null;
   return (
@@ -516,10 +519,10 @@ export function Pager({
       <p className="text-xs text-muted">{summary}</p>
       <div className="flex gap-2">
         <Button size="sm" disabled={page === 0} onClick={() => onPage(page - 1)}>
-          Previous
+          {labels[0]}
         </Button>
         <Button size="sm" disabled={!hasNext} onClick={() => onPage(page + 1)}>
-          Next
+          {labels[1]}
         </Button>
       </div>
     </div>

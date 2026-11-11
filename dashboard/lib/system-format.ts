@@ -413,6 +413,86 @@ const telegramReasons: Record<string, string> = {
 export const telegramReason = (code: string | null | undefined): string =>
   code ? (telegramReasons[code] ?? reason(code)) : '';
 
+/* ---------- Sent to apps ---------- */
+
+const sendApps: Record<string, string> = {telegram: 'Telegram', slack: 'Slack'};
+export const sendApp = (channel: string): string =>
+  sendApps[channel] ?? readable(channel).replace(/^./, c => c.toUpperCase());
+
+export const sendKinds: Record<string, string> = {
+  reply: 'Reply',
+  approved_send: 'Approved message',
+  approval_card: 'Approval card',
+  card_update: 'Card update',
+  button_answer: 'Button answer',
+  refusal: 'Not-allowed reply',
+  notice: 'Notice',
+  notice_update: 'Notice update',
+  reaction: 'Reaction',
+  typing: 'Typing',
+  setup: 'Bot setup',
+  other: 'Other',
+};
+/** What a send was; a reaction names its emoji, or that it was cleared. */
+export function sendWhat(row: {kind: string; detail?: string | null}): string {
+  const label = sendKinds[row.kind] ?? readable(row.kind);
+  return row.kind === 'reaction' && row.detail
+    ? label + ' ' + (row.detail === 'clear' ? 'cleared' : row.detail)
+    : label;
+}
+
+const sendStates: Record<string, {label: string; tone: Tone}> = {
+  sent: {label: 'Sent', tone: 'good'},
+  failed: {label: 'Failed', tone: 'bad'},
+  uncertain: {label: 'Uncertain', tone: 'warn'},
+  not_sent: {label: 'Not sent', tone: 'neutral'},
+};
+/** Expected no-ops, as storage counts them: listed, never a problem. */
+const harmlessSendCodes = ['message_not_modified', 'button_answer_expired'];
+export function sendState(row: {state: string; error_code?: string | null}): {label: string; tone: Tone} {
+  const state = sendStates[row.state] ?? {label: readable(row.state), tone: 'neutral' as Tone};
+  return harmlessSendCodes.includes(row.error_code ?? '') ? {...state, tone: 'neutral'} : state;
+}
+
+const sendReasons: Record<string, string> = {
+  bot_blocked: 'The person blocked the bot',
+  user_deactivated: 'The person’s account is closed',
+  bot_removed: 'The bot was removed from the chat',
+  chat_not_found: 'Chat not found',
+  topic_not_found: 'Topic closed or not found',
+  message_not_found: 'Message no longer exists',
+  message_not_modified: 'Already up to date',
+  formatting_rejected: 'Formatting rejected',
+  button_answer_expired: 'Button press expired',
+  reaction_not_allowed: 'Reactions not allowed in this chat',
+  no_permission: 'Bot lacks permission',
+  message_too_long: 'Message too long',
+  button_rejected: 'A button was rejected',
+  rate_limited: 'Telegram asked to slow down',
+  unauthorized: 'Bot token rejected',
+  forbidden: 'Not allowed in this chat',
+  conflict: 'Another program is using the bot',
+  rejected: 'Refused by the app',
+  timed_out: 'No answer in time',
+  network_error: 'Network problem',
+  server_error: 'Telegram server error',
+  restart: 'Interrupted by a restart',
+  cancelled: 'Cancelled',
+  authority_revoked: 'No longer allowed',
+  audience_changed: 'Blocked: wrong chat',
+  reaction_unbound: 'Not tied to a current message',
+  chat_action_unbound: 'Not tied to a current message',
+  refused: 'Stopped by Nocheh’s own check',
+};
+/** Why a send didn't go through, in short plain words; an unknown code shows as it is. */
+export function sendReason(row: {state: string; error_code?: string | null}): string {
+  const code = row.error_code;
+  if (!code) return '';
+  // Not sent and rate limited is Nocheh's own flood window, not the app asking.
+  if (code === 'rate_limited' && row.state === 'not_sent') return 'Held back: too many at once';
+  return sendReasons[code] ?? code;
+}
+
 /* ---------- Databases ---------- */
 
 const databaseNames: Record<string, string> = {

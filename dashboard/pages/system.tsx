@@ -1,19 +1,20 @@
 /**
- * System: is Nocheh healthy, what is it doing in the background, and the
- * tools to back it up, restore it and look inside its databases.
+ * System: is Nocheh healthy, what is it doing in the background, what it sent
+ * to chat apps, and the tools to back it up, restore it and look inside its databases.
  */
 import {Gauge} from 'lucide-react';
 import {useView} from '../lib/navigation';
 import {pageTabs, tabIds} from '../lib/page-tabs';
 import {useResource} from '../lib/resource';
 import {href} from '../lib/routes';
-import {workCounts} from '../lib/system-health';
+import {chatSends, workCounts} from '../lib/system-health';
 import {LinkButton} from '../ui/link-button';
 import {Page, Tabs} from '../ui/page';
 import {BackupsView} from './system/backups';
 import {DatabasesView} from './system/databases';
 import {HealthView} from './system/health';
 import {MachineLogView} from './system/machine-log';
+import {SendsView} from './system/sends';
 import {WorkView} from './system/work';
 
 const views = tabIds('system');
@@ -25,7 +26,7 @@ export default function SystemPage() {
   return (
     <Page
       title="System"
-      description="Health, background work, the machine log, backups and databases."
+      description="Health, background work, what Nocheh sent to chat apps, the machine log, backups and databases."
       actions={
         <LinkButton href={href('usage')} variant="secondary" size="sm">
           <Gauge aria-hidden /> Usage and reply speed
@@ -39,6 +40,7 @@ export default function SystemPage() {
           tabs={[
             {id: 'health', label: pageTabs.system.health},
             {id: 'work', label: pageTabs.system.work, count: counts.failed + counts.uncertain || null},
+            {id: 'sends', label: pageTabs.system.sends, count: chatSends(monitoring.data)?.problems || null},
             {id: 'machines', label: pageTabs.system.machines},
             {id: 'backups', label: pageTabs.system.backups},
             {id: 'databases', label: pageTabs.system.databases},
@@ -48,6 +50,7 @@ export default function SystemPage() {
     >
       {view === 'health' && <HealthView />}
       {view === 'work' && <WorkView />}
+      {view === 'sends' && <SendsView />}
       {view === 'machines' && <MachineLogView />}
       {view === 'backups' && <BackupsView />}
       {view === 'databases' && <DatabasesView />}

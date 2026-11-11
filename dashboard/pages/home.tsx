@@ -5,6 +5,7 @@ import {useResource} from '../lib/resource';
 import {href} from '../lib/routes';
 import {useSettings} from '../lib/settings';
 import {memoryAvailability} from '../lib/supervision';
+import {sendIssue} from '../lib/system-health';
 import {cn} from '../lib/utils';
 import {Badge, Card, CardHeader, LoadError, Skeleton, Stat, type Tone} from '../ui/core';
 import {Page} from '../ui/page';
@@ -83,6 +84,8 @@ export default function Home() {
       link: href('system', {view: 'work'}),
       action: 'Review',
     });
+  const sends = sendIssue(m);
+  if (sends) items.push(sends);
   if (telegram === 'disabled' && !open.has('telegram'))
     items.push({
       tone: 'neutral',

@@ -28,6 +28,7 @@ export const pageTabs = {
   system: {
     health: 'Health',
     work: 'Background work',
+    sends: 'Sent to apps',
     machines: 'Machine log',
     backups: 'Backups',
     databases: 'Databases',
