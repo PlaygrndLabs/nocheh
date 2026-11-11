@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, DEFAULT_STATE, INSTALLATION_ROOT
+from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, machine_folder, DEFAULT_STATE, INSTALLATION_ROOT
 
 ROOT = REPO_ROOT
 STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
@@ -27,12 +27,14 @@ def build_image(name, env=None):
 
 
 def development_box_token():
-    # make dev runs on the operating .env without initialize(), so one from before boxes gets its box token here.
+    # make dev runs on the operating .env without initialize(), so one from before boxes or machines gets its tokens here.
     from tools.development.live_dev import operating_root, operating_config
     root = operating_root(); operating_config(root); path = root / '.env'; saved = read_env(path)
-    if not saved.get('NOCHEH_BOX_TOKEN'): write_env(path, generate(saved, ('NOCHEH_BOX_TOKEN',)))
-    # The launcher's read-only bind of the GitHub copies: made here at 0700, so Docker never makes it as root.
-    (root / 'data/local').mkdir(parents=True, exist_ok=True, mode=0o700); github_folders(root / 'data/local')
+    missing = tuple(name for name in ('NOCHEH_BOX_TOKEN', 'NOCHEH_MACHINE_TOKEN') if not saved.get(name))
+    if missing: write_env(path, generate(saved, missing))
+    # The launcher's read-only bind of the GitHub copies and nocheh-machines' keys folder: made here at 0700, so Docker
+    # never makes them as root.
+    (root / 'data/local').mkdir(parents=True, exist_ok=True, mode=0o700); github_folders(root / 'data/local'); machine_folder(root / 'data/local')
 
 
 def run_isolated_tests(rest):
