@@ -73,7 +73,8 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
             root, wire = Path(folder), LostEdit()
             gateway = TelegramService(Policy(True, '123', [], {}), '123456:synthetic', root / 'spool', root / 'state')
             # The bot journals every send and edit, as the running service's does.
-            gateway.bot = ExtBot('123456:synthetic', request=instrument_request(wire, Capture(root / 'capture', '123456')), get_updates_request=Wire())
+            capture = Capture(root / 'capture', '123456')
+            gateway.bot = ExtBot('123456:synthetic', request=instrument_request(wire, capture), get_updates_request=Wire())
             gateway.status, gateway.action_lock = 'connected', asyncio.Lock()
             await gateway.bot.initialize()
             notice = {'id': 'c' * 64, 'chat_id': '123', 'text': 'A problem.'}
@@ -83,6 +84,7 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await gateway.send_notice(edit), {'state': 'done', 'edited': True},
                              'the same edit is sent again, not answered from the journal as uncertain')
             self.assertEqual([name for name, _ in wire.calls], ['sendMessage', 'editMessageText'])
+            await capture.sends.settle()
 
     def test_every_send_edit_and_adapter_in_the_services_turns_previews_off(self):
         self.assertEqual(unprotected('bot.send_message(1, "x")\nbot.edit_message_text("x", chat_id=1, message_id=2)\n'

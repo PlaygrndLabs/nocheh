@@ -1,4 +1,5 @@
-"""Fsync before PTB sees updates; journal writes before any outbound request but a chat action or working reaction."""
+"""Fsync before PTB sees updates; journal writes before any outbound request but a chat action or working reaction.
+Every request that leaves, or that a check holds back, reactions included, also leaves a content-free send record (sends.py)."""
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +7,7 @@ import base64
 import contextvars
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -14,6 +16,7 @@ from time import perf_counter
 from urllib.parse import urlsplit
 
 from services.durable import canonical, digest, immutable_file
+from .sends import Sends
 
 DISPATCH_KEY = contextvars.ContextVar('nocheh_dispatch_key', default=None)
 OUTBOUND_CHECK = contextvars.ContextVar('nocheh_outbound_check', default=None)
@@ -40,6 +43,7 @@ class Capture:
     def __init__(self, root: Path, bot_id: str, recover=True):
         self.root, self.bot_id = root, bot_id
         self.polling = {'last_poll_at': None, 'last_update_at': None, 'error_code': None}
+        self.sends = Sends(root, bot_id)
         # Only the service that sends recovers; discovery sends nothing and must not stamp the
         # service's in-flight sends as ambiguous.
         if recover: self.recover()
@@ -55,12 +59,20 @@ class Capture:
             key = event['key'].removesuffix(':intent')
             result = intent.with_suffix('.result')
             if not result.exists():
-                self.complete(key, event['payload']['method'], event['payload']['parameters'], None)
+                method, parameters = event['payload']['method'], event['payload']['parameters']
+                self.complete(key, method, parameters, None)
+                self.sends.restarted(method, parameters, self.dispatch_of(key, method, parameters))
             else:
                 self.enqueue(json.loads(result.read_bytes())['event'])
 
     def enqueue(self, value):
         immutable_file(self.root / 'pending', digest(value['key']) + '.json', canonical(value))
+
+    def dispatch_of(self, key, method, parameters):
+        """The dispatch key a journal key was made from (see outbound), or None."""
+        head, tail = f'outbound:{self.bot_id}:', f':{method}:{digest(canonical(parameters))}'
+        base = re.sub(r':rate-retry:\d+$', '', key)
+        return base[len(head):-len(tail)] if base.startswith(head) and base.endswith(tail) else None
 
     def event(self, key, kind, payload, scope='system', text=None, source_id=None, revision='0'):
         return {'version': 1, 'key': key, 'origin': 'generated', 'bot_id': self.bot_id,
@@ -187,6 +199,10 @@ def parseable_updates(result, polling):
     return status, json.dumps(body).encode()
 
 
+def elapsed(started):
+    return round((perf_counter() - started) * 1000)
+
+
 def instrument_request(request, capture: Capture, polling=False):
     class CapturedRequest(type(request)):
         __slots__ = ()
@@ -223,22 +239,42 @@ def instrument_request(request, capture: Capture, polling=False):
             # Formatting, chunks and retries may change routing. Check
             # the actual request before journaling or transmission each time.
             check = OUTBOUND_CHECK.get()
+            # Send records are written off the event loop; one never fails or delays its request.
+            sends = capture.sends
             if method in ('sendChatAction', 'setMessageReaction'):
                 # A chat action ("typing…") or a working reaction (👀, then 👍
                 # or 👎) carries no content, and the next one replaces it. It is
                 # sent only inside a bound presence and is not journaled, so a long
-                # turn adds no archive records and a retried turn can set its 👀
-                # again instead of being answered from the journal.
-                if check is None:
-                    raise Held('telegram_chat_action_unbound' if method == 'sendChatAction' else 'telegram_reaction_unbound')
-                await asyncio.to_thread(check, method, parameters)
-                return await super().do_request(*args, **kwargs)
+                # turn adds no archive records. It never runs under a dispatch key,
+                # so a journal entry could not answer a retried turn's 👀 anyway.
+                # It leaves only its send record ("typing…" only when it fails).
+                try:
+                    if check is None:
+                        raise Held('telegram_chat_action_unbound' if method == 'sendChatAction' else 'telegram_reaction_unbound')
+                    await asyncio.to_thread(check, method, parameters)
+                except Exception as error:
+                    sends.refused(method, parameters, None, str(error) if isinstance(error, Held) else None)
+                    raise
+                started = perf_counter()
+                try:
+                    result = await super().do_request(*args, **kwargs)
+                except BaseException as error:
+                    sends.failed(method, parameters, None, error, elapsed(started))
+                    raise
+                sends.answered(method, parameters, None, result, elapsed(started))
+                return result
             if check is not None:
-                await asyncio.to_thread(check, method, parameters)
+                try:
+                    await asyncio.to_thread(check, method, parameters)
+                except Exception as error:
+                    sends.refused(method, parameters, DISPATCH_KEY.get(), str(error) if isinstance(error, Held) else None)
+                    raise
             # Context is inherited by tasks the sender starts.
             dispatch = DISPATCH_KEY.get() or 'control:' + uuid.uuid4().hex
             # The bound check may record each admitted request's journal outcome.
             observe = getattr(check, 'observe', None) or (lambda *_: None)
+            # A journal replay sends nothing, and a hold after an uncertain attempt
+            # follows that attempt's own record, so neither adds a send record.
             try:
                 key, saved = await asyncio.to_thread(capture.outbound, method, parameters, dispatch)
             except BaseException:
@@ -247,13 +283,19 @@ def instrument_request(request, capture: Capture, polling=False):
             if saved is not None:
                 observe(method, capture.outcome(saved), saved[0])
                 return saved
+            started = perf_counter()
             try:
                 result = await super().do_request(*args, **kwargs)
-            except BaseException:
+            except BaseException as error:
+                sends.failed(method, parameters, dispatch, error, elapsed(started))
                 await asyncio.shield(asyncio.to_thread(capture.complete, key, method, parameters, None))
                 observe(method, 'ambiguous', 0)
                 raise
-            observe(method, await asyncio.to_thread(capture.complete, key, method, parameters, result), result[0])
+            ms = elapsed(started)
+            try:
+                observe(method, await asyncio.to_thread(capture.complete, key, method, parameters, result), result[0])
+            finally:
+                sends.answered(method, parameters, dispatch, result, ms)
             return result
 
     request.__class__ = CapturedRequest

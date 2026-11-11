@@ -91,7 +91,7 @@ class TelegramService:
             else:
                 general, updates = requests(self.capture)
                 self.bot = Bot(self.token, request=general, get_updates_request=updates)
-            self.sender = Sender(self.bot)
+            self.sender = Sender(self.bot, sends=self.capture.sends)
             self.poller = Poller(self)
             self.polling = asyncio.ensure_future(self.poller.run())
             self.polling.add_done_callback(lambda task: task.cancelled() or task.exception() is None or self.fatal('telegram_adapter_failed', True))
@@ -149,6 +149,9 @@ class TelegramService:
             await asyncio.wait([self.polling, *(task for presence in self.presences.values() for task in (presence.typing, presence.eyes) if task)], timeout=5)
             if self.poller.menu: self.poller.menu.cancel()
             try: await self.bot.shutdown()
+            except Exception: pass
+            # Send records still being written are kept rather than dropped with the loop.
+            try: await asyncio.wait_for(self.capture.sends.settle(), 5)
             except Exception: pass
             self.ended.set()
         try: asyncio.run_coroutine_threadsafe(drain(), self.loop).result(timeout=35)
