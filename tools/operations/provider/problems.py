@@ -29,7 +29,9 @@ FOLLOW_SECONDS = 7 * 86400
 MAX_FOLLOWED = 50
 # What each kind of problem needs to read before it may count as cleared.
 SOURCES = {'application': 'application', 'service': 'services', 'models': 'routes', 'work_unchecked': 'work', 'workers': 'work',
-           'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'github': 'github', 'telegram': 'telegram'}
+           'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram'}
+# Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
+OWN_SENDS = ('notice', 'notice_update')
 # Background work families, as System › Work names them.
 FAMILIES = {
     'telegram': 'Telegram replies', 'preparation': 'Preparing messages', 'browser': 'Browser chat',
@@ -82,6 +84,16 @@ def _family(name):
     return FAMILIES.get(name, str(name).replace('_', ' ').capitalize())
 
 
+def _sends(monitoring):
+    """Sends to chat apps that failed in storage's last-day window, without the notices' own, or None when
+    storage's summary could not be read."""
+    sends = (monitoring.get('archive') or {}).get('chat_sends')
+    if not isinstance(sends, dict) or type(sends.get('problems')) is not int or not isinstance(sends.get('problem_kinds'), dict):
+        return None
+    own = sum(count for kind, count in sends['problem_kinds'].items() if kind in OWN_SENDS and type(count) is int)
+    return max(sends['problems'] - own, 0)
+
+
 def problems(monitoring, usage_rows, today):
     """The current problems: a key, a count that grows when the problem gets worse, and
     `total` for counts that only ever grow. Texts are built when a notice is sent."""
@@ -120,6 +132,7 @@ def problems(monitoring, usage_rows, today):
     add('workers', sum(1 for w in workers if not w.get('connected')), 'workers')
     spool = ((monitoring.get('archive') or {}).get('archive') or {}).get('spool_failures')
     add('spool', len(spool) if isinstance(spool, list) else 0, 'spool')
+    add('sends', _sends(monitoring) or 0, 'sends')
     incident = monitoring.get('telegram_incident')
     if incident and incident.get('at'):
         add('telegram:' + str(incident['at']), 1, 'telegram', at=str(incident['at']), reason=incident.get('error_code'))
@@ -210,6 +223,8 @@ def text(problem, new):
         return f"{_plural(count, 'background worker isn’t', 'background workers aren’t')} connected. Their work waits."
     if kind == 'spool':
         return f"{_plural(count, 'incoming message', 'incoming messages')} couldn’t be saved."
+    if kind == 'sends':
+        return f"{_plural(count, 'send to a chat app', 'sends to chat apps')} failed in the last day."
     if kind == 'telegram':
         reason = TELEGRAM_REASONS.get(problem.get('reason'), 'the connection failed')
         return f"Telegram stopped working at {problem['at'][:16].replace('T', ' ')} UTC: {reason}."
@@ -289,6 +304,8 @@ def readable(monitoring):
         found.add('work')
     if isinstance(((monitoring.get('archive') or {}).get('archive') or {}).get('spool_failures'), list):
         found.add('spool')
+    if _sends(monitoring) is not None:
+        found.add('sends')
     github = monitoring.get('github')
     if isinstance(github, dict) and not github.get('unavailable'):
         found.add('github')
