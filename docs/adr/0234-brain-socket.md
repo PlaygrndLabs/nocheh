@@ -70,9 +70,10 @@ texts, and replaces the brain half of the runtime operation list behind
 
 <consequences>
 - A new brain is one file that implements `Brain`, plus one line in
-  `brains.ts`. A brain without settings, persona or notes leaves those
-  operations out, and the dashboard's pages for them answer that the connected
-  assistant cannot do this.
+  `brains.ts`. A brain without settings, persona, notes or instruction
+  defaults leaves those operations out. The dashboard pages that read them
+  (per-chat limits, role and skills, notes, built-in instructions) then say
+  "The connected assistant can't do this" instead of offering a retry.
 - Nocheh's own chat interface can later talk to whichever brain is connected
   through `startTurn` and `observeTurn`.
 - The helper services still run in the Hermes service. Moving them, and the

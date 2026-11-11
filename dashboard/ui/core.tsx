@@ -205,7 +205,24 @@ export function Empty({
 }
 
 /** A request that failed: says so plainly and offers a retry. Never shown as "nothing here". */
-export function LoadError({what, onRetry, className}: {what: string; onRetry?: () => void; className?: string}) {
+export function LoadError({
+  what,
+  error,
+  onRetry,
+  className,
+}: {
+  what: string;
+  /** The API error code. A brain that lacks the feature gets its own message and no retry (ADR-0234). */
+  error?: string;
+  onRetry?: () => void;
+  className?: string;
+}) {
+  if (error === 'brain_capability_unavailable')
+    return (
+      <Notice className={className} title="The connected assistant can’t do this">
+        It doesn’t offer {what}.
+      </Notice>
+    );
   return (
     <Notice
       tone="warn"
