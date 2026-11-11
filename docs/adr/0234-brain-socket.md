@@ -42,10 +42,9 @@ texts, and replaces the brain half of the runtime operation list behind
   answers `brain_capability_unavailable`.
 - The brain never sends anything to a platform. A Telegram turn either returns
   its reply in the receipt for Nocheh's own bot to send, or ends `suppressed`
-  with `intentional_silence`. Until Nocheh's bot sends replies, Hermes's
-  Telegram adapter still sends them, chosen by the Hermes brain's
-  `telegramReplies` option; Hermes's turn routes `/internal/turn/*` return
-  the reply instead.
+  with `intentional_silence`. Hermes's turn routes `/internal/turn/*` return
+  the reply, and Nocheh's own bot sends it
+  ([ADR-0235](0235-nocheh-owns-the-telegram-bot.md)).
 - Every brain reports failures with the same codes: `brain_unavailable` (no
   answer, a started turn may exist), `brain_rejected` (an error answer, nothing
   started or changed), `brain_invalid_response` and
@@ -54,8 +53,8 @@ texts, and replaces the brain half of the runtime operation list behind
 - `src/brain/hermes.ts` is the only code that knows Hermes's run, management
   and notes routes. `src/brain/brains.ts` is the one place that chooses the
   brain; Hermes is the only brain today, and turn passes name it.
-- `RuntimeCall` keeps only the helper services and the Telegram calls Hermes
-  still answers. The owner's instruction texts ride on turns and notes reviews
+- `RuntimeCall` keeps only the helper services and the Telegram calls, which
+  Nocheh's own bot answers since ADR-0235. The owner's instruction texts ride on turns and notes reviews
   through the socket, and on the helper services that run one.
 - The owner API's brain route is `/v1/brain/manage` and its admin operation
   `brain.manage`. `/v1/runtime` reports `brain` with its id, name and
@@ -76,6 +75,6 @@ texts, and replaces the brain half of the runtime operation list behind
   "The connected assistant can't do this" instead of offering a retry.
 - Nocheh's own chat interface can later talk to whichever brain is connected
   through `startTurn` and `observeTurn`.
-- The helper services still run in the Hermes service. Moving them, and the
-  Telegram calls, out of it is separate work.
+- The helper services still run in the Hermes service. The Telegram calls
+  moved out of it with ADR-0235.
 </consequences>

@@ -10,9 +10,10 @@ data, credentials, model providers, volumes, or background workers. Current outc
 gates belong in [TASK.md](../TASK.md); dated reports stay in ignored
 `data/acceptance/results/telegram-simulation/`.
 
-The native layer uses the pinned Hermes adapter and python-telegram-bot with
-synthetic Bot API transports. The coupled HTTP fixture runs actual native polling,
-the three PostgreSQL stores, Nocheh workflows, Hermes and Honcho. Component tests
+The native layer is Nocheh's own Telegram service (`nocheh-telegram`) on
+python-telegram-bot with synthetic Bot API transports. The coupled HTTP fixture runs
+its actual polling and sends, the three PostgreSQL stores, Nocheh workflows, Hermes
+and Honcho. Component tests
 also substitute selected runtime/Honcho responses. Scripted inference tests
 integration contracts and failure handling, not language-model intelligence or
 real provider quality. Real providers, embeddings, and production recall retain their [separate gates](release-acceptance.md).

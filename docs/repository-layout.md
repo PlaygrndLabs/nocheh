@@ -9,7 +9,7 @@ Git contains source code, configuration needed to build and deploy it, documenta
 | `dashboard/` | Owner dashboard source |
 | `deploy/` | Dockerfiles, synthetic acceptance overlays, and pinned upstream revisions |
 | `docs/` | Specifications support, decisions, procedures, and non-identifying status summaries |
-| `services/` | Hermes runtime, Telegram gateway, agent launcher and plugin; Honcho service code |
+| `services/` | Telegram bot service (`services/telegram`), Hermes runtime, agent launcher and plugin; Honcho service code |
 | `src/` | TypeScript application services |
 | `test/` | Tests and explicitly synthetic fixtures |
 | `tools/` | CLI routing, operations, runtime helpers, acceptance harnesses, development tools, and build helpers |

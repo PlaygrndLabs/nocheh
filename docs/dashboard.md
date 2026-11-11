@@ -54,7 +54,7 @@ from its side panel and confirm with a short message.
 
 Links that use an earlier page or tab name (for example `#activity`, `#archive`, `#sharing`, `#monitoring`, `#projects` or `#memoryMap`) open the page and tab that now hold that content; a link to one memory-access request opens it in the Inbox.
 
-Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
+Nocheh is the main product, and its own service is the Telegram bot. Hermes provides the assistant runtime,
 its own native tools, profiles and native notes through an integration. Nocheh owns
 capture, access rules, guarding, approvals, the per-chat tool switches, its data tools
 (served to the brain over `/mcp`) and long-term memory behind its memory socket (Honcho
