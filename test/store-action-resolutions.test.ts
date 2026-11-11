@@ -9,6 +9,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {claimHostWorkflow,finishHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {workflowDetail,workflowHealth} from '../src/workflows/owner.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('an unclear page read closes itself, the owner closes other unclear operations, and nothing runs again (ADR-0218)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -17,7 +18,7 @@ test('an unclear page read closes itself, the owner closes other unclear operati
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-action-resolutions-')),key='resolutions:'+Date.now(),group='-'+Date.now();
   const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
-    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no provider');}});
+    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution,event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:'1',revision:'1',occurred_at:null,text:'Made-up operations',
     payload:{message:{message_id:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Made-up operations'}}};
   try {

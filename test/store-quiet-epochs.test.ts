@@ -12,6 +12,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import type {GuardBinding} from '../src/stores/guards.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('waiting approvals carry across reaction epochs and stop after any other epoch',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -20,7 +21,7 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-quiet-epochs-')),key='quiet-epochs:'+Date.now(),asking='-100555',other='-100777';
   const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[asking,other]}),
-    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no provider');}});
+    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution;
   const capture=async(group:string,label:string,payload:any)=>{
     const value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:group,
@@ -153,7 +154,7 @@ test('automatic learning revisions are quiet; owner corrections are not; learnin
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-learning-epochs-')),key='learning-epochs:'+Date.now(),asking='-100556';
   const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[asking]}),
-    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no provider');}});
+    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution;
   const host=async(id:string)=>{
     const row=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[id])).rows[0];

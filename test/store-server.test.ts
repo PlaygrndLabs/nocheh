@@ -12,6 +12,7 @@ import {connectStores,initializeStoreDatabases,type StorePools} from '../src/sto
 import {storageServices} from '../src/stores/services.js';
 import {storageServer} from '../src/stores/server.js';
 import {startStorageCapture} from '../src/stores/worker.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('separated application captures through control outages, exposes owner repositories and fences inactive restores',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -37,7 +38,7 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:[]};}
     throw Error('unexpected external operation');
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,honcho:async()=>{throw Error('no native provider calls');}});
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no native provider calls');})});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
     hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await mkdir(join(root,'workflows'),{recursive:true});await writeFile(join(root,'workflows/inactive'),'fixture: no Inngest connection');

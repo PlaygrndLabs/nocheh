@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {savePolicy} from '../src/security/store.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('memory approvals preserve exact wording, topic, recovery and delivery authority',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async t=>{
@@ -26,7 +27,7 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
         if(input.observe_only)return {state:receipts.has(id)?'done':'not_found'};
         await services.telegramActions.authorizeDelivery(input);assert.equal(receipts.has(id),false,'the same native effect cannot execute twice');
         sent.push(input);receipts.add(id);if(loseReceipt){loseReceipt=false;throw Error('synthetic lost delivery response');}return {state:'done'};
-      },honcho:async()=>{throw Error('no provider');}});
+      },memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
     await services.guards.reconcile();await services.guards.setMode('on');
     const capture=async(scope:string,index:number,text:string)=>{
       const event:Envelope={version:1,key:label+':'+index,origin:'live',kind:'telegram_update',bot_id:label,scope,source_id:String(index),revision:'1',occurred_at:null,text,

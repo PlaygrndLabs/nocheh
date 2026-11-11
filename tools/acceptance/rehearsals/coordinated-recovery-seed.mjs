@@ -2,12 +2,13 @@
 import assert from 'node:assert/strict';
 import {connectStores} from '../../../dist/src/stores/connections.js';
 import {storageServices} from '../../../dist/src/stores/services.js';
+import {honchoEngine} from '../../../dist/src/memory/honcho.js';
 const config={host:'nocheh-db'};
 const stores=connectStores(config,Object.fromEntries(['archive','derived','control'].map(s=>[s,process.env['NOCHEH_'+s.toUpperCase()+'_PASSWORD']])));
 try {
   assert.equal((await stores.archive.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-recovery-fixture');
   const s=storageServices(stores,{dataDir:'/data',serviceToken:'synthetic-coordinated-recovery-token',policy:()=>({enabled:false,owner_id:'123',group_ids:[]}),
-    runtime:async()=>{throw Error('no_provider_allowed');},honcho:async()=>{throw Error('no_provider_allowed');}});
+    runtime:async()=>{throw Error('no_provider_allowed');},memoryEngine:honchoEngine(async()=>{throw Error('no_provider_allowed');})});
   const source=(await s.capture.capture({version:1,key:'coordinated-recovery',origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',
     source_id:'1',revision:'1',occurred_at:null,text:'Original observation\r\n',payload:{message:{message_id:1,date:1700000000,
       chat:{id:123,type:'private'},from:{id:123},text:'Original observation\r\n',voice:{file_id:'synthetic-voice'}}}})).source;

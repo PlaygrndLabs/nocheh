@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {jobDeadlines,ownerApprovedJob} from '../src/stores/background-jobs.js';
 import {storageServices} from '../src/stores/services.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a job is one run priced from its progress, stopped at its cost or time limit with a note, relaunched at most twice, and a relaunch asks for every change',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -26,7 +27,7 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
       if(operation==='run.resume')return {state:'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       assert.equal(operation,'telegram.approval');cards.push(input);return {state:'done',chat_id:input.chat_id,message_id:'5'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let updates=0,sent=100,reactions=0,noted=0;
   const capture=async(chat:string,payload:Record<string,any>)=>{
     const update=++updates,event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,

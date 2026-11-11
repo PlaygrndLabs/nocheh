@@ -24,7 +24,7 @@ test('broker supports only explicit scoped routes and the configured reply provi
   assert.equal(scopedRoute('GET','/v1/search'),true);
   // The agent's reading tools reach storage, which checks who may read what.
   for(const route of ['/v1/archive/page','/v1/imports/pending'])assert.equal(scopedRoute('GET',route),true);
-  assert.equal(scopedRoute('POST','/v1/memory/honcho/search'),true);
+  assert.equal(scopedRoute('POST','/v1/memory/longterm/search'),true);
   for(const action of ['start','status','stop'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),true);
   for(const action of ['size','propose'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),false);
   assert.equal(scopedRoute('POST','/v1/jobs/approve'),false,'only a person approves a job, on its card');
@@ -141,7 +141,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     assert.equal((await pool.query("SELECT rule FROM security_events WHERE state='blocked' ORDER BY id DESC LIMIT 1")).rows[0].rule,'hosted_provider_tools_denied');
     assert.equal((await request('/v1/chat/completions',payload,token)).status,403);
     assert.equal(calls.length,before,'denied calls never reach upstreams');
-    assert.equal((await request('/v1/memory/honcho/context',{})).status,200);
+    assert.equal((await request('/v1/memory/longterm/context',{})).status,200);
     // Compress only broker deadlines so this covers a slow recall without a
     // multi-minute test. The normal memory route still times out and cancels.
     const setTimer=globalThis.setTimeout;
@@ -149,8 +149,8 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
       setTimer(fn,ms===600000?1000:ms===120000?5:ms,...args)) as typeof setTimeout);
     slowMemory=true;
     try {
-      assert.equal((await request('/v1/memory/honcho/recall',{query:'Synthetic recall'})).status,200);
-      assert.equal((await request('/v1/memory/honcho/context',{})).status,503,'automatic context keeps the ordinary short deadline');
+      assert.equal((await request('/v1/memory/longterm/recall',{query:'Synthetic recall'})).status,200);
+      assert.equal((await request('/v1/memory/longterm/context',{})).status,503,'automatic context keeps the ordinary short deadline');
       assert.equal((await request('/v1/memory/recall',{query:'Synthetic recall'})).status,503);
     }finally{slowMemory=false;clock.mock.restore();}
     // A provider's refusal passes on only its HTTP status, never its message, so the owner's notice can name it.

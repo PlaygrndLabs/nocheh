@@ -8,6 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a job\'s changes wait for its end, then come on as few cards as fit, each approved or rejected as a whole; Stop ends them',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -25,7 +26,7 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       if(operation==='telegram.notice'){notices.push(input);return {state:'done'};}
       assert.equal(operation,'telegram.approval');cards.push(input);return {state:'done',chat_id:input.chat_id,message_id:'5'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let sent=100,updates=0;
   const bot=String(Date.now()).slice(-9);
   const capture=async(chat:string,payload:Record<string,any>)=>{

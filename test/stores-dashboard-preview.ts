@@ -9,6 +9,7 @@ import {DashboardSessions} from '../src/dashboard-auth.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 if(process.env.NOCHEH_STORES_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
 const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -22,7 +23,7 @@ const services=storageServices(stores,{dataDir,detectorVersion:'ui-fixture',serv
   if(operation==='memory.filter')return {items:[{text:'The observatory team is reviewing the instrument checklist.',source_ids:[(input.candidates as any[])[0].id]}],
    producer:{name:'fixture',version:'1',model:'deterministic',provider:'offline',api_mode:'fixture'}};
   throw Error('fixture_external_operation_denied');
- },honcho:async()=>{throw Error('fixture_native_memory_unavailable');},
+ },memoryEngine:honchoEngine(async()=>{throw Error('fixture_native_memory_unavailable');}),
  transcription:{name:'fixture-transcription',version:'2',outputKind:'transcript',async run(bytes){if(bytes.toString()!=='Synthetic original audio bytes')throw Error('fixture_bytes_changed');return 'Updated reading: the northern telescope inspection is complete.';}}
 });
 const api=new OwnerStorageApi(services),owner={admin:true,scope:null},sessions=new DashboardSessions();

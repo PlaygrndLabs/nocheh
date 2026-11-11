@@ -15,7 +15,7 @@ def update(request, provider_state=PROVIDER_STATE, connection=None):
         raise ValueError('invalid_budget_request')
     if connection is None:
         from tools.operations.archive.archive import API
-        connection=API().call('/v1/memory/honcho')['connection']
+        connection=API().call('/v1/memory/longterm')['connection']
     if not connection.get('attached') or not connection.get('verified'):
         raise ValueError('honcho_budget_requires_accepted_memory')
     ledger=Ledger(state_for(provider_state)/'ledger/budget.sqlite')

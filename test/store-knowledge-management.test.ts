@@ -7,6 +7,7 @@ import {storageServices} from '../src/stores/services.js';
 import type {OrganizationProposal} from '../src/stores/knowledge-contract.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import type {Interpretation} from '../src/interpretations.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('delegated organization is exact, atomic, reversible, and independent from every access authority',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -16,7 +17,7 @@ test('delegated organization is exact, atomic, reversible, and independent from 
   const stores=connectStores(config,{archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')});
   const owner={admin:true,scope:null},key='organization:'+Date.now(),group='-'+Date.now(),other=String(Number(group)-1),topic=group+'/topic/99';let sequence=0;
   const s=storageServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,other]}),
-   runtime:async operation=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no provider calls');}});
+   runtime:async operation=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const knowledge=s.knowledge as any;
   // Model-provider and reply-delivery setup are outside this storage fixture. Keep all proposal,
   // authority, guarded-evidence, transaction, receipt and replay behavior real.

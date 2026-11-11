@@ -8,6 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('the owner re-runs Honcho memory for chosen chats, retries failed learning and replaces it from the archive',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -19,7 +20,7 @@ test('the owner re-runs Honcho memory for chosen chats, retries failed learning 
   const first='-1'+Date.now(),second='-2'+Date.now(),owner:Reader={admin:true,scope:null};
   const calls:{path:string;body:any;method?:string}[]=[],remote=new Map<string,any[]>();let sequence=0,retried=2,failed=2;
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[first,second]}),
-    runtime:async()=>({literals:[]}),honcho:async(path,body:any,method)=>{
+    runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any,method)=>{
       calls.push({path,body,...(method?{method}:{})});
       if(method==='DELETE')return {deleted:true};
       if(path.endsWith('/nocheh/failed-learning/retry'))return {retried};
@@ -30,7 +31,7 @@ test('the owner re-runs Honcho memory for chosen chats, retries failed learning 
       if(path.includes('/queue/status'))return {pending_work_units:0,in_progress_work_units:0};
       if(path.endsWith('/nocheh/queue-health'))return {failed_items:false};
       return {};
-    }});
+    })});
   const capture=async(group:string,id:number,text:string,date:number)=>{
     const event:Envelope={version:1,key:key+':'+group+':'+id,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:key+':'+group+':'+id,revision:'1',occurred_at:String(date),text,
       payload:{message:{message_id:id,date,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:123},text}}};
@@ -42,8 +43,8 @@ test('the owner re-runs Honcho memory for chosen chats, retries failed learning 
   try {
     await services.guards.reconcile();await services.guards.setMode('off');await services.guards.setMode('on');
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=true,include_history=false WHERE singleton');
-    await assert.rejects(services.memory.retryFailedLearning(owner),{code:'honcho_memory_detached'});
-    await assert.rejects(services.memory.relearn(owner,{}),{code:'honcho_memory_detached'});
+    await assert.rejects(services.memory.retryFailedLearning(owner),{code:'memory_detached'});
+    await assert.rejects(services.memory.relearn(owner,{}),{code:'memory_detached'});
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,attached_at=now() WHERE singleton');
     const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='honcho'")).rows[0].epoch};
     // Telegram dates in October 2026; the writes happen now.

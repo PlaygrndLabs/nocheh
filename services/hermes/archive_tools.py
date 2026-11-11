@@ -56,9 +56,9 @@ def request(path,body=None,timeout=None):
     # Prepared context can include a cold guard-model pass. It is still bounded,
     # but must not share the short timeout used by ordinary archive reads.
     # An action's proposal and its result both pass the secret check, so they get the longer timeout too.
-    timeout = timeout or (615 if path == '/v1/memory/honcho/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/honcho/search', '/v1/tools/propose')
+    timeout = timeout or (615 if path == '/v1/memory/longterm/recall' else 60 if path in ('/v1/context/prepare', '/v1/memory/longterm/search', '/v1/tools/propose')
                           or path.startswith(('/v1/jobs/', '/v1/tools/actions/')) else 15)
-    if path == '/v1/memory/honcho/recall' and _PROCESS_DEADLINE is not None:
+    if path == '/v1/memory/longterm/recall' and _PROCESS_DEADLINE is not None:
         # Leave time for Hermes to reason and check delivery policy.
         timeout = min(timeout, _PROCESS_DEADLINE-time.time()-45)
         if timeout <= 0:raise TimeoutError('memory_recall_turn_budget_exhausted')
@@ -119,7 +119,7 @@ def meaning_tool(args, **kwargs):
     try:
         query=args.get('query')
         if not isinstance(query,str) or not query.strip() or len(query)>2000:raise ValueError('invalid_query')
-        return json.dumps(request('/v1/memory/honcho/search',{'query':query,'limit':min(10,max(1,int(args.get('limit',5))))}),ensure_ascii=False)
+        return json.dumps(request('/v1/memory/longterm/search',{'query':query,'limit':min(10,max(1,int(args.get('limit',5))))}),ensure_ascii=False)
     except Exception:
         return json.dumps({'error':'memory_search_unavailable'})
 
@@ -218,7 +218,7 @@ def register(ctx):
         ('nocheh_memory_search','Find archived messages by meaning rather than exact words, among the messages learned into memory for this audience. '
          'Chats that were not learned return nothing (learned is false); use nocheh_archive_search or nocheh_archive_page for them. Cite returned source references.',
          {'query':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':10}},['query'],meaning_tool),
-        ('nocheh_memory_recall','Recall primary Honcho memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions Honcho read, so read them with nocheh_archive_read before relying on a claim that matters.',
+        ('nocheh_memory_recall','Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the facts long-term memory read, so read them with nocheh_archive_read before relying on a claim that matters.',
          {'query':{'type':'string'},'profile':{'type':'string'},'limit':{'type':'integer','minimum':1,'maximum':50}},['query'],recall_tool),
         ('nocheh_action_request','Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',
          {'destination':{'type':'string','description':'Use current for this Telegram conversation including its topic, a numeric Telegram chat ID, or CHAT_ID/topic/THREAD_ID. The server resolves current from the authenticated source turn.'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
@@ -497,7 +497,7 @@ def destinations_tool(args,**kwargs):
 
 def recall_tool(args, **kwargs):
     try:
-        result=request('/v1/memory/honcho/recall',{'query':args.get('query','')})
+        result=request('/v1/memory/longterm/recall',{'query':args.get('query','')})
         claims=json.loads(base64.urlsafe_b64decode((_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()).split('.')[1]+'==='))
         if claims.get('scope') is None:
             result['native']=request('/v1/memory/recall',args)

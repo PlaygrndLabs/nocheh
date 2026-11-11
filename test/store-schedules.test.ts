@@ -7,6 +7,7 @@ import pg from 'pg';
 import {canonical,digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('schedule definitions and fires are recoverable control operations with durable guarded derivatives',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -23,7 +24,7 @@ test('schedule definitions and fires are recoverable control operations with dur
   const owner={admin:true,scope:null},profile='nocheh-'+digest('123').slice(0,24),job='fixture-'+base;
   const s=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-123']}),
     runtime:async(op,body)=>{assert.equal(op,'guard.detect');if(detectorDown)throw Error('detector unavailable');return {literals:String(body.text).includes('fixture-secret')?['fixture-secret']:[]};},
-    honcho:async()=>{throw Error('no providers');}});
+    memoryEngine:honchoEngine(async()=>{throw Error('no providers');})});
   let definition:any={profile,name:'Synthetic job',prompt:'Exact\r\nfixture-secret\0 schedule',schedule:{kind:'interval',minutes:60},deliver:'local',repeat:null,
     enabled:true,removed:false,preferences:{'agent.max_iterations':4},execution_version:'v1'};
   let sequence=0;

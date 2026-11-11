@@ -8,6 +8,7 @@ import {storageServices} from '../src/stores/services.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {SourceRetirementRepository} from '../src/stores/source-retirement.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('owner retirement covers every message revision, preserves evidence and delivery, and can be undone',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -19,7 +20,7 @@ test('owner retirement covers every message revision, preserves evidence and del
   const cancelled:string[]=[];
   const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
     runtime:async(operation,input)=>{if(operation==='run.cancel'){cancelled.push(String(input.event_id));return {state:'cancelled'};}throw Error('runtime_not_expected');},
-    honcho:async()=>{throw Error('honcho_not_expected');}});
+    memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const prefix='retirement:'+Date.now();
   const event=(label:string,id:number,update:number,body:any,kind='telegram_update'):Envelope=>({version:1,key:prefix+':'+label,origin:'live',bot_id:'fixture',
     kind,scope:group,source_id:String(id),revision:String(update),occurred_at:null,text:body.message?.text??body.edited_message?.text??null,payload:{update_id:update,...body}});
@@ -91,7 +92,7 @@ test('reaction state rejects superseded and delayed observations while keeping a
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),group=String(-Date.now()),prefix='reactions:'+Date.now();
   const s=storageServices(stores,{dataDir:'/tmp/nocheh-reaction-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
-    runtime:async()=>{throw Error('runtime_not_expected');},honcho:async()=>{throw Error('honcho_not_expected');}});
+    runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const checkmark={type:'emoji',emoji:'✅'},heart={type:'emoji',emoji:'❤️'};
   const capture=async(label:string,update:number,body:any)=>{
     const value:Envelope={version:1,key:prefix+':'+label,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:group,source_id:'1',revision:String(update),
@@ -140,7 +141,7 @@ test('retirement offers delivered replies that repeat the message without retiri
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),chat=String(Date.now()%1000000000+1000),owner={admin:true,scope:null};
   const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-related',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
-    runtime:async()=>{throw Error('runtime_not_expected');},honcho:async()=>{throw Error('honcho_not_expected');}});
+    runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const prefix='related:'+Date.now();
   const capture=async(label:string,id:number,text:string,kind='telegram_update')=>(await s.capture.capture({version:1,key:prefix+':'+label,origin:'live',bot_id:'fixture',
     kind,scope:chat,source_id:String(id),revision:String(id),occurred_at:null,text,
@@ -167,7 +168,7 @@ test('native history learns which recorded turns are retired or answered by a re
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),chat=String(Date.now()%1000000000+2000),owner={admin:true,scope:null};
   const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-history',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
-    runtime:async()=>{throw Error('runtime_not_expected');},honcho:async()=>{throw Error('honcho_not_expected');}});
+    runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const prefix='history:'+Date.now(),base=Date.now()%1000000000,update=(id:number)=>'telegram:fixture:update:'+(base+id);
   const capture=async(key:string,id:number,text:string,kind='telegram_update')=>(await s.capture.capture({version:1,key,origin:'live',bot_id:'fixture',
     kind,scope:chat,source_id:String(id),revision:String(id),occurred_at:null,text,

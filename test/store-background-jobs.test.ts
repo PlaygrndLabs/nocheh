@@ -11,6 +11,7 @@ import {storageServices} from '../src/stores/services.js';
 import {byteBudget,jobDeadlines,jobTokens,reportParts} from '../src/stores/background-jobs.js';
 import {brokerServer} from '../src/security/broker.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a background job is started with one call, approved on its card, runs as one run in its own session and reports to its chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -30,7 +31,7 @@ test('a background job is started with one call, approved on its card, runs as o
       if(operation==='run.start'||operation==='run.cancel'){runs.push(operation+':'+input.event_id);return {state:'queued'};}
       assert.equal(operation,'telegram.approval');cards.push(input);
       return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const bot=String(Date.now()).slice(-9);
   const capture=async(label:string,payload:Record<string,unknown>,scope=group)=>{
     const event:Envelope={version:1,key:payload.update_id?`telegram:${bot}:update:${payload.update_id}`:key+':'+label,origin:'live',kind:'telegram_update',bot_id:payload.update_id?bot:key,scope,source_id:payload.update_id?String(payload.update_id):label,revision:'1',occurred_at:null,text:String((payload.message as any)?.text??''),payload};

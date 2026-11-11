@@ -58,7 +58,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
       return json(res,200,await s.retirements.historyRetirements(ids as string[]));
     }
-    if(req.method==='POST'&&path==='/internal/honcho/prepare') {
+    if(req.method==='POST'&&path==='/internal/memory/prepare') {
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
       await assertGuardConfiguration(s.guards,config.guardMode);
       await s.configuration.assert(config.assistant);
@@ -355,32 +355,32 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const retired=principal.turnEvent?await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference):false;
       return json(res,200,{valid:principal.admin||!retired&&telegramDeliveryAllowed(s.access.policy(),principal,source)});
     }
-    if(path==='/v1/memory/honcho') {
+    if(path==='/v1/memory/longterm') {
       admin(principal);
       if(req.method==='GET')return json(res,200,await s.memory.status());
       if(req.method==='POST')return json(res,200,await s.memory.connection(principal,await readJson(req)));
     }
-    if(path==='/v1/memory/honcho/fresh-start'&&req.method==='POST')return json(res,200,await s.memory.freshStart(principal,await readJson(req)));
-    if(path==='/v1/memory/honcho/rebuild') {
+    if(path==='/v1/memory/longterm/fresh-start'&&req.method==='POST')return json(res,200,await s.memory.freshStart(principal,await readJson(req)));
+    if(path==='/v1/memory/longterm/rebuild') {
       admin(principal);
       if(req.method==='GET')return json(res,200,await s.memory.rebuildEstimate(principal,url.searchParams.getAll('space')));
       if(req.method==='POST')return json(res,200,await s.memory.relearn(principal,await readJson(req)));
     }
-    if(path==='/v1/memory/honcho/retry-failed'&&req.method==='POST')return json(res,200,await s.memory.retryFailedLearning(principal));
-    if(path==='/v1/memory/honcho/verify'&&req.method==='POST'){admin(principal);return json(res,200,await s.memory.acceptVerification(principal,await readJson(req)));}
-    if(path==='/v1/memory/honcho/acceptance-session'&&req.method==='POST')return json(res,200,await s.memory.issueAcceptance(principal));
-    const acceptanceSession=path.match(/^\/v1\/memory\/honcho\/acceptance-session\/([a-f0-9]{64})$/);
+    if(path==='/v1/memory/longterm/retry-failed'&&req.method==='POST')return json(res,200,await s.memory.retryFailedLearning(principal));
+    if(path==='/v1/memory/longterm/verify'&&req.method==='POST'){admin(principal);return json(res,200,await s.memory.acceptVerification(principal,await readJson(req)));}
+    if(path==='/v1/memory/longterm/acceptance-session'&&req.method==='POST')return json(res,200,await s.memory.issueAcceptance(principal));
+    const acceptanceSession=path.match(/^\/v1\/memory\/longterm\/acceptance-session\/([a-f0-9]{64})$/);
     if(acceptanceSession&&req.method==='DELETE')return json(res,200,await s.memory.closeAcceptance(principal,acceptanceSession[1]!));
-    if(req.method==='POST'&&['/v1/memory/honcho/context','/v1/memory/honcho/recall'].includes(path)) {
+    if(req.method==='POST'&&['/v1/memory/longterm/context','/v1/memory/longterm/recall'].includes(path)) {
       if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
       const body=object(await readJson(req));
       return result(path.endsWith('/context')?await s.memory.context(principal):
-        await timed(s.stores.control,principal.turnEvent,'honcho_recall','nocheh',()=>s.memory.recall(principal,string(body.query??'',2000))),true);
+        await timed(s.stores.control,principal.turnEvent,'longterm_recall','nocheh',()=>s.memory.recall(principal,string(body.query??'',2000))),true);
     }
-    if(path==='/v1/memory/honcho/search'&&req.method==='POST') {
+    if(path==='/v1/memory/longterm/search'&&req.method==='POST') {
       if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
       const body=object(await readJson(req)),count=limit(body.limit,5,10);
-      const found=await timed(s.stores.control,principal.turnEvent,'honcho_search','nocheh',()=>s.memory.search(principal,string(body.query??'',2000),count));
+      const found=await timed(s.stores.control,principal.turnEvent,'longterm_search','nocheh',()=>s.memory.search(principal,string(body.query??'',2000),count));
       return result({sources:await s.sources.found(principal,found.ids,count),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {

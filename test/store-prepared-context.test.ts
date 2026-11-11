@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src
 import {storageServices} from '../src/stores/services.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {PreparedContextRepository} from '../src/stores/prepared-context.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('guarded runtime contexts stay derived, checkpoint detector output, preserve authorized text and isolate audiences',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -20,7 +21,7 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-runtime-context-')),key='context:'+Date.now();
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
-    runtime:async()=>({literals:[]}),honcho:async()=>{throw Error('no provider calls');}});
+    runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:key,revision:'1',occurred_at:null,
     text:'Owner-preserved sentence.',payload:{message:{chat:{id:123,type:'private'},text:'Owner-preserved sentence.'}}};
   const principal=async(turnEvent:string,extra:Partial<Reader>={}):Promise<Reader>=>{

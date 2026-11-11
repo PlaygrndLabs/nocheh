@@ -11,6 +11,7 @@ import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} f
 import {storageServices} from '../src/stores/services.js';
 import {portableDerivativeTypes,type PortableRecord} from '../src/stores/derivative-portability.js';
 import type {DerivativeReference} from '../src/stores/derived.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('complete derivative transfer retains edits and lineage while imported authority remains inert',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -43,7 +44,7 @@ test('complete derivative transfer retains edits and lineage while imported auth
   const stores=connectStores(config,passwords),target=connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords);
   const root=await mkdtemp(join(tmpdir(),'nocheh-derivative-portable-')),owner={admin:true,scope:null},key='portable:'+randomUUID();
   const options=(directory:string)=>({dataDir:join(root,directory),detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
-    runtime:async()=>({literals:[]}),honcho:async()=>{throw Error('no native calls');}});
+    runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no native calls');})});
   const source=storageServices(stores,options('source')),restored=storageServices(target,options('target'));
   try {
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'88',revision:'1',occurred_at:null,text:'Original evidence',

@@ -29,9 +29,9 @@ test('a voice reply breaks down into non-overlapping categorized stages that sum
     row('conversation',assistant,30_000,1),row('llm',assistant+6_000,21_000,1,3),row('model_guard',assistant,800,1,3),
     row('telegram_send',delivery,600,1),
     // Bound to the turn event by the server, placed in attempt 1 by its time.
-    row('honcho_recall',assistant+9_000,2_200,0),
+    row('longterm_recall',assistant+9_000,2_200,0),
     // Outside every Hermes window: cannot be attributed, never invented.
-    row('honcho_recall',t+200_000,9_999,0),
+    row('longterm_recall',t+200_000,9_999,0),
   ];
   const result=breakdown(event,t,t+500,rows),stage=(name:string)=>result.stages.find(s=>s.stage===name);
   assert.equal(result.reply_ms,61_000);assert.equal(result.complete,true);assert.equal(result.attempts,1);
@@ -40,8 +40,8 @@ test('a voice reply breaks down into non-overlapping categorized stages that sum
   assert.equal(stage('transcription')!.ms,7_000);assert.equal(stage('transcription')!.category,'third_party');
   assert.equal(stage('step:preparation')!.ms,1_500,'step time excludes the transcription inside it');
   assert.equal(stage('llm')!.ms,21_000);assert.equal(stage('llm')!.calls,3);assert.equal(stage('llm')!.category,'llm');
-  assert.equal(stage('honcho_recall')!.ms,2_200,'only the in-window recall counts');assert.equal(stage('honcho_recall')!.category,'third_party');
-  assert.equal(stage('memory_recall')!.label,'Honcho context');
+  assert.equal(stage('longterm_recall')!.ms,2_200,'only the in-window recall counts');assert.equal(stage('longterm_recall')!.category,'third_party');
+  assert.equal(stage('memory_recall')!.label,'Long-term memory context');
   assert.equal(stage('conversation')!.ms,30_000-21_000-800-2_200,'tools + agent is conversation minus provider, guard and recall');
   assert.equal(stage('hermes_turn')!.ms,40_000-2_000-1_500-500-1_000-30_000);
   assert.equal(stage('telegram_send')!.ms,600);assert.equal(stage('hermes_delivery')!.ms,400);

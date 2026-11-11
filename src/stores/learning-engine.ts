@@ -2,16 +2,16 @@ import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {learningInstruction,ownerPrompts} from '../prompts.js';
-import type {HonchoCall} from '../honcho.js';
+import type {MemoryEngine} from '../memory/engine.js';
 import {learningResult,learningResultSchema,parseInterpretations,triggeredInterpretations,type LearningRejection} from '../interpretations.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
-import {HonchoProvenanceRepository} from './honcho-provenance.js';
+import {MemoryProvenanceRepository} from './memory-provenance.js';
 import {LearnedMemoryRepository,type LearnedPublication} from './learned.js';
 import {LearningContextRepository,type PreparedLearningContext} from './learning-context.js';
-import {evidencePeerId,honchoPeerId} from './entities.js';
+import {evidencePeerId,memoryPeerId} from './entities.js';
 
 const protocol='honcho-contextual-learning-v1';
 /** A saved reasoning result is never rerun, so a result that fails these checks fails identically on every retry. */
@@ -20,24 +20,19 @@ export const terminalLearningCodes=new Set(['invalid_interpretation_result','lea
 const terminalRenewalCodes=new Set(['invalid_interpretation_result']);
 const queued=`EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='memory_review' AND w.job_id='interpret:'||j.id
   AND w.state IN ('queued','waiting','running','retryable_failed'))`;
-/** Honcho's peer chat takes a query of up to 200,000 characters and keeps each reasoning round's messages within
- * 61,440 tokens (tools/operations/memory/honcho_setup.py sets both; a test keeps them equal). Honcho never shortens
- * the query, so Nocheh gives it about half of those tokens and leaves the rest for what Honcho gathers: 92,160 UTF-8
- * bytes, half the tokens at 3 bytes a token. Learning queries measure about 2.4 (id-heavy JSON) to 6.4 (Persian text)
- * bytes a token, so an id-heavy query can take up to about 61% of the tokens; the request stays far below the guard. */
-export const honchoQueryCharacters=200000,honchoInputTokens=61440,honchoQueryBytes=honchoInputTokens/2*3;
-/** The learning query within Honcho's limits. Waiting cards give up their other names and then leave
+/** The learning query within the memory engine's question limits (see HonchoEngine). Waiting cards give up their other names and then leave
  * from the end first, as they only help join repeat names. Then other evidence keeps only its text, then rules
  * are left out from the end, then the trigger keeps only its text, then other evidence is left out from
  * the end; anything longer cannot be asked. The instruction lists the evidence the query still shows. */
-export function learningQuery(instruction:string|((citable:string[])=>string),context:Pick<PreparedLearningContext,'source'|'space'|'projects'|'organization_context'|'entities'|'observations'|'rules'|'limitations'>):string {
+export function learningQuery(instruction:string|((citable:string[])=>string),context:Pick<PreparedLearningContext,'source'|'space'|'projects'|'organization_context'|'entities'|'observations'|'rules'|'limitations'>,
+  limits:MemoryEngine['questionLimits']):string {
   const textOnly=(item:PreparedLearningContext['observations'][number])=>({...item,value:{text:(item.value as {text?:unknown})?.text??null}});
   let observations=context.observations,rules=context.rules,waiting=context.entities.waiting;const limitations=[...context.limitations];
   // Contexts saved before waiting cards carry none and keep their exact query.
   const entities=()=>waiting===undefined?context.entities:{...context.entities,waiting};
   const query=()=>(typeof instruction==='string'?instruction:instruction(observations.map(item=>item.source.id)))+
     `\n${canonical({space:context.space,projects:context.projects,organization_context:context.organization_context,entities:entities(),observations,rules,limitations})}`;
-  const fits=()=>{const text=query();return Buffer.byteLength(text)<=honchoQueryBytes&&Array.from(text).length<=honchoQueryCharacters;};
+  const fits=()=>{const text=query();return Buffer.byteLength(text)<=limits.bytes&&Array.from(text).length<=limits.characters;};
   if(fits())return query();
   if(waiting?.length) {
     limitations.push('waiting_omitted');waiting=waiting.map(card=>({...card,also_called:[]}));
@@ -57,7 +52,7 @@ export function learningQuery(instruction:string|((citable:string[])=>string),co
 }
 export class ContextualLearningRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly guards:GuardRepository,
-    readonly learned:LearnedMemoryRepository,readonly provenance:HonchoProvenanceRepository,readonly call:HonchoCall){}
+    readonly learned:LearnedMemoryRepository,readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine){}
 
   /** The source's learning inputs under the binding; the hash leaves out the binding and rule wording. */
   private async prepare(source:SourceReference,workspace:string,audience:string,binding:GuardBinding) {
@@ -163,18 +158,17 @@ export class ContextualLearningRepository {
         let result=await this.derived.checkpoint(operation);
         if(!result) {
           const prompt=(await ownerPrompts(this.contexts.access.stores.control))['learning.interpret'];
-          const query=learningQuery(citable=>learningInstruction(prompt,{trigger_id:context.source.id,citable_ids:canonical(citable)}),context);
+          const query=learningQuery(citable=>learningInstruction(prompt,{trigger_id:context.source.id,citable_ids:canonical(citable)}),context,this.engine.questionLimits);
           await this.provenance.current(job.workspace,job.audience,job.binding);
-          const peer=context.entities.speaker?honchoPeerId(context.entities.speaker):evidencePeerId(context.source);
+          const peer=context.entities.speaker?memoryPeerId(context.entities.speaker):evidencePeerId(context.source);
           // A group or topic interpretation reasons only over that audience's own sessions.
-          const scope=await this.provenance.chatScope(job.workspace,job.audience);
-          const response=await this.call('/v3/workspaces/'+job.workspace+'/peers/'+peer+'/chat',{query,reasoning_level:'low',stream:false,
-            response_format:learningResultSchema,...scope});
+          const sessions=await this.provenance.chatScope(job.workspace,job.audience);
+          const response=await this.engine.ask(job.workspace,peer,query,{sessions,evidence:false,format:learningResultSchema});
           // Preserve the completed reasoning result before validation, publication or job completion.
           const output=await this.derived.record({operation_id:operation,source:job.source_reference,parents:[job.input_reference],kind:'learning_result',
-            content:Buffer.from(string(response.content,200000)),producer:'honcho',producer_version:protocol,configuration:{reasoning_level:'low',peer},
+            content:Buffer.from(string(response.text,200000)),producer:this.engine.id,producer_version:protocol,configuration:{reasoning_level:'low',peer},
             provenance:{workspace:job.workspace,input:job.input_reference,limitations:['reasoning_response_has_no_exact_conclusion_citations']}});
-          result={id:output.id,content:Buffer.from(response.content)};
+          result={id:output.id,content:Buffer.from(response.text)};
         }
         await this.provenance.current(job.workspace,job.audience,job.binding);
         const parsed=learningResult(result.content.toString());
@@ -193,7 +187,7 @@ export class ContextualLearningRepository {
           const prior=(await this.derived.pool.query('SELECT active_revision FROM learned_entries WHERE id=$1',[entryId])).rows[0];
           // Existing owner corrections remain authoritative, including after new evidence.
           if(prior&&(await this.derived.pool.query("SELECT 1 FROM learned_versions WHERE entry_id=$1 AND revision=$2 AND author='owner'",[entryId,prior.active_revision])).rowCount){ids.push(entryId);continue;}
-          // An identical active interpretation cannot justify another global guard epoch and Honcho rebuild.
+          // An identical active interpretation cannot justify another global guard epoch and memory rebuild.
           if(prior&&await this.learned.matchesActiveAutomatic(entryId,value,context.dependencies,id+':'+index)){ids.push(entryId);continue;}
           const version=await this.learned.stageAutomatic(entryId,value,prior?.active_revision??null,id+':'+index,context.dependencies,
             job.binding,protocol,detect,{workspace:job.workspace,result_id:result.id,limitations:['reasoning_response_has_no_exact_conclusion_citations']});

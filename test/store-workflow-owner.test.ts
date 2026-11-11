@@ -11,6 +11,7 @@ import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {listWorkflows,workflowDetail,workflowHealth} from '../src/workflows/owner.js';
 import {workflowMetrics} from '../src/workflows/metrics.js';
 import {enterFamily,leaveFamily,requestWorkflow} from '../src/workflows/store.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('owner workflow inspection and receipt-aware controls use control storage only',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -19,7 +20,7 @@ test('owner workflow inspection and receipt-aware controls use control storage o
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-workflow-owner-')),key='workflow-owner:'+Date.now();
   const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
-    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no native calls');}});
+    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no native calls');})});
   const event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:'123',source_id:'1',revision:'1',occurred_at:null,text:'private content canary',
     payload:{message:{message_id:1,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'private content canary',voice:{file_id:key}}}};
   const find=async(family:string,job:string)=>(await stores.control.query('SELECT id FROM workflow_registry WHERE family=$1 AND job_id=$2 ORDER BY generation DESC LIMIT 1',[family,job])).rows[0].id as string;

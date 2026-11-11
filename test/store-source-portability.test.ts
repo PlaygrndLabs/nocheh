@@ -14,6 +14,7 @@ import {CaptureCoordinator} from '../src/stores/capture.js';
 import {SourcePortabilityRepository} from '../src/stores/source-portability.js';
 import {storageServices} from '../src/stores/services.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('source-only portable records preserve originals and recover imports without live replies or learning',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -24,7 +25,7 @@ test('source-only portable records preserve originals and recover imports withou
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-source-portable-')),key='source-portable:'+Date.now(),token=digest(key);
   const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
-    runtime:async()=>{throw Error('no runtime calls');},honcho:async()=>{throw Error('no Honcho calls');}}),api=new OwnerStorageApi(s);
+    runtime:async()=>{throw Error('no runtime calls');},memoryEngine:honchoEngine(async()=>{throw Error('no Honcho calls');})}),api=new OwnerStorageApi(s);
   const server=createServer((req,res)=>{void(async()=>{
     if(!await api.handle(reader(req,token),req,res,new URL(req.url!,'http://fixture')))throw new HttpError(404,'not_found');
   })().catch(error=>json(res,error instanceof HttpError?error.status:500,{error:error instanceof HttpError?error.code:'internal_error'}));});

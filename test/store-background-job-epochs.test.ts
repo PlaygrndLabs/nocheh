@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {carriesForward} from '../src/stores/guards.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a job report survives a reaction in another group, any other change after its run ends the job without a report, and Stop sends no further part',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -25,7 +26,7 @@ test('a job report survives a reaction in another group, any other change after 
       if(operation==='run.resume')return {state:'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       assert.equal(operation,'telegram.approval');cards.push(input);return {state:'done',chat_id:input.chat_id,message_id:'5'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let updates=0,sent=100,reactions=0;
   const capture=async(chat:string,payload:Record<string,any>)=>{
     const update=++updates,event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,

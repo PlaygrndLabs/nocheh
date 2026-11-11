@@ -30,27 +30,27 @@ const timeline={
 /** Stages known only as durations inside a timeline stage of the same attempt. */
 const nested={
   bootstrap:{category:'internal',label:'Hermes bootstrap'},
-  memory_recall:{category:'third_party',label:'Honcho context'},
+  memory_recall:{category:'third_party',label:'Long-term memory context'},
   history_prepare:{category:'internal',label:'Hermes history'},
   agent_init:{category:'internal',label:'Hermes agent setup'},
   conversation:{category:'internal',label:'tools + agent'},
   llm:{category:'llm',label:'provider wait'},
   model_guard:{category:'internal',label:'model guard'},
-  honcho_recall:{category:'third_party',label:'Honcho recall'},
-  honcho_search:{category:'third_party',label:'Honcho search'},
+  longterm_recall:{category:'third_party',label:'Long-term memory recall'},
+  longterm_search:{category:'third_party',label:'Long-term memory search'},
   telegram_send:{category:'third_party',label:'Telegram send'},
 } as const satisfies Record<string,Definition>;
 /** Parent → children, in allocation order. A parent keeps only what its children do not explain. */
 const children:Record<string,readonly string[]>={
   hermes_turn:['bootstrap','memory_recall','history_prepare','agent_init','conversation'],
-  conversation:['llm','model_guard','honcho_recall','honcho_search'],
+  conversation:['llm','model_guard','longterm_recall','longterm_search'],
   hermes_delivery:['telegram_send'],
 };
 export const stageDefinitions:Record<string,Definition>={...timeline,...nested};
 /** Order used for display: roughly the order a reply passes through. */
 const order=['capture','outbox:preparation','queue:preparation','step:preparation','wait:preparation','transcription',
   'outbox:telegram','queue:telegram','step:telegram','wait:telegram','hermes_queue','bootstrap','memory_recall','history_prepare',
-  'agent_init','llm','model_guard','honcho_recall','honcho_search','conversation','hermes_turn','telegram_send','hermes_delivery'];
+  'agent_init','llm','model_guard','longterm_recall','longterm_search','conversation','hermes_turn','telegram_send','hermes_delivery'];
 const recordable=new Set(Object.keys(stageDefinitions).filter(stage=>!stage.startsWith('wait:')));
 const sources=new Set(['nocheh','workflow','hermes','broker']);
 const maximum=86400000;

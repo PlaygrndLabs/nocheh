@@ -169,7 +169,7 @@ def runtime_up():
 def monthly(provider_state=PROVIDER_STATE):
     from tools.operations.archive.archive import API
     from services.honcho.meter import Ledger
-    connection=API().call('/v1/memory/honcho')['connection']
+    connection=API().call('/v1/memory/longterm')['connection']
     ledger=Ledger(state_for(provider_state)/'ledger/budget.sqlite')
     budget=ledger.report()
     if budget['mode']=='monthly':return

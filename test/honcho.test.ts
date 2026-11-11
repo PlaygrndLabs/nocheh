@@ -5,7 +5,8 @@ import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {approveLearning} from '../src/learning.js';
 import {prepareGuarded,setGuardMode,guardState,editGuarded} from '../src/guarded.js';
-import {honchoClient,syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,memoryContext,refreshMemoryContext,prepareMemoryRequest,observeGeneration,type HonchoCall} from '../src/honcho.js';
+import {honchoClient} from '../src/memory/honcho.js';
+import {syncMemory,queueMemory,memoryStatus,setMemoryConnection,acceptMemoryVerification,recallMemory,memoryContext,refreshMemoryContext,prepareMemoryRequest,observeGeneration,type HonchoCall} from '../src/honcho.js';
 
 test('slow Honcho recall can finish while ordinary calls retain their deadline',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});
@@ -19,7 +20,7 @@ test('slow Honcho recall can finish while ordinary calls retain their deadline',
  const call=honchoClient('http://synthetic-honcho');
  const recall=call('/v3/workspaces/test/peers/source/chat',{});t.mock.timers.tick(25);
  assert.equal((await recall).content,'Synthetic memory');
- const rejected=assert.rejects(call('/v3/workspaces/test/queue/status'),{code:'honcho_unavailable'});t.mock.timers.tick(25);await rejected;
+ const rejected=assert.rejects(call('/v3/workspaces/test/queue/status'),{code:'memory_engine_unavailable'});t.mock.timers.tick(25);await rejected;
 });
 
 test('durable Honcho receipts, consent, isolation, uncertain writes and current-only egress',{skip:!process.env.PGHOST},async()=>{
