@@ -54,7 +54,8 @@ export function turnDeadline(req:IncomingMessage,now=Date.now()):number|undefine
   const value=req.headers['x-nocheh-turn-deadline'];
   if(typeof value!=='string'||!/^\d{9,12}(?:\.\d{1,6})?$/.test(value))return undefined;
   const seconds=Number(value);
-  return seconds*1000<=now+3600000?seconds:undefined;
+  // Whole seconds: a timer refuses a fraction of a millisecond.
+  return seconds*1000<=now+3600000?Math.floor(seconds):undefined;
 }
 
 /** How often a long tool call tells the client it is still running. A client's own read limit is never shorter. */
@@ -65,7 +66,8 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
   if(req.method!=='POST'){res.writeHead(405,{allow:'POST','content-type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:'method_not_allowed'}));return;}
   // Brains reach this only from inside Nocheh's own network; a browser never does.
   if(req.headers.origin!==undefined)throw new HttpError(403,'origin_not_allowed');
-  if(options.principal.admin)throw new HttpError(403,'turn_credential_required');
+  // Only a turn's own pass: never the service token, nor an older pass that names no turn.
+  if(options.principal.admin||!options.principal.turnEvent)throw new HttpError(403,'turn_credential_required');
   const version=req.headers['mcp-protocol-version'];
   if(version!==undefined&&!protocolVersions.includes(String(version)))return rpc(res,400,failure(null,-32600,'Unsupported protocol version'));
   let message:unknown;

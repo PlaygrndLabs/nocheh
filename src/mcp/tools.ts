@@ -56,7 +56,7 @@ const given=(value:unknown)=>value!==undefined&&value!==null&&value!==''&&value!
 export function timeoutFor(path:string,deadline?:number,now=Date.now()):number {
   if(path===memoryRoutes.recall) {
     // Leave time for the brain to reason and check delivery policy.
-    const left=deadline===undefined?615000:Math.min(615000,deadline*1000-now-45000);
+    const left=deadline===undefined?615000:Math.min(615000,Math.floor(deadline*1000-now-45000));
     if(left<=0){const error=new Error('memory_recall_turn_budget_exhausted');error.name='TimeoutError';throw error;}
     return left;
   }

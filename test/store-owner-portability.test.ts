@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {storeSchemas} from '../src/stores/schema.js';
 import {OwnerPortabilityRepository,portableOwnerTables,type OwnerRecord} from '../src/stores/owner-portability.js';
 import type {StorePools} from '../src/stores/connections.js';
+import {canonical,digest} from '../src/archive.js';
 
 // Two empty schemas in the fixture's control database: one to export from, one to import into.
 test('owner data travels with its types, and nothing imported acts by itself',
@@ -74,6 +75,11 @@ test('owner data travels with its types, and nothing imported acts by itself',
     // The owner's tool switches come along, chat by chat; one that was on arrives inherited, so an import never turns a tool on.
     assert.deepEqual((await target.query('SELECT space_id,shell,browser,mcp FROM chat_tool_settings ORDER BY space_id')).rows,
       [{space_id:'*',shell:false,browser:null,mcp:null},{space_id:'-10042',shell:null,browser:null,mcp:false}]);
+    // A hand-edited file cannot turn a tool on with values the database reads as true, nor pin a revision nothing can follow.
+    const edited={space_id:'-10073',shell:'t',browser:1,mcp:'on',revision:2147483647};
+    await to.restore(owner,[{format:'nocheh-owner-record-v1',table:'chat_tool_settings',key:['-10073'],row:edited,
+      sha256:digest(canonical({table:'chat_tool_settings',key:['-10073'],row:edited}))}]);
+    assert.deepEqual((await target.query("SELECT shell,browser,mcp,revision FROM chat_tool_settings WHERE space_id='-10073'")).rows,[{shell:null,browser:null,mcp:null,revision:1}]);
     // History keeps its order.
     const steps=async(pool:pg.Pool)=>(await pool.query('SELECT changes FROM owner_task_activity ORDER BY id')).rows.map(r=>JSON.stringify(r.changes));
     assert.deepEqual(await steps(target),await steps(source));

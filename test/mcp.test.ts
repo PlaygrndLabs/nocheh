@@ -65,7 +65,7 @@ test('a turn pass names its brain, and only a turn pass may',()=>{
 });
 
 test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async()=>{
-  let principal:Reader={scope:'-1001',admin:false};const seen:Call[]=[];
+  let principal:Reader={scope:'-1001',admin:false,turnEvent:'e'.repeat(64)};const seen:Call[]=[];
   const server=createServer((req,res)=>{void serveMcp(req,res,{principal,isolated:false,call:async(method,path,body,ms)=>{seen.push({method,path,body,timeout:ms});
     if(path.startsWith('/v1/imports'))return {status:200,body:{imports:[]}};if(path.startsWith('/v1/search'))return {status:200,body:[]};throw Error('down');}})
     .catch(error=>{res.writeHead(error instanceof HttpError?error.status:500,{'content-type':'application/json'});res.end(JSON.stringify({error:error.code}));});});
@@ -103,13 +103,15 @@ test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async(
     assert.equal((await fetch(base+'/mcp',{method:'DELETE'})).status,405);
     // A browser never reaches it, and only a turn's own pass uses it.
     assert.equal((await post({jsonrpc:'2.0',id:14,method:'ping'},{origin:'https://example.com'})).status,403);
-    principal={scope:null,admin:true};
-    assert.deepEqual(await (await post({jsonrpc:'2.0',id:15,method:'ping'})).json(),{error:'turn_credential_required'});
+    for(const other of [{scope:null,admin:true},{scope:'-1001',admin:false}] as Reader[]) {
+      principal=other;
+      assert.deepEqual(await (await post({jsonrpc:'2.0',id:15,method:'ping'})).json(),{error:'turn_credential_required'});
+    }
   }finally{await close(server);}
 });
 
 test('a long tool call keeps a client that takes an event stream reading until its answer',async()=>{
-  const principal:Reader={scope:'-1001',admin:false};let wait=0;
+  const principal:Reader={scope:'-1001',admin:false,turnEvent:'e'.repeat(64)};let wait=0;
   const server=createServer((req,res)=>{void serveMcp(req,res,{principal,isolated:false,keepalive:40,call:async(_method,path)=>{
     if(path.startsWith('/v1/search'))await new Promise(resolve=>setTimeout(resolve,wait));
     return {status:200,body:path.startsWith('/v1/imports')?{imports:[]}:[]};}});});
@@ -176,10 +178,13 @@ test('a long memory recall fits the turn, and the secret-checked routes get a mi
   assert.throws(()=>timeoutFor(memoryRoutes.recall,now/1000+44,now),{name:'TimeoutError'});
   // The turn process names its deadline; a value it could not have set is ignored.
   const header=(value:string)=>({headers:{'x-nocheh-turn-deadline':value}}) as unknown as IncomingMessage;
-  assert.equal(turnDeadline(header(String((now+100000)/1000)),now),(now+100000)/1000);
+  assert.equal(turnDeadline(header(String((now+100000)/1000)),now),Math.floor((now+100000)/1000));
+  // A fraction of a second still gives a whole-millisecond timer.
+  assert.ok(Number.isInteger(timeoutFor(memoryRoutes.recall,turnDeadline(header(Math.floor(now/1000+300)+'.25'),now),now)));
+  assert.ok(Number.isInteger(timeoutFor(memoryRoutes.recall,now/1000+300.123,now+0.5)));
   for(const value of [String((now+3700000)/1000),'soon','1e10',''])assert.equal(turnDeadline(header(value),now),undefined,value);
   // A deadline already past leaves no time for a recall, rather than the whole budget.
-  const past=turnDeadline(header(String(now/1000-1)),now);assert.equal(past,now/1000-1);
+  const past=turnDeadline(header(String(now/1000-1)),now);assert.equal(past,Math.floor(now/1000-1));
   assert.throws(()=>timeoutFor(memoryRoutes.recall,past,now),/memory_recall_turn_budget_exhausted/);
   assert.equal(turnDeadline({headers:{}} as unknown as IncomingMessage,now),undefined);
 });

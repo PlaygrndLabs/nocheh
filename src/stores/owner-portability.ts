@@ -134,7 +134,9 @@ export class OwnerPortabilityRepository {
   private safe(table:string,row:Record<string,unknown>):Record<string,unknown> {
     if(table==='sharing_rules')return {...row,enabled:false};
     // A tool switch arrives off or inherited, never on: an import never turns a tool on that this installation turned off.
-    if(table==='chat_tool_settings')return Object.fromEntries(Object.entries(row).map(([key,value])=>[key,['shell','browser','mcp'].includes(key)&&value===true?null:value]));
+    // Only a real false stays off; anything else, such as "t" or 1 that the database would read as on, arrives inherited.
+    if(table==='chat_tool_settings')return Object.fromEntries(Object.entries(row).map(([key,value])=>
+      [key,['shell','browser','mcp'].includes(key)?(value===false?false:null):key==='revision'?1:value]));
     if(table==='owner_task_reminders') {
       const due=Date.parse(String(row.remind_at));
       if(row.state==='sending'||row.state==='uncertain'||row.state==='pending'&&!(due>Date.now()))return {...row,state:'skipped'};

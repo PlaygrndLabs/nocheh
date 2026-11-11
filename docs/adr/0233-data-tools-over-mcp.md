@@ -86,9 +86,13 @@ tools is unchanged.
   /v1/chat-tools`; the dashboard shows them on a chat's page in Chats and, for
   every chat, in Settings › Assistant. Scheduled runs and background jobs follow
   their chat; a schedule has no switches of its own.
-- In development mode the old profile values are not carried over, so every tool
-  starts on. An install that saved one removes it from Hermes's saved settings
-  once; Hermes refuses a setting it no longer knows, so its turns stop until then.
+- In development mode the old values are not carried over, so every tool starts
+  on. A value saved for one chat in Hermes is ignored; set it again in Chats. A
+  value saved for every chat in Hermes's shared settings stops turns
+  (`unsupported_preference`) until it is removed once.
+- The endpoint takes only a pass that names its turn, and a fraction of a second
+  in `X-Nocheh-Turn-Deadline` is dropped. An import takes only a real `false` as
+  off and starts each imported row's revision at 1.
 - The owner export carries `chat_tool_settings` with the owner's other settings
   ([ADR-0230](0230-portable-export-carries-owner-work.md)). A switch that was on
   arrives inherited, so an import never turns a tool on.

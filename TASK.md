@@ -122,9 +122,9 @@ before a run ([ADR-0233](docs/adr/0233-data-tools-over-mcp.md), [tools](test/mcp
 [switches](test/store-chat-tools.test.ts), [Hermes](services/hermes/test_data_tools.py),
 [failure](services/hermes/test_turn_failure_codes.py)); the full tester passed. Pending: a
 live reply on the owner's install after the pull. Owner step on an install that
-ever saved a Commands, Web pages or Outside tools switch: those saved values no longer
-apply and must be removed from Hermes's saved settings, or turns stop with
-`unsupported_preference`.
+ever saved a Commands, Web pages or Outside tools switch: a value for one chat is
+ignored and is set again in Chats; a value for every chat must be removed from Hermes's
+shared settings, or turns stop with `unsupported_preference`.
 
 One waiting card per person or project (owner, 2026-11-08: "all <project name> arent same?
 isnt auto or manual merge them to one waiting item"): a new name for a person or
