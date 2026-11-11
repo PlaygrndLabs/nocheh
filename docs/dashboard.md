@@ -375,9 +375,11 @@ approve can work on over SSH
 `host.docker.internal` for a VM on the computer that runs Nocheh), a port (22 by
 default) and a login. Nocheh connects from its own container, so the form flags
 `localhost`, `127.x.x.x` and `::1` and says to use `host.docker.internal` instead.
-Nocheh then makes the machine's key, keeps it, and shows its public key with **Copy
-public key**: on the machine, add that line to the login's `~/.ssh/authorized_keys`,
-then press **Test**. The first good test trusts the machine's host key. Nocheh may
+Nocheh then makes the machine's key, keeps it, and shows a setup command with **Copy
+setup command** and **Copy public key**: paste the command into a terminal on the
+machine, signed in as the login, and it adds the public key to
+`~/.ssh/authorized_keys` once, with the modes SSH asks for; or add the key there
+yourself. Then press **Test**. The first good test trusts the machine's host key. Nocheh may
 use the login you use yourself: Stop ends only the programs a job started there. The
 machine needs bash; bash 4 or later and coreutils' `timeout` (`gtimeout` from
 Homebrew on macOS) work best.
@@ -386,7 +388,7 @@ Each machine shows its login, address and port, its state (Not tested, Ready, Te
 failed with the reason and what to do, or Off), its last good test and its host key
 fingerprint. Ready means its last Test passed; after a failed Test no new job can
 ask for it until a Test passes again. Its row has **Test**, an on/off switch,
-**Edit**, **Copy public key**, **Trust a new host key** (after you reinstalled the
+**Edit**, **Copy setup command**, **Trust a new host key** (after you reinstalled the
 machine, for example), **Log** and **Remove**. **Edit** uses the same fields and
 checks as Add machine. A new name saves at once. A new address, port or login asks
 first: Nocheh forgets the host key, jobs running on the machine stop, cards waiting

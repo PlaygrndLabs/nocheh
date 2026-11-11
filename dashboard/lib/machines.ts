@@ -110,9 +110,19 @@ export function machineEdit(machine: Machine, draft: MachineDraft) {
 export const endpoint = (machine: Pick<Machine, 'login' | 'address' | 'port'>) =>
   `${machine.login}@${machine.address.includes(':') ? `[${machine.address}]` : machine.address}:${machine.port}`;
 
-/** The one line that tells the owner where the public key goes. */
+/** The one line that tells the owner how the public key gets on the machine. */
 export const setupLine = (login: string) =>
-  `On the VM, add this line to ~${login}/.ssh/authorized_keys, then press Test.`;
+  `On the machine, signed in as ${login}, paste the setup command into a terminal, or add the public key to ~${login}/.ssh/authorized_keys yourself. Then press Test.`;
+
+/** A shell command, for the owner to paste on the machine, that adds the public key to the login's authorized_keys once,
+ *  with the modes SSH asks for. */
+export const setupCommand = (publicKey: string) => {
+  const key = `'${publicKey.replaceAll("'", `'\\''`)}'`;
+  return (
+    'mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && ' +
+    `{ grep -qxF -- ${key} ~/.ssh/authorized_keys || printf '%s\\n' ${key} >> ~/.ssh/authorized_keys; }`
+  );
+};
 
 const words: Record<string, string> = {
   machine_unreachable: 'Can’t reach the machine',
@@ -155,8 +165,7 @@ export function machineErrorPhrase(code: string | null | undefined): string {
 }
 
 const keyMissing = 'Machine keys aren’t kept in backups. Remove this machine and add it again.';
-const cleanupFailed =
-  'Programs the job started may still run on the machine, so end them yourself.';
+const cleanupFailed = 'Programs the job started may still run on the machine, so end them yourself.';
 
 /** What to do after a test or an action failed with this code. */
 export function machineAdvice(code: string, login: string): string {
