@@ -31,6 +31,7 @@ import {memoryAccessSchema} from './memory-access-schema.js';
 import {ownerAutonomySchema} from './owner-autonomy.js';
 import {taskSchema} from './tasks.js';
 import {notionSchema} from './notion.js';
+import {chatToolSchema} from './chat-tools.js';
 import {promptSchema} from '../prompts.js';
 import {telegramChatSchema} from './telegram-chats.js';
 import {telegramTopicSchema} from './telegram-topics.js';
@@ -150,6 +151,7 @@ ${memoryAccessSchema}
 ${ownerAutonomySchema}
 ${taskSchema}
 ${notionSchema}
+${chatToolSchema}
 ${promptSchema}
 ${telegramChatSchema}
 ${telegramTopicSchema}

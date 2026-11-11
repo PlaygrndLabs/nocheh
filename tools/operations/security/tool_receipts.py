@@ -2,25 +2,13 @@
 import fcntl
 import json
 import os
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from tools.operations.security.tool_execution import FAILURES,READ_ANSWERED,UNSENT,bounded_execute,sandbox_ready
 
 
 def permitted_execute(state,action):
-    from tools.operations.security.native import call
-    from urllib.parse import urlencode
-    # The action's own native profile is named after the epoch it was proposed in. Its chat's stable
-    # profile still resolves after a later epoch carries the action (ADR-0200), and a job has none of its own.
-    preference=action['preference']
-    # Reading the settings changes nothing, so a new epoch or a publication mid-read is simply read again.
-    for attempt in range(3):
-        try:current=call(state,'/api/nocheh/preferences?'+urlencode({'profile':preference['profile'],'space':preference['space']}));break
-        except Exception:
-            if attempt==2:return {'exit_code':1,'error':'tool_policy_unavailable'}
-            time.sleep(1)
-    if current['values'].get('nocheh_tools.'+action['kind'])!='on':return {'exit_code':1,'error':'tool_disabled_by_owner'}
+    # The claim already checked the chat's tool switch in Nocheh, so an action turned off never reaches here.
     # A shell command or page read runs in the sandbox image. Without it nothing is sent, so the
     # owner learns it did not run, not that it may have.
     if action['kind']!='mcp' and not sandbox_ready():return {'exit_code':1,'error':'tool_sandbox_missing'}

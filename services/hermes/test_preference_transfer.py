@@ -22,7 +22,7 @@ class PreferenceTransferTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.source)})
         self.env.start(); self.addCleanup(self.env.stop)
         self.policy = Scopes({'enabled': True, 'owner_id': '42', 'group_ids': ['-10']})
-        save(self.source, {'agent.max_iterations': 5, 'nocheh_tools.shell': 'off'}, view(self.source)['revision'])
+        save(self.source, {'agent.max_iterations': 5, 'agent.reasoning_effort': 'high'}, view(self.source)['revision'])
         save(self.source, {'agent.max_iterations': 2}, view(self.source)['revision'], job='old-schedule')
         self.owner = self.source / 'profiles' / Scopes.profile('42')
         self.group = self.source / 'profiles' / Scopes.profile('-10')

@@ -169,10 +169,11 @@ class MemoryEvidenceTests(unittest.TestCase):
                "patch.object(subscription,'configured_urls',lambda:{body['base_url']}),patch.object(archive_tools,'request',lambda path,value:value if path=='/v1/context/prepare' else {'hits':[]}):\n"
                "    result=assistant_turn.run(body)\n"
                "open(sys.argv[2],'w').write(json.dumps(result))\n")
+        from . import mcp_fixture
         server=ThreadingHTTPServer(('127.0.0.1',0),Model);threading.Thread(target=server.serve_forever,daemon=True).start()
         root=Path(__file__).resolve().parents[2]
         try:
-            with tempfile.TemporaryDirectory() as folder:
+            with tempfile.TemporaryDirectory() as folder,mcp_fixture.Endpoint() as endpoint:
                 profile=Path(folder)/'profile';(profile/'native-state').mkdir(parents=True);(profile/'memories').mkdir()
                 (profile/'memories'/'MEMORY.md').write_text('The owner prefers short answers.')
                 def turn(text):
@@ -180,7 +181,7 @@ class MemoryEvidenceTests(unittest.TestCase):
                     body={'session_id':'s','chat_id':'-20','user_id':'5','owner':True,'text':text,'channel':'telegram','memory_context':'evidence',
                           'model':'synthetic','api_key':'synthetic','base_url':'http://127.0.0.1:%d/v1'%server.server_address[1],
                           'provider':'openai','api_mode':'chat_completions','archive_credential':'turn.synthetic','turn_deadline_epoch':time.time()+120}
-                    process=subprocess.run([sys.executable,'-c',child,json.dumps(body),str(result)],cwd=root,env={**os.environ,'HERMES_HOME':str(profile)},
+                    process=subprocess.run([sys.executable,'-c',child,json.dumps(body),str(result)],cwd=root,env={**os.environ,'HERMES_HOME':str(profile),'ARCHIVE_URL':endpoint.url},
                                            capture_output=True,text=True,timeout=240)
                     self.assertEqual(process.returncode,0,process.stderr[-2000:])
                     self.assertEqual(json.loads(result.read_text())['state'],'done')

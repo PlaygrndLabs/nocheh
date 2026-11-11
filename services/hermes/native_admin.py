@@ -62,9 +62,9 @@ class Administration:
             from .runtime_profiles import ProfileCatalog
             self.profile_catalog = ProfileCatalog(self.root, policy, token)
 
-    def binding(self,name,space=None):
+    def binding(self,name):
         if self.profile_catalog:
-            return self.profile_catalog.validate(self.profile_catalog.resolve(name,space))
+            return self.profile_catalog.validate(self.profile_catalog.resolve(name))
         if not self.policy.owner:raise ValueError('owner_profile_unavailable')
         if not name or name in ('default','current'):name=Scopes.profile(self.policy.owner)
         path=self.root/'profiles'/name
@@ -84,20 +84,13 @@ class Administration:
         if (path/'nocheh-owner-profile.json').is_file():return Scope(self.policy.owner,self.policy.owner,True,name,self.policy.owner)
         raise ValueError('profile_scope_denied')
 
-    def preference_home(self,name,home,space=None):
+    def preference_home(self,name,home):
         if self.profile_catalog:
-            entry=self.profile_catalog.resolve(name,space)
-            path=self.profile_catalog.path(entry['preference_profile'])
-            if space is not None:
-                # The executor's check reads what a turn of that chat copies (prepare_profile): a named
-                # profile's own settings, else its space's, else its chat's.
-                for candidate in (path,self.profile_catalog.path(Scopes.profile(entry['space'])),self.profile_catalog.path(Scopes.profile(entry['scope']))):
-                    if (candidate/'config.yaml').is_file():return candidate
-            return path
+            return self.profile_catalog.path(self.profile_catalog.resolve(name)['preference_profile'])
         bound=self.binding(name)
         return self.root/'profiles'/Scopes.profile(bound.space) if bound.revision else home
 
-    def profile(self, name, space=None):
+    def profile(self, name):
         if not name or name in ('default', 'current'):
             if not self.policy.owner: raise ValueError('owner_profile_unavailable')
             name = Scopes.profile(self.policy.owner)
@@ -105,7 +98,7 @@ class Administration:
         path = self.root / 'profiles' / name
         if path.is_symlink() or not path.resolve().is_relative_to(self.root / 'profiles'):
             raise ValueError('profile_path_denied')
-        binding=self.binding(name,space);name=binding.profile;path=self.root/'profiles'/name
+        binding=self.binding(name);name=binding.profile;path=self.root/'profiles'/name
         if path.is_symlink():raise ValueError('profile_path_denied')
         return name, path
 
@@ -242,10 +235,7 @@ class Administration:
                     result=await asyncio.to_thread(self.profile_catalog.request,'/v1/browser/undelivered',
                         {'profile':entry['logical_profile'],'space':entry['space'],**({'after':query['after'][0]} if 'after' in query else {})})
                     return await JSONResponse(result)(scope,receive,send)
-                # The executor names a chat's stable profile and its space, because a topic's profile has no marker of its own.
-                space = query.get('space', [None])[0] if path == '/api/nocheh/preferences' and method == 'GET' else None
-                if space is not None and not selected: raise ValueError('profile_scope_denied')
-                name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected, space)
+                name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected)
                 if path.startswith('/api/files') and (method, path) in {
                     ('GET','/api/files'), ('GET','/api/files/read'), ('GET','/api/files/download'),
                     ('GET','/api/files/stream'), ('HEAD','/api/files/stream'), ('POST','/api/files/upload'),
@@ -280,8 +270,7 @@ class Administration:
                         name, home = self.profile(body_name)
                 result, status, extra = None, 200, {}
                 if path in ('/api/config','/api/nocheh/preferences','/api/nocheh/policy'):
-                    # The executor's stable name resolves at every epoch; the native name of this one may not, a moment later.
-                    home=self.preference_home(selected if space is not None else name,home,space)
+                    home=self.preference_home(name,home)
                 if path.startswith('/api/cron/'):
                     from .native_cron import manage
                     result=manage(self,path,method,query,body,headers)

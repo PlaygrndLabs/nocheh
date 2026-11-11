@@ -13,9 +13,6 @@ PREFERENCES = {
     'agent.run_budget_seconds': {'default': 180, 'min': 30, 'max': 180},
     'memory.memory_char_limit': {'default': 2200, 'min': 100, 'max': 20000},
     'memory.user_char_limit': {'default': 1375, 'min': 100, 'max': 20000},
-    'nocheh_tools.shell': {'default': 'on', 'choices': ['on','off']},
-    'nocheh_tools.browser': {'default': 'on', 'choices': ['on','off']},
-    'nocheh_tools.mcp': {'default': 'on', 'choices': ['on','off']},
 }
 
 

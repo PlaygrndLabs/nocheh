@@ -48,7 +48,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const capture=async(options:Record<string,unknown>={})=>{
     const scope=String(options.scope??'123'),profile='nocheh-'+digest(scope).slice(0,24),job='execution-'+base+'-'+(++serial);
     const definition={profile,name:'Fixture',prompt:'Prompt fixture-secret',schedule:{kind:'interval',minutes:60},deliver:'local',repeat:null,enabled:true,removed:false,
-      preferences:{'nocheh_tools.shell':'off'},execution_version:'v1',...options};delete (definition as any).scope;
+      preferences:{'agent.reasoning_effort':'high'},execution_version:'v1',...options};delete (definition as any).scope;
     const saved=await s.schedules.definition(owner,{scope,profile,job_id:job,definition,workflow_cursor:digest(job),workflow_sequence:1});
     const fire=await s.schedules.capture(owner,{scope,space:scope,profile,job_id:job,id:'first',text:definition.prompt,files:[],definition,
       job_revision:digest(canonical(definition)),scheduled_for:'2026-09-18T12:00:00Z',fire_reason:'manual',owner_epoch:(await authority()).epoch});

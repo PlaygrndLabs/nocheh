@@ -6,7 +6,6 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Interpretation} from '../src/interpretations.js';
-import {preferenceProfile} from '../src/stores/controlled-execution.js';
 import {defaultLogicalProfile} from '../src/stores/runtime-profile.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
@@ -136,17 +135,6 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('the executor checks the tool settings of the chat, not of the epoch the action was proposed in',()=>{
-  const custom='profile-'+'a'.repeat(48),topic='-100555/topic/7';
-  assert.deepEqual(preferenceProfile({logical_profile:custom,space_id:'123'},'123'),{profile:custom,space:'123'},'an owner\'s own named profile keeps its settings');
-  assert.deepEqual(preferenceProfile({logical_profile:defaultLogicalProfile({admin:false,scope:'-100555',space:topic}),space_id:topic},'123'),
-    {profile:defaultLogicalProfile({admin:false,scope:'-100555',space:topic}),space:topic});
-  assert.deepEqual(preferenceProfile({logical_profile:'job-'+'b'.repeat(24),space_id:'123'},'123'),{profile:defaultLogicalProfile({admin:false,scope:null,space:'123'}),space:'123'},
-    'a job follows its chat\'s settings');
-  assert.deepEqual(preferenceProfile({logical_profile:defaultLogicalProfile({admin:false,scope:null,space:'123/topic/4'}),space_id:'123/topic/4'},'123'),
-    {profile:defaultLogicalProfile({admin:false,scope:null,space:'123'}),space:'123'},'the owner\'s private chat has no settings per topic');
-});
-
 test('automatic learning revisions are quiet; owner corrections are not; learning waits for a running action',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -188,7 +176,7 @@ test('automatic learning revisions are quiet; owner corrections are not; learnin
 
     // An approved action that is running holds back a learning batch, which goes back to waiting.
     const held=await learn('A green mark means finished.',1),rb=await host(running.id),claim=await x.claim(rb) as any;
-    assert.equal(claim.claimed,true);assert.deepEqual(claim.preference,{profile:defaultLogicalProfile(asker),space:asking});
+    assert.equal(claim.claimed,true);
     await assert.rejects(held.activate(),{code:'learning_publication_pending'});
     assert.equal((await s.guards.state()).epoch,proposed.epoch,'no epoch while it runs');
     assert.deepEqual(await x.start(rb),{started:true});
@@ -200,7 +188,6 @@ test('automatic learning revisions are quiet; owner corrections are not; learnin
     assert.equal((await s.supervision.decision(owner,'controlled_action',waiting.id)).observation,'current','the Inbox keeps Approve open after a learning revision');
     assert.equal((await a.decide(owner,{id:waiting.id,fingerprint:waiting.fingerprint,decision:'approve'})).state,'approved');
     const wb=await host(waiting.id),carried=await x.claim(wb) as any;assert.equal(carried.claimed,true);assert.equal(carried.arguments.command,'printf learning-card');
-    assert.deepEqual(carried.preference,claim.preference,'the executor checks the same chat settings in the later epoch');
     assert.notEqual(carried.profile,defaultLogicalProfile(asker));
     assert.deepEqual(await x.start(wb),{started:true});
     await x.finish({id:waiting.id,actor:wb.actor,state:'done',result:{stdout:'made-up later result',exit_code:0}});

@@ -13,6 +13,7 @@ import {OwnerLock} from '../src/owner-lock.js';
 import {tmpdir} from 'node:os';
 import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
 import {NotionRepository,notionSchema} from '../src/stores/notion.js';
+import {ChatToolSettingsRepository,chatToolSchema} from '../src/stores/chat-tools.js';
 import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
@@ -22,7 +23,7 @@ const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLoc
 await initialize(pool);
 await ownerLock.create('preview-password');
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
-await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);
+await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
 // Two synthetic projects, each with its own list beside the personal one.
 const garden='9'.repeat(64),studio='8'.repeat(64);
 for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
@@ -31,6 +32,9 @@ for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
 for(const [id,name] of [['1'.repeat(64),'Mira Chen'],['d1'.repeat(32),'Devon']])
   await pool.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person',$2,'active') ON CONFLICT(id) DO NOTHING",[id,name]);
 const notion=new NotionRepository(pool);
+// The real tool switches on the preview's database: the group keeps pages off, and one of its topics turns them back on.
+const chatTools=new ChatToolSettingsRepository(pool,()=>'42');
+await pool.query("INSERT INTO chat_tool_settings(space_id,browser) VALUES('-10042',false),('-10042/topic/7',true)");
 // Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
 let notionSignIn:{connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean}={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};
 // GitHub: the preview stands in for GitHub's create and install pages and returns at once; made-up repositories, and the
@@ -543,6 +547,7 @@ const server=createServer((req,res)=>{void(async()=>{
   const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);
   if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
   if(route==='/notion')return json(res,200,await notion.get(taskOwner));
+  if(route==='/chat-tools')return json(res,200,await chatTools.get(taskOwner,url.searchParams.get('space')??'*'));
   if(route==='/connections/notion')return json(res,200,notionSignIn);
   if(route==='/connections/github')return json(res,200,githubStatus());
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
@@ -594,6 +599,7 @@ const server=createServer((req,res)=>{void(async()=>{
   const factRevoke=route.match(/^\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/),ownGrant=factRevoke&&factGrants.find(g=>g.id===factRevoke[1]);
   if(ownGrant){if(ownGrant.revision!==body.expected_revision||ownGrant.state!=='active')throw new HttpError(409,'memory_fact_grant_changed');ownGrant.state='revoked';ownGrant.revision++;return json(res,200,{id:ownGrant.id,state:'revoked',revision:ownGrant.revision});}
   if(route==='/notion')return json(res,200,await notion.save(taskOwner,body));
+  if(route==='/chat-tools')return json(res,200,await chatTools.save(taskOwner,body));
   if(route==='/connections/notion/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/?connect=notion')throw new HttpError(400,'invalid_notion_redirect');
     return json(res,200,{url:body.redirect+'&code=fixture-code&state=fixture-state'});}
   if(route==='/connections/notion/finish'){if(body.state!=='fixture-state')throw new HttpError(400,'notion_sign_in_expired');

@@ -7,13 +7,14 @@ import type {StorePools} from './connections.js';
 /**
  * The owner's own work and choices in the control store, which the derivative
  * format does not carry: tasks, chat-to-project links, sharing rules, hidden
- * sources, learning choices, topic names, edited built-in texts and settings.
+ * sources, learning choices, topic names, edited built-in texts, settings and
+ * the tool switches of each chat.
  * Rows travel as Postgres renders them and come back through
  * json_populate_record, so dates, times, arrays and decimals keep their type.
  *
- * Nothing imported can act on its own: sharing rules arrive switched off, and
- * reminders whose time has passed or whose sending was interrupted arrive
- * skipped. The freedom level, Telegram policy, grants, approvals and job
+ * Nothing imported can act on its own: sharing rules arrive switched off, tool
+ * switches arrive off or inherited, and reminders whose time has passed or
+ * whose sending was interrupted arrive skipped. The freedom level, Telegram policy, grants, approvals and job
  * history stay out, as they do for derivatives.
  */
 type Table={key:string[];singleton?:boolean;serial?:string};
@@ -36,6 +37,7 @@ const tables:Record<string,Table>={
   owner_prompts:{key:['singleton'],singleton:true},
   owner_notion:{key:['singleton'],singleton:true},
   background_settings:{key:['singleton'],singleton:true},
+  chat_tool_settings:{key:['space_id']},
 };
 export const portableOwnerTables=Object.keys(tables);
 export interface OwnerRecord {format:'nocheh-owner-record-v1';table:string;key:string[];row:Record<string,unknown>;sha256:string}
@@ -131,6 +133,10 @@ export class OwnerPortabilityRepository {
   /** Imported rows never act by themselves. */
   private safe(table:string,row:Record<string,unknown>):Record<string,unknown> {
     if(table==='sharing_rules')return {...row,enabled:false};
+    // A tool switch arrives off or inherited, never on: an import never turns a tool on that this installation turned off.
+    // Only a real false stays off; anything else, such as "t" or 1 that the database would read as on, arrives inherited.
+    if(table==='chat_tool_settings')return Object.fromEntries(Object.entries(row).map(([key,value])=>
+      [key,['shell','browser','mcp'].includes(key)?(value===false?false:null):key==='revision'?1:value]));
     if(table==='owner_task_reminders') {
       const due=Date.parse(String(row.remind_at));
       if(row.state==='sending'||row.state==='uncertain'||row.state==='pending'&&!(due>Date.now()))return {...row,state:'skipped'};

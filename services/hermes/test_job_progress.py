@@ -26,7 +26,7 @@ class JobProgressTests(unittest.TestCase):
     def test_nothing_happens_until_a_background_turn_binds_it_and_it_binds_once(self):
         for hook in (progress.api_request,progress.auxiliary_call):self.assertIsNone(hook(usage=ANSWER))
         self.assertIsNone(progress.tool_call(tool_name='todo_list',result=todos(('Read','pending'))))
-        self.assertIsNone(progress.tool_result(tool_name='nocheh_archive_search',result='{}'))
+        self.assertIsNone(progress.tool_result(tool_name='mcp__nocheh__archive_search',result='{}'))
         progress.finish({'turn_exit_reason':'max_iterations_reached(300/300)'})
         self.assertEqual(self.lines,[])
         for emit,limits in ((None,{'prior_cost_usd':0}),(self.lines.append,None),(self.lines.append,{'cost_limit_usd':'5','prior_cost_usd':0}),
@@ -65,12 +65,12 @@ class JobProgressTests(unittest.TestCase):
     def test_the_cost_notice_comes_once_on_the_newest_tool_result_at_80_percent(self):
         self.bind()
         progress.api_request(usage=ANSWER);progress.api_request(usage=ANSWER)
-        self.assertIsNone(progress.tool_result(tool_name='nocheh_archive_search',result='{"sources":[]}'),'3.0001 is under 4.0')
+        self.assertIsNone(progress.tool_result(tool_name='mcp__nocheh__archive_search',result='{"sources":[]}'),'3.0001 is under 4.0')
         progress.api_request(usage=ANSWER)
-        self.assertIsNone(progress.tool_result(tool_name='nocheh_archive_search',result={'not':'a string'}),'only a text result carries it')
-        self.assertEqual(progress.tool_result(tool_name='nocheh_archive_search',result='{"sources":[]}'),'{"sources":[]}\n\n'+progress.COST_NOTICE)
+        self.assertIsNone(progress.tool_result(tool_name='mcp__nocheh__archive_search',result={'not':'a string'}),'only a text result carries it')
+        self.assertEqual(progress.tool_result(tool_name='mcp__nocheh__archive_search',result='{"sources":[]}'),'{"sources":[]}\n\n'+progress.COST_NOTICE)
         progress.api_request(usage=ANSWER)
-        self.assertIsNone(progress.tool_result(tool_name='nocheh_archive_search',result='{}'),'once per run')
+        self.assertIsNone(progress.tool_result(tool_name='mcp__nocheh__archive_search',result='{}'),'once per run')
         self.assertEqual(progress.COST_NOTICE,'[SYSTEM NOTICE — cost budget nearly used] This job has used about 80% of its cost limit. '
                                               'Stop new discovery now and write the final report from what you have.')
 

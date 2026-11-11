@@ -50,12 +50,12 @@ export class ScheduleRepository {
     if(!['once','interval','cron'].includes(String(schedule.kind))||Buffer.byteLength(canonical(schedule))>4096||Buffer.byteLength(canonical(preferences))>4096)
       throw new HttpError(400,'invalid_schedule_definition');
     // Preferences are a closed set; conversation text never supplies provider or
-    // administrative policy through a generated schedule document.
+    // administrative policy through a generated schedule document. Tools follow the
+    // switches of the schedule's chat, so a schedule carries none of its own.
     for(const [key,value] of Object.entries(preferences)){
       const range:Record<string,[number,number]>={'agent.max_iterations':[1,16],'agent.run_budget_seconds':[30,180],
         'memory.memory_char_limit':[100,20000],'memory.user_char_limit':[100,20000]};
       if(key==='agent.reasoning_effort'){if(!['low','medium','high'].includes(String(value)))throw new HttpError(400,'invalid_schedule_preference');}
-      else if(['nocheh_tools.shell','nocheh_tools.browser','nocheh_tools.mcp'].includes(key)){if(!['on','off'].includes(String(value)))throw new HttpError(400,'invalid_schedule_preference');}
       else if(!range[key]||!Number.isSafeInteger(value)||Number(value)<range[key]![0]||Number(value)>range[key]![1])throw new HttpError(400,'invalid_schedule_preference');
     }
     return {...body,prompt,execution_version:identity(body.execution_version)};

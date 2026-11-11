@@ -176,7 +176,7 @@ class BrowserGatewayTests(unittest.TestCase):
         created=next(row for row in rows if row.get('id')==1)
         self.assertIn('session_id',created.get('result',{}),created)
         self.assertEqual(created['result']['info']['managed_execution'],'isolated_per_turn')
-        self.assertEqual(set(created['result']['info']['tools']['Nocheh']),{'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_archive_page','nocheh_memory_search','nocheh_action_request','nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall','nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read','nocheh_telegram_destinations','nocheh_tasks','nocheh_notion','nocheh_background_job','skills_list','skill_view'})
+        self.assertEqual(set(created['result']['info']['tools']['Nocheh']),{'memory','session_search','mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__nocheh__archive_page','mcp__nocheh__memory_search','mcp__nocheh__action_request','mcp__nocheh__shell','mcp__nocheh__browser','mcp__nocheh__mcp','mcp__nocheh__action_status','mcp__nocheh__memory_recall','mcp__nocheh__knowledge_inspect','mcp__nocheh__knowledge_propose','mcp__nocheh__knowledge_status','mcp__nocheh__owner_read','mcp__nocheh__telegram_destinations','mcp__nocheh__tasks','mcp__nocheh__notion','mcp__nocheh__background_job','skills_list','skill_view'})
         self.assertIn('error',next(row for row in rows if row.get('id')==2))
         self.assertFalse((home/'auth.json').exists())
 

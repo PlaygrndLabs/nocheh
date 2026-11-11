@@ -14,21 +14,23 @@ import sys
 import time
 from pathlib import Path
 
-ALLOWED_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_read','nocheh_archive_page','nocheh_memory_search','nocheh_action_request',
-               'nocheh_shell','nocheh_browser','nocheh_mcp','nocheh_action_status','nocheh_memory_recall',
-               'nocheh_knowledge_inspect','nocheh_knowledge_propose','nocheh_knowledge_status','nocheh_owner_read','nocheh_telegram_destinations','nocheh_tasks','nocheh_notion',
-               'nocheh_background_job','skills_list','skill_view'}
+# Nocheh's data tools come from its MCP endpoint through Hermes's own MCP client, which names each one mcp__nocheh__<tool>.
+DATA_TOOLS={'mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__nocheh__archive_page','mcp__nocheh__memory_search',
+            'mcp__nocheh__memory_recall','mcp__nocheh__action_request','mcp__nocheh__background_job','mcp__nocheh__telegram_destinations',
+            'mcp__nocheh__shell','mcp__nocheh__browser','mcp__nocheh__mcp','mcp__nocheh__owner_read','mcp__nocheh__tasks','mcp__nocheh__notion',
+            'mcp__nocheh__action_status','mcp__nocheh__knowledge_inspect','mcp__nocheh__knowledge_propose','mcp__nocheh__knowledge_status'}
+ALLOWED_TOOLS={'memory','session_search','skills_list','skill_view'}|DATA_TOOLS
 # The owner sets skills; a turn may read them but never create or change one.
 OWNER_SET_TOOLS={'skill_manage'}
-TURN_TOOLSETS=['memory','session_search','nocheh_archive','skills']
+TURN_TOOLSETS=['memory','session_search','mcp-nocheh','skills']
 # A job's own turns never start, list or stop jobs.
-JOB_STRIPPED={'nocheh_background_job'}
+JOB_STRIPPED={'mcp__nocheh__background_job'}
 # A background job's run also keeps Hermes's own to-do list.
 BACKGROUND_TOOLS=(ALLOWED_TOOLS-JOB_STRIPPED)|{'todo_list'}
 BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
 # A box run runs Hermes's own terminal, file and code tools in the job's sealed box. It keeps
 # the archive tools and Notion, and loses native memory, the shell and the browser.
-BOX_STRIPPED={'nocheh_shell','nocheh_browser'}
+BOX_STRIPPED={'mcp__nocheh__shell','mcp__nocheh__browser'}
 BOX_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
 BOX_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file','code_execution']
 # A machine run runs Hermes's own terminal and file tools on the owner's machine, through Nocheh (machine_box.py).
@@ -63,6 +65,35 @@ def turn_tools(background,box,machine=False):
 def verify_profile_tools(names,allowed=ALLOWED_TOOLS):
     unexpected=set(names)-allowed
     if unexpected:raise UnexpectedProfileTool(unexpected)
+
+
+def data_tools_server(credential,deadline):
+    """Nocheh's MCP endpoint for this turn. It lives in this process's memory only: the turn
+    credential never reaches config.yaml, a file or the environment. The endpoint checks every
+    call with it, as the routes behind it do."""
+    return {'url':os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/mcp',
+            'headers':{'Authorization':'Bearer '+credential,'X-Nocheh-Turn-Deadline':str(int(deadline))},
+            # A memory recall may wait 615 s for long-term memory and 15 s more for the owner's native notes; the endpoint
+            # fits it into the turn's deadline. This also lifts Hermes's 420 s limit on one tool call for these tools.
+            'timeout':660,'connect_timeout':15,
+            # The preflight probe would go through the guarded plain HTTP client, which refuses it.
+            'skip_preflight':True,'strict_redirect_headers':True,'trust':'full',
+            'sampling':{'enabled':False},'elicitation':{'enabled':False},'events':False,
+            'supports_parallel_tool_calls':False,'tools':{'resources':False,'prompts':False}}
+
+
+def connect_data_tools(credential,deadline):
+    """Connect Nocheh's data tools for this turn; a turn without all of them does not run."""
+    from tools.mcp_tool_discovery import register_mcp_servers
+    if not DATA_TOOLS<=set(register_mcp_servers({'nocheh':data_tools_server(credential,deadline)})):
+        raise RuntimeError('data_tools_unavailable')
+
+
+def disconnect_data_tools():
+    """Close the turn's MCP connection and stop Hermes's MCP loop, so the process ends with its turn."""
+    if 'tools.mcp_tool' not in sys.modules:return
+    from tools.mcp_tool_lifecycle import shutdown_mcp_servers
+    shutdown_mcp_servers(timeout=5)
 
 
 def exact_predecessor_question(text):
@@ -255,8 +286,6 @@ def run(body, emit=None, relay=None):
     bind_profile_home(profile)
     from .profile_config import preferences, read
     prefs=body.get('preferences') or preferences(read(profile/'config.yaml'))
-    from .archive_tools import bind_process_preferences
-    bind_process_preferences(prefs)
     database=SessionDB(database_path(profile))
     record('bootstrap',phase);phase=perf_counter()
     from .prompts import reply, text
@@ -280,18 +309,25 @@ def run(body, emit=None, relay=None):
         # Each model call of the run, and its to-do list, go out as progress lines; the cost notice comes from them too.
         from services.hermes import job_progress
         job_progress.bind(relay or (lambda event:None),body['background'])
-    agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
-        api_key=credentials.access_token,base_url=credentials.base_url,
-        enabled_toolsets=['memory'] if review else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,
-        fallback_model=None,
-        session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
-        user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
-        skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
-        quiet_mode=True,save_trajectories=False,max_iterations=iterations or prefs['agent.max_iterations'],
-        # A job run's budget ends at the job's soft deadline; Hermes's own notice at 80% of it asks for the report.
-        run_budget_seconds=run_budget(body) if background else prefs['agent.run_budget_seconds'],
-        reasoning_config=reasoning(credentials,prefs),ephemeral_system_prompt=(
-            reply(body.get('prompts'),body['owner'])+long_term))
+    try:
+        # Nocheh's data tools, from its MCP endpoint with this turn's credential; a review only keeps native notes.
+        if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'])
+        agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
+            api_key=credentials.access_token,base_url=credentials.base_url,
+            enabled_toolsets=['memory'] if review else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,
+            fallback_model=None,
+            session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
+            user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
+            skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
+            quiet_mode=True,save_trajectories=False,max_iterations=iterations or prefs['agent.max_iterations'],
+            # A job run's budget ends at the job's soft deadline; Hermes's own notice at 80% of it asks for the report.
+            run_budget_seconds=run_budget(body) if background else prefs['agent.run_budget_seconds'],
+            reasoning_config=reasoning(credentials,prefs),ephemeral_system_prompt=(
+                reply(body.get('prompts'),body['owner'])+long_term))
+    except BaseException:
+        disconnect_data_tools();raise
+    # The turn's tools are set below; Hermes's refresh at the start of a turn would bring back a tool the turn dropped.
+    agent._skip_mcp_refresh=True
     record('agent_init',phase)
     try:
         if agent._memory_store is not None:
@@ -348,7 +384,7 @@ def run(body, emit=None, relay=None):
         if review:
             # A memory review leaves an empty native session behind; Hermes's own hidden flag keeps it out of the session list.
             with contextlib.suppress(Exception):database.set_session_hidden(session_id,True)
-        database.close();restore_evidence()
+        database.close();restore_evidence();disconnect_data_tools()
 
 
 def main():
@@ -397,7 +433,7 @@ def main():
     except Exception as error:
         import traceback
         frames=traceback.extract_tb(error.__traceback__)
-        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','guard_transition_pending','audience_context_changed','runtime_turn_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable','job_machine_unavailable'}
+        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','guard_transition_pending','audience_context_changed','runtime_turn_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable','job_machine_unavailable','data_tools_unavailable'}
         result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names

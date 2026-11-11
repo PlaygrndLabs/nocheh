@@ -160,10 +160,11 @@ appears anywhere in the request except the current turn, `[[notes:marker]]`
 whether it is in the Hermes native notes the model sees; `[[long:n]]`,
 `[[silent]]` and `[[empty-once:key]]` produce long, `[NO_REPLY]` and one blank
 answer. `[[turn:marker]]` reports whether a marker appears in the current turn
-(unaddressed group messages travel there), `[[tool:nocheh_x {json}]]` calls any
-Nocheh tool with those arguments (also `memory`, `todo_list` and a job box's
+(unaddressed group messages travel there), `[[tool:mcp__nocheh__x {json}]]` calls any
+Nocheh tool (Hermes's name for Nocheh's MCP tool `x`) with those arguments (also `memory`, `todo_list` and a job box's
 Hermes tools) and `[[after:silent]]` makes the answer after a
-tool call `[NO_REPLY]`. `[[usage:n]]` makes each scripted answer in that turn
+tool call `[NO_REPLY]`. The brain reads a Nocheh tool's own result inside the
+`{"result": ...}` envelope Hermes's MCP client puts around it. `[[usage:n]]` makes each scripted answer in that turn
 report `n` prompt tokens; the fixture's reply rates (`NOCHEH_FIXTURE_REPLY_RATES`,
 read only with `NOCHEH_INSTALLATION_FIXTURE=1`) price them, so a background
 job's cost limit can be reached. `[[delay:s]]` makes each scripted answer in that

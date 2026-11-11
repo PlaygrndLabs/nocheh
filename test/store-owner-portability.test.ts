@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {storeSchemas} from '../src/stores/schema.js';
 import {OwnerPortabilityRepository,portableOwnerTables,type OwnerRecord} from '../src/stores/owner-portability.js';
 import type {StorePools} from '../src/stores/connections.js';
+import {canonical,digest} from '../src/archive.js';
 
 // Two empty schemas in the fixture's control database: one to export from, one to import into.
 test('owner data travels with its types, and nothing imported acts by itself',
@@ -41,6 +42,7 @@ test('owner data travels with its types, and nothing imported acts by itself',
     for(let step=2;step<=12;step++)await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard',$2)",[parent,JSON.stringify({step})]);
     await source.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,revision,project_id) VALUES('rule-1','Garden to studio','[\"-10042\"]','-10073',true,'filtered',1,$1)",[project]);
     await source.query("UPDATE background_settings SET cost_limit_usd=7.5,revision=1");
+    await source.query("INSERT INTO chat_tool_settings(space_id,shell,browser,mcp) VALUES('*',false,null,null),('-10042',null,true,false)");
     await source.query("UPDATE owner_prompts SET texts='{\"greeting\":\"Hello there\"}',revision=2");
     await target.query("UPDATE owner_prompts SET texts='{\"greeting\":\"Target wording\"}',revision=1");
 
@@ -70,6 +72,14 @@ test('owner data travels with its types, and nothing imported acts by itself',
     // A changed setting on the target wins; an untouched one takes the imported value.
     assert.equal((await target.query('SELECT texts FROM owner_prompts')).rows[0].texts.greeting,'Target wording');
     assert.equal(Number((await target.query('SELECT cost_limit_usd FROM background_settings')).rows[0].cost_limit_usd),7.5);
+    // The owner's tool switches come along, chat by chat; one that was on arrives inherited, so an import never turns a tool on.
+    assert.deepEqual((await target.query('SELECT space_id,shell,browser,mcp FROM chat_tool_settings ORDER BY space_id')).rows,
+      [{space_id:'*',shell:false,browser:null,mcp:null},{space_id:'-10042',shell:null,browser:null,mcp:false}]);
+    // A hand-edited file cannot turn a tool on with values the database reads as true, nor pin a revision nothing can follow.
+    const edited={space_id:'-10073',shell:'t',browser:1,mcp:'on',revision:2147483647};
+    await to.restore(owner,[{format:'nocheh-owner-record-v1',table:'chat_tool_settings',key:['-10073'],row:edited,
+      sha256:digest(canonical({table:'chat_tool_settings',key:['-10073'],row:edited}))}]);
+    assert.deepEqual((await target.query("SELECT shell,browser,mcp,revision FROM chat_tool_settings WHERE space_id='-10073'")).rows,[{shell:null,browser:null,mcp:null,revision:1}]);
     // History keeps its order.
     const steps=async(pool:pg.Pool)=>(await pool.query('SELECT changes FROM owner_task_activity ORDER BY id')).rows.map(r=>JSON.stringify(r.changes));
     assert.deepEqual(await steps(target),await steps(source));

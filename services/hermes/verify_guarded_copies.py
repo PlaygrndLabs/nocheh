@@ -42,7 +42,7 @@ async def main():
         record('import_prepared',projection['state']=='ready' and projection['content']['text']=='Database password: ***')
         call('/v1/data/'+source+'/guarded',{'source_id':'events:'+source,'expected_revision':projection['active_revision'],'content':{'text':edited,'payload':{}}})
         record('original_unchanged',call('/v1/events/'+source)['event']['text']==original)
-        question='Use nocheh_archive_read to read nocheh:event:'+source+'. Reply with the exact sentence in its text, without commentary.'
+        question='Use mcp__nocheh__archive_read to read nocheh:event:'+source+'. Reply with the exact sentence in its text, without commentary.'
         event=capture('question',question);call('/v1/guarded/prepare',{'event_id':event})
         deadline=time.monotonic()+120
         while any(p['state']!='ready' for p in call('/v1/data/'+event+'/guarded')['projections']):

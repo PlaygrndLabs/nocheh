@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS security_events (
 CREATE INDEX IF NOT EXISTS security_events_effect ON security_events(effect_id,id);
 ALTER TABLE security_events ADD COLUMN IF NOT EXISTS source_reference jsonb;
 ALTER TABLE security_events ADD COLUMN IF NOT EXISTS timings jsonb;
+ALTER TABLE security_events ADD COLUMN IF NOT EXISTS brain text CHECK(brain IS NULL OR brain ~ '^[a-z][a-z0-9-]{0,31}$');
 CREATE INDEX IF NOT EXISTS security_events_kind_created ON security_events(kind,created_at);
 `;
 export const securitySchema=securityCoreSchema+`ALTER TABLE action_requests ADD COLUMN IF NOT EXISTS security_decision jsonb;`;
@@ -62,10 +63,10 @@ export async function evaluate(db:Db,effect:Effect,grant?:string,lock=false):Pro
 export type EffectState='proposed'|'allowed'|'blocked'|'awaiting_approval'|'claimed'|'started'|'completed'|'failed'|'ambiguous';
 export async function recordEffect(db:Db,effect:Effect,state:EffectState,decision:Decision,source?:string|SourceReference|OperationReference,permission?:string,timings?:ModelTimings) {
   // A closed schema prevents payloads, URLs, headers or exception strings from entering logs.
-  await db.query(`INSERT INTO security_events(effect_id,state,kind,scope,profile,source_event_id,policy_revision,origin,rule,permission_id,source_reference,timings)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
+  await db.query(`INSERT INTO security_events(effect_id,state,kind,scope,profile,source_event_id,policy_revision,origin,rule,permission_id,source_reference,timings,brain)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING`,
     [effect.id,state,effect.kind,effect.scope,effect.profile,typeof source==='string'?source:source?.id??null,
-      decision.revision,decision.origin,decision.rule,permission??null,typeof source==='string'?null:source??null,safeTimings(timings)]);
+      decision.revision,decision.origin,decision.rule,permission??null,typeof source==='string'?null:source??null,safeTimings(timings),effect.brain??null]);
 }
 export async function effectLog(pool:pg.Pool,principal:Reader,after='0',effect?:string,event?:string) {
   admin(principal);

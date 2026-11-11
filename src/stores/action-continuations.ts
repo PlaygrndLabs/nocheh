@@ -59,7 +59,7 @@ export const ownerRejected=(action:{state:string;error_code:string|null},owner:b
 export function answeredInTurn(action:{state:string;observed_in_turn:string|null},asking:string|undefined):boolean {
   return action.observed_in_turn===action.state&&asking==='done';
 }
-/** Only ids, tools and states reach the model; it reads each result itself through nocheh_action_status. */
+/** Only ids, tools and states reach the model; it reads each result itself through mcp__nocheh__action_status. */
 export function continuationText(template:string,actions:{id:string;kind:string;state:string}[]):string {
   return fillTemplate(template,{actions:actions.map(a=>'- '+a.id+' ('+a.kind+'): '+a.state).join('\n')});
 }

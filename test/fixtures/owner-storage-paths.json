@@ -3,6 +3,7 @@
 "paths": [
  {"path": "/v1/owner-autonomy", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/notion", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/chat-tools", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs/settings", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/stop", "owner_storage": true, "allowed_path": true},
@@ -88,6 +89,7 @@
  {"path": "/v1/guards/derived_artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/revisions/3", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/memory/provenance", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs/copies", "owner_storage": false, "allowed_path": false},
+ {"path": "/v1/chat-tools/history", "owner_storage": false, "allowed_path": false},
  {"path": "/v1/background-jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": false, "allowed_path": false},
  {"path": "/v1/background-jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/start", "owner_storage": false, "allowed_path": false},
  {"path": "/v1/background-jobs/settings/copies", "owner_storage": false, "allowed_path": false},

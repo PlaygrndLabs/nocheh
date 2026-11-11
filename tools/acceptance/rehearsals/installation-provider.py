@@ -29,10 +29,10 @@ class ScriptedBrain:
     Requests without a directive keep the deterministic mock behaviour.
     """
     DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes)(?::([^\]]*))?\]\]')
-    # Any Nocheh tool, Hermes's own memory or to-do tool, or a Hermes tool of a job's sealed box, with exact JSON
-    # arguments: [[tool:nocheh_tasks {"action":"list"}]], [[tool:memory {"action":"add",...}]].
-    # Several in one turn are called one after another.
-    TOOL = re.compile(r'\[\[tool:(nocheh_[a-z_]+|memory|todo_list|terminal|read_file|write_file|search_files|patch|execute_code)\s+(\{.*?\})\]\]', re.S)
+    # Any Nocheh tool (Hermes names Nocheh's MCP tools mcp__nocheh__<tool>), Hermes's own memory or to-do tool, or a
+    # Hermes tool of a job's sealed box, with exact JSON arguments: [[tool:mcp__nocheh__tasks {"action":"list"}]],
+    # [[tool:memory {"action":"add",...}]]. Several in one turn are called one after another.
+    TOOL = re.compile(r'\[\[tool:(mcp__nocheh__[a-z_]+|memory|todo_list|terminal|read_file|write_file|search_files|patch|execute_code)\s+(\{.*?\})\]\]', re.S)
     # [[usage:N]] reports N prompt tokens for each scripted answer in that turn, so a background job's cost adds up.
     USAGE = re.compile(r'\[\[usage:([0-9]{1,9})\]\]')
     # [[delay:S]] makes each scripted answer in that turn wait S seconds (1 to 90, under the broker's request deadline),
@@ -43,13 +43,17 @@ class ScriptedBrain:
     RESTART = 'This job restarted and its earlier work could not be kept.'
     NOTICES = {'cost': '[SYSTEM NOTICE — cost budget nearly used]', 'time': '[SYSTEM NOTICE — run time budget nearly exhausted]'}
     # Nocheh's follow-up turn once approved operations end (src/prompts.ts actionContinued): one line per operation,
-    # each read with nocheh_action_status, as the text asks.
+    # each read with mcp__nocheh__action_status, as the text asks.
     CONTINUED = '[Operations ended]'
     OPERATION = re.compile(r'^- ([a-f0-9]{64}) \([a-z_]+\): [a-z_]+$', re.M)
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
-    TOOLS = {'search': 'nocheh_archive_search', 'recall': 'nocheh_memory_recall', 'action': 'nocheh_action_request',
-             'owner': 'nocheh_owner_read'}
+    TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
+             'owner': 'mcp__nocheh__owner_read'}
+    NOCHEH = 'mcp__nocheh__'
+    # Hermes frames every MCP tool's result as untrusted data (agent/tool_dispatch_helpers.py): an opening tag, one
+    # paragraph telling the model to treat it as data, a blank line, the content and the closing tag. A notice may follow.
+    FRAMED = re.compile(r'<untrusted_tool_result source="([^"]*)">\n[^\n]*\n\n(.*)\n</untrusted_tool_result>', re.S)
 
     def __init__(self, counts, canary):
         self.counts, self.canary, self.events, self.emptied, self.seen = counts, canary, [], set(), set()
@@ -61,6 +65,24 @@ class ScriptedBrain:
         if isinstance(content, list):
             return '\n'.join(part.get('text', '') for part in content if isinstance(part, dict))
         return ''
+
+    def result(self, name, content):
+        """A tool's result as the tool gave it. Hermes's MCP client hands the model a Nocheh tool's text as
+        {"result": <text>} inside its untrusted-data frame, and a job's notice may follow it; scenarios read the tool's own JSON."""
+        text = self.text(content)
+        if not name.startswith(self.NOCHEH):
+            return text
+        framed = self.FRAMED.match(text)
+        if framed and framed[1] == name:
+            text = framed[2] + text[framed.end():]
+        try:
+            value, end = json.JSONDecoder().raw_decode(text)
+        except ValueError:
+            return text
+        if not isinstance(value, dict) or 'result' not in value or set(value) - {'result', 'structuredContent', '_meta'}:
+            return text
+        inner = value['result']
+        return (inner if isinstance(inner, str) else json.dumps(inner, ensure_ascii=False)) + text[end:]
 
     def notes(self, body):
         """The native notes the model sees: the system prompt, and the native entries of the
@@ -125,7 +147,7 @@ class ScriptedBrain:
 
     def script(self, body):
         names = {tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)}
-        if not any(isinstance(name, str) and name.startswith('nocheh_') for name in names):
+        if not any(isinstance(name, str) and name.startswith(self.NOCHEH) for name in names):
             return None
         messages = [message for message in body.messages if message.role != 'system']
         users = [index for index, message in enumerate(messages) if message.role == 'user']
@@ -135,7 +157,7 @@ class ScriptedBrain:
         match = self.DIRECTIVE.search(current)
         tools = self.TOOL.findall(current)
         if not match and not tools and self.CONTINUED in current:
-            tools = [('nocheh_action_status', json.dumps({'id': operation})) for operation in self.OPERATION.findall(current)]
+            tools = [('mcp__nocheh__action_status', json.dumps({'id': operation})) for operation in self.OPERATION.findall(current)]
         if not match and not tools:
             return None
         if self.canary in '\n'.join(self.text(message.content) for message in body.messages):
@@ -156,7 +178,7 @@ class ScriptedBrain:
             # The answer gives each tool's actual result, one line per tool, in call order.
             lines = []
             for (name, argument), message in zip(tools, results[-len(tools):]):
-                result = self.text(message.content)
+                result = self.result(name, message.content)
                 self.record(directive='tool', argument=argument, phase='final', tool=name, result=result[:20000])
                 lines.append('[brain] ' + name + ': ' + ' '.join(result.split())[:3000])
             return {'content': '[NO_REPLY]' if silent_after else '\n'.join(lines)}
@@ -165,7 +187,7 @@ class ScriptedBrain:
             results = [message for message in later if message.role == 'tool']
             if results:
                 name = self.TOOLS[kind]
-                result = self.text(results[-1].content)
+                result = self.result(name, results[-1].content)
                 self.record(directive=kind, argument=argument, phase='final', tool=name, result=result[:20000])
                 return {'content': '[NO_REPLY]' if silent_after else '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
             if kind == 'search':

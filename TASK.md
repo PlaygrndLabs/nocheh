@@ -110,6 +110,22 @@ is what ran; unlike the sealed box, the VM has its own internet while the job ke
 the archive tools; machine keys are not backed up, so after a restore each machine
 fails with `machine_key_missing` until it is removed and added again.
 
+Data tools over MCP (owner, 2026-11-10: "start build." on the build plan whose step 5
+offers Nocheh's data tools over MCP and moves the tool switches into Nocheh): the
+broker and `nocheh-app` serve the 18 data tools at `/mcp`, each calling its existing
+route with the turn's pass; Hermes connects in each turn and sees them as
+`mcp__nocheh__…`, and a turn without all of them stops with `data_tools_unavailable`;
+a turn's pass names its brain, kept with each checked effect; commands, web pages and
+outside tools are switched per chat or topic on its page in Chats, with "Tools in every
+chat" in Settings › Assistant, and Nocheh checks the switch on every proposal and again
+before a run ([ADR-0233](docs/adr/0233-data-tools-over-mcp.md), [tools](test/mcp.test.ts),
+[switches](test/store-chat-tools.test.ts), [Hermes](services/hermes/test_data_tools.py),
+[failure](services/hermes/test_turn_failure_codes.py)); the full tester passed. Pending: a
+live reply on the owner's install after the pull. Owner step on an install that
+ever saved a Commands, Web pages or Outside tools switch: a value for one chat is
+ignored and is set again in Chats; a value for every chat must be removed from Hermes's
+shared settings, or turns stop with `unsupported_preference`.
+
 One waiting card per person or project (owner, 2026-11-08: "all <project name> arent same?
 isnt auto or manual merge them to one waiting item"): a new name for a person or
 project already waiting joins that card when learning names it as `same_as` or the
@@ -132,7 +148,7 @@ secret-checked like the arguments and never changes what runs
 ([ADR-0224](docs/adr/0224-operation-cards-lead-with-the-askers-summary.md),
 [words](test/action-text.test.ts), [store](test/store-controlled-actions.test.ts),
 [cards](test/store-approval-buttons.test.ts), [list cards](test/store-background-job-changes.test.ts),
-[Hermes](services/hermes/test_action_results.py), [gateway](services/hermes/test_approval_cards.py),
+[tools](test/mcp.test.ts), [gateway](services/hermes/test_approval_cards.py),
 full tester scenario `tool_card_reads_in_words`). Pending: the owner's yes on the
 mock, and a real Notion card with a summary on the owner's live install after the
 machine pull.
@@ -218,7 +234,7 @@ is not queued again.
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
 task table against a group chat): long tool results are read in parts
-([check](services/hermes/test_action_results.py)). Waiting and approved tool
+([check](test/mcp.test.ts)). Waiting and approved tool
 actions, such as Notion calls, survive reactions in any chat and automatic learning
 revisions (owner, 2026-11-03: "Keep them valid"), then run when approved, and a later turn or
 job step of the asking chat reads its own action; any other epoch change still
@@ -516,7 +532,7 @@ the organization workflow, including learning publication recovery.
 [authority/application checks](test/store-knowledge-management.test.ts),
 [owner read checks](test/store-owner-supervision.test.ts),
 [inactive restore checks](test/knowledge-portability.test.ts),
-[runtime checks](services/hermes/test_knowledge_tools.py),
+[runtime checks](test/mcp.test.ts),
 [learning checks](test/store-learning-engine.test.ts).
 
 Activity Decisions provides complete server totals and exact-item links across
@@ -886,10 +902,10 @@ not yet run on the owner's installation:
 - Owner task list (October 19): the owner asked for a Telegram mini app to
   manage Nocheh, Nocheh's own task manager in it, and Notion through MCP as an
   optional extra. Step 1 is in source: a Tasks page in the dashboard and a
-  `nocheh_tasks` assistant tool for the owner's private chat over one list in
+  `tasks` assistant tool for the owner's private chat over one list in
   the control store ([decision](docs/adr/0160-owner-task-list.md),
   [check](test/store-tasks.test.ts), [broker check](test/knowledge-broker.test.ts),
-  [tool check](services/hermes/test_knowledge_tools.py),
+  [tool check](test/mcp.test.ts),
   [browser check](test/dashboard-pages.browser.mjs)). Live check pending: ask
   Nocheh in the private chat to add, list and finish a task.
 - Telegram mini app (October 19): Home, Inbox and Tasks in Telegram through a
@@ -915,14 +931,14 @@ not yet run on the owner's installation:
   Today, Upcoming and Board views; Settings › Tasks
   ([decision](docs/adr/0167-tasks-like-a-notion-table.md),
   [check](test/store-tasks.test.ts), [browser check](test/dashboard-pages.browser.mjs),
-  [tool check](services/hermes/test_knowledge_tools.py)). The first start drops
+  [tool check](test/mcp.test.ts)). The first start drops
   existing tasks. Live check pending: set a reminder a few minutes ahead from
   chat and see it arrive once in the private chat. Later: calendar view and
   saved views.
 - Notion through MCP (October 26): the owner asked "how can connect Notion
   (use MCP)?". Settings › Connections › Notion signs in through Notion (or a
   Business MCP token), turns Notion on, and chooses which calls ask first;
-  `nocheh_notion` works only in the owner's private chat
+  the `notion` tool works only in the owner's private chat
   ([decision](docs/adr/0175-notion-through-its-mcp-server.md),
   [check](test/store-notion.test.ts), [sign-in check](services/hermes/test_notion_connection.py),
   [browser check](test/dashboard-pages.browser.mjs)). November 1: the
@@ -1114,7 +1130,7 @@ Earlier upgrades are in [task history](docs/task-history.md).
   ones as uncertain. Checks: [closing](test/store-action-resolutions.test.ts),
   [messages](test/store-telegram-actions.test.ts), the dashboard
   [drawer](test/dashboard-pages.browser.mjs) and the agent's
-  [status keys](services/hermes/test_action_results.py). Pending: after merge, the
+  [status keys](test/mcp.test.ts). Pending: after merge, the
   owner's two existing reads leave Waiting once the development schema update
   runs (automatic on the next build in `make dev`).
 - One message when already allowed, stage C (2026-11-08,
@@ -1123,7 +1139,7 @@ Earlier upgrades are in [task history](docs/task-history.md).
   in the turn, up to 60 seconds, and answers in that reply. Once the tool holds
   the result, it notes the state it read; the follow-up skips only that answer,
   and a lost note or a follow-up turn's note leaves the follow-up in place. Checks:
-  [in-turn wait](services/hermes/test_action_results.py),
+  [in-turn wait](test/mcp.test.ts),
   [skip rule](test/action-continuations.test.ts),
   [marks and skips](test/store-action-continuations.test.ts), and the tester
   scenario `allowed_command_runs_without_a_card`.
@@ -2241,7 +2257,7 @@ activation remains separate.
      that change.
    - Honcho-only recall passed live on October 13: a note in one group topic
      was answered correctly in another topic the next day. The fact reached
-     Hermes only through `nocheh_memory_recall` (Honcho's answer); the
+     Hermes only through `memory_recall` (Honcho's answer); the
      turn-start Honcho context, the archive results and per-topic chat history
      did not contain it. The reply waited 33 minutes because the Claude login
      expired overnight while the machine slept; once it renewed, the turn took

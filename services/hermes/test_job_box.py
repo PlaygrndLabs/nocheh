@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import socket
@@ -169,7 +168,7 @@ class ToolGateTests(unittest.TestCase):
         self.folder=tempfile.TemporaryDirectory();self.box=Box(self.folder.name)
         from tools import code_execution_tool
         self.provider=job_box.Provider();register_provider(self.provider);self.deadline=time.time()+300
-        self.names=job_box.REQUIRED|{'nocheh_archive_page','todo_list'};self.spill=code_execution_tool._spill_full_stdout;self.load=code_execution_tool._load_config
+        self.names=job_box.REQUIRED|{'mcp__nocheh__archive_page','todo_list'};self.spill=code_execution_tool._spill_full_stdout;self.load=code_execution_tool._load_config
 
     def tearDown(self):
         from agent.terminal_env_registry import restore_registration
@@ -188,7 +187,7 @@ class ToolGateTests(unittest.TestCase):
     def test_box_tools_are_blocked_outside_a_sealed_box_step(self):
         for name in job_box.TOOLS:
             with self.subTest(name=name):self.assertTrue(self.blocked(name))
-        self.assertFalse(self.blocked('nocheh_archive_page'));self.assertFalse(self.blocked('delegate_task'))
+        self.assertFalse(self.blocked('mcp__nocheh__archive_page'));self.assertFalse(self.blocked('delegate_task'))
         with sealed_env(self.box.path):
             # The box is mounted but this step was never sealed.
             self.assertTrue(self.blocked('terminal'));self.assertTrue(self.blocked('delegate_task'))
@@ -198,7 +197,7 @@ class ToolGateTests(unittest.TestCase):
             job_box.seal(self.names,self.deadline)
             for name in self.names:
                 with self.subTest(name=name):self.assertFalse(self.blocked(name))
-            for name in ('delegate_task','nocheh_shell','memory','web_search'):
+            for name in ('delegate_task','mcp__nocheh__shell','memory','web_search'):
                 with self.subTest(name=name):self.assertTrue(self.blocked(name))
             # Once the job's time is up, its box tools say so; its other tools still run.
             self.assertEqual(job_box.TIME_UP,"The job's time is up. Write the final report now.")
@@ -206,7 +205,7 @@ class ToolGateTests(unittest.TestCase):
             job_box._DEADLINE=time.time()+35
             for name in job_box.REQUIRED:
                 with self.subTest(name=name):self.assertEqual(job_box.tool_gate(tool_name=name,args={},task_id='t'),{'action':'block','message':job_box.TIME_UP})
-            self.assertFalse(self.blocked('nocheh_archive_page'))
+            self.assertFalse(self.blocked('mcp__nocheh__archive_page'))
             # Hermes's wait for a background command, and the terminal's default timeout, end with the step too.
             from tools.terminal_tool import _get_env_config
             job_box._DEADLINE=time.time()+100.5;self.assertFalse(self.blocked('terminal'))
@@ -249,7 +248,7 @@ class ToolGateTests(unittest.TestCase):
             env=get_active_env('call_task');self.assertIsInstance(env,job_box.Environment)
             # The step's deadline was set before the environment was made: its snapshot keeps exports from command to command.
             self.assertTrue(env._snapshot_ready)
-            preview=maybe_persist_tool_result(content='{"records":"'+'Alice: hello. '*20000+'"}',tool_name='nocheh_archive_page',
+            preview=maybe_persist_tool_result(content='{"records":"'+'Alice: hello. '*20000+'"}',tool_name='mcp__nocheh__archive_page',
                                               tool_use_id='call_7',env=get_active_env('call_task'))
             self.assertIn('Full output could not be saved to sandbox',preview);self.assertNotIn('Full output saved to',preview)
             # Hermes's idle reaper keeps it for the whole step, however long the step goes without a box command.
@@ -336,48 +335,26 @@ class BoxStepTests(unittest.TestCase):
         from services.hermes.test_scopes import JOB_BOX_TOOLS
         from services.hermes.profile_config import atomic_yaml,resolved
         self.assertNotIn('memory',BOX_TOOLSETS);self.assertEqual(BOX_TOOLS-BACKGROUND_TOOLS,job_box.TOOLS)
-        self.assertEqual(BACKGROUND_TOOLS-BOX_TOOLS,{'memory','nocheh_shell','nocheh_browser'});self.assertIn('nocheh_mcp',BOX_TOOLS)
+        self.assertEqual(BACKGROUND_TOOLS-BOX_TOOLS,{'memory','mcp__nocheh__shell','mcp__nocheh__browser'});self.assertIn('mcp__nocheh__mcp',BOX_TOOLS)
         with tempfile.TemporaryDirectory() as folder,sealed_env('/box/exec.sock'):
             profile=Path(folder);atomic_yaml(profile/'config.yaml',resolved({},'synthetic'))
             (profile/'plugins').mkdir();(profile/'plugins'/'nocheh').symlink_to(Path(job_box.__file__).parent,target_is_directory=True)
             token=set_hermes_home_override(str(profile))
             try:
                 discover_plugins()
-                names={item['function']['name'] for item in get_tool_definitions(enabled_toolsets=BOX_TOOLSETS,quiet_mode=True)}
+                from services.hermes import mcp_fixture
+                with mcp_fixture.connected():
+                    names={item['function']['name'] for item in get_tool_definitions(enabled_toolsets=BOX_TOOLSETS,quiet_mode=True)}
                 removed,allowed=turn_tools(True,True)
                 self.assertEqual(names-removed,JOB_BOX_TOOLS);self.assertEqual(allowed,JOB_BOX_TOOLS);self.assertEqual(BOX_TOOLS,JOB_BOX_TOOLS)
                 verify_profile_tools(names-removed,allowed)
             finally:reset_hermes_home_override(token)
 
-    def test_a_job_proposal_asks_for_the_box_only_with_a_boolean(self):
-        from services.hermes import archive_tools
-        with patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request,patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'1'}):
-            archive_tools.job_tool({'action':'start','title':'Count','instruction':'Count lines.','box':True})
-            archive_tools.job_tool({'action':'start','title':'Count','instruction':'Count lines.','box':'yes'})
-            archive_tools.job_tool({'action':'status','box':True})
-        self.assertEqual([call.args for call in request.call_args_list],[
-            ('/v1/jobs/start',{'title':'Count','instruction':'Count lines.','box':True}),
-            ('/v1/jobs/start',{'title':'Count','instruction':'Count lines.'}),('/v1/jobs/status',{})])
-        from urllib.error import HTTPError
-        for code in ('job_box_not_allowed','job_changed'):
-            refused=HTTPError('url',409,'Conflict',{},io.BytesIO(json.dumps({'error':code}).encode()))
-            with self.subTest(code=code),patch.object(archive_tools,'request',side_effect=refused),patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'1'}):
-                self.assertEqual(json.loads(archive_tools.job_tool({'action':'start','title':'t','instruction':'i','box':True})),{'error':code})
-
-    def test_a_box_job_is_refused_where_job_steps_have_no_box(self):
-        from services.hermes import archive_tools
-        start=lambda box:archive_tools.job_tool({'action':'start','title':'Count','instruction':'Count lines.','box':box})
-        for environment,allowed in (({},False),({'NOCHEH_SECURITY_RUNTIME':'legacy'},False),({'NOCHEH_ISOLATED_TURN':'0'},False),
-                                    ({'NOCHEH_ISOLATED_TURN':'1'},True),({'NOCHEH_SECURITY_RUNTIME':'isolated'},True)):
-            with self.subTest(environment=environment),patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'','NOCHEH_SECURITY_RUNTIME':'legacy',**environment}),\
-                 patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request:
-                self.assertEqual(json.loads(start(True)),{'id':'a'*64,'state':'proposed'} if allowed else {'error':'job_box_not_allowed'})
-                self.assertEqual(request.call_count,1 if allowed else 0)
-                self.assertEqual(json.loads(start(False))['state'],'proposed')
 
 
 # One box step through assistant_turn.run, in its own process as in production: the real in-box
-# server on a temporary socket, an archive whose page is oversized, and the step's model outside.
+# server on a temporary socket, Nocheh's data tools at a made-up MCP endpoint whose page is oversized,
+# and the step's model outside.
 TURN='''import json,os,sys,threading
 from pathlib import Path
 from unittest.mock import patch
@@ -389,10 +366,7 @@ box_server.run=recorded
 server=box_server.listen(str(folder/'exec.sock'),os.getgid());threading.Thread(target=box_server.serve,args=(server,-1),daemon=True).start()
 os.environ.update(NOCHEH_ISOLATED_TURN='1',TERMINAL_ENV='nocheh_box',NOCHEH_BOX_SOCKET=str(folder/'exec.sock'),TERMINAL_CWD=str(folder/'work'))
 from services.hermes import archive_tools,assistant_turn,job_box,request_boundary,subscription
-def archive(path,value=None):
-    if path=='/v1/context/prepare':return value
-    if path.startswith('/v1/archive/page'):return {'records':[{'text':'Alice: hello. '*20000}],'next':None}
-    return {'imports':[]} if path=='/v1/imports/pending' else {'hits':[]}
+archive=lambda path,value=None:value if path=='/v1/context/prepare' else {'hits':[]}
 install=request_boundary.install
 with patch.object(request_boundary,'install',lambda:install(request_boundary.Boundary('on',transform=lambda url,payload:payload))),\\
      patch.object(subscription,'configured_urls',lambda:{body['base_url']}),patch.object(archive_tools,'request',archive):
@@ -407,10 +381,11 @@ class BoxTurnTests(unittest.TestCase):
     def test_a_box_step_runs_exactly_the_box_tools_and_its_commands_in_the_box(self):
         import subprocess,sys
         from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        from services.hermes import mcp_fixture
         from services.hermes.assistant_turn import BOX_TOOLS
         from services.hermes.profile_config import atomic_yaml,resolved
         sent=[]
-        calls=[{'name':'nocheh_archive_page','arguments':'{}'},
+        calls=[{'name':'mcp__nocheh__archive_page','arguments':'{}'},
                {'name':'terminal','arguments':json.dumps({'command':'echo "Alice: hello" > marker.txt; pwd; echo "home=$HERMES_HOME."'})}]
         class Model(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
@@ -430,8 +405,9 @@ class BoxTurnTests(unittest.TestCase):
                 chunks=[{'choices':[{'index':0,'delta':delta,'finish_reason':None}]},{'choices':[{'index':0,'delta':{},'finish_reason':reason}],'usage':usage}]
                 self.reply(b''.join(b'data: '+json.dumps({'id':'r','object':'chat.completion.chunk','created':0,'model':'synthetic',**c}).encode()+b'\n\n' for c in chunks)+b'data: [DONE]\n\n','text/event-stream')
         server=ThreadingHTTPServer(('127.0.0.1',0),Model);threading.Thread(target=server.serve_forever,daemon=True).start()
+        page=lambda name,arguments:{'records':[{'text':'Alice: hello. '*20000}],'next':None} if name=='archive_page' else {}
         try:
-            with tempfile.TemporaryDirectory() as folder:
+            with tempfile.TemporaryDirectory() as folder,mcp_fixture.Endpoint(page) as endpoint:
                 folder=Path(folder);profile=folder/'profile';(profile/'native-state').mkdir(parents=True);(profile/'memories').mkdir();(folder/'work').mkdir()
                 atomic_yaml(profile/'config.yaml',resolved({},'synthetic'))
                 (profile/'plugins').mkdir();(profile/'plugins'/'nocheh').symlink_to(Path(job_box.__file__).parent,target_is_directory=True)
@@ -441,14 +417,14 @@ class BoxTurnTests(unittest.TestCase):
                       'model':'synthetic','api_key':'synthetic','base_url':'http://127.0.0.1:%d/v1'%server.server_address[1],'provider':'openai','api_mode':'chat_completions',
                       'archive_credential':'turn.synthetic','turn_deadline_epoch':time.time()+120,'model_context_length':128000}
                 child=subprocess.run([sys.executable,'-c',TURN,json.dumps(body),str(folder)],cwd=Path(__file__).resolve().parents[2],
-                                     env={**os.environ,'HERMES_HOME':str(profile)},capture_output=True,text=True,timeout=240)
+                                     env={**os.environ,'HERMES_HOME':str(profile),'ARCHIVE_URL':endpoint.url},capture_output=True,text=True,timeout=240)
                 self.assertEqual(child.returncode,0,child.stderr[-2000:])
                 outcome=json.loads((folder/'result.json').read_text());marker=(folder/'work'/'marker.txt').read_text()
         finally:server.shutdown();server.server_close()
         self.assertEqual((outcome['result'].get('state'),outcome['result'].get('text')),('done','Report: done'),outcome['result'])
         steps=[payload for payload in sent if payload.get('tools')]
         self.assertEqual([{tool['function']['name'] for tool in payload['tools']} for payload in steps],[set(BOX_TOOLS)]*3)
-        self.assertNotIn('nocheh_background_job',BOX_TOOLS,'a box step has no job tool')
+        self.assertNotIn('mcp__nocheh__background_job',BOX_TOOLS,'a box step has no job tool')
         self.assertEqual(outcome['step'],sorted(BOX_TOOLS))
         self.assertEqual(outcome['deadline'],body['turn_deadline_epoch'],'the box ends with this run, not later')
         # Each model call of the run went out as a progress line, with the run's totals so far.
@@ -461,6 +437,10 @@ class BoxTurnTests(unittest.TestCase):
         self.assertIn('Full output could not be saved to sandbox',page);self.assertNotIn('Full output saved to',page)
         self.assertEqual(marker,'Alice: hello\n');self.assertIn(str(folder/'work'),terminal);self.assertIn('home=.',terminal)
         self.assertTrue(any('marker.txt' in script for script in outcome['scripts']))
+        # The data tools came from Nocheh's endpoint with the run's own credential and deadline, and the page call went there.
+        self.assertEqual({(request['authorization'],request['deadline']) for request in endpoint.requests},
+                         {('Bearer turn.synthetic',str(int(body['turn_deadline_epoch'])))})
+        self.assertEqual([request['params'] for request in endpoint.requests if request['method']=='tools/call'],[{'name':'archive_page','arguments':{}}])
 
     def test_a_step_without_its_box_reports_job_box_unavailable(self):
         # As the launcher runs a box step it could not make the box for: System › Background work shows this code.

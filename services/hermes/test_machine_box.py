@@ -29,12 +29,23 @@ class Broker(ThreadingHTTPServer):
     command. `answer` sets another reply: (status, body) refuses, a list of byte strings goes out as the body's
     chunks, and 'hang' sends the headers and waits for the client to go. It records every request."""
     def __init__(self):
+        from services.hermes import mcp_fixture
         self.requests=[];self.answer=None;self.gone=threading.Event();self.scripts=tempfile.mkdtemp(prefix='machine-');outer=self
+        # The broker also serves Nocheh's data tools at /mcp, as the real one does; those calls are not recorded.
         class Handler(BaseHTTPRequestHandler):
             protocol_version='HTTP/1.1'
             def log_message(self,*args):pass
+            def mcp(self,status,value=None):
+                body=b'' if value is None else json.dumps(value).encode();self.close_connection=True
+                self.send_response(status);self.send_header('Content-Length',str(len(body)));self.send_header('Connection','close')
+                if value is not None:self.send_header('Content-Type','application/json')
+                self.end_headers();self.wfile.write(body)
+            def do_GET(self):self.mcp(405)
+            do_DELETE=do_GET
             def do_POST(self):
                 raw=self.rfile.read(int(self.headers['Content-Length']));body=json.loads(raw);self.close_connection=True
+                if self.path=='/mcp':
+                    return self.mcp(202) if 'id' not in body else self.mcp(200,{'jsonrpc':'2.0','id':body['id'],**mcp_fixture.result(body.get('method'),body.get('params') or {})})
                 outer.requests.append({'path':self.path,'authorization':self.headers['Authorization'],'type':self.headers['Content-Type'],'body':body,'raw':raw})
                 answer=outer.answer
                 if isinstance(answer,tuple):
@@ -322,7 +333,7 @@ class MachineGateTests(Machine):
             patcher=patch.object(module,'_expand_tilde',module._expand_tilde);patcher.start();self.addCleanup(patcher.stop)
         # As in a turn: its own home is not the machine's, and Hermes's home holds no home folder.
         self.turn=os.path.join(self.folder.name,'turn');os.mkdir(self.turn)
-        self.names=job_box.MACHINE_REQUIRED|{'process_manage','nocheh_archive_page','todo_list'}
+        self.names=job_box.MACHINE_REQUIRED|{'process_manage','mcp__nocheh__archive_page','todo_list'}
 
     def tearDown(self):
         from agent.terminal_env_registry import restore_registration
@@ -352,7 +363,7 @@ class MachineGateTests(Machine):
             job_box.seal(self.names,self.deadline)
             for name in self.names:
                 with self.subTest(name=name):self.assertFalse(self.blocked(name))
-            for name in ('execute_code','delegate_task','nocheh_shell','memory'):
+            for name in ('execute_code','delegate_task','mcp__nocheh__shell','memory'):
                 with self.subTest(name=name):self.assertTrue(self.blocked(name))
             self.assertEqual(job_box.tool_gate(tool_name='execute_code',args={},task_id='t'),{'action':'block','message':'This tool is not available in this job.'})
             env=get_active_env('call_task');self.assertIsInstance(env,machine_box.Environment)
@@ -458,7 +469,9 @@ class MachineStepTests(unittest.TestCase):
             token=set_hermes_home_override(str(profile))
             try:
                 discover_plugins()
-                names={item['function']['name'] for item in get_tool_definitions(enabled_toolsets=MACHINE_TOOLSETS,quiet_mode=True)}
+                from services.hermes import mcp_fixture
+                with mcp_fixture.connected():
+                    names={item['function']['name'] for item in get_tool_definitions(enabled_toolsets=MACHINE_TOOLSETS,quiet_mode=True)}
                 removed,allowed=turn_tools(True,False,True)
                 self.assertEqual(names-removed,JOB_MACHINE_TOOLS);self.assertEqual(allowed,JOB_MACHINE_TOOLS)
                 verify_profile_tools(names-removed,allowed)
