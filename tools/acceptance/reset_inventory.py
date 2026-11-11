@@ -116,7 +116,7 @@ def files(state, memory, config_path, blockers):
         for path in sorted(bot.iterdir()):
             actions.append(entry(path, 'erase', 'telegram_runtime_state'))
     area(memory, {**{name: ('preserve', 'memory_setup_credentials_or_spending') for name in (
-        'honcho.env', 'meter.env', 'internal_token', 'database_password', 'temporary_embedding_key', 'honcho.Dockerfile',
+        'honcho.env', 'meter.env', 'internal_token', 'database_password', 'temporary_embedding_key',
         'ledger', 'bridge-auth', 'bridge.Dockerfile', 'bridge.yaml', 'compose.env')},
         **{name: ('erase', 'old_memory_content') for name in ('baseline', 'reports')}})
     for item in actions:

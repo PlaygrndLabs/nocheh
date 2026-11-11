@@ -503,6 +503,17 @@ The development stack reloads the changed routes on its own after a pull; a stac
 not in development mode needs a full restart, so the Honcho gateway and Hermes use
 the new routes. Pending: a second engine, such as mem0, when the owner wants one.
 
+Honcho image build (2026-11-11): `./bin/nocheh build` failed on an installation whose
+Honcho state folder sits outside the checkout. Docker Compose v5 builds through Bake,
+which asks for an extra `--allow=fs.read=` permission for a Dockerfile outside the build
+context and the working folder. The generated build file is now
+`data/compat/upstreams/honcho/nocheh.Dockerfile`, inside the context, and Honcho state
+no longer holds it ([setup check](services/honcho/test_setup.py),
+[Compose check](services/hermes/test_honcho_runtime.py)). A cloud Compose build of the
+Honcho image passed with the state folder outside the checkout. One-time step on an
+installation built before: delete `honcho.Dockerfile` from its Honcho state folder, or
+the reset preflight reports it as `unclassified_state_path`.
+
 Long recalls (2026-11-10): a long-term recall slower than five minutes failed as
 "memory unavailable". Node's fetch stops waiting for an answer after 300 s,
 whatever deadline it gets, and Hermes stops any tool after 420 s. The Honcho
@@ -1653,7 +1664,8 @@ Earlier upgrades are in [task history](docs/task-history.md).
   because installations run only through `make dev` never generate
   `honcho.Dockerfile`. That build file is now optional: a backup records it as
   rebuildable when absent and still requires the five owned Honcho state files
-  ([check](services/hermes/test_operations.py)). The rerun with the fix
+  ([check](services/hermes/test_operations.py)). Since November 11 the build file
+  lives in the Honcho source checkout, and backups hold only those five files. The rerun with the fix
   passed: Telegram paused 78 seconds; 947 state files and 99 table fingerprints,
   Honcho and workflow state were covered; the inactive restore matched every
   fingerprint and kept Telegram, provider login, Honcho attachment and

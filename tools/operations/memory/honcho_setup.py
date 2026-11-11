@@ -22,6 +22,8 @@ STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
 # them equal.
 QUERY_CHARACTERS=200000
 INPUT_TOKENS=61440
+# Nocheh's pinned build of the Honcho source checkout; docker-compose.yml names it.
+BUILD_FILE='nocheh.Dockerfile'
 
 
 def state_for(provider_state):
@@ -134,10 +136,14 @@ def sources():
             if '@sha256:' not in image and image not in stages:
                 raise SystemExit(f'{image}: Honcho build image is not pinned; update the Honcho lock')
         return text
-    # A Dockerfile from the previous pin never outlives a refused one.
-    (STATE/'honcho.Dockerfile').unlink(missing_ok=True)
+    # The build file sits inside the build context: Compose builds through Bake, which refuses to read a Dockerfile
+    # outside the context or the working folder unless the build is given an extra file-read permission. Upstream's
+    # COPY lines name their paths, so the file never enters the image. One from the previous pin never outlives a
+    # refused one.
+    built=ROOT/'data/compat/upstreams/honcho'/BUILD_FILE
+    built.unlink(missing_ok=True)
     upstream=pinned((ROOT/'data/compat/upstreams/honcho/Dockerfile').read_text())
-    (STATE/'honcho.Dockerfile').write_text(upstream+'\nENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache\nRUN python -c "import tiktoken; tiktoken.get_encoding(\'o200k_base\'); tiktoken.get_encoding(\'cl100k_base\')"\n')
+    built.write_text(upstream+'\nENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache\nRUN python -c "import tiktoken; tiktoken.get_encoding(\'o200k_base\'); tiktoken.get_encoding(\'cl100k_base\')"\n')
 
 
 def provider_ready(provider_state=PROVIDER_STATE):

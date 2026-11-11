@@ -92,6 +92,12 @@ class HonchoRuntimeTests(unittest.TestCase):
             self.assertTrue(any(mount['source'].endswith('/services/honcho/meter.py')
                                 for mount in services['honcho-provider-gateway']['volumes']))
             self.assertTrue(services['honcho-cli']['build']['context'].endswith('/services/honcho/cli'))
+            # The state folder here is outside the checkout, as an owner's may be: the build file still sits inside
+            # the build context, the one place Compose's Bake build reads without an extra file-read permission.
+            from tools.operations.memory.honcho_setup import BUILD_FILE
+            for name in ('honcho-api','honcho-deriver'):
+                self.assertEqual(services[name]['build']['context'],str(ROOT/'data/compat/upstreams/honcho'))
+                self.assertEqual(services[name]['build']['dockerfile'],BUILD_FILE)
             self.assertFalse(config['volumes']['honcho_redis'].get('external',False))
             self.assertEqual(services['honcho-redis']['volumes'][0]['source'],'honcho_redis')
             for name in ('honcho-postgres','honcho-redis','honcho-api','honcho-deriver','honcho-provider-gateway'):

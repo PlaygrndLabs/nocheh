@@ -90,7 +90,10 @@ class HonchoSetupTests(unittest.TestCase):
             dockerfile.write_text('# syntax=docker/dockerfile:1\nFROM base:1 AS builder\nCOPY --from=tool:2 /tool /bin/tool\nFROM base:1\n')
             with patch.object(honcho_setup, 'ROOT', root), patch.object(honcho_setup, 'STATE', state):
                 honcho_setup.sources()
-                built = (state / 'honcho.Dockerfile').read_text()
+                # Inside the build context, so Compose's Bake build needs no extra file-read permission.
+                target = root / 'data/compat/upstreams/honcho/nocheh.Dockerfile'
+                built = target.read_text()
+                self.assertEqual(list(state.iterdir()), [])
                 self.assertEqual(built.count('base:1@sha256:' + 'a' * 64), 2)
                 self.assertIn('COPY --from=tool:2@sha256:' + 'b' * 64 + ' /tool', built)
                 self.assertNotIn('# syntax=', built)
@@ -98,12 +101,12 @@ class HonchoSetupTests(unittest.TestCase):
                 dockerfile.write_text('FROM base:1\nCOPY --from=tool:3 /tool /bin/tool\n')
                 with self.assertRaisesRegex(SystemExit, 'tool:2: build image is not in the Honcho Dockerfile'):
                     honcho_setup.sources()
-                self.assertFalse((state / 'honcho.Dockerfile').exists())
+                self.assertFalse(target.exists())
                 # Upstream added another image: every FROM and COPY --from must still carry a digest.
                 dockerfile.write_text('FROM base:1 AS builder\nCOPY --from=tool:2 /tool /bin/tool\nFROM other:1\nCOPY --from=builder /app /app\n')
                 with self.assertRaisesRegex(SystemExit, 'other:1: Honcho build image is not pinned'):
                     honcho_setup.sources()
-                self.assertFalse((state / 'honcho.Dockerfile').exists())
+                self.assertFalse(target.exists())
 
     def test_monthly_cutover_requires_live_acceptance_and_attachment(self):
         with tempfile.TemporaryDirectory() as folder:

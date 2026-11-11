@@ -84,17 +84,15 @@ class SnapshotTests(unittest.TestCase):
                  patch('tools.operations.workflows.workflow_worker.running',return_value=False):
                 with self.assertRaisesRegex(ValueError,'Unsupported state symlink'):backup(state,root/'rejected-backup')
 
-    def test_honcho_backup_needs_owned_state_but_not_the_generated_dockerfile(self):
+    def test_honcho_backup_needs_every_owned_state_file(self):
         with tempfile.TemporaryDirectory() as folder:
             memory=Path(folder)
             for name in HONCHO_STATE:(memory/name).write_text('synthetic')
-            # A `make dev` installation never generates the build file.
-            self.assertEqual(honcho_state(memory),(list(HONCHO_STATE),['honcho/honcho.Dockerfile']))
-            (memory/'honcho.Dockerfile').write_text('FROM synthetic')
-            self.assertEqual(honcho_state(memory),([*HONCHO_STATE,'honcho.Dockerfile'],[]))
-            (memory/'honcho.Dockerfile').unlink();(memory/'honcho.Dockerfile').symlink_to(memory/'honcho.env')
+            # The build file lives in the Honcho source checkout, so state holds only the owned files.
+            self.assertEqual(honcho_state(memory),list(HONCHO_STATE))
+            (memory/'database_password').unlink();(memory/'database_password').symlink_to(memory/'honcho.env')
             with self.assertRaisesRegex(ValueError,'honcho_backup_state_missing'):honcho_state(memory)
-            (memory/'honcho.Dockerfile').unlink();(memory/'database_password').unlink()
+            (memory/'database_password').unlink()
             with self.assertRaisesRegex(ValueError,'honcho_backup_state_missing'):honcho_state(memory)
 
     def test_restore_fingerprint_table_names_are_allowlisted(self):

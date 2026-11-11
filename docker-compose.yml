@@ -59,7 +59,9 @@ x-honcho-runtime: &honcho-runtime
   image: nocheh-honcho:3326373c
   build:
     context: ./data/compat/upstreams/honcho
-    dockerfile: ${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/honcho.Dockerfile
+    # Written into the context by `./bin/nocheh build` (tools/operations/memory/honcho_setup.py): Compose builds through
+    # Bake, which refuses a Dockerfile outside the context without an extra file-read permission.
+    dockerfile: nocheh.Dockerfile
   profiles: [honcho]
   env_file: [{path: "${NOCHEH_HONCHO_STATE_DIR:-./data/local/honcho}/honcho.env", required: false}]
   networks: [honcho-isolated]

@@ -85,7 +85,7 @@ def main():
     (memory / 'ledger').mkdir(parents=True, mode=0o700, exist_ok=True)
     password = secrets.token_hex(32)
     for name, value in {'internal_token': token, 'database_password': password,
-                        'temporary_embedding_key': 'synthetic-no-provider', 'honcho.Dockerfile': '# fixture uses an explicit image\n'}.items():
+                        'temporary_embedding_key': 'synthetic-no-provider'}.items():
         path = memory / name
         path.write_text(value)
         path.chmod(0o600)
