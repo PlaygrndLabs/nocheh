@@ -15,7 +15,7 @@ import type {GuardRepository} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {closedTurnStates,currentTurn,dispatchPayload,terminalTurnStates,turnFence,turnResultCodes,type TurnInput} from './telegram-turn.js';
-import {botReady,cancelReply,deliveredReceipt,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
+import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply} from './telegram-reply.js';
 
 /** One row per controlled action that ended in a live conversation; the DB trigger writes it in the same commit as the end state. */
 export const actionContinuationSchema=`
@@ -152,7 +152,14 @@ export class ActionContinuationRepository {
       if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
     }
-    if(!credential)return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+    if(!credential) {
+      // An earlier check may have handed the reply to the bot, so the bot's receipt decides: a sent reply is never sent
+      // again under a new attempt, nor recorded as withdrawn.
+      const sent=await withdrawReply(this.call,row.event_id,attempt);
+      if(!sent||sent.state==='running')return await this.receive(row,{state:'running'});
+      if(replyOutcome(sent))return await this.storeResult(row,deliveredReceipt(receipt,sent));
+      return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+    }
     const target=replyTarget(input,attempt,credential);
     if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
     const sent=await sendReply(this.call,target,String(input.body.source_key)+':continuation:'+row.action_id,receipt.reply,{notify:true,presence:true});

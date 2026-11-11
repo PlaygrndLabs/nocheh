@@ -13,7 +13,7 @@ import re
 from datetime import timedelta
 
 from . import formatting
-from .capture import held
+from .capture import DISPATCH_KEY, held
 from .checks import no_preview
 
 # Telegram counts a message's length in UTF-16 code units.
@@ -127,10 +127,13 @@ class Sender:
         from telegram.error import BadRequest, NetworkError, TimedOut
         # Telegram refuses message_thread_id 1, the forum's General topic, on a send.
         thread = None if not topic or int(topic) == 1 else int(topic)
-        retried_thread = False
+        retried_thread, fresh = False, 0
         for attempt in range(3):
             parameters = {'chat_id': int(chat_id), 'reply_to_message_id': int(reply_to) if reply_to else None,
                           'message_thread_id': thread, **({} if notify else {'disable_notification': True})}
+            # A retry after a refusal or a connect timeout reached no chat, so it gets its own journal entry;
+            # under the same entry the journal would answer with the first attempt's saved result.
+            token = DISPATCH_KEY.set(f'{base}:retry:{fresh}') if fresh and (base := DISPATCH_KEY.get()) else None
             try:
                 await self._markdown_or_plain(chunk, parameters)
                 return True
@@ -142,7 +145,7 @@ class Sender:
                     # A one-off "thread not found" recovers on an immediate retry. The reply never
                     # leaves its topic, so a topic that is really gone ends the send.
                     if 'thread not found' in text and thread is not None and not retried_thread:
-                        retried_thread = True
+                        retried_thread, fresh = True, fresh + 1
                         continue
                     if 'message to be replied not found' in text and reply_to:
                         reply_to = None  # The message it answers was deleted; the reply still goes to its chat and topic.
@@ -153,6 +156,9 @@ class Sender:
                     raise
                 if attempt >= 2:
                     raise
+                # Only a request that never connected is sent anew; any other failure may have reached Telegram,
+                # and its journal entry answers the retry instead.
+                if isinstance(error, TimedOut): fresh += 1
                 await asyncio.sleep(2 ** attempt)
             except Exception as error:
                 retry_after = getattr(error, 'retry_after', None)
@@ -162,6 +168,8 @@ class Sender:
                 if wait > FLOOD_INLINE_WAIT or attempt >= 2:
                     return self._flooded(chat_id, wait)
                 await asyncio.sleep(wait)
+            finally:
+                if token is not None: DISPATCH_KEY.reset(token)
         return False
 
     async def typing(self, chat_id, topic=None):

@@ -56,6 +56,13 @@ export async function cancelReply(call:RuntimeCall,event:string,attempt:number|s
   try{await call('telegram.reply',{id:deliveryId(event,attempt),cancel:true},10000);}catch{/* The bot's receipt stays authoritative. */}
 }
 
+/** Stops a reply the bot may still be sending and returns what became of it, or null when the bot did not answer. */
+export async function withdrawReply(call:RuntimeCall,event:string,attempt:number|string):Promise<Record<string,unknown>|null> {
+  try{return await call('telegram.reply',{id:deliveryId(event,attempt),cancel:true},10000);}catch{return null;}
+}
+/** A withdrawn reply that the bot already sent, may have sent, or settled as silence: its receipt stands. */
+export const replyOutcome=(sent:Record<string,unknown>)=>['done','ambiguous','suppressed'].includes(String(sent.state));
+
 /** The turn's receipt with the brain's timings and the bot's send: queued and assistant from the brain, delivery and
  * finished from the bot. */
 export function deliveredReceipt(brain:TurnReceipt,delivery:Record<string,unknown>):Record<string,unknown> {

@@ -162,7 +162,8 @@ class TelegramService:
         return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout=timeout)
 
     def connected(self):
-        return self.status == 'connected' and self.bot is not None
+        # Recovering means one poll failed; sends still try, and a real outage fails them on its own.
+        return self.status in ('connected', 'recovering') and self.bot is not None
 
     def identify(self, body=None):
         return {'state': self.health()['state'], **(self.identity or {})}

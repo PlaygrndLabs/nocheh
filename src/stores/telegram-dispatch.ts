@@ -21,7 +21,7 @@ import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
 import {notAllowedPrivateReply,notAllowedReply,ownerPrompts} from '../prompts.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
-import {botReady,cancelReply,deliveredReceipt,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
+import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply} from './telegram-reply.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -176,7 +176,14 @@ export class TelegramDispatchRepository {
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
     }
     // The reply was written for a context that changed: it runs again under the new one, or not at all.
-    if(!credential)return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+    if(!credential) {
+      // An earlier check may have handed the reply to the bot, so the bot's receipt decides: a sent reply is never sent
+      // again under a new attempt, nor recorded as withdrawn.
+      const sent=await withdrawReply(this.call,row.event_id,attempt);
+      if(!sent||sent.state==='running')return await this.receive(row,{state:'running',stage:'delivery'});
+      if(replyOutcome(sent))return await this.storeResult(row,deliveredReceipt(receipt,sent));
+      return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+    }
     const target=replyTarget(input,attempt,credential);
     if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
     if(await this.earlierReply(row,input,receipt))return await this.receive(row,{state:'running',stage:'delivery'});
@@ -192,10 +199,15 @@ export class TelegramDispatchRepository {
   private async earlierReply(row:any,input:Input,receipt:TurnReceipt):Promise<boolean> {
     const ended=Number((receipt.window as {finished?:unknown}|undefined)?.finished);
     if(!Number.isSafeInteger(ended)||Date.now()-ended>conversationOrderWaitMs)return false;
-    const earlier=(await this.control.query(`SELECT event_id FROM dispatches WHERE state='running' AND attempts>0 AND event_id<>$1
-      AND created_at<$2 AND updated_at>now()-interval '10 minutes' LIMIT 50`,[row.event_id,row.created_at])).rows.map(other=>other.event_id as string);
-    if(!earlier.length)return false;
-    return (await this.archive.pool.query('SELECT 1 FROM events WHERE id=ANY($1::text[]) AND scope=$2 LIMIT 1',[earlier,input.body.scope])).rowCount!>0;
+    const running=(await this.control.query(`SELECT event_id FROM dispatches WHERE state='running' AND attempts>0 AND event_id<>$1
+      AND updated_at>now()-interval '10 minutes' LIMIT 50`,[row.event_id])).rows.map(other=>other.event_id as string);
+    if(!running.length)return false;
+    // Telegram's update order, as turns start in it (heldByEarlier); local capture order can differ.
+    const own=(await this.archive.pool.query(`SELECT scope,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE id=$1`,[row.event_id])).rows[0];
+    if(!own||!/^\d{1,19}$/.test(String(own.update_id)))return false;
+    return (await this.archive.pool.query(`SELECT 1 FROM (SELECT convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events
+      WHERE id=ANY($1::text[]) AND scope=$2) earlier WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$3::numeric LIMIT 1`,
+      [running,own.scope,own.update_id])).rowCount!>0;
   }
   private async input(reference:DerivativeReference):Promise<Input> {
     const row=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
@@ -383,7 +395,12 @@ export class TelegramDispatchRepository {
     // An album's caption usually sits on one part; the turn reads every part's text in order.
     const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null;
     // A group message nobody addressed to the bot stays archived without a turn; the next turn sees it as recent.
-    if(!scope.owner&&!groupTurn(this.groupReplies,addressing,text,await this.identity().catch(()=>null)))return 'not_addressed';
+    if(!scope.owner) {
+      const identity=await this.identity().catch(()=>null);
+      // Until the bot knows its own name and @username, a mention of either cannot be recognized; skipping the message
+      // for good on that guess would lose it, so the decision waits for the bot.
+      if(!groupTurn(this.groupReplies,addressing,text,identity))return identity?'not_addressed':observation('waiting','admission',0,Date.now()+10000,'prerequisite');
+    }
     // Command authority comes from the original owner DM, never a guarded edit.
     const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);

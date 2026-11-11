@@ -73,6 +73,8 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   const telegram:FakeCall=async(operation,input,timeout)=>{
     const answer=await bot(operation,input,timeout);
     if(operation==='telegram.identity')return {...answer,state:botState};
+    // A slow send is still running when Nocheh asks, and has gone out by the time Nocheh withdraws it.
+    if(operation==='telegram.reply'&&delivery==='slow')return input.cancel?{state:'done',timings:{telegram_send:{ms:5,calls:1}},window:{delivery:Date.now()-5,finished:Date.now()}}:{state:'running'};
     return operation==='telegram.reply'&&delivery==='ambiguous'&&!input.cancel?{state:'ambiguous',error_code:'delivery_unconfirmed'}:answer;
   };
   const control=new Proxy(stores.control,{get(target,name){
@@ -196,6 +198,13 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     native.set(busy.reference.id,{state:'done'});await due(busy.reference.id);assert.equal((await run(busy.reference.id)).state,'completed');
     assert.equal((await operations.memory_review!('reactions:'+epochBefore,await authority('memory_review'))).state,'completed');
     assert.equal((await services.guards.state()).epoch,epochBefore+1,'the reaction advances the epoch once no reply runs');
+    // A reply the bot was still sending when the context changed keeps the bot's receipt: it is never sent again.
+    const slow=await capture('Reply still sending when the context changes');await prepare(slow.reference.id);mode='done';delivery='slow';
+    assert.equal((await run(slow.reference.id)).state,'running');
+    await services.guards.setMode('off');await services.guards.setMode('on');await due(slow.reference.id);
+    assert.equal((await run(slow.reference.id)).state,'completed');delivery='done';
+    assert.equal(calls.filter(c=>c.input.event_id===slow.reference.id&&c.operation==='run.start').length,1);
+    assert.ok(sends.some(item=>item.input.id===digest(slow.reference.id+':1')&&item.input.cancel===true),'the bot is asked what became of the reply');
     const voice=await capture('',{text:undefined,voice:{file_id:key+':audio',file_unique_id:key,duration:1}});
     await services.attachments.commit(voice.artifact_ids[0]!,Buffer.from([79,103,103,0,255]));await prepare(voice.reference.id);
     mode='done';timingShape='malformed';assert.equal((await run(voice.reference.id)).state,'completed');const voiceInput=calls.at(-1)!.input;timingShape='valid';
@@ -417,6 +426,75 @@ test('a group turn sees the unaddressed group messages since the last turn, neve
     const refusals=sends.filter(item=>item.operation==='telegram.refusal');assert.equal(refusals.length,1);
     assert.deepEqual(Object.keys(refusals[0]!.input).sort(),['chat_id','event_id','message_id','reply','user_id'],'the bot gets only what it sends');
     assert.equal(started.length,5,'a refused message runs no turn');
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('replies go out in Telegram update order even when a later turn is seen first',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-reply-order-')),base=Date.now(),group='-'+base,token=digest('reply-order:'+base);
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},native=new Map<string,any>(),replies:string[]=[];
+  const runtime:FakeCall=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    const id=String(input.event_id);
+    if(operation==='run.start'){native.set(id,{state:'running'});return {state:'running'};}
+    assert.equal(operation,'run.resume');return native.get(id)??{state:'not_found'};
+  };
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
+    memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
+    telegram:fixtureTelegram((operation,input)=>{if(operation==='telegram.reply'&&!input.cancel)replies.push(String(input.event_id));})});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  const capture=async(text:string,update:number)=>{
+    const message={message_id:update,date:1700000000,chat:{id:Number(group),type:'supergroup'},from:{id:123,is_bot:false,first_name:'Owner'},text};
+    const id=(await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
+      source_id:String(update),revision:'1',occurred_at:null,text,payload:{update_id:update,message}})).source.reference.id;
+    await services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'));return id;
+  };
+  const run=async(id:string)=>{await stores.control.query('UPDATE dispatches SET next_attempt=now() WHERE event_id=$1',[id]);return services.telegram.run(id,await authority('telegram'));};
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    // One poll's two updates, committed newest first.
+    const newer=await capture('Second',base+2),older=await capture('First',base+1);
+    assert.equal((await run(older)).state,'running');assert.equal((await run(newer)).state,'running');
+    const done={state:'done',window:{queued:Date.now()-100,assistant:Date.now()-90,finished:Date.now()}};
+    native.set(older,done);native.set(newer,done);
+    assert.equal((await run(newer)).state,'running','the later reply waits for the earlier one');assert.deepEqual(replies,[]);
+    assert.equal((await run(older)).state,'completed');assert.equal((await run(newer)).state,'completed');
+    assert.deepEqual(replies,[older,newer]);
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a group mention waits for the bot to know its own name instead of being skipped',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-identity-')),base=Date.now(),group='-'+base,token=digest('identity:'+base);
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let known=false;
+  const runtime:FakeCall=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'delivery'};
+  };
+  const bot=fixtureTelegram();
+  // The bot has just restarted and has not read its own name yet.
+  const telegram:FakeCall=async(operation,input,timeout)=>operation==='telegram.identity'&&!known?{state:'starting'}:bot(operation,input,timeout);
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,telegram,
+    memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),groupReplies:{mode:'addressed',names:['Nocheh']}});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const update=base+1,text='@Nocheh_Bot are you there?',message={message_id:update,date:1700000000,chat:{id:Number(group),type:'supergroup'},
+      from:{id:123,is_bot:false,first_name:'Owner'},text,entities:[{type:'mention',offset:0,length:11}]};
+    const id=(await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
+      source_id:String(update),revision:'1',occurred_at:null,text,payload:{update_id:update,message}})).source.reference.id;
+    assert.equal((await services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'))).state,'completed');
+    assert.equal((await services.telegram.run(id,await authority('telegram'))).state,'waiting');
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[id])).rows[0].state,'pending','not skipped');
+    assert.equal(started.length,0);
+    known=true;await stores.control.query('UPDATE dispatches SET next_attempt=now() WHERE event_id=$1',[id]);
+    assert.equal((await services.telegram.run(id,await authority('telegram'))).state,'completed');assert.equal(started.length,1);
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

@@ -165,6 +165,18 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {'state': 'suppressed', 'error_code': 'telegram_rejected'})
         self.assertEqual(self.request.delivered, [], 'a reply never widens its audience to General')
 
+    async def test_a_one_off_missing_topic_is_sent_on_the_retry(self):
+        refused = []
+        def respond(data):
+            if data.get('message_thread_id') and not refused:
+                refused.append(data)
+                return 400, canonical({'ok': False, 'error_code': 400, 'description': 'Bad Request: message thread not found'})
+        self.request.respond = respond
+        # The retry gets its own journal entry, so it is really sent rather than answered with the first refusal.
+        self.assertEqual(await self.deliver(self.envelope()), {'state': 'done'})
+        self.assertEqual(len(refused), 1)
+        self.assertEqual(len(self.request.delivered), 1)
+
     async def test_general_forum_message_replies_in_general(self):
         self.assertEqual(await self.deliver(self.envelope(topic=None)), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)

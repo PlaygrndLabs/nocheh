@@ -75,6 +75,14 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
             service.capture.polling['last_poll_at'] = (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat()
             self.assertEqual(service.health()['state'], 'recovering')
 
+    def test_one_failed_poll_still_lets_replies_go_out(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(folder, [])
+            service.bot = object()
+            for status, connected in (('connected', True), ('recovering', True), ('starting', False), ('stopped', False)):
+                service.status = status
+                self.assertEqual(service.connected(), connected, status)
+
 
 class ServerTests(unittest.TestCase):
     def test_health_names_the_service_and_routes_need_the_service_token(self):
