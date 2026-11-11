@@ -113,26 +113,37 @@ TAG='NOCHEH_STARTED'
 CLEANUP=r'''exec 2>/dev/null </dev/null
 j=$1 m=~/.nocheh/jobs u=$(id -un) proc=
 [ -r /proc/$$/stat ] && proc=1
-# The login's live processes, other than this shell, that are the job's: those that hold file $2 open, those with tag $1 that
-# were left to init (launchd), and those that any of these started. One with the tag that another program started, such as a
-# session manager that took the tag over, is not. Its text never spells out a tag it looks for, which it would then find
-# in its own command line.
+# The login's live processes, other than this shell, that are the job's: those that hold file $2 open, those that any of
+# these started, and those with tag $1, unless a program of the login that shows its own environment without the tag is
+# above them before init (launchd), a process of another user or one of the job's (such as a session manager that took the
+# tag over and started them). A program whose environment cannot be read (on macOS the system's own, such as /bin/sh; on
+# Linux one that wrote over it) shows none. Its text never spells out a tag it looks for, which it would then find in its
+# own command line.
 has() { ps -E -ww -o command= -p "$1" | tr ' ' '\n' | grep -qxF -- "$2"; }
+shows() {
+  local a b
+  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "${b#"$a"}" != "$b" ] || return 1
+  printf '%s\n' "${b#"$a"}" | tr ' ' '\n' | grep -q '^[A-Za-z_][A-Za-z0-9_]*=' && ! printf '%s\n' "$b" | tr ' ' '\n' | grep -qxF -- "$2"
+}
 hits() {
-  local tag=$1 file=$2 e d p f v rest dirs all table= marked= tagged=
+  local tag=$1 file=$2 e d p f v w rest dirs all table= marked= tagged= plain=
   if [ -n "$proc" ]; then
     for e in /proc/[0-9]*; do
       p=${e#/proc/}
       [ "$p" != $$ ] && [ -O "$e" ] && read -r rest <"$e/stat" || continue
-      rest=${rest##*) }; set -- $rest; dirs=$e
+      rest=${rest##*) }; set -- $rest; dirs=$e w=
       # A program whose first thread ended while others run shows as a zombie; its threads hold its files and environment.
       if [ "$1" = Z ]; then [ "${18}" -gt 1 ] || continue; dirs=$(echo "$e"/task/*); fi
       table="$table$p $2
 "
       for d in $dirs; do
         for f in "$d"/fd/*; do if [ "$f" -ef "$file" ]; then marked="$marked $p"; continue 3; fi; done
-        while IFS= read -r -d '' v; do if [ "$v" = "$tag" ]; then tagged="$tagged $p"; continue 3; fi; done <"$d/environ"
+        while IFS= read -r -d '' v; do
+          if [ "$v" = "$tag" ]; then tagged="$tagged $p"; continue 3; fi
+          [ -n "$w" ] || case ${v%%=*} in "$v"|''|[0-9]*|*[!A-Za-z0-9_]*) ;; *) w=1;; esac
+        done <"$d/environ"
       done
+      [ -z "$w" ] || plain="$plain $p"
     done
   else
     marked=$(lsof -t -w -- "$file" | tr '\n' ' ')
@@ -145,12 +156,21 @@ hits() {
       if has "$p" "$tag"; then tagged="$tagged $p"; else all=1; fi
     done
     if [ -n "$all" ]; then for p in $(printf '%s\n' "$table" | awk '{print $1}'); do ! has "$p" "$tag" || tagged="$tagged $p"; done; fi
+    # Only the programs above one with the tag matter: each is asked on its own whether it shows an environment.
+    for p in $(printf '%s\n' "$table" | M=$marked T=$tagged awk '
+      BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) mk[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1}
+      NF>=2 {up[$1]=$2}
+      END {for (p in tg) {q=p; for (n=0; n<64 && (q in up); n++) {q=up[q]; if (q==1 || !(q in up) || (q in mk)) break; if (!(q in tg) && !(q in seen)) {seen[q]=1; print q}}}}'); do
+      ! shows "$p" "$tag" || plain="$plain $p"
+    done
   fi
-  printf '%s\n' "$table" | M=$marked T=$tagged awk -v me=$$ '
-    BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) mk[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1}
+  printf '%s\n' "$table" | M=$marked T=$tagged P=$plain awk -v me=$$ '
+    function left(p,  q, n) {for (q=up[p]; n<64; n++) {if (q==1 || !(q in up) || (q in k)) return 1; if (q in pl) return 0; q=up[q]}; return 0}
+    BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) mk[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1
+           n=split(ENVIRON["P"], a, " "); for (i=1; i<=n; i++) pl[a[i]]=1}
     NF>=2 && $1!=me {up[$1]=$2; id[++c]=$1}
     END {for (i=1; i<=c; i++) if (id[i] in mk) k[id[i]]=1
-         do {more=0; for (i=1; i<=c; i++) {p=id[i]; if (!(p in k) && ((up[p] in k) || ((p in tg) && up[p]==1))) {k[p]=1; more=1}}} while (more)
+         do {more=0; for (i=1; i<=c; i++) {p=id[i]; if (!(p in k) && ((up[p] in k) || ((p in tg) && left(p)))) {k[p]=1; more=1}}} while (more)
          for (i=1; i<=c; i++) if (id[i] in k) print id[i]}'
 }
 mkdir -p -m 700 "$m" && : >"$m/probe-$$" && exec 6<"$m/probe-$$" || exit 3

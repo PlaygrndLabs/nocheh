@@ -955,7 +955,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   await row('lab-vm-2').getByRole('button', {name: 'Remove'}).click();
   await page.getByRole('dialog', {name: 'Remove lab-vm-2?'}).getByRole('button', {name: 'Remove'}).click();
   await page.getByRole('status').filter({hasText: 'lab-vm-2 is removed.'}).waitFor();
-  assert.equal(await row('lab-vm-2').count(), 0);
+  await row('lab-vm-2').waitFor({state: 'detached'});
 
   // Each machine's commands open in the log, filtered to it; internal ones only on request.
   await row('build-vm').getByRole('link', {name: 'Log'}).click();

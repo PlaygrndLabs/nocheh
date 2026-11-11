@@ -37,11 +37,15 @@ else stays.
   marker, and markers older than 30 days are removed. The store sends the job's id
   with each command and each cleanup.
 - **The cleanup ends only the job's programs.** A process of the login is the
-  job's when it holds the job's marker open, when it carries the tag and was left
-  to init (launchd on macOS), or when one of the job's processes started it. One
-  with the tag that another, untagged program started, such as a session manager
-  that took the tag over, is not. A Linux process whose first thread ended while
-  others run counts by its other threads. The cleanup ends the job's processes, in
+  job's when it holds the job's marker open, when one of the job's processes
+  started it, or when it carries the tag. A process with the tag is not the job's
+  when, going up through the programs that started it, a program of the login that
+  shows its own environment without the tag comes before init (launchd on macOS),
+  a process of another user or one of the job's: a session manager that took the
+  tag over and started it, for example. A program whose environment cannot be read,
+  such as a system program on macOS or one that wrote over its environment, shows
+  none, so it never hides the job's programs below it. A Linux process whose first
+  thread ended while others run counts by its other threads. The cleanup ends the job's processes, in
   up to five rounds for programs started meanwhile, and nothing else: not the
   owner's own programs, and not what other jobs left running. It is done after two
   rounds a second apart find none, so a program that left its parent during a
@@ -49,7 +53,9 @@ else stays.
 - **How it looks.** On Linux it reads `/proc`. On macOS it asks `lsof` for the
   marker's holders, `ps` for who started whom, and `ps -E` for tags, checking each
   process that shows the tag on its own, and every process where one of those does
-  not hold up, since a command line may span lines. Lists reach `awk` through its
+  not hold up, since a command line may span lines. For the programs above one with
+  the tag, it compares `ps` with and without `-E` to see whether they show an
+  environment. Lists reach `awk` through its
   environment, since macOS's awk refuses a newline in `-v`.
 - **It proves it can find a program first.** Before it ends anything, the cleanup
   starts a `sleep` that holds a probe file open and must find it by that file, a
