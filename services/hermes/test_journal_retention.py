@@ -20,37 +20,35 @@ class JournalRetentionTests(unittest.TestCase):
     def test_only_finished_journals_older_than_the_window_are_removed(self):
         with tempfile.TemporaryDirectory() as folder:
             spool, managed = Path(folder) / 'spool', Path(folder) / 'hermes' / 'nocheh-managed-runs'
-            out = spool / 'outbound'
-            write(out / 'old.intent', {'key': 'synthetic'}, 40); write(out / 'old.result', {'state': 'delivered'}, 40)
-            write(out / 'new.intent', {'key': 'synthetic'}, 5); write(out / 'new.result', {'state': 'delivered'}, 5)
-            write(out / 'open.intent', {'key': 'synthetic'}, 40)
-            write(out / 'orphan.result', {'state': 'rejected'}, 40)
-            dispatch = spool / 'dispatch'
-            write(dispatch / 'turn.intent', {}, 40); write(dispatch / 'turn.result', {'state': 'done'}, 40)
-            write(dispatch / 'running.intent', {}, 40)
-            runs = spool / 'async-runs'
-            for suffix in ('.request', '.events', '.started'): write(runs / ('done' + suffix), b'{}', 40)
-            write(runs / 'done.result', {'state': 'done'}, 40)
-            for suffix in ('.request', '.events', '.started'): write(runs / ('live' + suffix), b'{}', 40)
+            turns = spool / 'brain-turns'
+            for suffix in ('.request', '.events', '.started', '.outcome'): write(turns / ('old' + suffix), b'{}', 40)
+            write(turns / 'old.result', {'state': 'done'}, 40)
+            for suffix in ('.request', '.events', '.started'): write(turns / ('new' + suffix), b'{}', 5)
+            write(turns / 'new.result', {'state': 'done'}, 5)
+            for suffix in ('.request', '.events', '.started'): write(turns / ('live' + suffix), b'{}', 40)
             for suffix in ('.request', '.receipt', '.stream', '.published'): write(managed / ('sent' + suffix), b'{}', 40)
             write(managed / 'sent.result', {'state': 'done'}, 40)
             for suffix in ('.request', '.receipt'): write(managed / ('owed' + suffix), b'{}', 40)
             write(managed / 'owed.result', {'state': 'done'}, 40)
+            # The Telegram service's send journals share the spool; it prunes them itself.
+            out, sends = spool / 'outbound', spool / 'dispatch'
+            write(out / 'sent.intent', {'key': 'synthetic'}, 40); write(out / 'sent.result', {'state': 'delivered'}, 40)
+            write(sends / 'reply.intent', {}, 40); write(sends / 'reply.result', {'state': 'done'}, 40)
 
-            self.assertEqual(prune(spool, managed, 30), 5)
+            self.assertEqual(prune(spool, managed, 30), 2)
             left = sorted(str(path.relative_to(folder)) for path in Path(folder).rglob('*') if path.is_file())
             self.assertEqual(left, sorted([
-                'spool/outbound/new.intent', 'spool/outbound/new.result', 'spool/outbound/open.intent',
-                'spool/dispatch/running.intent',
-                'spool/async-runs/live.request', 'spool/async-runs/live.events', 'spool/async-runs/live.started',
+                'spool/brain-turns/new.request', 'spool/brain-turns/new.events', 'spool/brain-turns/new.started', 'spool/brain-turns/new.result',
+                'spool/brain-turns/live.request', 'spool/brain-turns/live.events', 'spool/brain-turns/live.started',
+                'spool/outbound/sent.intent', 'spool/outbound/sent.result', 'spool/dispatch/reply.intent', 'spool/dispatch/reply.result',
                 'hermes/nocheh-managed-runs/owed.request', 'hermes/nocheh-managed-runs/owed.receipt',
-                'hermes/nocheh-managed-runs/owed.result']), 'unfinished and unpublished journals stay')
+                'hermes/nocheh-managed-runs/owed.result']), 'unfinished, unpublished and Telegram journals stay')
             self.assertEqual(prune(spool, managed, 0), 0, '0 keeps everything')
 
-    def test_an_interrupted_pass_never_leaves_an_unanswered_intent(self):
+    def test_an_interrupted_pass_never_leaves_an_unanswered_run(self):
         with tempfile.TemporaryDirectory() as folder:
             spool = Path(folder)
-            write(spool / 'outbound' / 'a.intent', {}, 40); write(spool / 'outbound' / 'a.result', {'state': 'ambiguous'}, 40)
+            write(spool / 'brain-turns' / 'a.request', {}, 40); write(spool / 'brain-turns' / 'a.result', {'state': 'ambiguous'}, 40)
             removed = []
             real = Path.unlink
             def unlink(path, missing_ok=False):
@@ -58,8 +56,8 @@ class JournalRetentionTests(unittest.TestCase):
                 if path.suffix == '.result': raise OSError('interrupted')
                 return real(path, missing_ok=missing_ok)
             with patch.object(Path, 'unlink', unlink), self.assertRaises(OSError):prune(spool, spool / 'managed', 30)
-            self.assertEqual(removed, ['.intent', '.result'])
-            self.assertFalse((spool / 'outbound' / 'a.intent').exists())
+            self.assertEqual(removed, ['.request', '.events', '.started', '.outcome', '.result'])
+            self.assertFalse((spool / 'brain-turns' / 'a.request').exists())
             self.assertEqual(prune(spool, spool / 'managed', 30), 1, 'the next pass removes the leftover result')
 
     def test_retention_days_default_to_keeping_everything_and_reject_invalid_values(self):

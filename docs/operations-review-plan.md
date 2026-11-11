@@ -17,7 +17,7 @@ third-party service time and LLM time measured separately.
 
 | Stage | Measured today | Gap |
 | --- | --- | --- |
-| Telegram poll and capture | `network_ms`, `capture_ms` in memory (`services/hermes/capture.py:221`) | Not persisted per event |
+| Telegram poll and capture | `network_ms`, `capture_ms` in memory (`services/telegram/capture.py:202`) | Not persisted per event |
 | Capture to workflow request, outbox publish | Timestamps only | Derivable, not reported |
 | Inngest queue, waits, steps | Inngest history only | No Nocheh record per event |
 | Transcription | None | Missing |

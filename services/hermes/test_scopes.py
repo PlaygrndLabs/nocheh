@@ -11,9 +11,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from .scopes import Scopes,verify_capability
-from .assistant_gateway import AssistantGateway,prepare_profile
+from .assistant_gateway import prepare_profile
 from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,BACKGROUND_TOOLS,BACKGROUND_TOOLSETS,OWNER_SET_TOOLS,TURN_TOOLSETS,UnexpectedProfileTool,turn_tools,verify_profile_tools
-from .capture import canonical,immutable_file
+from services.durable import canonical
 from . import mcp_fixture
 
 # The exact tools of a reply turn and of a job's plain and box steps. A job's turns never have the job tool.
@@ -206,14 +206,6 @@ class ScopeTests(unittest.TestCase):
             verify_profile_tools(ALLOWED_TOOLS|{'foreign_tool','private:payload'})
         self.assertEqual(str(caught.exception),'unexpected_profile_tool')
         self.assertEqual(caught.exception.names,['foreign_tool'])
-
-    def test_restart_marks_orphan_dispatch_and_action_receipts_ambiguous(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder)
-            for name in ('a'*64,'action-'+'b'*64):immutable_file(root/'spool/dispatch',name+'.intent',b'{}')
-            gateway=AssistantGateway(root,root/'spool',self.scopes,'','synthetic',lambda:None)
-            for path in (root/'spool/dispatch').glob('*.result'):self.assertEqual(json.loads(path.read_text())['state'],'ambiguous')
-            gateway.start();self.assertEqual(gateway.status,'credentials_missing')
 
 
 if __name__=='__main__':unittest.main()

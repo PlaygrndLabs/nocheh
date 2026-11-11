@@ -1,9 +1,10 @@
-"""Finished delivery journals are kept unless the owner sets retention days.
+"""Finished brain-turn and managed-run journals are kept unless the owner sets retention days.
 
 A journal is removed only once its closed result is older than the retention
 window. Unfinished journals, and managed receipts still owed to Nocheh, stay.
 Within a group the result file goes last, so an interrupted pass never leaves
-an intent that looks unanswered; the next pass removes what remains."""
+a run that looks unanswered; the next pass removes what remains. The Telegram
+service prunes its own send journals (services/telegram/retention.py)."""
 from __future__ import annotations
 
 import json
@@ -16,7 +17,6 @@ from pathlib import Path
 from .async_runs import CLOSED
 
 DAY = 86400
-OUTBOUND = {'delivered', 'rejected', 'ambiguous'}
 
 
 def retention_days():
@@ -48,15 +48,6 @@ def prune(spool: Path, managed: Path, days: int, now: float | None = None) -> in
     if not days:
         return 0
     cutoff, removed = (now if now is not None else time.time()) - days * DAY, 0
-    for result in (spool / 'outbound').glob('*.result'):
-        if _closed(result, cutoff, OUTBOUND):
-            removed += _remove(result, ('.intent',))
-    for result in (spool / 'dispatch').glob('*.result'):
-        if _closed(result, cutoff, None):
-            removed += _remove(result, ('.intent',))
-    for result in (spool / 'async-runs').glob('*.result'):
-        if _closed(result, cutoff, CLOSED):
-            removed += _remove(result, ('.request', '.events', '.started'))
     # Brain turns keep their reply in .outcome, which goes with its run.
     for result in (spool / 'brain-turns').glob('*.result'):
         if _closed(result, cutoff, CLOSED):

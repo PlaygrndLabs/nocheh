@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from .async_runs import AsyncRuns,identity
-from .capture import canonical,immutable_file
+from services.durable import canonical,immutable_file
 
 
 class AsyncRunTests(unittest.TestCase):
@@ -41,7 +41,8 @@ class AsyncRunTests(unittest.TestCase):
                     'telegram_send':{'ms':7,'calls':1},'private phrase':{'ms':1,'calls':1},'total':{'ms':3,'calls':1,'text':'private'}}}
             runs=AsyncRuns(folder,execute,lambda body:None);body=self.body();runs.start(body)
             result=self.wait(runs,body)
-            self.assertEqual(result['timings'],{'conversation':{'ms':40,'calls':1},'telegram_send':{'ms':7,'calls':1}})
+            # The brain never sends to Telegram, so a send time is not one of its phases.
+            self.assertEqual(result['timings'],{'conversation':{'ms':40,'calls':1}})
             window=result['window'];self.assertEqual(set(window),{'queued','assistant','delivery','finished'})
             self.assertTrue(window['queued']<=window['assistant']<=window['delivery']<=window['finished'])
             self.assertNotIn('private',(Path(folder)/(result['run_id']+'.result')).read_text())

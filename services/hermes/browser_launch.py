@@ -38,7 +38,7 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
         NOCHEH_BROWSER_SPACE=bound.space,NOCHEH_BROWSER_REVISION=str(bound.revision),
         NOCHEH_BROWSER_LOGICAL_PROFILE=bound.logical_profile,NOCHEH_BROWSER_GENERATION=bound.generation,
         NOCHEH_BROWSER_GUARD_EPOCH=str(bound.guard_epoch),
-        NOCHEH_BROWSER_OWNER_ID=admin.policy.owner,NOCHEH_CAPTURE_ENABLED='0',
+        NOCHEH_BROWSER_OWNER_ID=admin.policy.owner,
         NODE_ENV='production',HERMES_TUI_DISABLE_MOUSE='1',HERMES_TUI_INLINE='1',HERMES_TUI_DASHBOARD='1',
         COLORTERM='truecolor',TERM='xterm-256color')
     if resume: env['HERMES_TUI_RESUME']=resume

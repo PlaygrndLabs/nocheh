@@ -13,7 +13,7 @@ from datetime import datetime,timezone
 from pathlib import Path
 
 from .assistant_gateway import native_turn
-from .capture import canonical,digest
+from services.durable import canonical,digest
 from .scopes import Scopes
 from .subscription import resolve_credentials
 

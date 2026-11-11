@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from .scopes import Scope
-from .capture import canonical
+from services.durable import canonical
 
 
 class BrowserGateway:

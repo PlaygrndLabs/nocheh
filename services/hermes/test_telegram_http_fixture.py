@@ -153,9 +153,8 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.mock.state['unknown'],['getChatAdministrators'])
         self.assertEqual(TelegramMock(self.path).state['unknown'],['getChatAdministrators'])
 
-    async def test_fixture_transport_keeps_operational_boundary_and_rejects_other_tokens(self):
+    async def test_fixture_transport_routes_only_the_synthetic_bot_and_rejects_other_tokens(self):
         from tools.acceptance.telegram_runtime import install_transport
-        from services.hermes.request_boundary import operational_request
         with patch.object(httpx.AsyncHTTPTransport,'handle_async_request',new_callable=AsyncMock) as send:
             restore=install_transport()
             try:
@@ -165,12 +164,10 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
                 transport=httpx.AsyncHTTPTransport();self.addAsyncCleanup(transport.aclose)
                 for path in ('/bot'+TOKEN+'/getUpdates','/file/bot'+TOKEN+'/documents/example.bin'):
                     request=httpx.Request('POST','https://api.telegram.org'+path,content=b'synthetic')
-                    self.assertTrue(operational_request(request))
                     await transport.handle_async_request(request)
                     routed=send.call_args.args[-1]
                     self.assertEqual(str(routed.url),'http://model-fixture:8317'+path)
                     self.assertEqual(routed.headers['host'],'model-fixture:8317')
-                    self.assertFalse(operational_request(routed))
                     self.assertEqual(await routed.aread(),b'synthetic')
                 model=httpx.Request('POST','http://model-fixture:8317/v1/chat/completions',json={})
                 await transport.handle_async_request(model);self.assertIs(send.call_args.args[-1],model)

@@ -166,7 +166,7 @@ class BrowserGatewayTests(unittest.TestCase):
         home=self.root/'profiles/group-one';home.mkdir(parents=True)
         env={**os.environ,'NOCHEH_RUNTIME_HOME':str(self.root),'HERMES_HOME':str(home),
              'NOCHEH_BROWSER_PROFILE':'group-one','NOCHEH_BROWSER_SCOPE':'-10','NOCHEH_BROWSER_OWNER':'0',
-             'NOCHEH_BROWSER_OWNER_ID':'42','NOCHEH_MODEL':'gpt-5.6-sol','NOCHEH_CAPTURE_ENABLED':'0'}
+             'NOCHEH_BROWSER_OWNER_ID':'42','NOCHEH_MODEL':'gpt-5.6-sol'}
         requests=[{'jsonrpc':'2.0','id':1,'method':'session.create','params':{}},
                   {'jsonrpc':'2.0','id':2,'method':'shell.exec','params':{'command':'true'}}]
         result=subprocess.run([sys.executable,'-m','services.hermes.browser_gateway'],

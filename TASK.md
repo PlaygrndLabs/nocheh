@@ -654,10 +654,9 @@ that starts as “Nocheh” and “نوچه”
 ([decision](docs/adr/0133-group-replies-when-addressed.md),
 [editable names](docs/adr/0134-editable-bot-names.md),
 [dispatch checks](test/store-telegram-dispatch.test.ts),
-[trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
-gateway check ([test](services/hermes/test_gateway.py)) and the
-`group_answers_only_when_addressed` simulator scenario run only on the owner's
-development machine and have not been run. Addressing by a name at the start passed live on
+[trigger checks](test/telegram-frontdoor.test.ts)). The
+`group_answers_only_when_addressed` simulator scenario runs only on the owner's
+development machine and has not been run. Addressing by a name at the start passed live on
 October 12 (four group messages, one reply each). Pending: a live unaddressed
 group message that gets no reply, and a reply or @mention that gets one.
 
@@ -1066,8 +1065,7 @@ turn also withholds the native notes it added that way and the entries its
 patches landed in (spans of 4 or more characters)
 ([check](services/hermes/test_retired_history.py)); the tester saves its note in
 that shape; Hermes takes round video
-notes itself, so Nocheh's extra handler is gone
-([check](services/hermes/test_gateway.py)); the browser TUI's `/rewind` says
+notes itself, so Nocheh's extra handler is gone; the browser TUI's `/rewind` says
 rewind is unavailable, inline pictures are off
 ([profile check](services/hermes/test_profile_config.py)), and the dashboard
 patch follows the new Vite config. The Honcho memory export carries the new

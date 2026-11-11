@@ -13,8 +13,14 @@ test('owner runtime status names the plugged-in brain, reports Telegram polling 
   const dataDir=await mkdtemp(join(tmpdir(),'nocheh-runtime-status-'));
   const token='fixture-owner-token';
   const config={token,dataDir} as Settings;
-  const brain=fixtureBrain(async operation=>{assert.equal(operation,'status');return {ok:true,telegram:'connected',telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}};});
-  const server=storageServer({brain} as unknown as StorageServices,config,async()=>{throw Error('no helper service call');},undefined,undefined,{'guard.detect':true,'image.read':false});
+  // The brain reports its own health; Telegram's comes from Nocheh's own bot.
+  const brain=fixtureBrain(async operation=>{assert.equal(operation,'status');return {ok:true,service:'hermes'};});
+  const bot=async(operation:string)=>{
+    assert.equal(operation,'telegram.status');
+    return {ok:true,service:'telegram',telegram:'connected',telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}};
+  };
+  const capabilities={'guard.detect':true,'image.read':false,'telegram.status':true};
+  const server=storageServer({brain} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');
@@ -24,7 +30,8 @@ test('owner runtime status names the plugged-in brain, reports Telegram polling 
     const body=await owner.json() as {status:{telegram:string;telegram_details:{last_poll_at:string}}};
     assert.equal(body.status.telegram,'connected');
     assert.equal(body.status.telegram_details.last_poll_at,'2026-09-25T11:44:49Z');
-    assert.deepEqual((body as unknown as {capabilities:unknown}).capabilities,{'guard.detect':true,'image.read':false});
+    assert.equal((body.status as unknown as {service:string}).service,'hermes');
+    assert.deepEqual((body as unknown as {capabilities:unknown}).capabilities,capabilities);
     assert.deepEqual((body as unknown as {brain:unknown}).brain,{id:'hermes',name:'Fixture brain',capabilities:{telegram:true,browser:true,scheduler:true,background:true,
       settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:true}});
     // A brain that does not answer is reported, not hidden.

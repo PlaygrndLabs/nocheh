@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime,timezone
 from pathlib import Path
 from urllib.request import Request,urlopen
-from .capture import canonical
+from services.durable import canonical
 
 
 def archive(route,body,token):

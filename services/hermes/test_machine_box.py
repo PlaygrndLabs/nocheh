@@ -304,7 +304,7 @@ class MachineProviderTests(unittest.TestCase):
             def __init__(self):self.calls=[]
             def __getattr__(self,name):return lambda *args,**kwargs:self.calls.append((name,args))
         for value,backend in (('',False),('0',False),('1',True)):
-            with self.subTest(value=value),patch.dict(os.environ,{'NOCHEH_MACHINE_RUN':value,'NOCHEH_BOX_SOCKET':'','NOCHEH_CAPTURE_ENABLED':'0'}):
+            with self.subTest(value=value),patch.dict(os.environ,{'NOCHEH_MACHINE_RUN':value,'NOCHEH_BOX_SOCKET':''}):
                 context=Context();register(context)
                 providers=[args[0] for name,args in context.calls if name=='register_terminal_environment_provider']
                 self.assertEqual([type(item) for item in providers],[machine_box.Provider] if backend else [])

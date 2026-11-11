@@ -27,15 +27,3 @@ def register(ctx):
     ctx.register_hook('post_auxiliary_call', job_progress.auxiliary_call)
     ctx.register_hook('post_tool_call', job_progress.tool_call)
     ctx.register_hook('transform_tool_result', job_progress.tool_result)
-    if os.environ.get('NOCHEH_CAPTURE_ENABLED') == '1':
-        from plugins.platforms.telegram import adapter as native
-        from services.hermes.capture import captured_adapter_class
-        class Registration:
-            def __getattr__(self, name):
-                return getattr(ctx, name)
-            def register_platform(self, **kwargs):
-                kwargs['adapter_factory'] = lambda config: captured_adapter_class()(config)
-                ctx.register_platform(**kwargs)
-        # Preserve all native setup/permission/formatting metadata. Only the
-        # adapter factory changes; registry registration removes its deferred loader.
-        native.register(Registration())

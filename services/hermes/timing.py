@@ -2,8 +2,8 @@
 from contextlib import contextmanager
 from time import perf_counter
 
-# telegram_send is measured by the gateway around the native Bot API send.
-PHASES={'bootstrap','memory_recall','history_prepare','agent_init','conversation','context_prepare','model_guard','total','telegram_send'}
+# Telegram's own send time is measured by nocheh-telegram, never here.
+PHASES={'bootstrap','memory_recall','history_prepare','agent_init','conversation','context_prepare','model_guard','total'}
 VALUES={}
 
 

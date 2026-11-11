@@ -303,7 +303,7 @@ class ToolGateTests(unittest.TestCase):
             def __init__(self):self.calls=[]
             def __getattr__(self,name):return lambda *args,**kwargs:self.calls.append((name,args))
         for socket_path,backend in (('',False),(self.box.path,True)):
-            with self.subTest(backend=backend),patch.dict(os.environ,{'NOCHEH_BOX_SOCKET':socket_path,'NOCHEH_CAPTURE_ENABLED':'0'}):
+            with self.subTest(backend=backend),patch.dict(os.environ,{'NOCHEH_BOX_SOCKET':socket_path}):
                 context=Context();register(context)
                 self.assertIn(('register_hook',('pre_tool_call',job_box.tool_gate)),context.calls)
                 providers=[args[0] for name,args in context.calls if name=='register_terminal_environment_provider']

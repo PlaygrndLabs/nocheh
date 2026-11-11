@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock,patch
 
-from services.hermes.capture import Capture
+from services.telegram.capture import Capture
 from tools.acceptance import reset_effects as effects
 from tools.acceptance import reset_inventory
 from tools.acceptance import reset_protocol

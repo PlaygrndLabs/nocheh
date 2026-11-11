@@ -1006,10 +1006,10 @@ class BoxPutTests(unittest.TestCase):
 
 class BoxWiringTests(unittest.TestCase):
     def test_turn_spec_without_box_is_unchanged(self):
-        # Digests of the step-2 turn specs, before boxes existed.
+        # Digests of the step-2 turn specs, before boxes existed, less the capture switch Hermes no longer has.
         args=('nocheh-'+'a'*24,'/owned/profiles','sha256:'+'b'*64,'nocheh-agent',1000,1000)
-        for extra,expected in (((),'52622b6067227934a25bed7f20afeebe927db7e4ed1b7d74b55437fb7debea44'),
-                               (('/owned/checkout',),'4b9b9be529be20218f4e4a94dd93e4c731aa2f00f3fb5a15b6cd8ad5fa6dec5d')):
+        for extra,expected in (((),'c80675ed39fdcfb013e6f6c605e0d42812736aba51182af9e6b9c027f4ed0dd6'),
+                               (('/owned/checkout',),'3b102004a4db7052cf0cd529b65993ed0247e52d503d175c74d0683aefca8fc9')):
             spec=launcher.container_spec(*args,*extra)
             self.assertEqual(hashlib.sha256(json.dumps(spec).encode()).hexdigest(),expected)
             self.assertEqual(launcher.container_spec(*args,*extra,None),spec)

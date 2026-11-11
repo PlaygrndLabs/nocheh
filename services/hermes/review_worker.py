@@ -92,7 +92,7 @@ def start(root,policy,model,credentials,body):
     only a child that reported a failure without changing the notes does.
     """
     import fcntl
-    from .capture import immutable_file
+    from services.durable import immutable_file
     from .native_memory import notes_snapshot
     previous=observe(root,policy,body)
     if previous['state'] not in ('not_found','failed'):return previous
@@ -160,7 +160,7 @@ def stopped(profile,review_id,before):
 
 def _review(profile,policy,model,credentials,body):
     env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
-    env.update(HERMES_HOME=str(profile),NOCHEH_CAPTURE_ENABLED='0',GUARD_MODE=body.get('guard_mode','on'))
+    env.update(HERMES_HOME=str(profile),GUARD_MODE=body.get('guard_mode','on'))
     transport = credentials.runtime()
     request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
              'session_id':'review-'+body['id'],'prompts':body.get('prompts') or {},'owner':True,'chat_id':policy.owner,'user_id':policy.owner,**transport}
