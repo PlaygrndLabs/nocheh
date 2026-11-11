@@ -53,9 +53,10 @@ else stays.
 - **How it looks.** On Linux it reads `/proc`. On macOS it asks `lsof` for the
   marker's holders, `ps` for who started whom, and `ps -E` for tags, checking each
   process that shows the tag on its own, and every process where one of those does
-  not hold up, since a command line may span lines. For the programs above one with
-  the tag, it compares `ps` with and without `-E` to see whether they show an
-  environment. Lists reach `awk` through its
+  not hold up, since a command line may span lines. A process carries the tag only
+  where it is in what `ps -E` adds to `ps`, its environment, not where a command
+  line merely names it. The same comparison tells whether the programs above one
+  with the tag show an environment. Lists reach `awk` through its
   environment, since macOS's awk refuses a newline in `-v`.
 - **It proves it can find a program first.** Before it ends anything, the cleanup
   starts a `sleep` that holds a probe file open and must find it by that file, a

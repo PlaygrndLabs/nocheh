@@ -464,7 +464,7 @@ class MachineServerTests(unittest.TestCase):
         # span lines, then its environment, and shows none for the system's own programs (here: sleep and a sh in sys);
         # BWK awk where it is installed, which refuses a newline in -v. A program with the tag counts also under such a
         # system program left to init by a launcher that closed what it inherited, but not under the owner's program that
-        # shows its environment.
+        # shows its environment; the owner's program that only names the tag in its command line is not the job's.
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
         mine=None
         check='[ -r /proc/$$/stat ]';self.assertEqual(ms.CLEANUP.count(check),1)
@@ -491,13 +491,16 @@ class MachineServerTests(unittest.TestCase):
             job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'sleep 600; :' 'one\n2 two'")]
             launcher=self.launch(JOB,folder,'launcher',f'{sys.executable} -c \'import subprocess; subprocess.Popen(["{here}/sys/sh", "-c", '
                                  f'"echo $$ > {folder}/syssh; tail -f /dev/null & echo $! > {folder}/systail; wait"])\'')
+            (here/'names.sh').write_text(f"sh -c 'tail -f /dev/null & echo $! > {folder}/namedchild; wait; : {ms.TAG}={JOB}' & echo $! > {folder}/named; wait\n")
             others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
-                    self.launch(None,folder,'manager',f'sh -c \'{ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/managed; wait\' sh {JOB}',tag=False)]
+                    self.launch(None,folder,'manager',f'sh -c \'{ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/managed; wait\' sh {JOB}',tag=False),
+                    self.launch(None,folder,'names',f'{here}/sys/sh {here}/names.sh',tag=False)]
             try:
                 deadline=time.monotonic()+5
-                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed')) and time.monotonic()<deadline:time.sleep(.05)
+                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild')) and time.monotonic()<deadline:time.sleep(.05)
                 while alive(launcher) and time.monotonic()<deadline:time.sleep(.05)
-                job+=[int((here/'syssh').read_text()),int((here/'systail').read_text())];others.append(int((here/'managed').read_text()))
+                job+=[int((here/'syssh').read_text()),int((here/'systail').read_text())]
+                others+=[int((here/name).read_text()) for name in ('managed','named','namedchild')]
                 self.assertFalse(alive(launcher))
                 self.assertEqual(self.cleanup_here(script,path),0)
                 for pid in job:self.assertFalse(alive(pid),pid)

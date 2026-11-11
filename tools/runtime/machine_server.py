@@ -119,12 +119,15 @@ j=$1 m=~/.nocheh/jobs u=$(id -un) proc=
 # tag over and started them). A program whose environment cannot be read (on macOS the system's own, such as /bin/sh; on
 # Linux one that wrote over it) shows none. Its text never spells out a tag it looks for, which it would then find in its
 # own command line.
-has() { ps -E -ww -o command= -p "$1" | tr ' ' '\n' | grep -qxF -- "$2"; }
-shows() {
+# Without /proc: the words of process $1's environment, one per line, which `ps -E` prints after its command line (none
+# where the environment cannot be read); fails where ps answers otherwise.
+vars() {
   local a b
   a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "${b#"$a"}" != "$b" ] || return 1
-  printf '%s\n' "${b#"$a"}" | tr ' ' '\n' | grep -q '^[A-Za-z_][A-Za-z0-9_]*=' && ! printf '%s\n' "$b" | tr ' ' '\n' | grep -qxF -- "$2"
+  printf '%s\n' "${b#"$a"}" | tr ' ' '\n'
 }
+has() { vars "$1" | grep -qxF -- "$2"; }
+shows() { local v; v=$(vars "$1") && printf '%s\n' "$v" | grep -q '^[A-Za-z_][A-Za-z0-9_]*=' && ! printf '%s\n' "$v" | grep -qxF -- "$2"; }
 hits() {
   local tag=$1 file=$2 e d p f v w rest dirs all table= marked= tagged= plain=
   if [ -n "$proc" ]; then
@@ -150,17 +153,21 @@ hits() {
     table=$(ps -x -U "$u" -o pid= -o ppid= -o stat=) && [ -n "$table" ] || return 1
     table=$(printf '%s\n' "$table" | awk '$3 !~ /^Z/ {print $1, $2}')
     # ps -E prints each command line, which may span lines, then the environment: each process that shows the tag is
-    # checked on its own, and where one does not hold up, every process is.
+    # checked on its own, and where the tag is in neither its environment nor its command line, which only names it, the
+    # line was another's: then every process is.
     all=
     for p in $(ps -E -ww -x -U "$u" -o pid= -o command= | awk -v t="$tag" '$1 ~ /^[0-9]+$/ {p=$1} {for (i=1; i<=NF; i++) if ($i==t) {print p; next}}'); do
-      if has "$p" "$tag"; then tagged="$tagged $p"; else all=1; fi
+      if has "$p" "$tag"; then tagged="$tagged $p"
+      elif ! ps -E -ww -o command= -p "$p" | tr ' ' '\n' | grep -qxF -- "$tag"; then all=1; fi
     done
     if [ -n "$all" ]; then for p in $(printf '%s\n' "$table" | awk '{print $1}'); do ! has "$p" "$tag" || tagged="$tagged $p"; done; fi
-    # Only the programs above one with the tag matter: each is asked on its own whether it shows an environment.
+    # Only the programs above one with the tag, up to the marker's holders and what they started, matter: each is asked
+    # on its own whether it shows an environment.
     for p in $(printf '%s\n' "$table" | M=$marked T=$tagged awk '
-      BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) mk[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1}
+      BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) k[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1}
       NF>=2 {up[$1]=$2}
-      END {for (p in tg) {q=p; for (n=0; n<64 && (q in up); n++) {q=up[q]; if (q==1 || !(q in up) || (q in mk)) break; if (!(q in tg) && !(q in seen)) {seen[q]=1; print q}}}}'); do
+      END {do {more=0; for (p in up) if (!(p in k) && (up[p] in k)) {k[p]=1; more=1}} while (more)
+           for (p in tg) if (!(p in k)) {q=p; for (n=0; n<64 && (q in up); n++) {q=up[q]; if (q==1 || !(q in up) || (q in k)) break; if (!(q in tg) && !(q in seen)) {seen[q]=1; print q}}}}'); do
       ! shows "$p" "$tag" || plain="$plain $p"
     done
   fi
