@@ -89,17 +89,21 @@ test('the last day reads as one plain line', () => {
   assert.equal(sendSummary(sends()), 'Last day: 120 sent, 2 failed, 1 uncertain, 3 not sent');
 });
 
-test('each send reads in plain words, and expected no-ops never look like failures', () => {
+test('each send reads in plain words, and what storage doesn’t count as a problem never looks like a failure', () => {
   assert.equal(sendWhat({kind: 'reaction', detail: '👀'}), 'Reaction 👀');
   assert.equal(sendWhat({kind: 'reaction', detail: 'clear'}), 'Reaction cleared');
   assert.equal(sendWhat({kind: 'refusal', detail: null}), 'Not-allowed reply');
-  assert.deepEqual(sendState({state: 'failed', error_code: 'message_not_modified'}), {
-    label: 'Failed',
-    tone: 'neutral',
-  });
-  assert.deepEqual(sendState({state: 'failed', error_code: 'bot_blocked'}), {label: 'Failed', tone: 'bad'});
+  assert.deepEqual(sendState({state: 'failed', problem: false}), {label: 'Failed', tone: 'neutral'});
+  assert.deepEqual(sendState({state: 'uncertain', problem: false}), {label: 'Uncertain', tone: 'neutral'});
+  assert.deepEqual(sendState({state: 'failed', problem: true}), {label: 'Failed', tone: 'bad'});
+  assert.deepEqual(sendState({state: 'uncertain', problem: true}), {label: 'Uncertain', tone: 'warn'});
+  assert.deepEqual(sendState({state: 'sent', problem: false}), {label: 'Sent', tone: 'good'});
   assert.equal(sendReason({state: 'failed', error_code: 'rate_limited'}), 'Telegram asked to slow down');
   assert.equal(sendReason({state: 'not_sent', error_code: 'rate_limited'}), 'Held back: too many at once');
   assert.equal(sendReason({state: 'failed', error_code: 'something_new'}), 'something_new');
   assert.equal(sendReason({state: 'sent', error_code: null}), '');
+  assert.equal(
+    sendReason({state: 'failed', error_code: 'formatting_rejected', recovered: true}),
+    'Formatting rejected; sent on a retry',
+  );
 });

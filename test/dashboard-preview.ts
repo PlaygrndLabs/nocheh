@@ -213,7 +213,7 @@ const machineCommands:any[]=[];
   started_at:minutesAgo(6-i*0.2),finished_at:minutesAgo(6-i*0.2-0.05)}));
  machineCommands.unshift(machineCommand(vm,{...job,command:'npm test 2>&1 | tail -n 40',state:'running',exit_code:null,output_sha256:null,output_bytes:0,started_at:minutesAgo(0.3),finished_at:null}));}
 // Sent to apps: content-free send records, newest first, a few of them problems (synthetic, in memory).
-const chatTitles:Record<string,string>={'42':'Owner','73':'Mira Chen',[conversation]:'Aurora planning'},harmlessSends=['message_not_modified','button_answer_expired'];
+const chatTitles:Record<string,string>={'42':'Owner','73':'Mira Chen',[conversation]:'Aurora planning'},harmlessSends=['message_not_modified','button_answer_expired','reaction_not_allowed'];
 const chatSends:any[]=[];
 {const send=(minutes:number,kind:string,method:string,chat:string|null,row:any={})=>chatSends.unshift({id:String(901+chatSends.length),at:minutesAgo(minutes),channel:'telegram',kind,method,chat,
   chat_title:chat?chatTitles[chat]??null:null,topic:null,message_id:chat?300+chatSends.length:null,detail:null,state:'sent',status:200,error_code:null,reference:null,ms:180,...row});
@@ -225,13 +225,15 @@ const chatSends:any[]=[];
  send(120,'button_answer','answerCallbackQuery',null,{state:'failed',status:400,error_code:'button_answer_expired'});
  send(95,'reply','sendMessage','73',{state:'uncertain',status:0,error_code:'timed_out',message_id:null,ms:30000});
  send(80,'approved_send','sendMessage',conversation,{state:'not_sent',status:0,error_code:'audience_changed',message_id:null,ms:null});
- send(60,'reply','sendMessage',conversation,{topic:7});
+ send(61,'reply','sendMessage',conversation,{topic:7,state:'failed',status:400,error_code:'formatting_rejected',message_id:null,reference:'telegram:1:update:60',recovered:true});
+ send(60,'reply','sendMessage',conversation,{topic:7,reference:'telegram:1:update:60'});
  send(40,'reply','sendMessage','42',{state:'not_sent',status:0,error_code:'rate_limited',message_id:null,ms:null});
  send(25,'reaction','setMessageReaction',conversation,{detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed'});
  send(12,'reaction','setMessageReaction','42',{detail:'👀'});
  send(11,'reply','sendMessage','42');
  send(10,'reaction','setMessageReaction','42',{detail:'clear'});}
-const sendProblem=(row:any)=>['failed','uncertain'].includes(row.state)&&!harmlessSends.includes(row.error_code);
+const sendProblem=(row:any)=>['failed','uncertain'].includes(row.state)&&!harmlessSends.includes(row.error_code)&&!row.recovered;
+for(const row of chatSends)Object.assign(row,{problem:sendProblem(row),recovered:row.recovered===true});
 /** Storage's /v1/status chat_sends: the last day's outcomes; the newest problem is any age. */
 function chatSendSummary(){const since=Date.now()-864e5,day=chatSends.filter(row=>Date.parse(row.at)>since),problems=day.filter(sendProblem),n=(state:string)=>day.filter(row=>row.state===state).length;
  return {window_hours:24,sent:n('sent'),failed:n('failed'),uncertain:n('uncertain'),not_sent:n('not_sent'),problems:problems.length,

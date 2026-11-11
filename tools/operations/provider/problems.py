@@ -23,6 +23,8 @@ QUIET_SECONDS = 3600
 STEADY = ('application', 'service', 'workers', 'work_unchecked')
 # Counts kept forever, so only their growth is news.
 TOTALS = ('failed:', 'uncertain:')
+# Counts over a rolling day drop as old ones age out, so the highest count told stays the bar until they clear.
+ROLLING = ('sends',)
 MAX_LINES = 20
 # Sent notices are followed for a week, so a problem that clears later still marks its line.
 FOLLOW_SECONDS = 7 * 86400
@@ -278,7 +280,7 @@ def due(current, record, now, first=False, seen=None, rows=True):
             continue
         if problem['kind'] in STEADY and problem['key'] not in before:
             continue
-        if not problem['count'] or previous and problem['count'] < previous['count']:
+        if not problem['count'] or previous and problem['count'] < previous['count'] and problem['kind'] not in ROLLING:
             # Cleared history: count growth from what is left.
             left = lowest(problem['key'], problem['count'])
             sent[problem['key']] = {**(previous or {'at': 0}), 'count': min(previous['count'], left) if previous else left}

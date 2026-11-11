@@ -57,6 +57,10 @@ export type ChatSend = {
   error_code: string | null;
   reference: string | null;
   ms: number | null;
+  /** Counts for Health: refused or unanswered, not an expected no-op, and no later try delivered it. */
+  problem?: boolean;
+  /** A later try of the same send went through. */
+  recovered?: boolean;
 };
 export type ChatSends = {
   window_hours: number;

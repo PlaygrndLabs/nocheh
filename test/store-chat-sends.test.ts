@@ -78,7 +78,7 @@ test('send records drain once from the spool, list newest first with chat names,
     assert.deepEqual(await sends.drain(root),{recorded:1,rejected:0});assert.equal(await count(),3);
     await stores.control.query('DELETE FROM chat_sends');
 
-    // Health: the last day's counts; harmless codes are listed but never problems.
+    // Health: the last day's counts; harmless codes, such as a group that takes no reactions, are listed but never problems.
     const now=Date.now(),ago=(minutes:number)=>new Date(now-minutes*60000).toISOString(),group='-100'+(now%1000000000),other='-100'+(now%1000000000+1);
     const rows=[
       record({at:ago(60*24*30),state:'failed',status:403,error_code:'bot_blocked',chat:'123'}),
@@ -100,13 +100,13 @@ test('send records drain once from the spool, list newest first with chat names,
       text:'Synthetic',payload:{update_id:1,message:{message_id:1,date:1,chat:{id:Number(group),type:'supergroup',title:'Captured name'},from:{id:123},text:'Synthetic'}}};
     await new ArchiveRepository(stores.archive).capture(event);
     const summary=await sends.summary(new Date(now));
-    assert.deepEqual({...summary,latest_problems:undefined},{window_hours:24,sent:2,failed:3,uncertain:2,not_sent:1,problems:3,
-      problem_kinds:{reaction:1,reply:1,typing:1},last_problem_at:ago(5),latest_problems:undefined});
+    assert.deepEqual({...summary,latest_problems:undefined},{window_hours:24,sent:2,failed:3,uncertain:2,not_sent:1,problems:2,
+      problem_kinds:{reply:1,typing:1},last_problem_at:ago(5),latest_problems:undefined});
     assert.deepEqual(summary.latest_problems.map(row=>[row.kind,row.error_code,row.chat_title]),
-      [['typing','server_error',null],['reply','timed_out','Other group'],['reaction','reaction_not_allowed','Captured name']]);
-    const reaction=summary.latest_problems[2]!;
-    assert.deepEqual(Object.keys(reaction),['id','at','channel','kind','method','chat','chat_title','topic','message_id','detail','state','status','error_code','reference','ms']);
-    assert.equal(typeof reaction.id,'string');assert.equal(reaction.detail,'👀');assert.equal(reaction.message_id,7);assert.equal(reaction.at,ago(30));
+      [['typing','server_error',null],['reply','timed_out','Other group']]);
+    const reply=summary.latest_problems[1]!;
+    assert.deepEqual(Object.keys(reply),['id','at','channel','kind','method','chat','chat_title','topic','message_id','detail','state','status','error_code','reference','ms','problem','recovered']);
+    assert.equal(typeof reply.id,'string');assert.equal(reply.problem,true);assert.equal(reply.recovered,false);assert.equal(reply.at,ago(10));
     assert.equal(JSON.stringify(summary).includes('Synthetic'),false,'no message content reaches Health');
     // The newest problem of any age, even with none in the last day.
     const later=await sends.summary(new Date(now+86400000*2));
@@ -118,8 +118,11 @@ test('send records drain once from the spool, list newest first with chat names,
     assert.deepEqual(all.map(row=>row.at),[...rows].map(row=>row.at).sort().reverse());
     assert.equal(new Set(all.map(row=>row.id)).size,rows.length);
     assert.equal(all.find(row=>row.topic===7)?.chat_title,'Captured name');
+    const reaction=all.find(row=>row.kind==='reaction');
+    assert.deepEqual([reaction.detail,reaction.message_id,reaction.chat_title,reaction.problem],['👀',7,'Captured name',false]);
+    assert.deepEqual(all.filter(row=>row.problem).map(row=>row.error_code),['server_error','timed_out','bot_blocked']);
     const problems=await sends.list(owner,{filter:'problems'});
-    assert.deepEqual(problems.records.map(row=>row.error_code),['server_error','timed_out','reaction_not_allowed','bot_blocked']);assert.equal(problems.next,null);
+    assert.deepEqual(problems.records.map(row=>row.error_code),['server_error','timed_out','bot_blocked']);assert.equal(problems.next,null);
     const firstProblem=await sends.list(owner,{filter:'problems',limit:1}),nextProblem=await sends.list(owner,{filter:'problems',limit:1,before:firstProblem.next!});
     assert.deepEqual([firstProblem.records[0]!.error_code,nextProblem.records[0]!.error_code],['server_error','timed_out']);
     assert.deepEqual((await sends.list(owner,{kind:'card_update'})).records.map(row=>row.error_code),['message_not_modified']);
@@ -131,9 +134,35 @@ test('send records drain once from the spool, list newest first with chat names,
     // Retention: only rows sent before the cutoff go; zero days keeps everything.
     assert.equal(await sends.expire(now,0),0);assert.equal(await count(),rows.length);
     assert.equal(await sends.expire(now,14),1);
-    assert.deepEqual((await sends.list(owner,{filter:'problems'})).records.map(row=>row.error_code),['server_error','timed_out','reaction_not_allowed']);
+    assert.deepEqual((await sends.list(owner,{filter:'problems'})).records.map(row=>row.error_code),['server_error','timed_out']);
     assert.equal(await sends.prune(new Date(Date.parse(ago(22)))),4);assert.equal(await sends.prune(new Date(Date.parse(ago(22)))),0,'a repeated pass is a no-op');
     assert.deepEqual((await sends.list(owner)).records.map(row=>row.at),[ago(5),ago(10),ago(15),ago(20)]);
     assert.equal(await sends.prune(new Date(now),2),2,'one batch is bounded');
+
+    // An attempt that a later try of the same send delivered is listed as recovered, never a problem: a plain-text
+    // resend after a formatting refusal, a short rate-limit wait, a fresh retry after a timeout. One that nothing
+    // delivered stays a problem, as does one whose only later success is another send or came too late.
+    await stores.control.query('DELETE FROM chat_sends');
+    const retries=[
+      record({at:ago(9),state:'failed',status:400,error_code:'formatting_rejected',reference:'telegram:4242:update:20',message_id:null}),
+      record({at:ago(9),reference:'telegram:4242:update:20',message_id:21}),
+      record({at:ago(8),state:'failed',status:429,error_code:'rate_limited',reference:'notice:'+'a'.repeat(64),chat:'123',message_id:null}),
+      record({at:ago(8),reference:'notice:'+'a'.repeat(64),chat:'123',message_id:22}),
+      record({at:ago(7),state:'uncertain',status:0,error_code:'timed_out',reference:'telegram:4242:update:30',message_id:null}),
+      record({at:ago(7),reference:'telegram:4242:update:30:retry:1',message_id:23}),
+      record({at:ago(6),state:'failed',status:400,error_code:'chat_not_found',reference:'telegram:4242:update:40',message_id:null}),
+      record({at:ago(6),reference:'telegram:4242:update:41',message_id:24}),
+      record({at:ago(90),state:'failed',status:400,error_code:'message_not_found',reference:'telegram:4242:update:50',message_id:null}),
+      record({at:ago(60),reference:'telegram:4242:update:50',message_id:25}),
+    ];
+    for(const value of retries)await write(value);
+    assert.deepEqual(await sends.drain(root),{recorded:retries.length,rejected:0});
+    const recovering=await sends.summary(new Date(now));
+    assert.deepEqual([recovering.failed,recovering.uncertain,recovering.problems,recovering.problem_kinds],[4,1,2,{reply:2}]);
+    assert.deepEqual(recovering.latest_problems.map(row=>row.error_code),['chat_not_found','message_not_found']);
+    const listed=(await sends.list(owner)).records.filter(row=>row.state!=='sent');
+    assert.deepEqual(listed.map(row=>[row.error_code,row.problem,row.recovered]),[['chat_not_found',true,false],['timed_out',false,true],
+      ['rate_limited',false,true],['formatting_rejected',false,true],['message_not_found',true,false]]);
+    assert.deepEqual((await sends.list(owner,{filter:'problems'})).records.map(row=>row.error_code),['chat_not_found','message_not_found']);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

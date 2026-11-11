@@ -33,8 +33,8 @@ CREATE INDEX IF NOT EXISTS chat_sends_problems ON chat_sends(at DESC, id DESC) W
 
 export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','reaction','typing','setup','other'] as const;
 export const sendStates=['sent','failed','uncertain','not_sent'] as const;
-/** Expected no-ops: listed, never counted as problems. */
-export const harmlessSendCodes=['message_not_modified','button_answer_expired'] as const;
+/** Expected no-ops, and a chat's own choice not to take reactions: listed, never counted as problems. */
+export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed'] as const;
 export type ChatSend={version:1;key:string;channel:string;account:string|null;at:string;kind:typeof sendKinds[number];method:string;
   chat:string|null;topic:number|null;message_id:number|null;detail:string|null;state:typeof sendStates[number];status:number;
   error_code:string|null;reference:string|null;ms:number|null};
@@ -43,7 +43,15 @@ const FILE=/^[a-f0-9]{64}\.json$/,MAX_BYTES=16*1024,WINDOW_HOURS=24;
 const KEY=/^send:([a-z][a-z0-9_]{0,31}):([A-Za-z0-9_.-]{0,64}):[a-f0-9]{32}$/;
 const AT=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const required=['version','key','channel','at','kind','method','state','status'],nullable=['account','chat','topic','message_id','detail','error_code','reference','ms'];
-const PROBLEM=`state IN ('failed','uncertain') AND coalesce(error_code,'') NOT IN (${harmlessSendCodes.map(code=>`'${code}'`).join(',')})`;
+/** Within this time a retry of the same send that went through recovers the attempt before it. */
+const RETRY_MINUTES=15;
+/** An attempt a later one of the same send delivered: a plain-text resend, a short rate-limit wait, a fresh retry. */
+const recovered=(s:string)=>`(${s}.state IN ('failed','uncertain') AND ${s}.reference IS NOT NULL AND EXISTS (SELECT 1 FROM chat_sends r
+  WHERE r.state='sent' AND r.at>=${s}.at AND r.at<${s}.at+interval '${RETRY_MINUTES} minutes' AND r.id<>${s}.id AND r.channel=${s}.channel
+  AND r.chat IS NOT DISTINCT FROM ${s}.chat AND r.method=${s}.method
+  AND regexp_replace(r.reference,':retry:[0-9]+$','')=regexp_replace(${s}.reference,':retry:[0-9]+$','')))`;
+const problem=(s:string)=>`(${s}.state IN ('failed','uncertain') AND coalesce(${s}.error_code,'') NOT IN (${harmlessSendCodes.map(code=>`'${code}'`).join(',')})
+  AND NOT ${recovered(s)})`;
 const text=(value:unknown,pattern:RegExp)=>typeof value==='string'&&pattern.test(value);
 const integer=(value:unknown,min:number,max:number)=>Number.isSafeInteger(value)&&(value as number)>=min&&(value as number)<=max;
 
@@ -139,17 +147,18 @@ export class ChatSendRepository {
     return rows.map(row=>({id:String(row.id),at:row.at.toISOString(),channel:row.channel,kind:row.kind,method:row.method,chat:row.chat,
       chat_title:row.channel==='telegram'&&row.chat?titles.get(row.chat)??null:null,topic:row.topic===null?null:Number(row.topic),
       message_id:row.message_id===null?null:Number(row.message_id),detail:row.detail,state:row.state,status:row.status,
-      error_code:row.error_code,reference:row.reference,ms:row.ms}));
+      error_code:row.error_code,reference:row.reference,ms:row.ms,problem:row.problem===true,recovered:row.recovered===true}));
   }
 
-  /** The last day's outcomes for Health; problems leave out harmless codes, the newest problem is any age. */
+  /** The last day's outcomes for Health; problems leave out harmless codes and recovered attempts, the newest problem is any age. */
   async summary(now=new Date()) {
     const since=new Date(now.getTime()-WINDOW_HOURS*3600000);
     const [states,kinds,last,latest]=await Promise.all([
       this.control.query('SELECT state,count(*)::int AS count FROM chat_sends WHERE at>$1 GROUP BY state',[since]),
-      this.control.query(`SELECT kind,count(*)::int AS count FROM chat_sends WHERE at>$1 AND ${PROBLEM} GROUP BY kind ORDER BY kind`,[since]),
-      this.control.query(`SELECT at FROM chat_sends WHERE ${PROBLEM} ORDER BY at DESC,id DESC LIMIT 1`),
-      this.control.query(`SELECT * FROM chat_sends WHERE at>$1 AND ${PROBLEM} ORDER BY at DESC,id DESC LIMIT 10`,[since])]);
+      this.control.query(`SELECT kind,count(*)::int AS count FROM chat_sends s WHERE at>$1 AND ${problem('s')} GROUP BY kind ORDER BY kind`,[since]),
+      this.control.query(`SELECT at FROM chat_sends s WHERE ${problem('s')} ORDER BY at DESC,id DESC LIMIT 1`),
+      this.control.query(`SELECT s.*,true AS problem,false AS recovered FROM chat_sends s WHERE at>$1 AND ${problem('s')}
+        ORDER BY at DESC,id DESC LIMIT 10`,[since])]);
     const counts:Record<string,number>=Object.fromEntries(sendStates.map(state=>[state,0]));
     for(const row of states.rows)counts[row.state]=row.count;
     const problemKinds:Record<string,number>=Object.fromEntries(kinds.rows.map(row=>[row.kind,row.count]));
@@ -164,8 +173,9 @@ export class ChatSendRepository {
     const filter=query.filter||'all',kind=query.kind??'',before=query.before??'',count=query.limit??50;
     if(!['all','problems'].includes(filter)||kind&&!(sendKinds as readonly string[]).includes(kind)||before&&!/^[1-9][0-9]{0,17}$/.test(before)||
       !Number.isSafeInteger(count)||count<1||count>100)throw new HttpError(400,'invalid_chat_send_query');
-    const rows=(await this.control.query(`SELECT * FROM chat_sends WHERE ($1::bigint IS NULL OR (at,id)<(SELECT at,id FROM chat_sends WHERE id=$1))
-      AND ($2='' OR kind=$2)${filter==='problems'?' AND '+PROBLEM:''} ORDER BY at DESC,id DESC LIMIT $3`,[before||null,kind,count+1])).rows;
+    const rows=(await this.control.query(`SELECT s.*,${problem('s')} AS problem,${recovered('s')} AS recovered FROM chat_sends s
+      WHERE ($1::bigint IS NULL OR (at,id)<(SELECT at,id FROM chat_sends WHERE id=$1))
+      AND ($2='' OR kind=$2)${filter==='problems'?' AND '+problem('s'):''} ORDER BY at DESC,id DESC LIMIT $3`,[before||null,kind,count+1])).rows;
     return {records:await this.rows(rows.slice(0,count)),next:rows.length>count?String(rows[count-1].id):null};
   }
 

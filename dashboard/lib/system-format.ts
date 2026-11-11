@@ -447,11 +447,11 @@ const sendStates: Record<string, {label: string; tone: Tone}> = {
   uncertain: {label: 'Uncertain', tone: 'warn'},
   not_sent: {label: 'Not sent', tone: 'neutral'},
 };
-/** Expected no-ops, as storage counts them: listed, never a problem. */
-const harmlessSendCodes = ['message_not_modified', 'button_answer_expired'];
-export function sendState(row: {state: string; error_code?: string | null}): {label: string; tone: Tone} {
+/** A refusal or no answer that storage doesn't count as a problem, such as an expected no-op or one a retry
+ * delivered, keeps its label but not the alarm. */
+export function sendState(row: {state: string; problem?: boolean}): {label: string; tone: Tone} {
   const state = sendStates[row.state] ?? {label: readable(row.state), tone: 'neutral' as Tone};
-  return harmlessSendCodes.includes(row.error_code ?? '') ? {...state, tone: 'neutral'} : state;
+  return row.problem === false && ['failed', 'uncertain'].includes(row.state) ? {...state, tone: 'neutral'} : state;
 }
 
 const sendReasons: Record<string, string> = {
@@ -485,12 +485,13 @@ const sendReasons: Record<string, string> = {
   refused: 'Stopped by Nocheh’s own check',
 };
 /** Why a send didn't go through, in short plain words; an unknown code shows as it is. */
-export function sendReason(row: {state: string; error_code?: string | null}): string {
+export function sendReason(row: {state: string; error_code?: string | null; recovered?: boolean}): string {
   const code = row.error_code;
   if (!code) return '';
   // Not sent and rate limited is Nocheh's own flood window, not the app asking.
-  if (code === 'rate_limited' && row.state === 'not_sent') return 'Held back: too many at once';
-  return sendReasons[code] ?? code;
+  const reason =
+    code === 'rate_limited' && row.state === 'not_sent' ? 'Held back: too many at once' : (sendReasons[code] ?? code);
+  return row.recovered ? reason + '; sent on a retry' : reason;
 }
 
 /* ---------- Databases ---------- */

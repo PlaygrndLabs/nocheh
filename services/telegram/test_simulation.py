@@ -513,6 +513,32 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
                          [('reply', '-20', 17, 'failed', 429, 'rate_limited', 'telegram:123456:update:1'),
                           ('reply', '-20', 17, 'not_sent', 0, 'rate_limited', 'telegram:123456:update:2')])
 
+    async def test_each_try_of_a_reply_that_recovers_leaves_its_own_record(self):
+        """The sender's own retries are separate requests, so each leaves one record under the same reference;
+        storage then treats the refused try as recovered."""
+        def once(answer):
+            used = False
+            def respond(data):
+                nonlocal used
+                if not used:
+                    used = True
+                    return answer(data)
+            return respond
+        cases = {
+            'formatting_rejected': once(lambda data: (400, canonical({'ok': False, 'error_code': 400, 'description': "Bad Request: can't parse entities"}))),
+            'message_not_found': once(lambda data: (400, canonical({'ok': False, 'error_code': 400, 'description': 'Bad Request: message to be replied not found'}))),
+            'rate_limited': once(lambda data: (429, canonical({'ok': False, 'error_code': 429, 'description': 'Too Many Requests: retry after 1',
+                                                               'parameters': {'retry_after': 1}}))),
+        }
+        for number, (code, respond) in enumerate(cases.items(), 1):
+            self.request.respond = respond
+            self.assertEqual(await self.deliver(self.envelope(identifier=number)), {'state': 'done'}, code)
+        records = sorted(await self.sends(), key=lambda r: (r['reference'], r['at'], r['state'] == 'sent'))
+        self.assertEqual([(r['reference'], r['state'], r['error_code']) for r in records],
+                         [(f'telegram:123456:update:{number}', state, code if state == 'failed' else None)
+                          for number, code in enumerate(cases, 1) for state in ('failed', 'sent')])
+        self.assertEqual(len(records), len([c for c in self.request.calls if c[0] == 'sendMessage']), 'one record per request that left')
+
     async def test_a_setup_call_is_recorded_as_setup(self):
         self.assertTrue(await self.bot.delete_webhook(drop_pending_updates=False))
         [record] = await self.sends()

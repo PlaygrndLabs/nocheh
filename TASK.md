@@ -505,15 +505,17 @@ owner reads the list at `/v1/chat-sends`, the "Keep delivery logs" days expire t
 problem notices gain the kind `sends`
 ([decision](docs/adr/0237-record-every-send-to-a-chat-app.md),
 [bot](services/telegram/test_sends.py), [store](test/store-chat-sends.test.ts)).
-Built on the `sends/*` branches (bot, store, notices, dashboard, docs), not yet on main.
-"typing…" is recorded only when it fails, once per chat and reason in ten minutes; the
-owner was told this is the default unless they object. Pending: the owner's merge, then a
+Built on one branch (bot, store, notices, dashboard, docs), not yet on main. A try that a
+later one recovered within 15 minutes, an unchanged edit, an expired button answer and a
+reaction the chat does not allow are listed but not problems. Awaiting the owner's answer:
+the code records a failed "typing…" (once per chat and reason in ten minutes), while the
+owner's rule in SPECS.md is that typing is not recorded; if they say never, drop it from
+`services/telegram/capture.py`. Pending: the owner's merge, then a
 live check on a running installation that a real 👀 reaction and a reply appear in
 System › Sent to apps as sent, and that the next failed send shows on Health and in a notice.
 Follow-ups: the dashboard's own `setChatMenuButton` (mini app menu button) is a send with
 no record until it moves into the bot with the other dashboard Bot API calls above (those
-are reads, which stay unrecorded); Settings › Privacy & data describes "Delivery logs" as
-logs of replies only and should name the send records too.
+are reads, which stay unrecorded).
 
 Swappable memory (owner, 2026-11-10: "the main things in nocheh should be data
 and hermes and honcho should be replace able with other things like claude code

@@ -137,8 +137,13 @@ or delivery receipts, and nothing reads them to decide a send.
 
 **System › Sent to apps** lists them, newest first, with a Problems filter.
 Failed and uncertain sends of the last day show on Health and in the owner's
-problem notices, which leave out failed notices themselves; an unchanged edit
-and an expired button answer are listed but never counted as problems. **Keep
+problem notices. The notices leave out every send of the notice kind (problem
+notices, task reminders, import and inbox messages), so a notice that cannot be
+sent never asks for another. A failed or uncertain try followed within 15
+minutes by a sent one with the same chat, method and dispatch key, such as a
+plain-text resend or a retry after a rate limit, shows as sent on a retry. It,
+an unchanged edit, an expired button answer and a reaction the chat does not
+allow are listed but never counted as problems. **Keep
 delivery logs** in Settings › Privacy & data removes old records too. The
 dashboard's own mini app menu button call does not pass the bot yet, so it has
 no record ([ADR-0237](adr/0237-record-every-send-to-a-chat-app.md)).

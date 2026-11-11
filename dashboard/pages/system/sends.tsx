@@ -95,6 +95,20 @@ function Sends({filter}: {filter: Filter}) {
       )}
       {!data && !error ? (
         <LoadingRows rows={5} />
+      ) : data && !rows.length && pages.length > 1 ? (
+        // An older page can come back empty, such as when its starting point has expired.
+        <>
+          <Empty icon={Send} title="Nothing older">
+            Go back to the newest sends.
+          </Empty>
+          <Pager
+            page={pages.length - 1}
+            hasNext={false}
+            labels={['Newer', 'Older']}
+            onPage={() => setPages([null])}
+            summary={`Page ${pages.length}`}
+          />
+        </>
       ) : data && !rows.length ? (
         <Empty icon={Send} title={filter === 'problems' ? 'Nothing failed' : 'Nothing sent yet'}>
           {filter === 'problems'

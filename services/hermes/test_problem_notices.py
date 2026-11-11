@@ -323,6 +323,16 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 3940, sending())
         self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Fixed at 13:05 UTC']))
 
+    def test_failed_sends_aging_out_of_the_day_are_not_news_when_they_come_back(self):
+        self.check(NOW, sending(reaction=5))
+        self.check(NOW + 1800, sending(reaction=4))
+        self.check(NOW + 3720, sending(reaction=5))
+        self.check(NOW + 7400, sending(reaction=1))
+        self.check(NOW + 11100, sending(reaction=2))
+        self.assertEqual(len(self.sent), 1, 'a count that fell as old sends left the day and rose again told nothing new')
+        self.check(NOW + 14800, sending(reaction=6))
+        self.assertEqual(self.sent[-1]['problems'], ['6 sends to chat apps failed in the last day.'])
+
     def test_failed_notices_do_not_count_as_failed_sends(self):
         self.check(NOW, sending(notice=2, notice_update=3))
         self.assertEqual(self.sent, [], 'a notice that cannot be sent must not ask for another')

@@ -1172,22 +1172,21 @@ test('usage shows calls, tokens and cost, and never prices an unknown cost as fr
 
 test('sent to apps lists each send with its outcome, and Health opens the ones that failed', async () => {
   const {page, problems} = await open('system');
-  // Health counts the last day's problems, leaving out expected no-ops, and opens them filtered.
-  const issue = page.getByRole('listitem').filter({hasText: '3 sends to chat apps failed in the last day'});
-  await issue.getByText('Approval card: 1 · Reaction: 1 · Reply: 1').waitFor();
+  // Health counts the last day's problems, leaving out expected no-ops and attempts a retry delivered, and opens them filtered.
+  const issue = page.getByRole('listitem').filter({hasText: '2 sends to chat apps failed in the last day'});
+  await issue.getByText('Approval card: 1 · Reply: 1').waitFor();
   await issue.getByRole('link', {name: 'Review'}).click();
-  await page.getByRole('tab', {name: 'Sent to apps 3', selected: true}).waitFor();
+  await page.getByRole('tab', {name: 'Sent to apps 2', selected: true}).waitFor();
   assert.equal(new URL(page.url()).hash, '#system?view=sends&filter=problems');
-  await page.getByText(/^Last day: \d+ sent, 4 failed, 1 uncertain, 2 not sent$/).waitFor();
+  await page.getByText(/^Last day: \d+ sent, 5 failed, 1 uncertain, 2 not sent$/).waitFor();
   const table = page.getByRole('table', {name: 'Sent to apps'});
-  await table.getByRole('cell', {name: 'Reactions not allowed in this chat'}).waitFor();
+  await table.getByRole('cell', {name: 'No answer in time'}).waitFor();
   // App, chat, what, result and reason, as a wide screen shows them.
   assert.deepEqual(
     await table
       .locator('tbody tr')
       .evaluateAll(rows => rows.map(row => [...row.cells].slice(1).map(cell => cell.innerText.trim()))),
     [
-      ['Telegram', 'Aurora planning', 'Reaction 👀', 'Failed', 'Reactions not allowed in this chat'],
       ['Telegram', 'Mira Chen', 'Reply', 'Uncertain', 'No answer in time'],
       ['Telegram', 'Mira Chen', 'Approval card', 'Failed', 'The person blocked the bot'],
     ],
@@ -1199,6 +1198,8 @@ test('sent to apps lists each send with its outcome, and Health opens the ones t
   for (const name of [
     'Already up to date',
     'Button press expired',
+    'Reactions not allowed in this chat',
+    'Formatting rejected; sent on a retry',
     'Blocked: wrong chat',
     'Held back: too many at once',
   ])

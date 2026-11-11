@@ -780,7 +780,7 @@ export function PrivacySettings() {
                   <Unsaved show={s.changed('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS')} />
                 </>
               }
-              description="Logs of replies the assistant finished sending. Unfinished ones are never deleted."
+              description="Logs of replies the assistant finished sending, and the records of everything sent to chat apps. Unfinished replies are never deleted."
             >
               <Retention setting="NOCHEH_HERMES_JOURNAL_RETENTION_DAYS" label="Keep delivery logs" />
             </SettingRow>

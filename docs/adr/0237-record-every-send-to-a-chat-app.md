@@ -6,8 +6,9 @@ agent that send to apps like telegram, slack, etc" and answered "yes" to the
 plan: record everything Nocheh sends to any chat app, including messages,
 edits, cards and reactions; show what was sent, to which chat, when, and
 whether it worked; the dashboard shows the failed ones; skip "typing…", which
-fires constantly. The owner was told that a "typing…" that fails is still
-recorded, at most once per chat and reason in ten minutes, unless they object.
+fires constantly. Recording a "typing…" that fails, at most once per chat and
+reason in ten minutes, was proposed to the owner and awaits their answer; until
+then SPECS.md states only the owner's rule.
 Builds on [ADR-0235](0235-nocheh-owns-the-telegram-bot.md). Amends the "no
 stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
 [ADR-0211](0211-hermes-working-reactions-on-the-answered-message.md).
@@ -99,11 +100,15 @@ stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
   hourly in bounded batches.
 - Storage `/v1/status` carries `chat_sends`: the last 24 hours' counts by
   state, `problems` (failed and uncertain, without the expected no-ops
-  `message_not_modified` and `button_answer_expired`), `problem_kinds`,
+  `message_not_modified`, `button_answer_expired` and `reaction_not_allowed`,
+  and without a recovered try: one followed within 15 minutes by a `sent`
+  record with the same channel, chat, method and reference, a `:retry:N`
+  suffix ignored), `problem_kinds`,
   `last_problem_at` (any age) and the ten latest problems. The owner reads all
   records at `GET /v1/chat-sends` (`filter=all|problems`, `kind`, `before`,
   `limit` up to 100), newest first, with the chat's saved title where Nocheh
-  knows it, through the owner storage allowlist.
+  knows it and whether each record counts as a problem or recovered, through
+  the owner storage allowlist.
 - The dashboard shows them as System › Sent to apps, with an All and a
   Problems filter, and System › Health (with the mini app's Health) lists
   "N sends to chat apps failed in the last day", linking there. The owner's
@@ -111,7 +116,10 @@ stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
   rules: at most hourly and only when worse, marked fixed when the count is
   back to zero, and a summary that could not be read is not zero. It counts the
   same problems without kinds `notice` and `notice_update`, so a notice that
-  cannot be sent never asks for another.
+  cannot be sent never asks for another. Because the count covers a rolling
+  day, a fall from failures aging out is not a fix: the highest count told
+  stays the bar until the count reaches zero, so the same failures aging out
+  and new ones arriving are not news again.
 - The record is platform neutral: it names its channel and account, and each
   platform has its own chat ID form (Telegram's numeric IDs; others letters,
   digits, `_` and `-`). A Slack front door, or any later one, writes the same
@@ -128,7 +136,8 @@ stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
   `reaction_not_allowed` or another code.
 - A reply split into chunks, sent again as plain text or retried after a rate
   limit leaves one record per request, so the list shows attempts, not
-  messages. A request a restart cut off is recorded when the service starts
+  messages; a try that a later one recovered is marked "sent on a retry" and
+  is not a problem. A request a restart cut off is recorded when the service starts
   again, at that time, with `restart`.
 - Records hold chat and message IDs but no content, and are kept forever by
   default, like the delivery logs; a turn adds a few rows.

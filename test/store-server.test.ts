@@ -63,11 +63,11 @@ test('separated application captures through control outages, exposes owner repo
     assert.deepEqual(initialStatus.chat_sends,{window_hours:24,sent:0,failed:0,uncertain:0,not_sent:0,problems:0,problem_kinds:{},last_problem_at:null,latest_problems:[]});
     // The worker takes the front door's send records; Health and the owner's list show what failed.
     const send={version:1,key:'send:telegram:4242:'+digest(key).slice(0,32),channel:'telegram',account:'4242',at:new Date().toISOString(),kind:'reaction',
-      method:'setMessageReaction',chat:'-42',topic:null,message_id:5,detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed',reference:null,ms:80};
+      method:'setMessageReaction',chat:'-42',topic:null,message_id:5,detail:'👀',state:'failed',status:400,error_code:'message_not_found',reference:null,ms:80};
     await mkdir(join(root,'spool/sends'),{recursive:true});await writeFile(join(root,'spool/sends',digest(send.key)+'.json'),canonical(send));
     await until(async()=>!(await readdir(join(root,'spool/sends'))).length);
     const sendStatus=(await request('/v1/status')).chat_sends;
-    assert.equal(sendStatus.problems,1);assert.deepEqual(sendStatus.problem_kinds,{reaction:1});assert.equal(sendStatus.latest_problems[0].error_code,'reaction_not_allowed');
+    assert.equal(sendStatus.problems,1);assert.deepEqual(sendStatus.problem_kinds,{reaction:1});assert.equal(sendStatus.latest_problems[0].error_code,'message_not_found');
     assert.deepEqual((await request('/v1/chat-sends?filter=problems')).records.map((row:any)=>[row.kind,row.detail,row.chat]),[['reaction','👀','-42']]);
     await request('/v1/chat-sends?limit=101',undefined,400);
     const runtimeStatus=await request('/v1/runtime');
