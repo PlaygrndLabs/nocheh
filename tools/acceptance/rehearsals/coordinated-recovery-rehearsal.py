@@ -31,7 +31,7 @@ try:
         COMPOSE_PROJECT_NAME=project,NOCHEH_AGENT_NETWORK=project+'-agent',NOCHEH_MEMORY_NETWORK=project+'-memory',TELEGRAM_OWNER_ID='123',NOCHEH_PORT='18960')
     write_env(source/'.env',config)
     memory=source/'honcho';memory.mkdir(mode=0o700)
-    for name in ('internal_token','database_password','temporary_embedding_key','honcho.Dockerfile'):
+    for name in ('internal_token','database_password','temporary_embedding_key'):
         (memory/name).write_text('synthetic-native-portable-not-a-real-credential');(memory/name).chmod(0o600)
     write_env(memory/'honcho.env',{'DB_CONNECTION_URI':'postgresql+psycopg://experiment:synthetic-native-portable-not-a-real-credential@honcho-postgres:5432/honcho_experiment'})
     write_env(memory/'meter.env',{})
