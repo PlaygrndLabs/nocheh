@@ -16,6 +16,7 @@ import {MACHINE_BODY,MachineRepository,machineErrors} from '../stores/machines.j
 import {RuntimeTurnRepository} from '../stores/turns.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
+import {longFetch} from '../long-fetch.js';
 
 export interface TurnBinding {
   event_id:string;scope:string;profile:string;logical_profile:string;owner:boolean;
@@ -108,6 +109,8 @@ async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
 }
 export function brokerServer(options:BrokerOptions) {
   const call=options.fetch??fetch;
+  // A long-term recall may wait on the archive for up to ten minutes, longer than Node's own fetch waits.
+  const relayCall=options.fetch??longFetch;
   // Sealed job boxes follow Nocheh's own rows, so without storage no turn gets one.
   const box=options.storage instanceof RuntimeTurnRepository?new JobBoxRepository(options.storage.access):null;
   // So do machine jobs (ADR-0231). This service holds no machine token: storage refuses each command without one.
@@ -196,7 +199,7 @@ export function brokerServer(options:BrokerOptions) {
         // apply to retrieval; native memory remains writable within the owned profile.
         // A machine command is approved by its job's card and logged by storage in machine_commands.
         if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/start','/v1/jobs/stop','/v1/machines/exec'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
-        const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
+        const response=await relayCall(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok) {
           // A job request is told what to correct, such as a member's daily limit or a box it may not have; a machine command
           // why it did not run, also when the machine could not be reached.

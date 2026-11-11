@@ -38,6 +38,18 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(network.call_args.kwargs['timeout'],15)
         finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)
 
+    def test_hermes_lets_long_term_recall_run_past_its_420_second_tool_limit(self):
+        from hermes_cli.plugins import PluginContext,PluginManager
+        from hermes_cli.plugins_manifest import PluginManifest
+        from agent.tool_dispatch_helpers import _extend_tool_timeout
+        manager=PluginManager()
+        try:
+            archive_tools.register(PluginContext(PluginManifest(name='nocheh-synthetic'),manager))
+            # The recall waits up to 615 s for long-term memory and 15 s for native memory.
+            self.assertGreaterEqual(_extend_tool_timeout('nocheh_memory_recall',420.0),630)
+            self.assertEqual(_extend_tool_timeout('nocheh_archive_search',420.0),420.0)
+        finally: manager.unload()
+
     def test_foreground_recall_reserves_time_for_the_answer_and_skips_expired_calls(self):
         token=archive_tools.ARCHIVE_CREDENTIAL.set('signed-synthetic-credential')
         try:
