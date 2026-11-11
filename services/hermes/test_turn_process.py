@@ -76,7 +76,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
     def job(self,**changes):
         """A job run's context as storage sends it, its deadlines from now."""
         now=time.time()
-        return {'channel':'background','background':{'job_id':'c'*64,'attempt':1,'max_iterations':300,'box':False,'soft_deadline':int(now)+2700,
+        return {'channel':'background','background':{'job_id':'c'*64,'attempt':1,'max_iterations':300,'box':False,'machine':False,'soft_deadline':int(now)+2700,
                 'hard_deadline':int(now)+2880,'rates':{'input':2,'output':10,'cache_read':0.2,'cache_write':2.5,'request':None},
                 'cost_limit_usd':5,'prior_cost_usd':0,**changes}}
     async def test_a_background_job_run_lasts_to_its_hard_deadline_and_relays_its_progress(self):
@@ -84,7 +84,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         extra=self.job();limits=extra['background']
         line={'event':'progress','tokens':{'input_tokens':1200,'output_tokens':300,'cache_read_tokens':5000,'cache_write_tokens':40,'calls':3},'unknown_calls':1,
               'todo':[{'content':'Search the marks','status':'in_progress'}]}
-        expected={key:limits[key] for key in ('max_iterations','box','soft_deadline','rates','cost_limit_usd','prior_cost_usd')}
+        expected={key:limits[key] for key in ('max_iterations','box','machine','soft_deadline','rates','cost_limit_usd','prior_cost_usd')}
         child=('import sys,json; body=json.load(sys.stdin); assert body["channel"]=="background"; assert body["heartbeat"] is True; '
                'assert body["background"]=='+repr(expected)+', body["background"]; '
                'assert body["turn_deadline_epoch"]=='+str(limits['hard_deadline'])+'; '
@@ -128,6 +128,14 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['state'],'done')
         now=int(time.time())
         for changes in ({'box':'true'},{'soft_deadline':None},{'hard_deadline':'later'},{'soft_deadline':now+3000,'hard_deadline':now+2000},{'hard_deadline':float('inf')}):
+            with self.subTest(changes=changes),self.assertRaisesRegex(ValueError,'invalid_background_run'):
+                await self.execute(child,extra=self.job(**changes))
+    async def test_a_machine_run_says_so_to_the_turn_with_a_strict_boolean_and_is_never_also_a_box_run(self):
+        child=('import sys,json; body=json.load(sys.stdin); assert body["background"]["machine"] is True and body["background"]["box"] is False; '
+               'print(json.dumps({"state":"done","text":"so far"}))')
+        result,_=await self.execute(child,extra=self.job(machine=True))
+        self.assertEqual(result['state'],'done')
+        for changes in ({'machine':'true'},{'machine':1},{'machine':None},{'machine':True,'box':True}):
             with self.subTest(changes=changes),self.assertRaisesRegex(ValueError,'invalid_background_run'):
                 await self.execute(child,extra=self.job(**changes))
     async def test_untranscribed_earlier_voice_is_named_without_entering_memory_query(self):

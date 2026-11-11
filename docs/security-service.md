@@ -121,6 +121,29 @@ Background work shows as "job box unavailable". The launcher logs one line at
 startup that names a missing token or image, never the token. The owner turns
 boxes off with **Sealed box for jobs** in Settings › Assistant.
 
+The broker also relays the commands of a job that works on one of the owner's
+machines ([ADR-0231](adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md)).
+The run's own credential posts each command to `POST /v1/machines/exec`, which the
+broker sends on to `nocheh-app` with a body limit that fits the command's 4 MiB
+input, a 15-minute timeout and output capped at 8 MiB plus 64 KiB: `nocheh-machines`
+keeps a command's output frames, headers included, within 8 MiB, and the 64 KiB
+leave room for its notes and exit code. It makes no effect decision of its own: the
+job's card is the approval and System › Machine log is the record. It passes the
+machine refusal codes, such as `machine_off` or `machine_unreachable`, back to the
+run unchanged. `nocheh-app` checks the job and calls `nocheh-machines`, which
+holds the keys and runs `ssh`. Only `nocheh-app` and `nocheh-machines` receive
+`NOCHEH_MACHINE_TOKEN`; `./bin/nocheh init`, `up` and `make dev` generate it when it
+is missing, it has at least 32 characters, differs from `SERVICE_TOKEN` and
+`NOCHEH_BOX_TOKEN`, and Settings never shows it. The broker, the launcher and turns
+never hold it or a key. The run's binding names its machine, and the
+launcher then starts the turn with `TERMINAL_ENV=nocheh_machine`, `TERMINAL_CWD=~`
+and `NOCHEH_MACHINE_RUN=1`, without any extra mount or network. The turn asks no
+approval per command, but Hermes's hardline floor and its block on guessing a
+password through `sudo -S` still apply, and the file tools take paths on the
+machine, where `~` is the machine login's home. A binding with
+both a box and a machine is refused. Machine jobs need the isolated runtime: in
+legacy mode the tool refuses a machine with `isolated_runtime_required`.
+
 To return to the previous execution mode, set `NOCHEH_SECURITY_RUNTIME=legacy`
 and `NOCHEH_MEMORY_CONTEXT=legacy` and restart Hermes with this version's image.
 Sealed boxes need the isolated runtime. In legacy mode a job that asks for a box

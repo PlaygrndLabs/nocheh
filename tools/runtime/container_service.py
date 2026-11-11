@@ -9,6 +9,10 @@ from tools.operations.installation.configuration import ROOT
 
 
 def main(args):
+    if args==['machines']:
+        # nocheh-machines mounts only /machines, never the state folder.
+        from tools.runtime.machine_server import main as machines
+        return machines()
     state=Path(os.environ['NOCHEH_STATE_DIR'])
     if args==['executor-health']:
         try:

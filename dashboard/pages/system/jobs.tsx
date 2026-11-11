@@ -5,16 +5,19 @@
  * button at the top.
  */
 import {useState} from 'react';
-import {Check, Circle, CircleDot, Square} from 'lucide-react';
+import {Check, Circle, CircleDot, ScrollText, Square} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
+import {cleanupLine, machineErrorPhrase} from '../../lib/machines';
 import {refreshResources, useResource} from '../../lib/resource';
+import {href} from '../../lib/routes';
 import {ago, dateTime} from '../../lib/system-format';
 import {
   Badge,
   Button,
   Card,
   CardHeader,
+  Details,
   Field,
   Input,
   LoadError,
@@ -47,6 +50,11 @@ export type Job = {
   finished_at: string | null;
   created_at: string;
   error_code: string | null;
+  /** The owner's machine the job works on over SSH, and the plan its card showed. */
+  machine: {name: string} | null;
+  steps: string[] | null;
+  /** Ending what a stopped machine job left running on its machine: pending, then done or failed. */
+  machine_cleanup: 'pending' | 'done' | 'failed' | null;
 };
 type Limits = {
   cost_limit_usd: number;
@@ -68,6 +76,8 @@ export const jobStates: Record<string, [string, Tone]> = {
   failed: ['Failed', 'bad'],
 };
 const open = new Set(['proposed', 'approved', 'running', 'reporting']);
+// Stop ends a machine job's programs only once it has started; before that nothing ran there.
+const started = new Set(['running', 'reporting']);
 const money = (value: number) => '$' + (value < 10 ? value.toFixed(2) : value.toFixed(0));
 
 /** What a job has done and what it may still spend, in one line. */
@@ -81,6 +91,33 @@ export function jobProgress(job: Job): string {
   ]
     .filter(Boolean)
     .join(' · ');
+}
+
+/** Why a job ended early, in words. */
+const jobError = (code: string) =>
+  code.startsWith('job_machine') ? machineErrorPhrase(code) : code.replaceAll('_', ' ');
+
+/** The plan the owner approved for a machine job: open while it runs, folded once it ended. */
+function Plan({steps, open}: {steps: string[]; open: boolean}) {
+  const list = (
+    <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[13px]" aria-label="Plan">
+      {steps.map((step, index) => (
+        <li key={index} dir="auto">
+          {step}
+        </li>
+      ))}
+    </ol>
+  );
+  return open ? (
+    <div className="mt-2">
+      <p className="text-xs font-medium text-muted">Plan</p>
+      {list}
+    </div>
+  ) : (
+    <Details className="mt-2" summary={`Plan, ${steps.length === 1 ? '1 step' : `${steps.length} steps`}`}>
+      {list}
+    </Details>
+  );
 }
 
 function TodoList({items}: {items: Todo[]}) {
@@ -112,9 +149,17 @@ export function BackgroundJobs() {
   const {confirm, toast} = useFeedback();
   const [busy, setBusy] = useState('');
   const stop = async (job: Job) => {
+    const begun = started.has(job.state);
     const ok = await confirm({
       title: 'Stop this job?',
-      body: 'The running job is cancelled and no report is sent. What it already spent stays spent.',
+      body:
+        (begun ? 'The running job is cancelled and no report is sent.' : 'The job is cancelled before it starts.') +
+        ' What it already spent stays spent.' +
+        (job.machine
+          ? begun
+            ? ` Nocheh also ends every program its login runs on ${job.machine.name}.`
+            : ` Nothing has run on ${job.machine.name} yet.`
+          : ''),
       confirm: 'Stop',
       danger: true,
     });
@@ -150,6 +195,7 @@ export function BackgroundJobs() {
           <ul className="divide-y divide-line" aria-label="Background jobs">
             {list.map(job => {
               const [label, tone] = jobStates[job.state] ?? [job.state, 'neutral'];
+              const cleanup = job.machine ? cleanupLine(job.machine_cleanup, job.machine.name) : null;
               return (
                 <li key={job.id} className="px-5 py-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -159,7 +205,8 @@ export function BackgroundJobs() {
                       </p>
                       <p className="text-xs text-muted">
                         {chatName(job.chat)}
-                        {job.asked_in !== job.chat ? ` · asked in ${chatName(job.asked_in)}` : ''} ·{' '}
+                        {job.asked_in !== job.chat ? ` · asked in ${chatName(job.asked_in)}` : ''}
+                        {job.machine ? ` · on ${job.machine.name}` : ''} ·{' '}
                         {job.finished_at
                           ? `ended ${ago(job.finished_at)}`
                           : job.started_at
@@ -181,10 +228,26 @@ export function BackgroundJobs() {
                   <p className="mt-1 text-[13px] text-muted" title={dateTime(job.created_at)}>
                     {jobProgress(job)}
                     {(job.state === 'failed' || job.state === 'stopped') && job.error_code
-                      ? ` · ${job.error_code.replaceAll('_', ' ')}`
+                      ? ` · ${jobError(job.error_code)}`
                       : ''}
                   </p>
+                  {cleanup && (
+                    <p className={`mt-1 text-[13px] ${cleanup.tone === 'warn' ? 'text-warn' : 'text-muted'}`}>
+                      {cleanup.text}
+                    </p>
+                  )}
+                  {job.machine && job.steps?.length ? (
+                    <Plan steps={job.steps} open={open.has(job.state) || job.state === 'stopping'} />
+                  ) : null}
                   {(open.has(job.state) || job.state === 'stopping') && <TodoList items={job.todo} />}
+                  {job.machine && job.started_at && (
+                    <a
+                      className="mt-2 inline-flex items-center gap-1 text-[13px] text-accent-text hover:underline"
+                      href={href('system', {view: 'machines', job: job.id})}
+                    >
+                      <ScrollText className="size-3.5" aria-hidden /> Commands it ran on {job.machine.name}
+                    </a>
+                  )}
                 </li>
               );
             })}

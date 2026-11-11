@@ -92,6 +92,8 @@ def files(state, memory, config_path, blockers):
 
     state_erase = ('files', 'spool', 'reports', 'backups', 'security-before-activation', 'workflows')
     area(state, {**{name: ('erase', 'installation_content') for name in state_erase},
+                 # The keys of machines the erased control store listed; ./bin/nocheh up makes the folder again.
+                 'machines': ('erase', 'keys_of_erased_machines'),
                  **{name: ('preserve', 'saved_setup_and_credentials') for name in ('secrets', 'compose.env', 'assistant.json', 'previous-configuration')},
                  **{name: ('delegate', '') for name in ('admin', 'hermes', 'honcho')}})
     area(state / 'admin', {**{name: ('erase', 'installation_content_and_receipts') for name in ('backups', 'exports', 'jobs', 'tools', 'workflows', 'dashboard', 'downloads')},

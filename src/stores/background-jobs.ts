@@ -4,7 +4,7 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
+import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
@@ -20,6 +20,9 @@ import type {SourceRepository} from './retrieval.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {ManagedExecutionRepository,managedEventId,type ManagedInput} from './managed-execution.js';
+import {machineJob,machinePin,machineReady,machineTokenSet,type MachinePin} from './machines.js';
+import {followUpTurn} from './owner-autonomy.js';
+import {ProjectRepository} from './projects.js';
 
 export const backgroundJobSchema=`
 CREATE TABLE IF NOT EXISTS background_settings (
@@ -107,6 +110,12 @@ export const JOB_MINUTES=50;
 const DECISION_HOURS=24;
 // The report goes to the chat in parts the Telegram sender splits further.
 const REPORT_PART=12000;
+// A job card with the longest line a decided card adds stays below Telegram's 4,096 UTF-16 units, so it can always be sent and settled.
+const CARD_LIMIT=3800;
+// The lines a decided card adds under its text (settleJob).
+const outcomes=['running','running_elsewhere','queued','done','limited','stopped','stopping','failed','rejected','repo_removed','machine_off'];
+/** A machine job's plan as its card and run show it: one numbered line a step. */
+const numbered=(steps:string[])=>steps.map((step,index)=>`${index+1}. ${step}`).join('\n');
 export const closedStates=new Set(['done','failed','stopped','rejected']);
 // A GitHub copy a job's box may hold (ADR-0209). Same numbers and patterns as github.py, repo_fetch.py,
 // box_repo.py and security_launcher.py; a parity test reads them.
@@ -174,6 +183,14 @@ export function todoList(value:unknown):Todo[] {
   if(!Array.isArray(value))throw new HttpError(400,'invalid_run_progress');
   return value.slice(0,50).map(item=>{if(!item||typeof item!=='object'||Array.isArray(item))throw new HttpError(400,'invalid_run_progress');
     return {content:codePoints(item.content,200),status:codePoints(item.status,20)};});
+}
+/** A machine job's plan as the owner approves it: 1 to 12 steps of 1 to 200 characters each, on one line each. */
+export function planSteps(value:unknown):string[] {
+  if(!Array.isArray(value)||value.length<1||value.length>12)throw new HttpError(400,'invalid_job_request');
+  return value.map(step=>{
+    const text=typeof step==='string'?step.replace(/\s+/g,' ').trim().replace(unstorable,'\ufffd'):'';
+    if(!text||text.length>200)throw new HttpError(400,'invalid_job_request');return text;
+  });
 }
 /** A heartbeat's progress, strictly: the run's token counts and calls without usage, and its to-do list when it changed. */
 export function runProgress(value:unknown):RunProgress {
@@ -319,17 +336,36 @@ export class BackgroundJobRepository {
     const cost=jobPriced(rates)?Math.round(((tokens.input*rates.input!+tokens.output*rates.output!)/1e6+tokens.calls*(rates.request??0))*100)/100:null;
     return {...size,pages:tokens.pages,tokens:tokens.read,minutes:tokens.minutes,cost_usd:cost,rates};
   }
+  /** The machine an owner's job may work on, pinned from its row (ADR-0231): only for the owner's own live message, never a
+   *  follow-up, in their private chat or the group of an active project, never with the box, while machine control is on and
+   *  set up; and only a machine that is ready: on, with a trusted host key, and its last test passed. */
+  private async machineFor(principal:Reader,space:string,requester:string|null,box:boolean,name:string):Promise<MachinePin> {
+    const project=async()=>(await new ProjectRepository(this.control).effective(space)).project?.state==='active';
+    if(requester!==null||box||!machineTokenSet()||await followUpTurn(this.control,principal)||principal.scope!==null&&!await project()||
+      !(await this.control.query('SELECT 1 FROM machine_settings WHERE singleton AND enabled')).rowCount)throw new HttpError(409,'job_machine_not_allowed');
+    const row=(await this.control.query(`SELECT * FROM machines WHERE lower(name)=lower($1) AND ${machineReady}`,[name])).rows[0];
+    if(!row)throw new HttpError(409,'job_machine_not_found');
+    return machinePin(row);
+  }
+  /** Refuse a job whose card, with the longest line a decided card adds, would not fit Telegram: it could never be approved. */
+  private async cardFits(row:any,shown:{title:string;instruction:string}):Promise<void> {
+    const {text,lines}=await this.cardText(row,shown);
+    if(text.length+2+Math.max(...outcomes.map(name=>(lines[name]??'').length))>CARD_LIMIT)throw new HttpError(409,'job_card_too_long');
+  }
   /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
    * Nothing runs until whoever approves it presses Approve. */
   async start(principal:Reader,input:unknown) {
-    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box','repo'].includes(key))||
-      body.box!==undefined&&typeof body.box!=='boolean'||body.repo!==undefined&&(typeof body.repo!=='string'||!body.repo||body.repo.length>140))
+    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box','repo','machine','steps'].includes(key))||
+      body.box!==undefined&&typeof body.box!=='boolean'||body.repo!==undefined&&(typeof body.repo!=='string'||!body.repo||body.repo.length>140)||
+      body.machine!==undefined&&(typeof body.machine!=='string'||!body.machine.trim()||body.machine.length>40)||(body.machine===undefined)!==(body.steps===undefined))
       throw new HttpError(400,'invalid_job_request');
-    const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim();
+    const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim(),steps=body.steps===undefined?null:planSteps(body.steps);
     if(!title||!instruction)throw new HttpError(400,'invalid_job_request');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
-    const size=await this.sources.size(principal,{chat:body.chat===undefined?'':string(body.chat,64),from,to}),settings=await this.settings();
     const owner=this.access.policy().owner_id!,space=principal.space!,scope=space.split('/topic/')[0]===owner?owner:turn.scope,box=body.box===true;
+    // A machine only for the owner's own request, in their private chat or an active project's group; refused before anything is spent.
+    const machine=body.machine===undefined?null:await this.machineFor(principal,space,requester,box,(body.machine as string).trim());
+    const size=await this.sources.size(principal,{chat:body.chat===undefined?'':string(body.chat,64),from,to}),settings=await this.settings();
     // Only the owner's own job, asked in their private chat, gets the sealed box, and only while the box switch is on.
     if(box&&(!privateJob({scope,requester},owner)||!settings.box_tools))throw new HttpError(409,'job_box_not_allowed');
     // A GitHub copy only in the box, and only one the owner copied: refused before anything is spent.
@@ -345,31 +381,44 @@ export class BackgroundJobRepository {
       if(today>=settings.member_daily_jobs)throw new HttpError(409,'job_limit_reached');
     }
     const estimate=await this.estimate(size);
-    // A member's job over the owner's limit, or on a model whose cost cannot be measured, waits for the owner instead.
-    const priced=jobPriced(estimate.rates),approver=requester&&(!priced||(estimate.cost_usd??0)>settings.cost_limit_usd)?'owner':'requester';
+    // A member's job over the owner's limit, or on a model whose cost cannot be measured, waits for the owner instead. A machine
+    // job's card always goes to the owner's private chat, wherever it was asked.
+    const priced=jobPriced(estimate.rates),approver=machine||requester&&(!priced||(estimate.cost_usd??0)>settings.cost_limit_usd)?'owner':'requester';
     const costLimit=Math.max(settings.cost_limit_usd,Math.ceil((estimate.cost_usd??0)*1.5)),minutesLimit=Math.max(settings.minutes_limit,Math.ceil(estimate.minutes*1.5));
     const bytes=byteBudget(costLimit,estimate.rates);
     // Refused before the secret check spends anything: the agent narrows the period or splits the work.
     if(minutesLimit>JOB_MINUTES)throw new HttpError(409,'job_too_long');
+    // A card Telegram would refuse could never be approved: refused before the secret check, and again with the checked text.
+    const cardRow={estimate:{...estimate,from:from||null,to:to||null},rates:estimate.rates,cost_limit_usd:costLimit,minutes_limit:minutesLimit,notion_reads:notion,box,repo,requester,machine,steps};
+    await this.cardFits(cardRow,{title,instruction});
     const id=digest(canonical([protocol,source,binding,title,instruction,size.chat,from,to]));
-    const proposal=await this.derived.record({operation_id:'background-proposal:'+id,source,kind:'background_job_request',content:Buffer.from(canonical({title,instruction})),
-      producer:'nocheh',producer_version:protocol,configuration:{binding,chat:size.chat,from,to}});
+    // A machine job's plan is checked for secrets with its title and instruction; another plan for the same request is
+    // another proposal, which the fingerprint then refuses as a changed job.
+    const proposal=await this.derived.record({operation_id:'background-proposal:'+id+(steps?':'+digest(canonical(steps)):''),source,kind:'background_job_request',
+      content:Buffer.from(canonical(steps?{title,instruction,steps}:{title,instruction})),producer:'nocheh',producer_version:protocol,configuration:{binding,chat:size.chat,from,to}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),shown=object(JSON.parse(String((representation.value as any).text)));
-    // The pinned copy is part of what is approved; a job without one keeps the fingerprint it had before copies existed.
-    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes,...(repo?{repo}:{})}));
+    const plan=steps&&Array.isArray(shown.steps)?shown.steps.map(step=>String(step)):steps;
+    await this.cardFits({...cardRow,steps:plan},{title:String(shown.title),instruction:String(shown.instruction)});
+    // The pinned copy and machine and the plan are part of what is approved; a job without them keeps the fingerprint it had before them.
+    const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes,
+      ...(repo?{repo}:{}),...(machine?{machine,steps:plan}:{})}));
     const insert=(db:Pick<pg.PoolClient,'query'>)=>db.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
-      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo,notion_reads) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) ON CONFLICT DO NOTHING`,
+      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo,notion_reads,machine,steps) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) ON CONFLICT DO NOTHING`,
       [id,source,proposal,representation.revision,binding,scope,space,size.chat,'job-'+id.slice(0,24),requester,approver,fingerprint,
-        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo,notion]);
-    if(!repo)await insert(this.control);
+        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo,notion,machine,plan===null?null:JSON.stringify(plan)]);
+    if(!repo&&!machine)await insert(this.control);
     else {
-      // The copy row is locked before the job row exists, the order Remove takes them in: Remove waits for this short
-      // transaction and then withdraws the new job, or removed the copy first and nothing is recorded.
+      // The copy or machine row is locked before the job row exists, the order Remove takes them in: Remove waits for this
+      // short transaction and then withdraws the new job, or removed the copy first and nothing is recorded. The machine
+      // switch is taken first, as turning it off takes it.
       const db=await this.control.connect();
       try {
         await db.query('BEGIN');
-        if(!(await db.query('SELECT 1 FROM github_copies WHERE copy_id=$1 FOR SHARE',[repo.copy_id])).rowCount)throw new HttpError(409,'job_repo_not_allowed');
+        if(repo&&!(await db.query('SELECT 1 FROM github_copies WHERE copy_id=$1 FOR SHARE',[repo.copy_id])).rowCount)throw new HttpError(409,'job_repo_not_allowed');
+        if(machine&&!(await db.query('SELECT 1 FROM machine_settings WHERE singleton AND enabled FOR SHARE')).rowCount)throw new HttpError(409,'job_machine_not_allowed');
+        if(machine&&!(await db.query(`SELECT 1 FROM machines WHERE id=$1 AND ${machineReady} AND address=$2 AND port=$3 AND login=$4 AND host_key=$5 FOR SHARE`,
+          [machine.id,machine.address,machine.port,machine.login,machine.host_key])).rowCount)throw new HttpError(409,'job_machine_not_found');
         await insert(db);await db.query('COMMIT');
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     }
@@ -377,6 +426,7 @@ export class BackgroundJobRepository {
     if(row.fingerprint!==fingerprint)throw new HttpError(409,'job_changed');
     return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:jobPriced(row.rates)?Number(row.cost_limit_usd):null,minutes:row.minutes_limit},box:row.box as boolean,
       repo:row.repo?{name:row.repo.name,branch:row.repo.branch,commit:row.repo.commit,copied_at:row.repo.copied_at}:null,
+      ...(row.machine?{machine:{name:row.machine.name},steps:row.steps}:{}),
       message:row.state==='proposed'?'Nothing runs until it is approved.':'This job was already decided; its state is shown.'};
   }
   /** The exact proposal a card shows, read through the secret check of its audience. */
@@ -396,7 +446,13 @@ export class BackgroundJobRepository {
   }
   /** The card a person approves: the exact instruction, what it reads and what it may cost. */
   async card(id:string) {
-    const row=await this.row(id),shown=await this.proposal(row),prompts=await ownerPrompts(this.control),estimate=row.estimate;
+    const row=await this.row(id),{text,lines}=await this.cardText(row,await this.proposal(row));
+    const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
+    return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines};
+  }
+  /** A card's text from a job's values and the exact proposal it shows; also for a job not yet recorded. */
+  private async cardText(row:any,shown:{title:string;instruction:string}) {
+    const prompts=await ownerPrompts(this.control),estimate=row.estimate;
     const lines=labeledLines(backgroundTexts,prompts['background.texts']);
     const period=estimate.from||estimate.to?[estimate.from??'…',estimate.to??'…'].join(' – '):null;
     const values:Record<string,string|null|undefined>={title:shown.title,instruction:shown.instruction,
@@ -407,16 +463,17 @@ export class BackgroundJobRepository {
       // From the job's own pin, so a card settled after Remove still shows what was asked.
       repo:row.repo?fillTemplate(lines.repo!,{repo_name:row.repo.name,repo_branch:row.repo.branch,repo_commit:row.repo.commit.slice(0,7),
         repo_copied:row.repo.copied_at.slice(0,16).replace('T',' ')+' UTC',repo_size:Math.ceil(row.repo.bytes/1e6)+' MB, '+count(row.repo.files,'file','files')}):null,
+      // From the job's own pin too, and the plan exactly as approved.
+      machine:row.machine?fillTemplate(lines.machine!,{machine_name:row.machine.name,machine_login:row.machine.login,machine_address:row.machine.address}):null,
+      steps:row.steps?.length?lines.steps+'\n'+numbered(row.steps):null,
       checked:[lines.checked,row.requester?lines.member_limit:null].filter(Boolean).join(' ')||null};
     // What the job may do without asking is always on its card: a saved card without the line, or whose line
     // is left out for another missing value, gets it at the end.
     const template=prompts['background.card']??backgroundCard,kept=template.split('\n').filter(line=>lineKept(line,values));
     // A forced cost line carries the time limit too, when a saved card left it out with the cost limit's line.
-    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰'],['repo','📦']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}'+
+    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰'],['repo','📦'],['machine','🖥'],['steps','📋']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}'+
       (name==='unpriced'&&!kept.some(line=>line.includes('{minutes_limit}'))?' ({minutes_limit} min)':''));
-    const text=fillTemplate(missing.length?template+'\n\n'+missing.join('\n'):template,values);
-    const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
-    return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines};
+    return {text:fillTemplate(missing.length?template+'\n\n'+missing.join('\n'):template,values),lines};
   }
   /** The decision on a card, by the owner or, on their own job's card in its chat, the person who asked. */
   async decide(by:string,input:unknown,source:SourceReference) {
@@ -448,9 +505,10 @@ export class BackgroundJobRepository {
     return row.approver==='requester'&&!!row.requester&&row.requester===user&&row.scope===chat;
   }
   /** Jobs this chat can see: its own, or every job for the owner. A live turn in the owner's private chat also sees the
-   *  GitHub copies a box job may read, while the box switch is on. */
+   *  GitHub copies a box job may read, while the box switch is on; the owner's own live message there or in an active
+   *  project's group also sees the machines a job may work on, while machine control is on. */
   async list(principal:Reader) {
-    let rows,repos:{name:string;branch:string;commit:string;copied_at:string}[]|undefined;
+    let rows,repos:{name:string;branch:string;commit:string;copied_at:string}[]|undefined,machines:{name:string;ready:boolean}[]|undefined;
     if(principal.admin)rows=(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 50')).rows;
     else {
       const turn=await this.turns.binding(principal);
@@ -458,6 +516,7 @@ export class BackgroundJobRepository {
         // copied_at as ISO text, as in the pin: a turn's answer is rebuilt from its texts for the secret check, so a Date would become {}.
         repos=(await this.control.query('SELECT repo AS name,branch,left(commit_id,12) AS commit,copied_at FROM github_copies ORDER BY lower(repo)')).rows
           .map(row=>({...row,copied_at:new Date(row.copied_at).toISOString()}));
+      if(await this.machinesShown(principal))machines=(await this.control.query(`SELECT name,${machineReady} AS ready FROM machines ORDER BY lower(name)`)).rows;
       rows=principal.scope===null?(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 20')).rows:
         (await this.control.query('SELECT * FROM background_jobs WHERE scope=$1 ORDER BY created_at DESC LIMIT 20',[principal.scope])).rows;
     }
@@ -467,9 +526,17 @@ export class BackgroundJobRepository {
       jobs.push({id:row.id,title,state:row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.state,chat:row.target,asked_in:row.space_id,
         attempts:row.attempts,ended:row.ended,cost_usd:Number(row.cost_usd),cost_limit_usd:Number(row.cost_limit_usd),priced:jobPriced(row.rates),minutes_limit:row.minutes_limit,estimate:row.estimate,
         todo:row.todo,started_at:row.started_at,finished_at:row.finished_at,created_at:row.created_at,error_code:row.error_code,
-        ...(principal.admin?{logical_profile:row.logical_profile,approver:row.approver}:{})});
+        machine:row.machine?{name:row.machine.name}:null,steps:row.steps??null,
+        ...(principal.admin?{logical_profile:row.logical_profile,approver:row.approver,machine_cleanup:row.machine_cleanup??null}:{})});
     }
-    return {jobs,...(repos?{repos}:{})};
+    return {jobs,...(repos?{repos}:{}),...(machines?{machines}:{})};
+  }
+  /** Whether a turn may see the machines: the owner's own live message, not a job's run or a follow-up, in their private chat or
+   *  an active project's group, while machine control is on and set up. */
+  private async machinesShown(principal:Reader):Promise<boolean> {
+    if(!machineTokenSet()||!(await this.control.query('SELECT 1 FROM machine_settings WHERE singleton AND enabled')).rowCount)return false;
+    try{if((await this.liveTurn(principal)).requester!==null)return false;}catch(error){if(error instanceof HttpError)return false;throw error;}
+    return !await followUpTurn(this.control,principal)&&(principal.scope===null||(await new ProjectRepository(this.control).effective(principal.space!)).project?.state==='active');
   }
   /** The GitHub copies a box job may read, and the digests jobs still pin: an approved job, a running job within its box
    *  time and a proposal still waiting for its decision, none stopped and none whose copy was removed. github.py keeps
@@ -560,8 +627,10 @@ export class BackgroundJobRepository {
   async halt(id:string):Promise<{id:string;state:'stopped'|'stopping'}> {
     const row=await this.row(id);
     if(closedStates.has(row.state))throw new HttpError(409,'job_not_running');
+    // A machine job that started has what it runs on its machine ended too (machines.ts).
     const changed=await this.control.query(`UPDATE background_jobs SET cancel_requested=true,state=CASE WHEN state='proposed' THEN 'stopped' ELSE state END,
-      finished_at=CASE WHEN state='proposed' THEN now() END,revision=revision+1,updated_at=now() WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id]);
+      finished_at=CASE WHEN state='proposed' THEN now() END,machine_cleanup=CASE WHEN machine IS NOT NULL AND state IN ('running','reporting') THEN coalesce(machine_cleanup,'pending')
+      ELSE machine_cleanup END,revision=revision+1,updated_at=now() WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id]);
     if(!changed.rowCount)throw new HttpError(409,'job_not_running');
     const run=await this.latest(row.id);
     if(run&&['captured','running'].includes(run.run_state))await this.runs.end(run.event_id,'stopped');
@@ -600,7 +669,10 @@ export class BackgroundJobRepository {
     // ends. A failure here fails the tick, which is tried again (ADR-0204).
     if(state==='stopped'||(await this.control.query('SELECT cancel_requested FROM background_jobs WHERE id=$1',[row.id])).rows[0]?.cancel_requested)
       await this.stopped(row.id);
-    const changed=await this.control.query(`UPDATE background_jobs SET state=$2,error_code=$3,finished_at=now(),revision=revision+1,updated_at=now()
+    // A machine job that ran and failed or was stopped has its programs on the machine ended; one that ends well leaves them,
+    // also when only its report then fails. A limit or a Stop while it reports has set its cleanup already.
+    const changed=await this.control.query(`UPDATE background_jobs SET state=$2,error_code=$3,finished_at=now(),machine_cleanup=CASE WHEN machine IS NOT NULL
+      AND started_at IS NOT NULL AND state<>'reporting' AND $2 IN ('failed','stopped') THEN coalesce(machine_cleanup,'pending') ELSE machine_cleanup END,revision=revision+1,updated_at=now()
       WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id,state,code]);
     if(changed.rowCount)await this.settled(row.id);
     return observation(state==='done'?'completed':state==='stopped'?'cancelled':'failed','assistant',0,Date.now(),state==='failed'?'workflow_execution_failed':null);
@@ -700,7 +772,8 @@ export class BackgroundJobRepository {
     const note=await this.derived.record({operation_id:'background-limit:'+row.id,source:row.source_reference,parents:[row.proposal_reference],
       kind:'background_limit_note',content:Buffer.from(canonical({text})),producer:'nocheh',producer_version:protocol,
       configuration:{binding:run.run_binding,job_id:row.id,limit}});
-    await this.control.query(`UPDATE background_jobs SET state='reporting',ended=$2,report_reference=$3,revision=revision+1,updated_at=now()
+    await this.control.query(`UPDATE background_jobs SET state='reporting',ended=$2,report_reference=$3,
+      machine_cleanup=CASE WHEN machine IS NOT NULL THEN coalesce(machine_cleanup,'pending') ELSE machine_cleanup END,revision=revision+1,updated_at=now()
       WHERE id=$1 AND state='running'`,[row.id,limit,note]);
     return this.report({...row,state:'reporting',ended:limit,report_reference:note});
   }
@@ -763,8 +836,9 @@ export class BackgroundJobRepository {
    *  the first message again with the restart note, whose
    *  to-do line is kept only while carriedTodo allows it. An earlier run ran only if it made a model call, after which Hermes
    *  has its first message: one that failed before (no box, a busy profile) left nothing to resume or restart. A box run also
-   *  says what the box holds, every time: the box can be new; so does the GitHub copy it pinned. */
-  async runText(job:any,run:any,binding:GuardBinding,box=false):Promise<string> {
+   *  says what the box holds, every time: the box can be new; so does the GitHub copy it pinned. A run on the job's machine
+   *  says which machine and the plan the owner approved, every time. */
+  async runText(job:any,run:any,binding:GuardBinding,box=false,machine=false):Promise<string> {
     const prompts=await ownerPrompts(this.control),shown=await this.proposal(job);
     const ran=run.attempt>1?(await this.control.query(`SELECT r.binding FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id
       WHERE b.job_id=$1 AND b.attempt<$2 AND r.input_reference IS NOT NULL AND (b.unknown_calls>0 OR coalesce((b.tokens->>'calls')::integer,0)>0)`,
@@ -773,6 +847,8 @@ export class BackgroundJobRepository {
     let text=same?fillTemplate(prompts['background.resume']??backgroundResume,{title:shown.title}):await this.firstMessage(job,shown,prompts);
     if(ran.length&&!same){const todo=await this.carriedTodo(job.id,binding);
       text+='\n\n'+fillTemplate(prompts['background.restart']??backgroundRestart,{todo:todo?.length?todo.map(item=>item.content+' ('+item.status+')').join('; '):null});}
+    if(machine&&job.machine)return text+'\n\n'+fillTemplate(prompts['background.machine']??backgroundMachine,{machine_name:job.machine.name,machine_login:job.machine.login,
+      machine_address:job.machine.address,steps:numbered(job.steps??[])});
     return box?text+'\n\n'+(prompts['background.box']??backgroundBox)+(job.repo?'\n\n'+fillTemplate(prompts['background.repo']??backgroundRepo,{repo:job.repo.name,
       branch:job.repo.branch,commit:job.repo.commit,copied:job.repo.copied_at.slice(0,16).replace('T',' ')+' UTC'}):''):text;
   }
@@ -828,7 +904,7 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
     if(!job?.started_at)throw new HttpError(409,'job_not_running');
     const rates=jobRates(job.rates),{soft,hard}=jobDeadlines(job);
     const prior=Number((await this.control.query('SELECT coalesce(sum(cost_usd),0) AS cost FROM background_runs WHERE job_id=$1 AND attempt<$2',[row.job_id,run.attempt])).rows[0].cost);
-    return {background:{job_id:row.job_id,attempt:run.attempt,max_iterations:JOB_ITERATIONS,box:await this.box(row),
+    return {background:{job_id:row.job_id,attempt:run.attempt,max_iterations:JOB_ITERATIONS,box:await this.box(row),machine:await this.machine(row),
       soft_deadline:Math.floor(soft/1000),hard_deadline:Math.floor(hard/1000),rates,cost_limit_usd:jobPriced(rates)?Number(job.cost_limit_usd):null,prior_cost_usd:prior}};
   }
   /** Whether a run runs in its job's sealed box: the same rule that puts the box in its binding (job-box.ts). */
@@ -836,10 +912,14 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
     const owner=this.access.policy().owner_id;
     return !!await boxJob(this.control,owner,row.source_reference,{owner:row.scope===owner,job:row.job_id,logical_profile:row.logical_profile},await this.guards.state());
   }
+  /** Whether a run works on its job's machine: the same rule that puts the machine in its binding (machines.ts). */
+  private async machine(row:any):Promise<boolean> {
+    return !!await machineJob(this.control,this.access.policy().owner_id,row.source_reference,{job:row.job_id,logical_profile:row.logical_profile});
+  }
   protected async build(row:any){
     await this.current(row);const principal=this.principal(row),job=await this.jobs.allowed(row),run=await this.runRow(row.event_id);
     await this.turns.register(principal,{logical_profile:row.logical_profile,job:row.job_id});
-    const input:ManagedInput={principal,text:await this.jobs.runText(job,run,row.binding,await this.box(row)),transcripts:[],files:[],source_key:'nocheh:operation:'+row.event_id};
+    const input:ManagedInput={principal,text:await this.jobs.runText(job,run,row.binding,await this.box(row),await this.machine(row)),transcripts:[],files:[],source_key:'nocheh:operation:'+row.event_id};
     await this.turns.prepared.allow(principal,input);
     const reference=await this.derived.record({operation_id:'background-input:'+row.event_id,source:row.source_reference,parents:[job.proposal_reference],
       kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:this.protocol,

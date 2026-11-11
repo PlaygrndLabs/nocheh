@@ -58,9 +58,15 @@ FROM docker:29.9.3-cli@sha256:2357639ad1ea7d0194134bf3292622fd4e562483966ed674e5
 # not repeat apt-get on every watched dashboard rebuild.
 FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS management-base
 # python3-cryptography signs the GitHub app's requests for short repo keys (ADR-0210).
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-yaml python3-cryptography git ca-certificates && rm -rf /var/lib/apt/lists/*
+# openssh-client lets nocheh-machines make machine keys and run approved commands on the owner's machines.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-yaml python3-cryptography git ca-certificates openssh-client && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
+# Compose runs management as NOCHEH_UID, and ssh refuses a uid without a passwd entry ("No user exists for uid").
+ARG LOCAL_UID=1000
+ARG LOCAL_GID=1000
+RUN (getent group ${LOCAL_GID} >/dev/null || groupadd --gid ${LOCAL_GID} nocheh) && \
+    (getent passwd ${LOCAL_UID} >/dev/null || useradd --no-log-init --uid ${LOCAL_UID} --gid ${LOCAL_GID} --no-create-home --home-dir /tmp --shell /usr/sbin/nologin nocheh)
 
 FROM management-base AS management
 WORKDIR /app

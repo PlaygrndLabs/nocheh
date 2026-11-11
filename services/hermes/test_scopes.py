@@ -21,6 +21,7 @@ REPLY_TOOLS={'memory','session_search','nocheh_archive_search','nocheh_archive_r
              'nocheh_knowledge_status','nocheh_owner_read','nocheh_telegram_destinations','nocheh_tasks','nocheh_notion','nocheh_background_job','skills_list','skill_view'}
 JOB_TOOLS=(REPLY_TOOLS-{'nocheh_background_job'})|{'todo_list'}
 JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','nocheh_shell','nocheh_browser'})|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
+JOB_MACHINE_TOOLS=JOB_BOX_TOOLS-{'execute_code'}
 
 
 class ScopeTests(unittest.TestCase):
@@ -144,8 +145,9 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
         self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'nocheh_background_job'},JOB_TOOLS))
         self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'nocheh_background_job','nocheh_shell','nocheh_browser'},JOB_BOX_TOOLS))
+        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'nocheh_background_job','nocheh_shell','nocheh_browser'},JOB_MACHINE_TOOLS))
         self.assertIn('nocheh_background_job',REPLY_TOOLS)
-        for tools in (JOB_TOOLS,JOB_BOX_TOOLS):self.assertNotIn('nocheh_background_job',tools)
+        for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('nocheh_background_job',tools)
 
     def test_background_job_steps_add_only_the_native_todo_list(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override

@@ -31,8 +31,8 @@ const routes = [
   ['chats?chat=-10042', 'Chats'],
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm', 'facts'].map(view => ['memory?view=' + view, 'Memory']),
-  ...['work', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'advanced'].map(view => ['settings?view=' + view, 'Settings']),
+  ...['work', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'machines', 'advanced'].map(view => ['settings?view=' + view, 'Settings']),
 ];
 
 const relay = net

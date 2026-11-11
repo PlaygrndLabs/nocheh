@@ -44,9 +44,11 @@ def docker(method,path,body=None):
         return json.loads(raw) if raw else {}
     finally:client.close()
 
-def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=None):
+def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=None,machine=False):
     if not re.fullmatch(r'nocheh-[a-f0-9]{24}',profile):raise ValueError('invalid_isolated_profile')
     if box is not None and not BOX_NAME.fullmatch(box):raise ValueError('invalid_job_box')
+    # A job run on the owner's machine reaches it only through nocheh-security, as this turn: no mount, no network.
+    if type(machine) is not bool or machine and box is not None:raise ValueError('invalid_job_machine')
     root=Path(host_root)
     if not root.is_absolute() or any(c in str(root) for c in '\r\n,:'):raise ValueError('invalid_host_profile_root')
     if not re.fullmatch(r'sha256:[a-f0-9]{64}',image):raise ValueError('pinned_runtime_image_required')
@@ -68,7 +70,8 @@ def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=
       'Cmd':['python','-m','services.hermes.assistant_turn'],
       'Env':['HOME=/tmp/home','HERMES_HOME=/profile','NOCHEH_CAPTURE_ENABLED=0','NOCHEH_ISOLATED_TURN=1',
              'ARCHIVE_URL=http://nocheh-security:8786','GUARD_URL=http://nocheh-security:8786',
-             *(['TERMINAL_ENV=nocheh_box','TERMINAL_CWD=/work','NOCHEH_BOX_SOCKET=/box/exec.sock'] if box is not None else [])],
+             *(['TERMINAL_ENV=nocheh_box','TERMINAL_CWD=/work','NOCHEH_BOX_SOCKET=/box/exec.sock'] if box is not None else []),
+             *(['TERMINAL_ENV=nocheh_machine','TERMINAL_CWD=~','NOCHEH_MACHINE_RUN=1'] if machine else [])],
       'OpenStdin':True,'StdinOnce':True,'AttachStdin':True,'AttachStdout':True,'AttachStderr':False,'Tty':False,
       'Labels':{'nocheh.role':'isolated-turn','nocheh.profile':profile},
       'HostConfig':{'ReadonlyRootfs':True,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],
@@ -571,6 +574,9 @@ class Handler(BaseHTTPRequestHandler):
             with build_opener(ProxyHandler({})).open(request,timeout=120) as response:binding=json.load(response)
             profile=binding['profile'];validate_local_profile(profile)
             boxed=binding.get('box') is not None
+            # A machine job's run: the binding names its job and machine. A run is never both in a box and on a machine.
+            machine=binding.get('machine') is not None
+            if machine and (boxed or not isinstance(binding['machine'],dict)):raise ValueError('invalid_job_machine')
             with ACTIVE_LOCK:
                 if profile in ACTIVE:raise ValueError('profile_busy')
                 if boxed:
@@ -591,7 +597,7 @@ class Handler(BaseHTTPRequestHandler):
                 # A box the sweep removed meanwhile is not mounted; Docker would recreate its volume empty.
                 if box and not running(box[0]):box=None
                 spec=container_spec(profile,self.server.host_profiles,self.server.image,self.server.network,int(os.environ['NOCHEH_UID']),int(os.environ['NOCHEH_GID']),
-                                    os.environ.get('NOCHEH_DEV_TURN_SOURCE') or None,box[1] if box else None)
+                                    os.environ.get('NOCHEH_DEV_TURN_SOURCE') or None,box[1] if box else None,machine=machine)
                 identifier=docker('POST','/containers/create?name=nocheh-turn-'+uuid.uuid4().hex,spec)['Id']
                 # Cleared only when the turn ends by itself, with exit code 0, no kill and a done result.
                 if box:ABNORMAL.add(job)
