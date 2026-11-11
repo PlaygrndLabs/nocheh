@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {drainSourceSpool} from '../src/stores/capture.js';
 import {browserManifests} from '../src/stores/browser-capture.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -21,7 +21,7 @@ test('browser originals and file manifests survive database outages and replay w
     if(down()&&['query','connect'].includes(String(key)))return Promise.reject(Error('synthetic database outage'));return value.apply(target,args);
   }:value;}});
   const stores:StorePools={...connected,archive:outage(connected.archive,()=>archiveDown),control:outage(connected.control,()=>controlDown)};
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
     runtime:async()=>{throw Error('capture cannot invoke runtime');},memoryEngine:honchoEngine(async()=>{throw Error('capture cannot invoke memory');})}),owner={admin:true,scope:null};
   const original=Buffer.from([0,1,2,255,13,10]),text='Original text  \r\n😃',body={scope:'123',profile:'research',conversation:'fixture-'+Date.now(),id:'submission',text,
     files:[{name:'exact.bin',kind:'file',bytes_base64:original.toString('base64')},{name:'empty.txt',kind:'file',bytes_base64:''}]};

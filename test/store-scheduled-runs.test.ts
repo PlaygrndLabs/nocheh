@@ -7,7 +7,7 @@ import pg from 'pg';
 import {canonical,digest} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices,type FakeCall} from './fixture-brain.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
@@ -26,7 +26,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
       if(failCompletion&&String(sql).startsWith('UPDATE managed_runs SET state=$2,result_reference')){failCompletion=false;return Promise.reject(Error('lost control completion'));}
       return (client.query as any)(sql,...args);};const value=Reflect.get(client,name);return typeof value==='function'?value.bind(client):value;}});
   };const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(op,body)=>{
+  const runtime:FakeCall=async(op,body)=>{
     if(op==='guard.detect')return {literals:String(body.text).includes('fixture-secret')?['fixture-secret']:[]};
     calls.push({op,body});if(op==='schedule.advance')return {state:'waiting',next_attempt:Date.now()+60000};
     assert.ok(op.startsWith('run.'),'no external delivery while staging a proposal');const id=String(body.event_id);
@@ -42,7 +42,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:'Scheduled answer fixture-secret'});
     native.set(id,{state:'done'});if(mode==='ack_lost'){mode='done';throw Error('lost native acknowledgement');}return {state:'done'};
   };
-  const s=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:['-123']}),runtime,
+  const s=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:['-123']}),runtime,
     memoryEngine:honchoEngine(async()=>{throw Error('no providers');})}),owner={admin:true,scope:null};
   const authority=async()=>({owner:'inngest' as const,epoch:(await s.schedules.ownership()).epoch});
   const capture=async(options:Record<string,unknown>={})=>{

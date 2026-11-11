@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {SourceRetirementRepository} from '../src/stores/source-retirement.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
@@ -18,7 +18,7 @@ test('owner retirement covers every message revision, preserves evidence and del
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),group=String(-Date.now()),owner={admin:true,scope:null};
   const cancelled:string[]=[];
-  const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
+  const s=fixtureServices(stores,{dataDir:'/tmp/nocheh-retirement-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
     runtime:async(operation,input)=>{if(operation==='run.cancel'){cancelled.push(String(input.event_id));return {state:'cancelled'};}throw Error('runtime_not_expected');},
     memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const prefix='retirement:'+Date.now();
@@ -91,7 +91,7 @@ test('reaction state rejects superseded and delayed observations while keeping a
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),group=String(-Date.now()),prefix='reactions:'+Date.now();
-  const s=storageServices(stores,{dataDir:'/tmp/nocheh-reaction-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
+  const s=fixtureServices(stores,{dataDir:'/tmp/nocheh-reaction-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
     runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const checkmark={type:'emoji',emoji:'✅'},heart={type:'emoji',emoji:'❤️'};
   const capture=async(label:string,update:number,body:any)=>{
@@ -140,7 +140,7 @@ test('retirement offers delivered replies that repeat the message without retiri
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),chat=String(Date.now()%1000000000+1000),owner={admin:true,scope:null};
-  const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-related',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
+  const s=fixtureServices(stores,{dataDir:'/tmp/nocheh-retirement-related',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
     runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const prefix='related:'+Date.now();
   const capture=async(label:string,id:number,text:string,kind='telegram_update')=>(await s.capture.capture({version:1,key:prefix+':'+label,origin:'live',bot_id:'fixture',
@@ -167,7 +167,7 @@ test('native history learns which recorded turns are retired or answered by a re
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),chat=String(Date.now()%1000000000+2000),owner={admin:true,scope:null};
-  const s=storageServices(stores,{dataDir:'/tmp/nocheh-retirement-history',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
+  const s=fixtureServices(stores,{dataDir:'/tmp/nocheh-retirement-history',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
     runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const prefix='history:'+Date.now(),base=Date.now()%1000000000,update=(id:number)=>'telegram:fixture:update:'+(base+id);
   const capture=async(key:string,id:number,text:string,kind='telegram_update')=>(await s.capture.capture({version:1,key,origin:'live',bot_id:'fixture',

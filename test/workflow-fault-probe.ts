@@ -13,6 +13,7 @@ import {setGuardMode} from '../src/guarded.js';
 import {authorize,readJson,json,object} from '../src/http.js';
 import {startLoops} from '../src/worker-loops.js';
 import {hermesAdapter} from '../src/hermes-adapter.js';
+import {hermesBrain} from '../src/brain/hermes.js';
 import {runtimeCall} from '../src/runtime.js';
 import {workflowClient,connectWorkflows} from '../src/workflows/client.js';
 import {workflowFunctions} from '../src/workflows/engine.js';
@@ -69,7 +70,8 @@ try{
     server.listen(8781,'0.0.0.0');close=()=>new Promise<void>(resolve=>server.close(()=>resolve()));
   }else if(action==='worker'){
     const client=workflowClient('pipeline'),runtime=runtimeCall(hermesAdapter({url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!}));
-    const connection=await connectWorkflows('pipeline',client,workflowFunctions(client,pool,pipelineOperations(pool,config,runtime)));
+    const brain=hermesBrain({url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!});
+    const connection=await connectWorkflows('pipeline',client,workflowFunctions(client,pool,pipelineOperations(pool,config,runtime,brain)));
     const report=async()=>{if(connection.state==='ACTIVE')await registerWorker(pool,'pipeline',['preparation','telegram']);};
     await report();const timer=setInterval(()=>{void report().catch(()=>{});},1000);
     close=async()=>{clearInterval(timer);await connection.close();};

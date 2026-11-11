@@ -9,7 +9,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader,scopeToken} from '../src/access.js';
 import {HttpError,json} from '../src/http.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {OwnerStorageApi,ownerStoragePath} from '../src/stores/owner-api.js';
 import {existsSync,readFileSync} from 'node:fs';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -38,7 +38,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-owner-api-')),key='owner-api:'+Date.now(),token=digest(key);
   let engines=0;
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
     runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');}),
     transcription:{name:'fixture',version:'1',outputKind:'transcript',async run(bytes){engines++;assert.equal(bytes.toString(),'Original voice bytes');return 'Generated reading';}}});
   const api=new OwnerStorageApi(services);

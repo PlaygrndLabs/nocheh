@@ -1,7 +1,7 @@
 import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import type {RuntimeCall} from '../runtime.js';
+import {brainOperation,type Brain} from '../brain/brain.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import type {ExecutionAuthority} from '../workflows/store.js';
 import type {SourceAccessRepository} from './access.js';
@@ -16,8 +16,8 @@ import type {TelegramActionRepository} from './telegram-actions.js';
 export class ScheduledRunRepository extends ManagedExecutionRepository {
   protected readonly channel='scheduler' as const;
   protected readonly family='schedules' as const;
-  constructor(access:SourceAccessRepository,derived:DerivedRepository,turns:RuntimeTurnRepository,token:string,call:RuntimeCall,
-    readonly schedules:ScheduleRepository,readonly actions:TelegramActionRepository){super(access,derived,turns,token,call);}
+  constructor(access:SourceAccessRepository,derived:DerivedRepository,turns:RuntimeTurnRepository,token:string,brain:Brain,
+    readonly schedules:ScheduleRepository,readonly actions:TelegramActionRepository){super(access,derived,turns,token,brain);}
   protected async readiness(_row:any){return observation('completed','preparation');}
   private async version(row:any){
     const version=(await this.control.query('SELECT * FROM schedule_versions WHERE id=$1',[row.schedule_version])).rows[0];
@@ -91,7 +91,7 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
     if(binding.mode==='on')await this.guards.prepare(row.prompt_reference,this.schedules.detectorVersion,this.schedules.detect);
     const ownership=await this.schedules.ownership();
     if(ownership.owner!==authority.owner||ownership.epoch!==authority.epoch||!ownership.admission)return observation('waiting','schedule',0,Date.now()+30000,'owner_paused');
-    const result=await this.call('schedule.advance',{logical_profile:row.logical_profile,job_id:row.job_id,cursor:row.cursor,owner_epoch:authority.epoch},20000);
+    const result=await brainOperation(this.brain,'advanceSchedules')({logical_profile:row.logical_profile,job_id:row.job_id,cursor:row.cursor,owner_epoch:authority.epoch});
     if(!['waiting','completed','skipped'].includes(String(result.state))||result.state==='waiting'&&(!Number.isSafeInteger(result.next_attempt)||Number(result.next_attempt)<0))
       throw new HttpError(503,'invalid_schedule_observation');
     return observation(result.state as 'waiting'|'completed'|'skipped','schedule',0,result.state==='waiting'?Number(result.next_attempt):Date.now(),result.state==='waiting'?'prerequisite':null);

@@ -290,7 +290,9 @@ function Connections({m}: {m: any}) {
   const telegram = m?.telegram_enabled
     ? (telegramStates[status.telegram] ?? {label: readable(status.telegram) || 'Unknown', tone: 'neutral' as Tone})
     : {label: 'Turned off', tone: 'neutral' as Tone};
-  const capabilities = Object.entries(runtime.data?.capabilities ?? {}).filter(([, v]) => typeof v === 'boolean');
+  // What the connected brain offers; Nocheh's own helper services are not listed.
+  const brain = runtime.data?.brain;
+  const capabilities = Object.entries(brain?.capabilities ?? {}).filter(([, v]) => typeof v === 'boolean');
   const worker = (value: string | undefined) =>
     ['ready', 'connected', 'running'].includes(String(value))
       ? {tone: 'good' as Tone, label: 'Working'}
@@ -340,7 +342,14 @@ function Connections({m}: {m: any}) {
                     ? 'Unknown'
                     : 'Checking…'
               }
-              detail={runtime.data?.status?.model ? `Model: ${runtime.data.status.model}` : undefined}
+              detail={
+                [
+                  brain?.name && `Brain: ${brain.name}`,
+                  runtime.data?.status?.model && `Model: ${runtime.data.status.model}`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ') || undefined
+              }
             />
             <ConnectionRow name="Message capture" tone={capture.tone} state={capture.label} />
             <ConnectionRow name="Background work scheduler" tone={scheduler.tone} state={scheduler.label} />

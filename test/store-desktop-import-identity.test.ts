@@ -5,7 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {observedSource} from '../src/observed-source.js';
 import {sourceObjectId} from '../src/source-model.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 const desktop=(scope:string,chat:{id:number;type:string},message:Record<string,unknown>,label=''):Envelope=>({version:1,
@@ -65,7 +65,7 @@ test('imported copies of live messages are marked and lose to the live copy; new
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),bare=Date.now(),group='-100'+bare,owner={admin:true,scope:null};
-  const s=storageServices(stores,{dataDir:'/tmp/nocheh-desktop-identity-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
+  const s=fixtureServices(stores,{dataDir:'/tmp/nocheh-desktop-identity-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
     runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const chat={id:bare,type:'public_supergroup'};
   const record=async(value:Envelope)=>await s.imports.record(owner,{event:value,artifacts:[],derived:[]}) as any;

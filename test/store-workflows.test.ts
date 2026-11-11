@@ -7,7 +7,7 @@ import pg from 'pg';
 import {randomUUID} from 'node:crypto';
 import {digest,type Envelope} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {boundStorageOperations,storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
@@ -143,7 +143,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-workflow-')),key='workflows:'+Date.now(),group='-'+Date.now(),owner='123';
   let sends=0,reviews=0,reasoning=0,engines=0,loseReply=true,sequence=0,targetIds:string[]=[],duringObserve:(()=>Promise<void>)|undefined;
   const remote=new Map<string,any[]>(),runtimeCalls:string[]=[];let reviewRunning=false,reviewObservations=0;
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:owner,group_ids:[group]}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:owner,group_ids:[group]}),
     runtime:async(operation,input)=>{
       runtimeCalls.push(operation);
       if(operation==='guard.detect')return {literals:[]};

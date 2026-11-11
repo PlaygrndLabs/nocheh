@@ -10,7 +10,7 @@ import {turnToken,reader} from '../src/access.js';
 import type {IncomingMessage} from 'node:http';
 import {preparedAudience} from '../src/stores/prepared-context.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {brokerServer} from '../src/security/broker.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -22,7 +22,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-broker-')),key='broker:'+Date.now(),token='synthetic-service-token-only-for-tests';
   let detectors=0,revocation=false;const calls:{url:string;body:unknown}[]=[];
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
     runtime:async(_operation,input)=>{detectors++;return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no native provider');})});
   const mock:typeof fetch=async(url,init)=>{
     calls.push({url:String(url),body:init?.body?JSON.parse(String(init.body)):null});

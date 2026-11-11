@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('native profile configuration retains stable preference identities while revoking old execution generations',
@@ -15,7 +15,7 @@ test('native profile configuration retains stable preference identities while re
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-profiles-')),key='profile-'+Date.now(),owner={admin:true,scope:null};
-  const groups=['-456'],s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:groups}),
+  const groups=['-456'],s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:groups}),
     runtime:async()=>{throw Error('no runtime calls');},memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   try {
     await s.guards.reconcile();await s.guards.setMode('on');const before=await s.guards.state();

@@ -6,6 +6,7 @@ import {conversationScope} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
 import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import {pageDate} from '../conversation-page.js';
@@ -287,7 +288,7 @@ export class BackgroundJobRepository {
   stopped:(id:string)=>Promise<void>=async()=>{};
   constructor(readonly access:SourceAccessRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
     readonly turns:RuntimeTurnRepository,readonly sources:SourceRepository,readonly telegram:TelegramActionRepository,
-    readonly call:RuntimeCall,readonly detect:(text:string)=>Promise<unknown>,token:string){
+    readonly call:RuntimeCall,readonly brain:Brain,readonly detect:(text:string)=>Promise<unknown>,token:string){
     this.runs=new BackgroundRunRepository(this,token);
   }
   get control(){return this.access.stores.control;}
@@ -875,7 +876,7 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
   protected override get resultKind(){return 'background_result';}
   protected override get protocol(){return 'managed-background-v1';}
   protected override readonly carries=true;
-  constructor(readonly jobs:BackgroundJobRepository,token:string){super(jobs.access,jobs.derived,jobs.turns,token,jobs.call);}
+  constructor(readonly jobs:BackgroundJobRepository,token:string){super(jobs.access,jobs.derived,jobs.turns,token,jobs.brain);}
   private async runRow(id:string){
     const run=(await this.control.query('SELECT * FROM background_runs WHERE event_id=$1',[id])).rows[0];
     if(!run)throw new HttpError(404,'captured_run_not_found');return run;

@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -20,7 +20,7 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
   const fixture=async(topic?:number,autoFollowup=true,wording='Orion launch schedule milestone is October.')=>{
     const label=key+':'+(++sequence),group='-'+(Date.now()*10+sequence),destination=group+(topic?'/topic/'+topic:''),sent:Record<string,unknown>[]=[];
     const receipts=new Set<string>();let loseReceipt=false;
-    const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(label),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+    const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(label),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
       runtime:async(operation,input)=>{
         if(operation==='guard.detect')return {literals:[]};
         assert.equal(operation,'action.execute');const id=String(input.id);

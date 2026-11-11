@@ -9,7 +9,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {storageServer} from '../src/stores/server.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
@@ -23,7 +23,7 @@ test('host imports preserve originals through retries and fence job writes, lear
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-import-')),key='import:'+Date.now(),token=digest(key);
   const owner={admin:true,scope:null},policy={enabled:true,owner_id:'123',group_ids:[]};
   const runtime=async()=>{throw Error('imports must not execute an agent or provider');};
-  const s=storageServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime,memoryEngine:honchoEngine(runtime as any)});
+  const s=fixtureServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime,memoryEngine:honchoEngine(runtime as any)});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
     hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await s.guards.reconcile();await s.configuration.configure(policy,'on');
@@ -117,7 +117,7 @@ test('an import shows how far its messages are prepared, becomes ready once all 
     if(operation!=='telegram.notice')throw Error('only the ready notice is sent');
     notices.push(body);return {state:telegram};
   };
-  const s=storageServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime:runtime as any,memoryEngine:honchoEngine(runtime as any)});
+  const s=fixtureServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime:runtime as any,memoryEngine:honchoEngine(runtime as any)});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
     hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await s.guards.reconcile();await s.configuration.configure(policy,'on');

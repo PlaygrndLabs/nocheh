@@ -6,6 +6,7 @@ import {ingest} from '../src/archive.js';
 import {setGuardMode,guardState} from '../src/guarded.js';
 import {requestPreparation} from '../src/workflows/preparation-request.js';
 import {pipelineOperations} from '../src/workflows/pipeline.js';
+import {fixtureBrain} from './fixture-brain.js';
 import {pauseFamily,switchFamily} from '../src/workflows/store.js';
 import {settings} from './fixture-settings.js';
 import {spacePolicy} from '../src/spaces.js';
@@ -36,7 +37,7 @@ test('preparation admission never bypasses Inngest; guarding resumes with a new 
     const runtime=async()=>{calls++;throw Error('a read must not run preparation');};
     assert.equal((await sharedContext(pool,reader,'Shared',runtime)).sources.length,0);assert.equal(calls,0);
     const event=(await pool.query("SELECT id FROM events WHERE kind='shared_knowledge'")).rows[0].id;
-    const operation=pipelineOperations(pool,settings(),async(op)=>{assert.equal(op,'guard.detect');return {literals:['mango123']};}).preparation!;
+    const operation=pipelineOperations(pool,settings(),async(op)=>{assert.equal(op,'guard.detect');return {literals:['mango123']};},fixtureBrain(runtime)).preparation!;
     assert.equal((await operation(event,{owner:'inngest',epoch:epoch-1})).state,'waiting');
     assert.equal((await sharedContext(pool,reader,'Shared',runtime)).sources.length,0);
     assert.equal((await operation(event,{owner:'inngest',epoch})).state,'completed');
@@ -48,7 +49,7 @@ test('preparation admission never bypasses Inngest; guarding resumes with a new 
     const voice=await ingest(pool,{version:1,key:schema+':voice',origin:'live',kind:'telegram_update',scope:'123',bot_id:'fixture',source_id:'2',revision:'1',occurred_at:null,text:null,
       payload:{message:{message_id:2,chat:{id:123,type:'private'},from:{id:123},voice:{file_id:'fixture-voice'}}}});
     await pool.query('UPDATE artifacts SET state=\'ready\',file_hash=$2 WHERE event_id=$1',[voice.id,'b'.repeat(64)]);
-    const telegram=pipelineOperations(pool,{...settings(),assistant:{enabled:true,owner_id:'123',group_ids:[]}},runtime).telegram!;
+    const telegram=pipelineOperations(pool,{...settings(),assistant:{enabled:true,owner_id:'123',group_ids:[]}},runtime,fixtureBrain(runtime)).telegram!;
     const started=Date.now(),waiting=await telegram(voice.id,{owner:'inngest',epoch});
     assert.equal(waiting.stage,'transcription');assert.equal(waiting.waiting_reason,'prerequisite');
     assert.ok(waiting.next_attempt-started<10000);

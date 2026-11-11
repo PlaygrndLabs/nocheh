@@ -9,7 +9,7 @@ import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {SharingContentRepository} from '../src/stores/sharing.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -24,7 +24,7 @@ test('sharing publishes exact prepared text with private provenance, revocation 
   let calls=0,mode:'safe'|'citation'|'outside'|'instruction'='safe',duringFilter:(()=>Promise<void>)|null=null;
   const filterInputs:string[]=[];
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};
       assert.equal(operation,'memory.filter');calls++;
@@ -161,7 +161,7 @@ test('a project whose chats share what they know filters or publishes only the o
   const key='project-sharing:'+Date.now(),group='-'+Date.now(),other=group+'3',token='synthetic-sharing-token-not-a-real-credential',owner:Reader={admin:true,scope:null};
   const filterInputs:string[]=[];let calls=0;
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       assert.equal(operation,'memory.filter');calls++;

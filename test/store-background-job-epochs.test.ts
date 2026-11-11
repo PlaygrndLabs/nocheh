@@ -8,7 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {carriesForward} from '../src/stores/guards.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a job report survives a reaction in another group, any other change after its run ends the job without a report, and Stop sends no further part',
@@ -19,7 +19,7 @@ test('a job report survives a reaction in another group, any other change after 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-epochs-')),key='job-epochs:'+Date.now(),group='-100555',other='-100777';
   const cards:Record<string,any>[]=[];
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};

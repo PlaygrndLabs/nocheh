@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {chatToolAllowed,chatToolSettings,toolSpace} from '../src/stores/chat-tools.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
@@ -49,7 +49,7 @@ test('the owner sets tool switches per chat and topic; Nocheh refuses and stops 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-chat-tools-')),key='chat-tools:'+Date.now(),group='-10042',topic=group+'/topic/7';
   const owner:Reader={admin:true,scope:null};let detected=0;
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
     runtime:async operation=>{if(operation==='guard.detect'){detected++;return {literals:[]};}throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const api=new OwnerStorageApi(s),a=s.controlledActions,x=s.controlledExecution;
   let serial=0;

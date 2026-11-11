@@ -10,7 +10,8 @@ import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
 import {limit} from '../retrieval.js';
-import type {RuntimeCall,RuntimeOperation} from '../runtime.js';
+import type {RuntimeCall} from '../runtime.js';
+import {brainErrors,brainOperation,brainSummary,type BrainOperation} from '../brain/brain.js';
 import {immutableFile} from '../storage.js';
 import {ownerSecurityRoute} from '../security/owner-api.js';
 import {captureEvidence} from './generated-capture.js';
@@ -77,8 +78,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
     if(req.method==='GET'&&path==='/v1/runtime') {
       admin(principal);
-      const runtimeStatus=await call('status',{},5000).catch(()=>({ok:false,error:'runtime_unavailable'}));
-      return json(res,200,{id:'hermes',status:runtimeStatus,capabilities});
+      // The plugged-in brain and its health, and which helper services answer (ADR-0234).
+      const brainStatus=await s.brain.status().catch(()=>({ok:false,error:brainErrors.unavailable}));
+      return json(res,200,{brain:brainSummary(s.brain),status:brainStatus,capabilities});
     }
     if(req.method==='POST'&&path==='/v1/runtime/usage-price'){
       // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.
@@ -189,14 +191,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(req.method==='GET'&&path==='/v1/runtime/profiles')return json(res,200,await s.runtimeProfiles.list(principal));
       if(req.method==='POST')return json(res,200,await (path.endsWith('/resolve')?s.runtimeProfiles.resolve(principal,await readJson(req)):s.runtimeProfiles.save(principal,await readJson(req))));
     }
-    if(req.method==='POST'&&path==='/v1/manage/hermes') {
-      // Owner management of native profiles: each action maps to a runtime operation, never a native path.
+    if(req.method==='POST'&&path==='/v1/brain/manage') {
+      // Owner management of the brain's own state (ADR-0234): each action maps to a brain operation, never a native path.
       admin(principal);
       const {action,...input}=object(await readJson(req,1024*1024)),writes=['changes','role','skills'].some(key=>key in input);
-      const operation=({profiles:'profiles.list',memory:'memory.read',preferences:writes?'config.write':'config.read',
-        persona:writes?'persona.write':'persona.read'} as Record<string,RuntimeOperation>)[string(action,20)];
+      const operation=({profiles:'listProfiles',memory:'readNotes',preferences:writes?'writeSettings':'readSettings',
+        persona:writes?'writePersona':'readPersona'} as Record<string,BrainOperation>)[string(action,20)];
       if(!operation)throw new HttpError(400,'unknown_management_action');
-      return json(res,200,await call(operation,input));
+      return json(res,200,await brainOperation(s.brain,operation)(input));
     }
     if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
@@ -397,7 +399,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
       const input=object(await readJson(req)),binding=await s.guards.state();
       if(!principal.admin)await s.turns.binding(principal);
-      return result(await call('memory.recall',{...input,guard_epoch:binding.epoch,generation:binding.generation}));
+      return result(await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation}));
     }
     if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
     if(path==='/v1/memory/reviews/control'&&req.method==='POST') {

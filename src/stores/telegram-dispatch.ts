@@ -4,6 +4,7 @@ import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {enterFamily,hash,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
 import type {ArchiveRepository,SourceReference} from './archive.js';
@@ -101,14 +102,14 @@ export class TelegramDispatchRepository {
   constructor(readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,readonly sources:SourceRepository,
     readonly derived:DerivedRepository,readonly guards:GuardRepository,readonly preparation:PreparationRepository,
     readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:ActionCommandRepository,
-    readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
+    readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly brain:Brain,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
   private get control(){return this.access.stores.control;}
   /** Native cancellation is best effort; the durable receipt remains authoritative. */
   async cancelRetired(ids:string[]):Promise<void> {
     if(!ids.length)return;
     const rows=(await this.control.query("SELECT event_id,attempts FROM dispatches WHERE event_id=ANY($1::text[]) AND state='running' AND attempts>0",[ids])).rows;
     for(const row of rows)try{
-      await this.call('run.cancel',{channel:'telegram',event_id:row.event_id,attempt:row.attempts},10000);
+      await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt:row.attempts});
     }catch{/* The running workflow retries observation and cancellation under the revoked guard epoch. */}
   }
   private observation(row:any):Observation {
@@ -130,7 +131,7 @@ export class TelegramDispatchRepository {
     }
     const output=await this.derived.record({operation_id:`telegram-dispatch-result:${row.event_id}:${row.attempts}`,
       source:row.source_reference,parents:[row.input_reference],kind:'runtime_result',content:Buffer.from(canonical(result)),
-      producer:'hermes',producer_version:protocol,configuration:{attempt:row.attempts},provenance:{binding:row.binding}});
+      producer:this.brain.id,producer_version:protocol,configuration:{attempt:row.attempts},provenance:{binding:row.binding}});
     // Timings are diagnostics outside the durable result; a malformed set is dropped whole.
     const timings=hermesTimings(response);if(timings)await recordHermesAttempt(this.control,row.event_id,row.attempts,timings);
     return this.finish(row,result,output);
@@ -355,7 +356,7 @@ export class TelegramDispatchRepository {
     let reopened=0;
     for(const candidate of candidates) {
       let journal:Record<string,unknown>;
-      try {journal=await this.call('run.events',{channel:'telegram',event_id:candidate.event_id,attempt:candidate.attempts,after:0},10000);}
+      try {journal=await this.brain.turnEvents({channel:'telegram',event_id:candidate.event_id,attempt:candidate.attempts},0);}
       catch {continue;}
       const disposition=interruptedJournalDisposition(journal);
       if(disposition!=='pre_delivery') {
@@ -429,7 +430,7 @@ export class TelegramDispatchRepository {
       let input:Input;
       if(row.state==='running') {
         let observed:Record<string,unknown>;
-        try{observed=await this.call('run.resume',{channel:'telegram',event_id:id,attempt:row.attempts,observe_only:true},10000);}
+        try{observed=await this.brain.observeTurn({channel:'telegram',event_id:id,attempt:row.attempts});}
         catch{return await this.receive(row,{state:'running'});}
         if(closed.has(String(observed.state)))return await this.receive(row,observed);
         input=await this.input(row.input_reference);
@@ -446,7 +447,7 @@ export class TelegramDispatchRepository {
           }
           if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
-          try{return await this.receive(row,await this.call('run.cancel',{channel:'telegram',event_id:id,attempt:row.attempts},10000));}
+          try{return await this.receive(row,await this.brain.cancelTurn({channel:'telegram',event_id:id,attempt:row.attempts}));}
           catch{return await this.receive(row,{state:'running'});}
         }
         if(!['not_found','queued'].includes(String(observed.state)))return await this.receive(row,observed);
@@ -492,7 +493,7 @@ export class TelegramDispatchRepository {
       if(this.token.length<24)throw new HttpError(503,'service_credential_required');
       const credential=await this.prepared.audience.turn(this.token,input.principal,id,Date.now()+600000);await currentTurn(this,input);
       let result:Record<string,unknown>;
-      try{result=await this.call('run.start',{...input.body,asynchronous:true,archive_credential:credential},10000);}
+      try{result=await this.brain.startTurn({channel:'telegram',event_id:id,attempt:row.attempts},{...input.body,archive_credential:credential});}
       catch{result={state:'running'};}
       return await this.receive(row,result);
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(hashtextextended($1,803364))',[id]);if(held)await leaveFamily(db,'telegram');});}

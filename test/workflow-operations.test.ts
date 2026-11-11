@@ -11,6 +11,7 @@ import {fetchAttachments} from '../src/storage.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {prepareGuarded,setGuardMode} from '../src/guarded.js';
 import {dispatchCommitted} from '../src/assistant.js';
+import {fixtureBrain} from './fixture-brain.js';
 import {pauseFamily,switchFamily} from '../src/workflows/store.js';
 
 test('targeted preparation and dispatch preserve source identity and exclude legacy or stale owners',{skip:!process.env.PGHOST},async()=>{
@@ -41,10 +42,10 @@ test('targeted preparation and dispatch preserve source identity and exclude leg
     assert.equal((await pool.query("SELECT count(*) FROM guard_sources WHERE event_id=$1 AND state<>'ready'",[first.id])).rows[0].count,'0');
     assert.equal((await pool.query("SELECT state FROM artifacts WHERE event_id=$1",[second.id])).rows[0].state,'pending');
     await pauseFamily(pool,'telegram',1);await switchFamily(pool,'telegram',1,'inngest');
-    await dispatchCommitted(pool,config,async()=>{throw Error('legacy dispatch cannot run');},undefined,{owner:'inngest',epoch:1});
-    await dispatchCommitted(pool,config,async(operation,input)=>{assert.equal(operation,'run.start');assert.equal(input.event_id,first.id);dispatches++;return {state:'done'};},first.id,{owner:'inngest',epoch:2});
+    await dispatchCommitted(pool,config,fixtureBrain(async()=>{throw Error('legacy dispatch cannot run');}),undefined,{owner:'inngest',epoch:1});
+    await dispatchCommitted(pool,config,fixtureBrain(async(operation,input)=>{assert.equal(operation,'run.start');assert.equal(input.event_id,first.id);dispatches++;return {state:'done'};}),first.id,{owner:'inngest',epoch:2});
     assert.equal(dispatches,1);
-    await dispatchCommitted(pool,config,async()=>{throw Error('completed job cannot run');},first.id,{owner:'inngest',epoch:2});
+    await dispatchCommitted(pool,config,fixtureBrain(async()=>{throw Error('completed job cannot run');}),first.id,{owner:'inngest',epoch:2});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[first.id])).rows[0].state,'done');
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[second.id])).rows[0].state,'pending');
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}

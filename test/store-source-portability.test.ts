@@ -12,7 +12,7 @@ import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src
 import {ArchiveRepository,sourceIdentity,type CapturedSource} from '../src/stores/archive.js';
 import {CaptureCoordinator} from '../src/stores/capture.js';
 import {SourcePortabilityRepository} from '../src/stores/source-portability.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -24,7 +24,7 @@ test('source-only portable records preserve originals and recover imports withou
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-source-portable-')),key='source-portable:'+Date.now(),token=digest(key);
-  const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
+  const owner={admin:true,scope:null},s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
     runtime:async()=>{throw Error('no runtime calls');},memoryEngine:honchoEngine(async()=>{throw Error('no Honcho calls');})}),api=new OwnerStorageApi(s);
   const server=createServer((req,res)=>{void(async()=>{
     if(!await api.handle(reader(req,token),req,res,new URL(req.url!,'http://fixture')))throw new HttpError(404,'not_found');

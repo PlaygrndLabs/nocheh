@@ -5,54 +5,49 @@ import {runtimeCall, runtimeOperations, type RuntimeAdapter} from '../src/runtim
 import {runInput} from '../src/run-source.js';
 
 function contract(name: string, adapter: RuntimeAdapter, observed: Array<{operation:string;body:Record<string,unknown>}>) {
-  test(name+' preserves scope, receipt identity and immutable input through the runtime boundary', async()=>{
+  test(name+' passes helper service input through unchanged and refuses what it does not offer', async()=>{
     const call=runtimeCall(adapter);
-    const source={channel:'telegram',event_id:'a'.repeat(64),scope:'-20',source_key:'fixture:1',attempt:1,text:'original 😃\r\n  '};
-    await call('run.start',source); await call('run.start',source);
+    const input={text:'original 😃\r\n  ',priority:'background'};
+    await call('guard.detect',input); await call('guard.detect',input);
     assert.deepEqual(observed[0]?.body,observed[1]?.body);
-    assert.equal(observed[0]?.body.scope,'-20');
-    assert.equal(observed[0]?.body.text,source.text);
-    await call('config.write',{scope:'-20',revision:'old',changes:{'agent.max_iterations':9}});
-    assert.equal(observed.at(-1)?.body.revision,'old');
+    assert.equal(observed[0]?.body.text,input.text);
     const count=observed.length;
     const unavailable=runtimeOperations.find(operation=>!adapter.capabilities[operation]);assert.ok(unavailable);
     await assert.rejects(call(unavailable,{id:'unknown'}),{code:'runtime_capability_unavailable'});
-    assert.equal(observed.length,count,'unavailable operations never reach the harness');
+    assert.equal(observed.length,count,'unavailable operations never reach the service');
   });
 }
 const nativeCalls:Array<{operation:string;body:Record<string,unknown>}>=[];
-contract('Hermes',hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
+const hermes=hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
   nativeCalls.push({operation:new URL(String(url)).pathname,body:JSON.parse(String(init?.body))});
   assert.equal((init?.headers as Record<string,string>).authorization,'Bearer fixture');
-  return Response.json({state:'done'});
-}}),nativeCalls);
+  return Response.json({literals:[]});
+}});
+contract('Hermes services',{...hermes,capabilities:{...hermes.capabilities,'usage.price':false}},nativeCalls);
 const fakeCalls:Array<{operation:string;body:Record<string,unknown>}>=[];
-contract('Replacement harness',{
-  id:'fixture',capabilities:Object.fromEntries(runtimeOperations.map(op=>[op,op!=='run.cancel'])) as RuntimeAdapter['capabilities'],
-  async call(operation,body){fakeCalls.push({operation,body});return {state:'done'};},
+contract('Replacement services',{
+  id:'fixture',capabilities:Object.fromEntries(runtimeOperations.map(op=>[op,op!=='image.read'])) as RuntimeAdapter['capabilities'],
+  async call(operation,body){fakeCalls.push({operation,body});return {literals:[]};},
 },fakeCalls);
+
+test('the Hermes services answer only helper operations, at their own routes',async()=>{
+  assert.ok(runtimeOperations.every(operation=>hermes.capabilities[operation]),'every helper service has a route');
+  const seen:string[]=[];
+  const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
+    const body=JSON.parse(String(init?.body));assert.ok(!('channel' in body));seen.push(new URL(String(url)).pathname);return Response.json({});
+  }}));
+  await call('memory.filter',{channel:'telegram',text:'x'});await call('voice.transcribe',{check:true});
+  assert.deepEqual(seen,['/internal/memory/filter','/internal/transcribe']);
+});
 
 test('adapter preserves public error codes without exposing a provider response',async()=>{
   for(const [status,payload,code] of [[429,{secret:'private'},'quota_paused'],[503,{error:'detector_contract_rejected'},'detector_contract_rejected'],[502,{secret:'private'},'runtime_unavailable']] as const){
     const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async()=>Response.json(payload,{status})}));
     await assert.rejects(call('guard.detect',{text:'fixture'}),{code});
   }
-  const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async()=>{throw Error('must not run');}}));
-  await assert.rejects(call('run.start',{channel:'browser'}),{code:'runtime_channel_unavailable'});
-});
-
-test('asynchronous Telegram, browser and scheduler operations retain one source and attempt identity',async()=>{
-  const seen:Array<{path:string;body:unknown}>=[];
-  const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
-    seen.push({path:new URL(String(url)).pathname,body:JSON.parse(String(init?.body))});return Response.json({state:'running'});
-  }}));
-  for(const channel of ['telegram','browser','scheduler']){
-  seen.length=0;
-  const source={channel,event_id:'a'.repeat(64),attempt:7,asynchronous:true};
-  for(const operation of ['run.start','run.resume','run.events','run.cancel'] as const)await call(operation,source);
-  assert.deepEqual(seen.map(row=>row.path),['/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel']);
-  assert.ok(seen.every(row=>JSON.stringify(row.body)===JSON.stringify(source)));
-  }
+  const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async()=>Response.json({error:'attachment_too_large'},{status:413})}));
+  await assert.rejects(call('source.file',{file_id:'f'}),{code:'attachment_too_large'});
+  await assert.rejects(call('file.extract',{}),{code:'runtime_unavailable'});
 });
 
 test('browser and scheduled originals have their own identities and preserve text exactly',()=>{
@@ -62,18 +57,4 @@ test('browser and scheduled originals have their own identities and preserve tex
   assert.equal(browser.kind,'browser_input');assert.equal(schedule.kind,'scheduled_trigger');
   assert.equal(browser.bot_id,'');assert.equal(browser.channel,'browser');
   assert.notEqual(runInput({...input,channel:'browser',scope:'group'}).key,browser.key);
-});
-
-test('role and skills travel as one native profile action and keep their conflict code',async()=>{
-  const seen:Array<Record<string,unknown>>=[];
-  const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
-    assert.equal(new URL(String(url)).pathname,'/internal/manage');
-    const body=JSON.parse(String(init?.body));seen.push(body);
-    return body.revision==='stale'?Response.json({error:'configuration_conflict'},{status:409}):Response.json({role:'',skills:[],revision:'r'});
-  }}));
-  await call('persona.read',{scope:'default'});
-  await call('persona.write',{scope:'-20',role:'Family helper',skills:[],revision:'r'});
-  await call('prompts.defaults',{});
-  assert.deepEqual(seen,[{scope:'default',action:'persona'},{scope:'-20',role:'Family helper',skills:[],revision:'r',action:'persona'},{action:'prompts'}]);
-  await assert.rejects(call('persona.write',{scope:'-20',role:'',skills:[],revision:'stale'}),{code:'configuration_conflict',status:409});
 });

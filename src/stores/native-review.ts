@@ -2,7 +2,7 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object} from '../http.js';
 import type pg from 'pg';
-import type {RuntimeCall} from '../runtime.js';
+import {brainOperation,type Brain} from '../brain/brain.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
@@ -55,16 +55,18 @@ export async function requestStrandedSources(pool:pg.Pool,since:Date,limit=100):
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
 }
 
-/** Native notes remain in Hermes. Nocheh stores prepared inputs and execution receipts separately. */
+/** The brain's own notes remain in the brain. Nocheh stores prepared inputs and execution receipts separately. */
 export class NativeReviewRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
-    readonly turns:RuntimeTurnRepository,readonly call:RuntimeCall,readonly token:string){}
+    readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string){}
   private get control(){return this.contexts.access.stores.control;}
   private actor(source:SourceReference,binding:GuardBinding):Reader {
     const owner=this.contexts.access.policy().owner_id;if(!owner)throw new HttpError(409,'owner_review_required');
     return {admin:false,scope:null,space:owner,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,purpose:'memory-review'};
   }
   async queue(source:SourceReference):Promise<string[]> {
+    // A brain that keeps no notes of its own has nothing to learn them from.
+    if(!this.brain.reviewNotes)return [];
     const binding=await this.contexts.guards.state();
     // Each source is reviewed once per installation generation; repeating a started review repeats its model calls.
     // A waiting review (never started, or failed without changing notes) can't run under an older authorization epoch,
@@ -200,15 +202,15 @@ export class NativeReviewRepository {
       };
       let result:Record<string,unknown>;
       try {
-        result=await this.call('memory.review',uncertain?{id,scope:actor.space,observe_only:true}:{id,scope:actor.space,content:document.text,
-          event_id:job.source_reference.id,guard_mode:job.binding.mode,archive_credential:credential},uncertain?10000:240000);
+        result=await brainOperation(this.brain,'reviewNotes')(uncertain?{id,scope:actor.space,observe_only:true}:{id,scope:actor.space,content:document.text,
+          event_id:job.source_reference.id,guard_mode:job.binding.mode,archive_credential:credential});
       }catch {return await unconfirmed();}
       if(!uncertain&&result.state==='waiting'&&result.error_code==='profile_busy') {
         await db.query("UPDATE native_review_jobs SET state='pending',attempts=greatest(0,attempts-1),error_code='waiting_for_profile',next_attempt=now()+interval '5 seconds',updated_at=now() WHERE id=$1",[id]);return 'pending';
       }
       if(result.state==='done') {
         const output=await this.derived.record({operation_id:operationId,source:job.source_reference,parents:[job.input_reference],kind:'runtime_result',content:Buffer.from(canonical({state:'done'})),
-          producer:'hermes',producer_version:protocol,configuration:{review_id:id},provenance:{binding:job.binding,native_receipt:id}});
+          producer:this.brain.id,producer_version:protocol,configuration:{review_id:id},provenance:{binding:job.binding,native_receipt:id}});
         return await complete(output.id);
       }
       if(result.state==='failed') {

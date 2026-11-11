@@ -9,6 +9,7 @@ import {prepareGuarded,setGuardMode,editGuarded} from '../src/guarded.js';
 import {memoryStatus} from '../src/honcho.js';
 import {pauseFamily,switchFamily,requestWorkflow} from '../src/workflows/store.js';
 import {memoryOperations} from '../src/workflows/memory.js';
+import {fixtureBrain,type FakeCall} from './fixture-brain.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
 
 test('memory requests preserve consent, native receipt identity, owner revisions and read-only Honcho reconciliation',{skip:!process.env.PGHOST},async()=>{
@@ -17,10 +18,11 @@ test('memory requests preserve consent, native receipt identity, owner revisions
   const admin=new pg.Pool(options),namespace='workflow_memory_'+Date.now();await admin.query(`CREATE SCHEMA ${namespace}`);
   const pool=new pg.Pool({...options,options:`-c search_path=${namespace}`,max:8});
   const calls:string[]=[],saved=new Map<string,any[]>();let writes=0,reads=0,queuePending=0;
-  const ops=memoryOperations(pool,config,async(operation,body)=>{
+  const runtime:FakeCall=async(operation,body)=>{
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'memory.review');calls.push(String(body.id));if(calls.length===1)throw Error('synthetic lost receipt response');return {state:'done'};
-  },async(path,body:any)=>{
+  };
+  const ops=memoryOperations(pool,config,runtime,fixtureBrain(runtime),async(path,body:any)=>{
     if(path.endsWith('/messages/list')){reads++;return {items:saved.get(path.slice(0,-5))??[]};}
     if(path.endsWith('/messages')){writes++;saved.set(path,body.messages.map((m:any)=>({...m,id:'remote-fixture'})));throw Error('synthetic lost write acknowledgment');}
     if(path.endsWith('/representation'))return {representation:'Stored synthetic memory'};

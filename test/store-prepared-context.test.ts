@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {PreparedContextRepository} from '../src/stores/prepared-context.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -20,7 +20,7 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-runtime-context-')),key='context:'+Date.now();
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:key,revision:'1',occurred_at:null,
     text:'Owner-preserved sentence.',payload:{message:{chat:{id:123,type:'private'},text:'Owner-preserved sentence.'}}};

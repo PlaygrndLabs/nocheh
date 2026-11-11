@@ -15,7 +15,7 @@ import {validFromEpoch} from '../src/stores/guards.js';
 import {JobBoxRepository,boxTokenValid} from '../src/stores/job-box.js';
 import {notionJobFetch,notionReads} from '../src/stores/notion.js';
 import {storageServer} from '../src/stores/server.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('only the owner\'s approved private job gets the sealed box, its binding and live list follow the job, the guard and the switch, and its chat copy is the job\'s own checked chat, whole',
@@ -27,7 +27,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
   const token=digest(key),boxToken='synthetic-box-token-'+'b'.repeat(24),owner:Reader={admin:true,scope:null};
   const previousBox=process.env.NOCHEH_BOX_TOKEN;process.env.NOCHEH_BOX_TOKEN=boxToken;
   const policy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const};
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};

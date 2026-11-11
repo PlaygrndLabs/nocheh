@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import type {Settings} from '../config.js';
 import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import {HttpError,string} from '../http.js';
 import {fetchAttachments} from '../storage.js';
 import {prepareArchiveFiles} from '../preparation.js';
@@ -14,7 +15,7 @@ export type WorkflowOperation=(jobId:string,authority:ExecutionAuthority)=>Promi
 export const observation=(state:WorkflowState,stage:string,attempts=0,next=Date.now(),reason:string|null=null):Observation=>({state,stage,attempts,next_attempt:Math.max(Date.now()+100,Number(next)),waiting_reason:reason});
 
 
-export function pipelineOperations(pool:pg.Pool,config:Settings,call:RuntimeCall):Partial<Record<WorkflowFamily,WorkflowOperation>> {
+export function pipelineOperations(pool:pg.Pool,config:Settings,call:RuntimeCall,brain:Brain):Partial<Record<WorkflowFamily,WorkflowOperation>> {
   return {
     preparation:async(eventId,authority)=>{
       if(!(await pool.query('SELECT 1 FROM events WHERE id=$1',[eventId])).rowCount)return observation('failed','admission');
@@ -34,7 +35,7 @@ export function pipelineOperations(pool:pg.Pool,config:Settings,call:RuntimeCall
         if(prepared.state!=='completed')return waitForPreparation(prepared,row.attempts);
       }
       if(['pending','running','failed'].includes(row.state)&&row.next_attempt<=new Date()) {
-        await dispatchCommitted(pool,config,call,eventId,authority);row=await load();
+        await dispatchCommitted(pool,config,brain,eventId,authority);row=await load();
       }
       const state:WorkflowState=row.state==='done'?'completed':row.state==='suppressed'?'skipped':row.state==='ambiguous'?'ambiguous':row.state==='cancelled'?'cancelled':row.state==='failed'?'retryable_failed':row.state==='running'?'running':'waiting';
       const waitStage:Record<string,string>={waiting_for_attachments:'attachments',guard_preparation_pending:'preparation'};

@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {storeSchemas} from '../src/stores/schema.js';
 import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {portableDerivativeTypes,type PortableRecord} from '../src/stores/derivative-portability.js';
 import type {DerivativeReference} from '../src/stores/derived.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -45,7 +45,7 @@ test('complete derivative transfer retains edits and lineage while imported auth
   const root=await mkdtemp(join(tmpdir(),'nocheh-derivative-portable-')),owner={admin:true,scope:null},key='portable:'+randomUUID();
   const options=(directory:string)=>({dataDir:join(root,directory),detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no native calls');})});
-  const source=storageServices(stores,options('source')),restored=storageServices(target,options('target'));
+  const source=fixtureServices(stores,options('source')),restored=fixtureServices(target,options('target'));
   try {
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'88',revision:'1',occurred_at:null,text:'Original evidence',
       payload:{message:{message_id:88,chat:{id:123,type:'private'},from:{id:123,first_name:'Owner'},voice:{file_id:key}}}};

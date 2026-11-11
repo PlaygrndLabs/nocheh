@@ -2,7 +2,8 @@ import {settings} from '../config.js';
 import {hermesAdapter} from '../hermes-adapter.js';
 import {memoryEngine} from '../memory/engines.js';
 import {runtimeCall} from '../runtime.js';
-import {withPrompts} from '../prompts.js';
+import {brainWithPrompts,withPrompts} from '../prompts.js';
+import {brain} from '../brain/brains.js';
 import {brokerServer} from '../security/broker.js';
 import {runtimeStores} from './runtime-pools.js';
 import {storageServices} from './services.js';
@@ -11,7 +12,7 @@ import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHea
 
 const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(hermesAdapter({url:config.hermesUrl,token:config.token})),stores.control);
 const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
-  policy:()=>config.assistant,runtime:call,memoryEngine:memoryEngine(config)});
+  policy:()=>config.assistant,runtime:call,brain:brainWithPrompts(brain(config),stores.control),memoryEngine:memoryEngine(config)});
 const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',
   archive:process.env.ARCHIVE_URL??'http://nocheh-app:8780',hermes:config.hermesUrl,prepare:storageGuardService(services),
   assertActive:()=>assertStorageActive(config.dataDir),assertReady:async()=>{await assertGuardConfiguration(services.guards,config.guardMode);await services.configuration.assert(config.assistant);},health:()=>storageHealth(stores)});

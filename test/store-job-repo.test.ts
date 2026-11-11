@@ -13,7 +13,7 @@ import {jobErrors as toolJobErrors} from '../src/mcp/tools.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {storageServer} from '../src/stores/server.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 // The job tool's own list of codes it may relay; the broker relays exactly these.
@@ -35,7 +35,7 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
   // A card being posted can run something first, as a Remove that lands while Telegram answers; a settle that reaches the
   // gateway before its card was sent is not shown, as the gateway answers edited:false without a sent receipt.
   let posting:{id:string;before:()=>Promise<void>}|null=null;const unsent=new Set<string>(),dropped:string[]=[];
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect'){checks++;return {literals:[]};}
       if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};

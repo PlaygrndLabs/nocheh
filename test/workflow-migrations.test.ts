@@ -5,6 +5,7 @@ import {initialize} from '../src/database.js';
 import {settings} from './fixture-settings.js';
 import {ingest,type Envelope} from '../src/archive.js';
 import {beginMigration,finishMigration,migrationStatus,reconcileMigration,migrationHostReady,stageMigrationImport} from '../src/workflows/migrations.js';
+import {fixtureBrain} from './fixture-brain.js';
 import {cancelImport,confirmImport} from '../src/workflows/imports.js';
 import {hash,enterFamily,leaveFamily,registerWorker,publishOutbox,claimWorkflow,families} from '../src/workflows/store.js';
 
@@ -33,10 +34,11 @@ test('one-way family migration survives lost responses, transaction rollback and
     assert.equal(await enterFamily(client,'telegram','legacy',1),false);
     assert.equal(await publishOutbox(pool,async()=>{throw Error('must not publish');}),0);
     const during=await ingest(pool,source('captured-while-paused'));assert.ok(during.id);
+    const unused=async()=>{throw Error('runtime_not_expected');};
     const native=await ingest(pool,source('native-receipt'));await pool.query("UPDATE dispatches SET state='running',attempts=1 WHERE event_id=$1",[native.id]);
-    await reconcileMigration(pool,id,async(operation,body)=>{assert.equal(operation,'run.resume');assert.equal(body.observe_only,true);assert.equal(body.event_id,native.id);return {state:'not_found'};},'42');
+    await reconcileMigration(pool,id,unused,fixtureBrain(async(operation,body)=>{assert.equal(operation,'run.resume');assert.equal(body.observe_only,true);assert.equal(body.event_id,native.id);return {state:'not_found'};}),'42');
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[native.id])).rows[0].state,'running','unknown receipt cannot authorize a replacement effect');
-    await reconcileMigration(pool,id,async(_operation,body)=>{assert.equal(body.observe_only,true);return {state:'done'};},'42');
+    await reconcileMigration(pool,id,unused,fixtureBrain(async(_operation,body)=>{assert.equal(body.observe_only,true);return {state:'done'};}),'42');
     await assert.rejects(finishMigration(pool,id,'switch'),{code:'workflow_worker_not_ready'});
     await registerWorker(pool,'pipeline',['telegram']);
     await pool.query("UPDATE workflow_registry SET lease_until=now()+interval '1 minute' WHERE id=$1",[wid(pending.id)]);

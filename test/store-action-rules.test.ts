@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
@@ -22,7 +22,7 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-rules-')),key='rules:'+Date.now(),group='-100'+Date.now(),token=digest(key);
   const owner:Reader={admin:true,scope:null},cards:any[]=[],answers:string[]=[];
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}});
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='telegram.approval'){

@@ -8,7 +8,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('fact grants authorize exact destinations while relationships only create reject-once suggestions',
@@ -18,7 +18,7 @@ test('fact grants authorize exact destinations while relationships only create r
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-access-'));
   const key='memory-access:'+Date.now(),group='-'+Date.now(),owner:Reader={admin:true,scope:null};
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group]};
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async operation=>operation==='guard.detect'?{literals:[]}:{state:'done'},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const capture=async(scope:string,index:number,text:string)=>{const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(index),revision:'1',occurred_at:null,text,
     payload:{message:{message_id:index,date:1,chat:{id:Number(scope),type:scope==='123'?'private':'group'},from:{id:Number(scope==='123'?'123':'456'),first_name:'Fixture'},text}}};

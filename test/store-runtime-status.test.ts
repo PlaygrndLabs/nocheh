@@ -7,13 +7,14 @@ import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {storageServer} from '../src/stores/server.js';
 import type {StorageServices} from '../src/stores/services.js';
+import {fixtureBrain} from './fixture-brain.js';
 
-test('owner runtime status reports Telegram polling and denies scoped readers',async()=>{
+test('owner runtime status names the plugged-in brain, reports Telegram polling and denies scoped readers',async()=>{
   const dataDir=await mkdtemp(join(tmpdir(),'nocheh-runtime-status-'));
   const token='fixture-owner-token';
   const config={token,dataDir} as Settings;
-  const server=storageServer({} as StorageServices,config,async()=>({ok:true,telegram:'connected',
-    telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}}),undefined,undefined,{'run.start':true,'lifecycle':false});
+  const brain=fixtureBrain(async operation=>{assert.equal(operation,'status');return {ok:true,telegram:'connected',telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}};});
+  const server=storageServer({brain} as unknown as StorageServices,config,async()=>{throw Error('no helper service call');},undefined,undefined,{'guard.detect':true,'image.read':false});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');
@@ -23,7 +24,17 @@ test('owner runtime status reports Telegram polling and denies scoped readers',a
     const body=await owner.json() as {status:{telegram:string;telegram_details:{last_poll_at:string}}};
     assert.equal(body.status.telegram,'connected');
     assert.equal(body.status.telegram_details.last_poll_at,'2026-09-25T11:44:49Z');
-    assert.deepEqual((body as unknown as {capabilities:unknown}).capabilities,{'run.start':true,'lifecycle':false});
+    assert.deepEqual((body as unknown as {capabilities:unknown}).capabilities,{'guard.detect':true,'image.read':false});
+    assert.deepEqual((body as unknown as {brain:unknown}).brain,{id:'hermes',name:'Fixture brain',capabilities:{telegram:true,browser:true,scheduler:true,background:true,
+      settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:true}});
+    // A brain that does not answer is reported, not hidden.
+    const down=storageServer({brain:{...brain,status:async()=>{throw Error('down');}}} as unknown as StorageServices,config,async()=>({}));
+    await new Promise<void>(resolve=>down.listen(0,'127.0.0.1',resolve));
+    try{
+      const port=(down.address() as {port:number}).port;
+      const answer=await (await fetch(`http://127.0.0.1:${port}/v1/runtime`,{headers:{authorization:'Bearer '+token}})).json() as {status:unknown};
+      assert.deepEqual(answer.status,{ok:false,error:'brain_unavailable'});
+    }finally{await new Promise<void>(resolve=>down.close(()=>resolve()));}
     const scoped=await fetch(url,{headers:{authorization:'Bearer '+scopeToken(token,'owner',Date.now()+60_000)}});
     assert.equal(scoped.status,403);
   }finally{

@@ -14,7 +14,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {machineJob,machineTokenSet} from '../src/stores/machines.js';
 import {storageServer} from '../src/stores/server.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 const sha=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
@@ -76,7 +76,7 @@ test('only the owner\'s own request in their private chat or an active project\'
   process.env.NOCHEH_MACHINES_URL='http://127.0.0.1:'+(fake.address() as {port:number}).port;process.env.NOCHEH_MACHINE_TOKEN=machineToken;
   const policy={enabled:true,owner_id:'123',group_ids:[project,other],group_access:{[project]:{granted:['9'],denied:[]}},topic_memory:'group' as const};
   const approvals:any[]=[];
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};

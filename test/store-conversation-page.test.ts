@@ -4,7 +4,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a conversation is read in time order, page by page, only by those who may read it',
@@ -14,7 +14,7 @@ test('a conversation is read in time order, page by page, only by those who may 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),bare=Date.now(),group='-100'+bare,other='-200'+bare,key='conversation-page:'+bare;
-  const s=storageServices(stores,{dataDir:'/tmp/nocheh-conversation-page-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group,other]}),
+  const s=fixtureServices(stores,{dataDir:'/tmp/nocheh-conversation-page-fixture',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'42',group_ids:[group,other]}),
     runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
   const update=(chat:string,suffix:string,date:number,body:Record<string,unknown>,kind='telegram_update'):Envelope=>({version:1,key:key+suffix,origin:'live',
     bot_id:'fixture',kind,scope:chat,source_id:String(((body.message??body.edited_message??body.message_reaction) as any).message_id),

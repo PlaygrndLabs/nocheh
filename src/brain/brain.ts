@@ -22,7 +22,8 @@ export type TurnRef={readonly channel:TurnChannel;readonly event_id:string;reado
  * turn is not due yet. `suppressed` means the brain chose not to run or answer it. */
 export type TurnState='queued'|'waiting'|'running'|'done'|'failed'|'cancelled'|'suppressed'|'ambiguous'|'not_found';
 export const closedTurnStates:ReadonlySet<TurnState>=new Set(['done','failed','cancelled','suppressed','ambiguous']);
-/** The answer of a done turn, when the brain returns it rather than sending it. Empty text means the brain stays silent. */
+/** The answer of a done turn, when the brain returns it rather than sending it. A brain that chooses silence ends the
+ * turn `suppressed` with `intentional_silence` instead. */
 export type TurnReply={readonly text:string;readonly session_id:string};
 /** Besides these fields a receipt may carry bounded details Nocheh records, such as `timings`, `window`, `error_type`,
  * `error_stage` and `unexpected_tool_names`. It never carries message content other than `reply`. */
@@ -97,8 +98,10 @@ export const brainUnavailable=()=>new HttpError(503,brainErrors.unavailable);
 export const brainRejected=()=>new HttpError(503,brainErrors.rejected);
 export const brainInvalid=()=>new HttpError(502,brainErrors.invalid);
 export const brainUnsupported=()=>new HttpError(409,brainErrors.unsupported);
+/** The brain's optional operations that take and answer plain records. */
+export type BrainOperation='readSettings'|'writeSettings'|'readPersona'|'writePersona'|'listProfiles'|'readNotes'|'recallNotes'|'reviewNotes'|'advanceSchedules';
 /** An optional operation of the plugged-in brain, or `brain_capability_unavailable`. */
-export function brainOperation<K extends 'readSettings'|'writeSettings'|'readPersona'|'writePersona'|'listProfiles'|'readNotes'|'recallNotes'|'reviewNotes'|'advanceSchedules'>(brain:Brain,name:K):Call {
+export function brainOperation(brain:Brain,name:BrainOperation):Call {
   const operation=brain[name];if(!operation)throw brainUnsupported();
   return input=>operation.call(brain,input);
 }

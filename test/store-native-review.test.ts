@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {NativeReviewRepository,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -21,7 +21,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-')),key='review:'+Date.now(),group='-'+Date.now();
   const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null},receipts=new Set<string>();
   let mode:'busy'|'lose'|'missing'|'done'='busy',writes=0,requests=0,observations=0;
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};
       assert.equal(operation,'memory.review');assert.equal(input.scope,'123');
@@ -68,7 +68,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
       },release:client.release.bind(client)} as pg.PoolClient;
     }) as typeof control.connect;
     const access=Object.assign(Object.create(services.access),{stores:{...stores,control}}),contexts=Object.assign(Object.create(services.contexts),{access});
-    const recovering=new NativeReviewRepository(contexts,services.derived,services.prepared,services.turns,services.reviews.call,token);
+    const recovering=new NativeReviewRepository(contexts,services.derived,services.prepared,services.turns,services.reviews.brain,token);
     mode='done';await assert.rejects(recovering.run(next,authority),/synthetic_control_completion_lost/);
     const beforeRecovery={requests,observations,writes};assert.equal(await services.reviews.run(next,authority),'done');
     assert.deepEqual({requests,observations,writes},beforeRecovery,'durable completion requires neither native execution nor another observation');
@@ -96,7 +96,7 @@ test('native review runs once per source across authorization epochs and stops o
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-once-')),key='review-once:'+Date.now(),group='-'+Date.now();
   const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null};
   let mode:'done'|'missing'|'running'|'failed'='done',starts=0,observations=0;
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       assert.equal(operation,'memory.review');

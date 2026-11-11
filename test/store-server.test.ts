@@ -9,7 +9,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices,type FakeCall} from './fixture-brain.js';
 import {storageServer} from '../src/stores/server.js';
 import {startStorageCapture} from '../src/stores/worker.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -29,7 +29,7 @@ test('separated application captures through control outages, exposes owner repo
   }});
   const stores:StorePools={...connected,archive:unavailable(connected.archive,()=>archiveDown),control:unavailable(connected.control,()=>controlDown)};
   const policy={enabled:true,owner_id:'123',group_ids:['-42']};let nativeCalls=0;
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+  const runtime:FakeCall=async(operation,input)=>{
     if(operation==='status')return {ok:true,telegram:'connected'};
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','memory.limited':'Limited',
@@ -38,7 +38,7 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:[]};}
     throw Error('unexpected external operation');
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no native provider calls');})});
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no native provider calls');})});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
     hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await mkdir(join(root,'workflows'),{recursive:true});await writeFile(join(root,'workflows/inactive'),'fixture: no Inngest connection');
@@ -59,13 +59,15 @@ test('separated application captures through control outages, exposes owner repo
     const initialStatus=await request('/v1/status');
     assert.equal(initialStatus.guard_mode,'on');assert.equal(initialStatus.storage_layout,'original-only-v1');
     assert.equal(typeof initialStatus.archive.events,'number');assert.ok(Array.isArray(initialStatus.archive.artifacts));
-    assert.equal((await request('/v1/runtime')).status.telegram,'connected');
+    const runtimeStatus=await request('/v1/runtime');
+    assert.equal(runtimeStatus.status.telegram,'connected');assert.equal(runtimeStatus.brain.id,'hermes');assert.equal(runtimeStatus.brain.capabilities.persona,true);
     await request('/v1/runtime',undefined,403,scopeToken(token,'123',Date.now()+60000));
     const persona={action:'persona',scope:'default',role:'Fixture role',skills:[],revision:'r1'};
-    assert.deepEqual(await request('/v1/manage/hermes',persona),{operation:'persona.write',input:{scope:'default',role:'Fixture role',skills:[],revision:'r1'}});
-    assert.equal((await request('/v1/manage/hermes',{action:'persona',scope:'default'})).operation,'persona.read');
-    assert.equal((await request('/v1/manage/hermes',{action:'preferences',scope:'default'})).operation,'config.read');
-    await request('/v1/manage/hermes',{action:'unknown'},400);
+    assert.deepEqual(await request('/v1/brain/manage',persona),{operation:'persona.write',input:{scope:'default',role:'Fixture role',skills:[],revision:'r1'}});
+    assert.equal((await request('/v1/brain/manage',{action:'persona',scope:'default'})).operation,'persona.read');
+    assert.equal((await request('/v1/brain/manage',{action:'preferences',scope:'default'})).operation,'config.read');
+    await request('/v1/brain/manage',{action:'unknown'},400);
+    await request('/v1/brain/manage',persona,403,scopeToken(token,'123',Date.now()+60000));
     const prompts=await request('/v1/prompts');
     assert.equal(prompts.defaults['reply.owner'],'Owner');assert.match(prompts.defaults['learning.interpret'],/\{trigger_id\}/);assert.deepEqual(prompts.texts,{});
     const saved=await request('/v1/prompts',{texts:{'reply.owner':' Answer in Persian. '},revision:prompts.revision});

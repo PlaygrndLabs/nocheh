@@ -7,7 +7,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {HttpError,json,readJson} from '../src/http.js';
 import {DashboardSessions} from '../src/dashboard-auth.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -17,7 +17,7 @@ const check=new pg.Client(config);await check.connect();
 try{if((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name!=='nocheh-stores-fixture')throw Error('synthetic_cluster_required');}finally{await check.end();}
 const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
 await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),dataDir='/tmp/nocheh-owner-ui';await mkdir(dataDir,{recursive:true});
-const services=storageServices(stores,{dataDir,detectorVersion:'ui-fixture',serviceToken:'ui-fixture-service-token-not-real',policy:()=>({enabled:true,owner_id:'123',group_ids:['-10042','-10043']}),
+const services=fixtureServices(stores,{dataDir,detectorVersion:'ui-fixture',serviceToken:'ui-fixture-service-token-not-real',policy:()=>({enabled:true,owner_id:'123',group_ids:['-10042','-10043']}),
  runtime:async(operation,input)=>{
   if(operation==='guard.detect')return {literals:String(input.text).includes('sample-secret-value')?['sample-secret-value']:[]};
   if(operation==='memory.filter')return {items:[{text:'The observatory team is reviewing the instrument checklist.',source_ids:[(input.candidates as any[])[0].id]}],

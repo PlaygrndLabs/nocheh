@@ -497,7 +497,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
     return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'run.start':true,'memory.recall':true,'lifecycle':false}});
+  if(route==='/runtime')return json(res,200,{brain:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false}},
+    status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'guard.detect':true,'image.read':true,'usage.price':false}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';
     return json(res,200,{scope,nodes:[...(all?[{id:'collection:*',kind:'collection',label:'All private knowledge'}]:[]),{id:'group:42',kind:'group',chat_type:'private',label:'Private chat · @fixture_owner'},{id:'message:'+id,event_id:id,kind:'message',label:'Northern lights trip'},{id:'user:owner',kind:'user',label:'@fixture_owner'},{id:'project:night-sky',kind:'project',label:'Night sky'}],edges:[...(all?[{from:'collection:*',to:'group:42',kind:'contains'}]:[]),{from:'group:42',to:'message:'+id,kind:'contains'},{from:'user:owner',to:'message:'+id,kind:'authored'},{from:'project:night-sky',to:'group:42',kind:'project_context'}],bounds:{truncated:false},unresolved_replies:0,next:null});

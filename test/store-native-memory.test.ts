@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
 import {HttpError} from '../src/http.js';
@@ -212,7 +212,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   const owner:Reader={admin:true,scope:null},remote=new Map<string,any[]>(),calls:{path:string;body:any;method?:string}[]=[];
   let loseReply=true,rejectWrite=false,sequence=0;const ownerApproved='Owner-approved password=visible123',descendants:string[]=[],active=new Map<string,Set<string>>();
   const priorities:unknown[]=[];
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(_operation,input)=>{priorities.push(input.priority);return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},
     memoryEngine:honchoEngine(async(path,body:any,method)=>{
       calls.push({path,body,...(method?{method}:{})});
@@ -478,7 +478,7 @@ test('foreground recall requires independent source evidence while background co
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-current-question-')),key='current-question:'+Date.now(),group='-'+Date.now();
   const calls:string[]=[];let sequence=0;
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
       calls.push(path);
       if(path.endsWith('/messages/list'))return {items:[]};

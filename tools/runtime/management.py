@@ -137,13 +137,9 @@ def dispatch(body):
     if operation == 'usage.view':
         from tools.operations.provider.usage import view
         return view(state, body.get('days', 30))
-    if operation == 'hermes.manage':
-        from tools.operations.archive.archive import API
-        import urllib.error
-        try: return API().call('/v1/manage/hermes', body['request'])
-        except urllib.error.HTTPError as error:
-            if error.code == 409: raise ValueError('configuration_conflict') from None
-            raise
+    if operation == 'brain.manage':
+        # The plugged-in brain's own settings, persona and notes (ADR-0234); its plain error code reaches the dashboard.
+        return api_call('/v1/brain/manage', body['request'], 'brain_unavailable')
     if operation == 'archive.projections':
         from tools.operations.archive.archive import API
         from urllib.parse import urlsplit
