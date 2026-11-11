@@ -6,7 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from .capture import Capture, DISPATCH_KEY, canonical, captured_adapter_class, clear_command_menu, digest, instrument_request
+from services.durable import canonical, digest
+from .capture import Capture, DISPATCH_KEY, clear_command_menu, instrument_request
 
 
 class Request:
@@ -113,14 +114,14 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         original=self.root/'outbound'/(digest(key)+'.result')
         original_bytes=original.read_bytes();completed_at=original.stat().st_mtime
         restarted=Capture(self.root,'testbot')
-        with patch('services.hermes.capture.time.time',return_value=completed_at+9):
+        with patch('services.telegram.capture.time.time',return_value=completed_at+9):
             self.assertEqual(restarted.outbound('sendMessage',parameters,'limited'),(key,rejected))
-        with patch('services.hermes.capture.time.time',return_value=completed_at+10):
+        with patch('services.telegram.capture.time.time',return_value=completed_at+10):
             retry,saved=restarted.outbound('sendMessage',parameters,'limited')
         self.assertNotEqual(retry,key);self.assertIsNone(saved)
         delivered=(200,b'{"ok":true,"result":{"message_id":8}}')
         restarted.complete(retry,'sendMessage',parameters,delivered)
-        with patch('services.hermes.capture.time.time',return_value=completed_at+20):
+        with patch('services.telegram.capture.time.time',return_value=completed_at+20):
             self.assertEqual(Capture(self.root,'testbot').outbound('sendMessage',parameters,'limited'),(retry,delivered))
         self.assertEqual(original.read_bytes(),original_bytes,'a retry must preserve the original rejection receipt')
         self.assertEqual(len(list((self.root/'outbound').glob('*.intent'))),2)
@@ -183,41 +184,15 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         async def sleep(seconds):
             waits.append(seconds)
             if len(waits)==2: menus['default']=['status']  # A process still shutting down writes its menu again.
-        with patch.dict('os.environ',{'TELEGRAM_GROUP_IDS':'-100,-200,-300'}),self.assertLogs('services.hermes.capture',level='WARNING'):
-            await clear_command_menu(Bot(),sleep=sleep)
+        with self.assertLogs('services.telegram.capture',level='WARNING'):
+            await clear_command_menu(Bot(),['-100','-200','-300'],sleep=sleep)
         self.assertEqual(menus,{key:[] for key in menus})
         self.assertEqual(waits,[0,60])
 
-    async def test_the_connecting_adapter_clears_the_menu_after_connect(self):
-        from .assistant_gateway import committed_adapter_class
-        adapter=object.__new__(committed_adapter_class());adapter._bot=object()
-        with patch('services.hermes.capture.clear_command_menu',new_callable=AsyncMock) as clear:
-            await adapter._run_post_connect_housekeeping();await adapter._menu_clear_task
-        clear.assert_awaited_once_with(adapter._bot)
-
-    async def test_native_cold_start_retains_updates_and_handlers_require_committed_dispatch(self):
-        from plugins.platforms.telegram.adapter import TelegramAdapter
-        from telegram.ext import ApplicationHandlerStop
-        cls=captured_adapter_class(); adapter=object.__new__(cls); adapter.capture=self.capture
-        with patch.object(TelegramAdapter,'_start_polling_resilient',new_callable=AsyncMock) as native:
-            await adapter._start_polling_resilient(drop_pending_updates=True,error_callback=None)
-            self.assertFalse(native.call_args.kwargs['drop_pending_updates'])
-            self.assertNotIn('allowed_updates',native.call_args.kwargs)
-        with patch.object(TelegramAdapter,'_start_polling_once',new_callable=AsyncMock) as native:
-            await adapter._start_polling_once(None,drop_pending_updates=True,error_callback=None)
-            self.assertFalse(native.call_args.kwargs['drop_pending_updates'])
-            self.assertNotIn('allowed_updates',native.call_args.kwargs)
-        with self.assertRaises(RuntimeError): await adapter._start_webhook_mode('https://unused')
-        app=SimpleNamespace(add_handler=lambda handler,group=0: handlers.append((handler,group)))
-        handlers=[]
-        with patch.object(TelegramAdapter,'_register_handlers') as native:
-            adapter._register_handlers(app)
-            native.assert_called_once_with(app)
-        callback=handlers[0][0].callback
-        with self.assertRaises(ApplicationHandlerStop): await callback(SimpleNamespace(update_id=1),None)
-        token=DISPATCH_KEY.set('telegram:testbot:update:1')
-        try: await callback(SimpleNamespace(update_id=1),None)
-        finally: DISPATCH_KEY.reset(token)
+    async def test_discovery_never_settles_the_services_unfinished_sends(self):
+        self.capture.outbound('sendMessage',{'chat_id':20,'text':'hello'},'in-flight')
+        Capture(self.root,'testbot',recover=False)
+        self.assertEqual(list((self.root/'outbound').glob('*.result')),[])
 
 
 if __name__ == '__main__':

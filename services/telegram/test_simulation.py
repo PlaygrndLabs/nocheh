@@ -1,7 +1,7 @@
-"""Synthetic Bot API scenarios through the pinned PTB and Hermes adapter.
+"""Synthetic Bot API scenarios through the Telegram library and the Telegram service.
 
-Only Telegram's transport and the model answer are scripted. Native formatting,
-batching, scope resolution, durable capture, dispatch and receipts are real.
+Only Telegram's transport is scripted. Formatting, chunking, the checks on every request,
+durable capture and receipts are real.
 Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage and #setmessagereaction.
 """
 import asyncio
@@ -11,27 +11,20 @@ import hmac
 import json
 import os
 import tempfile
-import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gateway.config import PlatformConfig
-from plugins.platforms.telegram.update_admission import TelegramApplication
-from telegram.ext import Application, ExtBot
+from telegram.ext import ExtBot
 from telegram.request import BaseRequest
 
-from services.hermes.assistant_gateway import AssistantGateway, TURN, committed_adapter_class, reaction_check, reactions_enabled, typing_enabled
-from services.hermes.capture import canonical, digest, instrument_request
-from services.hermes.scopes import Scopes
-
-
-class FixtureGateway(AssistantGateway):
-    # Receipts carry measured timings; these checks compare the outcome only.
-    async def dispatch(self, *args, **kwargs):
-        result = await super().dispatch(*args, **kwargs)
-        return {key: value for key, value in result.items() if key != 'timings'}
+from services.durable import canonical, digest
+from services.telegram.capture import Capture, instrument_request
+from services.telegram.checks import reaction_check
+from services.telegram.gateway import TelegramService
+from services.telegram.sender import Sender
+from services.telegram.settings import Policy, reactions_enabled, typing_enabled
 
 
 class TelegramSimulationRequest(BaseRequest):
@@ -85,54 +78,35 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.secret = 'synthetic-simulation-service-token'
-        env = patch.dict(os.environ, {'NOCHEH_SPOOL_DIR': str(self.root / 'spool'),
-                                     'SERVICE_TOKEN': self.secret,
-                                     'HERMES_HOME': str(self.root)})
+        env = patch.dict(os.environ, {'SERVICE_TOKEN': self.secret, 'TELEGRAM_TYPING': 'false', 'TELEGRAM_REACTIONS': 'false'})
         env.start()
         self.addCleanup(env.stop)
         self.allowed = True
-        policy_check = patch('services.hermes.assistant_gateway.check_delivery_policy',
-                             side_effect=lambda _credential: self.allowed)
+        policy_check = patch('services.telegram.gateway.check_delivery_policy', side_effect=lambda _credential: self.allowed)
         policy_check.start()
         self.addCleanup(policy_check.stop)
-        self.policy = Scopes({'enabled': True, 'owner_id': '123', 'group_ids': ['-20'],
-                              'group_access': {'-20': {'granted': ['456'], 'denied': []}}})
-        self.adapter = committed_adapter_class()(PlatformConfig(
-            enabled=True, token='123456:synthetic', typing_indicator=False))
+        self.policy = Policy(True, '123', ['-20'], {'-20': {'granted': ['456'], 'denied': []}})
+        self.capture = Capture(self.root / 'spool', '123456')
         self.request, self.polling = TelegramSimulationRequest(), TelegramSimulationRequest()
-        instrument_request(self.request, self.adapter.capture)
-        instrument_request(self.polling, self.adapter.capture, polling=True)
+        instrument_request(self.request, self.capture)
+        instrument_request(self.polling, self.capture, polling=True)
         self.bot = ExtBot('123456:synthetic', request=self.request, get_updates_request=self.polling)
-        # The pinned adapter builds its application with the native admission class.
-        self.app = Application.builder().bot(self.bot).application_class(
-            TelegramApplication, {'adapter': self.adapter}).build()
-        await self.app.initialize()
-        self.addAsyncCleanup(self.app.shutdown)
-        self.adapter._app = self.app
-        self.adapter._bot = self.bot
-        self.adapter._text_batch_delay_seconds = 0.001
-        self.adapter._register_handlers(self.app)
+        await self.bot.initialize()
+        self.addAsyncCleanup(self.bot.shutdown)
         self.answer = 'پاسخ مصنوعی برای بررسی مسیر ارسال'
-        self.handled = []
-
-        async def answer(event):
-            self.handled.append(event)
-            TURN.get()['agent_result'] = {'state': 'done', 'text': self.answer, 'session_id': 'synthetic'}
-            return self.answer
-
-        self.adapter.set_message_handler(answer)
         self.gateway = self.new_gateway()
 
     def new_gateway(self):
-        gateway = FixtureGateway(self.root, self.root / 'spool', self.policy,
-                                   '123456:synthetic', 'synthetic', lambda: None)
-        gateway.status = 'connected'
-        gateway.adapter = self.adapter
-        gateway.capacity = asyncio.Semaphore(2)
+        """A freshly started service over the same spool, as after a restart."""
+        gateway = TelegramService(self.policy, '123456:synthetic', self.root / 'spool', self.root / 'state')
+        gateway.status, gateway.bot, gateway.capture = 'connected', self.bot, self.capture
+        gateway.sender = Sender(self.bot, pace=0)
         gateway.action_lock = asyncio.Lock()
+        gateway.typing_on = getattr(self, 'typing', False)
+        gateway.reactions_on = getattr(self, 'reacting', False)
         return gateway
 
-    def envelope(self, identifier=1, topic=17):
+    def envelope(self, identifier=1, topic=17, attempt=1, text=None, presence=None):
         source_key = f'telegram:123456:update:{identifier}'
         event_id = digest(source_key)
         claims = {'scope': '-20', 'space': '-20' if topic is None else f'-20/topic/{topic}',
@@ -140,45 +114,65 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
                   'audience': 'nocheh-assistant'}
         body = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
         signature = base64.urlsafe_b64encode(hmac.new(self.secret.encode(), body.encode(), hashlib.sha256).digest()).decode().rstrip('=')
+        return {'id': digest(event_id + ':' + str(attempt)), 'event_id': event_id, 'attempt': attempt, 'dispatch_key': source_key,
+                'chat_id': '-20', 'topic': topic, 'reply_to': str(identifier), 'message_id': str(identifier),
+                'text': self.answer if text is None else text, 'session_id': 'synthetic', 'notify': False,
+                'presence': bool(self.gateway.reactions_on or self.gateway.typing_on) if presence is None else presence,
+                'archive_credential': f'turn.{body}.{signature}'}
+
+    def update(self, identifier=1, topic=17):
         message = {'message_id': identifier, 'date': 1700000000,
                    'chat': {'id': -20, 'type': 'supergroup', 'is_forum': True},
                    'from': {'id': 456, 'is_bot': False, 'first_name': 'Synthetic'}, 'text': 'پیام مصنوعی'}
         if topic is not None:
             message.update(message_thread_id=topic, is_topic_message=True)
-        return {'event_id': event_id, 'source_key': source_key, 'scope': '-20', 'attempt': 1,
-                'archive_credential': f'turn.{body}.{signature}', 'group_addressing': {'direct': True, 'handles': []},
-                'payload': {'update_id': identifier, 'message': message}}
+        return {'update_id': identifier, 'message': message}
 
-    async def test_polling_duplicates_are_durable_before_dispatch_and_offsets_acknowledge(self):
+    async def deliver(self, envelope, gateway=None, work=0.0):
+        """Show presence while the brain works for ``work`` seconds, then deliver the reply; the outcome only."""
+        gateway = gateway or self.gateway
+        chat, topic, message, credential = gateway._turn(envelope)
+        if envelope.get('presence') and gateway.connected() and (gateway.typing_on or gateway.reactions_on):
+            await gateway._start(envelope['id'], chat, topic, message, credential)
+            await asyncio.sleep(work)
+        result = await gateway._reply(envelope['id'], envelope, chat, topic, message, credential)
+        return {key: value for key, value in result.items() if key not in ('timings', 'window')}
+
+    async def brain_ended(self, envelope, finish, work=0.0):
+        """The brain's turn ended without a reply: presence is finished as Nocheh's core does."""
+        chat, topic, message, credential = self.gateway._turn(envelope)
+        await self.gateway._start(envelope['id'], chat, topic, message, credential)
+        await asyncio.sleep(work)
+        await self.gateway._finish(envelope['id'], chat, message, credential, finish)
+
+    async def test_polling_duplicates_are_durable_before_delivery_and_offsets_acknowledge(self):
         envelope = self.envelope()
-        self.polling.updates = [envelope['payload']]
+        self.polling.updates = [self.update()]
         for _ in range(2):
             updates = await self.bot.get_updates(allowed_updates=['message', 'message_reaction', 'message_reaction_count'])
             self.assertEqual(len(updates), 1)
             captured = self.root / 'spool/pending' / (envelope['event_id'] + '.json')
-            self.assertEqual(json.loads(captured.read_bytes())['payload'], envelope['payload'])
-        self.assertEqual(await self.gateway.dispatch(envelope), {'state': 'done'})
-        self.assertEqual(await self.new_gateway().dispatch(envelope), {'state': 'done'})
+            self.assertEqual(json.loads(captured.read_bytes())['payload'], self.update())
+        self.assertEqual(await self.deliver(envelope), {'state': 'done'})
+        self.assertEqual(await self.deliver(envelope, self.new_gateway()), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
         self.assertEqual(await self.bot.get_updates(offset=2), ())
 
-    async def test_missing_topic_never_delivers_a_private_topic_answer_in_general(self):
+    async def test_missing_topic_never_delivers_a_topic_answer_in_general(self):
         self.request.respond = lambda data: (400, canonical({'ok': False, 'error_code': 400,
             'description': 'Bad Request: message thread not found'})) if data.get('message_thread_id') else None
-        result = await self.gateway.dispatch(self.envelope())
-        self.assertNotEqual(result['state'], 'done')
-        self.assertEqual(self.request.delivered, [], 'native fallback must not widen the approved audience')
+        result = await self.deliver(self.envelope())
+        self.assertEqual(result, {'state': 'suppressed', 'error_code': 'telegram_rejected'})
+        self.assertEqual(self.request.delivered, [], 'a reply never widens its audience to General')
 
     async def test_general_forum_message_replies_in_general(self):
-        envelope = self.envelope(topic=None)
-        self.assertEqual(await self.gateway.dispatch(envelope), {'state': 'done'})
+        self.assertEqual(await self.deliver(self.envelope(topic=None)), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
         self.assertIn(self.request.delivered[0].get('message_thread_id'), (None, 1))
 
     async def test_approved_action_preserves_exact_topic_and_receipt_after_restart(self):
         body = {'id': 'b' * 64, 'destination': '-20/topic/17', 'text': 'پیگیری تأییدشدهٔ مصنوعی'}
-        with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}), patch(
-                'services.hermes.assistant_gateway.check_action_policy', return_value=True):
+        with patch('services.telegram.gateway.check_action_policy', return_value=True):
             self.assertEqual(await self.gateway.send_action(body), {'state': 'done'})
             self.assertEqual(await self.new_gateway().send_action(body), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
@@ -190,8 +184,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(text), 4096)
         self.assertLessEqual(len(text.encode('utf-16-le')) // 2, 12000)
         body = {'id': 'd' * 64, 'destination': '-20/topic/17', 'text': text}
-        with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}), patch(
-                'services.hermes.assistant_gateway.check_action_policy', return_value=True):
+        with patch('services.telegram.gateway.check_action_policy', return_value=True):
             self.assertEqual(await self.gateway.send_action(body), {'state': 'done'})
             count = len(self.request.delivered)
             self.assertGreater(count, 1)
@@ -207,8 +200,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.request.calls), before)
         self.assertEqual(self.request.delivered, [])
 
-    async def test_explicit_general_topic_uses_the_native_general_send_convention(self):
-        self.assertEqual(await self.gateway.dispatch(self.envelope(topic=1)), {'state': 'done'})
+    async def test_explicit_general_topic_uses_the_general_send_convention(self):
+        self.assertEqual(await self.deliver(self.envelope(topic=1)), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
         self.assertIsNone(self.request.delivered[0].get('message_thread_id'))
 
@@ -216,8 +209,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.request.respond = lambda data: (400, canonical({'ok': False, 'error_code': 400,
             'description': 'Bad Request: message thread not found'})) if data.get('message_thread_id') else None
         body = {'id': 'c' * 64, 'destination': '-20/topic/17', 'text': 'Synthetic approved topic follow-up'}
-        with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}), patch(
-                'services.hermes.assistant_gateway.check_action_policy', return_value=True):
+        with patch('services.telegram.gateway.check_action_policy', return_value=True):
             self.assertEqual(await self.gateway.send_action(body), {'state': 'ambiguous'})
             self.assertEqual(await self.new_gateway().send_action(body), {'state': 'ambiguous'})
         self.assertEqual(self.request.delivered, [])
@@ -228,38 +220,39 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
             self.allowed = False
         self.request.respond = revoke_after_first
         envelope = self.envelope()
-        result = await self.gateway.dispatch(envelope)
+        result = await self.deliver(envelope)
         self.assertNotEqual(result['state'], 'done')
         self.assertEqual(len(self.request.delivered), 1, 'only the chunk authorized before revocation can leave')
-        self.assertEqual(await self.new_gateway().dispatch(envelope), result)
+        self.allowed = True
+        self.assertEqual(await self.deliver(envelope, self.new_gateway()), result)
         self.assertEqual(len(self.request.delivered), 1, 'partial delivery cannot be replayed after restart')
 
     async def test_long_persian_emoji_reply_keeps_its_topic_and_replays_no_chunks(self):
         self.answer = 'یک پاسخ بلند با ایموجی 🌿 و جزئیات مصنوعی\n' * 350
         envelope = self.envelope()
-        self.assertEqual(await self.gateway.dispatch(envelope), {'state': 'done'})
+        self.assertEqual(await self.deliver(envelope), {'state': 'done'})
         self.assertGreater(len(self.request.delivered), 1)
         self.assertTrue(all(d.get('message_thread_id') == 17 for d in self.request.delivered))
         before = len(self.request.delivered)
-        self.assertEqual(await self.new_gateway().dispatch(envelope), {'state': 'done'})
+        self.assertEqual(await self.deliver(envelope, self.new_gateway()), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), before)
 
     async def test_markdown_rejection_falls_back_within_same_topic_only(self):
         self.answer = '**پاسخ مصنوعی**'
         self.request.respond = lambda data: (400, canonical({'ok': False, 'error_code': 400,
             'description': "Bad Request: can't parse entities"})) if data.get('parse_mode') else None
-        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+        self.assertEqual(await self.deliver(self.envelope()), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
         self.assertEqual(self.request.delivered[0]['message_thread_id'], 17)
 
     async def test_uncertain_server_failure_is_not_repeated_after_restart(self):
         self.request.respond = lambda data: (500, canonical({'ok': False, 'error_code': 500, 'description': 'Synthetic server failure'}))
         envelope = self.envelope()
-        result = await self.gateway.dispatch(envelope)
+        result = await self.deliver(envelope)
         self.assertEqual(result['state'], 'ambiguous')
         before = len([c for c in self.request.calls if c[0] == 'sendMessage'])
         self.assertEqual(before, 1)
-        self.assertEqual(await self.new_gateway().dispatch(envelope), result)
+        self.assertEqual(await self.deliver(envelope, self.new_gateway()), result)
         self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), before)
 
     async def test_rate_limit_rejection_recovers_without_duplicate_delivery(self):
@@ -272,21 +265,20 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
                     'description': 'Too Many Requests: retry after 1', 'parameters': {'retry_after': 1}})
         self.request.respond = rate_limit
         envelope = self.envelope()
-        self.assertEqual(await self.gateway.dispatch(envelope), {'state': 'done'})
+        self.assertEqual(await self.deliver(envelope), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
         self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), 2)
-        self.assertEqual(await self.new_gateway().dispatch(envelope), {'state': 'done'})
+        self.assertEqual(await self.deliver(envelope, self.new_gateway()), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
 
     async def test_cancel_between_chunks_keeps_partial_delivery_without_later_sends(self):
         self.answer = 'Synthetic long answer for cancellation. ' * 350
-        cancelled = threading.Event()
-        self.request.respond = lambda data: cancelled.set()
         envelope = self.envelope()
-        result = await self.gateway.dispatch(envelope, cancelled=cancelled)
+        self.request.respond = lambda data: self.gateway.cancels[envelope['id']].set()
+        result = await self.deliver(envelope)
         self.assertEqual(result['state'], 'ambiguous', 'an earlier transmitted chunk cannot be called cancelled')
         self.assertEqual(len(self.request.delivered), 1)
-        self.assertEqual(await self.new_gateway().dispatch(envelope), result)
+        self.assertEqual(await self.deliver(envelope, self.new_gateway()), result)
         self.assertEqual(len(self.request.delivered), 1)
 
     async def test_revocation_during_rate_limit_wait_blocks_the_retry(self):
@@ -295,7 +287,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
             return 429, canonical({'ok': False, 'error_code': 429,
                 'description': 'Too Many Requests: retry after 1', 'parameters': {'retry_after': 1}})
         self.request.respond = revoke_and_reject
-        result = await self.gateway.dispatch(self.envelope())
+        result = await self.deliver(self.envelope())
         self.assertNotEqual(result['state'], 'done')
         self.assertEqual(self.request.delivered, [])
         self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), 1)
@@ -303,20 +295,19 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     async def test_deleted_reply_anchor_may_change_without_changing_topic(self):
         self.request.respond = lambda data: (400, canonical({'ok': False, 'error_code': 400,
             'description': 'Bad Request: message to be replied not found'})) if data.get('reply_parameters') else None
-        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+        self.assertEqual(await self.deliver(self.envelope()), {'state': 'done'})
         self.assertEqual(len(self.request.delivered), 1)
         self.assertEqual(self.request.delivered[0]['message_thread_id'], 17)
 
-    async def test_action_revocation_between_native_chunks_prevents_further_sends(self):
+    async def test_action_revocation_between_chunks_prevents_further_sends(self):
         approved = True
-        self.adapter.MAX_MESSAGE_LENGTH = 80
+        self.gateway.sender.limit = 80
         def revoke(data):
             nonlocal approved
             approved = False
         self.request.respond = revoke
         body = {'id': 'a' * 64, 'destination': '-20', 'text': 'Synthetic approved message. ' * 20}
-        with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}), \
-                patch('services.hermes.assistant_gateway.check_action_policy', side_effect=lambda action: approved):
+        with patch('services.telegram.gateway.check_action_policy', side_effect=lambda action: approved):
             result = await self.gateway.send_action(body)
             self.assertEqual(result['state'], 'ambiguous')
             self.assertEqual(len(self.request.delivered), 1)
@@ -326,18 +317,10 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     def chat_actions(self):
         return [data for operation, data in self.request.calls if operation == 'sendChatAction']
 
-    def slow_answer(self, seconds=0.3, result=None):
-        async def answer(event):
-            await asyncio.sleep(seconds)
-            TURN.get()['agent_result'] = result or {'state': 'done', 'text': self.answer, 'session_id': 'synthetic'}
-            return self.answer if (result or {}).get('state', 'done') == 'done' else None
-        self.adapter.set_message_handler(answer)
-
     async def test_working_turn_shows_typing_in_its_own_topic_until_the_reply(self):
-        self.adapter.turn_typing = True
-        self.slow_answer()
-        with patch('services.hermes.assistant_gateway.TYPING_INTERVAL', 0.05):
-            self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+        self.gateway.typing_on = True
+        with patch('services.telegram.gateway.TYPING_INTERVAL', 0.05):
+            self.assertEqual(await self.deliver(self.envelope(), work=0.3), {'state': 'done'})
             await asyncio.sleep(0.2)
         actions = self.chat_actions()
         self.assertGreaterEqual(len(actions), 3, 'typing is renewed while the turn works')
@@ -349,34 +332,23 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b'sendMessage', journal)
 
     async def test_typing_stops_when_the_turn_fails_or_authority_is_gone(self):
-        self.adapter.turn_typing = True
-        self.slow_answer(result={'state': 'failed', 'error_code': 'model_unavailable'})
-        with patch('services.hermes.assistant_gateway.TYPING_INTERVAL', 0.05):
-            result = await self.gateway.dispatch(self.envelope())
-            self.assertEqual(result['state'], 'failed')
+        self.gateway.typing_on = True
+        with patch('services.telegram.gateway.TYPING_INTERVAL', 0.05):
+            await self.brain_ended(self.envelope(), 'failed', work=0.3)
             count = len(self.chat_actions())
             self.assertGreater(count, 0)
             await asyncio.sleep(0.2)
             self.assertEqual(len(self.chat_actions()), count, 'a failed turn stops typing')
             self.allowed = False
-            self.slow_answer()
-            await self.gateway.dispatch(self.envelope(identifier=2))
+            await self.deliver(self.envelope(identifier=2), work=0.3)
         self.assertEqual(len(self.chat_actions()), count, 'a revoked space sees no typing')
         self.assertEqual(self.request.delivered, [])
 
-    async def test_no_typing_when_switched_off_unaddressed_or_a_fixed_reply(self):
-        self.slow_answer(0.1)
-        with patch('services.hermes.assistant_gateway.TYPING_INTERVAL', 0.02):
-            self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
-            self.adapter.turn_typing = True
-            unaddressed = self.envelope(identifier=2)
-            unaddressed['group_addressing'] = {'direct': False, 'handles': []}
-            self.assertEqual(await self.gateway.dispatch(unaddressed), {'state': 'suppressed', 'error_code': 'not_addressed'})
-            fixed = self.envelope(identifier=3)
-            fixed['control_reply'] = 'Synthetic fixed reply'
-            self.assertEqual(await self.gateway.dispatch(fixed), {'state': 'done'})
+    async def test_no_typing_when_switched_off(self):
+        with patch('services.telegram.gateway.TYPING_INTERVAL', 0.02):
+            self.assertEqual(await self.deliver(self.envelope(presence=True), work=0.1), {'state': 'done'})
         self.assertEqual(self.chat_actions(), [])
-        self.assertEqual(len(self.request.delivered), 2)
+        self.assertEqual(len(self.request.delivered), 1)
 
     def test_typing_setting_defaults_on_and_rejects_malformed_values(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -396,9 +368,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
                 for operation, data in self.request.calls if operation == 'setMessageReaction']
 
     async def test_working_turn_reacts_on_its_own_message_around_the_reply(self):
-        self.adapter.turn_reactions = True
-        self.slow_answer(0.05)
-        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
+        self.gateway.reactions_on = True
+        self.assertEqual(await self.deliver(self.envelope(), work=0.05), {'state': 'done'})
         self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, ['\U0001f44d'])])
         operations = [operation for operation, _ in self.request.calls if operation in ('setMessageReaction', 'sendMessage')]
         self.assertEqual(operations, ['setMessageReaction', 'sendMessage', 'setMessageReaction'], '👀 before the reply, 👍 after it')
@@ -406,52 +377,36 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(b'setMessageReaction', journal, 'working reactions add no delivery records')
 
     async def test_a_failed_turn_shows_thumbs_down_and_its_retry_works_again(self):
-        self.adapter.turn_reactions = True
-        self.slow_answer(0.01, result={'state': 'failed', 'error_code': 'model_unavailable'})
-        self.assertEqual((await self.gateway.dispatch(self.envelope()))['state'], 'failed')
+        self.gateway.reactions_on = True
+        await self.brain_ended(self.envelope(), 'failed', work=0.01)
         self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, ['\U0001f44e'])])
         # The retry's 👀 is the same request as the first one; it is sent, not answered from the journal.
-        self.slow_answer(0.01)
-        retry = {**self.envelope(), 'attempt': 2}
-        self.assertEqual(await self.gateway.dispatch(retry), {'state': 'done'})
+        self.assertEqual(await self.deliver(self.envelope(attempt=2), work=0.01), {'state': 'done'})
         self.assertEqual(self.reactions()[2:], [('-20', 1, ['\U0001f440']), ('-20', 1, ['\U0001f44d'])])
         self.assertEqual(len(self.request.delivered), 1)
 
     async def test_silence_and_cancellation_clear_the_working_reaction(self):
-        self.adapter.turn_reactions = True
-        async def silent(event):
-            TURN.get()['agent_result'] = {'state': 'done', 'text': '', 'session_id': 'synthetic'}
-            return None
-        self.adapter.set_message_handler(silent)
-        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'suppressed', 'error_code': 'intentional_silence'})
-        self.slow_answer(0.01, result={'state': 'cancelled'})
-        self.assertEqual(await self.gateway.dispatch(self.envelope(identifier=2)), {'state': 'cancelled'})
+        self.gateway.reactions_on = True
+        self.assertEqual(await self.deliver(self.envelope(text=''), work=0.01), {'state': 'suppressed', 'error_code': 'intentional_silence'})
+        await self.brain_ended(self.envelope(identifier=2), 'clear', work=0.01)
         self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, []), ('-20', 2, ['\U0001f440']), ('-20', 2, [])])
         self.assertEqual(self.request.delivered, [])
 
     async def test_an_uncertain_delivery_clears_the_working_reaction(self):
         # Telegram may have shown the reply even though its answer was lost, so no 👎.
-        self.adapter.turn_reactions = True
-        self.slow_answer(0.01)
+        self.gateway.reactions_on = True
         self.request.respond = lambda data: (502, b'Bad Gateway')
-        result = await self.gateway.dispatch(self.envelope())
+        result = await self.deliver(self.envelope(), work=0.01)
         self.assertEqual(result['state'], 'ambiguous')
         self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, [])])
 
-    async def test_no_reaction_when_switched_off_unaddressed_a_fixed_reply_or_revoked(self):
-        self.slow_answer(0.01)
-        self.assertEqual(await self.gateway.dispatch(self.envelope()), {'state': 'done'})
-        self.adapter.turn_reactions = True
-        unaddressed = self.envelope(identifier=2)
-        unaddressed['group_addressing'] = {'direct': False, 'handles': []}
-        self.assertEqual(await self.gateway.dispatch(unaddressed), {'state': 'suppressed', 'error_code': 'not_addressed'})
-        fixed = self.envelope(identifier=3)
-        fixed['control_reply'] = 'Synthetic fixed reply'
-        self.assertEqual(await self.gateway.dispatch(fixed), {'state': 'done'})
+    async def test_no_reaction_when_switched_off_or_revoked(self):
+        self.assertEqual(await self.deliver(self.envelope(presence=True), work=0.01), {'state': 'done'})
+        self.gateway.reactions_on = True
         self.allowed = False
-        self.assertNotEqual((await self.gateway.dispatch(self.envelope(identifier=4)))['state'], 'done')
+        self.assertNotEqual((await self.deliver(self.envelope(identifier=4), work=0.01))['state'], 'done')
         self.assertEqual(self.reactions(), [], 'a revoked space gets no reaction either')
-        self.assertEqual(len(self.request.delivered), 2)
+        self.assertEqual(len(self.request.delivered), 1)
 
     async def test_a_reaction_outside_a_turn_is_refused_before_any_request(self):
         with self.assertRaisesRegex(Exception, 'telegram_reaction_unbound'):
