@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 from .async_runs import CLOSED,identity
 from .brain_turns import BrainTurns
-from .capture import canonical,digest,immutable_file
+from services.durable import canonical,digest,immutable_file
 from .scopes import Scope,Scopes
 from .subscription import ProviderNotConfigured
 
@@ -341,7 +341,7 @@ class BrainTurnTests(unittest.TestCase):
             handler.path='/internal/turn/start'
             with self.assertRaisesRegex(RuntimeError,'brain_not_started'):handler.dispatch(body)
         brain=self.brain(self.replying())
-        with patch.object(runtime,'BRAIN',brain),patch.object(runtime,'ASSISTANT',None):
+        with patch.object(runtime,'BRAIN',brain),patch.object(runtime,'MANAGED',None):
             handler.path='/internal/turn/start';self.assertIn(handler.dispatch(body)['state'],('queued','running','done'))
             handler.path='/internal/turn/resume'
             for _ in range(500):
@@ -352,8 +352,11 @@ class BrainTurnTests(unittest.TestCase):
             handler.path='/internal/turn/events'
             self.assertEqual(handler.dispatch({**observe(body),'after':2})['events'][-1]['state'],'done')
             handler.path='/internal/turn/cancel';self.assertEqual(handler.dispatch(observe(body)),state)
-            handler.path='/internal/run/start'
-            with self.assertRaisesRegex(RuntimeError,'assistant_not_started'):handler.dispatch(body)
+            # A Telegram turn has only the turn routes; the run routes refuse it, with or without a channel.
+            for route in ('start','resume','events','cancel'):
+                handler.path='/internal/run/'+route
+                for value in (body,{key:item for key,item in body.items() if key!='channel'}):
+                    with self.assertRaisesRegex(ValueError,'runtime_channel_unavailable'):handler.dispatch(value)
 
     def test_the_service_answers_turn_routes_and_reports_active_turns(self):
         from . import runtime
@@ -374,7 +377,15 @@ class BrainTurnTests(unittest.TestCase):
                 self.assertEqual(call('/internal/turn/start',turn_body(41,control_reply='Fixed reply')),(400,{'error':'invalid_request'}))
                 status,state=call('/internal/turn/start',turn_body(41));self.assertEqual(status,200)
                 self.assertIn(state['state'],('queued','running','done'))
-                self.assertIn('brain_turns',call('/health')[1])
+                health=call('/health')[1]
+                self.assertIn('brain_turns',health)
+                # Telegram's health is the bot's own; Hermes reports none.
+                self.assertFalse({'telegram','telegram_details'}&set(health))
+                # Nothing that reached Telegram is left: these are unknown routes.
+                for route in ('/internal/dispatch','/internal/action','/internal/file','/internal/telegram/approval','/internal/telegram/refusal',
+                              '/internal/telegram/notice','/internal/telegram/chat'):
+                    self.assertEqual(call(route,{'chat_id':'-20'}),(400,{'error':'invalid_request'}),route)
+                self.assertEqual(call('/internal/run/start',turn_body(42)),(400,{'error':'invalid_request'}))
         finally:server.shutdown();server.server_close();thread.join()
 
     def test_journal_retention_prunes_finished_brain_turns(self):

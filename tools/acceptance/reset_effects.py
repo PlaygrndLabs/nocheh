@@ -143,7 +143,7 @@ def evaluate(state,observed):
             if not isinstance(identifier,str) or not HASH.fullmatch(identifier):raise ValueError('reset_effect_identity_invalid')
             if kind=='dispatches':
                 if type(row['attempts']) is not int or row['attempts']<0:raise ValueError('reset_effect_attempt_invalid')
-                name=digest(identifier+':'+str(row['attempts']));dispatch=row['source_key']
+                name='reply-'+digest(identifier+':'+str(row['attempts']));dispatch=row['source_key']
             else:name='action-'+identifier;dispatch='action:'+identifier
             saved=receipt(Path(state)/'spool/dispatch'/(name+'.result'))
             checksum=saved[1] if saved else None

@@ -7,9 +7,9 @@ import {defaultBrain} from '../src/access.js';
 
 type Seen={path:string;method:string;body:Record<string,unknown>|null};
 /** Hermes behind a fake transport that records each request and answers with `answer`. */
-function hermes(answer:(seen:Seen)=>Response|Promise<Response>,telegramReplies?:'hermes'|'nocheh') {
+function hermes(answer:(seen:Seen)=>Response|Promise<Response>) {
   const seen:Seen[]=[];
-  const plugged=hermesBrain({url:'http://fixture.invalid',token:'fixture',...(telegramReplies?{telegramReplies}:{}),fetch:async(url,init)=>{
+  const plugged=hermesBrain({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
     assert.equal((init?.headers as Record<string,string>).authorization,'Bearer fixture');
     const request={path:new URL(String(url)).pathname,method:String(init?.method),body:init?.body?JSON.parse(String(init.body)):null};
     seen.push(request);return answer(request);
@@ -18,9 +18,9 @@ function hermes(answer:(seen:Seen)=>Response|Promise<Response>,telegramReplies?:
 }
 const id='a'.repeat(64);
 
-test('Hermes runs every channel on its run routes with one identity per turn',async()=>{
+test('Hermes runs every other channel on its run routes with one identity per turn',async()=>{
   const {plugged,seen}=hermes(({path})=>Response.json(path.endsWith('/events')?{events:[{sequence:4,state:'running',stage:'assistant',at:1}]}:{state:'running'}));
-  for(const channel of turnChannels) {
+  for(const channel of turnChannels.filter(channel=>channel!=='telegram')) {
     seen.length=0;const ref={channel,event_id:id,attempt:7};
     await plugged.startTurn(ref,{scope:'-20',text:'original 😃\r\n  ',channel:'other',attempt:1});
     await plugged.observeTurn(ref);await plugged.turnEvents(ref,3);await plugged.cancelTurn(ref);
@@ -31,13 +31,13 @@ test('Hermes runs every channel on its run routes with one identity per turn',as
   }
 });
 
-test('with Nocheh sending Telegram replies, Telegram turns run on the turn routes and must return their reply',async()=>{
+test('Telegram turns run on the turn routes and must return their reply, which Nocheh sends',async()=>{
   let answer:Record<string,unknown>={state:'done',reply:{text:'Hello',session_id:'s1'}};
-  const {plugged,seen}=hermes(()=>Response.json(answer),'nocheh');
+  const {plugged,seen}=hermes(()=>Response.json(answer));
   const ref={channel:'telegram' as const,event_id:id,attempt:'continuation-1'};
   assert.deepEqual((await plugged.startTurn(ref,{text:'hi'})).reply,{text:'Hello',session_id:'s1'});
-  await plugged.observeTurn(ref);await plugged.cancelTurn(ref);
-  assert.deepEqual(seen.map(row=>row.path),['/internal/turn/start','/internal/turn/resume','/internal/turn/cancel']);
+  await plugged.observeTurn(ref);await plugged.cancelTurn(ref);answer={events:[]};await plugged.turnEvents(ref,0);
+  assert.deepEqual(seen.map(row=>row.path),['/internal/turn/start','/internal/turn/resume','/internal/turn/cancel','/internal/turn/events']);
   assert.deepEqual(seen[0]?.body,{text:'hi',channel:'telegram',event_id:id,attempt:'continuation-1'},'turn routes take no asynchronous flag');
   answer={state:'suppressed',error_code:'intentional_silence'};assert.equal((await plugged.observeTurn(ref)).state,'suppressed');
   for(const invalid of [{state:'done'},{state:'done',reply:{text:'Hello'}},{state:'done',reply:'Hello'},{state:'sent'}]) {

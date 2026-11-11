@@ -53,6 +53,10 @@ def commands(revision):
             runtime,'python','-m','unittest','discover','-s','services/hermes','-t','.','-p','test_*.py','-q']),
         ('dashboard_assets',['docker','run','--rm','--network=none','--read-only',runtime,'python','-c',
             "from pathlib import Path; assert Path('/opt/hermes/hermes_cli/web_dist/index.html').is_file(); assert Path('/workspace/services/hermes/dashboard/manifest.json').is_file()"]),
+        # Nocheh's own Telegram bot runs from the same image and its pinned Telegram SDK (ADR-0235).
+        ('telegram_bot_tests',['docker','run','--rm','--network=none','--read-only','--tmpfs','/tmp:rw,exec,nosuid,nodev,mode=1777',
+            '--cap-drop=ALL','--security-opt=no-new-privileges','-e','SERVICE_TOKEN='+'0'*64,
+            runtime,'python','-m','unittest','discover','-s','services/telegram','-t','.','-p','test_*.py','-q']),
     ]
 
 

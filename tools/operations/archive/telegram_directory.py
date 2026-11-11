@@ -106,12 +106,12 @@ def directory(state, archive=None, bot_api=_bot_api):
     return {'groups': result[:100], 'truncated': archive.get('truncated') is True or len(result) > 100 or len(selected) > 20}
 
 
-def _hermes_discovery(state):
-    """Runs `discover-telegram` inside Hermes: it saves every update it reads, confirms
+def _bot_discovery(state):
+    """Runs `discover-telegram` inside nocheh-telegram: it saves every update it reads, confirms
     none of them and sends no message, so nothing is lost when Telegram is turned on."""
     command, env = compose(state)
     try:
-        result = subprocess.run(command + ['exec', '-T', 'hermes', 'python', '-m', 'services.hermes.discover_telegram'],
+        result = subprocess.run(command + ['exec', '-T', 'nocheh-telegram', 'python', '-m', 'services.telegram.discover'],
                                 env=env, capture_output=True, text=True, timeout=60, check=False)
     except (OSError, subprocess.TimeoutExpired):
         raise ValueError('telegram_discovery_failed') from None
@@ -123,7 +123,7 @@ def _hermes_discovery(state):
         raise ValueError('telegram_discovery_failed') from None
 
 
-def discover(state, bot_api=_bot_api, run=_hermes_discovery):
+def discover(state, bot_api=_bot_api, run=_bot_discovery):
     """Who wrote to the bot privately, for "Find my Telegram ID". Works only while
     Telegram is off, so it never competes with Nocheh reading the bot's messages."""
     values = load(state)

@@ -1,4 +1,4 @@
-"""Run the real Hermes runtime against the isolated fixture's HTTP Bot API."""
+"""Run Nocheh's Telegram service against the isolated fixture's HTTP Bot API."""
 import inspect
 import os
 from tools.acceptance.telegram_mock import TOKEN
@@ -16,9 +16,9 @@ def install_transport():
         if bound.arguments.get('token')!=TOKEN:raise ValueError('synthetic_telegram_token_required')
         return original(*bound.args,**bound.kwargs)
     def route(request):
-        # Rewrite only after the production boundary has inspected the actual
-        # Bot API request. Capture, current authority, parsing and policy stay
-        # intact; model requests still cross the unchanged mandatory guard.
+        # Rewrite at the transport, below the service's instrumented requests:
+        # capture, the outbound journal and every policy check still see the
+        # real Bot API request. Other hosts, such as the archive, pass unchanged.
         url=request.url
         if url.scheme!='https' or url.host!='api.telegram.org' or url.port not in (None,443):return request
         if not any(url.path.startswith(prefix) for prefix in ('/bot'+TOKEN+'/', '/file/bot'+TOKEN+'/')):
@@ -40,8 +40,8 @@ def install_transport():
 
 def main():
     install_transport()
-    from services.hermes.runtime import main as runtime
-    runtime()
+    from services.telegram.server import main as server
+    server()
 
 
 if __name__=='__main__':main()

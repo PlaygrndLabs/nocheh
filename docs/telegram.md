@@ -1,7 +1,9 @@
 # Telegram setup and assistant acceptance
 
-The native Hermes Telegram adapter is active locally with the configured owner and
-selected groups. Owner-DM and selected-group replies have passed; the remaining
+Nocheh's own Telegram service, `nocheh-telegram`, is the bot: it is the only part
+that holds the bot token, polls Telegram and sends to it. The brain (Hermes today)
+only writes the replies ([ADR-0235](adr/0235-nocheh-owns-the-telegram-bot.md)). It is
+active locally with the configured owner and selected groups. Owner-DM and selected-group replies have passed; the remaining
 [release checks](release-acceptance.md) are pending. New installations default to
 disabled until a token, owner ID and explicit policy are configured. No VPS is needed.
 
@@ -102,8 +104,8 @@ removals invalidate stale inferred meaning without sending a new reply to an old
 message. If no update is delivered, Nocheh cannot infer a reaction change.
 
 While Nocheh works on a message, the bot shows "typing…" in its chat or topic
-(**Show typing while working** turns it off) and reacts to it with the pinned Hermes
-adapter's own working reactions: 👀 while it works, then 👍 once the reply is
+(**Show typing while working** turns it off) and reacts to it with working
+reactions: 👀 while it works, then 👍 once the reply is
 sent or 👎 when the turn failed. A turn that ends in silence, is cancelled, or
 whose delivery is uncertain clears the 👀; a retried turn sets it again. The reactions follow the same rules
 as "typing…": only for a turn that will write an answer, only on that exact

@@ -10,9 +10,12 @@ class TelegramRehearsalOwnershipTests(unittest.TestCase):
         self.directory=ROOT/'data/acceptance/results/synthetic-test'
         self.project='nocheh-installation-'+'a'*12
         self.info={'project':self.project,'directory':str(self.directory),'images':{'native':'sha256:'+'b'*64}}
+        bind=lambda source,target:{'type':'bind','source':str(self.directory/source),'target':target}
         self.manifest={'name':self.project,'networks':{'default':{'internal':True,'name':self.project+'_default'}},
-            'services':{'hermes':{'image':self.info['images']['native'],'volumes':[{'type':'bind',
-                'source':str(self.directory/'state/hermes'),'target':'/workspace/data/local/hermes'}]},
+            'services':{'hermes':{'image':self.info['images']['native'],'environment':{'TELEGRAM_ENABLED':'false'},
+                'volumes':[bind('state/hermes','/workspace/data/local/hermes'),bind('state/spool','/data/spool')]},
+                'nocheh-telegram':{'image':self.info['images']['native'],'environment':{'TELEGRAM_BOT_TOKEN':''},
+                    'volumes':[bind('state/spool','/data/spool'),bind('state/telegram','/telegram-state')]},
                 'model-fixture':{'environment':{'NOCHEH_INSTALLATION_FIXTURE':'1'}}}}
 
     def test_only_matching_owned_fixture_is_admitted(self):
@@ -48,6 +51,25 @@ class TelegramRehearsalOwnershipTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'owned_native_state_required'):validate_fixture(self.directory,self.info,manifest)
         self.manifest['services']['hermes']['image']='nocheh-hermes:local'
         with self.assertRaisesRegex(ValueError,'synthetic_fixture_required'):validate_fixture(self.directory,self.info,self.manifest)
+
+    def test_telegram_service_must_use_the_fixture_image_and_its_own_state(self):
+        for target,source in (('/telegram-state',ROOT/'data/local/telegram'),('/data/spool',ROOT/'data/local/spool')):
+            with self.subTest(target=target):
+                manifest=copy.deepcopy(self.manifest)
+                next(v for v in manifest['services']['nocheh-telegram']['volumes'] if v['target']==target)['source']=str(source)
+                with self.assertRaisesRegex(ValueError,'owned_native_state_required'):validate_fixture(self.directory,self.info,manifest)
+        # The fake Bot API's own folder is not the service's state.
+        manifest=copy.deepcopy(self.manifest)
+        manifest['services']['nocheh-telegram']['volumes'][1]['source']=str(self.directory/'state/telegram-mock')
+        with self.assertRaisesRegex(ValueError,'owned_native_state_required'):validate_fixture(self.directory,self.info,manifest)
+        self.manifest['services']['nocheh-telegram']['image']='nocheh-hermes:local'
+        with self.assertRaisesRegex(ValueError,'synthetic_fixture_required'):validate_fixture(self.directory,self.info,self.manifest)
+
+    def test_hermes_never_holds_the_bot_token(self):
+        for key in ('TELEGRAM_BOT_TOKEN','TELEGRAM_BOT_TOKEN_FILE'):
+            with self.subTest(key=key):
+                manifest=copy.deepcopy(self.manifest);manifest['services']['hermes']['environment'][key]=''
+                with self.assertRaisesRegex(ValueError,'telegram_token_outside_telegram_service'):validate_fixture(self.directory,self.info,manifest)
 
 
 if __name__=='__main__':unittest.main()

@@ -97,19 +97,6 @@ def trusted_detector(endpoint):
         DETECTOR_CALL.reset(token)
 
 
-def operational_request(request):
-    """Only native Telegram Bot API operations bypass model-payload inspection."""
-    url=urlsplit(str(request.url))
-    if url.scheme!='https' or url.username or url.password or url.port not in (None,443):
-        return False
-    if url.hostname=='api.telegram.org' and (url.path.startswith('/bot') or url.path.startswith('/file/bot')):
-        # Native Bot API operations have one token path component plus method;
-        # a provider configured at .../chat/completions does not match.
-        parts=url.path.strip('/').split('/')
-        return (len(parts)==2 and parts[0].startswith('bot') and ':' in parts[0] and '/' not in parts[1]) or url.path.startswith('/file/bot')
-    return False
-
-
 def clear_reasoning_sidecars(payload):
     """Pinned Responses compatibility: replay clear history without opaque reasoning.
 
@@ -167,7 +154,6 @@ class Boundary:
             # The exemption can never survive a provider change/redirect.
             if not trusted(destination,[detector_endpoint]): raise GuardUnavailable('detector_destination_rejected')
             return False
-        if operational_request(request): return False
         from .archive_tools import _PROCESS_CREDENTIAL, ARCHIVE_CREDENTIAL
         if _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get(): return True
         return required(self.mode)

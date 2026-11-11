@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 from .review_worker import observe
-from .assistant_gateway import AssistantGateway
 
 
 class WorkflowObservationTests(unittest.TestCase):
@@ -23,11 +22,3 @@ class WorkflowObservationTests(unittest.TestCase):
                     self.assertEqual(observe(root,policy,body),{'state':'running'})
                 self.assertEqual(observe(root,policy,body),{'state':'ambiguous'})
                 with self.assertRaisesRegex(ValueError,'owner_review_required'):observe(root,policy,{**body,'scope':'43'})
-
-    def test_native_action_receipt_can_be_observed_without_telegram_connection(self):
-        with tempfile.TemporaryDirectory() as directory:
-            instance=object.__new__(AssistantGateway);instance.receipts=Path(directory);instance.loop=None
-            body={'id':'a'*64,'observe_only':True}
-            self.assertEqual(instance.action(body),{'state':'not_found'})
-            (instance.receipts/('action-'+'a'*64+'.result')).write_text('{"state":"done"}')
-            self.assertEqual(instance.action(body),{'state':'done'})

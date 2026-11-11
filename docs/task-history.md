@@ -1582,7 +1582,7 @@ incorrectly placed after SDK restart. One native attempt separately hit its
 once. The subsequent full run passes, but that timeout's cause remains unproven.
 Scripted inference establishes no new model-quality or live recall pass.
 [Procedure](telegram-simulation.md), [runner](../tools/acceptance/telegram_rehearsal.py),
-[SDK checks](../services/hermes/test_telegram_http_fixture.py),
+[SDK checks](../services/telegram/test_telegram_http_fixture.py),
 [ownership checks](../test/test_telegram_rehearsal.py).
 
 </entry>
@@ -1603,7 +1603,7 @@ ordinary-message pass closes that response gate. Guarded preparation is under
 investigation with content-free diagnostics confined to the fixture. Original
 failure reports remain in ignored state. [Procedure](telegram-simulation.md),
 [runner](../tools/acceptance/telegram_rehearsal.py),
-[contract checks](../services/hermes/test_telegram_http_fixture.py).
+[contract checks](../services/telegram/test_telegram_http_fixture.py).
 
 </entry>
 

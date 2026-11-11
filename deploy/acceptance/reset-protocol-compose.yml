@@ -22,8 +22,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     entrypoint: [python, -m, unittest]
-    command: [services.hermes.test_capture, -q]
+    command: [services.telegram.test_capture, -q]
     environment:
       HOME: /tmp
-      HERMES_HOME: /tmp/nocheh-reset-protocol-fixture
       SERVICE_TOKEN: reset-protocol-synthetic-not-a-real-credential

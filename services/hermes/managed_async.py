@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request,urlopen
 from .async_runs import AsyncRuns,identity,CLOSED
-from .capture import canonical,immutable_file
+from services.durable import canonical,immutable_file
 from .job_progress import merge
 from .scopes import Scope,verify_capability
 from .usage import _count

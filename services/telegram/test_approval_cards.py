@@ -22,8 +22,9 @@ except ImportError:
     fake.MessageEntity=type('MessageEntity',(),{'TEXT_LINK':'text_link','__init__':lambda self,type,offset,length,url=None:self.__dict__.update(type=type,offset=offset,length=length,url=url)})
     sys.modules['telegram']=fake
 
-from .assistant_gateway import AssistantGateway
 from .capture import OUTBOUND_CHECK
+from .gateway import TelegramService
+from .settings import Policy
 
 
 class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
@@ -40,10 +41,9 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             previews_off(link_preview_options);edits.append((chat_id,message_id,text,reply_markup,links(entities)));return True
         links=lambda entities:[(entity.type,entity.offset,entity.length,entity.url) for entity in entities or []]
         async def answer_callback_query(query,text=None):answers.append((query,text));return True
-        value=AssistantGateway(root,root/'spool',SimpleNamespace(enabled=True,owner='123',groups=list(groups),group_access=access or {}),'123456:synthetic','synthetic',lambda:None)
-        value.status='connected';value.action_lock=asyncio.Lock();value.group_replies='all';value.group_names=['Nocheh']
-        value.adapter=SimpleNamespace(_bot=SimpleNamespace(username='nocheh_fixture_bot',first_name='My Nocheh',send_message=send_message,
-                                                           edit_message_text=edit_message_text,answer_callback_query=answer_callback_query))
+        value=TelegramService(Policy(True,'123',list(groups),access or {}),'123456:synthetic',root/'spool',root/'state')
+        value.status='connected';value.action_lock=asyncio.Lock()
+        value.bot=SimpleNamespace(send_message=send_message,edit_message_text=edit_message_text,answer_callback_query=answer_callback_query)
         return value
 
     async def test_cards_go_to_the_owner_or_an_allowed_group_and_are_sent_once(self):
@@ -107,7 +107,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits)
             async def lost(*args,**kwargs):raise TimeoutError('the answer did not arrive')
-            gateway.adapter._bot.send_message=lost
+            gateway.bot.send_message=lost
             data=lambda choice:'n'+choice+'f'*56
             card={'kind':'card','id':'f'*64,'chat_id':'123','text':'⚙️ Run browser','buttons':[['Approve',data('a')],['Reject',data('d')]]}
             self.assertEqual(await gateway.send_approval(card),{'state':'ambiguous'})
@@ -165,17 +165,14 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
     async def test_unallowed_members_who_address_nocheh_get_the_fixed_reply_once(self):
         with tempfile.TemporaryDirectory() as folder:
             sent=[];gateway=self.gateway(Path(folder),sent,access={'-20':{'granted':['7'],'denied':['8']}})
-            ask={'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','topic':'17','text':'Nocheh, what is the plan?',
-                 'group_addressing':{'direct':False,'handles':[]},'reply':'Sorry, only allowed people.'}
+            # Nocheh's core sends a group refusal only for a message that addressed the bot.
+            ask={'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','topic':'17','reply':'Sorry, only allowed people.'}
             self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
             self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
             self.assertEqual(sent,[(-20,17,'Sorry, only allowed people.',None,5,[])],'one fixed reply to that message, in its topic')
-            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'text':'what is the plan?'}),{'state':'skipped'},
-                             'a member who does not address Nocheh is not answered, whatever the reply setting')
             self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'7'}),{'state':'skipped'},'an allowed member is never refused')
             self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'123'}),{'state':'skipped'})
-            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'8','group_addressing':{'direct':True,'handles':[]},'text':'hi'}),{'state':'done'},
-                             'a denied member who replies to Nocheh is refused')
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'8'}),{'state':'done'},'a denied member is refused')
             for bad in [{**ask,'chat_id':'-30'},{**ask,'chat_id':'123'},{**ask,'reply':''},{**ask,'reply':'x'*1001},{**ask,'event_id':'x'}]:
                 with self.assertRaises(ValueError):await gateway.send_refusal(bad)
             self.assertEqual(len(sent),2)
@@ -203,17 +200,18 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await gateway.send_notice(notice),{'state':'done'})
             self.assertEqual(await gateway.send_notice(notice),{'state':'done'})
             self.assertEqual(len(sent),1,'sent once')
-            buttons=sent[0][3]
-            self.assertEqual([button[0] for button in buttons[0]],['Open','Retry failed'])
+            # The real keyboard, or the plain rows this file's stand-in builds when the Telegram library is not here.
+            rows=getattr(sent[0][3],'inline_keyboard',sent[0][3])
+            self.assertEqual([getattr(button,'text',None) or button[0] for button in rows[0]],['Open','Retry failed'])
             for bad in [{'text':'Open','url':'javascript:alert(1)'},{'text':'Open','web_app':'http://mini.example.test'},{'text':'Run','callback':'na'+'a'*56},
                         {'text':'','url':'https://example.test'},{'text':'Open','url':'https://example.test','callback':'nr'}]:
                 with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'b'*64,'buttons':[bad]})
             # Telegram refuses a dashboard address it does not accept: nothing was sent, so the text goes alone.
-            send=gateway.adapter._bot.send_message
+            send=gateway.bot.send_message
             async def strict(chat,text,reply_markup=None,**options):
                 if reply_markup is not None:raise BadRequest('Wrong http url')
                 return await send(chat,text,**options)
-            gateway.adapter._bot.send_message=strict
+            gateway.bot.send_message=strict
             self.assertEqual(await gateway.send_notice({**notice,'id':'c'*64,'buttons':[{'text':'Open','url':'http://127.0.0.1:8783/#system'}]}),{'state':'done'})
             self.assertEqual((len(sent),sent[-1][3]),(2,None))
             with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'d'*64,'chat_id':'-20'},)  # only the owner's private chat
@@ -232,13 +230,13 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await gateway.send_notice({**notice,'id':'b'*64,'edit':True}),{'state':'not_found'},'only a notice this runtime sent')
             self.assertEqual(len(sent),1,'an edit never sends')
             async def unchanged(*args,**options):raise BadRequest('Message is not modified')
-            gateway.adapter._bot.edit_message_text=unchanged
+            gateway.bot.edit_message_text=unchanged
             self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'done','edited':False})
             async def blocked(*args,**options):raise Forbidden('Forbidden: bot was blocked by the user')
-            gateway.adapter._bot.edit_message_text=blocked
+            gateway.bot.edit_message_text=blocked
             self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'done','edited':False},'a definite refusal is not tried again')
             async def offline(*args,**options):raise TimeoutError()
-            gateway.adapter._bot.edit_message_text=offline
+            gateway.bot.edit_message_text=offline
             self.assertEqual(await gateway.send_notice({**notice,'edit':True}),{'state':'not_started','error_code':'telegram_edit_failed'},
                              'tried again on the next check')
             with self.assertRaises(ValueError):await gateway.send_notice({**notice,'edit':'yes'})

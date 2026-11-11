@@ -68,7 +68,7 @@ def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=
     if box is not None:mounts.append({'Type':'volume','Source':box,'Target':'/box','ReadOnly':True})
     return {'Image':image,'User':f'{uid}:{gid}','WorkingDir':'/workspace',
       'Cmd':['python','-m','services.hermes.assistant_turn'],
-      'Env':['HOME=/tmp/home','HERMES_HOME=/profile','NOCHEH_CAPTURE_ENABLED=0','NOCHEH_ISOLATED_TURN=1',
+      'Env':['HOME=/tmp/home','HERMES_HOME=/profile','NOCHEH_ISOLATED_TURN=1',
              'ARCHIVE_URL=http://nocheh-security:8786','GUARD_URL=http://nocheh-security:8786',
              *(['TERMINAL_ENV=nocheh_box','TERMINAL_CWD=/work','NOCHEH_BOX_SOCKET=/box/exec.sock'] if box is not None else []),
              *(['TERMINAL_ENV=nocheh_machine','TERMINAL_CWD=~','NOCHEH_MACHINE_RUN=1'] if machine else [])],

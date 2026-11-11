@@ -186,7 +186,8 @@ def apply(state, progress=lambda step: None):
         before = {**DEFAULTS, **read_env(previous)} if previous.exists() else values
         def run():
             current = load(state)
-            services = ['nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb']
+            # nocheh-telegram holds the bot token and the typing and reaction settings.
+            services = ['nocheh-db', 'nocheh-app', 'nocheh-security', 'hermes', 'hermes-agent-sb', 'nocheh-telegram']
             if mini_app.enabled(current): services += list(mini_app.SERVICES)
             # Compose stops and restarts each changed service in dependency order: the
             # app may take its whole 300 s grace to finish work in flight and Hermes its

@@ -95,7 +95,7 @@ def files(state, memory, config_path, blockers):
                  # The keys of machines the erased control store listed; ./bin/nocheh up makes the folder again.
                  'machines': ('erase', 'keys_of_erased_machines'),
                  **{name: ('preserve', 'saved_setup_and_credentials') for name in ('secrets', 'compose.env', 'assistant.json', 'previous-configuration')},
-                 **{name: ('delegate', '') for name in ('admin', 'hermes', 'honcho')}})
+                 **{name: ('delegate', '') for name in ('admin', 'hermes', 'honcho', 'telegram')}})
     area(state / 'admin', {**{name: ('erase', 'installation_content_and_receipts') for name in ('backups', 'exports', 'jobs', 'tools', 'workflows', 'dashboard', 'downloads')},
                            'applied.json': ('erase', 'stale_applied_configuration_revision'),
                            'settings.lock': ('preserve', 'configuration_advisory_lock'),
@@ -107,6 +107,14 @@ def files(state, memory, config_path, blockers):
         for path in sorted(native.iterdir()):
             action = 'preserve' if path.name in ('auth.json', 'auth.lock') else 'snapshot_preferences_then_erase' if path.name in ('profiles', 'nocheh-policy.yaml') else 'erase'
             actions.append(entry(path, action, 'provider_login' if action == 'preserve' else 'native_runtime_state'))
+    # The Telegram service's folder holds only its runtime state, such as its incident file. Its
+    # content is erased and the folder kept, so Docker never makes it again as root.
+    bot = state / 'telegram'
+    if bot.is_symlink():
+        blockers.append({'code': 'state_anchor_symlink', 'path': str(bot)})
+    elif bot.is_dir():
+        for path in sorted(bot.iterdir()):
+            actions.append(entry(path, 'erase', 'telegram_runtime_state'))
     area(memory, {**{name: ('preserve', 'memory_setup_credentials_or_spending') for name in (
         'honcho.env', 'meter.env', 'internal_token', 'database_password', 'temporary_embedding_key', 'honcho.Dockerfile',
         'ledger', 'bridge-auth', 'bridge.Dockerfile', 'bridge.yaml', 'compose.env')},

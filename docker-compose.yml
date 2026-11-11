@@ -515,6 +515,10 @@ services:
       NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS: ${NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS:-0}
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
+      # The app decides which group messages address the bot, then asks nocheh-telegram to answer.
+      TELEGRAM_URL: http://nocheh-telegram:8784
+      TELEGRAM_GROUP_REPLIES: ${TELEGRAM_GROUP_REPLIES:-addressed}
+      TELEGRAM_BOT_NAMES: ${TELEGRAM_BOT_NAMES-Nocheh,نوچه}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
     depends_on:
       nocheh-db: {condition: service_healthy}
@@ -573,6 +577,7 @@ services:
     depends_on:
       nocheh-miniapp: {condition: service_healthy}
 
+  # The brain: answers turns for Nocheh and never talks to Telegram. It keeps the chat scopes, not the bot token.
   hermes:
     logging: *logging
     image: nocheh-hermes:local
@@ -592,18 +597,13 @@ services:
     environment:
       NOCHEH_STORAGE_LAYOUT: original-only-v1
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      NOCHEH_CAPTURE_ENABLED: '1'
       NOCHEH_DASHBOARD_HOME: /dashboard-state/home
       NOCHEH_BROWSER_CHAT: '1'
+      # Chat scopes for routing turns; polling and sending belong to nocheh-telegram.
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
       TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
       TELEGRAM_GROUP_ACCESS: ${TELEGRAM_GROUP_ACCESS:-{}}
-      TELEGRAM_GROUP_REPLIES: ${TELEGRAM_GROUP_REPLIES:-addressed}
-      TELEGRAM_BOT_NAMES: ${TELEGRAM_BOT_NAMES-Nocheh,نوچه}
-      TELEGRAM_TYPING: ${TELEGRAM_TYPING:-true}
-      TELEGRAM_REACTIONS: ${TELEGRAM_REACTIONS:-true}
       GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
       NOCHEH_SECURITY_RUNTIME: ${NOCHEH_SECURITY_RUNTIME:-isolated}
       NOCHEH_MEMORY_CONTEXT: ${NOCHEH_MEMORY_CONTEXT:-evidence}
@@ -644,6 +644,55 @@ services:
       nocheh-security: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # The only Telegram poller and sender, and the only service given the bot token in its environment: long polling,
+  # durable capture, the outbound journal and every message sent. It waits for the app, not Hermes, so a brain restart
+  # never stops polling.
+  nocheh-telegram:
+    logging: *logging
+    image: nocheh-hermes:local
+    command: [python, -m, services.telegram.server]
+    # The spool's files are 0600, so the bot runs as the same user as nocheh-app.
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    # A fatal polling error exits the process; Compose brings it back.
+    restart: unless-stopped
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [default]
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+      TELEGRAM_GROUP_IDS: ${TELEGRAM_GROUP_IDS:-}
+      TELEGRAM_GROUP_ACCESS: ${TELEGRAM_GROUP_ACCESS:-{}}
+      TELEGRAM_TYPING: ${TELEGRAM_TYPING:-true}
+      TELEGRAM_REACTIONS: ${TELEGRAM_REACTIONS:-true}
+      # Empty connects directly.
+      TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
+      # The same owner setting as Hermes's: it prunes the bot's finished delivery journals.
+      NOCHEH_HERMES_JOURNAL_RETENTION_DAYS: ${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}
+      NOCHEH_SPOOL_DIR: /data/spool
+      NOCHEH_TELEGRAM_STATE: /telegram-state
+      ARCHIVE_URL: http://nocheh-app:8780
+      PORT: '8784'
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
+      # Holds telegram-incident.json across the restart after a fatal polling error.
+      - ${NOCHEH_STATE_DIR:-./data/local}/telegram:/telegram-state
+    depends_on:
+      nocheh-app: {condition: service_healthy}
+    healthcheck:
+      # 200 whenever the server is up; the Telegram state is in the body.
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8784/health', timeout=4)"]
       interval: 5s
       timeout: 5s
       retries: 12

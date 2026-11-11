@@ -52,7 +52,7 @@ installation, and a live notice that names a provider's exact error and is then 
 Get started (owner, 2026-11-01: "yes" to a small checklist on Home, a "Find my
 Telegram ID" button and a warning when the OpenAI key is missing, before the server
 install): Home lists the open setup steps from the saved settings, and
-Settings › Telegram finds the owner's ID by running `discover-telegram` inside Hermes
+Settings › Telegram finds the owner's ID by running `discover-telegram` inside the bot service
 ([steps](test/dashboard-get-started.test.mjs),
 [discovery](services/hermes/test_telegram_directory.py),
 [browser](test/dashboard-pages.browser.mjs)). Pending: a real Find my ID press on the
@@ -475,12 +475,21 @@ list the gaps with code references.
 Swappable brain (owner, 2026-11-11: "yes start Telegram and brain socket"): the brain
 now sits behind one brain socket, and Hermes is the only brain plugged in. Every turn,
 and the brain's own settings, role and skills, notes and scheduled tasks, go through it;
-the brain never sends to a platform, and Hermes's Telegram adapter keeps sending replies
-until Nocheh's own bot does. The brain route moved to `/v1/brain/manage`, and Health
+the brain never sends to a platform. The brain route moved to `/v1/brain/manage`, and Health
 shows the brain and what it can do ([decision](docs/adr/0234-brain-socket.md),
 [socket](src/brain/brain.ts), [checks](test/brain.test.ts),
-[Hermes turn routes](services/hermes/test_brain_turns.py)). Pending: Nocheh's own
-Telegram bot sending the replies, then a second brain when the owner wants one.
+[Hermes turn routes](services/hermes/test_brain_turns.py)). Pending: a second brain when the
+owner wants one.
+
+Nocheh's own Telegram bot (owner, 2026-11-11, same go-ahead): the new `nocheh-telegram`
+service is the only holder of the bot token. It polls Telegram, shows typing and reactions,
+and sends replies, approval cards, refusals and notices; Nocheh decides group addressing
+and sends the reply the brain returns, and Hermes is brain only
+([decision](docs/adr/0235-nocheh-owns-the-telegram-bot.md),
+[service](services/telegram/test_service.py), [simulation](services/telegram/test_simulation.py),
+[core](test/store-telegram-dispatch.test.ts), [addressing](test/telegram-frontdoor.test.ts)).
+Pending: the dashboard's own Bot API calls (Find my ID pre-check, group directory, mini app
+menu button) still read the token and move into the bot later.
 
 Swappable memory (owner, 2026-11-10: "the main things in nocheh should be data
 and hermes and honcho should be replace able with other things like claude code
@@ -645,10 +654,9 @@ that starts as “Nocheh” and “نوچه”
 ([decision](docs/adr/0133-group-replies-when-addressed.md),
 [editable names](docs/adr/0134-editable-bot-names.md),
 [dispatch checks](test/store-telegram-dispatch.test.ts),
-[trigger checks](services/hermes/test_group_trigger.py)). The pinned-Hermes
-gateway check ([test](services/hermes/test_gateway.py)) and the
-`group_answers_only_when_addressed` simulator scenario run only on the owner's
-development machine and have not been run. Addressing by a name at the start passed live on
+[trigger checks](test/telegram-frontdoor.test.ts)). The
+`group_answers_only_when_addressed` simulator scenario runs only on the owner's
+development machine and has not been run. Addressing by a name at the start passed live on
 October 12 (four group messages, one reply each). Pending: a live unaddressed
 group message that gets no reply, and a reply or @mention that gets one.
 
@@ -1057,8 +1065,7 @@ turn also withholds the native notes it added that way and the entries its
 patches landed in (spans of 4 or more characters)
 ([check](services/hermes/test_retired_history.py)); the tester saves its note in
 that shape; Hermes takes round video
-notes itself, so Nocheh's extra handler is gone
-([check](services/hermes/test_gateway.py)); the browser TUI's `/rewind` says
+notes itself, so Nocheh's extra handler is gone; the browser TUI's `/rewind` says
 rewind is unavailable, inline pictures are off
 ([profile check](services/hermes/test_profile_config.py)), and the dashboard
 patch follows the new Vite config. The Honcho memory export carries the new
@@ -1329,7 +1336,7 @@ Earlier upgrades are in [task history](docs/task-history.md).
   the owner reply in 22.1 seconds. The exclusive profile lock, native fencing,
   current authority and original acceptance deadlines remain active.
   [HTTP runner](tools/acceptance/telegram_rehearsal.py),
-  [SDK checks](services/hermes/test_telegram_http_fixture.py),
+  [SDK checks](services/telegram/test_telegram_http_fixture.py),
   [lease decision](docs/adr/0098-isolated-native-lease-recovery.md).
 
   Guard preparation publishes at most four independent copies concurrently,

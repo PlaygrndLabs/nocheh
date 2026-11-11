@@ -10,7 +10,7 @@ import traceback
 from pathlib import Path
 from .assistant_gateway import TURN_CAPACITY,continuation_id,native_turn,render_reply_citations
 from .async_runs import CLOSED,AsyncRuns,identity
-from .capture import canonical,digest,immutable_file
+from services.durable import canonical,digest,immutable_file
 from .environment import secret
 from .scopes import Scopes,verify_capability
 from .subscription import ProviderNotConfigured

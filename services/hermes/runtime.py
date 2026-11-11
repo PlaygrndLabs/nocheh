@@ -3,9 +3,6 @@ from __future__ import annotations
 
 from services.hermes.environment import secret as environment_secret, parallel
 
-import base64
-import asyncio
-import re
 import contextlib
 import hmac
 import json
@@ -26,10 +23,6 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
 TOKEN = environment_secret('SERVICE_TOKEN')
 CALL_LOCK = threading.RLock()
-
-
-class AttachmentTooLarge(Exception):
-    """A Telegram file the bot can never download, so its retrieval settles."""
 
 
 class DetectorSlots:
@@ -66,7 +59,6 @@ class DetectorSlots:
 DETECTOR_SLOTS = DetectorSlots(parallel('NOCHEH_PARALLEL_GUARD_CHECKS', 3, 4))
 CHAT_STATUS = {'stage':'idle'}
 ERRORS = deque(maxlen=20)
-ASSISTANT = None
 ADMIN = None
 SCHEDULER = None
 MANAGED = None
@@ -134,8 +126,6 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.reply(404, {"error": "not_found"})
         return self.reply(200, {"ok": True, "service": "hermes", "model": MODEL,
-                                "telegram": ASSISTANT.health()['state'] if ASSISTANT else 'not_started',
-                                "telegram_details": ASSISTANT.health() if ASSISTANT else {},
                                 "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable",
                                 "managed_runs":len(MANAGED.runs.active) if MANAGED else 0,
                                 "brain_turns":len(BRAIN.runs.active) if BRAIN else 0,
@@ -152,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 return self.reply(400, {"error": "expected_object"})
-            # File capture and receipts must not queue behind model inference.
+            # Other routes must not queue behind model inference.
             # Detection can also be called by the guard during an active chat.
             lock = DETECTOR_SLOTS.slot(body.get('priority') == 'background') if self.path == '/internal/detect' else \
                 {'/internal/chat':CALL_LOCK}.get(self.path,contextlib.nullcontext())
@@ -160,10 +150,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.dispatch(body)
             self.reply(200, result)
         except ProviderNotConfigured:
-            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/file') else 'unknown','kind':'provider_not_configured'})
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect') else 'unknown','kind':'provider_not_configured'})
             self.reply(503, {'error':'provider_not_configured'})
-        except AttachmentTooLarge:
-            self.reply(413, {'error':'attachment_too_large'})
         except DetectorContractError as error:
             ERRORS.append({'route':'/internal/detect','kind':str(error),'shape':error.shape})
             self.reply(503, {'error':'detector_contract_rejected'})
@@ -174,33 +162,26 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(409 if code == 'configuration_conflict' else 400, {'error': code})
             self.reply(400, {'error': 'invalid_request'})
         except (KeyError, TypeError):
-            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/file') else 'unknown','kind':'invalid_request'})
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect') else 'unknown','kind':'invalid_request'})
             self.reply(400, {"error": "invalid_request"})
         except Exception as error:
             status = getattr(error, "status_code", 503)
             status = status if isinstance(status, int) and status in (401, 403, 429, 503) else 503
-            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect','/internal/file') else 'unknown','kind':type(error).__name__,'status':status})
+            ERRORS.append({'route':self.path if self.path in ('/internal/chat','/internal/detect') else 'unknown','kind':type(error).__name__,'status':status})
             self.reply(status, {"error": "quota_paused" if status == 429 else "subscription_unavailable",
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
-        # Telegram turns whose reply Nocheh sends; they never need the Telegram adapter.
+        # Telegram turns return their reply, which Nocheh sends; Hermes never talks to Telegram.
         if self.path in ('/internal/turn/start','/internal/turn/resume','/internal/turn/events','/internal/turn/cancel'):
             if BRAIN is None:raise RuntimeError('brain_not_started')
             return getattr(BRAIN,self.path.rsplit('/',1)[-1])(body)
+        # Every other channel's run; a Telegram turn has only the turn routes.
         if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
-            if body.get('channel') in ('browser','scheduler','background'):
-                if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
-                if self.path.endswith('/start'):return MANAGED.start(body)
-                return getattr(MANAGED.runs,self.path.rsplit('/',1)[-1])(body)
-            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
-            if body.get('channel','telegram')!='telegram':raise ValueError('runtime_channel_unavailable')
-            inspecting=self.path.endswith('/resume') and body.get('observe_only') is True
-            if self.path.endswith(('/start','/resume')) and not inspecting and (ASSISTANT.loop is None or ASSISTANT.status!='connected'):raise RuntimeError('telegram_not_ready')
-            result=getattr(ASSISTANT.runs,self.path.rsplit('/',1)[-1])(body)
-            if self.path.endswith('/resume') and body.get('observe_only') is True and result.get('state')=='not_found':
-                return ASSISTANT._reconcile_run(body) or result
-            return result
+            if body.get('channel') not in ('browser','scheduler','background'):raise ValueError('runtime_channel_unavailable')
+            if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
+            if self.path.endswith('/start'):return MANAGED.start(body)
+            return getattr(MANAGED.runs,self.path.rsplit('/',1)[-1])(body)
         if self.path=='/internal/browser/events':
             if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
             return MANAGED.events(body)
@@ -245,74 +226,10 @@ class Handler(BaseHTTPRequestHandler):
             if not scope.owner and claims.get('revision')!=scope.revision:raise ValueError('browser_audience_changed')
             credentials=resolve_credentials()
             return {'model':MODEL,**credentials.runtime()}
-        if self.path == '/internal/action':
-            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
-            return ASSISTANT.action(body)
-        if self.path == '/internal/telegram/approval':
-            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
-            return ASSISTANT.approval(body)
-        if self.path == '/internal/telegram/refusal':
-            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
-            return ASSISTANT.refusal(body)
-        if self.path == '/internal/telegram/notice':
-            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
-            return ASSISTANT.notice(body)
-        if self.path == '/internal/dispatch':
-            if ASSISTANT is None:raise RuntimeError('assistant_not_started')
-            return ASSISTANT.call(body)
         if self.path == '/internal/status':
             from services.hermes.request_boundary import FAILURES, FAILURE_DETAILS, COUNTS
             return {'guard_failures':list(FAILURES),'guard_failure_details':list(FAILURE_DETAILS),'model_boundary':dict(COUNTS),
                     'chat':dict(CHAT_STATUS),'errors':list(ERRORS)}
-        if self.path == '/internal/file':
-            from telegram import Bot
-            bot_token = environment_secret('TELEGRAM_BOT_TOKEN', required=False)
-            if not bot_token:
-                raise RuntimeError('telegram_not_configured')
-            ref = body['file_id']
-            if not isinstance(ref, str) or not ref or len(ref) > 1024:
-                raise ValueError('invalid_file_id')
-            async def download():
-                from telegram.error import BadRequest
-                async with Bot(bot_token) as bot:
-                    try:
-                        file = await bot.get_file(ref)
-                    except BadRequest as error:
-                        # The Bot API refuses files over 20 MB; retrying never helps.
-                        if 'too big' in str(error).lower():
-                            raise AttachmentTooLarge() from error
-                        raise
-                    if file.file_size and file.file_size > 50*1024*1024:
-                        raise AttachmentTooLarge()
-                    return await file.download_as_bytearray()
-            raw = asyncio.run(download())
-            if len(raw) > 50*1024*1024:
-                raise AttachmentTooLarge()
-            return {'bytes_base64': base64.b64encode(raw).decode()}
-        if self.path == '/internal/telegram/chat':
-            # Owner-requested presentation refresh: getChat only, never a send
-            # or a poll, so the single polling authority is unaffected.
-            from telegram import Bot
-            from telegram.error import BadRequest, ChatMigrated, Forbidden
-            bot_token = environment_secret('TELEGRAM_BOT_TOKEN', required=False)
-            if not bot_token:
-                raise RuntimeError('telegram_not_configured')
-            chat_id = body.get('chat_id')
-            if not isinstance(chat_id, str) or not re.fullmatch(r'-?[1-9][0-9]{0,18}', chat_id):
-                raise ValueError('invalid_chat_id')
-            async def read_chat():
-                async with Bot(bot_token) as bot:
-                    try:
-                        found = await bot.get_chat(int(chat_id))
-                    except ChatMigrated as error:
-                        return {'chat_id': chat_id, 'state': 'migrated', 'migrate_to_chat_id': str(error.new_chat_id)}
-                    except Forbidden:
-                        return {'chat_id': chat_id, 'state': 'not_member'}
-                    except BadRequest:
-                        return {'chat_id': chat_id, 'state': 'not_found'}
-                    return {'chat_id': str(found.id), 'state': 'available', 'type': found.type, 'title': found.title,
-                            'username': found.username, 'is_forum': bool(getattr(found, 'is_forum', False))}
-            return asyncio.run(read_chat())
         if self.path == "/internal/usage/price":
             # Prices Honcho's reported memory tokens with Hermes's own pricing table; counts only, no content.
             from services.hermes.usage import price, reply_rates
@@ -335,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ASSISTANT, ADMIN, SCHEDULER, BRAIN
+    global ADMIN, SCHEDULER, BRAIN
     if len(TOKEN) < 24:
         raise SystemExit("Service token is missing or too short")
     logging.disable(logging.CRITICAL)
@@ -344,24 +261,14 @@ def main():
     install()
     from services.hermes.compatibility_patch import install as install_native_gate
     install_native_gate()
-    from services.hermes.assistant_gateway import AssistantGateway
     from services.hermes.scopes import Scopes
     policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
-    bot_token=environment_secret('TELEGRAM_BOT_TOKEN', required=False)
     server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8781"))), Handler)
-    restarting=threading.Event()
-    def restart_after_failure():
-        if restarting.is_set():return
-        restarting.set()
-        # Let diagnostics observe the failure, then exit the entire process so no
-        # orphaned getUpdates request can compete with the replacement adapter.
-        timer=threading.Timer(15,server.shutdown);timer.daemon=True;timer.start()
-    # Finished delivery journals expire before the boot rescans read them.
+    # Finished run journals expire before the boot rescans read them.
     from . import journal_retention
     spool,managed_runs,journal_days=Path(os.environ.get('NOCHEH_SPOOL_DIR','/data/spool')),PROFILE_HOME/'nocheh-managed-runs',journal_retention.retention_days()
     journal_retention.prune(spool,managed_runs,journal_days)
     journal_stop=threading.Event();journal_retention.start(spool,managed_runs,journal_days,journal_stop)
-    ASSISTANT=AssistantGateway(PROFILE_HOME,str(spool),policy,bot_token,MODEL,resolve_credentials,restart_after_failure)
     from services.hermes.brain_turns import BrainTurns
     BRAIN=BrainTurns(PROFILE_HOME,str(spool),policy,MODEL,resolve_credentials)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
@@ -369,7 +276,6 @@ def main():
     # One process-wide redirect, installed before starting threads. Per-request
     # redirects race and can restore another request's secret-bearing output.
     with open(os.devnull,'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
-        ASSISTANT.start()
         BRAIN.open()
         ADMIN = admin = subprocess.Popen([sys.executable, '-m', 'services.hermes.native_admin'], stdout=quiet, stderr=quiet)
         from .native_admin import Administration,audience_revision
@@ -390,8 +296,6 @@ def main():
             admin.terminate()
             try: admin.wait(timeout=10)
             except subprocess.TimeoutExpired: admin.kill(); admin.wait()
-            ASSISTANT.stop()
-    if restarting.is_set():raise SystemExit(1)
 
 
 if __name__ == "__main__":

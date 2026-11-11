@@ -17,7 +17,7 @@ from pathlib import Path,PurePosixPath
 
 from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
 ROOT=INSTALLATION_ROOT
-SERVICES=['hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security']
+SERVICES=['nocheh-telegram','hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
         'guard_sources':'id','guard_revisions':'id','guard_fragments':'id','guard_state':'singleton','guard_invalidations':'id',
         'guard_context_values':'id','guard_context_inputs':'id',
@@ -100,7 +100,7 @@ def backup(state,output,leave_stopped=False):
     command=compose(state);env=environment(state)
     if output.exists(): raise ValueError('Backup destination already exists')
     if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
-        copied_roots=[Path(state)/name for name in ('files','spool','hermes','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
+        copied_roots=[Path(state)/name for name in ('files','spool','hermes','telegram','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
         if any(output.resolve().is_relative_to(root.resolve()) for root in copied_roots):
             raise ValueError('Backup destination would be included in its own snapshot')
         from tools.operations.installation.store_recovery import StoreRecovery
@@ -123,12 +123,15 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
         if three_stores else [name for name in SERVICES if name in running])
     barrier=ExitStack()
     workflow_was_running=workflows_running(state)
+    # Ingress, one at a time: the Telegram bot stops reading and sending before the brain stops answering.
+    ingress=('nocheh-telegram','hermes')
     try:
-        if 'hermes' in stopped:subprocess.run(command+['stop','hermes'],env=env,check=True)
+        for service in ingress:
+            if service in stopped:subprocess.run(command+['stop',service],env=env,check=True)
         if workflow_was_running:stop_workflows(state,wait=True)
         # Stop ingress first; then writers. PostgreSQL remains available to pg_dump.
         for service in stopped:
-            if service!='hermes':subprocess.run(command+['stop',service],env=env,check=True)
+            if service not in ingress:subprocess.run(command+['stop',service],env=env,check=True)
         manifest={'version':3,'created_at':datetime.now(timezone.utc).isoformat(),
                   'git_revision':source_revision(),
                   'files':{},'recreated_plugin_links':[],'excluded_rebuildable_caches':[]}
@@ -153,9 +156,10 @@ def _backup(state,output,leave_stopped,command,env,recovery=None):
             manifest.update(version=5,honcho=memory_snapshot(command,env,stage,sha))
         archive=stage/'state.tar.gz'
         with tarfile.open(archive,'w:gz',dereference=False) as tar:
-            for name in ('.env','files','spool','hermes','admin/jobs','admin/tools/receipts','admin/dashboard/home'):
+            for name in ('.env','files','spool','hermes','telegram','admin/jobs','admin/tools/receipts','admin/dashboard/home'):
                 base=env_path(state) if name=='.env' else state/name
-                if name.startswith('admin/') and not base.exists(): continue
+                # The bot's folder holds only its last incident; a state from before nocheh-telegram has none.
+                if (name.startswith('admin/') or name=='telegram') and not base.exists(): continue
                 candidates=[base]+sorted(base.rglob('*')) if base.is_dir() else [base]
                 for path in candidates:
                     relative='.env' if name=='.env' else path.relative_to(state).as_posix()
@@ -262,7 +266,7 @@ def restore(snapshot,state,project,port):
             with tar.extractfile(member) as source,destination.open('xb') as target: shutil.copyfileobj(source,target)
             destination.chmod(0o600)
     # Machine keys are never in a snapshot: the restored machines need a new key and test before a job may use them.
-    for directory in ('reports','files','spool','hermes','secrets','machines'): (state/directory).mkdir(exist_ok=True,mode=0o700)
+    for directory in ('reports','files','spool','hermes','telegram','secrets','machines'): (state/directory).mkdir(exist_ok=True,mode=0o700)
     # Retain the saved settings, but don't activate a duplicate Hermes credential owner.
     auth=state/'hermes/auth.json'
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')
@@ -303,7 +307,8 @@ def restore(snapshot,state,project,port):
         subprocess.run(command+['exec','-T','nocheh-db','psql','-X','-v','ON_ERROR_STOP=1','-U','nocheh','-d','nocheh','-c',
             "UPDATE honcho_connection SET attached=false,verified=false; UPDATE guard_state SET epoch=epoch+1;"],env=env,check=True,stdout=subprocess.DEVNULL)
     if manifest['version']!=6:
-        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes','hermes-agent-sb','inngest-server'],env=env,check=True)
+        # Telegram is off in the restored settings, so nocheh-telegram starts without polling or sending.
+        subprocess.run(command+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes','hermes-agent-sb','nocheh-telegram','inngest-server'],env=env,check=True)
     result={'status':'restored_inactive','state':str(state),'project':project,'port':port,
             'verified_tables':list(actual),'verified_state_files':len(manifest['files']),
             'telegram_enabled':False,'hermes_login_activated':False}
@@ -332,11 +337,15 @@ def main(command,state,rest):
         try:
             with urllib.request.urlopen(request,timeout=10) as response: result['archive']=json.load(response)
         except Exception as error: result['archive']={'error':type(error).__name__}
-        try:
-            raw=subprocess.check_output(compose(state)+['exec','-T','hermes','python','-c',
-                "import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:8781/health',timeout=5))))"],env=environment(state),text=True)
-            result['hermes']=json.loads(raw)
-        except Exception as error: result['hermes']={'error':type(error).__name__}
+        def health(service,port):
+            try:
+                raw=subprocess.check_output(compose(state)+['exec','-T',service,'python','-c',
+                    f"import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:{port}/health',timeout=5))))"],env=environment(state),text=True)
+                return json.loads(raw)
+            except Exception as error: return {'error':type(error).__name__}
+        result['hermes']=health('hermes',8781)
+        # The Telegram state comes from the bot itself; Hermes no longer talks to Telegram.
+        result['telegram']=health('nocheh-telegram',8784)
     elif command=='backup':
         parser.add_argument('--output',type=Path,default=ROOT/'data/backups'/time.strftime('%Y%m%d-%H%M%S'))
         parser.add_argument('--leave-stopped',action='store_true',help='Keep writers stopped for a planned cutover')

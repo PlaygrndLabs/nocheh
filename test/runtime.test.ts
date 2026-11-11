@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {hermesAdapter} from '../src/hermes-adapter.js';
-import {runtimeCall, runtimeOperations, type RuntimeAdapter} from '../src/runtime.js';
+import {telegramAdapter} from '../src/frontdoor/telegram.js';
+import {combinedAdapter, runtimeCall, runtimeOperations, type RuntimeAdapter} from '../src/runtime.js';
 import {runInput} from '../src/run-source.js';
 
 function contract(name: string, adapter: RuntimeAdapter, observed: Array<{operation:string;body:Record<string,unknown>}>) {
@@ -31,7 +32,10 @@ contract('Replacement services',{
 },fakeCalls);
 
 test('the Hermes services answer only helper operations, at their own routes',async()=>{
-  assert.ok(runtimeOperations.every(operation=>hermes.capabilities[operation]),'every helper service has a route');
+  const bot=telegramAdapter({url:'http://bot.invalid',token:'fixture'});
+  assert.ok(runtimeOperations.every(operation=>combinedAdapter(bot,hermes).capabilities[operation]),'every helper service has a route');
+  assert.ok(runtimeOperations.every(operation=>!(hermes.capabilities[operation]&&bot.capabilities[operation])),'no operation has two services');
+  assert.ok(runtimeOperations.filter(operation=>operation.startsWith('telegram.')).every(operation=>!hermes.capabilities[operation]),'Hermes answers no Telegram call');
   const seen:string[]=[];
   const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
     const body=JSON.parse(String(init?.body));assert.ok(!('channel' in body));seen.push(new URL(String(url)).pathname);return Response.json({});
@@ -46,7 +50,6 @@ test('adapter preserves public error codes without exposing a provider response'
     await assert.rejects(call('guard.detect',{text:'fixture'}),{code});
   }
   const call=runtimeCall(hermesAdapter({url:'http://fixture.invalid',token:'fixture',fetch:async()=>Response.json({error:'attachment_too_large'},{status:413})}));
-  await assert.rejects(call('source.file',{file_id:'f'}),{code:'attachment_too_large'});
   await assert.rejects(call('file.extract',{}),{code:'runtime_unavailable'});
 });
 

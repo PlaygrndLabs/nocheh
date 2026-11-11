@@ -132,7 +132,8 @@ services:
     environment:
       HOME: /workspace/data/local/hermes
     entrypoint: [python, -m, tools.development.dev_reload]
-    command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.runtime]
+    # Hermes imports the shared file helpers from services/durable.py.
+    command: [--watch, /workspace/services/hermes, --watch, /workspace/services/durable.py, --watch, /workspace/tools, --, python, -m, services.hermes.runtime]
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
@@ -146,6 +147,18 @@ services:
     environment:
       # Isolated turns read the watched checkout's plugin code, read-only.
       NOCHEH_DEV_TURN_SOURCE: ${NOCHEH_DEV_SOURCE_ROOT:?}
+    volumes:
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
+
+  nocheh-telegram:
+    image: ${NOCHEH_DEV_HERMES_BASE:?}
+    build: !reset null
+    restart: unless-stopped
+    entrypoint: [python, -m, tools.development.dev_reload]
+    # Not services/hermes: a brain edit must not restart the poller and leave its sends in flight unconfirmed.
+    # The shared file helpers in services/durable.py are watched too.
+    command: [--watch, /workspace/services/telegram, --watch, /workspace/services/durable.py, --watch, /workspace/tools, --, python, -m, services.telegram.server]
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro

@@ -22,7 +22,7 @@ NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 def acknowledge_browser_delivery(token, body):
     from urllib.request import Request, urlopen
     from urllib.error import HTTPError
-    from .capture import canonical
+    from services.durable import canonical
     if set(body) != {'receipt', 'sha256'} or any(not isinstance(value,str) or not re.fullmatch(r'[a-f0-9]{64}',value) for value in body.values()):
         raise ValueError('invalid_delivery_receipt')
     request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/browser/delivered', data=canonical(body),
@@ -409,7 +409,12 @@ class Administration:
                 elif path == '/api/env' and method == 'GET': result = {}
                 elif path in ('/api/status', '/api/gateway/status') and method == 'GET':
                     import urllib.request
-                    with urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=3) as response: live = json.load(response)
+                    # The gateway is nocheh-telegram: Hermes itself never talks to Telegram. A bot that is down
+                    # is a stopped gateway, not a broken status page.
+                    telegram = os.environ.get('TELEGRAM_URL', 'http://nocheh-telegram:8784')
+                    try:
+                        with urllib.request.urlopen(telegram + '/health', timeout=3) as response: live = json.load(response)
+                    except (OSError, ValueError): live = {}
                     running = live.get('telegram') == 'connected'
                     result = {'version': '0.23.0', 'release_date': '', 'active_sessions': 0,
                               'config_version': 1, 'latest_config_version': 1, 'config_path': str(home / 'config.yaml'),

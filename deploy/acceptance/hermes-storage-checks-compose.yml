@@ -11,7 +11,6 @@ services:
       HOME: /tmp
       HERMES_HOME: /tmp/nocheh-hermes-fixture
       TELEGRAM_ENABLED: "false"
-      NOCHEH_CAPTURE_ENABLED: "0"
       PYTHONDONTWRITEBYTECODE: "1"
       SERVICE_TOKEN: stores-fixture-token-not-a-real-credential
     volumes:

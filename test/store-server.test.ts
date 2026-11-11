@@ -30,7 +30,8 @@ test('separated application captures through control outages, exposes owner repo
   const stores:StorePools={...connected,archive:unavailable(connected.archive,()=>archiveDown),control:unavailable(connected.control,()=>controlDown)};
   const policy={enabled:true,owner_id:'123',group_ids:['-42']};let nativeCalls=0;
   const runtime:FakeCall=async(operation,input)=>{
-    if(operation==='status')return {ok:true,telegram:'connected'};
+    if(operation==='status')return {ok:true};
+    if(operation==='telegram.status')return {ok:true,telegram:'connected',telegram_details:{state:'connected'}};
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','memory.limited':'Limited',
       'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images'}};
@@ -40,10 +41,10 @@ test('separated application captures through control outages, exposes owner repo
   };
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no native provider calls');})});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
-    hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
+    hermesUrl:'http://fixture',telegramUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await mkdir(join(root,'workflows'),{recursive:true});await writeFile(join(root,'workflows/inactive'),'fixture: no Inngest connection');
   await services.guards.reconcile();await services.guards.setMode('on');
-  const worker=startStorageCapture(services,settings,25),server=storageServer(services,settings,runtime,worker.status);
+  const worker=startStorageCapture(services,settings,25),server=storageServer(services,settings,runtime,worker.status,undefined,{'telegram.status':true});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();assert.ok(address&&typeof address==='object');const base='http://127.0.0.1:'+address.port;
   const request=async(path:string,body?:unknown,status=200,credential=token)=>{

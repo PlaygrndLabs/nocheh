@@ -1,7 +1,7 @@
 """One native Hermes turn per process, with a fixed profile and read capability.
 
 Process isolation avoids profile-global tool caches crossing group boundaries.
-The parent owns Telegram and credentials; the child has no shell/network tools.
+The parent owns credentials; the child has no shell/network tools.
 """
 import contextlib
 import io

@@ -12,7 +12,7 @@ from tools.operations.installation import configuration, settings
 from tools.acceptance import reset_acceptance, reset_protocol
 
 FORMAT = 'nocheh-reset-acceptance-refresh-v1'
-SERVICES = ('hermes', 'nocheh-app', 'nocheh-dashboard', 'nocheh-security')
+SERVICES = ('hermes', 'nocheh-app', 'nocheh-dashboard', 'nocheh-security', 'nocheh-telegram')
 
 
 def _saved_group_grant(state):
@@ -62,7 +62,7 @@ def _containers(journal, activation, runner, environment):
 
 
 def prepare(journal, *, runner=reset_acceptance.run, environment=None):
-    """Write the fail-closed intent before replacing the four named services."""
+    """Write the fail-closed intent before replacing the named services."""
     environment = configuration.compose_environment(journal.state) if environment is None else environment
     activation = _activation(journal)
     if not set(SERVICES).issubset(activation['plan']['desired']) or set(SERVICES) & set(activation['plan']['initial_containers']):
@@ -93,7 +93,7 @@ def prepare(journal, *, runner=reset_acceptance.run, environment=None):
 
 def _assert_environment(activation, runner, environment, expected):
     by_service = reset_acceptance._owned(activation['plan'], runner, environment)
-    for service in ('hermes', 'nocheh-app', 'nocheh-security'):
+    for service in ('hermes', 'nocheh-app', 'nocheh-security', 'nocheh-telegram'):
         raw = runner(['docker', 'inspect', '--format', '{{json .Config.Env}}', by_service[service]['id']], environment)
         values = dict(item.split('=', 1) for item in json.loads(raw) if '=' in item)
         if values.get('TELEGRAM_GROUP_ACCESS') != expected:

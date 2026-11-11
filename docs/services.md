@@ -8,8 +8,8 @@ Docker administration access is explicitly owner-authorized.
 
 <layout>
 
-One Compose project contains 15 continuously running containers when Honcho is
-enabled, 17 with the Telegram mini app, and one more with pgweb. In the original-only layout, database initialization
+One Compose project contains 16 continuously running containers when Honcho is
+enabled, 18 with the Telegram mini app, and one more with pgweb. In the original-only layout, database initialization
 runs inside `nocheh-db` before it reports healthy. The legacy layout retains
 its application startup initialization.
 Temporary isolated agent containers are additional.
@@ -21,7 +21,8 @@ Temporary isolated agent containers are additional.
 | `nocheh-app` | API, source capture, durable event publisher, ordinary Inngest handlers and the `/mcp` data tools for turns without the isolated runtime | Docker / running |
 | `nocheh-db` | Separate Nocheh and Inngest databases and roles | Docker / running |
 | `nocheh-security` | Security broker, guard, exact authorization checks and the `/mcp` data tools for isolated turns | Docker / running |
-| `hermes` | The only Telegram poller and sender; the brain behind the brain socket, with its native dashboard; the helper services for files, voice notes, images and the secret check | Docker / running |
+| `nocheh-telegram` | The Telegram bot: the only service holding its token; polls Telegram, shows typing and reactions, sends replies, cards and notices | Docker / running |
+| `hermes` | The brain behind the brain socket, with its native dashboard; the helper services for voice notes, images and the secret check | Docker / running |
 | `hermes-agent-sb` | Launch sealed turn containers and job boxes; only agent infrastructure container mounting the Docker socket | Docker / running |
 | `nocheh-machines` | Run the commands of jobs the owner approved on the owner's machines over SSH; the only service holding their keys | Docker / running |
 | `inngest-server` | Workflow scheduling, retries, waits and inspection UI | Docker / running |
@@ -66,16 +67,17 @@ embeddings) to the providers chosen in Settings › Models; see
 ```mermaid
 flowchart TB
     Owner[Owner] --> Dashboard
-    Telegram[Telegram] --> Hermes
+    Telegram[Telegram] <--> Bot
     Telegram -.->|mini app| Tunnel --> MiniApp --> Dashboard
-    subgraph Docker["Local Docker Compose · 15 services, 17 with the mini app"]
+    subgraph Docker["Local Docker Compose · 16 services, 18 with the mini app"]
         Dashboard["nocheh-dashboard :8783"]
         Executor["nocheh-executor<br/>imports · approved tools · receipt recovery"]
         App["nocheh-app<br/>API · capture · publisher · workflow handlers"]
         PG["nocheh-db<br/>separate Nocheh and Inngest databases"]
         Engine[inngest-server]
         Queue[inngest-redis]
-        Hermes["hermes<br/>managed runtime and native dashboard"]
+        Bot["nocheh-telegram<br/>the Telegram bot"]
+        Hermes["hermes<br/>the brain · native dashboard"]
         Launcher[hermes-agent-sb]
         Security["nocheh-security<br/>broker and guard"]
         Machines["nocheh-machines :8789<br/>machine keys · SSH commands"]
@@ -92,7 +94,8 @@ flowchart TB
     Dashboard -.->|maintenance| DockerAPI[Local Docker engine]
     Executor -.->|approved tool sandboxes| DockerAPI
     Executor <-->|authenticated Connect via app| App
-    Hermes -->|capture| App
+    Bot -->|capture| App
+    App -->|presence · replies · cards| Bot
     App --> PG
     App <--> Engine
     Engine --> PG
@@ -134,10 +137,11 @@ legacy layout follows [ADR-0049](adr/0049-application-database-bootstrap.md).
 
 <workflow>
 
-Telegram → `hermes` spools the update → `nocheh-app` archives it and requests the
+Telegram → `nocheh-telegram` spools the update → `nocheh-app` archives it and requests the
 preparation, memory review and reply workflows → files read and secret-checked into masked
-copies → sealed Hermes turn through `nocheh-security`, with exact approvals for actions → `hermes` sends the reply, which is
-archived. Memory review writes the masked messages it may learn from to Honcho beside the reply, once preparation finishes.
+copies → `nocheh-app` decides whether a group message addresses the bot, has `nocheh-telegram` show typing and 👀,
+and starts a sealed Hermes turn through `nocheh-security`, with exact approvals for actions → Hermes returns the reply →
+`nocheh-telegram` sends it, and it is archived. Memory review writes the masked messages it may learn from to Honcho beside the reply, once preparation finishes.
 
 Preparation is a prerequisite. Workflow events carry opaque references and approved
 metadata; originals, transcripts, arguments and credentials remain protected.

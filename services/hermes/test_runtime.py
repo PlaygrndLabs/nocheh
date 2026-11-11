@@ -26,7 +26,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             self.assertEqual(handler.dispatch({**body,'observe_only':True}),{'state':'done'})
             credentials.assert_not_called();observe.assert_called_once()
 
-    def test_file_and_detector_requests_progress_while_chat_is_waiting(self):
+    def test_extraction_and_detector_requests_progress_while_chat_is_waiting(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
             from . import runtime
             entered=threading.Event();release=threading.Event()
@@ -46,7 +46,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
                     chat=workers.submit(request,'/internal/chat')
                     try:
                         self.assertTrue(entered.wait(1))
-                        self.assertEqual(request('/internal/file')['route'],'/internal/file')
+                        self.assertEqual(request('/internal/extract')['route'],'/internal/extract')
                         self.assertEqual(request('/internal/detect')['route'],'/internal/detect')
                         self.assertFalse(chat.done())
                     finally:release.set()

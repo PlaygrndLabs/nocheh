@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { DETECTOR_VERSION } from './guard.js';
 import { assistantPolicy } from './assistant-policy.js';
 import {storageLayout} from './stores/config.js';
+import {groupReplies} from './telegram-addressing.js';
 
 export function secret(name: string): string {
   const path = process.env[`${name}_FILE`];
@@ -25,11 +26,13 @@ export function settings() {
   const mode = process.env.GUARD_MODE === 'auto' ? 'on' : process.env.GUARD_MODE ?? 'on';
   if (!['off', 'on'].includes(mode)) throw new Error('Invalid guard mode');
   guardChecks(); // An invalid Settings value stops startup instead of the first preparation.
+  groupReplies(process.env); // So does a malformed group reply setting, instead of the first group message.
   return {
     service: service as Service, host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 8780),
     token: secret('SERVICE_TOKEN'), databasePassword: '',storageLayout:layout,
     dataDir: process.env.NOCHEH_DATA_DIR ?? '/data',
     hermesUrl: process.env.HERMES_URL ?? 'http://hermes:8781',
+    telegramUrl: process.env.TELEGRAM_URL ?? 'http://nocheh-telegram:8784',
     honchoUrl:process.env.HONCHO_URL??'http://honcho-api:8000',
     honchoEnabled:process.env.NOCHEH_HONCHO_ENABLED==='true',
     memoryToken:process.env.NOCHEH_MEMORY_TOKEN??'',

@@ -3,8 +3,9 @@
 They extend tools.acceptance.telegram_scenarios with what an owner does in a
 normal week: approval cards and button presses, group addressing, people who
 are not allowed, hiding messages, reactions, Telegram Desktop imports, learning
-that reaches Honcho, Inbox cards, tasks and reminders. Only Telegram and the
-model are fake: Hermes, Honcho, Inngest and the stores are the real services.
+that reaches Honcho, Inbox cards, tasks and reminders. Only Telegram's Bot API
+and the model are fake: Nocheh's Telegram service, Hermes, Honcho, Inngest and
+the stores are the real services.
 The scripted model acts only on explicit directives, so these scenarios test
 Nocheh's plumbing, rules and effects, never model judgement.
 """
@@ -22,6 +23,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 
 from tools.acceptance.github_mock import key_line
+from tools.acceptance.telegram_rehearsal import wait_telegram_connected
 from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Scenarios, isolated_turns, synthetic_pdf
 from tools.paths import ROOT
 
@@ -83,7 +85,7 @@ class ProductScenarios(Scenarios):
         return self.f.app('/v1/tools/actions')['telegram']
 
     def apply_access(self, access):
-        """Change who is allowed in which group and restart the services that read it."""
+        """Change who is allowed in which group and restart the services that read it, the Telegram service among them."""
         names = []
         for name, service in self.f.manifest['services'].items():
             environment = service.get('environment') or {}
@@ -94,7 +96,7 @@ class ProductScenarios(Scenarios):
         path.write_text(json.dumps(self.f.manifest))
         path.chmod(0o600)
         self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
-        self.wait('polling_reconnected', lambda: self.f.http('/health', service='hermes', port=8781)['telegram'] == 'connected', 180)
+        wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
         return names
 
     def topic_created(self, chat, topic, name):
@@ -154,7 +156,7 @@ class ProductScenarios(Scenarios):
         self.gate('no_typing_when_not_addressed', not [call for call in calls(started, GROUP) if call['method'] == 'sendChatAction'])
 
     def reactions_show_while_working(self):
-        # Hermes's own working reactions: 👀 on the message while Nocheh works on it, then 👍 once it answered.
+        # The Telegram service's working reactions: 👀 on the message while Nocheh works on it, then 👍 once it answered.
         def calls(since, chat, method, number=None):
             return [call for call in self.f.telegram()['calls'] if call['at'] >= since and call['method'] == method
                     and str(call['parameters'].get('chat_id')) == str(chat)

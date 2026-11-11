@@ -1,7 +1,7 @@
 # Owned archive and durable capture
 
-Native Hermes long polling is wrapped at the Telegram HTTP response boundary.
-The wrapper fsyncs every update before returning it to python-telegram-bot; only
+The `nocheh-telegram` service's long polling is wrapped at the Telegram HTTP
+response boundary. The wrapper fsyncs every update before returning it to python-telegram-bot; only
 then can the next poll acknowledge it. Cold starts and reconnects retain pending
 updates. Webhook mode is rejected until it has equivalent durable capture.
 
@@ -61,8 +61,8 @@ document reader and, for photos and images, its vision tool with the Images mode
 ## Verification
 
 `./bin/nocheh test` starts PostgreSQL, runs isolated-schema archive and
-HTTP tests inside the development image, and runs Python tests against the pinned
-native Telegram adapter. The suite covers duplicates, edits, original text,
+HTTP tests inside the development image, and runs Python tests against the
+`nocheh-telegram` service on the pinned python-telegram-bot. The suite covers duplicates, edits, original text,
 failed attachment downloads, historical suppression, capture disk failure,
 cold-start/reconnect behavior and ambiguous sends across restart.
 

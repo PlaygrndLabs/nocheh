@@ -5,7 +5,7 @@ import threading
 import uuid
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
-from .capture import canonical,digest
+from services.durable import canonical,digest
 from .native_cron import archive,store,inspect,profiles,definition,revision,workflow_cursor,sync_job
 from .native_memory import save_receipt
 

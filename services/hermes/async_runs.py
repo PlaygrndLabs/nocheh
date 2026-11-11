@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from .capture import canonical,immutable_file
+from services.durable import canonical,immutable_file
 
 CLOSED={'done','failed','ambiguous','suppressed','cancelled'}
 STAGES={'admission','assistant','delivery'}

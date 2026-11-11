@@ -4,65 +4,45 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextvars
-import hashlib
 import json
 import logging
-import os
 import time
 import uuid
-from time import perf_counter
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from urllib.parse import urlsplit
+
+from services.durable import canonical, digest, immutable_file
 
 DISPATCH_KEY = contextvars.ContextVar('nocheh_dispatch_key', default=None)
 OUTBOUND_CHECK = contextvars.ContextVar('nocheh_outbound_check', default=None)
 
 
-def canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+class Held(RuntimeError):
+    """A request this boundary did not let out, or whose outcome is already settled.
+
+    PTB wraps it in a NetworkError; the sender recognises it and never retries it,
+    since another try meets the same answer."""
 
 
-def digest(value):
-    return hashlib.sha256(value.encode() if isinstance(value, str) else value).hexdigest()
-
-
-def sync_directory(directory):
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def immutable_file(directory: Path, name: str, data: bytes):
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    target = directory / name
-    temporary = directory / ('.' + uuid.uuid4().hex + '.tmp')
-    created = True
-    try:
-        with temporary.open('xb') as file:
-            os.chmod(temporary, 0o600)
-            file.write(data)
-            file.flush()
-            os.fsync(file.fileno())
-        try:
-            os.link(temporary, target)
-        except FileExistsError:
-            created = False
-            if target.read_bytes() != data:
-                raise RuntimeError('immutable_capture_conflict') from None
-        sync_directory(directory)
-        return created
-    finally:
-        temporary.unlink(missing_ok=True)
+def held(error):
+    """Whether a send error, or anything it wraps, is one of this boundary's refusals."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, Held): return True
+        seen.add(id(error))
+        error = error.__cause__ or error.__context__
+    return False
 
 
 class Capture:
-    def __init__(self, root: Path, bot_id: str):
+    def __init__(self, root: Path, bot_id: str, recover=True):
         self.root, self.bot_id = root, bot_id
         self.polling = {'last_poll_at': None, 'last_update_at': None, 'error_code': None}
-        self.recover()
+        # Only the service that sends recovers; discovery sends nothing and must not stamp the
+        # service's in-flight sends as ambiguous.
+        if recover: self.recover()
 
     def recover(self):
         # On boot, a durable intent without a durable result is ambiguous. Never
@@ -115,7 +95,7 @@ class Capture:
         base = f"outbound:{self.bot_id}:{dispatch_key}:{method}:{digest(canonical(parameters))}"
         journal = self.root / 'outbound'
         # A documented 429 is an explicit rejection, not an uncertain send.
-        # Retain every attempt and honor its wait; the pinned adapter bounds its
+        # Retain every attempt and honor its wait; the sender bounds its
         # own retries to three. All other results retain their existing behavior.
         for attempt in range(3):
             key = base if attempt == 0 else base + ':rate-retry:' + str(attempt)
@@ -126,17 +106,17 @@ class Capture:
             saved = json.loads(result.read_bytes())
             self.enqueue(saved['event'])
             if saved['state'] == 'ambiguous':
-                raise RuntimeError('outbound_delivery_ambiguous')
+                raise Held('outbound_delivery_ambiguous')
             if attempt < 2 and self.rate_limit_elapsed(saved, result):
                 continue
             return key, (saved['status'], base64.b64decode(saved['wire']))
         if intent.exists():
             self.enqueue(json.loads(intent.read_bytes()))
             self.complete(key, method, parameters, None)
-            raise RuntimeError('outbound_delivery_ambiguous')
+            raise Held('outbound_delivery_ambiguous')
         event = self.event(key + ':intent', 'outbound_intent', {'method': method, 'parameters': parameters, 'state': 'attempting'}, parameters.get('chat_id', 'system'), parameters.get('text'))
         if not immutable_file(journal, intent.name, canonical(event)):
-            raise RuntimeError('outbound_delivery_ambiguous')
+            raise Held('outbound_delivery_ambiguous')
         self.enqueue(event)
         return key, None
 
@@ -176,12 +156,12 @@ class Capture:
 
 
 def parseable_updates(result, polling):
-    """Keep one update the pinned SDK cannot parse from wedging polling.
+    """Keep one update the Telegram library cannot parse from wedging polling.
 
-    The SDK rejects a whole getUpdates batch when any update fails to parse and
-    then retries the same offset forever. Each original is already durably
+    The library rejects a whole getUpdates batch when any update fails to parse,
+    and the same offset would be fetched forever. Each original is already durably
     captured, so an unparseable update is passed on as its bare update_id: the
-    offset advances, no handler runs, and the count stays visible in health.
+    offset advances, nothing reads it, and the count stays visible in health.
     """
     status, raw = result
     try:
@@ -240,22 +220,22 @@ def instrument_request(request, capture: Capture, polling=False):
                 return await super().do_request(*args, **kwargs)
             data = kwargs.get('request_data')
             parameters = data.parameters if data else {}
-            # Formatting, chunks and native retries may change routing. Check
+            # Formatting, chunks and retries may change routing. Check
             # the actual request before journaling or transmission each time.
             check = OUTBOUND_CHECK.get()
             if method in ('sendChatAction', 'setMessageReaction'):
                 # A chat action ("typing…") or a working reaction (👀, then 👍
                 # or 👎) carries no content, and the next one replaces it. It is
-                # sent only inside a bound turn and is not journaled, so a long
+                # sent only inside a bound presence and is not journaled, so a long
                 # turn adds no archive records and a retried turn can set its 👀
                 # again instead of being answered from the journal.
                 if check is None:
-                    raise RuntimeError('telegram_chat_action_unbound' if method == 'sendChatAction' else 'telegram_reaction_unbound')
+                    raise Held('telegram_chat_action_unbound' if method == 'sendChatAction' else 'telegram_reaction_unbound')
                 await asyncio.to_thread(check, method, parameters)
                 return await super().do_request(*args, **kwargs)
             if check is not None:
                 await asyncio.to_thread(check, method, parameters)
-            # Parent context is inherited by PTB's background reply tasks.
+            # Context is inherited by tasks the sender starts.
             dispatch = DISPATCH_KEY.get() or 'control:' + uuid.uuid4().hex
             # The bound check may record each admitted request's journal outcome.
             observe = getattr(check, 'observe', None) or (lambda *_: None)
@@ -280,20 +260,20 @@ def instrument_request(request, capture: Capture, polling=False):
     return request
 
 
-async def clear_command_menu(bot, sleep=asyncio.sleep, waits=(0, 60, 300, 900)):
+async def clear_command_menu(bot, groups, sleep=asyncio.sleep, waits=(0, 60, 300, 900)):
     """Leave no command menu in any scope Hermes ever filled, and check that it stayed empty.
 
-    A process that is still shutting down, or a rate limit, can leave a menu
-    behind, so each scope is read back and cleared again after a while.
+    Nocheh runs no bot command: a slash command is ordinary text for the owner, and nobody
+    else may use the bot. A process that is still shutting down, or a rate limit, can leave
+    a menu behind, so each scope is read back and cleared again after a while.
     """
     from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeChat, BotCommandScopeDefault
     from telegram.error import BadRequest, Forbidden
-    from .environment import telegram_policy
     log = logging.getLogger(__name__)
     scopes = [BotCommandScopeDefault(), BotCommandScopeAllPrivateChats(), BotCommandScopeAllGroupChats()]
     try:
         # Native Hermes gave each forum group its own menu, which outranks the shared ones.
-        scopes += [BotCommandScopeChat(chat_id=int(chat)) for chat in telegram_policy()['group_ids']]
+        scopes += [BotCommandScopeChat(chat_id=int(chat)) for chat in groups]
     except (ValueError, TypeError):
         pass
     for attempt, wait in enumerate(waits):
@@ -317,66 +297,3 @@ async def clear_command_menu(bot, sleep=asyncio.sleep, waits=(0, 60, 300, 900)):
             return
         scopes = left
     log.warning('command_menu_left: %s', ','.join(scope.type for scope in scopes))
-
-
-def captured_adapter_class():
-    from plugins.platforms.telegram.adapter import TelegramAdapter
-    from telegram import Update
-    from telegram.ext import ApplicationHandlerStop, TypeHandler
-
-    # The pinned native adapter passes Update.ALL_TYPES to start_polling. Fail
-    # startup if its Telegram library ever drops either required reaction type.
-    required_reactions = {'message_reaction', 'message_reaction_count'}
-
-    class ArchivedTelegramAdapter(TelegramAdapter):
-        def __init__(self, config):
-            super().__init__(config)
-            # Telegram fetches an address to preview it, so no message this adapter sends shows
-            # one, whatever the profile's platform settings say.
-            self._disable_link_previews = True
-            self.capture = Capture(Path(os.environ.get('NOCHEH_SPOOL_DIR', '/data/spool')), config.token.split(':',1)[0])
-
-        def _instrument_polling_request(self, request):
-            return instrument_request(super()._instrument_polling_request(request), self.capture, polling=True)
-
-        async def _start_polling_resilient(self, **kwargs):
-            kwargs['drop_pending_updates'] = False
-            if not required_reactions.issubset(Update.ALL_TYPES):
-                raise RuntimeError('Pinned Telegram adapter lacks reaction updates')
-            return await super()._start_polling_resilient(**kwargs)
-
-        async def _start_polling_once(self, app, **kwargs):
-            # Native reconnect recovery also calls this method directly.
-            kwargs['drop_pending_updates'] = False
-            if not required_reactions.issubset(Update.ALL_TYPES):
-                raise RuntimeError('Pinned Telegram adapter lacks reaction updates')
-            return await super()._start_polling_once(app, **kwargs)
-
-        async def _start_webhook_mode(self, *args, **kwargs):
-            raise RuntimeError('Nocheh durable capture currently requires native long polling')
-
-        async def _register_command_menu(self):
-            # Nocheh runs no native command: a slash command is ordinary text for
-            # the owner, and nobody else may use the bot. The native menu would
-            # list commands to everyone, so clear it in every scope it fills.
-            if not self._bot:
-                return
-            task = getattr(self, '_menu_clear_task', None)
-            if task is None or task.done():
-                self._menu_clear_task = asyncio.ensure_future(clear_command_menu(self._bot))
-
-        async def _build_ptb_requests(self):
-            request, updates = await super()._build_ptb_requests()
-            return instrument_request(request, self.capture), updates
-
-        def _register_handlers(self, app):
-            async def committed_only(update, context):
-                # Polling only captures. The archive worker explicitly dispatches
-                # committed live events; replay/import never enters this path.
-                expected = f"telegram:{self.capture.bot_id}:update:{update.update_id}"
-                if DISPATCH_KEY.get() != expected:
-                    raise ApplicationHandlerStop
-            app.add_handler(TypeHandler(Update, committed_only), group=-100)
-            super()._register_handlers(app)
-
-    return ArchivedTelegramAdapter

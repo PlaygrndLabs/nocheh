@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import Mock,patch
 
-from services.hermes.capture import Capture
+from services.telegram.capture import Capture
 from tools.acceptance import reset_effects as effects
 from tools.acceptance import reset_inventory
 from tools.acceptance import reset_protocol
@@ -50,7 +50,7 @@ class ResetEffectsTests(unittest.TestCase):
 
     def test_missing_or_ambiguous_transport_receipt_blocks_even_with_native_done(self):
         key=self.deliver(None)
-        folder=self.state/'spool/dispatch';folder.mkdir();(folder/(effects.digest(self.event+':1')+'.result')).write_text('{"state":"done"}')
+        folder=self.state/'spool/dispatch';folder.mkdir();(folder/('reply-'+effects.digest(self.event+':1')+'.result')).write_text('{"state":"done"}')
         self.assertFalse(effects.evaluate(self.state,self.observed)['settled'])
         self.capture.complete(key,'sendMessage',{'chat_id':123,'text':'private fixture message — سلام'},None)
         self.assertFalse(effects.evaluate(self.state,self.observed)['settled'])
@@ -109,7 +109,7 @@ class ResetEffectsTests(unittest.TestCase):
         self.assertTrue(effects.evaluate(self.state,self.observed)['settled'])
 
     def test_receipt_symlinks_and_hardlinks_are_not_read(self):
-        folder=self.state/'spool/dispatch';folder.mkdir(parents=True);path=folder/(effects.digest(self.event+':1')+'.result')
+        folder=self.state/'spool/dispatch';folder.mkdir(parents=True);path=folder/('reply-'+effects.digest(self.event+':1')+'.result')
         target=self.state/'outside';target.write_text('{"state":"done"}');path.symlink_to(target)
         with self.assertRaises(OSError):effects.evaluate(self.state,self.observed)
         path.unlink();os.link(target,path)

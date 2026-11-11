@@ -232,12 +232,14 @@ class ConfigurationTests(unittest.TestCase):
         for bad in ('0','9','two','-1'):
             with patch.dict(os.environ,{'NOCHEH_PARALLEL_RUNS':bad}),self.assertRaises(ValueError,msg=bad):parallel('NOCHEH_PARALLEL_RUNS',4)
 
-    def test_owner_sets_delivery_log_retention_for_hermes(self):
+    def test_owner_sets_delivery_log_retention_for_hermes_and_the_telegram_bot(self):
         import yaml
         from tools.operations.installation.configuration import ROOT,validate
         from tools.operations.installation.settings import EDITABLE
         compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
-        self.assertEqual(compose['hermes']['environment']['NOCHEH_HERMES_JOURNAL_RETENTION_DAYS'],'${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}')
+        # One owner setting prunes Hermes's managed-run receipts and the bot's delivery journals.
+        for service in ('hermes','nocheh-telegram'):
+            self.assertEqual(compose[service]['environment']['NOCHEH_HERMES_JOURNAL_RETENTION_DAYS'],'${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}',service)
         self.assertIn('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS',EDITABLE)
         with tempfile.TemporaryDirectory() as folder:
             values=initialize(Path(folder))
@@ -264,6 +266,38 @@ class ConfigurationTests(unittest.TestCase):
                 with self.assertRaises(ValueError,msg=checks):validate({**values,'NOCHEH_PARALLEL_GUARD_CHECKS':checks})
         with patch.dict(os.environ,{'NOCHEH_PARALLEL_GUARD_CHECKS':'4'}):self.assertEqual(parallel('NOCHEH_PARALLEL_GUARD_CHECKS',3,4),4)
         with patch.dict(os.environ,{'NOCHEH_PARALLEL_GUARD_CHECKS':'5'}),self.assertRaises(ValueError):parallel('NOCHEH_PARALLEL_GUARD_CHECKS',3,4)
+
+    def test_settings_validate_and_reach_the_app_and_the_telegram_bot(self):
+        import yaml
+        from tools.operations.installation.configuration import DEFAULTS, ROOT, validate
+        from tools.operations.installation.settings import EDITABLE
+        # The product name addresses the bot by default.
+        names = 'Nocheh,نوچه'
+        services = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())['services']
+        # The app decides addressing; the bot shows typing and reactions; Hermes gets neither.
+        app, bot, hermes = (services[name]['environment'] for name in ('nocheh-app', 'nocheh-telegram', 'hermes'))
+        # Without a colon, Compose keeps an owner's empty list instead of restoring the defaults.
+        self.assertEqual((app['TELEGRAM_GROUP_REPLIES'], app['TELEGRAM_BOT_NAMES']),
+                         ('${TELEGRAM_GROUP_REPLIES:-addressed}', '${TELEGRAM_BOT_NAMES-'+names+'}'))
+        self.assertEqual((DEFAULTS['TELEGRAM_GROUP_REPLIES'], DEFAULTS['TELEGRAM_BOT_NAMES']), ('addressed', names))
+        self.assertLessEqual({'TELEGRAM_GROUP_REPLIES', 'TELEGRAM_BOT_NAMES', 'TELEGRAM_TOPIC_MEMORY', 'TELEGRAM_TYPING', 'TELEGRAM_REACTIONS'}, EDITABLE)
+        self.assertEqual((bot['TELEGRAM_TYPING'], DEFAULTS['TELEGRAM_TYPING']), ('${TELEGRAM_TYPING:-true}', 'true'))
+        self.assertEqual((bot['TELEGRAM_REACTIONS'], DEFAULTS['TELEGRAM_REACTIONS']), ('${TELEGRAM_REACTIONS:-true}', 'true'))
+        moved = {'TELEGRAM_BOT_TOKEN', 'NOCHEH_CAPTURE_ENABLED', 'TELEGRAM_GROUP_REPLIES', 'TELEGRAM_BOT_NAMES', 'TELEGRAM_TYPING', 'TELEGRAM_REACTIONS'}
+        self.assertEqual(moved & set(hermes), set())
+        self.assertEqual({'TELEGRAM_TYPING', 'TELEGRAM_REACTIONS', 'TELEGRAM_BOT_TOKEN'} & set(app), set())
+        # Storage services decide recall scope, so the topic-memory choice reaches every service sharing the base environment.
+        storage = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())['x-service']['environment']
+        self.assertEqual((storage['TELEGRAM_TOPIC_MEMORY'], DEFAULTS['TELEGRAM_TOPIC_MEMORY']), ('${TELEGRAM_TOPIC_MEMORY:-group}', 'group'))
+        base = {**DEFAULTS, 'NOCHEH_ARCHIVE_PASSWORD': 'a' * 64, 'NOCHEH_DERIVED_PASSWORD': 'b' * 64, 'NOCHEH_CONTROL_PASSWORD': 'c' * 64,
+                'INNGEST_EVENT_KEY': 'd' * 64, 'INNGEST_SIGNING_KEY': 'e' * 64, 'INNGEST_POSTGRES_PASSWORD': 'f' * 64,
+                'POSTGRES_PASSWORD': 'p' * 24, 'SERVICE_TOKEN': 's' * 24}
+        validate(base)
+        validate({**base, 'TELEGRAM_GROUP_REPLIES': 'all', 'TELEGRAM_BOT_NAMES': ''})
+        validate({**base, 'TELEGRAM_TOPIC_MEMORY': 'topic', 'TELEGRAM_TYPING': 'false', 'TELEGRAM_REACTIONS': 'false'})
+        for key, bad in (('TELEGRAM_GROUP_REPLIES', 'some'), ('TELEGRAM_BOT_NAMES', 'n' * 33), ('TELEGRAM_TOPIC_MEMORY', 'chat'), ('TELEGRAM_TYPING', 'yes'), ('TELEGRAM_REACTIONS', 'on')):
+            with self.assertRaises(ValueError, msg=key):
+                validate({**base, key: bad})
 
     def test_separate_storage_credentials_are_private_stable_and_explicitly_selected(self):
         from tools.operations.installation.configuration import compose_command,validate

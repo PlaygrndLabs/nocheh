@@ -3,17 +3,12 @@ import { runtimeOperations, type RuntimeAdapter, type RuntimeOperation } from '.
 
 type Options = {url: string; token: string; fetch?: typeof fetch};
 /** Only this adapter knows the private paths of the helper services the Hermes service hosts. The brain itself is in
- * `brain/hermes.ts` (ADR-0234). */
+ * `brain/hermes.ts` (ADR-0234); Telegram is Nocheh's own bot, in `frontdoor/telegram.ts` (ADR-0235). */
 export function hermesAdapter(options: Options): RuntimeAdapter {
   const transport = options.fetch ?? fetch;
   const routes: Partial<Record<RuntimeOperation, string>> = {
-    'source.file': '/internal/file',
-    'guard.detect': '/internal/detect', 'action.execute': '/internal/action',
+    'guard.detect': '/internal/detect',
     'memory.filter':'/internal/memory/filter',
-    'telegram.chat':'/internal/telegram/chat',
-    'telegram.approval':'/internal/telegram/approval',
-    'telegram.refusal':'/internal/telegram/refusal',
-    'telegram.notice':'/internal/telegram/notice',
     'usage.price':'/internal/usage/price',
     'file.extract':'/internal/extract',
     'voice.transcribe':'/internal/transcribe',
@@ -37,8 +32,6 @@ export function hermesAdapter(options: Options): RuntimeAdapter {
         const error = await response.json().catch(() => null) as {error?: string} | null;
         // No provider chosen in Settings › Models is a waiting condition, not a runtime fault.
         if (error?.error === 'provider_not_configured') code = error.error;
-        // A file too large for the bot to download settles instead of retrying.
-        else if (operation === 'source.file' && error?.error === 'attachment_too_large') code = error.error;
         else if (operation === 'guard.detect' && error?.error === 'detector_contract_rejected') code = error.error;
         throw new HttpError(response.status, code);
       }

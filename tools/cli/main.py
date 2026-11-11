@@ -32,9 +32,10 @@ def development_box_token():
     root = operating_root(); operating_config(root); path = root / '.env'; saved = read_env(path)
     missing = tuple(name for name in ('NOCHEH_BOX_TOKEN', 'NOCHEH_MACHINE_TOKEN') if not saved.get(name))
     if missing: write_env(path, generate(saved, missing))
-    # The launcher's read-only bind of the GitHub copies and nocheh-machines' keys folder: made here at 0700, so Docker
-    # never makes them as root.
+    # The launcher's read-only bind of the GitHub copies, nocheh-machines' keys folder and nocheh-telegram's state folder:
+    # made here at 0700, so Docker never makes them as root.
     (root / 'data/local').mkdir(parents=True, exist_ok=True, mode=0o700); github_folders(root / 'data/local'); machine_folder(root / 'data/local')
+    (root / 'data/local/telegram').mkdir(exist_ok=True, mode=0o700)
 
 
 def run_isolated_tests(rest):
@@ -63,13 +64,15 @@ def run_isolated_tests(rest):
                     'dist/test/database-recovery.test.js'], cwd=ROOT, env=env)
             if result == 0:
                 result = subprocess.call(command + ['build', 'hermes'], cwd=ROOT, env=env)
-            if result == 0:
-                # Native unit tests get only a synthetic token, no Compose secrets.
-                result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
-                    '--tmpfs', '/tmp:rw,exec,nosuid,nodev,mode=1777', '--entrypoint', 'python',
-                    '-e', 'HERMES_HOME=/tmp/nocheh-tests', '-e', 'SERVICE_TOKEN=test-service-token',
-                    'nocheh-hermes:local', '-m', 'unittest', 'discover', '-s', 'services/hermes',
-                    '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
+            # Native and Telegram bot unit tests get only a synthetic token, no Compose secrets. Not all of
+            # services/, which also holds Honcho's tests.
+            for tests in ('services/hermes', 'services/telegram'):
+                if result == 0:
+                    result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
+                        '--tmpfs', '/tmp:rw,exec,nosuid,nodev,mode=1777', '--entrypoint', 'python',
+                        '-e', 'HERMES_HOME=/tmp/nocheh-tests', '-e', 'SERVICE_TOKEN=test-service-token',
+                        'nocheh-hermes:local', '-m', 'unittest', 'discover', '-s', tests,
+                        '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
         finally:
             cleanup = subprocess.call(command + ['down', '--volumes', '--remove-orphans'], cwd=ROOT, env=env)
         return result or cleanup
@@ -274,7 +277,7 @@ def main():
         "logs": ["logs", "--tail", "100", "-f"], "build": ["build"],
         "verify": ["exec", "-T", "hermes", "python", "-m", "services.hermes.verify", "--live"],
         "config": ["config", "--quiet"],
-        "discover-telegram": ["exec", "-T", "hermes", "python", "-m", "services.hermes.discover_telegram"],
+        "discover-telegram": ["exec", "-T", "nocheh-telegram", "python", "-m", "services.telegram.discover"],
     }
     # The launcher looks for the box image as it starts, so up builds it before the stack.
     result = build_image('box', env) if args.command == 'up' else 0
