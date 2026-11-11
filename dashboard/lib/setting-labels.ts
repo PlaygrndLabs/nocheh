@@ -44,6 +44,7 @@ export const settingLabels: Record<string, string> = {
   NOCHEH_BACKUP_TIME_ZONE: 'Backup time zone',
   NOCHEH_BACKUP_KEEP: 'Automatic backups kept',
   NOCHEH_OFFSITE: 'Off-site copies',
+  NOCHEH_OFFSITE_PROVIDER: 'Off-site storage',
   NOCHEH_OFFSITE_ENDPOINT: 'Off-site storage address',
   NOCHEH_OFFSITE_BUCKET: 'Off-site bucket',
   NOCHEH_OFFSITE_REGION: 'Off-site region',

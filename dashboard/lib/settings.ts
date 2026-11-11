@@ -89,6 +89,18 @@ function rebase(changes: Record<string, string>, data: SettingsView): Record<str
   );
 }
 
+/**
+ * Takes settings that a step other than Save just wrote, such as connecting off-site storage. Edits to the
+ * keys it wrote are dropped; other edits stay and are saved against the new revision.
+ */
+export function adoptSavedSettings(data: SettingsView, written: string[]) {
+  const changes = rebase(
+    Object.fromEntries(Object.entries(state.changes).filter(([key]) => !written.includes(key))),
+    data,
+  );
+  update({data, changes, revision: Object.keys(changes).length ? data.revision : null});
+}
+
 export function setSetting(key: string, value: string) {
   setSettings({[key]: value});
 }

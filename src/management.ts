@@ -345,6 +345,12 @@ export async function startManagement() {
         const body=req.method==='POST'?object(await readJson(req)):{};
         return json(res,200,await python({operation:'policy.manage',request:{...body,profile:url.searchParams.get('profile'),job:url.searchParams.get('job')},write:req.method==='POST'}));
       }
+      // Off-site storage from one pasted credential (ADR-0236). It writes the storage settings, so it waits like a save;
+      // the token or key travels only in this POST body and never comes back.
+      if(req.method==='POST'&&route==='/offsite/connect')return exclusive('writer-start',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        return json(res,200,await python({operation:'offsite.connect',request:object(await readJson(req))}));
+      });
       // The owner's Notion sign-in. Tokens travel only in POST bodies and never come back.
       if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);

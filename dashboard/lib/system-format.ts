@@ -343,6 +343,30 @@ const offsiteErrors: Record<string, string> = {
   offsite_low_disk: 'Not enough free disk space to make the encrypted copy. Free some space, then try again.',
   offsite_copy_too_large: 'The backup is too large for one off-site copy.',
   offsite_needs_cryptography: 'This computer needs the Python cryptography package to open off-site copies.',
+  offsite_storage_check_failed: 'The storage accepted a test file but gave back something else. Try again.',
+  offsite_provider_unknown: 'Pick Cloudflare or Backblaze first.',
+  offsite_cloudflare_token_invalid: 'Paste the whole token Cloudflare showed, without spaces.',
+  offsite_cloudflare_token_refused: 'Cloudflare didn’t accept this token. Copy it again, or make a new one.',
+  offsite_cloudflare_unreachable: 'Cloudflare couldn’t be reached. Check the internet connection and try again.',
+  offsite_cloudflare_account_needed:
+    'Cloudflare didn’t say which account this token is for. Paste the account ID below.',
+  offsite_cloudflare_account_invalid: 'That isn’t one of the accounts this token reaches.',
+  offsite_cloudflare_r2_off:
+    'R2 isn’t turned on in this Cloudflare account yet. Turn on R2 in Cloudflare (free up to 10 GB), then connect again.',
+  offsite_cloudflare_needs_r2_permission:
+    'The token can’t make buckets. Use Open Cloudflare to make one with Workers R2 Storage: Edit.',
+  offsite_cloudflare_needs_token_permission:
+    'The token can’t make keys. Use Open Cloudflare to make one that also has Account API Tokens: Edit.',
+  offsite_cloudflare_bucket_failed: 'Cloudflare didn’t make the bucket. Try again in a minute.',
+  offsite_cloudflare_lock_failed: 'Cloudflare didn’t accept the lock on the bucket. Try again in a minute.',
+  offsite_cloudflare_token_failed: 'Cloudflare didn’t make the bucket key. Try again in a minute.',
+  offsite_backblaze_key_invalid: 'Paste the keyID and the applicationKey exactly as Backblaze showed them.',
+  offsite_backblaze_key_refused: 'Backblaze didn’t accept this key. Check both values, or make a new key.',
+  offsite_backblaze_key_not_limited:
+    'This key reaches more than one bucket. Make a key for the backup bucket only, so it can’t touch anything else.',
+  offsite_backblaze_key_read_only: 'This key can’t write. Make a key with Read and Write access.',
+  offsite_backblaze_unavailable: 'Backblaze didn’t answer as expected. Try again in a minute.',
+  offsite_backblaze_unreachable: 'Backblaze couldn’t be reached. Check the internet connection and try again.',
 };
 
 export function operationError(code: string): string {

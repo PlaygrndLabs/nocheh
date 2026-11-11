@@ -1,10 +1,16 @@
-import {useSettings} from '../../lib/settings';
-import {Button, Card, CardHeader, Input, Segmented, Select, SettingRow} from '../../ui/core';
+import {useState} from 'react';
+import {ExternalLink} from 'lucide-react';
+import {apiPost, type ApiError} from '../../lib/api';
+import {adoptSavedSettings, useSettings, type SettingsView} from '../../lib/settings';
+import {operationError} from '../../lib/system-format';
+import {Button, Card, CardHeader, Input, Notice, Segmented, Select, SettingRow} from '../../ui/core';
+import {useFeedback} from '../../ui/overlay';
 import {Unsaved} from './telegram';
 import {PasswordSettings} from './password';
 
 const offsiteKeys = [
   'NOCHEH_OFFSITE',
+  'NOCHEH_OFFSITE_PROVIDER',
   'NOCHEH_OFFSITE_ENDPOINT',
   'NOCHEH_OFFSITE_BUCKET',
   'NOCHEH_OFFSITE_REGION',
@@ -35,13 +41,119 @@ function zones(): string[] {
   }
 }
 
-/** Encrypted off-site copies of finished backups in the owner's own S3-compatible storage (ADR-0229). */
+type Provider = 'cloudflare' | 'backblaze' | 'other';
+type Connected = {
+  status: 'connected';
+  provider: Exclude<Provider, 'other'>;
+  bucket: string;
+  account?: string;
+  lock_days?: number;
+  setup_token_deleted?: boolean;
+  settings: SettingsView;
+};
+type ChooseAccount = {status: 'choose_account'; accounts: {id: string; name: string}[]};
+
+// Cloudflare's token page, already filled in: R2 to make the bucket and its lock, and API tokens to make the
+// bucket-only key. Nocheh deletes this setup token once it is done (ADR-0236).
+const cloudflareTokenPage =
+  'https://dash.cloudflare.com/?to=/:account/api-tokens&permissionGroupKeys=' +
+  encodeURIComponent(
+    JSON.stringify([
+      {key: 'workers_r2', type: 'edit'},
+      {key: 'account_api_tokens', type: 'edit'},
+    ]),
+  ) +
+  '&name=' +
+  encodeURIComponent('Nocheh setup');
+const cloudflareR2Page = 'https://dash.cloudflare.com/?to=/:account/r2/overview';
+const cloudflareTokensPage = 'https://dash.cloudflare.com/?to=/:account/api-tokens';
+const backblazeKeysPage = 'https://secure.backblaze.com/app_keys.htm';
+const storageKeys = [
+  'NOCHEH_OFFSITE_PROVIDER',
+  'NOCHEH_OFFSITE_ENDPOINT',
+  'NOCHEH_OFFSITE_BUCKET',
+  'NOCHEH_OFFSITE_REGION',
+  'NOCHEH_OFFSITE_ACCESS_KEY_ID',
+  'NOCHEH_OFFSITE_SECRET_ACCESS_KEY',
+];
+
+function OutLink({href, children}: {href: string; children: React.ReactNode}) {
+  return (
+    <a className="text-accent-text underline-offset-2 hover:underline" href={href} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  );
+}
+
+/** Encrypted off-site copies of finished backups in the owner's own storage (ADR-0229, ADR-0236). */
 function OffsiteSettings() {
   const s = useSettings();
+  const feedback = useFeedback();
   const on = s.value('NOCHEH_OFFSITE') === 's3';
+  const provider = (s.value('NOCHEH_OFFSITE_PROVIDER') || 'cloudflare') as Provider;
   const configured = (key: string) => !!s.field(key)?.configured;
   const keep = s.value('NOCHEH_OFFSITE_KEEP') || '14';
   const customKeep = !keepPresets.includes(keep);
+  // Storage counts as connected once Nocheh saved this provider with every storage setting.
+  const connected =
+    provider !== 'other' &&
+    s.saved('NOCHEH_OFFSITE_PROVIDER') === provider &&
+    ['NOCHEH_OFFSITE_ENDPOINT', 'NOCHEH_OFFSITE_BUCKET', 'NOCHEH_OFFSITE_ACCESS_KEY_ID'].every(key => !!s.saved(key)) &&
+    configured('NOCHEH_OFFSITE_SECRET_ACCESS_KEY');
+  const [again, setAgain] = useState(false);
+  const [token, setToken] = useState('');
+  const [keyId, setKeyId] = useState('');
+  const [key, setKey] = useState('');
+  const [account, setAccount] = useState('');
+  const [accounts, setAccounts] = useState<ChooseAccount['accounts'] | null>(null);
+  const [askAccount, setAskAccount] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const [done, setDone] = useState<Connected | null>(null);
+  const showForm = provider !== 'other' && (!connected || again);
+
+  const pick = (value: Provider) => {
+    s.set('NOCHEH_OFFSITE_PROVIDER', value);
+    setProblem('');
+    setDone(null);
+    setAgain(false);
+  };
+  const connect = async () => {
+    setBusy(true);
+    setProblem('');
+    setDone(null);
+    try {
+      const answer = await apiPost<Connected | ChooseAccount>(
+        '/offsite/connect',
+        provider === 'cloudflare' ? {provider, token, ...(account ? {account} : {})} : {provider, key_id: keyId, key},
+      );
+      if (answer.status === 'choose_account') {
+        setAccounts(answer.accounts);
+        setAccount(answer.accounts[0]?.id ?? '');
+        return;
+      }
+      adoptSavedSettings(answer.settings, storageKeys);
+      setDone(answer);
+      setToken('');
+      setKey('');
+      setKeyId('');
+      setAccounts(null);
+      setAskAccount(false);
+      setAgain(false);
+      feedback.toast('Storage connected.');
+    } catch (error) {
+      const code = (error as ApiError).message;
+      if (code === 'offsite_cloudflare_account_needed') setAskAccount(true);
+      setProblem(operationError(code));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const ready =
+    provider === 'cloudflare'
+      ? !!token.trim() && (!askAccount || /^[0-9a-f]{32}$/.test(account))
+      : !!keyId.trim() && !!key.trim();
+
   const text = (key: string, title: string, description: string, placeholder: string, secret = false) => (
     <SettingRow
       htmlFor={key}
@@ -65,11 +177,16 @@ function OffsiteSettings() {
       />
     </SettingRow>
   );
+  const connectButton = (
+    <Button variant="primary" busy={busy} disabled={!ready || s.busy || busy} onClick={() => void connect()}>
+      Connect
+    </Button>
+  );
   return (
     <Card>
       <CardHeader
         title="Off-site copies"
-        description="After each automatic backup, an encrypted copy goes to your own storage, such as a Cloudflare R2 bucket. It is locked with your passphrase on this machine, so the storage only ever holds scrambled data."
+        description="After each automatic backup, an encrypted copy goes to your own storage. It is locked with your passphrase on this machine, so the storage only ever holds scrambled data."
         className="pb-3"
       />
       <div className="border-t border-line">
@@ -97,26 +214,233 @@ function OffsiteSettings() {
         </SettingRow>
         {on && (
           <>
-            {text(
-              'NOCHEH_OFFSITE_ENDPOINT',
-              'Storage address',
-              'The S3 address of your storage. For Cloudflare R2: https://<account id>.r2.cloudflarestorage.com',
-              'https://…r2.cloudflarestorage.com',
+            <SettingRow
+              title={
+                <>
+                  Storage
+                  <Unsaved show={s.changed('NOCHEH_OFFSITE_PROVIDER')} />
+                </>
+              }
+              description={
+                provider === 'cloudflare'
+                  ? 'Cloudflare R2: free up to 10 GB. Nocheh sets it up from one token.'
+                  : provider === 'backblaze'
+                    ? 'Backblaze B2: free up to 10 GB. Nocheh reads the rest from one key.'
+                    : 'Any other S3-compatible storage. You fill in its address and keys.'
+              }
+            >
+              <div className="flex sm:justify-end">
+                <Segmented
+                  label="Storage"
+                  size="sm"
+                  value={provider}
+                  disabled={s.busy || busy}
+                  onChange={pick}
+                  options={[
+                    {value: 'cloudflare', label: 'Cloudflare'},
+                    {value: 'backblaze', label: 'Backblaze'},
+                    {value: 'other', label: 'Other S3'},
+                  ]}
+                />
+              </div>
+            </SettingRow>
+            {(problem || done) && (
+              <div className="border-t border-line px-5 py-4">
+                {problem ? (
+                  <Notice tone="bad">{problem}</Notice>
+                ) : (
+                  done && (
+                    <Notice tone="good" title={'Connected to bucket ' + done.bucket + '.'}>
+                      {done.lock_days
+                        ? `Each copy is locked for ${done.lock_days} days, so nobody can delete it early, not even with this machine’s key. `
+                        : ''}
+                      {done.setup_token_deleted === false && (
+                        <>
+                          Nocheh couldn’t delete the setup token. Delete “Nocheh setup” in{' '}
+                          <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.{' '}
+                        </>
+                      )}
+                      {s.saved('NOCHEH_OFFSITE') === 's3' && configured('NOCHEH_OFFSITE_PASSPHRASE')
+                        ? 'New copies go there from now on.'
+                        : 'Now type your passphrase below and save.'}
+                    </Notice>
+                  )
+                )}
+              </div>
             )}
-            {text('NOCHEH_OFFSITE_BUCKET', 'Bucket', 'Make an empty bucket just for these copies.', 'nocheh-backups')}
-            {text('NOCHEH_OFFSITE_REGION', 'Region', 'R2 uses auto. Other providers name a region.', 'auto')}
-            {text(
-              'NOCHEH_OFFSITE_ACCESS_KEY_ID',
-              'Access key ID',
-              'From an API token that can read and write this bucket only.',
-              'Access key ID',
+            {provider !== 'other' && connected && !again && (
+              <SettingRow
+                title={provider === 'cloudflare' ? 'Cloudflare R2' : 'Backblaze B2'}
+                description={
+                  `Connected. Copies go to bucket ${s.saved('NOCHEH_OFFSITE_BUCKET')}.` +
+                  (provider === 'cloudflare'
+                    ? ' Nocheh keeps a key for this bucket only, and each copy is locked for 7 days.'
+                    : '')
+                }
+              >
+                <div className="flex sm:justify-end">
+                  <Button size="sm" disabled={s.busy} onClick={() => setAgain(true)}>
+                    Connect again
+                  </Button>
+                </div>
+              </SettingRow>
             )}
-            {text(
-              'NOCHEH_OFFSITE_SECRET_ACCESS_KEY',
-              'Secret access key',
-              'Kept on this machine and never shown again.',
-              'Secret access key',
-              true,
+            {showForm && provider === 'cloudflare' && (
+              <>
+                <SettingRow
+                  title="1. Make a setup token"
+                  description={
+                    <>
+                      Cloudflare opens with the right permissions already chosen. Click Continue to summary, then Create
+                      Token, and copy it. First time with R2? <OutLink href={cloudflareR2Page}>Turn on R2</OutLink>{' '}
+                      first.
+                    </>
+                  }
+                >
+                  <div className="flex sm:justify-end">
+                    <Button size="sm" asChild>
+                      <a href={cloudflareTokenPage} target="_blank" rel="noreferrer">
+                        Open Cloudflare <ExternalLink aria-hidden className="size-3.5" />
+                      </a>
+                    </Button>
+                  </div>
+                </SettingRow>
+                <SettingRow
+                  htmlFor="offsite-cloudflare-token"
+                  title="2. Paste it here"
+                  description="Nocheh makes the bucket and a key for that bucket only, tests it, then deletes the setup token. The token itself is never saved."
+                >
+                  <div className="flex gap-2">
+                    <Input
+                      id="offsite-cloudflare-token"
+                      type="password"
+                      autoComplete="off"
+                      placeholder="Setup token"
+                      value={token}
+                      disabled={s.busy || busy}
+                      onChange={e => setToken(e.target.value.trim())}
+                    />
+                    {!accounts && !askAccount && connectButton}
+                  </div>
+                </SettingRow>
+                {accounts && (
+                  <SettingRow
+                    htmlFor="offsite-cloudflare-account"
+                    title="Cloudflare account"
+                    description="This token reaches more than one account. Pick the one for the copies."
+                  >
+                    <div className="flex gap-2">
+                      <Select
+                        id="offsite-cloudflare-account"
+                        value={account}
+                        disabled={busy}
+                        onChange={e => setAccount(e.target.value)}
+                      >
+                        {accounts.map(row => (
+                          <option key={row.id} value={row.id}>
+                            {row.name || row.id}
+                          </option>
+                        ))}
+                      </Select>
+                      {connectButton}
+                    </div>
+                  </SettingRow>
+                )}
+                {askAccount && !accounts && (
+                  <SettingRow
+                    htmlFor="offsite-cloudflare-account-id"
+                    title="Account ID"
+                    description="Cloudflare didn’t say which account this token is for. Copy the Account ID from your Cloudflare account home."
+                  >
+                    <div className="flex gap-2">
+                      <Input
+                        id="offsite-cloudflare-account-id"
+                        autoComplete="off"
+                        placeholder="32 letters and digits"
+                        value={account}
+                        disabled={busy}
+                        onChange={e => setAccount(e.target.value.trim().toLowerCase())}
+                      />
+                      {connectButton}
+                    </div>
+                  </SettingRow>
+                )}
+              </>
+            )}
+            {showForm && provider === 'backblaze' && (
+              <>
+                <SettingRow
+                  title="1. Make a key"
+                  description="In Backblaze, create a private bucket, then an application key with Read and Write access to that bucket only."
+                >
+                  <div className="flex sm:justify-end">
+                    <Button size="sm" asChild>
+                      <a href={backblazeKeysPage} target="_blank" rel="noreferrer">
+                        Open Backblaze <ExternalLink aria-hidden className="size-3.5" />
+                      </a>
+                    </Button>
+                  </div>
+                </SettingRow>
+                <SettingRow
+                  htmlFor="offsite-backblaze-key-id"
+                  title="2. Paste it here"
+                  description="Nocheh finds the bucket and its address, and tests the key before saving it."
+                >
+                  <div className="flex flex-col gap-2">
+                    <Input
+                      id="offsite-backblaze-key-id"
+                      aria-label="Key ID"
+                      autoComplete="off"
+                      placeholder="keyID"
+                      value={keyId}
+                      disabled={s.busy || busy}
+                      onChange={e => setKeyId(e.target.value.trim())}
+                    />
+                    <div className="flex gap-2">
+                      <Input
+                        aria-label="Application key"
+                        type="password"
+                        autoComplete="off"
+                        placeholder="applicationKey"
+                        value={key}
+                        disabled={s.busy || busy}
+                        onChange={e => setKey(e.target.value.trim())}
+                      />
+                      {connectButton}
+                    </div>
+                  </div>
+                </SettingRow>
+              </>
+            )}
+            {provider === 'other' && (
+              <>
+                {text(
+                  'NOCHEH_OFFSITE_ENDPOINT',
+                  'Storage address',
+                  'The https S3 address of your storage, such as https://s3.eu-central-1.example.com',
+                  'https://…',
+                )}
+                {text(
+                  'NOCHEH_OFFSITE_BUCKET',
+                  'Bucket',
+                  'Make an empty bucket just for these copies.',
+                  'nocheh-backups',
+                )}
+                {text('NOCHEH_OFFSITE_REGION', 'Region', 'The region your storage names, or auto.', 'auto')}
+                {text(
+                  'NOCHEH_OFFSITE_ACCESS_KEY_ID',
+                  'Access key ID',
+                  'From a key that can read and write this bucket only.',
+                  'Access key ID',
+                )}
+                {text(
+                  'NOCHEH_OFFSITE_SECRET_ACCESS_KEY',
+                  'Secret access key',
+                  'Kept on this machine and never shown again.',
+                  'Secret access key',
+                  true,
+                )}
+              </>
             )}
             {text(
               'NOCHEH_OFFSITE_PASSPHRASE',
@@ -133,7 +457,7 @@ function OffsiteSettings() {
                   <Unsaved show={s.changed('NOCHEH_OFFSITE_KEEP')} />
                 </>
               }
-              description="Older copies in the bucket are deleted after each new one."
+              description="Older copies are deleted after each new one. Copies still locked by the storage stay until their lock ends."
             >
               <div className="flex gap-2 sm:justify-end">
                 <Select
