@@ -730,18 +730,19 @@ const server=createServer((req,res)=>{void(async()=>{
     if(body.provider==='cloudflare'){
       if(!body.token)throw new HttpError(400,'offsite_cloudflare_token_invalid');
       if(body.token==='refused')throw new HttpError(400,'offsite_cloudflare_token_refused');
+      if(body.token==='no-r2')throw new HttpError(400,'offsite_cloudflare_r2_off');
       if(body.token==='two-accounts'&&!body.account)return json(res,200,{status:'choose_account',accounts:[{id:'0'.repeat(32),name:'Example home'},{id:'1'.repeat(32),name:'Example work'}]});
       settingsChanges={...settingsChanges,NOCHEH_OFFSITE_PROVIDER:'cloudflare',NOCHEH_OFFSITE_ENDPOINT:'https://'+(body.account??'0'.repeat(32))+'.r2.cloudflarestorage.com',
         NOCHEH_OFFSITE_BUCKET:'nocheh-backups',NOCHEH_OFFSITE_REGION:'auto',NOCHEH_OFFSITE_ACCESS_KEY_ID:'example-key-id',NOCHEH_OFFSITE_SECRET_ACCESS_KEY:'example-secret'};
-      settingsRevision+='x';
-      return json(res,200,{status:'connected',provider:'cloudflare',bucket:'nocheh-backups',account:'Example home',lock_days:7,setup_token_deleted:true,settings:settingsView(mode)});
+      const savedOn=settingsRevision;settingsRevision+='x';
+      return json(res,200,{saved_on:savedOn,status:'connected',provider:'cloudflare',bucket:'nocheh-backups',account:'Example home',lock_days:7,setup_token_deleted:true,settings:settingsView(mode)});
     }
     if(body.provider==='backblaze'){
       if(!body.key_id||!body.key)throw new HttpError(400,'offsite_backblaze_key_invalid');
       settingsChanges={...settingsChanges,NOCHEH_OFFSITE_PROVIDER:'backblaze',NOCHEH_OFFSITE_ENDPOINT:'https://s3.us-west-004.backblazeb2.com',
         NOCHEH_OFFSITE_BUCKET:'example-backups',NOCHEH_OFFSITE_REGION:'us-west-004',NOCHEH_OFFSITE_ACCESS_KEY_ID:String(body.key_id),NOCHEH_OFFSITE_SECRET_ACCESS_KEY:'example-secret'};
-      settingsRevision+='x';
-      return json(res,200,{status:'connected',provider:'backblaze',bucket:'example-backups',settings:settingsView(mode)});
+      const savedOn=settingsRevision;settingsRevision+='x';
+      return json(res,200,{saved_on:savedOn,status:'connected',provider:'backblaze',bucket:'example-backups',settings:settingsView(mode)});
     }
     throw new HttpError(400,'offsite_provider_unknown');
   }

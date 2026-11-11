@@ -23,7 +23,7 @@ SETUP = 'cfat_example-setup-token-value'
 class Cloudflare(BaseHTTPRequestHandler):
     """A small stand-in for the parts of Cloudflare's API the connect flow uses."""
     accounts, tokens, buckets, locks, calls = [], {}, set(), {}, []
-    r2_on, can_mint, minted = True, True, 0
+    r2_on, can_mint, minted, lock_readable = True, True, 0, True
 
     def log_message(self, *args):
         pass
@@ -53,6 +53,7 @@ class Cloudflare(BaseHTTPRequestHandler):
             if bucket not in Cloudflare.buckets: return self._answer(404, errors=[(10006, 'The specified bucket does not exist.')])
             if rest.endswith('/lock'):
                 if method == 'PUT': Cloudflare.locks[bucket] = body['rules']; return self._answer(200, {})
+                if not Cloudflare.lock_readable: return self._answer(503, errors=[(10001, 'Internal error')])
                 return self._answer(200, {'rules': Cloudflare.locks.get(bucket, [])})
             return self._answer(200, {'name': bucket})
         if rest.startswith('/tokens/permission_groups'):
@@ -61,8 +62,11 @@ class Cloudflare(BaseHTTPRequestHandler):
                                       {'id': 'g-read', 'name': 'Workers R2 Storage Bucket Item Read'}])
         if rest == '/tokens' and method == 'POST':
             Cloudflare.minted += 1; value = f'minted-value-{Cloudflare.minted}'
-            Cloudflare.tokens[value] = {'id': f'minted-{Cloudflare.minted}', 'policies': body['policies']}
+            Cloudflare.tokens[value] = {'id': f'minted-{Cloudflare.minted}', 'name': body['name'], 'policies': body['policies']}
             return self._answer(200, {'id': f'minted-{Cloudflare.minted}', 'value': value})
+        if rest.startswith('/tokens/') and method == 'GET':
+            row = next((row for row in Cloudflare.tokens.values() if row['id'] == rest.split('/')[2]), None)
+            return self._answer(200, {'id': row['id'], 'name': row.get('name', '')}) if row else self._answer(404, errors=[(1003, 'Not found')])
         if rest.startswith('/tokens/') and method == 'DELETE':
             gone = rest.split('/')[2]
             for value, row in list(Cloudflare.tokens.items()):
@@ -107,9 +111,9 @@ class ConnectTests(unittest.TestCase):
     def setUp(self):
         cloudflare, bucket, backblaze = (server.server_port for server in self.servers)
         Cloudflare.accounts = [{'id': ACCOUNT, 'name': 'Example home'}]
-        Cloudflare.tokens = {SETUP: {'id': 'setup-id'}}
+        Cloudflare.tokens = {SETUP: {'id': 'setup-id', 'name': 'Nocheh setup'}}
         Cloudflare.buckets, Cloudflare.locks, Cloudflare.calls = set(), {}, []
-        Cloudflare.r2_on, Cloudflare.can_mint, Cloudflare.minted = True, True, 0
+        Cloudflare.r2_on, Cloudflare.can_mint, Cloudflare.minted, Cloudflare.lock_readable = True, True, 0, True
         Bucket.objects.clear(); Bucket.uploads.clear(); Bucket.requests.clear()
         self.folder = tempfile.TemporaryDirectory(); self.state = Path(self.folder.name); initialize(self.state)
         storage = f'http://127.0.0.1:{bucket}'
@@ -168,6 +172,30 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(load(self.state)['NOCHEH_OFFSITE_ACCESS_KEY_ID'], 'minted-2')
         self.assertEqual(sorted(row['id'] for row in Cloudflare.tokens.values()), ['minted-2'])
 
+    def test_a_bucket_and_a_key_this_installation_did_not_save_are_left_alone(self):
+        # Another installation's bucket of the same name: this one makes its own.
+        Cloudflare.buckets.add('nocheh-backups')
+        result = self.connect()
+        self.assertRegex(result['bucket'], r'^nocheh-backups-[0-9a-f]{8}$')
+        self.assertEqual(load(self.state)['NOCHEH_OFFSITE_BUCKET'], result['bucket'])
+        self.assertNotIn('nocheh-backups', Cloudflare.locks)
+        # A key typed in by hand, even for this bucket, is never deleted by connecting again.
+        Cloudflare.tokens['hand-made-value'] = {'id': 'hand-made', 'name': 'My R2 key'}
+        save(self.state, {'NOCHEH_OFFSITE_ACCESS_KEY_ID': 'hand-made'}, revision(load(self.state)))
+        Cloudflare.tokens['cfat_second-setup'] = {'id': 'setup-2'}
+        self.assertEqual(self.connect(token='cfat_second-setup')['bucket'], result['bucket'])
+        self.assertIn('hand-made', {row['id'] for row in Cloudflare.tokens.values()})
+
+    def test_lock_rules_that_cannot_be_read_are_never_overwritten(self):
+        self.connect()
+        Cloudflare.locks['nocheh-backups'].insert(0, {'id': 'owner-rule'})
+        Cloudflare.lock_readable = False
+        before = view(self.state)['revision']
+        Cloudflare.tokens['cfat_second-setup'] = {'id': 'setup-2'}
+        with self.assertRaisesRegex(offsite.OffsiteError, 'offsite_cloudflare_lock_failed'): self.connect(token='cfat_second-setup')
+        self.assertEqual(view(self.state)['revision'], before)
+        self.assertEqual([rule['id'] for rule in Cloudflare.locks['nocheh-backups']], ['owner-rule', 'nocheh-copies'])
+
     def test_several_accounts_ask_which_one(self):
         Cloudflare.accounts = [{'id': ACCOUNT, 'name': 'Example home'}, {'id': OTHER_ACCOUNT, 'name': 'Example work'}]
         before = view(self.state)['revision']
@@ -192,7 +220,8 @@ class ConnectTests(unittest.TestCase):
                 self.connect(token='cfat_unknown' if code.endswith('refused') else SETUP)
         with self.assertRaisesRegex(offsite.OffsiteError, 'offsite_cloudflare_token_invalid'): self.connect(token='two words')
         self.assertEqual(view(self.state)['revision'], before)
-        self.assertIn(SETUP, Cloudflare.tokens)
+        # Nothing was made in Cloudflare, and the setup token stays for another try.
+        self.assertEqual(Cloudflare.buckets, set()); self.assertIn(SETUP, Cloudflare.tokens)
 
     def test_a_new_key_is_retried_until_it_works_and_removed_when_it_never_does(self):
         original, refusals = Bucket.do_PUT, []

@@ -24,6 +24,8 @@ from xml.etree import ElementTree
 
 RECORD = 'admin/offsite.json'
 PREFIX = 'nocheh-backups/'
+# A storage lock (ADR-0236) refuses to delete or replace a young copy.
+LOCKED = 'offsite_storage_ObjectLockedByBucketPolicy'
 SUFFIX = '.nocheh-backup'
 MAGIC = b'NOCHEH-OFFSITE-1\n'
 CHUNK = 4 * 1024 * 1024
@@ -395,7 +397,13 @@ def send(state, values, opener=None):
     try:
         if copy.exists(): copy.unlink()
         size = encrypt_backup(path, copy, config['passphrase'])
-        storage = Storage(config, opener); storage.put(key, copy)
+        storage = Storage(config, opener)
+        try: storage.put(key, copy)
+        except OffsiteError as error:
+            # This backup was sent before and its copy is still locked: that copy stays and counts as sent.
+            if str(error) != LOCKED: raise
+            size = next((item['size'] for item in storage.list() if item['key'] == key), None)
+            if size is None: raise
         removed, locked, prune_error = 0, 0, None
         try:
             copies = storage.list()
@@ -403,7 +411,7 @@ def send(state, values, opener=None):
                 # A storage lock (ADR-0236) keeps young copies; they are removed by a later copy once it ends.
                 try: storage.delete(item['key']); removed += 1
                 except OffsiteError as error:
-                    if str(error) != 'offsite_storage_ObjectLockedByBucketPolicy': raise
+                    if str(error) != LOCKED: raise
                     locked += 1
         except OffsiteError as error: prune_error = str(error)
         record = read_record(state)

@@ -240,14 +240,18 @@ Pick the storage under Storage:
 
 - **Cloudflare** (R2, free up to 10 GB): press Open Cloudflare, which opens
   Cloudflare's token page with the permissions already chosen. Create the token,
-  paste it and press Connect. Nocheh makes the bucket `nocheh-backups`, locks each
+  paste it and press Connect. Nocheh makes its own bucket (`nocheh-backups`, or
+  that name plus a random ending when the account already has one), locks each
   copy for 7 days so it can't be deleted early, keeps a key for that bucket only,
-  tests it and deletes the setup token. Turn on R2 in Cloudflare first if you
+  tests it and deletes the setup token. If connecting stops with an error, the
+  setup token stays so you can try again; delete "Nocheh setup" in Cloudflare's
+  API tokens once you are done with it. Turn on R2 in Cloudflare first if you
   never used it.
-- **Backblaze** (B2, free up to 10 GB): create a private bucket and an
-  application key with Read and Write access to that bucket only, paste the key
-  ID and the key and press Connect. Nocheh reads the address and bucket from
-  Backblaze and tests the key.
+- **Backblaze** (B2, free up to 10 GB): create a private bucket, set its
+  Lifecycle Settings to "Keep only the last version" so removed copies free their
+  space, and create an application key with Read and Write access to that bucket
+  only. Paste the key ID and the key and press Connect. Nocheh reads the address
+  and bucket from Backblaze and tests the key.
 - **Other S3**: fill in the storage address, bucket, region and keys yourself.
 
 Then type the passphrase and Save. See
@@ -268,9 +272,9 @@ export NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… NOCHEH_OFFS
 ./bin/nocheh restore ./recovered-backup --state ./data/restored --project nocheh-restored
 ```
 
-For Cloudflare, create an R2 API token with Object Read for the bucket
-`nocheh-backups` in Cloudflare's R2 settings: it shows the S3 address and both keys,
-and the region is `auto`. For Backblaze, use a key for the bucket; the region is the
+For Cloudflare, create an R2 API token with Object Read for the bucket the dashboard
+named (`nocheh-backups` unless it added an ending) in Cloudflare's R2 settings: it
+shows the S3 address and both keys, and the region is `auto`. For Backblaze, use a key for the bucket; the region is the
 part of the address after `s3.`, such as `us-west-004`.
 
 `offsite list` shows the copies in the bucket, `offsite fetch` takes the newest one

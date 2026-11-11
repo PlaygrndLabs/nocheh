@@ -1,8 +1,8 @@
 """Connects off-site copies to the owner's storage from one pasted credential (ADR-0236).
 
 Cloudflare R2: the owner makes one setup token on a Cloudflare page that opens already filled in. Nocheh finds the
-account, creates the bucket, locks every copy for LOCK_DAYS, makes a second token that can only read and write
-objects in that bucket, tests it, saves its S3 keys and deletes the setup token. Backblaze B2: the owner pastes a
+account, creates a bucket of its own, locks every copy for LOCK_DAYS, makes a second token that can only read and
+write objects in that bucket, tests it, saves its S3 keys and deletes the setup token. Backblaze B2: the owner pastes a
 key limited to one bucket, and Nocheh reads the storage address and the bucket from Backblaze.
 
 Neither path sees the passphrase, and no answer or record ever carries a token or key."""
@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import re
+import secrets
 import time
 import urllib.error
 import urllib.parse
@@ -20,6 +21,8 @@ from tools.operations.installation.offsite import PREFIX, OffsiteError, Storage
 CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4'
 BACKBLAZE_AUTHORIZE = 'https://api.backblazeb2.com/b2api/v4/b2_authorize_account'
 BUCKET = 'nocheh-backups'
+# A bucket Nocheh made: the first one, or one with a random ending when another installation took the first name.
+OWN_BUCKET = re.compile(r'nocheh-backups(-[0-9a-f]{8})?')
 LOCK_RULE = 'nocheh-copies'
 LOCK_DAYS = 7
 TOKEN_NAME = 'Nocheh off-site copies'
@@ -90,25 +93,40 @@ def _setup_token(api, account):
     raise OffsiteError('offsite_cloudflare_token_refused')
 
 
-def _bucket(api, account):
-    try: api.call('POST', f'/accounts/{account}/r2/buckets', {'name': BUCKET})
-    except CloudflareError as error:
-        # Connecting again keeps the bucket and the copies already in it.
-        try: api.call('GET', f'/accounts/{account}/r2/buckets/{BUCKET}'); return
-        except CloudflareError: pass
-        if R2_OFF in error.codes or 'enable r2' in error.text or 'purchase r2' in error.text: raise OffsiteError('offsite_cloudflare_r2_off') from None
-        if error.status == 403 or 10000 in error.codes: raise OffsiteError('offsite_cloudflare_needs_r2_permission') from None
-        raise OffsiteError('offsite_cloudflare_bucket_failed') from None
+def _bucket_refused(error):
+    if R2_OFF in error.codes or 'enable r2' in error.text or 'purchase r2' in error.text: raise OffsiteError('offsite_cloudflare_r2_off') from None
+    if error.status == 403 or 10000 in error.codes: raise OffsiteError('offsite_cloudflare_needs_r2_permission') from None
+    raise OffsiteError('offsite_cloudflare_bucket_failed') from None
 
 
-def _lock(api, account):
+def _bucket(api, account, saved):
+    """The bucket an earlier connect saved, or a new one. Connecting again keeps the bucket and the copies in it. A bucket
+    this installation did not save is never taken over: another installation may keep and prune its own copies there."""
+    path = f'/accounts/{account}/r2/buckets'
+    if saved:
+        try: api.call('GET', f'{path}/{saved}'); return saved
+        except CloudflareError as error:
+            if error.status != 404: _bucket_refused(error)
+    for name in (BUCKET, f'{BUCKET}-{secrets.token_hex(4)}'):
+        try: api.call('POST', path, {'name': name}); return name
+        except CloudflareError as error:
+            try: api.call('GET', f'{path}/{name}')
+            except CloudflareError: _bucket_refused(error)
+    raise OffsiteError('offsite_cloudflare_bucket_failed')
+
+
+def _lock(api, account, bucket):
     """Copies under PREFIX cannot be deleted or replaced for LOCK_DAYS, even with the saved keys."""
-    path = f'/accounts/{account}/r2/buckets/{BUCKET}/lock'
-    try: rules = (api.call('GET', path) or {}).get('rules') or []
-    except CloudflareError: rules = []
+    path = f'/accounts/{account}/r2/buckets/{bucket}/lock'
+    # A PUT replaces every rule, so the owner's own rules are read first and kept. When they cannot be read,
+    # nothing is written: a guess would delete them.
+    try: rules = (api.call('GET', path) or {}).get('rules')
+    except CloudflareError as error:
+        if error.status != 404: raise OffsiteError('offsite_cloudflare_lock_failed') from None
+        rules = []
+    if not isinstance(rules or [], list): raise OffsiteError('offsite_cloudflare_lock_failed')
     rule = {'id': LOCK_RULE, 'enabled': True, 'prefix': PREFIX, 'condition': {'type': 'Age', 'maxAgeSeconds': LOCK_DAYS * 86400}}
-    # A PUT replaces every rule, so the owner's own rules on this bucket stay as they are.
-    kept = [item for item in rules if isinstance(item, dict) and item.get('id') != LOCK_RULE]
+    kept = [item for item in rules or [] if isinstance(item, dict) and item.get('id') != LOCK_RULE]
     try: api.call('PUT', path, {'rules': kept + [rule]})
     except CloudflareError: raise OffsiteError('offsite_cloudflare_lock_failed') from None
 
@@ -124,6 +142,13 @@ def _groups(api, tokens):
             if isinstance(row, dict) and row.get('name') in OBJECT_GROUPS and row.get('id'): found[row['name']] = str(row['id'])
         if len(found) == len(OBJECT_GROUPS): return [{'id': found[name]} for name in OBJECT_GROUPS]
     raise OffsiteError('offsite_cloudflare_token_failed')
+
+
+def _ours(api, tokens, token_id):
+    """Only a key an earlier connect made is deleted, never one the owner made by hand."""
+    try: found = api.call('GET', f'{tokens}/{urllib.parse.quote(token_id, safe="")}')
+    except (CloudflareError, OffsiteError): return False
+    return isinstance(found, dict) and found.get('name') == TOKEN_NAME
 
 
 def _forget(api, tokens, token_id):
@@ -145,9 +170,11 @@ def _try_storage(config, opener, wait):
 
 
 def _store(state, changes):
+    """Saves the storage settings; answers the new settings view and the revision it saved on."""
     from tools.operations.installation.configuration import load
     from tools.operations.installation.settings import revision, save
-    return save(state, changes, revision(load(state)))
+    before = revision(load(state))
+    return save(state, changes, before), before
 
 
 def _saved(state):
@@ -165,35 +192,39 @@ def cloudflare(state, token, account=None, opener=None, store=_store, wait=time.
     elif accounts: return {'status': 'choose_account', 'accounts': accounts}
     else: raise OffsiteError('offsite_cloudflare_account_needed')
     tokens, setup = _setup_token(api, account)
-    _bucket(api, account)
-    _lock(api, account)
+    endpoint = f'https://{account}.r2.cloudflarestorage.com'
+    saved = _saved(state)
+    # Only this installation's own earlier connect to this account counts; settings typed by hand never do.
+    earlier = saved.get('NOCHEH_OFFSITE_PROVIDER') == 'cloudflare' and saved.get('NOCHEH_OFFSITE_ENDPOINT') == endpoint \
+        and OWN_BUCKET.fullmatch(saved.get('NOCHEH_OFFSITE_BUCKET') or '')
+    # Checked before the bucket is made, so a token without this permission leaves nothing behind.
     groups = _groups(api, tokens)
+    bucket = _bucket(api, account, saved['NOCHEH_OFFSITE_BUCKET'] if earlier else None)
+    _lock(api, account, bucket)
     try:
         created = api.call('POST', tokens, {'name': TOKEN_NAME, 'policies': [{
-            'effect': 'allow', 'permission_groups': groups, 'resources': {f'com.cloudflare.edge.r2.bucket.{account}_default_{BUCKET}': '*'}}]})
+            'effect': 'allow', 'permission_groups': groups, 'resources': {f'com.cloudflare.edge.r2.bucket.{account}_default_{bucket}': '*'}}]})
     except CloudflareError as error:
         raise OffsiteError('offsite_cloudflare_needs_token_permission' if error.status == 403 or 10000 in error.codes
                            else 'offsite_cloudflare_token_failed') from None
     if not isinstance(created, dict) or not created.get('id') or not created.get('value'): raise OffsiteError('offsite_cloudflare_token_failed')
     # Cloudflare's S3 keys for a token: its id, and the SHA-256 of its value.
     key_id, secret = str(created['id']), hashlib.sha256(str(created['value']).encode()).hexdigest()
-    endpoint = f'https://{account}.r2.cloudflarestorage.com'
-    try: _try_storage({'endpoint': endpoint, 'bucket': BUCKET, 'region': 'auto', 'access_key': key_id, 'secret_key': secret}, opener, wait)
+    try: _try_storage({'endpoint': endpoint, 'bucket': bucket, 'region': 'auto', 'access_key': key_id, 'secret_key': secret}, opener, wait)
     except Exception:
         _forget(api, tokens, key_id); raise
-    saved = _saved(state)
-    previous = saved.get('NOCHEH_OFFSITE_ACCESS_KEY_ID') if saved.get('NOCHEH_OFFSITE_PROVIDER') == 'cloudflare' \
-        and saved.get('NOCHEH_OFFSITE_ENDPOINT') == endpoint else None
+    previous = saved.get('NOCHEH_OFFSITE_ACCESS_KEY_ID') if earlier else None
     try:
-        settings = store(state, {'NOCHEH_OFFSITE_PROVIDER': 'cloudflare', 'NOCHEH_OFFSITE_ENDPOINT': endpoint, 'NOCHEH_OFFSITE_BUCKET': BUCKET,
-                                 'NOCHEH_OFFSITE_REGION': 'auto', 'NOCHEH_OFFSITE_ACCESS_KEY_ID': key_id, 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': secret})
+        settings, saved_on = store(state, {'NOCHEH_OFFSITE_PROVIDER': 'cloudflare', 'NOCHEH_OFFSITE_ENDPOINT': endpoint, 'NOCHEH_OFFSITE_BUCKET': bucket,
+                                           'NOCHEH_OFFSITE_REGION': 'auto', 'NOCHEH_OFFSITE_ACCESS_KEY_ID': key_id,
+                                           'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': secret})
     except Exception:
         _forget(api, tokens, key_id); raise
     # The key from an earlier connect is no longer used; the setup token is not needed again.
-    if previous and previous not in (key_id, setup): _forget(api, tokens, previous)
+    if previous and previous not in (key_id, setup) and _ours(api, tokens, previous): _forget(api, tokens, previous)
     name = next((row['name'] for row in accounts if row['id'] == account), '')
-    return {'status': 'connected', 'provider': 'cloudflare', 'bucket': BUCKET, 'account': name, 'lock_days': LOCK_DAYS,
-            'setup_token_deleted': _forget(api, tokens, setup), 'settings': settings}
+    return {'status': 'connected', 'provider': 'cloudflare', 'bucket': bucket, 'account': name, 'lock_days': LOCK_DAYS,
+            'setup_token_deleted': _forget(api, tokens, setup), 'settings': settings, 'saved_on': saved_on}
 
 
 def backblaze(state, key_id, key, opener=None, store=_store, wait=time.sleep):
@@ -220,10 +251,10 @@ def backblaze(state, key_id, key, opener=None, store=_store, wait=time.sleep):
     if not found: raise OffsiteError('offsite_backblaze_unavailable')
     config = {'endpoint': endpoint, 'bucket': names[0], 'region': found.group(1), 'access_key': key_id, 'secret_key': key}
     _try_storage(config, opener, wait)
-    settings = store(state, {'NOCHEH_OFFSITE_PROVIDER': 'backblaze', 'NOCHEH_OFFSITE_ENDPOINT': endpoint, 'NOCHEH_OFFSITE_BUCKET': names[0],
-                             'NOCHEH_OFFSITE_REGION': found.group(1), 'NOCHEH_OFFSITE_ACCESS_KEY_ID': key_id,
-                             'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': key})
-    return {'status': 'connected', 'provider': 'backblaze', 'bucket': names[0], 'settings': settings}
+    settings, saved_on = store(state, {'NOCHEH_OFFSITE_PROVIDER': 'backblaze', 'NOCHEH_OFFSITE_ENDPOINT': endpoint, 'NOCHEH_OFFSITE_BUCKET': names[0],
+                                       'NOCHEH_OFFSITE_REGION': found.group(1), 'NOCHEH_OFFSITE_ACCESS_KEY_ID': key_id,
+                                       'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': key})
+    return {'status': 'connected', 'provider': 'backblaze', 'bucket': names[0], 'settings': settings, 'saved_on': saved_on}
 
 
 def connect(state, request):

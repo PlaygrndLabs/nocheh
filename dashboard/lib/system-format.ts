@@ -358,7 +358,8 @@ const offsiteErrors: Record<string, string> = {
   offsite_cloudflare_needs_token_permission:
     'The token can’t make keys. Use Open Cloudflare to make one that also has Account API Tokens: Edit.',
   offsite_cloudflare_bucket_failed: 'Cloudflare didn’t make the bucket. Try again in a minute.',
-  offsite_cloudflare_lock_failed: 'Cloudflare didn’t accept the lock on the bucket. Try again in a minute.',
+  offsite_cloudflare_lock_failed:
+    'Cloudflare didn’t let Nocheh read or set the lock on the bucket. Try again in a minute.',
   offsite_cloudflare_token_failed: 'Cloudflare didn’t make the bucket key. Try again in a minute.',
   offsite_backblaze_key_invalid: 'Paste the keyID and the applicationKey exactly as Backblaze showed them.',
   offsite_backblaze_key_refused: 'Backblaze didn’t accept this key. Check both values, or make a new key.',

@@ -687,7 +687,15 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   const token = page.locator('#offsite-cloudflare-token');
   await token.fill('refused');
   await page.getByRole('button', {name: 'Connect'}).click();
-  await page.getByRole('alert').filter({hasText: 'Cloudflare didn’t accept this token'}).waitFor();
+  const refused = page.getByRole('alert').filter({hasText: 'Cloudflare didn’t accept this token'});
+  await refused.waitFor();
+  assert.doesNotMatch(await refused.textContent(), /Nocheh setup/);
+  // A stop after the token was accepted leaves it for another try, and says where to delete it.
+  await token.fill('no-r2');
+  await page.getByRole('button', {name: 'Connect'}).click();
+  const stopped = page.getByRole('alert').filter({hasText: 'R2 isn’t turned on'});
+  await stopped.waitFor();
+  assert.match(await stopped.textContent(), /delete “Nocheh setup”/);
   // A token that reaches two accounts asks which one.
   await token.fill('two-accounts');
   await page.getByRole('button', {name: 'Connect'}).click();
@@ -704,16 +712,24 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   await page.locator('#NOCHEH_OFFSITE_PASSPHRASE').fill('a long synthetic passphrase');
   await bar.getByRole('button', {name: 'Save'}).click();
   await bar.getByText('No unsaved changes').waitFor();
-  // Backblaze fills everything from a key limited to one bucket.
+  // Backblaze fills everything from a key limited to one bucket. Choosing it alone saves nothing.
   await storage.getByRole('radio', {name: 'Backblaze'}).click();
+  await page.getByText('Keep only the last version', {exact: false}).waitFor();
+  assert.equal(await bar.getByText('No unsaved changes').count(), 1);
   await page.locator('#offsite-backblaze-key-id').fill('0041example');
   await page.getByLabel('Application key').fill('K004example');
   await page.getByRole('button', {name: 'Connect'}).click();
   await page.getByRole('status').filter({hasText: 'Connected to bucket example-backups.'}).waitFor();
   await bar.getByText('No unsaved changes').waitFor();
-  // Other S3 storage keeps every field to fill in by hand.
+  // Other S3 storage keeps every field to fill in by hand, and is saved with Save.
   await storage.getByRole('radio', {name: 'Other S3'}).click();
   assert.equal(await page.locator('#NOCHEH_OFFSITE_ENDPOINT').inputValue(), 'https://s3.us-west-004.backblazeb2.com');
+  await page.locator('#NOCHEH_OFFSITE_BUCKET').fill('example-other');
+  await bar.getByText('2 unsaved changes').waitFor();
+  // Going back drops what was typed for it.
+  await storage.getByRole('radio', {name: 'Backblaze'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.getByText('Connected. Copies go to bucket example-backups.').waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });

@@ -91,14 +91,18 @@ function rebase(changes: Record<string, string>, data: SettingsView): Record<str
 
 /**
  * Takes settings that a step other than Save just wrote, such as connecting off-site storage. Edits to the
- * keys it wrote are dropped; other edits stay and are saved against the new revision.
+ * keys it wrote are dropped. Other edits stay: made against the settings that step saved on, they move to the
+ * new revision; made against older settings, they keep theirs, so Save still reports a change made elsewhere.
  */
-export function adoptSavedSettings(data: SettingsView, written: string[]) {
+export function adoptSavedSettings(data: SettingsView, written: string[], savedOn: string) {
+  // A settings answer still on its way is older than this one.
+  sequence++;
   const changes = rebase(
     Object.fromEntries(Object.entries(state.changes).filter(([key]) => !written.includes(key))),
     data,
   );
-  update({data, changes, revision: Object.keys(changes).length ? data.revision : null});
+  const dirty = Object.keys(changes).length > 0;
+  update({data, changes, revision: !dirty ? null : state.revision === savedOn ? data.revision : state.revision});
 }
 
 export function setSetting(key: string, value: string) {

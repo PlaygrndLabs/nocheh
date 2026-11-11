@@ -217,6 +217,24 @@ class SendAndCheckTests(unittest.TestCase):
         self.assertEqual(offsite.send(self.state, self.values)['removed'], 2)
         self.assertEqual(offsite.status(self.state, self.values)['provider'], 'cloudflare')
 
+    def test_sending_a_backup_again_while_its_copy_is_locked_keeps_that_copy(self):
+        self.backup(JOBS[0], 1); first = offsite.send(self.state, self.values)
+        stored = dict(Bucket.objects)
+        original = Bucket.do_PUT
+        def lock(handler):
+            if urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path).split('/', 2)[2] in stored:
+                handler._parts(); handler._body(); return handler._send(409, b'<Error><Code>ObjectLockedByBucketPolicy</Code></Error>')
+            return original(handler)
+        with patch.object(Bucket, 'do_PUT', lock): again = offsite.send(self.state, self.values)
+        self.assertEqual((again['status'], again['key'], again['bytes']), ('offsite_sent', first['key'], first['bytes']))
+        self.assertEqual(Bucket.objects, stored)
+        self.assertEqual(offsite.status(self.state, self.values)['last']['state'], 'sent')
+        # A lock on a key that is not there is still a failure.
+        Bucket.objects.clear()
+        with patch.object(Bucket, 'do_PUT', lambda handler: (handler._parts(), handler._body(),
+                                                             handler._send(409, b'<Error><Code>ObjectLockedByBucketPolicy</Code></Error>'))):
+            with self.assertRaisesRegex(offsite.OffsiteError, 'ObjectLockedByBucketPolicy'): offsite.send(self.state, self.values)
+
     def test_large_copies_use_multipart_and_the_restore_test_passes(self):
         self.backup(JOBS[0], 1, payload=bytes(range(256)) * 20000)
         with patch.object(offsite, 'PART', 1024 * 1024): offsite.send(self.state, self.values)

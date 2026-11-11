@@ -50,6 +50,7 @@ type Connected = {
   lock_days?: number;
   setup_token_deleted?: boolean;
   settings: SettingsView;
+  saved_on: string;
 };
 type ChooseAccount = {status: 'choose_account'; accounts: {id: string; name: string}[]};
 
@@ -90,7 +91,14 @@ function OffsiteSettings() {
   const s = useSettings();
   const feedback = useFeedback();
   const on = s.value('NOCHEH_OFFSITE') === 's3';
-  const provider = (s.value('NOCHEH_OFFSITE_PROVIDER') || 'cloudflare') as Provider;
+  // Cloudflare and Backblaze are saved by Connect, so choosing one only changes what this card shows. Other S3 is
+  // saved with Save, together with the fields typed for it.
+  const [viewing, setViewing] = useState<Provider | null>(null);
+  const provider = (
+    s.changed('NOCHEH_OFFSITE_PROVIDER')
+      ? s.value('NOCHEH_OFFSITE_PROVIDER')
+      : (viewing ?? (s.saved('NOCHEH_OFFSITE_PROVIDER') || 'cloudflare'))
+  ) as Provider;
   const configured = (key: string) => !!s.field(key)?.configured;
   const keep = s.value('NOCHEH_OFFSITE_KEEP') || '14';
   const customKeep = !keepPresets.includes(keep);
@@ -108,19 +116,35 @@ function OffsiteSettings() {
   const [accounts, setAccounts] = useState<ChooseAccount['accounts'] | null>(null);
   const [askAccount, setAskAccount] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState('');
+  // A Cloudflare connect that stops after the setup token was accepted leaves that token in place for another try.
+  const [problem, setProblem] = useState<{text: string; tokenLeft: boolean} | null>(null);
   const [done, setDone] = useState<Connected | null>(null);
   const showForm = provider !== 'other' && (!connected || again);
 
+  const forgetAccount = () => {
+    setAccount('');
+    setAccounts(null);
+    setAskAccount(false);
+  };
   const pick = (value: Provider) => {
-    s.set('NOCHEH_OFFSITE_PROVIDER', value);
-    setProblem('');
+    // Leaving Other S3 drops what was typed for it; choosing it is the one storage edit Save writes.
+    s.setMany(
+      Object.fromEntries(
+        storageKeys.map(key => [
+          key,
+          key === 'NOCHEH_OFFSITE_PROVIDER' && value === 'other' ? 'other' : s.field(key)?.secret ? '' : s.saved(key),
+        ]),
+      ),
+    );
+    setViewing(value === 'other' ? null : value);
+    forgetAccount();
+    setProblem(null);
     setDone(null);
     setAgain(false);
   };
   const connect = async () => {
     setBusy(true);
-    setProblem('');
+    setProblem(null);
     setDone(null);
     try {
       const answer = await apiPost<Connected | ChooseAccount>(
@@ -132,19 +156,29 @@ function OffsiteSettings() {
         setAccount(answer.accounts[0]?.id ?? '');
         return;
       }
-      adoptSavedSettings(answer.settings, storageKeys);
+      adoptSavedSettings(answer.settings, storageKeys, answer.saved_on);
       setDone(answer);
+      setViewing(null);
       setToken('');
       setKey('');
       setKeyId('');
-      setAccounts(null);
-      setAskAccount(false);
+      forgetAccount();
       setAgain(false);
       feedback.toast('Storage connected.');
     } catch (error) {
       const code = (error as ApiError).message;
       if (code === 'offsite_cloudflare_account_needed') setAskAccount(true);
-      setProblem(operationError(code));
+      setProblem({
+        text: operationError(code),
+        tokenLeft:
+          provider === 'cloudflare' &&
+          code.startsWith('offsite_') &&
+          ![
+            'offsite_cloudflare_token_invalid',
+            'offsite_cloudflare_token_refused',
+            'offsite_cloudflare_account_needed',
+          ].includes(code),
+      });
     } finally {
       setBusy(false);
     }
@@ -247,7 +281,16 @@ function OffsiteSettings() {
             {(problem || done) && (
               <div className="border-t border-line px-5 py-4">
                 {problem ? (
-                  <Notice tone="bad">{problem}</Notice>
+                  <Notice tone="bad">
+                    {problem.text}
+                    {problem.tokenLeft && (
+                      <>
+                        {' '}
+                        The setup token stays in Cloudflare so you can try again. Once you are done with it, delete
+                        “Nocheh setup” in <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.
+                      </>
+                    )}
+                  </Notice>
                 ) : (
                   done && (
                     <Notice tone="good" title={'Connected to bucket ' + done.bucket + '.'}>
@@ -279,7 +322,16 @@ function OffsiteSettings() {
                 }
               >
                 <div className="flex sm:justify-end">
-                  <Button size="sm" disabled={s.busy} onClick={() => setAgain(true)}>
+                  <Button
+                    size="sm"
+                    disabled={s.busy}
+                    onClick={() => {
+                      forgetAccount();
+                      setProblem(null);
+                      setDone(null);
+                      setAgain(true);
+                    }}
+                  >
                     Connect again
                   </Button>
                 </div>
@@ -318,7 +370,11 @@ function OffsiteSettings() {
                       placeholder="Setup token"
                       value={token}
                       disabled={s.busy || busy}
-                      onChange={e => setToken(e.target.value.trim())}
+                      onChange={e => {
+                        // Another token may reach other accounts.
+                        setToken(e.target.value.trim());
+                        forgetAccount();
+                      }}
                     />
                     {!accounts && !askAccount && connectButton}
                   </div>
@@ -371,7 +427,7 @@ function OffsiteSettings() {
               <>
                 <SettingRow
                   title="1. Make a key"
-                  description="In Backblaze, create a private bucket, then an application key with Read and Write access to that bucket only."
+                  description="In Backblaze, create a private bucket and set its Lifecycle Settings to Keep only the last version, so deleted copies free their space. Then create an application key with Read and Write access to that bucket only."
                 >
                   <div className="flex sm:justify-end">
                     <Button size="sm" asChild>
