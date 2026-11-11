@@ -40,6 +40,8 @@ behaviour; only who carries them out changes.
   (`src/telegram-addressing.ts`, with the bot's own username and display name
   from `identity`). An unaddressed group message closes `suppressed` with
   `not_addressed`; a refusal goes out only when the message addressed the bot.
+  While the bot does not yet know its own name, a group message that names no
+  configured name waits instead of closing.
 - A turn: Nocheh shows typing and 👀 (`presence`), starts the brain turn,
   renews presence at each check (once a second; it lapses after 30 seconds
   without one), and when the brain is done asks the bot to send the reply,
@@ -48,14 +50,14 @@ behaviour; only who carries them out changes.
   presence and the reply, and the bot keeps a receipt per reply, so asking
   again never sends twice.
 - A reply waits, at most two minutes after its turn ended, while an earlier
-  turn in the same chat still runs, so replies keep the order of their
-  messages. A follow-up after approved operations alerts; an ordinary reply is
+  turn in the same chat still runs, so replies keep the Telegram order of their
+  messages (update ids, not capture order). A follow-up after approved operations alerts; an ordinary reply is
   silent. The owner's command replies need no brain and show no presence.
 - Since the brain sends nothing, a turn the brain lost (`ambiguous`) runs
   again under a new attempt; only a send can end uncertain. A reply whose
   context changed while the brain worked is not sent and runs again
   (`space_policy_changed`), or is withdrawn when its source was retired or its
-  chat deselected.
+  chat deselected; a reply the bot had already sent keeps the bot's receipt.
 - `/v1/runtime` adds the bot's `telegram` state and `telegram_details` to the
   brain's status, so the dashboard reads them where it did.
 </decision>
