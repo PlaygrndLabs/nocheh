@@ -88,7 +88,7 @@ credential without receiving administrative API authority.
 
 The `archive_search`, `archive_read`, `archive_page`
 (one chat in time order, GET `/v1/archive/page?chat=&from=&to=&after=&limit=`)
-and `memory_search` (Honcho search by meaning in learned chats) tools of Nocheh's
+and `memory_search` (long-term memory search by meaning in learned chats; Honcho today) tools of Nocheh's
 MCP endpoint (`/mcp`), which Hermes offers as `mcp__nocheh__archive_search` and so on,
 carry source references and bounded context. Each Hermes turn connects with its own turn
 credential, held only in that turn's memory; a call without it is refused.

@@ -242,13 +242,16 @@ the backup's size plus 1 GiB. On a new machine, install the Python
 backup folder back and restore it; the passphrase is asked for:
 
 ```sh
-NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… \
-NOCHEH_OFFSITE_ACCESS_KEY_ID=… NOCHEH_OFFSITE_SECRET_ACCESS_KEY=… \
+export NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… \
+  NOCHEH_OFFSITE_ACCESS_KEY_ID=… NOCHEH_OFFSITE_SECRET_ACCESS_KEY=…
+./bin/nocheh offsite list
 ./bin/nocheh offsite fetch --output ./recovered-backup
 ./bin/nocheh restore ./recovered-backup --state ./data/restored --project nocheh-restored
 ```
 
-See [ADR-0229](adr/0229-encrypted-off-site-backup-copies.md).
+`offsite list` shows the copies in the bucket, `offsite fetch` takes the newest one
+unless `--key` names another, and `offsite decrypt COPY --output DIR` opens a copy you
+downloaded yourself. See [ADR-0229](adr/0229-encrypted-off-site-backup-copies.md).
 
 For a planned cutover, use `backup --leave-stopped` to keep the source writers
 stopped after its final snapshot. First reconcile pending work against deliveries
@@ -268,7 +271,7 @@ results. Restore is deliberately inactive until the owner resolves that gap.
 
 ## Portable archive and memory
 
-Maintenance → **Export archive and memory** creates an authenticated ZIP download.
+System › Backups › **Export archive and memory** creates an authenticated ZIP download.
 The same export is available without the dashboard:
 
 ```sh
@@ -278,7 +281,14 @@ The same export is available without the dashboard:
 The destination must be new. `archive/` preserves the existing NDJSON/file replay
 format with originals and derived provenance. `native/` contains registered
 profiles' exact notes, scope markers and consistent SQLite copies, including
-committed WAL state. The completion manifest includes sizes and SHA-256 hashes.
+committed WAL state, plus each profile's scheduled jobs (`cron/jobs.json`), staged
+inactive. `owner/` carries the owner's own records: tasks with their comments,
+reminders, people, links, files and history, project assignments, sharing rules,
+learning consent, hidden sources, topic names, edited built-in texts, Notion and
+background-work settings and each chat's tool switches. On import, nothing acts by
+itself: sharing rules arrive off, a switch that was on arrives inherited, and a
+past-due reminder arrives skipped ([ADR-0230](adr/0230-portable-export-carries-owner-work.md)).
+The completion manifest includes sizes and SHA-256 hashes.
 Operational auth/configuration files are excluded; secrets typed into conversations
 remain part of those original conversations. This read-only export is not one
 global snapshot and does not include every setting, policy or retired custom
