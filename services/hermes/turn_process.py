@@ -81,9 +81,11 @@ def recent_group(value):
 
 
 def job_run(limits):
-    """A background job run's limits from its context, checked: its box flag and its soft and hard deadlines (epoch seconds)."""
+    """A background job run's limits from its context, checked: its box and machine flags, never both, and its soft
+    and hard deadlines (epoch seconds)."""
     finite=lambda value:type(value) in (int,float) and math.isfinite(value)
-    if (not isinstance(limits,dict) or type(limits.get('box',False)) is not bool or not finite(limits.get('soft_deadline'))
+    if (not isinstance(limits,dict) or type(limits.get('box',False)) is not bool or type(limits.get('machine',False)) is not bool
+            or limits.get('box') is True and limits.get('machine') is True or not finite(limits.get('soft_deadline'))
             or not finite(limits.get('hard_deadline')) or limits['soft_deadline']>limits['hard_deadline']):raise ValueError('invalid_background_run')
     return limits
 
@@ -138,9 +140,10 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         request['preferences']=scheduled_preferences(profile,body)
     if background:
         # A job run: its iteration backstop, its time budget and what its cost notice needs come from the job,
-        # and it reports its progress while it works. A box run's tools run in the job's sealed box; the turn
-        # checks the box is really there.
-        request.update(background={'max_iterations':background.get('max_iterations'),'box':background.get('box',False),'soft_deadline':background['soft_deadline'],
+        # and it reports its progress while it works. A box run's tools run in the job's sealed box, a machine run's
+        # on the owner's machine; the turn checks the box or the way to the machine is really there.
+        request.update(background={'max_iterations':background.get('max_iterations'),'box':background.get('box',False),
+                                   'machine':background.get('machine',False),'soft_deadline':background['soft_deadline'],
                                    **{key:background.get(key) for key in ('rates','cost_limit_usd','prior_cost_usd')}},heartbeat=True)
     from .security_transport import isolated_enabled,scoped_transport
     isolated=isolated_enabled()

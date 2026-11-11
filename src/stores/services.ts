@@ -57,6 +57,7 @@ import {ReactionStateRepository} from './reaction-state.js';
 import {KnowledgeManagementRepository} from './knowledge-management.js';
 import {OwnerSupervisionRepository} from './owner-supervision.js';
 import {BackgroundJobRepository} from './background-jobs.js';
+import {MachineRepository} from './machines.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -117,7 +118,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
   },{call:options.runtime,owner:()=>options.policy().owner_id});
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,detect,options.serviceToken??'');
-  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs);
+  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
@@ -126,7 +127,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
-  return {jobs,ownerAutonomy,notion,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {jobs,machines,ownerAutonomy,notion,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

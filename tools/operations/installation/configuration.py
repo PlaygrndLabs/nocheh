@@ -278,15 +278,19 @@ def validate(values):
     # It is no setting: initialize() and make dev fill it when empty, and Settings never shows or edits it.
     box=values.get('NOCHEH_BOX_TOKEN')
     if box and (len(box)<32 or box==values['SERVICE_TOKEN']):raise ValueError('NOCHEH_BOX_TOKEN must contain at least 32 characters and differ from SERVICE_TOKEN')
+    # Only the app and nocheh-machines hold the machine token; like the box token it is generated, never a setting.
+    machine=values.get('NOCHEH_MACHINE_TOKEN')
+    if machine and (len(machine)<32 or machine in (values['SERVICE_TOKEN'],box)):
+        raise ValueError('NOCHEH_MACHINE_TOKEN must contain at least 32 characters and differ from SERVICE_TOKEN and NOCHEH_BOX_TOKEN')
     # Every job that may run at once (two) must be able to have its box.
     if not re.fullmatch(r'[2-8]',str(values.get('NOCHEH_BOX_LIMIT','2'))):raise ValueError('NOCHEH_BOX_LIMIT must be 2-8')
 
 
-GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD')
+GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD')
 
 
 def generate(values, names=GENERATED):
-    """Fills each missing internal credential; `make dev`, which never runs initialize(), fills only the box token."""
+    """Fills each missing internal credential; `make dev`, which never runs initialize(), fills only the box and machine tokens."""
     for name in names:
         if not values.get(name): values[name] = secrets.token_hex(32)
     return values
@@ -298,10 +302,15 @@ def github_folders(state):
     (Path(state) / 'github/copies').mkdir(exist_ok=True, mode=0o700)
 
 
+def machine_folder(state):
+    """The machines' keys, mounted only into nocheh-machines; made here so Docker never makes it as root. Never backed up."""
+    (Path(state) / 'machines').mkdir(exist_ok=True, mode=0o700)
+
+
 def initialize(state):
     state = Path(state).resolve()
     for name in ('files', 'spool', 'hermes', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
-    github_folders(state)
+    github_folders(state); machine_folder(state)
     path = env_path(state); existing = read_env(path)
     values = dict(DEFAULTS)
     values.update(existing)

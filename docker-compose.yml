@@ -69,7 +69,12 @@ x-honcho-runtime: &honcho-runtime
 x-management: &management
   logging: *logging
   image: nocheh-management:${NOCHEH_IMAGE_TAG:-local}
-  build: {context: ., target: management}
+  build: &management-build
+    context: .
+    target: management
+    args:
+      LOCAL_UID: ${NOCHEH_UID:-1000}
+      LOCAL_GID: ${NOCHEH_GID:-1000}
   user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
   group_add: ["${NOCHEH_DOCKER_GID:-0}"]
   init: true
@@ -235,6 +240,34 @@ services:
       timeout: 5s
       retries: 12
       start_period: 15s
+  # Runs the commands of owner-approved jobs on the owner's machines over SSH. It alone holds the machines' keys,
+  # and only it and nocheh-app hold its token: no Docker socket, state folder, database login or service token here.
+  # Without NOCHEH_MACHINE_TOKEN it refuses every request, and nothing waits for it, so Nocheh runs the same without it.
+  nocheh-machines:
+    logging: *logging
+    image: nocheh-management:${NOCHEH_IMAGE_TAG:-local}
+    build: *management-build
+    command: [machines]
+    user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      NOCHEH_MACHINE_TOKEN: ${NOCHEH_MACHINE_TOKEN:-}
+    volumes:
+      - ${NOCHEH_STATE_DIR:-./data/local}/machines:/machines
+    networks: [default]
+    # A machine on this computer answers at host.docker.internal, on Linux too.
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8789/health',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   honcho-postgres:
     logging: *logging
@@ -479,6 +512,10 @@ services:
       <<: *environment
       NOCHEH_SERVICE: nocheh-app
       NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
+      # Only the app and nocheh-machines hold the machine token; ./bin/nocheh init and up generate it. Without it every
+      # machine route refuses, and nothing else changes.
+      NOCHEH_MACHINE_TOKEN: ${NOCHEH_MACHINE_TOKEN:-}
+      NOCHEH_MACHINES_URL: http://nocheh-machines:8789
       NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS: ${NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS:-0}
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}

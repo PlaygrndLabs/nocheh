@@ -11,8 +11,8 @@ import {restoredInactive,storageHeartbeat} from './lifecycle.js';
 import type {StorageServices} from './services.js';
 
 export function startStorageCapture(s:StorageServices,config:Settings,interval=1000) {
-  const status:Record<string,string>={capture:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting',imports:'starting',voices:'starting'};
-  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,started=new Date(),timingsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0;
+  const status:Record<string,string>={capture:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting',imports:'starting',voices:'starting',machines:'starting'};
+  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,started=new Date(),timingsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0,machinesChecked=0;
   const jobs:Record<string,()=>Promise<unknown>>={
     capture:()=>drainSourceSpool(s.capture,config.dataDir),
     reconciliation:()=>s.capture.reconcile(),
@@ -35,6 +35,8 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     imports:async()=>{if(Date.now()-importsChecked<30000)return;await s.imports.settle();importsChecked=Date.now();},
     // Voice notes saved before transcription was set up are transcribed a few at a time.
     voices:async()=>{if(Date.now()-voicesChecked<60000)return;voicesChecked=Date.now();await s.voices.transcribe();},
+    // A stopped machine job's programs on its machine are ended, and log rows a stopped process left running are closed.
+    machines:async()=>{if(Date.now()-machinesChecked<5000)return;machinesChecked=Date.now();await s.machines.cleanupTick();},
   };
   const stop=startLoops(Object.fromEntries(Object.entries(jobs).map(([stage,run])=>[stage,async()=>{
     if(restoredInactive(config.dataDir)){status[stage]='inactive';return;}

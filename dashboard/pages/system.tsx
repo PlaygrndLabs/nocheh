@@ -13,6 +13,7 @@ import {Page, Tabs} from '../ui/page';
 import {BackupsView} from './system/backups';
 import {DatabasesView} from './system/databases';
 import {HealthView} from './system/health';
+import {MachineLogView} from './system/machine-log';
 import {WorkView} from './system/work';
 
 const views = tabIds('system');
@@ -24,7 +25,7 @@ export default function SystemPage() {
   return (
     <Page
       title="System"
-      description="Health, background work, backups and databases."
+      description="Health, background work, the machine log, backups and databases."
       actions={
         <LinkButton href={href('usage')} variant="secondary" size="sm">
           <Gauge aria-hidden /> Usage and reply speed
@@ -38,6 +39,7 @@ export default function SystemPage() {
           tabs={[
             {id: 'health', label: pageTabs.system.health},
             {id: 'work', label: pageTabs.system.work, count: counts.failed + counts.uncertain || null},
+            {id: 'machines', label: pageTabs.system.machines},
             {id: 'backups', label: pageTabs.system.backups},
             {id: 'databases', label: pageTabs.system.databases},
           ]}
@@ -46,6 +48,7 @@ export default function SystemPage() {
     >
       {view === 'health' && <HealthView />}
       {view === 'work' && <WorkView />}
+      {view === 'machines' && <MachineLogView />}
       {view === 'backups' && <BackupsView />}
       {view === 'databases' && <DatabasesView />}
     </Page>

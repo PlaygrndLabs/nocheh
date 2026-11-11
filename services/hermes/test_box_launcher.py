@@ -746,9 +746,9 @@ class HandlerTests(unittest.TestCase):
         environment=patch.dict(os.environ,{'SERVICE_TOKEN':'s'*32,'NOCHEH_UID':'1000','NOCHEH_GID':'1000','NOCHEH_SECURITY_URL':self.security.url()})
         environment.start();self.addCleanup(environment.stop);os.environ.pop('NOCHEH_DEV_TURN_SOURCE',None)
 
-    def bind(self,credential,profile=None,entry=None):
+    def bind(self,credential,profile=None,entry=None,machine=None):
         self.security.bindings[credential]={'profile':profile or self.PROFILE,'model':'model-1','owner':'owner-1','scope':'chat-1',
-                                            'model_context_length':1000,'box':entry}
+                                            'model_context_length':1000,'box':entry,**({'machine':machine} if machine is not None else {})}
 
     def body(self,credential):
         return json.dumps({'archive_credential':credential,'model':'model-1','owner':'owner-1','chat_id':'chat-1','api_mode':'chat_completions',
@@ -821,6 +821,18 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(self.turn('first')[0],200);self.settled()
         self.assertEqual((self.turn_specs(),self.prepared),([self.plain()],[]))
         self.assertFalse([c for c in self.docker.calls if 'job-box' in json.dumps(c) or '/volumes' in c[1]])
+
+    def test_a_machine_run_gets_the_machine_backend_and_no_box(self):
+        self.bind('first',machine={'job':JOB,'machine':'build-vm'})
+        self.assertEqual(self.turn('first'),(200,b'{"state":"done"}\n'));self.settled()
+        self.assertEqual(self.turn_specs(),[launcher.container_spec(self.PROFILE,'/owned/profiles',self.IMAGE,'nocheh-agent',1000,1000,machine=True)])
+        self.assertEqual(self.prepared,[])
+        # A run is never both in a box and on a machine, and a machine entry is an object: no turn is made.
+        for credential,entry,machine in (('both',box(),{'job':JOB,'machine':'build-vm'}),('named',None,'build-vm')):
+            self.docker.calls.clear();self.bind(credential,entry=entry,machine=machine)
+            with self.subTest(credential=credential):
+                self.assertEqual(self.turn(credential)[0],503);self.settled()
+                self.assertEqual((self.turn_specs(),self.prepared),([],[]))
 
     def test_only_a_box_turn_that_ended_by_itself_with_success_keeps_its_box(self):
         # Exit code 0 and no kill: the job's next step may reuse its box, and an earlier mark is cleared.
@@ -1006,6 +1018,13 @@ class BoxWiringTests(unittest.TestCase):
         self.assertEqual(boxed['Env'],plain['Env']+['TERMINAL_ENV=nocheh_box','TERMINAL_CWD=/work','NOCHEH_BOX_SOCKET=/box/exec.sock'])
         self.assertEqual({k:v for k,v in boxed.items() if k not in ('Env','HostConfig')},{k:v for k,v in plain.items() if k not in ('Env','HostConfig')})
         with self.assertRaises(ValueError):launcher.container_spec(*args,None,'../docker.sock')
+        # A machine run reaches the machine only through nocheh-security: the same mounts, and only its backend's environment.
+        machine=launcher.container_spec(*args,machine=True)
+        self.assertEqual(machine['Env'],plain['Env']+['TERMINAL_ENV=nocheh_machine','TERMINAL_CWD=~','NOCHEH_MACHINE_RUN=1'])
+        self.assertEqual({k:v for k,v in machine.items() if k!='Env'},{k:v for k,v in plain.items() if k!='Env'})
+        self.assertEqual(launcher.container_spec(*args,machine=False),plain)
+        for extra,machine in (((None,'nocheh-box-'+'c'*24),True),((),1),((),'yes'),((),None)):
+            with self.subTest(machine=machine),self.assertRaisesRegex(ValueError,'invalid_job_machine'):launcher.container_spec(*args,*extra,machine=machine)
 
     def test_box_token_reaches_only_the_broker_and_launcher(self):
         import yaml

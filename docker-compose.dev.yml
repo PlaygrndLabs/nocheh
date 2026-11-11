@@ -89,6 +89,19 @@ services:
     depends_on:
       nocheh-app: {condition: service_healthy}
 
+  nocheh-machines:
+    image: ${NOCHEH_DEV_PROJECT:?}:machines
+    build:
+      context: ${NOCHEH_DEV_SOURCE_ROOT:?}
+      args:
+        LOCAL_UID: ${NOCHEH_UID:-1000}
+        LOCAL_GID: ${NOCHEH_GID:-1000}
+    restart: unless-stopped
+    entrypoint: [python3, -m, tools.development.dev_reload]
+    command: [--watch, /app/tools/runtime, --, python3, -m, tools.runtime.container_service, machines]
+    volumes:
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/app/tools:ro
+
   nocheh-security:
     build:
       context: ${NOCHEH_DEV_SOURCE_ROOT:?}

@@ -261,7 +261,8 @@ def restore(snapshot,state,project,port):
             destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             with tar.extractfile(member) as source,destination.open('xb') as target: shutil.copyfileobj(source,target)
             destination.chmod(0o600)
-    for directory in ('reports','files','spool','hermes','secrets'): (state/directory).mkdir(exist_ok=True,mode=0o700)
+    # Machine keys are never in a snapshot: the restored machines need a new key and test before a job may use them.
+    for directory in ('reports','files','spool','hermes','secrets','machines'): (state/directory).mkdir(exist_ok=True,mode=0o700)
     # Retain the saved settings, but don't activate a duplicate Hermes credential owner.
     auth=state/'hermes/auth.json'
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')

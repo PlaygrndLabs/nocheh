@@ -137,7 +137,7 @@ def main():
         rendered = json.loads(subprocess.check_output(compose_command(state, project) + ['config', '--format', 'json'], env=env, text=True))
         selected = {'nocheh-db', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
             'hermes', 'hermes-agent-sb', 'honcho-postgres', 'honcho-redis',
-            'honcho-api', 'honcho-deriver', 'honcho-provider-gateway', 'nocheh-dashboard', 'nocheh-executor'}
+            'honcho-api', 'honcho-deriver', 'honcho-provider-gateway', 'nocheh-dashboard', 'nocheh-executor', 'nocheh-machines'}
         rendered['services'] = {name: value for name, value in rendered['services'].items() if name in selected}
         for network in rendered['networks'].values():
             network['internal'] = True
@@ -158,6 +158,8 @@ def main():
                 service['environment']['TELEGRAM_ENABLED'] = 'true'
             if name == 'nocheh-db':
                 service['image'] = images['postgres']
+            if name == 'nocheh-machines':
+                service['image'] = images['management']
             if name in ('nocheh-dashboard', 'nocheh-executor'):
                 service['image'] = images['management']
                 service['environment']['NOCHEH_INSTALLATION_ROOT'] = str(installation)
