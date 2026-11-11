@@ -7,7 +7,7 @@ ADR files are historical records and stay unchanged; a later ADR replaces only t
 
 ## Nocheh in one paragraph
 
-Nocheh is a personal AI brain. It owns the original archive, the rules, the secret check and every owner decision. Hermes is the agent runtime: it runs each turn in a sealed container and also acts as the Telegram adapter that receives and sends messages. Telegram is one front door, not the product. Honcho is long-term memory, and Hermes native notes are a smaller per-chat memory. Inngest drives durable workflows, but Nocheh's own Postgres state decides each step. The runtime, the memory service, the model providers and the front door all sit behind adapters and can be swapped.
+Nocheh is a personal AI brain. It owns the original archive, the rules, the secret check and every owner decision. Hermes is the brain today, behind the brain socket: it runs each turn in a sealed container and returns the reply. Nocheh's own `nocheh-telegram` service is the Telegram bot that receives and sends messages. Telegram is one front door, not the product. Honcho is long-term memory, and Hermes native notes are a smaller per-chat memory. Inngest drives durable workflows, but Nocheh's own Postgres state decides each step. The runtime, the memory service, the model providers and the front door all sit behind adapters and can be swapped.
 
 ## Current decisions
 
@@ -44,7 +44,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 
 ### Replies and turns
 
-- Hermes polls and sends for Telegram; each chat has its own Hermes profile with a fixed tool set and its own role (SOUL.md) and skills; a role or skill change reaches continuing sessions through Hermes' own prompt refresh ([0021](0021-scoped-native-assistant-processes.md), [0151](0151-chat-role-and-skills-in-hermes-profiles.md), [0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
+- Nocheh's own bot polls and sends for Telegram ([0235](0235-nocheh-owns-the-telegram-bot.md)); each chat has its own Hermes profile with a fixed tool set and its own role (SOUL.md) and skills; a role or skill change reaches continuing sessions through Hermes' own prompt refresh ([0021](0021-scoped-native-assistant-processes.md), [0151](0151-chat-role-and-skills-in-hermes-profiles.md), [0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
 - Each turn runs in its own sealed container; browser TUI turns use the same isolation, and abandoned leases are reclaimed under the profile lock ([0028](0028-isolated-native-browser-turns.md), [0098](0098-isolated-native-lease-recovery.md)).
 - Turns start in Telegram update order per chat or topic; chats and topics run in parallel up to owner limits (3 replies, 4 agent runs) ([0104](0104-telegram-update-order-and-untransmitted-sends.md), [0125](0125-per-chat-telegram-dispatch-lanes.md), [0136](0136-per-topic-dispatch-lanes.md), [0126](0126-owner-set-parallel-replies-and-runs.md)).
 - The owner's instruction texts ride on each runtime call; defaults stay in code ([0152](0152-owner-editable-built-in-instructions.md)).

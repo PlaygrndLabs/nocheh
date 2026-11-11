@@ -13,7 +13,7 @@
 
 Today's AI assistants are rented brains. What they learn about you lives inside one app, one model and one company's memory, and switching tools means starting over.
 
-Nocheh turns that around. Your source data stays in Nocheh, in a portable format, and memory is built from it and can be rebuilt from it. Nocheh also keeps the rules: who may see what, what may be shared and what needs your approval. The long-term memory engine (Honcho today) plugs in through the memory socket: swap it, and your data, your rules and your history stay where they are. The brain (Hermes today) reaches your data through Nocheh's tools, and Nocheh runs every turn through the brain socket. Replacing Hermes still needs the helpers and the Telegram connection it hosts to move into Nocheh first.
+Nocheh turns that around. Your source data stays in Nocheh, in a portable format, and memory is built from it and can be rebuilt from it. Nocheh also keeps the rules: who may see what, what may be shared and what needs your approval. The long-term memory engine (Honcho today) plugs in through the memory socket: swap it, and your data, your rules and your history stay where they are. The brain (Hermes today) reaches your data through Nocheh's tools, and Nocheh runs every turn through the brain socket. Nocheh's own service is the Telegram bot, so the brain never holds the bot token. Replacing Hermes still needs the helper services it hosts, such as file and voice reading and the secret check's model call, to move into Nocheh first.
 
 ## The design
 
@@ -137,7 +137,7 @@ flowchart LR
 
 Nocheh is TypeScript services, a React dashboard and mini app, and Python for its Hermes integration and a few helper services, all in one Docker Compose project.
 
-- **Front doors.** Sources are stored in a platform-independent model (platform, kind, ID, relationships), so new chat platforms such as Slack or Discord fit without changing existing data. Telegram is the first front door.
+- **Front doors.** Sources are stored in a platform-independent model (platform, kind, ID, relationships), so new chat platforms such as Slack or Discord fit without changing existing data. Telegram is the first front door, run by Nocheh's own `nocheh-telegram` service, which polls Telegram and sends every reply, card and notice. Nocheh decides whether a group message addresses the bot before any brain sees it.
 - **Three databases.** `nocheh_archive` keeps original messages and file records and is never rewritten; file bytes are saved on disk beside it, named by their checksum. `nocheh_derived` keeps masked copies and everything generated. `nocheh_control` keeps settings, access rules, tool switches, approvals and jobs. Hermes, Honcho and Inngest keep their own stores.
 - **Capture first.** Incoming messages land in a durable spool before they are acknowledged, then commit once. Restarts, retries and database outages don't drop or duplicate messages.
 - **Workflows.** Inngest runs every reply, learning step, import and background job as a durable workflow with retries, waits and full history.
@@ -162,7 +162,6 @@ Service map: [docs/services.md](docs/services.md).
 
 ## What's next
 
-- **Telegram moves into Nocheh** (in progress). A Nocheh service becomes the only bot, so the brain no longer holds the bot token.
 - **More out of Hermes.** The secret check's model call, file and voice reading, provider keys and schedules move into Nocheh. Then another brain, such as Claude Code, can replace Hermes.
 - **Later.** Another memory engine, such as mem0, behind the memory socket. Slack as another front door. Nocheh's own chat page that talks to whichever brain is plugged in. Several brains at once is a long-term idea, not planned work.
 

@@ -4,7 +4,8 @@
 
 <context>
 
-Nocheh is a personal AI brain with Hermes as its first replaceable runtime.
+Nocheh is a personal AI brain with Hermes as its first replaceable runtime, behind Nocheh's brain socket.
+Nocheh's own `nocheh-telegram` service is the Telegram bot; the brain never holds the bot token.
 Telegram is an adapter; owned source data, useful memory, and reasoning are the product.
 Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Honcho is the current engine.
 
