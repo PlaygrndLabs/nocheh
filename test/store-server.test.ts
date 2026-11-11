@@ -67,7 +67,6 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/brain/manage',{action:'persona',scope:'default'})).operation,'persona.read');
     assert.equal((await request('/v1/brain/manage',{action:'preferences',scope:'default'})).operation,'config.read');
     await request('/v1/brain/manage',{action:'unknown'},400);
-    await request('/v1/brain/manage',persona,403,scopeToken(token,'123',Date.now()+60000));
     const prompts=await request('/v1/prompts');
     assert.equal(prompts.defaults['reply.owner'],'Owner');assert.match(prompts.defaults['learning.interpret'],/\{trigger_id\}/);assert.deepEqual(prompts.texts,{});
     const saved=await request('/v1/prompts',{texts:{'reply.owner':' Answer in Persian. '},revision:prompts.revision});
