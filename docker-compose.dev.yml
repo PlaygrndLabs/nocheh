@@ -132,7 +132,8 @@ services:
     environment:
       HOME: /workspace/data/local/hermes
     entrypoint: [python, -m, tools.development.dev_reload]
-    command: [--watch, /workspace/services/hermes, --watch, /workspace/tools, --, python, -m, services.hermes.runtime]
+    # Hermes imports the shared file helpers from services/durable.py.
+    command: [--watch, /workspace/services/hermes, --watch, /workspace/services/durable.py, --watch, /workspace/tools, --, python, -m, services.hermes.runtime]
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
@@ -156,8 +157,8 @@ services:
     restart: unless-stopped
     entrypoint: [python, -m, tools.development.dev_reload]
     # Not services/hermes: a brain edit must not restart the poller and leave its sends in flight unconfirmed.
-    # The shared services/durable.py is not watched either; restart nocheh-telegram after changing it.
-    command: [--watch, /workspace/services/telegram, --watch, /workspace/tools, --, python, -m, services.telegram.server]
+    # The shared file helpers in services/durable.py are watched too.
+    command: [--watch, /workspace/services/telegram, --watch, /workspace/services/durable.py, --watch, /workspace/tools, --, python, -m, services.telegram.server]
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro

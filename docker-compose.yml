@@ -649,8 +649,9 @@ services:
       retries: 12
       start_period: 15s
 
-  # The only Telegram poller and sender, and the only container given the bot token: long polling, durable capture,
-  # the outbound journal and every Bot API call. It waits for the app, not Hermes, so a brain restart never stops polling.
+  # The only Telegram poller and sender, and the only service given the bot token in its environment: long polling,
+  # durable capture, the outbound journal and every message sent. It waits for the app, not Hermes, so a brain restart
+  # never stops polling.
   nocheh-telegram:
     logging: *logging
     image: nocheh-hermes:local
