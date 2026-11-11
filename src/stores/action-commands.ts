@@ -284,11 +284,11 @@ export class ActionCommandRepository {
         (follows?' Once it has run, its answer follows here as a reply.':'')};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
-  /** Where a job's card goes: the chat and topic where it was asked, or the owner's private chat
-   * when the owner approves a member's job. */
+  /** Where a job's card goes: the chat and topic where it was asked, or the owner's private chat when the owner approves a
+   * member's job or any machine job; there it answers the request when it was asked there. */
   private async jobPlace(row:any):Promise<{chat:string;topic?:string;here:string|null}> {
     const owner=this.access.policy().owner_id!;
-    if(row.approver==='owner')return {chat:owner,here:null};
+    if(row.approver==='owner'){const asked=row.requester?null:await this.asked(row.source_reference);return {chat:owner,here:asked&&asked.chat===owner?asked.message??null:null};}
     const [chat,topic]=String(row.space_id).split('/topic/'),asked=await this.asked(row.source_reference);
     return {chat:chat!,...(topic?{topic}:{}),here:asked&&asked.chat===chat&&(asked.topic??'')===(topic??'')?asked.message??null:null};
   }
@@ -304,8 +304,12 @@ export class ActionCommandRepository {
       if(sent?.state!=='done')return result;
       // A Remove that withdrew the job while its card was being posted settled a card that did not exist yet.
       if((await this.jobs.card(result.id)).state!=='proposed')await this.settle('background',result.id);
+      const asked=card.row.approver==='owner'&&!card.row.requester?await this.asked(card.row.source_reference):null;
       return {...result,message:card.row.approver==='owner'&&card.row.requester?
         'The owner was asked privately, with Approve and Reject buttons, to approve this job, because its cost is over what a member may start or cannot be measured. Say so briefly with the estimate; nothing runs until the owner approves.':
+        // The owner asking in a group is told where their card is, as for an operation they asked for there.
+        asked&&asked.chat!==this.access.policy().owner_id?
+        'The person who asked is the owner, so the decision is theirs: a card with Approve and Reject buttons for this job was sent to them in their private chat with you. In this chat answer them as "you", briefly: their card is waiting in their private chat, and the report will follow here once it runs. Do not say it waits for the owner or anyone else; do not show the plan or details.':
         'A card with Approve and Reject buttons for this job was posted here as the reply to the request. It shows the job, its size, time and cost, so say at most one short sentence; nothing runs until it is approved.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
@@ -314,9 +318,11 @@ export class ActionCommandRepository {
   private async settleJob(id:string,seen?:Seen) {
     if(!this.jobs)return;
     const card=await this.jobs.card(id),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
-    const state=row.error_code==='job_repo_removed'?'repo_removed':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
+    const state=row.error_code==='job_repo_removed'?'repo_removed':row.error_code==='job_machine_off'?'machine_off':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
       row.state==='done'&&row.ended?'limited':row.state;
-    const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines.running:card.lines[state];
+    // A card in the owner's private chat for a job asked elsewhere does not say the report comes here.
+    const away=String(row.space_id).split('/topic/')[0]!==place.chat;
+    const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines[away?'running_elsewhere':'running']:card.lines[state];
     const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;
     if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{}),...seenIn(seen,place.chat)});
     if(['done','failed','limited'].includes(state)&&!row.cancel_requested)await this.offerList(row);

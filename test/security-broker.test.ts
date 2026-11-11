@@ -1,12 +1,22 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {existsSync,readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {turnToken} from '../src/access.js';
-import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,providerTarget,scopedRoute} from '../src/security/broker.js';
+import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute} from '../src/security/broker.js';
 import type {IncomingMessage} from 'node:http';
 import {effectLog} from '../src/security/store.js';
+
+// Hermes's machine backend has words for every code a machine command may come back with; a cleanup's own code never reaches it.
+test('the machine backend words every code a machine command is refused or fails with',()=>{
+  const places=[new URL('../../services/hermes/machine_box.py',import.meta.url).pathname,join(process.env.PYTHONPATH??'/nonexistent','services/hermes/machine_box.py')];
+  const source=readFileSync(places.find(place=>existsSync(place))!,'utf8'),block=source.match(/^REFUSALS=\{\n([^}]*)\n\}$/m);
+  assert.ok(block,'REFUSALS is one dict');
+  assert.deepEqual([...block[1]!.matchAll(/^\s*'([a-z_]+)':/gm)].map(match=>match[1]!).sort(),[...machineErrors].filter(code=>code!=='machine_cleanup_failed').sort());
+});
 
 test('broker supports only explicit scoped routes and the configured reply provider',()=>{
   for(const route of ['/v1/export','/v1/tools/claim','/internal/security/transport','/v1/memory/shares','//example.com'])assert.equal(scopedRoute('POST',route),false);
@@ -18,6 +28,15 @@ test('broker supports only explicit scoped routes and the configured reply provi
   for(const action of ['start','status','stop'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),true);
   for(const action of ['size','propose'])assert.equal(scopedRoute('POST','/v1/jobs/'+action),false);
   assert.equal(scopedRoute('POST','/v1/jobs/approve'),false,'only a person approves a job, on its card');
+  // A job's run sends its commands for its machine; the owner's machine routes stay with the dashboard.
+  assert.equal(scopedRoute('POST','/v1/machines/exec'),true);
+  for(const [method,route] of [['GET','/v1/machines/exec'],['GET','/v1/machines'],['POST','/v1/machines'],['POST','/v1/machines/settings'],['GET','/v1/machines/commands'],
+    ['POST','/v1/machines/'+'a'.repeat(32)],['POST','/v1/machines/'+'a'.repeat(32)+'/test'],['POST','/v1/machines/'+'a'.repeat(32)+'/remove'],['POST','/v1/machines/exec/x']])
+    assert.equal(scopedRoute(method!,route!),false,method+' '+route);
+  for(const code of ['job_machine_not_allowed','job_machine_not_found','job_card_too_long'])assert.ok(jobErrors.has(code),code);
+  assert.deepEqual([...machineErrors].sort(),['invalid_machine_request','machine_auth_failed','machine_changed','machine_cleanup_failed','machine_host_key_changed',
+    'machine_host_key_unknown','machine_key_missing','machine_not_allowed','machine_off','machine_script_too_long','machine_time_up','machine_timeout','machine_unavailable',
+    'machine_unreachable']);
   // Settings › Models may name one HTTPS reply provider; any other address stays denied.
   const gateway='https://gateway.example.test/v1';
   assert.throws(()=>providerTarget({base_url:'https://attacker.example',api_mode:'codex_responses'},'/v1/chat/completions',gateway),{code:'provider_route_denied'});

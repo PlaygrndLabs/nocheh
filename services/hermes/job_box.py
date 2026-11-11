@@ -3,7 +3,7 @@
 ``nocheh_box`` is a plugin terminal backend. Each command Hermes runs for those tools goes,
 with its stdin, over one connection to the box's exec socket (tools/runtime/box_server.py);
 nothing is synced in or out. A fail-closed ``pre_tool_call`` hook blocks those tools in every
-turn that is not a sealed box run on this backend.
+turn that is not a sealed run on this backend, or on the machine backend of machine_box.py.
 """
 import contextlib
 import json
@@ -21,12 +21,16 @@ from agent.terminal_env_provider import TerminalEnvironmentProvider
 from tools.environments.base import BaseEnvironment,EnvironmentConnectionError
 
 NAME='nocheh_box'
+# A machine run (machine_box.py) is sealed here too, on its own backend.
+MACHINE='nocheh_machine'
 # Hermes's terminal, file and code_execution toolsets; process_manage follows background commands in the box.
 TOOLS=frozenset({'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'})
 REQUIRED=TOOLS-{'process_manage'}
+# A machine run has the same tools except execute_code: its code would run there as one opaque command.
+MACHINE_REQUIRED=REQUIRED-{'execute_code'}
 # The box caps a command's output at 8 MiB; a box that sends more is cut off.
 MAX_OUTPUT=8*1024*1024+65536
-# Set once by a sealed box run: the run's exact tool names and its absolute deadline (the job's hard deadline).
+# Set once by a sealed run: the run's exact tool names and its absolute deadline (the job's hard deadline).
 _STEP=None
 _DEADLINE=None
 # A box tool's command ends MARGIN seconds before the run does; with less than FLOOR seconds left, no box tool
@@ -43,14 +47,15 @@ def left():
     return _DEADLINE-time.time()-MARGIN if _DEADLINE is not None else 0
 
 
-def turn_side(cmd_string):
+def turn_side(cmd_string,*homes):
     """Whether a command names Hermes's own folders: its home and spill folders in this turn, or the
-    results folder it would write in the box. Hermes saves an oversized result in this turn, then asks
-    the box whether it can read it there; a box that says yes would send the model to a file it cannot open."""
+    results folder it would write in the box; or one of ``homes``, other folders of this turn. Hermes saves
+    an oversized result in this turn, then asks the box whether it can read it there; a box that says yes
+    would send the model to a file it cannot open."""
     from hermes_constants import get_hermes_home
-    home=str(get_hermes_home()).rstrip('/')
     return (any(name in cmd_string for name in ('hermes-results','cache/spillover','cache/terminal-output'))
-            or bool(home) and re.search(r'(?<![\w.~/-])'+re.escape(home)+r'(?![\w.-])',cmd_string) is not None)
+            or any(home and re.search(r'(?<![\w.~/-])'+re.escape(home)+r'(?![\w.-])',cmd_string)
+                   for home in (str(path).rstrip('/') for path in (get_hermes_home(),*homes))))
 
 
 def connect(path):
@@ -76,6 +81,20 @@ def exact(sock,size):
     return bytes(data)
 
 
+def frames(sock,put):
+    """Puts each output frame of a command's answer, up to MAX_OUTPUT; returns its exit code, or None when the
+    answer ended, broke its framing or sent more first. ``sock`` needs only recv(size)."""
+    size=0
+    while (head:=exact(sock,5)) is not None and head[:1] in (b'O',b'X'):
+        length=struct.unpack('>I',head[1:])[0]
+        if length>1<<20 or (data:=exact(sock,length)) is None:return None
+        if head[:1]==b'X':return struct.unpack('>i',data)[0] if length==4 else None
+        size+=length
+        if size>MAX_OUTPUT:return None
+        put(data)
+    return None
+
+
 class Process:
     """One box command. Output is pumped into a pipe as it comes, so Hermes's drain, timeout and
     interrupt work as for a local process. It has no pid: nothing here may be killed locally."""
@@ -89,17 +108,7 @@ class Process:
         while view:view=view[os.write(self._write,view):]
 
     def _pump(self):
-        size=0
-        try:
-            while (head:=exact(self._sock,5)) is not None and head[:1] in (b'O',b'X'):
-                length=struct.unpack('>I',head[1:])[0]
-                if length>1<<20 or (data:=exact(self._sock,length)) is None:break
-                if head[:1]==b'X':
-                    if length==4:self._code=struct.unpack('>i',data)[0]
-                    break
-                size+=length
-                if size>MAX_OUTPUT:break
-                self._put(data)
+        try:self._code=frames(self._sock,self._put)
         except OSError:pass
         finally:
             if self._code is None:
@@ -133,10 +142,26 @@ class Refused:
     def kill(self):pass
 
 
-class Environment(BaseEnvironment):
-    """Commands and their stdin go to the box; nothing is synced in or out."""
+class Forwarded(BaseEnvironment):
+    """Commands and their stdin go elsewhere, each ending before the run does; nothing is synced in or out."""
     _stdin_mode='payload'
 
+    def execute(self,command,cwd='',**kwargs):
+        # Hermes's own wait ends with the command there, before the run does.
+        kwargs['timeout']=max(1,min(kwargs.get('timeout') or self.timeout,int(left())))
+        result=super().execute(command,cwd,**kwargs)
+        # The full copy of a long output stays in this turn, where the file tools there cannot open it.
+        result.pop('output_total_chars',None)
+        if spill:=result.pop('full_output_path',None):
+            with contextlib.suppress(OSError):os.unlink(spill)
+        return result
+
+    def cleanup(self):
+        """Nocheh owns the other end: nothing to sync back or tear down."""
+
+
+class Environment(Forwarded):
+    """Commands and their stdin go to the box."""
     def __init__(self,path,cwd='/work',timeout=120):
         super().__init__(cwd=cwd,timeout=timeout)
         self._path=path
@@ -154,19 +179,6 @@ class Environment(BaseEnvironment):
         except OSError as error:
             sock.close();raise EnvironmentConnectionError(f'nocheh box send failed ({error.strerror or error})') from None
         return Process(sock)
-
-    def execute(self,command,cwd='',**kwargs):
-        # Hermes's own wait ends with the box command, before the run does.
-        kwargs['timeout']=max(1,min(kwargs.get('timeout') or self.timeout,int(left())))
-        result=super().execute(command,cwd,**kwargs)
-        # The full copy of a long output stays in this turn, where the box's file tools cannot open it.
-        result.pop('output_total_chars',None)
-        if spill:=result.pop('full_output_path',None):
-            with contextlib.suppress(OSError):os.unlink(spill)
-        return result
-
-    def cleanup(self):
-        """The launcher owns the box: nothing to sync back or tear down."""
 
 
 class Provider(TerminalEnvironmentProvider):
@@ -186,32 +198,52 @@ class Provider(TerminalEnvironmentProvider):
         return Environment(os.environ['NOCHEH_BOX_SOCKET'],cwd=cwd or '/work',timeout=timeout)
 
 
+def classes(name):
+    """A sealed backend's provider and environment classes."""
+    if name==MACHINE:
+        from services.hermes import machine_box
+        return machine_box.Provider,machine_box.Environment
+    return Provider,Environment
+
+
 def backend():
-    """True only while every way to the box tools leads to this backend."""
+    """True only while every way to the job's tools leads to one sealed backend: the box's, or the machine's.
+    A process runs one of them, never both."""
     from agent.terminal_env_registry import get_provider
     from tools.terminal_tool import _active_environments,_get_env_config
-    return (os.environ.get('NOCHEH_ISOLATED_TURN')=='1' and os.environ.get('TERMINAL_ENV')==NAME and bool(os.environ.get('NOCHEH_BOX_SOCKET'))
-            and _get_env_config()['env_type']==NAME and isinstance(get_provider(NAME),Provider)
-            and all(isinstance(env,Environment) for env in list(_active_environments.values())))
+    name=os.environ.get('TERMINAL_ENV');box,machine=bool(os.environ.get('NOCHEH_BOX_SOCKET')),os.environ.get('NOCHEH_MACHINE_RUN')=='1'
+    if name not in (NAME,MACHINE) or (box,machine)!=(name==NAME,name==MACHINE):return False
+    provider,environment=classes(name)
+    return (os.environ.get('NOCHEH_ISOLATED_TURN')=='1' and _get_env_config()['env_type']==name and isinstance(get_provider(name),provider)
+            and all(isinstance(env,environment) for env in list(_active_environments.values())))
 
 
 def seal(names,deadline):
-    """Bind this turn to one box run once its tools are known: the box tools on this backend
-    and the run's other tools run, nothing else, and no box command outlives the run's deadline."""
+    """Bind this turn to one box or machine run once its tools are known: the box or machine tools on
+    that backend and the run's other tools run, nothing else, and no command there outlives the run's deadline."""
     global _STEP,_DEADLINE
-    names=frozenset(names)
-    if (_STEP is not None or not REQUIRED<=names or 'delegate_task' in names or type(deadline) not in (int,float)
-            or not math.isfinite(deadline) or not backend()):raise RuntimeError('job_box_unavailable')
+    names=frozenset(names);name=os.environ.get('TERMINAL_ENV')
+    error='job_machine_unavailable' if name==MACHINE else 'job_box_unavailable'
+    if (_STEP is not None or not (MACHINE_REQUIRED if name==MACHINE else REQUIRED)<=names or (name==MACHINE and 'execute_code' in names)
+            or 'delegate_task' in names or type(deadline) not in (int,float) or not math.isfinite(deadline) or not backend()):raise RuntimeError(error)
     _DEADLINE=float(deadline)
     # While a task has no environment, Hermes spills an oversized tool result into this turn and
-    # sends the model to a path the box cannot open. The box environment is made now, as Hermes
+    # sends the model to a path the box or machine cannot open. The environment is made now, as Hermes
     # makes it for any tool, and its idle reaper keeps it for this one-run process; such a result
     # then keeps its inline preview.
     from tools.terminal_tool_lifecycle import ensure_task_env,get_active_env
     os.environ['TERMINAL_LIFETIME_SECONDS']='86400'
     env=ensure_task_env()
-    if not isinstance(env,Environment) or get_active_env(str(uuid.uuid4())) is not env or not backend():raise RuntimeError('job_box_unavailable')
+    if not isinstance(env,classes(name)[1]) or get_active_env(str(uuid.uuid4())) is not env or not backend():raise RuntimeError(error)
     _STEP=names
+    if name==MACHINE:
+        # The file tools take a relative path from TERMINAL_CWD, whose ~ is this turn's home, and expand ~ in this
+        # turn: once the machine told its own home, both start there, as its commands do.
+        if isinstance(env.cwd,str) and env.cwd.startswith('/'):os.environ['TERMINAL_CWD']=env.cwd
+        from tools.terminal_tool_config import plugin_sandbox_home
+        from services.hermes import machine_box
+        if home:=plugin_sandbox_home(env):machine_box.home(home)
+        return
     # execute_code also keeps a long output's full copy in this turn; it gives no path the box cannot open.
     from tools import code_execution_tool
     code_execution_tool._spill_full_stdout=lambda text:None
@@ -224,19 +256,20 @@ def seal(names,deadline):
     code_execution_tool._load_config=bounded
 
 
-BLOCKED={'action':'block','message':"This tool runs only in a background job's sealed box."}
+BLOCKED={'action':'block','message':"This tool runs only in a background job's sealed box or on its machine."}
 
 
 def tool_gate(tool_name='',**_):
     """pre_tool_call, fail closed: anything unexpected blocks."""
     try:
-        if tool_name=='delegate_task' and (_STEP is not None or os.environ.get('NOCHEH_BOX_SOCKET') or os.environ.get('TERMINAL_ENV')==NAME):
-            return {'action':'block','message':"Subagents are not available in a background job's sealed box."}
+        if tool_name=='delegate_task' and (_STEP is not None or os.environ.get('NOCHEH_BOX_SOCKET') or os.environ.get('TERMINAL_ENV') in (NAME,MACHINE)
+                                           or os.environ.get('NOCHEH_MACHINE_RUN')):
+            return {'action':'block','message':"Subagents are not available in a background job that runs commands."}
         if _STEP is not None and tool_name not in _STEP:return {'action':'block','message':'This tool is not available in this job.'}
         if _STEP is not None and tool_name in TOOLS and left()<FLOOR:return {'action':'block','message':TIME_UP}
         if tool_name not in TOOLS:return None
         if _STEP is not None and backend():
-            # Hermes's wait for a background command in the box is clamped by TERMINAL_TIMEOUT: it ends with the run too.
+            # Hermes's wait for a background command there is clamped by TERMINAL_TIMEOUT: it ends with the run too.
             os.environ['TERMINAL_TIMEOUT']=str(int(left()));return None
     except Exception:pass
     return BLOCKED

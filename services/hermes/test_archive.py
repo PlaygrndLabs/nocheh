@@ -220,6 +220,49 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn('/repo/code',repo['description']);self.assertIn('GitHub copies',schema['description'])
         self.assertNotIn('repo',schema['parameters']['required'])
 
+    def test_a_machine_and_its_plan_are_forwarded_only_with_start_and_only_from_the_isolated_runtime(self):
+        steps=['Install the build tools','Build the project','Report the test results']
+        with patch.object(archive_tools,'request',return_value={'id':'a'*64,'state':'proposed'}) as request,\
+                patch.object(archive_tools,'isolated_runtime',return_value=True):
+            archive_tools.job_tool({'action':'start','title':'t','instruction':'i','machine':'build-vm','steps':steps})
+            for machine,plan in (('',steps),(None,'Build it'),(7,None),(['build-vm'],{'1':'Build'})):
+                archive_tools.job_tool({'action':'start','title':'t','instruction':'i','machine':machine,'steps':plan})
+            archive_tools.job_tool({'action':'status','machine':'build-vm','steps':steps})
+            archive_tools.job_tool({'action':'stop','id':'b'*64,'machine':'build-vm','steps':steps})
+        self.assertEqual([call.args for call in request.call_args_list],[
+            ('/v1/jobs/start',{'title':'t','instruction':'i','machine':'build-vm','steps':steps}),
+            ('/v1/jobs/start',{'title':'t','instruction':'i','steps':steps}),*[('/v1/jobs/start',{'title':'t','instruction':'i'})]*3,
+            ('/v1/jobs/status',{}),('/v1/jobs/stop',{'id':'b'*64})])
+        # Its commands reach the machine only through the isolated runtime's broker.
+        with patch.object(archive_tools,'request') as request,patch.object(archive_tools,'isolated_runtime',return_value=False):
+            self.assertEqual(json.loads(archive_tools.job_tool({'action':'start','title':'t','instruction':'i','machine':'build-vm','steps':steps})),
+                             {'error':'isolated_runtime_required'})
+            request.assert_not_called()
+        import io
+        from urllib.error import HTTPError
+        for code in ('job_machine_not_allowed','job_machine_not_found','job_card_too_long'):
+            refused=HTTPError('url',409,'Conflict',{},io.BytesIO(json.dumps({'error':code}).encode()))
+            with self.subTest(code=code),patch.object(archive_tools,'request',side_effect=refused),patch.object(archive_tools,'isolated_runtime',return_value=True):
+                answer=json.loads(archive_tools.job_tool({'action':'start','title':'t','instruction':'i','machine':'build-vm','steps':steps}))
+                self.assertEqual(answer.pop('error'),code)
+                # A machine that is missing or not ready: the owner must add it and pass Test first.
+                if code=='job_machine_not_found':
+                    note=answer.pop('note')
+                    for words in ('Settings › Machines','press Test','until the test passes','action=status'):self.assertIn(words,note)
+                self.assertEqual(answer,{})
+        tools={}
+        class Context:
+            def register_tool(self,**kwargs):tools[kwargs['name']]=kwargs['schema']
+        archive_tools.register(Context())
+        schema=tools['nocheh_background_job'];properties=schema['parameters']['properties']
+        machine,plan=properties['machine'],properties['steps']
+        self.assertEqual((machine['type'],machine['maxLength']),('string',40))
+        self.assertTrue(machine['description'].startswith("For work on one of the owner's machines (see action=status machines): the machine's name and a short plan "
+                                                          "of 1-12 steps the owner approves on one card. Only for the owner's own request in their private chat or a project group."))
+        self.assertEqual((plan['type'],plan['minItems'],plan['maxItems'],plan['items']),('array',1,12,{'type':'string','maxLength':200}))
+        self.assertIn('box or machine with steps',schema['description']);self.assertIn("lists the owner's machines",schema['description'])
+        for name in ('machine','steps'):self.assertNotIn(name,schema['parameters']['required'])
+
     def test_the_job_tool_offers_start_status_and_stop_only(self):
         tools={}
         class Context:
