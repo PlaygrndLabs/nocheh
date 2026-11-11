@@ -7,6 +7,8 @@ SERVICE = 'nocheh-app'
 NAME = 'acceptance-code-refresh.json'
 HERMES = 'hermes'
 DASHBOARD = 'nocheh-dashboard'
+# The Telegram code runs here, not in Hermes, though both use the same image.
+TELEGRAM = 'nocheh-telegram'
 
 
 def _name(service, sequence=1):
@@ -18,6 +20,8 @@ def _name(service, sequence=1):
         name = 'acceptance-hermes-code-refresh.json'
     elif service == DASHBOARD:
         name = 'acceptance-dashboard-code-refresh.json'
+    elif service == TELEGRAM:
+        name = 'acceptance-telegram-code-refresh.json'
     else:
         raise ValueError('reset_code_refresh_service_invalid')
     return name if sequence == 1 else name[:-5] + '-' + str(sequence) + '.json'

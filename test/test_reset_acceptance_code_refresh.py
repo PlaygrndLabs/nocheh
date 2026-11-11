@@ -115,6 +115,26 @@ class CodeRefreshTests(unittest.TestCase):
         self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], after)
         self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-dashboard-code-refresh.json')['stage'], 'complete')
 
+    def test_telegram_service_refresh_rebinds_without_replacing_hermes(self):
+        before = self.before + [{'service': refresh.TELEGRAM, 'id': refresh.TELEGRAM + '-old'}]
+        activation = {**self.activation, 'containers': before,
+                      'plan': {**self.activation['plan'], 'desired': [row['service'] for row in before]}}
+        reset_protocol.atomic(self.journal.directory / 'acceptance-mode.json', activation)
+        after = [{**row, 'id': refresh.TELEGRAM + '-new'} if row['service'] == refresh.TELEGRAM else row for row in before]
+        with (patch.object(refresh, '_current', return_value=(activation, before, 'config')),
+              patch.object(refresh, '_image', return_value=self.old_image)):
+            self.assertEqual(refresh.prepare(self.journal, self.new_image, service=refresh.TELEGRAM, environment={})['service'], refresh.TELEGRAM)
+        both = [{**row, 'id': row['service'] + '-new'} if row['service'] in (refresh.TELEGRAM, refresh.HERMES) else row for row in before]
+        with (patch.object(refresh, '_current', return_value=(activation, both, 'config')),
+              patch.object(refresh, '_image', return_value=self.new_image)):
+            with self.assertRaisesRegex(RuntimeError, 'unexpected_container_replacement'):
+                refresh.finish(self.journal, service=refresh.TELEGRAM, environment={})
+        with (patch.object(refresh, '_current', return_value=(activation, after, 'config')),
+              patch.object(refresh, '_image', return_value=self.new_image)):
+            self.assertEqual(refresh.finish(self.journal, service=refresh.TELEGRAM, environment={})['stage'], 'complete')
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], after)
+        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-telegram-code-refresh.json')['stage'], 'complete')
+
     def test_dashboard_refresh_rejects_another_service_replacement(self):
         with (patch.object(refresh, '_current', return_value=(self.activation, self.before, 'config')),
               patch.object(refresh, '_image', return_value=self.old_image)):
