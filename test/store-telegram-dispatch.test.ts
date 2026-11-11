@@ -67,11 +67,12 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-')),base=Date.now(),key='dispatch:'+base,group='-'+base,token=digest(key);
   const policy={enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}},calls:{operation:string;input:any}[]=[],native=new Map<string,any>(),journals=new Map<string,any[]>();
-  let serial=base,mode='done',lostControl=false,timingShape:'valid'|'malformed'='valid',delivery='done';const query=stores.control.query.bind(stores.control);
+  let serial=base,mode='done',lostControl=false,timingShape:'valid'|'malformed'='valid',delivery='done',botState='connected';const query=stores.control.query.bind(stores.control);
   // Nocheh's bot: what it was asked to show and send, and how a send ends.
   const sends:{operation:string;input:any}[]=[],bot=fixtureTelegram((operation,input)=>sends.push({operation,input}));
   const telegram:FakeCall=async(operation,input,timeout)=>{
     const answer=await bot(operation,input,timeout);
+    if(operation==='telegram.identity')return {...answer,state:botState};
     return operation==='telegram.reply'&&delivery==='ambiguous'&&!input.cancel?{state:'ambiguous',error_code:'delivery_unconfirmed'}:answer;
   };
   const control=new Proxy(stores.control,{get(target,name){
@@ -212,6 +213,11 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal((await stores.control.query('SELECT error_code FROM dispatches WHERE event_id=$1',[lost.reference.id])).rows[0].error_code,'assistant_runtime_unavailable');
     await due(lost.reference.id);mode='done';assert.equal((await run(lost.reference.id)).state,'completed');
     assert.deepEqual(calls.filter(c=>c.input.event_id===lost.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    // While the bot is not connected no brain turn starts, so no model call is spent on a reply that cannot go out.
+    const offline=await capture('Bot offline');await prepare(offline.reference.id);mode='done';botState='failed';
+    assert.equal((await run(offline.reference.id)).state,'running');assert.ok(!calls.some(c=>c.input.event_id===offline.reference.id));
+    botState='connected';await due(offline.reference.id);assert.equal((await run(offline.reference.id)).state,'completed');
+    assert.deepEqual(calls.filter(c=>c.input.event_id===offline.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1]);
     const unconfirmed=await capture('Send unconfirmed');await prepare(unconfirmed.reference.id);mode='done';delivery='ambiguous';
     assert.equal((await run(unconfirmed.reference.id)).state,'ambiguous');delivery='done';
     const before=[calls.length,sends.length];await due(unconfirmed.reference.id);await run(unconfirmed.reference.id);

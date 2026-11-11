@@ -21,7 +21,7 @@ import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
 import {notAllowedPrivateReply,notAllowedReply,ownerPrompts} from '../prompts.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
-import {cancelReply,deliveredReceipt,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
+import {botReady,cancelReply,deliveredReceipt,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -143,11 +143,11 @@ export class TelegramDispatchRepository {
     } catch {/* Suggestions are a separate best-effort workflow and never affect the delivered reply. */}
     return this.observation(await this.row(row.event_id));
   }
-  private async receive(row:any,result:Record<string,unknown>) {
+  private async receive(row:any,result:Record<string,unknown>,delay=observeMs) {
     if(closed.has(String(result.state)))return this.storeResult(row,result);
     await this.control.query(`UPDATE dispatches SET state='running',runtime_stage=$2,error_code='awaiting_dispatch_receipt',
       next_attempt=now()+$3*interval '1 millisecond',revision=revision+1,updated_at=now() WHERE event_id=$1`,
-      [row.event_id,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:row.runtime_stage,observeMs]);
+      [row.event_id,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:row.runtime_stage,delay]);
     return this.observation(await this.row(row.event_id));
   }
   /** A pass for the turn under the current binding, after the turn's own binding and source are checked. */
@@ -164,18 +164,20 @@ export class TelegramDispatchRepository {
    */
   private async settle(row:any,input:Input,receipt:TurnReceipt):Promise<Observation> {
     const attempt=row.attempts as number,state=String(receipt.state);
-    let credential:string;
+    let credential:string|null=null,withdrawn:string|null=null;
     try{credential=await this.credential(input);}catch(error){
       if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
-      // The reply was written for a context that changed: it runs again under the new one, or not at all.
-      return await this.storeResult(row,renewedCodes.includes(error.code)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+      withdrawn=error.code;
     }
-    const target=replyTarget(input,attempt,credential);
     if(state!=='done') {
-      await finishPresence(this.call,target,unansweredFinish(state));
+      // Without a current pass the bot cannot be asked; an unrenewed presence lapses on its own.
+      if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
       // The brain never sends anything, so a turn it lost to a restart runs again under a new attempt.
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
     }
+    // The reply was written for a context that changed: it runs again under the new one, or not at all.
+    if(!credential)return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+    const target=replyTarget(input,attempt,credential);
     if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
     if(await this.earlierReply(row,input,receipt))return await this.receive(row,{state:'running',stage:'delivery'});
     const sent=await sendReply(this.call,target,String(input.body.source_key),receipt.reply,{notify:false,presence:input.body.control_reply==null});
@@ -494,6 +496,8 @@ export class TelegramDispatchRepository {
       }
       const fixed=controlReply(input);if(fixed)return await this.settle(row,input,fixed);
       credential??=await this.credential(input);
+      // The same ref starts once the bot can send its reply; until then it waits, as it did while Hermes held the bot.
+      if(!await botReady(this.call))return await this.receive(row,{state:'running'},10000);
       // Typing and 👀 show while the brain works; Nocheh renews them at each check.
       await showPresence(this.call,replyTarget(input,row.attempts,credential));
       let result:TurnReceipt;

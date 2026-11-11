@@ -15,7 +15,7 @@ import type {GuardRepository} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {closedTurnStates,currentTurn,dispatchPayload,terminalTurnStates,turnFence,turnResultCodes,type TurnInput} from './telegram-turn.js';
-import {cancelReply,deliveredReceipt,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
+import {botReady,cancelReply,deliveredReceipt,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
 
 /** One row per controlled action that ended in a live conversation; the DB trigger writes it in the same commit as the end state. */
 export const actionContinuationSchema=`
@@ -143,16 +143,17 @@ export class ActionContinuationRepository {
    * nobody watched it being typed. */
   private async settle(row:any,input:TurnInput,receipt:TurnReceipt):Promise<Observation> {
     const attempt=continuationAttempt(row.action_id,row.attempts),state=String(receipt.state);
-    let credential:string;
+    let credential:string|null=null,withdrawn:string|null=null;
     try{credential=await this.credential(input);}catch(error){
       if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
-      return await this.storeResult(row,renewedCodes.includes(error.code)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+      withdrawn=error.code;
     }
-    const target=replyTarget(input,attempt,credential);
     if(state!=='done') {
-      await finishPresence(this.call,target,unansweredFinish(state));
+      if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
     }
+    if(!credential)return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+    const target=replyTarget(input,attempt,credential);
     if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
     const sent=await sendReply(this.call,target,String(input.body.source_key)+':continuation:'+row.action_id,receipt.reply,{notify:true,presence:true});
     if(!sent||!closedTurnStates.has(String(sent.state)))return await this.receive(row,{state:'running'});
@@ -291,6 +292,7 @@ export class ActionContinuationRepository {
       }
       credential??=await this.credential(input);
       const attempt=continuationAttempt(id,row.attempts);
+      if(!await botReady(this.call))return await this.receive(row,{state:'running'});
       await showPresence(this.call,replyTarget(input,attempt,credential));
       let result:TurnReceipt;
       try{result=await this.brain.startTurn({channel:'telegram',event_id:row.event_id,attempt},{...input.body,archive_credential:credential});}

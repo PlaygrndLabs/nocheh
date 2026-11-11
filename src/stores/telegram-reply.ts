@@ -22,6 +22,12 @@ export function replyTarget(input:TurnInput,attempt:number|string,credential:str
     ...(topic?{topic}:{}),archive_credential:credential};
 }
 
+/** Whether the bot is connected to Telegram, so a turn's reply can be sent. A brain turn starts only then, as a reply
+ * that cannot be sent would cost a model call for nothing. */
+export async function botReady(call:RuntimeCall):Promise<boolean> {
+  try{return ['connected','recovering'].includes(String((await call('telegram.identity',{},5000)).state));}catch{return false;}
+}
+
 /** Show typing and 👀 while the brain works, or keep them showing; they lapse on their own if Nocheh stops asking. */
 export async function showPresence(call:RuntimeCall,target:ReturnType<typeof replyTarget>):Promise<void> {
   try{await call('telegram.presence',target,5000);}catch{/* Presence is cosmetic. */}

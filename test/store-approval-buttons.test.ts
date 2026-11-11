@@ -205,8 +205,9 @@ test('allowed members post freely in their own group; everything else waits for 
     const stranger=await message('stranger-ask',{text:'Nocheh, what is the plan?',message_thread_id:17,is_topic_message:true},8,++updates);
     await s.preparation.run(stranger.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     assert.equal((await s.telegram.run(stranger.id,await epoch('telegram'))).state,'skipped');
+    // Nocheh decided the message addressed the bot, so the bot gets only what it sends.
     assert.deepEqual({...refusals.at(-1),event_id:undefined},{event_id:undefined,chat_id:group,message_id:refusals.at(-1)!.message_id,topic:'17',user_id:'8',
-      group_addressing:{direct:false,handles:[]},text:'Nocheh, what is the plan?',reply:'Sorry, I only work with people the owner has allowed in this group.'});
+      reply:'Sorry, I only work with people the owner has allowed in this group.'});
     await stores.control.query(`UPDATE owner_prompts SET texts='{"telegram.not_allowed":"Only allowed people, please."}'::jsonb WHERE singleton`);
     const edited=await message('stranger-again',{text:'Nocheh?'},8,++updates);
     await s.preparation.run(edited.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));

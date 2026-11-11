@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram} from './fixture-brain.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {foregroundReplyActive} from '../src/stores/automatic-publication.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
@@ -24,7 +24,9 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-continuations-')),key='continuations:'+Date.now(),group='-100'+Date.now(),token=digest(key);
   const owner:Reader={admin:true,scope:null},starts:any[]=[],resumes:any[]=[],cancels:any[]=[];
   // What the runtime answers to the next start and observation of a follow-up turn.
-  let started:Record<string,unknown>={state:'done'},observed:Record<string,unknown>={state:'running'},denied:string[]=[];
+  let started:Record<string,unknown>={state:'done'},observed:Record<string,unknown>={state:'running'},denied:string[]=[],delivery='done';
+  // Nocheh's bot sends what the brain returns; only its send can end uncertain.
+  const sends:any[]=[],frontDoor=fixtureTelegram((operation,input)=>sends.push({operation,...input}));
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied}}});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
     runtime:async(operation,input)=>{
@@ -34,7 +36,9 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
       if(operation==='run.start'){starts.push(input);return started;}
       if(operation==='run.resume'){resumes.push(input);return observed;}
       assert.equal(operation,'run.cancel');cancels.push(input);return {state:'cancelled'};
-    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');}),
+    telegram:async(operation,input,timeout)=>operation==='telegram.reply'&&delivery==='ambiguous'&&!input.cancel?
+      (sends.push({operation,...input}),{state:'ambiguous',error_code:'delivery_unconfirmed'}):frontDoor(operation,input,timeout)});
   const bot=String(Date.now()).slice(-8)+'7';let updates=0;
   const capture=async(label:string,payload:Record<string,unknown>,scope=group)=>{
     const event:Envelope={version:1,key:`telegram:${bot}:update:${payload.update_id}`,origin:'live',kind:'telegram_update',bot_id:bot,scope,source_id:String(payload.update_id),revision:'1',occurred_at:null,text:label,payload};
@@ -105,11 +109,15 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     assert.equal(await foregroundReplyActive(stores.control,await s.guards.state(),true),true);
     await due(one.id);observed={state:'done'};
     assert.equal((await follow(one.id)).state,'completed');assert.equal(resumes.at(-1).attempt,'c1-'+one.id.slice(0,40));
+    // The bot sends the follow-up as a reply to the asking message in its topic, and it alerts.
+    const reply=sends.filter(item=>item.operation==='telegram.reply').at(-1);
+    assert.deepEqual(pick(reply,'chat_id','topic','attempt','notify','presence','text'),{chat_id:group,topic:17,attempt:'c1-'+one.id.slice(0,40),notify:true,presence:true,text:'Fixture reply'});
+    assert.match(reply.dispatch_key,new RegExp(':continuation:'+one.id+'$'));
     assert.equal((await row(one.id)).state,'done');
     assert.equal((await stores.derived.query('SELECT 1 FROM derived_artifacts WHERE operation_id=$1',['action-continuation-result:'+one.id+':1'])).rowCount,1);
     assert.equal(await foregroundReplyActive(stores.control,await s.guards.state(),true),false);
     const calls=starts.length+resumes.length;assert.equal((await follow(one.id)).state,'completed');assert.equal(starts.length+resumes.length,calls,'a finished follow-up calls nothing');
-    // A failure before delivery is retried as a new attempt, three times in all; an uncertain delivery is never repeated.
+    // A failure before delivery is retried as a new attempt, three times in all; an uncertain send is never repeated.
     const failing=await message('two'),two=await operation(failing,'printf made-up-two');await asking(failing,'done');await decide(two,'na');await ran(two.id);
     started={state:'failed',error_code:'assistant_runtime_unavailable'};
     for(const attempt of [1,2,3]) {
@@ -119,9 +127,9 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     let before=starts.length;await due(two.id);assert.equal((await follow(two.id)).state,'failed');assert.equal(starts.length,before,'no fourth start');
     assert.equal((await workflowDetail(stores.control,(await workflow(two.id)).id)).can_retry,false,'three failed attempts are final');
     const unsure=await message('three'),three=await operation(unsure,'printf made-up-three');await asking(unsure,'done');await decide(three,'na');await ran(three.id);
-    started={state:'ambiguous',error_code:'delivery_unconfirmed'};
-    assert.equal((await follow(three.id)).state,'ambiguous');before=starts.length;
-    await due(three.id);assert.equal((await follow(three.id)).state,'ambiguous');assert.equal(starts.length,before);
+    started={state:'done'};delivery='ambiguous';
+    assert.equal((await follow(three.id)).state,'ambiguous');before=starts.length;const sent=sends.length;delivery='done';
+    await due(three.id);assert.equal((await follow(three.id)).state,'ambiguous');assert.deepEqual([starts.length,sends.length],[before,sent]);
     // Operations of one message that end together are answered together; a request still waiting for the owner holds nothing.
     const together=await message('together');await asking(together,'done');
     const lead=await operation(together,'printf made-up-lead'),sibling=await operation(together,'printf made-up-sibling'),later=await operation(together,'printf made-up-later');
