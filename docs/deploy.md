@@ -63,7 +63,7 @@ in the single `nocheh` project on normal localhost ports. Stop unattended servic
 first and verify exclusive Telegram polling.
 The launcher refuses another running Nocheh project or
 an active unattended stack. It starts PostgreSQL, app, dashboard, executor,
-security, Hermes, workflow services, Honcho, and the mini app with its tunnel when set up.
+machines, security, Hermes, workflow services, Honcho, and the mini app with its tunnel when set up.
 The existing app container mounts source from the session checkout read-only
 and compiles changed TypeScript, React, CSS, and plugin assets into separate
 generated-code volumes. Node watches generated code, the dashboard reloads when
@@ -118,6 +118,7 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 | `data/local/files/` | Original attachment bytes |
 | `data/local/spool/` | Durable capture and retry data |
 | `data/local/reports/` | Local validation reports |
+| `data/local/machines/` | SSH keys and trusted host keys of the owner's machines; used only by `nocheh-machines`, never backed up, and erased by a reset with the machines |
 | Compose `postgres_data` volume | Nocheh archive database |
 
 `TELEGRAM_ENABLED` defaults to `false`. Configure `TELEGRAM_BOT_TOKEN`,
@@ -126,6 +127,22 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 `on`. See [guarded-copy operations](guard.md).
 `NOCHEH_BOX_IMAGE`, `NOCHEH_BOX_LIMIT` and the generated `NOCHEH_BOX_TOKEN` set up
 the sealed job box; see [the security service](security-service.md).
+The generated `NOCHEH_MACHINE_TOKEN` lets `nocheh-app` ask `nocheh-machines` to run
+jobs on the owner's machines; only those two services get it. It has at least 32
+characters and differs from `SERVICE_TOKEN` and `NOCHEH_BOX_TOKEN`. `init`, `up` and
+`make dev` generate it when it is missing. Without it, Settings › Machines says
+machine control is unavailable and nothing else changes. `nocheh-machines` runs
+from the management image, which carries the SSH client and a user for
+`NOCHEH_UID`: `./bin/nocheh up` builds it, `make dev-build` rebuilds it for
+`make dev`, and after `NOCHEH_UID` changes it needs a rebuild, or the service
+reports unhealthy because `ssh` cannot run. On each machine, give Nocheh a login
+of its own with bash as its shell and `ps` (procps) installed, so Stop can end its
+programs. For a VM on the same computer, use `host.docker.internal`, not `localhost`:
+`nocheh-machines` connects from its own container. On Linux, `host.docker.internal`
+reaches the host through Docker's host gateway; a host firewall can still block it.
+An address, port or login changes with Edit in Settings › Machines; the machine then
+needs a new Test, and its key stays. See
+[ADR-0231](adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md).
 Settings › Telegram › Mini app saves the mini app address and tunnel token; with both set and Telegram on,
 `up` also starts `nocheh-miniapp` and `nocheh-tunnel`. See [Telegram](telegram.md#mini-app).
 The API binds only to loopback; PostgreSQL has no host port.
@@ -197,6 +214,12 @@ disabled; a saved native Hermes login is held outside its active path.
 `spool/.restore-inactive`, `admin/tools/inactive` and `hermes/scheduler-inactive`
 hold archive workers, controlled tools and scheduled runs. No second bot, executor
 or login is activated by the rehearsal. Diagnostics expose these holds.
+Backups leave out the machines' keys in `machines/`. A restored installation keeps
+its machines in Settings › Machines but not their keys. They still show Ready from
+their last Test, but the next Test, command or cleanup fails with "Nocheh has no key
+for this machine" (`machine_key_missing`), and from then on the machine shows Test
+failed, so no new job can ask for it: remove each machine, add it again and put its
+new public key on the machine.
 
 The dashboard also backs up automatically once a day, by default at 04:00 UTC,
 through the same path as System › Backups › Back up now. Settings › Privacy &
