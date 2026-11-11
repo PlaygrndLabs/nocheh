@@ -35,6 +35,7 @@ import {telegramDirectory} from './telegram-directory.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
+import {MACHINE_BODY} from './machines.js';
 import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import type {hostTransport} from '../workflows/host-transport.js';
@@ -71,7 +72,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.memory.prepareRequest(body));
     }
     const principal=reader(req,config.token);
-    // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0231).
+    // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
     if(req.method==='GET'&&path==='/v1/runtime') {
@@ -307,6 +308,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // A stopped job's card shows that it stopped.
       void s.actionCommands.settle('background',stopped.id).catch(()=>{});
       return result(stopped);
+    }
+    // One command of a machine job's run on its machine (ADR-0231), through the broker only. Not an answer through result():
+    // the output is raw terminal bytes, and the run's next model request is secret-checked by the broker, as for the box.
+    if(req.method==='POST'&&path==='/v1/machines/exec') {
+      if(principal.admin)throw new HttpError(403,'machine_not_allowed');
+      return s.machines.exec(principal,await s.turns.binding(principal),await readJson(req,MACHINE_BODY),res);
     }
     if(req.method==='POST'&&['/v1/tools/claim','/v1/tools/start','/v1/tools/finish'].includes(path)) {
       admin(principal);const body=await readJson(req,2*1024*1024);

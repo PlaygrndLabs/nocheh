@@ -33,6 +33,10 @@ BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
 BOX_STRIPPED={'mcp__nocheh__shell','mcp__nocheh__browser'}
 BOX_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
 BOX_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file','code_execution']
+# A machine run runs Hermes's own terminal and file tools on the owner's machine, through Nocheh (machine_box.py).
+# It keeps and loses what a box run does, and has no code_execution.
+MACHINE_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_manage','read_file','write_file','patch','search_files'}
+MACHINE_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file']
 
 
 class UnexpectedProfileTool(RuntimeError):
@@ -52,10 +56,10 @@ def bind_profile_home(profile):
     from hermes_constants import set_hermes_home_override
     set_hermes_home_override(profile)
 
-def turn_tools(background,box):
+def turn_tools(background,box,machine=False):
     """The tools a turn drops from its profile's toolsets, and the exact set it then runs with."""
-    removed=OWNER_SET_TOOLS|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box else set())
-    return removed,BOX_TOOLS if box else BACKGROUND_TOOLS if background else ALLOWED_TOOLS
+    removed=OWNER_SET_TOOLS|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box or machine else set())
+    return removed,BOX_TOOLS if box else MACHINE_TOOLS if machine else BACKGROUND_TOOLS if background else ALLOWED_TOOLS
 
 
 def verify_profile_tools(names,allowed=ALLOWED_TOOLS):
@@ -213,6 +217,19 @@ def box_step(body):
     return box
 
 
+def machine_step(body):
+    """Whether this turn is a job run on the owner's machine. As for the box, the run and the launcher's environment
+    must agree in both directions, and a run is never both; anything else stops before the agent runs."""
+    limits=body.get('background')
+    run=body.get('channel')=='background' and body.get('review') is not True and isinstance(limits,dict)
+    machine=limits.get('machine',False) if run else False
+    if type(machine) is not bool:raise ValueError('invalid_background_run')
+    on,backend=os.environ.get('NOCHEH_MACHINE_RUN')=='1',os.environ.get('TERMINAL_ENV')=='nocheh_machine'
+    if (machine and limits.get('box') is True) or ((not (os.environ.get('NOCHEH_ISOLATED_TURN')=='1' and on and backend)) if machine else (on or backend)):
+        raise ValueError('job_machine_unavailable')
+    return machine
+
+
 def job_result(result, session_id):
     """A background job's run: its final answer is the report. The summary Hermes asks for when the run's
     iterations run out is a report too; a run that failed or was interrupted wrote none."""
@@ -228,7 +245,7 @@ def job_result(result, session_id):
 
 
 def run(body, emit=None, relay=None):
-    box=box_step(body)
+    machine=machine_step(body);box=box_step(body)
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
     if body.get('review') is not True and retired_content_question(body.get('source_text',body.get('text',''))):
@@ -296,7 +313,8 @@ def run(body, emit=None, relay=None):
         if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'])
         agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
             api_key=credentials.access_token,base_url=credentials.base_url,
-            enabled_toolsets=['memory'] if review else BOX_TOOLSETS if box else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,fallback_model=None,
+            enabled_toolsets=['memory'] if review else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,
+            fallback_model=None,
             session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
             user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
             skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
@@ -318,12 +336,12 @@ def run(body, emit=None, relay=None):
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
-        removed,allowed=turn_tools(background,box)
+        removed,allowed=turn_tools(background,box,machine)
         agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in removed]
         agent.valid_tool_names=set(agent.valid_tool_names)-removed
         verify_profile_tools(agent.valid_tool_names,allowed)
-        if box:
-            # The box tools must all be there, on the box backend; the hook then lets only this run's tools
+        if box or machine:
+            # The box or machine tools must all be there, on that backend; the hook then lets only this run's tools
             # run, and none of their commands outlives the run.
             from services.hermes import job_box
             job_box.seal(agent.valid_tool_names,body['turn_deadline_epoch'])
@@ -414,7 +432,7 @@ def main():
     except Exception as error:
         import traceback
         frames=traceback.extract_tb(error.__traceback__)
-        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','guard_transition_pending','audience_context_changed','runtime_turn_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable','data_tools_unavailable'}
+        known={'unexpected_profile_tool','unsupported_memory_compaction_revision','profile_scope_denied','guard_context_changed','guard_transition_pending','audience_context_changed','runtime_turn_changed','required_guard_unavailable','invalid_process_scope_binding','job_box_unavailable','job_machine_unavailable','data_tools_unavailable'}
         result={'state':'failed','error_code':str(error) if str(error) in known else 'assistant_runtime_unavailable',
                 'error_type':type(error).__name__,'error_stage':frames[-1].name if frames else 'bootstrap'}
         if isinstance(error,UnexpectedProfileTool):result['unexpected_tool_names']=error.names

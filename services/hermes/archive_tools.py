@@ -33,11 +33,17 @@ def bind_process_deadline(deadline, background=False):
     _PROCESS_DEADLINE=float(deadline)
 
 
-def request(path,body=None,timeout=None):
+def endpoint():
+    """Where this process asks Nocheh and as whom: the archive's base URL and the bound turn credential."""
     credential = _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()
     if not credential:
         raise RuntimeError('archive_scope_not_bound')
-    req = urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780') + path,
+    return os.environ.get('ARCHIVE_URL','http://nocheh-app:8780'),credential
+
+
+def request(path,body=None,timeout=None):
+    base,credential = endpoint()
+    req = urllib.request.Request(base + path,
                                  data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Prepared context can include a cold guard-model pass. It is still bounded,

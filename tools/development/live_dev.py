@@ -15,7 +15,7 @@ from tools.operations.provider import routes as provider_routes
 
 PROJECT = 'nocheh'
 DEV_IMAGES = 'nocheh-dev'
-SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor',
+SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor', 'nocheh-machines',
             'nocheh-security', 'hermes-agent-sb', 'inngest-redis', 'inngest-server',
             'hermes', 'honcho-postgres', 'honcho-redis',
             'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
@@ -285,7 +285,7 @@ def release_idle_fixture_networks(env):
 def build_needed(env):
     if os.environ.get('NOCHEH_DEV_BUILD') == '1':
         return True
-    for service in ('db', 'app', 'dashboard', 'executor', 'security'):
+    for service in ('db', 'app', 'dashboard', 'executor', 'machines', 'security'):
         result = subprocess.run(['docker', 'image', 'inspect', DEV_IMAGES + ':' + service],
                                 cwd=ROOT, env=env, capture_output=True)
         if result.returncode:

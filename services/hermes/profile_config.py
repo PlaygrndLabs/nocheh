@@ -85,8 +85,8 @@ def resolved(config, model):
     # Skills are set by the owner only. The native curator would archive or
     # consolidate a skill that no turn loaded for its configured window.
     config['curator'] = {'enabled': False}
-    # Hermes's terminal, file and code tools run only in a job's sealed box. A terminal section
-    # would replace the launcher's backend, possibly with local; the box's bounds are fixed.
+    # Hermes's terminal, file and code tools run only in a job's sealed box or on its machine. A terminal
+    # section would replace the launcher's backend, possibly with local; the box's bounds are fixed.
     config.pop('terminal', None)
     # A code kernel left idle in a box does not stay long after its last cell.
     config['code_execution'] = {'timeout': 120, 'max_tool_calls': 20, 'max_session_kernels': 1, 'kernel_idle_timeout': 600}

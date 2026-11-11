@@ -30,7 +30,7 @@ const listen=async(server:Server)=>{await new Promise<void>(resolve=>server.list
 const close=async(server:Server)=>{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));};
 
 test('the data tools keep their names, closed schemas and engine-neutral words',()=>{
-  // The brain sees each one as mcp__nocheh__<name>, one for one with the plugin tool nocheh_<name> it replaces (ADR-0231).
+  // The brain sees each one as mcp__nocheh__<name>, one for one with the plugin tool nocheh_<name> it replaces (ADR-0233).
   assert.deepEqual(mcpTools.map(item=>item.name),['archive_search','archive_read','archive_page','memory_search','memory_recall','action_request','background_job',
     'telegram_destinations','shell','browser','mcp','owner_read','tasks','notion','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
   for(const item of mcpTools) {
@@ -295,6 +295,40 @@ test('background jobs are started, listed and stopped through the bound scope',a
   // Only the isolated runtime has sealed boxes.
   assert.deepEqual(await run('background_job',{action:'start',title:'t',instruction:'i',box:true},fake(()=>({}),undefined,{isolated:false}).context),{error:'job_box_not_allowed'});
   assert.equal(idle.calls.length,0);
+});
+
+test('a machine and its plan are forwarded only with start and only from the isolated runtime',async()=>{
+  const steps=['Install the build tools','Build the project','Report the test results'];
+  const jobs=fake(()=>({id:ID,state:'proposed'}));
+  await run('background_job',{action:'start',title:'t',instruction:'i',machine:'build-vm',steps},jobs.context);
+  for(const [machine,plan] of [['',steps],[null,'Build it'],[7,null],[['build-vm'],{1:'Build'}]] as const)
+    await run('background_job',{action:'start',title:'t',instruction:'i',machine,steps:plan},jobs.context);
+  await run('background_job',{action:'status',machine:'build-vm',steps},jobs.context);
+  await run('background_job',{action:'stop',id:'b'.repeat(64),machine:'build-vm',steps},jobs.context);
+  assert.deepEqual(jobs.calls.map(call=>[call.path,call.body]),[
+    ['/v1/jobs/start',{title:'t',instruction:'i',machine:'build-vm',steps}],['/v1/jobs/start',{title:'t',instruction:'i',steps}],
+    ...Array(3).fill(['/v1/jobs/start',{title:'t',instruction:'i'}]),['/v1/jobs/status',{}],['/v1/jobs/stop',{id:'b'.repeat(64)}]]);
+  // Its commands reach the machine only through the isolated runtime's broker.
+  const plain=fake(()=>({}),undefined,{isolated:false});
+  assert.deepEqual(await run('background_job',{action:'start',title:'t',instruction:'i',machine:'build-vm',steps},plain.context),{error:'isolated_runtime_required'});
+  assert.equal(plain.calls.length,0);
+  for(const code of ['job_machine_not_allowed','job_machine_not_found','job_card_too_long']) {
+    const answer=await run('background_job',{action:'start',title:'t',instruction:'i',machine:'build-vm',steps},fake(()=>new Status(409,{error:code})).context);
+    assert.equal(answer.error,code);delete answer.error;
+    // A machine that is missing or not ready: the owner must add it and pass Test first.
+    if(code==='job_machine_not_found') {
+      for(const words of ['Settings › Machines','press Test','until the test passes','action=status'])assert.ok(answer.note.includes(words),words);
+      delete answer.note;
+    }
+    assert.deepEqual(answer,{},code);
+  }
+  const schema=tool('background_job'),properties=(schema.inputSchema as any).properties;
+  assert.deepEqual([properties.machine.type,properties.machine.maxLength],['string',40]);
+  assert.ok(properties.machine.description.startsWith('For work on one of the owner\'s machines (see action=status machines): the machine\'s name and a short plan '+
+    'of 1-12 steps the owner approves on one card. Only for the owner\'s own request in their private chat or a project group.'));
+  assert.deepEqual([properties.steps.type,properties.steps.minItems,properties.steps.maxItems,properties.steps.items],['array',1,12,{type:'string',maxLength:200}]);
+  assert.match(schema.description,/box or machine with steps/);assert.match(schema.description,/lists the owner's machines/);
+  for(const name of ['machine','steps'])assert.ok(!(schema.inputSchema as any).required.includes(name));
 });
 
 const view=(text:string)=>({id:ID,kind:'mcp',state:'done',result:{content:text},error_code:null,fingerprint:'f'.repeat(64)});

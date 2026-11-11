@@ -223,7 +223,8 @@ class ToolGateTests(unittest.TestCase):
             for names,deadline in ((self.names-{'execute_code'},self.deadline),(self.names|{'delegate_task'},self.deadline),
                                    (self.names,None),(self.names,True),(self.names,str(self.deadline)),(self.names,float('inf'))):
                 with self.subTest(names=names,deadline=deadline),self.assertRaisesRegex(RuntimeError,'job_box_unavailable'):job_box.seal(names,deadline)
-            with patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'0'}),self.assertRaisesRegex(RuntimeError,'job_box_unavailable'):job_box.seal(self.names,self.deadline)
+            for changes in ({'NOCHEH_ISOLATED_TURN':'0'},{'NOCHEH_MACHINE_RUN':'1'}):
+                with self.subTest(changes=changes),patch.dict(os.environ,changes),self.assertRaisesRegex(RuntimeError,'job_box_unavailable'):job_box.seal(self.names,self.deadline)
             # A job run lasts up to its job's hard deadline, 55 minutes after it started at most.
             long=time.time()+3300
             job_box.seal(self.names,long);self.assertEqual(job_box._DEADLINE,long)

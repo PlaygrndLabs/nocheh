@@ -12,6 +12,7 @@ import {AssistantSettings} from './settings/assistant';
 import {TaskSettingsPanel} from './settings/tasks';
 import {ConnectionSettings} from './settings/connections';
 import {GithubConnection} from './settings/github';
+import {MachineSettings} from './settings/machines';
 import {AdvancedSettings, advancedKeys} from './settings/advanced';
 import {loadSettings} from '../lib/settings';
 
@@ -50,6 +51,7 @@ export default function Settings() {
         <GithubConnection />
       </>
     );
+  else if (view === 'machines') body = <MachineSettings />;
   else if (!settings.data)
     body = settings.error ? (
       <LoadError what="settings" onRetry={() => void loadSettings()} />

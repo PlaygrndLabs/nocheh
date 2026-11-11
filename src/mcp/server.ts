@@ -4,7 +4,7 @@ import {HttpError,readJson} from '../http.js';
 import type {Reader} from '../access.js';
 import {mcpTools,type ToolContext,type Loopback} from './tools.js';
 
-/** MCP revisions this server speaks: Streamable HTTP without sessions or server-to-client requests (ADR-0231). */
+/** MCP revisions this server speaks: Streamable HTTP without sessions or server-to-client requests (ADR-0233). */
 export const protocolVersions=['2025-11-25','2025-06-18','2025-03-26'];
 const serverInfo={name:'nocheh',title:'Nocheh',version:'1'};
 type Id=string|number;

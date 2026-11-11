@@ -2,7 +2,7 @@ import {workflowMetrics} from '../src/workflows/metrics.js';
 /** Isolated UI acceptance fixture. No poller, scheduler, provider, or effect executor. */
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
@@ -122,7 +122,7 @@ const timingFor=(id:string)=>{const n=timingIds.indexOf(id),scale=1+((n*37)%10)/
 const browserDatabases=[['archive','Archive','postgres','nocheh_archive'],['derived','Derived','postgres','nocheh_derived'],['control','Control','postgres','nocheh_control'],['workflow','Workflow · Inngest','postgres','nocheh_inngest'],['hermes:fixture-owner','Hermes · fixture-owner','sqlite','state.db'],['usage','Model usage','sqlite','usage.sqlite']] as const;
 const browserRows=Array.from({length:73},(_,i)=>({id:(i+1).toString(16).padStart(64,'0'),channel:i%3?'telegram':'browser',scope:i%4?'42':'-10042',text:i%9===0?null:'Synthetic message '+(i+1)+' about stargazing plans.',received_at:hoursAgo(i*2)}));
 let memoryAttached=true;
-const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes','Hermes','Assistant runtime','running'],['honcho-api','Honcho','Memory engine','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
+const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes','Hermes','Assistant runtime','running'],['nocheh-machines','Nocheh','Runs approved jobs on the owner’s machines over SSH and keeps their keys','running'],['honcho-api','Honcho','Memory engine','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
 const personId='1'.repeat(64),projectEntityId='2'.repeat(64),projectId='ab'.repeat(32),factId='3'.repeat(64),requestId='4'.repeat(64),grantId='5'.repeat(64),conversation='-10042',topic='-10042/topic/7';
 const memoryMapNodes:any[]=[
  {id:`person:${personId}`,kind:'person',label:'Mira Chen',state:'active',detail:{revision:2,fact_count:2}},
@@ -160,10 +160,50 @@ const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.
 const backgroundJobs:any[]=[
   {id:hx('9a'),title:'Open tasks in the aurora group',state:'running',chat:'-10042',asked_in:'-10042',attempts:1,ended:null,cost_usd:0.84,cost_limit_usd:5,priced:true,minutes_limit:45,
    estimate:{minutes:14,cost_usd:1.6,messages:2400},todo:[{content:'Read March',status:'completed'},{content:'Read April',status:'in_progress'},{content:'Check who owns each open task',status:'pending'}],
-   started_at:minutesAgo(9),finished_at:null,created_at:minutesAgo(10),error_code:null},
+   started_at:minutesAgo(9),finished_at:null,created_at:minutesAgo(10),error_code:null,machine:null,steps:null,machine_cleanup:null},
   {id:hx('9b'),title:'Summary of last week',state:'done',chat:'42',asked_in:'42',attempts:1,ended:'time',cost_usd:0.12,cost_limit_usd:5,priced:true,minutes_limit:45,
-   estimate:{minutes:2,cost_usd:0.1,messages:180},todo:[],started_at:minutesAgo(120),finished_at:minutesAgo(118),created_at:minutesAgo(121),error_code:null}];
+   estimate:{minutes:2,cost_usd:0.1,messages:180},todo:[],started_at:minutesAgo(120),finished_at:minutesAgo(118),created_at:minutesAgo(121),error_code:null,machine:null,steps:null,machine_cleanup:null},
+  // A job on the owner's machine: the plan its card showed, and its to-do list as it works through it.
+  {id:hx('9c'),title:'Set up the garden site on build-vm',state:'running',chat:'42',asked_in:'-10042',attempts:1,ended:null,cost_usd:0.31,cost_limit_usd:5,priced:true,minutes_limit:45,
+   estimate:{minutes:20,cost_usd:0.9},todo:[{content:'Install git and the build tools',status:'completed'},{content:'Copy the project into ~/projects/garden-site',status:'in_progress'}],
+   started_at:minutesAgo(6),finished_at:null,created_at:minutesAgo(8),error_code:null,machine:{name:'build-vm'},
+   steps:['Install git and the build tools','Copy the project into ~/projects/garden-site','Install its packages and run its tests','Start it and check that it answers on port 8080'],machine_cleanup:null},
+  {id:hx('9d'),title:'Clean old logs on test-vm',state:'stopped',chat:'42',asked_in:'42',attempts:0,ended:null,cost_usd:0,cost_limit_usd:5,priced:true,minutes_limit:45,
+   estimate:{minutes:5,cost_usd:0.2},todo:[],started_at:null,finished_at:minutesAgo(200),created_at:minutesAgo(210),error_code:'job_machine_off',machine:{name:'test-vm'},
+   steps:['List log files older than 30 days in ~/logs','Delete them and report the space freed'],machine_cleanup:null},
+  // A machine job stopped at its time limit whose programs Nocheh couldn't end: the owner ends them.
+  {id:hx('9e'),title:'Build the photo gallery on build-vm',state:'done',chat:'42',asked_in:'42',attempts:1,ended:'time',cost_usd:0.62,cost_limit_usd:5,priced:true,minutes_limit:45,
+   estimate:{minutes:30,cost_usd:0.8},todo:[],started_at:minutesAgo(400),finished_at:minutesAgo(355),created_at:minutesAgo(410),error_code:null,machine:{name:'build-vm'},
+   steps:['Install the image tools','Build the gallery and start it on port 8081'],machine_cleanup:'failed'},
+  // A machine job still waiting for Approve: nothing has run on its machine yet.
+  {id:hx('9f'),title:'Rotate the logs on build-vm',state:'proposed',chat:'42',asked_in:'42',attempts:0,ended:null,cost_usd:0,cost_limit_usd:5,priced:true,minutes_limit:45,
+   estimate:{minutes:5,cost_usd:0.1},todo:[],started_at:null,finished_at:null,created_at:minutesAgo(2),error_code:null,machine:{name:'build-vm'},
+   steps:['Set up logrotate for ~/projects/garden-site/logs'],machine_cleanup:null}];
 let jobLimits={cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,box_tools:true,revision:0};
+// Machines: the preview stands in for Nocheh's machine service with made-up machines, keys and commands. Test fails only for an
+// address ending in .invalid; the key it shows is a fingerprint of the name, so a new host key shows only after Trust a new host key.
+const fingerprint=(text:string)=>createHash('sha256').update(text).digest('base64').replace(/=+$/,'');
+const machineView=(name:string,id:string)=>({id,name,public_key:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI'+fingerprint('key:'+id)+' nocheh '+name});
+let machineControl={enabled:true,revision:0};
+const machines:any[]=[
+  {...machineView('build-vm','ab12'.repeat(8)),address:'192.0.2.10',port:22,login:'nocheh',host_key:'SHA256:'+fingerprint('build-vm'),enabled:true,tested_at:minutesAgo(40),test_error:null,revision:2,created_at:minutesAgo(900),jobs:1},
+  {...machineView('test-vm','cd34'.repeat(8)),address:'host.docker.internal',port:2222,login:'nocheh',host_key:null,enabled:true,tested_at:null,test_error:'machine_auth_failed',revision:3,created_at:minutesAgo(300),jobs:0},
+  {...machineView('spare-vm','ef56'.repeat(8)),address:'spare-vm.example.invalid',port:22,login:'nocheh',host_key:null,enabled:false,tested_at:null,test_error:null,revision:1,created_at:minutesAgo(200),jobs:0}];
+let machineCommandId=40;
+const machineCommand=(machine:any,row:any)=>({id:++machineCommandId,machine_id:machine.id,machine_name:machine.name,job_id:null,job_title:null,kind:'command',state:'done',exit_code:0,
+  script_sha256:['test','cleanup'].includes(row.kind)?null:createHash('sha256').update('script:'+row.command).digest('hex'),output_sha256:createHash('sha256').update('output:'+row.command).digest('hex'),output_bytes:0,error_code:null,started_at:new Date().toISOString(),finished_at:new Date().toISOString(),...row});
+const machineCommands:any[]=[];
+{const job={job_id:hx('9c'),job_title:'Set up the garden site on build-vm'},vm=machines[0];
+ const commands:[string,string,number|null,number,string?][]=[['ssh test','test',0,26],['cd ~ && pwd','internal',0,12],['sudo -n true','command',1,58],['mkdir -p ~/projects/garden-site','command',0,0],
+  ['git --version','command',0,19],['read_file ~/projects/garden-site/README.md','file',0,2210],['ls -la ~/projects','command',0,412],['df -h ~','command',0,190],['npm --version','command',127,38],
+  ['curl -fsS https://example.org/garden-site.tar.gz -o /tmp/site.tar.gz','command',null,0,'machine_unreachable'],['tar -xzf /tmp/site.tar.gz -C ~/projects/garden-site','command',0,0]];
+ commands.forEach(([command,kind,exit,bytes,error],index)=>machineCommands.unshift(machineCommand(vm,{...(kind==='test'?{}:job),command,kind,exit_code:exit,output_bytes:bytes,
+  state:error?'failed':'done',error_code:error??null,started_at:minutesAgo(40-index*3),finished_at:minutesAgo(40-index*3-0.4)})));
+ for(let i=0;i<28;i++)machineCommands.unshift(machineCommand(vm,{...job,command:`sed -n '${i*40+1},${i*40+40}p' ~/projects/garden-site/src/app.js`,kind:i%4?'file':'command',output_bytes:900+i*13,
+  started_at:minutesAgo(6-i*0.2),finished_at:minutesAgo(6-i*0.2-0.05)}));
+ machineCommands.unshift(machineCommand(vm,{...job,command:'npm test 2>&1 | tail -n 40',state:'running',exit_code:null,output_sha256:null,output_bytes:0,started_at:minutesAgo(0.3),finished_at:null}));}
+const machineList=(mode:string)=>({available:mode!=='unavailable',...machineControl,machines});
+const machineAt=(id:string)=>{const machine=machines.find(row=>row.id===id);if(!machine)throw new HttpError(404,'machine_not_found');return machine;};
 const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',sharing_enabled:false,sharing_mode:'filtered',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',sharing_enabled:false,sharing_mode:'filtered',revision:2}];
 const devonId=hx('d1');
 const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
@@ -392,7 +432,7 @@ const server=createServer((req,res)=>{void(async()=>{
       row(0,'guard','Secret check','Nocheh','openai','OpenAI','gpt-5.6-sol',12,6000,240,0.01),row(0,'memory','Memory','Honcho','custom-1','Example gateway','claude-sonnet-5-5',9,30000,4000,null),
       row(0,'embedding','Memory search','Honcho','openai','OpenAI','text-embedding-3-small',20,8000,0,0.0002)].filter(r=>r.day>=day(days-1));
     return json(res,200,{since:day(days-1),today:day(0),days,rows,parts:[['reply','Telegram replies','Hermes'],['browser','Browser chat','Hermes'],['schedule','Scheduled runs','Hermes'],['memory_review','Memory notes','Hermes'],['guard','Secret check','Nocheh'],['memory','Memory','Honcho'],['embedding','Memory search','Honcho']].map(([id,label,service])=>({id,label,service})),sources:{hermes:'ok',honcho:'ok',pricing:'ok'}});}
-  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,keys:[{name:'SERVICE_TOKEN',service:'Nocheh services',usage:'Lets Nocheh’s own services and the dashboard call each other',present:true},{name:'NOCHEH_MEMORY_TOKEN',service:'Long-term memory (Honcho)',usage:'Lets Honcho’s model calls pass Nocheh’s secret check',present:false}],runtime:{status:{telegram:'disabled'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},routes:modelRoutes(),model_problems:[{day:new Date().toISOString().slice(0,10),part:'guard',label:'Secret check',provider:'openai',model:'gpt-5.6-sol',calls:12,failed:3,refused:2,hidden:1,reasons:{refused:2,timed_out:1},why:'2 refused by the model, 1 took too long'}],application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
+  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,keys:[{name:'SERVICE_TOKEN',service:'Nocheh services',usage:'Lets Nocheh’s own services and the dashboard call each other',present:true},{name:'NOCHEH_MEMORY_TOKEN',service:'Long-term memory (Honcho)',usage:'Lets Honcho’s model calls pass Nocheh’s secret check',present:false},{name:'NOCHEH_MACHINE_TOKEN',service:'Machine control',usage:'Lets Nocheh ask its machine service to run approved jobs on your machines',present:true}],runtime:{status:{telegram:'disabled'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},routes:modelRoutes(),model_problems:[{day:new Date().toISOString().slice(0,10),part:'guard',label:'Secret check',provider:'openai',model:'gpt-5.6-sol',calls:12,failed:3,refused:2,hidden:1,reasons:{refused:2,timed_out:1},why:'2 refused by the model, 1 took too long'}],application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
   if(route==='/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/health')return json(res,200,await workflowHealth(pool));
@@ -514,6 +554,10 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
   if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs});
   if(route==='/background-jobs/settings')return json(res,200,jobLimits);
+  if(route==='/machines')return json(res,200,machineList(mode));
+  if(route==='/machines/commands'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
+   const rows=machineCommands.filter(row=>(!q.get('machine')||row.machine_id===q.get('machine'))&&(!q.get('job')||row.job_id===q.get('job'))&&(q.get('kind')==='all'||row.kind!=='internal')&&(!before||row.id<before));
+   return json(res,200,{commands:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}
   const taskRead=route.match(/^\/tasks\/([a-f0-9]{64})$/);
   if(taskRead)return json(res,200,await tasks.get(taskOwner,taskRead[1]!));
   if(route==='/projects')return json(res,200,{projects:memoryProjects,next:null});
@@ -586,8 +630,31 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');
     jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),
       box_tools:typeof body.box_tools==='boolean'?body.box_tools:jobLimits.box_tools,revision:jobLimits.revision+1};return json(res,200,jobLimits);}
+  if(route==='/machines/settings'){if(body.revision!==machineControl.revision)throw new HttpError(409,'configuration_conflict');
+    machineControl={enabled:body.enabled===true,revision:machineControl.revision+1};return json(res,200,machineList(mode));}
+  if(route==='/machines'){if(mode==='unavailable')throw new HttpError(400,'machine_unavailable');
+    if(machines.some(row=>row.name.toLowerCase()===String(body.name).toLowerCase()))throw new HttpError(409,'machine_name_taken');
+    const machine={...machineView(String(body.name),randomUUID().replace(/-/g,'')),address:String(body.address),port:Number(body.port??22),login:String(body.login),host_key:null,enabled:true,
+      tested_at:null,test_error:null,revision:1,created_at:new Date().toISOString(),jobs:0};machines.push(machine);return json(res,200,machine);}
+  const machineChange=route.match(/^\/machines\/([a-f0-9]{32})(?:\/(test|forget-host-key|remove))?$/);
+  if(machineChange){const machine=machineAt(machineChange[1]!),action=machineChange[2];
+    if(action==='remove'){machines.splice(machines.indexOf(machine),1);return json(res,200,{ok:true});}
+    if(action==='forget-host-key'){Object.assign(machine,{host_key:null,tested_at:null,test_error:null,revision:machine.revision+1});return json(res,200,machine);}
+    if(action==='test'){if(mode==='unavailable')throw new HttpError(400,'machine_unavailable');const ok=!machine.address.endsWith('.invalid'),host_key=machine.host_key??'SHA256:'+fingerprint(machine.name);
+      Object.assign(machine,ok?{host_key,tested_at:new Date().toISOString(),test_error:null}:{test_error:'machine_unreachable'},{revision:machine.revision+1});
+      machineCommands.unshift(machineCommand(machine,{command:'ssh test',kind:'test',exit_code:ok?0:255,state:ok?'done':'failed',error_code:ok?null:'machine_unreachable'}));
+      return json(res,200,{machine,result:ok?{ok,host_key,system:'Linux 6.8.0 x86_64'}:{ok,error:'machine_unreachable'}});}
+    if(body.revision!==machine.revision)throw new HttpError(409,'configuration_conflict');
+    // Edit: a new address, port or login is another machine, as in the store: its host key goes and its jobs stop.
+    if(typeof body.name==='string'&&machines.some(row=>row!==machine&&row.name.toLowerCase()===body.name.toLowerCase()))throw new HttpError(409,'machine_name_taken');
+    const next={name:body.name??machine.name,address:body.address??machine.address,port:body.port??machine.port,login:body.login??machine.login};
+    const moved=next.address!==machine.address||next.port!==machine.port||next.login!==machine.login;
+    if(moved)for(const job of backgroundJobs.filter(row=>row.machine?.name===machine.name&&['proposed','approved','running'].includes(row.state)))
+      Object.assign(job,job.state==='running'?{state:'stopping',machine_cleanup:'pending'}:{state:'stopped',error_code:'job_machine_off',finished_at:new Date().toISOString()});
+    Object.assign(machine,next,moved?{host_key:null,tested_at:null,test_error:null,jobs:0}:{},typeof body.enabled==='boolean'?{enabled:body.enabled}:{},{revision:machine.revision+1});return json(res,200,machine);}
   const jobStop=route.match(/^\/background-jobs\/([a-f0-9]{64})\/stop$/);
-  if(jobStop){const job=backgroundJobs.find(row=>row.id===jobStop[1]);if(!job)throw new HttpError(404,'job_not_found');job.state='stopping';return json(res,200,{id:job.id,state:'stopping'});}
+  if(jobStop){const job=backgroundJobs.find(row=>row.id===jobStop[1]);if(!job)throw new HttpError(404,'job_not_found');
+   if(job.machine&&['running','reporting'].includes(job.state))job.machine_cleanup='pending';job.state='stopping';return json(res,200,{id:job.id,state:'stopping'});}
   if(route==='/tasks/archive-finished')return json(res,200,await tasks.archiveFinished(taskOwner,body));
   const taskChange=route.match(/^\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
   if(taskChange)return json(res,200,await (taskChange[2]==='comments'?tasks.comment(taskOwner,taskChange[1]!,body):taskChange[2]==='delete'?tasks.remove(taskOwner,taskChange[1]!)

@@ -11,7 +11,7 @@ export function scopeToken(secret:string,scope:string|null,expires:number,bindin
   const body=Buffer.from(JSON.stringify({scope,expires,audience:'nocheh-archive',...binding})).toString('base64url');
   return `scope.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 }
-/** The brain a turn's pass is for. Hermes is the one brain today; the pass names it so its effects can be told apart (ADR-0231). */
+/** The brain a turn's pass is for. Hermes is the one brain today; the pass names it so its effects can be told apart (ADR-0233). */
 export const defaultBrain='hermes';
 const brainName=/^[a-z][a-z0-9-]{0,31}$/;
 export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;brain?:string}):string {

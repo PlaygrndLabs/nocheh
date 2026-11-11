@@ -249,7 +249,7 @@ export function BackupsView() {
           'backup',
           HardDriveDownload,
           'Back up now',
-          'Saves messages, files, settings and the assistant’s state on this machine, including keys.',
+          'Saves messages, files, settings and the assistant’s state on this machine, including keys. The SSH keys of your machines in Settings › Machines stay out.',
           'Back up now',
           schedule && (
             <p className="mt-3 text-xs text-muted">

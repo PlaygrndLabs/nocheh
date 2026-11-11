@@ -65,6 +65,51 @@ picker chooses the private chat or a group ([sidebar](dashboard/app.tsx),
 [browser](test/dashboard-pages.browser.mjs)). Pending: the owner's look on the running
 installation.
 
+Machine control (owner, 2026-11-10: asked to let Nocheh set up projects in their VM,
+then chose no VM snapshots): Settings › Machines keeps the owner's machines (name,
+address, port, login); the new `nocheh-machines` service makes and keeps each machine's
+SSH key and shows only its public key, and Test trusts the host key on its first
+success. The owner's own message in the private chat or an active project's group can
+ask for a machine job with a short plan; its one plan card always goes to the private
+chat, and after Approve the job's Hermes terminal and file tools run on the machine
+through Nocheh for at most 50 minutes. Every command is logged in System › Machine log;
+a command ends when its shell ends, and past its time limit on the machine too when the
+machine has `timeout`; Stop, limits, a failed run and the off switches end every program
+of the job's login there, which needs `ps` (a failed cleanup shows as
+`machine_cleanup_failed`); a job that ends normally leaves its programs running and
+names them. A machine is Ready only while its last Test passed, and only then can a job
+ask for it. Every job card that would not fit Telegram is now refused with
+`job_card_too_long` instead of never arriving. The review round of 2026-11-11 added
+Edit for a machine's name, address, port and login (a new address, port or login asks
+first, forgets the host key, stops its jobs and needs a new Test); the address field
+flags `localhost` and points to `host.docker.internal`; the log shows the fingerprint
+of what ran; Background work shows a job's cleanup while it runs and when it failed;
+Remove, Trust a new host key and a move first end every pending cleanup of that
+machine, one at a time; the 8 MiB output cap counts frame headers; `~` in the file
+tools is the machine login's home; Hermes's `sudo -S` floor stays; a report that
+can't be delivered after a normal finish leaves the programs running; and
+`machine_key_missing` on a command marks the machine not ready
+([ADR-0231](docs/adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md),
+[stores](test/store-machines.test.ts), [backend](services/hermes/test_machine_box.py),
+[service](services/hermes/test_machine_server.py),
+[dashboard](test/dashboard-machines.test.mjs)). Unit, store and dashboard checks pass,
+and the full tester scenarios `machine_job_runs_after_one_approval` and
+`machine_job_refused_for_members_and_stopped` passed against a made-up SSH machine
+([scenarios](tools/acceptance/product_scenarios.py)). Pending: a real job on the
+owner's VM with a real model.
+Owner steps: say which VM app you will use, so its network can be checked; after the
+pull, run `./bin/nocheh up` (or `make dev-build`, since the management image now carries
+the SSH client), which makes `NOCHEH_MACHINE_TOKEN` and starts `nocheh-machines`; make a
+separate login for Nocheh on the VM, with bash as its shell and `ps` (procps) installed,
+since Stop ends every program it runs; add the VM in Settings › Machines, put the public
+key in that login's `~/.ssh/authorized_keys`, and press Test to check that Nocheh
+reaches it. A VM on the same computer is `host.docker.internal`, not `localhost`; a
+VM on a network only its host can reach may need a port forward or a bridged network.
+Open by design: the log's command text is what the run reports, and the script's hash
+is what ran; unlike the sealed box, the VM has its own internet while the job keeps
+the archive tools; machine keys are not backed up, so after a restore each machine
+fails with `machine_key_missing` until it is removed and added again.
+
 Data tools over MCP (owner, 2026-11-10: "start build." on the build plan whose step 5
 offers Nocheh's data tools over MCP and moves the tool switches into Nocheh): the
 broker and `nocheh-app` serve the 18 data tools at `/mcp`, each calling its existing
@@ -73,10 +118,10 @@ route with the turn's pass; Hermes connects in each turn and sees them as
 a turn's pass names its brain, kept with each checked effect; commands, web pages and
 outside tools are switched per chat or topic on its page in Chats, with "Tools in every
 chat" in Settings › Assistant, and Nocheh checks the switch on every proposal and again
-before a run ([ADR-0231](docs/adr/0231-data-tools-over-mcp.md), [tools](test/mcp.test.ts),
+before a run ([ADR-0233](docs/adr/0233-data-tools-over-mcp.md), [tools](test/mcp.test.ts),
 [switches](test/store-chat-tools.test.ts), [Hermes](services/hermes/test_data_tools.py),
-[failure](services/hermes/test_turn_failure_codes.py)). Pending: the full tester and a
-live reply on the owner's install after the machine pull. Owner step on an install that
+[failure](services/hermes/test_turn_failure_codes.py)); the full tester passed. Pending: a
+live reply on the owner's install after the pull. Owner step on an install that
 ever saved a Commands, Web pages or Outside tools switch: those saved values no longer
 apply and must be removed from Hermes's saved settings, or turns stop with
 `unsupported_preference`.

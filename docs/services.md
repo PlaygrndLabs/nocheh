@@ -8,8 +8,8 @@ Docker administration access is explicitly owner-authorized.
 
 <layout>
 
-One Compose project contains 14 continuously running containers when Honcho is
-enabled, 16 with the Telegram mini app, and one more with pgweb. In the original-only layout, database initialization
+One Compose project contains 15 continuously running containers when Honcho is
+enabled, 17 with the Telegram mini app, and one more with pgweb. In the original-only layout, database initialization
 runs inside `nocheh-db` before it reports healthy. The legacy layout retains
 its application startup initialization.
 Temporary isolated agent containers are additional.
@@ -23,6 +23,7 @@ Temporary isolated agent containers are additional.
 | `nocheh-security` | Security broker, guard and exact authorization checks | Docker / running |
 | `hermes` | The only Telegram poller and sender; managed Hermes runtime and native dashboard | Docker / running |
 | `hermes-agent-sb` | Launch sealed turn containers and job boxes; only agent infrastructure container mounting the Docker socket | Docker / running |
+| `nocheh-machines` | Run the commands of jobs the owner approved on the owner's machines over SSH; the only service holding their keys | Docker / running |
 | `inngest-server` | Workflow scheduling, retries, waits and inspection UI | Docker / running |
 | `inngest-redis` | Durable workflow queue and run state | Docker / running |
 | `honcho-api` | Memory API | Docker / running when enabled |
@@ -40,6 +41,19 @@ location, observed state and expected state. The Honcho metrics probe establishe
 process availability; memory backlog and receipt observations establish progress.
 API, capture and Inngest connectivity are separate observations.
 
+`nocheh-machines` listens on port 8789 inside the Compose network only. Only
+`nocheh-app` and `nocheh-machines` get `NOCHEH_MACHINE_TOKEN`. Only
+`nocheh-machines` uses the machines' keys in `data/local/machines/` and mounts that
+folder on its own; the dashboard and executor see it only inside the whole state
+folder they mount for backups and restarts, and leave it out of backups. It has no
+Docker socket, database login or service token. It runs from the management
+image on the default network, with `host.docker.internal` mapped to the host, and
+reports unhealthy when `ssh` cannot run as `NOCHEH_UID`. A job's commands reach it
+from its sealed turn through `nocheh-security` and `nocheh-app`. It caps a command's
+output frames at 8 MiB, their headers included, and runs one cleanup at a time for
+each machine, since a cleanup ends every program of the machine's login; see
+[ADR-0231](adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md).
+
 Nocheh runs no model provider service. Model calls leave through the security
 broker (replies), `hermes` (the secret check, images and voice notes) and `honcho-provider-gateway` (memory and
 embeddings) to the providers chosen in Settings › Models; see
@@ -54,7 +68,7 @@ flowchart TB
     Owner[Owner] --> Dashboard
     Telegram[Telegram] --> Hermes
     Telegram -.->|mini app| Tunnel --> MiniApp --> Dashboard
-    subgraph Docker["Local Docker Compose · 14 services, 16 with the mini app"]
+    subgraph Docker["Local Docker Compose · 15 services, 17 with the mini app"]
         Dashboard["nocheh-dashboard :8783"]
         Executor["nocheh-executor<br/>imports · approved tools · receipt recovery"]
         App["nocheh-app<br/>API · capture · publisher · workflow handlers"]
@@ -64,6 +78,7 @@ flowchart TB
         Hermes["hermes<br/>managed runtime and native dashboard"]
         Launcher[hermes-agent-sb]
         Security["nocheh-security<br/>broker and guard"]
+        Machines["nocheh-machines :8789<br/>machine keys · SSH commands"]
         Memory[honcho-api]
         Deriver[honcho-deriver]
         MemoryDB[honcho-postgres]
@@ -88,6 +103,8 @@ flowchart TB
     Launcher --> Box[Sealed job boxes · no network]
     Agents --> Security
     Security --> App
+    App -->|approved machine jobs| Machines
+    Machines -->|SSH| VM["The owner's machines"]
     Security -->|fetches provider key per call| Hermes
     Security --> Providers[Settings › Models providers]
     Hermes -->|secret check · images · voice| Providers

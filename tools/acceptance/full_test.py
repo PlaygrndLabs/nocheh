@@ -39,6 +39,8 @@ from tools.paths import ROOT
 IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
           'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:3326373c', 'box': 'nocheh-box:local'}
 BROWSER_IMAGE = 'nocheh-tester-browser:local'
+# The made-up machine the machine job scenarios work on over SSH (deploy/acceptance/vm-fixture.Dockerfile).
+VM_IMAGE = 'nocheh-tester-vm:local'
 
 # Plain-English names for the report, by scenario.
 TITLES = {
@@ -93,6 +95,8 @@ TITLES = {
     'background_job_restart': 'A background job restarts after its turn is killed or a message is hidden',
     'background_job_reaction_during_run': 'A background job runs on through a reaction in its chat',
     'background_job_time_limit': 'A background job at its time limit stops with a short note',
+    'machine_job_runs_after_one_approval': 'A job on your machine runs its commands there after one approval',
+    'machine_job_refused_for_members_and_stopped': 'A member cannot ask for a machine job, and Stop ends its programs there',
     'defaults_keep_history_and_notion_off': 'Defaults: history kept, Notion off',
     'settings_apply_is_followed_to_the_end': 'Settings: Save and apply finish, and a reload keeps following',
     'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',
@@ -116,6 +120,7 @@ def build_images(log):
     ids = ['--build-arg', 'LOCAL_UID='+str(os.getuid()), '--build-arg', 'LOCAL_GID='+str(os.getgid())]
     steps = [step('build_'+role, ['docker', 'build', '-t', tag]+options+ids+['.'], log) for role, tag, options in BUILDS]
     steps.append(step('build_browser', ['docker', 'build', '-t', BROWSER_IMAGE, '-f', 'deploy/acceptance/browser.Dockerfile', 'deploy/acceptance'], log))
+    steps.append(step('build_vm_fixture', ['docker', 'build', '-t', VM_IMAGE, '-f', 'deploy/acceptance/vm-fixture.Dockerfile', 'deploy/acceptance'], log))
     return steps, {role: tag for role, tag, _ in BUILDS}
 
 
@@ -237,7 +242,9 @@ def main():
     parser.add_argument('--build', action='store_true', help='Build the checkout\'s images under :tester tags first and test those')
     for role, image in IMAGES.items():
         parser.add_argument('--'+role+'-image', default=image)
+    parser.add_argument('--vm-image', default=VM_IMAGE, help='The made-up machine of the machine job scenarios; built when missing')
     args = parser.parse_args()
+    os.environ['NOCHEH_TESTER_VM_IMAGE'] = args.vm_image
     from tools.acceptance.product_scenarios import PRODUCT_ORDER, ProductScenarios
     from tools.acceptance.telegram_scenarios import ORDER, run
     order = args.only or ([] if args.skip_existing else ORDER)+PRODUCT_ORDER

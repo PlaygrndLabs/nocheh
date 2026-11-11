@@ -81,7 +81,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 
 ### Actions and approvals
 
-- The agent only proposes; approved shell, browser and MCP work runs in isolated containers with exact, revocable permissions ([0029](0029-controlled-tool-execution.md)).
+- The agent only proposes; approved shell, browser and MCP work runs in isolated containers with exact, revocable permissions ([0029](0029-controlled-tool-execution.md)); a job the owner approved may also reach, over SSH, a machine the owner registered, also at a private address ([0231](0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md)).
 - A waiting action shows Approve and Reject cards in Telegram with its exact content, an operation's in words; asked in chat, the card is the reply; the settled card says how it ended ([0158](0158-telegram-approval-buttons.md), [0165](0165-approval-card-is-the-answer-and-links-its-place.md), [0202](0202-approved-actions-report-how-they-ended.md), [0213](0213-operation-cards-read-in-words.md)); with the assistant's own one-line summary, an operation's card leads with it and its exact fields fold under it ([0224](0224-operation-cards-lead-with-the-askers-summary.md)).
 - Allowed members post freely in their own group; a message to another group is reviewed by the asker or the owner; other approvals go to the owner's private chat ([0159](0159-group-members-post-freely-and-approvals-go-private.md), [0161](0161-requesters-review-their-own-cross-group-messages.md)).
 - Topic destinations stay exact, a chat follows its own requests across turns, and waiting approvals carry across quiet epochs ([0092](0092-exact-topic-action-destinations.md), [0166](0166-a-chat-follows-its-own-message-requests.md), [0200](0200-waiting-approvals-survive-reaction-epochs.md)).
@@ -89,10 +89,10 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - An operation a rule or the owner freedom setting already allows is waited for in the turn, up to a minute, and answers in that reply; no follow-up repeats it ([0215](0215-an-allowed-operation-answers-in-the-same-turn.md)).
 - A web read's card can allow its site in that chat or topic for 12 hours or 30 days, and a command's card that exact command for 30 days; rules survive epochs, deny rules still win, and connected tools and messages are decided one by one ([0214](0214-allow-a-site-or-command-in-one-chat.md)); the card names the topic and says the rule covers everyone allowed there ([0225](0225-member-safety-rules.md)).
 - An operation or message whose outcome is unclear waits in the Inbox until the owner says it ran, says it did not, or dismisses it; an unclear web page read closes by itself. The receipt stays as observed and nothing runs again ([0218](0218-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md)).
-- The brain uses Nocheh's data tools through Nocheh's own `/mcp` endpoint, named `mcp__nocheh__<tool>`; each tool calls the existing route with the turn's pass, so every check stays, and a turn's pass names its brain. The owner's switches for commands, web pages and outside tools live in Nocheh per chat or topic, with a default for every chat, and Nocheh checks them on every proposal and again before a run ([0231](0231-data-tools-over-mcp.md)).
+- The brain uses Nocheh's data tools through Nocheh's own `/mcp` endpoint, named `mcp__nocheh__<tool>`; each tool calls the existing route with the turn's pass, so every check stays, and a turn's pass names its brain. The owner's switches for commands, web pages and outside tools live in Nocheh per chat or topic, with a default for every chat, and Nocheh checks them on every proposal and again before a run ([0233](0233-data-tools-over-mcp.md)).
 - Notion is optional, through its MCP server; only the owner's private chat proposes calls ([0175](0175-notion-through-its-mcp-server.md)); a read naming an address outside the owner's Notion, or holding one written with its scheme, asks like a change, and each call is checked again right before it runs ([0225](0225-member-safety-rules.md)).
 
-### Background jobs and sealed box
+### Background jobs, sealed box and machines
 
 - The agent starts a job with one call, Nocheh prices it and a card approves it; a job is one sealed Hermes run of up to 50 minutes, relaunched at most twice if it does not finish ([0197](0197-background-jobs-run-as-a-chain-of-sealed-steps.md), [0207](0207-a-background-job-is-one-hermes-run.md)).
 - Nocheh prices a job's model use itself at frozen rates, and the broker refuses requests past the cost limit ([0206](0206-nocheh-prices-a-jobs-model-use-itself.md)).
@@ -100,6 +100,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Jobs the owner asks for in their private chat may use a sealed box: no network, no keys, a read-only chat copy and a read-only GitHub copy fetched through Nocheh's own GitHub App ([0205](0205-owner-approved-jobs-work-in-a-sealed-box.md), [0209](0209-owner-approved-jobs-read-a-github-copy-in-their-box.md), [0210](0210-github-access-goes-through-nochehs-own-github-app.md)).
 - Owner-approved private-chat jobs read Notion as the owner allows; changes always ask, and group or member jobs never reach Notion ([0203](0203-owner-approved-jobs-read-notion.md)); a job keeps the Notion access it was approved with ([0225](0225-member-safety-rules.md)).
 - A job's changes come on list cards after its report ([0204](0204-a-jobs-changes-come-on-list-cards.md)).
+- The owner's own request in their private chat or an active project's group can ask for a job on one of the owner's machines with a short plan; one plan card always goes to the private chat, and the job's Hermes terminal and file tools then run on the machine over SSH. The `nocheh-machines` service holds the keys, every command is logged, Stop, limits and the off switches end every program of the job's login there, and there are no snapshots; every job card must fit Telegram ([0231](0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md)).
 
 ### Workflows and schedules
 
@@ -147,7 +148,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 ### Installation and recovery
 
 - Local Docker Compose is the target, in one project named nocheh; exact-revision rollouts rebuild only nocheh-app ([0019](0019-local-compose-development-and-acceptance.md), [0036](0036-one-compose-project.md), [0067](0067-exact-revision-app-rollout.md)).
-- nocheh-app holds archive, capture and handlers; nocheh-security holds broker and guard; hermes, hermes-agent-sb and nocheh-db complete the core ([0046](0046-consolidated-inngest-installation.md), [0055](0055-concise-core-service-names.md)).
+- nocheh-app holds archive, capture and handlers; nocheh-security holds broker and guard; hermes, hermes-agent-sb and nocheh-db complete the core ([0046](0046-consolidated-inngest-installation.md), [0055](0055-concise-core-service-names.md)); nocheh-machines alone holds the owner's machine keys ([0231](0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md)).
 - The dashboard and executor are services with owner-approved Docker socket access; agents never get the socket ([0048](0048-containerized-management.md)).
 - nocheh-db creates the archive, derived, control and workflow databases before it reports healthy; root Compose owns its volumes ([0054](0054-postgres-owned-store-bootstrap.md), [0075](0075-clean-development-setup.md)).
 - One root `.env` is the editable configuration ([0024](0024-single-environment-configuration.md)).

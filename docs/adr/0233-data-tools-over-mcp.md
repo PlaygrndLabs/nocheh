@@ -1,4 +1,4 @@
-# ADR-0231: Data tools over MCP
+# ADR-0233: Data tools over MCP
 
 <status>
 Accepted on 2026-11-10, as step 5 of the build that makes the brain and the
@@ -46,7 +46,10 @@ tools is unchanged.
 - Each tool calls the same service's existing `/v1` route again, on the port the
   request came in on, with the caller's pass. Every check stays where it was:
   audience, epochs, effect policy, the secret check, the owner-private check and
-  the job box. `/mcp` itself grants nothing.
+  the job box and the machine checks of
+  [ADR-0231](0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md).
+  `/mcp` itself grants nothing. As before, a job's `box` or `machine` is
+  refused before any call when the turn is not in the isolated runtime.
 - There are 18 tools with the arguments and answers the plugin tools had, the
   same error codes, bounds and parts. The MCP server is named `nocheh`, and a tool
   is named without the old `nocheh_` prefix, so the brain sees

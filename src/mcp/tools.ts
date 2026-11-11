@@ -12,7 +12,11 @@ type Value=Record<string,unknown>;
 /** Today's memory routes, in one place. The memory engine's own names stay behind Nocheh; no tool name or text shows them. */
 export const memoryRoutes={recall:'/v1/memory/honcho/recall',search:'/v1/memory/honcho/search',notes:'/v1/memory/recall',shared:'/v1/memory/context'} as const;
 /** What a job request may be told to correct; any other refusal stays opaque. The broker relays exactly these. */
-export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed']);
+export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
+  'job_machine_not_allowed','job_machine_not_found','job_card_too_long']);
+/** What the owner must do first, for a refusal the brain cannot correct by itself. */
+const jobNotes:Record<string,string>={job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
+  'there until the test passes. action=status lists the machines and whether each is ready.'};
 
 /** A route's refusal: its status and the small error body, if any. */
 class Refused extends Error {constructor(readonly status:number,readonly body:unknown){super('refused');}}
@@ -129,14 +133,18 @@ async function backgroundJob(args:Value,context:ToolContext) {
     for(const key of ['title','instruction','chat','from','to','id'])if(typeof args[key]==='string'&&args[key])body[key]=args[key];
     if(action==='start'&&typeof args.box==='boolean')body.box=args.box;
     if(action==='start'&&typeof args.repo==='string'&&args.repo)body.repo=args.repo;
-    // Only the isolated runtime has sealed boxes.
+    if(action==='start'&&typeof args.machine==='string'&&args.machine)body.machine=args.machine;
+    if(action==='start'&&Array.isArray(args.steps))body.steps=args.steps;
+    // Only the isolated runtime has sealed boxes, and only its broker reaches a machine.
     if(body.box&&!context.isolated)return text({error:'job_box_not_allowed'});
+    if(body.machine&&!context.isolated)return text({error:'isolated_runtime_required'});
     return text(await request(context,'/v1/jobs/'+action,body));
   }catch(error) {
     // Storage says what to correct, such as a member's daily limit; other failures stay opaque.
     if(error instanceof Refused) {
       const refused=code(error);
-      return text({error:typeof refused==='string'&&jobErrors.has(refused)?refused:({400:'invalid_job_request',403:'job_not_permitted',404:'job_not_found'} as Record<number,string>)[error.status]??'background_jobs_unavailable'});
+      const named=typeof refused==='string'&&jobErrors.has(refused)?refused:({400:'invalid_job_request',403:'job_not_permitted',404:'job_not_found'} as Record<number,string>)[error.status]??'background_jobs_unavailable';
+      return text({error:named,...(Object.hasOwn(jobNotes,named)?{note:jobNotes[named]}:{})});
     }
     return text({error:'background_jobs_unavailable'});
   }
@@ -380,7 +388,7 @@ function proposalSchema():Value {
 
 const day={type:['string','null']},ids={type:'array',items:{type:'string'},maxItems:20};
 /** Nocheh's data tools, as the brain sees them under the MCP server name nocheh (mcp__nocheh__<name>). Arguments and answers are
- * those the brain's own plugin tools had, so a turn reads the same evidence the same way (ADR-0231). */
+ * those the brain's own plugin tools had, so a turn reads the same evidence the same way (ADR-0233). */
 export const mcpTools:readonly McpTool[]=[
   {name:'archive_search',description:'Find permitted archive evidence in your authorized scope. For reaction questions without a known note ID, use mode=current_reactions with no query. Results include the guarded reaction observation and bounded target text; read source references for further detail. An individual empty new_reaction list records that actor removing their reaction; it does not prove task completion or that nobody else reacted. This captured evidence is incomplete; empty search results do not prove no reactions. For mode=text (default), query is required and every query word must match; try one or two distinctive words when a longer search misses. Cite returned source references.',
     inputSchema:shape({mode:{type:'string',enum:['text','current_reactions']},query:{type:'string',description:'Required for text mode; omitted for current_reactions.'},limit:{type:'integer',minimum:1,maximum:10}}),run:search},
@@ -398,9 +406,10 @@ export const mcpTools:readonly McpTool[]=[
   {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',
     inputSchema:shape({destination:{type:'string',description:'Use current for this Telegram conversation including its topic, a numeric Telegram chat ID, or CHAT_ID/topic/THREAD_ID. The server resolves current from the authenticated source turn.'},text:{type:'string',maxLength:3500}},['destination','text']),run:actionRequest},
   {name:'background_job',description:'Background jobs: work too big for one reply runs in a session of its own and reports back here. '+
-    'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD) and box. '+
+    'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD), and box or machine with steps. '+
     'Nocheh counts and prices it and posts an Approve card; nothing runs until it is approved, and the result says who approves. '+
-    'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos). '+
+    'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos); '+
+    'for the owner\'s own request it also lists the owner\'s machines and whether each is ready (machines). '+
     'action=stop with id stops a job you may stop. Only the owner may name another chat.',
     inputSchema:shape({action:{type:'string',enum:['start','status','stop']},title:{type:'string',maxLength:100},instruction:{type:'string',maxLength:8000},
       chat:{type:'string'},from:{type:'string'},to:{type:'string'},id:{type:'string'},
@@ -408,7 +417,12 @@ export const mcpTools:readonly McpTool[]=[
         'It then gets a sealed box with no internet that holds a checked copy of the job\'s own chat and, with repo, a read-only copy of that GitHub repository. '+
         'Only for a job the owner asks for in their private chat.'},
       repo:{type:'string',maxLength:140,description:'With start and box=true, for a job the owner asks for in their private chat: a GitHub repository '+
-        'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'}},['action']),run:backgroundJob},
+        'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'},
+      machine:{type:'string',maxLength:40,description:'For work on one of the owner\'s machines (see action=status machines): the machine\'s name and a short plan '+
+        'of 1-12 steps the owner approves on one card. Only for the owner\'s own request in their private chat or a project group. '+
+        'Your terminal and file tools then run on that machine.'},
+      steps:{type:'array',minItems:1,maxItems:12,items:{type:'string',maxLength:200},
+        description:'With start and machine: the plan, one short step per item, in order. The owner approves exactly this plan.'}},['action']),run:backgroundJob},
   {name:'telegram_destinations',description:'In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner\'s approval.',
     inputSchema:shape({}),run:destinations},
   {name:'shell',description:'Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval, a standing permission or a rule the owner set for this chat is required; when one already allows it, this call returns its result.',

@@ -16,6 +16,21 @@ TOOLS = ('archive_search', 'archive_read', 'archive_page', 'memory_search', 'mem
 NAMES = frozenset('mcp__nocheh__' + name for name in TOOLS)
 
 
+def result(method, params, answer=lambda name, arguments: {}, tools=TOOLS):
+    """The JSON-RPC result or error for one request, as Nocheh's endpoint would give it."""
+    if method == 'initialize':
+        return {'result': {'protocolVersion': '2025-11-25', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'nocheh', 'version': 'test'}}}
+    if method == 'ping':
+        return {'result': {}}
+    if method == 'tools/list':
+        return {'result': {'tools': [{'name': name, 'description': 'Synthetic ' + name.replace('_', ' ') + '.',
+                                      'inputSchema': {'type': 'object', 'properties': {}}} for name in tools]}}
+    if method == 'tools/call':
+        value = answer(params.get('name'), params.get('arguments') or {})
+        return {'result': {'content': [{'type': 'text', 'text': value if isinstance(value, str) else json.dumps(value)}], 'isError': False}}
+    return {'error': {'code': -32601, 'message': 'Method not found'}}
+
+
 class Endpoint:
     def __init__(self, answer=None, tools=TOOLS):
         self.answer = answer or (lambda name, arguments: {})
@@ -57,17 +72,7 @@ class Endpoint:
         self.url = 'http://127.0.0.1:%d' % self.server.server_address[1]
 
     def result(self, method, params):
-        if method == 'initialize':
-            return {'result': {'protocolVersion': '2025-11-25', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'nocheh', 'version': 'test'}}}
-        if method == 'ping':
-            return {'result': {}}
-        if method == 'tools/list':
-            return {'result': {'tools': [{'name': name, 'description': 'Synthetic ' + name.replace('_', ' ') + '.',
-                                          'inputSchema': {'type': 'object', 'properties': {}}} for name in self.tools]}}
-        if method == 'tools/call':
-            value = self.answer(params.get('name'), params.get('arguments') or {})
-            return {'result': {'content': [{'type': 'text', 'text': value if isinstance(value, str) else json.dumps(value)}], 'isError': False}}
-        return {'error': {'code': -32601, 'message': 'Method not found'}}
+        return result(method, params, self.answer, self.tools)
 
     def __enter__(self):
         threading.Thread(target=self.server.serve_forever, daemon=True).start()

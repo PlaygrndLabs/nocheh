@@ -21,6 +21,7 @@ from . import mcp_fixture
 REPLY_TOOLS={'memory','session_search','skills_list','skill_view',*('mcp__nocheh__'+name for name in mcp_fixture.TOOLS)}
 JOB_TOOLS=(REPLY_TOOLS-{'mcp__nocheh__background_job'})|{'todo_list'}
 JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','mcp__nocheh__shell','mcp__nocheh__browser'})|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
+JOB_MACHINE_TOOLS=JOB_BOX_TOOLS-{'execute_code'}
 
 
 class ScopeTests(unittest.TestCase):
@@ -149,8 +150,9 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
         self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job'},JOB_TOOLS))
         self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
+        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_MACHINE_TOOLS))
         self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
-        for tools in (JOB_TOOLS,JOB_BOX_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
+        for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
 
     def test_background_job_steps_add_only_the_native_todo_list(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
