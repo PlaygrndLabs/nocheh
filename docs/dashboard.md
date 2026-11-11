@@ -36,12 +36,12 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Chat | Talk to the assistant in the browser. It opens the assistant console's chat, where the profile picker chooses your private chat or a group. |
 | Inbox | Waiting: decide approvals, memory-access requests, identity suggestions and organization changes. Allowed actions: standing permissions you can revoke. History: earlier decisions and their outcomes. |
 | Tasks | Personal and per-project to-do lists, also filled by telling Nocheh in chat: Open, Today, Upcoming, Board, Done, Dropped, Archive and Trash. |
-| Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there, its role and skills, and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: let one chat use knowledge from another, with previews of exactly what is shared, and access defaults; rules a project sets are shown there and changed on the project. |
+| Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there and which tools it may use (Commands, Web pages, Outside tools), its role and skills, and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: let one chat use knowledge from another, with previews of exactly what is shared, and access defaults; rules a project sets are shown there and changed on the project. |
 | Messages | Messages: every original message, its agent copy and versions, files, transcripts and reactions; hide (retire) a message or restore it. Import: choose a Telegram export, review access and files, then start or resume an import. |
-| Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, project chats and organization, and whether a project's chats share what they know). Assistant notes: native notes and history for one chat. Long-term memory: Honcho readiness, attachment, budget, re-run or replace, and stored data. |
+| Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, project chats and organization, and whether a project's chats share what they know). Assistant notes: native notes and history for one chat. Long-term memory: the memory engine in use (Honcho today), readiness, attachment, budget, re-run or replace, and stored data. |
 | Usage | Model calls, tokens and cost by part and by model, calls per day, and reply speed with a per-stage breakdown for each reply. |
-| System | Health: services, connections, storage and diagnostics. Background work: background jobs with Stop (a machine job also shows its machine and plan), workflow totals, history charts and the task list with retry and cancel. Machine log: every command jobs ran on your machines. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
-| Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (backups, secret check, how long history is kept, password), Assistant (owner freedom, role and skills, limits, background jobs), Tasks (statuses, priorities, columns, time zone), Connections (Notion, GitHub), Machines (your VMs that jobs can work on over SSH, and the Machine control switch) and Advanced. |
+| System | Health: services, connections, storage and diagnostics. Background work: background jobs with Stop (a machine job also shows its machine and plan), workflow totals, history charts and the task list with retry and cancel. Machine log: every command jobs ran on your machines. Backups: backups, restore, off-site copies and their test, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
+| Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (backups, off-site copies, secret check, how long history is kept, password), Assistant (owner freedom, role and skills, tools in every chat, limits, background jobs), Tasks (statuses, priorities, columns, time zone), Connections (Notion, GitHub), Machines (your VMs that jobs can work on over SSH, and the Machine control switch) and Advanced. |
 
 Every settings edit, on any page, is a draft. On Settings and Chats the page header
 always stays at the top of the screen with Discard and Save, turned off until something
@@ -55,8 +55,10 @@ from its side panel and confirm with a short message.
 Links that use an earlier page or tab name (for example `#activity`, `#archive`, `#sharing`, `#monitoring`, `#projects` or `#memoryMap`) open the page and tab that now hold that content; a link to one memory-access request opens it in the Inbox.
 
 Nocheh is the main product. Hermes provides the Telegram adapter, assistant runtime,
-tools, profiles and memory through an integration. Nocheh owns capture, access rules,
-guarding and approvals. Native execution and administration remain restricted until
+its own native tools, profiles and native notes through an integration. Nocheh owns
+capture, access rules, guarding, approvals, the per-chat tool switches, its data tools
+(served to the brain over `/mcp`) and long-term memory behind its memory socket (Honcho
+today). Native execution and administration remain restricted until
 their integration acceptance passes; see TASK.md for actual phase status.
 
 Original chats are preserved evidence. Native notes are generated working memory
@@ -148,9 +150,12 @@ executed again. Inbox › History lists the latest 50 assistant runs (browser co
 An explicit retry creates another observed input. Local UI commands appear as
 “Captured only” because they do not start a model turn.
 
-The current tool set is memory, scoped native session search, archive retrieval and
-external-action proposals. Broader shell/browser/MCP execution and cron remain in
-their following phases. Local wake-word models and arbitrary TUI gateway commands
+A turn gets Hermes's own native notes, scoped native session search and skills, plus
+Nocheh's 18 data tools over MCP (`mcp__nocheh__*`): archive retrieval, long-term memory
+recall and search, tasks, Notion, message and shell, browser and MCP proposals,
+background jobs and knowledge proposals. Proposals follow the owner's approval rules,
+and most wait for a yes. Shell, browser and MCP proposals, Notion included, also follow
+the chat's tool switches. Local wake-word models and arbitrary TUI gateway commands
 are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the boundary.
 
 ## Native memory and Honcho
@@ -232,11 +237,15 @@ next cursor to retrieve additional graph pages:
 ```
 
 System › Backups provides diagnostics, portable archive ZIP export, consistent backup,
-service restart, and restore into a new inactive Compose project. Backup and
+service restart, restore into a new inactive Compose project, and, once Off-site
+copies are set up in Settings › Privacy & data, Send copy now and Test the off-site
+copy. Backup and
 restart show a review step. Restore selects a locally generated backup ID and an
 unused loopback port; it cannot overwrite current state. Restored Telegram stays
 disabled, and copied credentials stay inactive. The existing `backup`,
-`restore`, `diagnose`, and `archive export` commands remain available under `./bin/nocheh`.
+`restore`, `diagnose`, `export` and `archive export` commands remain available under
+`./bin/nocheh`, and `offsite list|fetch|decrypt` gets a backup back from an off-site copy
+on a new machine.
 
 Jobs, downloads, exports, backups and inactive restores are private files under
 `data/local/admin/` (or the selected `NOCHEH_STATE_DIR`). The UI streams downloads
@@ -284,7 +293,9 @@ box ([ADR-0205](adr/0205-owner-approved-jobs-work-in-a-sealed-box.md)). Off: no
 new job gets a box, a running job loses its box within seconds, and any relaunch
 runs without one. It saves over the job settings' revision, like the limits.
 Job preference overrides can be stored via CLI; scheduler execution is P6 work.
-Broader tool and approval policy controls are P5 work, not active capabilities yet.
+**Tools in every chat** sets Commands, Web pages and Outside tools to Default, On or
+Off for every chat; a chat or topic sets its own on its Tools card in Chats
+([ADR-0233](adr/0233-data-tools-over-mcp.md)).
 
 ```sh
 ./bin/nocheh runtime profiles
@@ -333,8 +344,14 @@ Shell runs in a disposable, network-disabled container with only the selected
 workspace mounted. Browser inspection fetches one approved public HTTPS page and
 renders its inert text/link structure offline. MCP supports exact public HTTPS
 tool calls or discovery with JSON responses; authenticated/SSE servers, local MCP
-processes and interactive browser actions remain unavailable. Global/profile
-preferences can disable each tool. Enabling a tool still requires action approval.
+processes and interactive browser actions remain unavailable. Nocheh keeps
+each chat's tool switches (Commands, Web pages, Outside tools, which also covers Notion):
+for every chat in Settings › Assistant › Tools in every chat, and for one chat or topic
+on its Tools card in Chats. A topic follows its chat, a chat follows every chat, and
+every tool starts on. A proposal for a tool that is off is refused with
+`tool_disabled_by_owner`, and the switch is checked again before the run. Scheduled
+runs and background jobs follow their chat. A tool that is on still follows the
+approval rules.
 
 ```sh
 ./bin/nocheh approvals list
