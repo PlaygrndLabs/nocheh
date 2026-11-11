@@ -1,4 +1,4 @@
-"""Encrypted off-site copies of finished backups (ADR-0229).
+"""Encrypted off-site copies of finished backups (ADR-0229, ADR-0236).
 
 A copy is the backup folder as one tar stream, encrypted on this machine with a key derived from the
 owner's passphrase, then uploaded to S3-compatible storage such as Cloudflare R2. The storage only
@@ -24,6 +24,8 @@ from xml.etree import ElementTree
 
 RECORD = 'admin/offsite.json'
 PREFIX = 'nocheh-backups/'
+# A storage lock (ADR-0236) refuses to delete or replace a young copy.
+LOCKED = 'offsite_storage_ObjectLockedByBucketPolicy'
 SUFFIX = '.nocheh-backup'
 MAGIC = b'NOCHEH-OFFSITE-1\n'
 CHUNK = 4 * 1024 * 1024
@@ -38,8 +40,12 @@ class OffsiteError(ValueError):
     pass
 
 
+PROVIDERS = ('cloudflare', 'backblaze', 'other')
+
+
 def settings(values):
     return {'enabled': values.get('NOCHEH_OFFSITE', 'off') == 's3',
+            'provider': values.get('NOCHEH_OFFSITE_PROVIDER', '') or 'cloudflare',
             'endpoint': values.get('NOCHEH_OFFSITE_ENDPOINT', '').rstrip('/'),
             'bucket': values.get('NOCHEH_OFFSITE_BUCKET', ''),
             'region': values.get('NOCHEH_OFFSITE_REGION', '') or 'auto',
@@ -52,6 +58,7 @@ def settings(values):
 def validate(values):
     mode = values.get('NOCHEH_OFFSITE', 'off')
     if mode not in ('off', 's3'): raise ValueError('NOCHEH_OFFSITE must be off or s3')
+    if values.get('NOCHEH_OFFSITE_PROVIDER', 'cloudflare') not in PROVIDERS: raise ValueError('NOCHEH_OFFSITE_PROVIDER must be cloudflare, backblaze or other')
     keep = str(values.get('NOCHEH_OFFSITE_KEEP', '14'))
     if not re.fullmatch(r'[1-9]\d{0,2}', keep) or int(keep) > 365: raise ValueError('NOCHEH_OFFSITE_KEEP must be 1-365')
     endpoint = str(values.get('NOCHEH_OFFSITE_ENDPOINT', ''))
@@ -390,20 +397,30 @@ def send(state, values, opener=None):
     try:
         if copy.exists(): copy.unlink()
         size = encrypt_backup(path, copy, config['passphrase'])
-        storage = Storage(config, opener); storage.put(key, copy)
-        removed, prune_error = 0, None
+        storage = Storage(config, opener)
+        try: storage.put(key, copy)
+        except OffsiteError as error:
+            # This backup was sent before and its copy is still locked: that copy stays and counts as sent.
+            if str(error) != LOCKED: raise
+            size = next((item['size'] for item in storage.list() if item['key'] == key), None)
+            if size is None: raise
+        removed, locked, prune_error = 0, 0, None
         try:
             copies = storage.list()
-            for item in copies[:max(0, len(copies) - config['keep'])]: storage.delete(item['key']); removed += 1
+            for item in copies[:max(0, len(copies) - config['keep'])]:
+                # A storage lock (ADR-0236) keeps young copies; they are removed by a later copy once it ends.
+                try: storage.delete(item['key']); removed += 1
+                except OffsiteError as error:
+                    if str(error) != LOCKED: raise
+                    locked += 1
         except OffsiteError as error: prune_error = str(error)
         record = read_record(state)
         record['sent'][backup] = {'key': key, 'at': _now().isoformat(), 'bytes': size}
         record['sent'] = dict(sorted(record['sent'].items(), key=lambda item: item[1]['at'])[-100:])
-        record['last'] = {'state': 'sent', 'at': _now().isoformat(), 'backup': backup, 'key': key, 'bytes': size, 'removed': removed,
-                          **({'prune_error': prune_error} if prune_error else {})}
+        extra = {**({'locked': locked} if locked else {}), **({'prune_error': prune_error} if prune_error else {})}
+        record['last'] = {'state': 'sent', 'at': _now().isoformat(), 'backup': backup, 'key': key, 'bytes': size, 'removed': removed, **extra}
         write_record(state, record)
-        return {'status': 'offsite_sent', 'backup': backup, 'key': key, 'bytes': size, 'removed': removed,
-                **({'prune_error': prune_error} if prune_error else {})}
+        return {'status': 'offsite_sent', 'backup': backup, 'key': key, 'bytes': size, 'removed': removed, **extra}
     except Exception as error:
         record = read_record(state)
         record['last'] = {'state': 'failed', 'at': _now().isoformat(), 'backup': backup, 'error': _code(error)}
@@ -446,7 +463,7 @@ def _code(error):
 
 def status(state, values):
     config = settings(values); record = read_record(state)
-    return {'enabled': config['enabled'], 'keep': config['keep'], 'bucket': config['bucket'] or None,
+    return {'enabled': config['enabled'], 'provider': config['provider'], 'keep': config['keep'], 'bucket': config['bucket'] or None,
             'last': record.get('last'), 'check': record.get('check'),
             # The newest copy that did reach the storage, for when the latest attempt is running or failed.
             'last_sent': max(record['sent'].values(), key=lambda entry: entry['at'], default=None),

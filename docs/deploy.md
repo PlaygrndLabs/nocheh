@@ -232,9 +232,32 @@ on the same disk. See [ADR-0187](adr/0187-daily-automatic-backups.md).
 
 To survive losing the machine, turn on Off-site copies in the same settings.
 Each new automatic backup is then encrypted on this machine with your
-passphrase and sent to S3-compatible storage you choose; the storage only ever
-holds scrambled data. Keep the passphrase somewhere other than this machine:
-without it no copy can be opened. System › Backups shows the last copy, sends
+passphrase and sent to storage you choose; the storage only ever holds
+scrambled data. Keep the passphrase somewhere other than this machine:
+without it no copy can be opened.
+
+Pick the storage under Storage:
+
+- **Cloudflare** (R2, free up to 10 GB): press Open Cloudflare, which opens
+  Cloudflare's token page with the permissions already chosen. Create the token,
+  paste it and press Connect. Nocheh makes its own bucket (`nocheh-backups`, or
+  that name plus a random ending when the account already has one), locks each
+  copy for 7 days so it can't be deleted early, keeps a key for that bucket only,
+  tests it and deletes the setup token. If connecting stops with an error, the
+  setup token stays so you can try again; delete "Nocheh setup" in Cloudflare's
+  API tokens once you are done with it. Turn on R2 in Cloudflare first if you
+  never used it.
+- **Backblaze** (B2, free up to 10 GB): create a private bucket, set its
+  Lifecycle Settings to "Keep only the last version" so removed copies free their
+  space, and create an application key with Read and Write access to that bucket
+  only. Paste the key ID and the key and press Connect. Nocheh reads the address
+  and bucket from Backblaze and tests the key.
+- **Other S3**: fill in the storage address, bucket, region and keys yourself.
+
+Then type the passphrase and Save. See
+[ADR-0236](adr/0236-off-site-storage-from-one-pasted-credential.md).
+
+System › Backups shows the last copy, sends
 one now, and tests that the newest copy opens and checks out. A copy is
 written to this disk before upload, so it is skipped while free space is under
 the backup's size plus 1 GiB. On a new machine, install the Python
@@ -242,12 +265,17 @@ the backup's size plus 1 GiB. On a new machine, install the Python
 backup folder back and restore it; the passphrase is asked for:
 
 ```sh
-export NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… \
+export NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… NOCHEH_OFFSITE_REGION=… \
   NOCHEH_OFFSITE_ACCESS_KEY_ID=… NOCHEH_OFFSITE_SECRET_ACCESS_KEY=…
 ./bin/nocheh offsite list
 ./bin/nocheh offsite fetch --output ./recovered-backup
 ./bin/nocheh restore ./recovered-backup --state ./data/restored --project nocheh-restored
 ```
+
+For Cloudflare, create an R2 API token with Object Read for the bucket the dashboard
+named (`nocheh-backups` unless it added an ending) in Cloudflare's R2 settings: it
+shows the S3 address and both keys, and the region is `auto`. For Backblaze, use a key for the bucket; the region is the
+part of the address after `s3.`, such as `us-west-004`.
 
 `offsite list` shows the copies in the bucket, `offsite fetch` takes the newest one
 unless `--key` names another, and `offsite decrypt COPY --output DIR` opens a copy you

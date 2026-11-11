@@ -100,6 +100,10 @@ def dispatch(body):
     if operation == 'backups.due':
         from tools.operations.installation.backup_schedule import due
         return due(state)
+    if operation == 'offsite.connect':
+        # One pasted credential fills the storage settings (ADR-0236); no answer carries a token or key.
+        from tools.operations.installation.offsite_connect import connect
+        return connect(state, body.get('request'))
     if operation == 'offsite.due':
         from tools.operations.installation.offsite import due as offsite_due
         from tools.operations.installation.configuration import load as load_settings

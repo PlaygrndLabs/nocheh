@@ -153,7 +153,8 @@ class SettingsTests(unittest.TestCase):
                                 ({'NOCHEH_OFFSITE_PASSPHRASE': 'short'}, '16'),
                                 ({'NOCHEH_OFFSITE_KEEP': '0'}, '1-365'),
                                 ({'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': ''}, 'need'),
-                                ({'NOCHEH_OFFSITE': 'ftp'}, 'off or s3')):
+                                ({'NOCHEH_OFFSITE': 'ftp'}, 'off or s3'),
+                                ({'NOCHEH_OFFSITE_PROVIDER': 'ftp'}, 'cloudflare, backblaze or other')):
             with self.assertRaisesRegex(ValueError, message): offsite.validate({**full, **change})
 
 
@@ -198,6 +199,41 @@ class SendAndCheckTests(unittest.TestCase):
         status = offsite.status(self.state, self.values)
         self.assertEqual(status['last']['state'], 'sent'); self.assertEqual(len(status['sent']), 2)
         self.assertNotIn(PASSPHRASE, (self.state / offsite.RECORD).read_text())
+
+    def test_copies_the_storage_still_locks_are_kept_without_an_error(self):
+        locked = {offsite.object_key(JOBS[0], '2026-11-01T04:00:00')}
+        original = Bucket.do_DELETE
+        def lock(handler):
+            if urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path).split('/', 2)[2] in locked:
+                handler._parts(); return handler._send(409, b'<Error><Code>ObjectLockedByBucketPolicy</Code></Error>')
+            return original(handler)
+        with patch.object(Bucket, 'do_DELETE', lock):
+            for number, job in enumerate(JOBS[:3], 1):
+                self.backup(job, number); result = offsite.send(self.state, self.values)
+        self.assertEqual((result['removed'], result['locked']), (0, 1)); self.assertNotIn('prune_error', result)
+        self.assertEqual(sorted(Bucket.objects), [offsite.object_key(job, f'2026-11-0{n}T04:00:00') for n, job in enumerate(JOBS[:3], 1)])
+        # Once the lock ends, the next copy removes it.
+        locked.clear(); self.backup(JOBS[3], 4)
+        self.assertEqual(offsite.send(self.state, self.values)['removed'], 2)
+        self.assertEqual(offsite.status(self.state, self.values)['provider'], 'cloudflare')
+
+    def test_sending_a_backup_again_while_its_copy_is_locked_keeps_that_copy(self):
+        self.backup(JOBS[0], 1); first = offsite.send(self.state, self.values)
+        stored = dict(Bucket.objects)
+        original = Bucket.do_PUT
+        def lock(handler):
+            if urllib.parse.unquote(urllib.parse.urlsplit(handler.path).path).split('/', 2)[2] in stored:
+                handler._parts(); handler._body(); return handler._send(409, b'<Error><Code>ObjectLockedByBucketPolicy</Code></Error>')
+            return original(handler)
+        with patch.object(Bucket, 'do_PUT', lock): again = offsite.send(self.state, self.values)
+        self.assertEqual((again['status'], again['key'], again['bytes']), ('offsite_sent', first['key'], first['bytes']))
+        self.assertEqual(Bucket.objects, stored)
+        self.assertEqual(offsite.status(self.state, self.values)['last']['state'], 'sent')
+        # A lock on a key that is not there is still a failure.
+        Bucket.objects.clear()
+        with patch.object(Bucket, 'do_PUT', lambda handler: (handler._parts(), handler._body(),
+                                                             handler._send(409, b'<Error><Code>ObjectLockedByBucketPolicy</Code></Error>'))):
+            with self.assertRaisesRegex(offsite.OffsiteError, 'ObjectLockedByBucketPolicy'): offsite.send(self.state, self.values)
 
     def test_large_copies_use_multipart_and_the_restore_test_passes(self):
         self.backup(JOBS[0], 1, payload=bytes(range(256)) * 20000)

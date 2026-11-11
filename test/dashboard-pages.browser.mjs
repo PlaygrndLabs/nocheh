@@ -673,6 +673,67 @@ test('task statuses, priorities and columns are edited in Settings', async () =>
   await page.close();
 });
 
+test('off-site storage connects from one Cloudflare token or a Backblaze key, then saves with the passphrase', async () => {
+  const {page, problems} = await open('settings?view=privacy');
+  await page.getByRole('radiogroup', {name: 'Send off-site copies'}).getByRole('radio', {name: 'On'}).click();
+  const storage = page.getByRole('radiogroup', {name: 'Storage'});
+  assert.equal(await storage.getByRole('radio', {name: 'Cloudflare'}).getAttribute('aria-checked'), 'true');
+  // Cloudflare opens its token page with both permissions already chosen.
+  const link = new URL(await page.getByRole('link', {name: 'Open Cloudflare'}).getAttribute('href'));
+  assert.deepEqual(JSON.parse(link.searchParams.get('permissionGroupKeys')), [
+    {key: 'workers_r2', type: 'edit'},
+    {key: 'account_api_tokens', type: 'edit'},
+  ]);
+  const token = page.locator('#offsite-cloudflare-token');
+  await token.fill('refused');
+  await page.getByRole('button', {name: 'Connect'}).click();
+  const refused = page.getByRole('alert').filter({hasText: 'Cloudflare didn’t accept this token'});
+  await refused.waitFor();
+  assert.doesNotMatch(await refused.textContent(), /Nocheh setup/);
+  // A stop after the token was accepted leaves it for another try, and says where to delete it.
+  await token.fill('no-r2');
+  await page.getByRole('button', {name: 'Connect'}).click();
+  const stopped = page.getByRole('alert').filter({hasText: 'R2 isn’t turned on'});
+  await stopped.waitFor();
+  assert.match(await stopped.textContent(), /delete “Nocheh setup”/);
+  // A token that reaches two accounts asks which one.
+  await token.fill('two-accounts');
+  await page.getByRole('button', {name: 'Connect'}).click();
+  await page.locator('#offsite-cloudflare-account').selectOption({label: 'Example work'});
+  await page.getByRole('button', {name: 'Connect'}).click();
+  const done = page.getByRole('status').filter({hasText: 'Connected to bucket nocheh-backups.'});
+  await done.waitFor();
+  assert.match(await done.textContent(), /locked for 7 days.*Now type your passphrase below and save\./);
+  await page.getByText('Connected. Copies go to bucket nocheh-backups.').waitFor();
+  assert.equal(await token.count(), 0, 'the token form closes once connected');
+  // Turning copies on is still the owner's unsaved edit, and saves with the passphrase.
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByText('1 unsaved change').waitFor();
+  await page.locator('#NOCHEH_OFFSITE_PASSPHRASE').fill('a long synthetic passphrase');
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  // Backblaze fills everything from a key limited to one bucket. Choosing it alone saves nothing.
+  await storage.getByRole('radio', {name: 'Backblaze'}).click();
+  await page.getByText('Keep only the last version', {exact: false}).waitFor();
+  assert.equal(await bar.getByText('No unsaved changes').count(), 1);
+  await page.locator('#offsite-backblaze-key-id').fill('0041example');
+  await page.getByLabel('Application key').fill('K004example');
+  await page.getByRole('button', {name: 'Connect'}).click();
+  await page.getByRole('status').filter({hasText: 'Connected to bucket example-backups.'}).waitFor();
+  await bar.getByText('No unsaved changes').waitFor();
+  // Other S3 storage keeps every field to fill in by hand, and is saved with Save.
+  await storage.getByRole('radio', {name: 'Other S3'}).click();
+  assert.equal(await page.locator('#NOCHEH_OFFSITE_ENDPOINT').inputValue(), 'https://s3.us-west-004.backblazeb2.com');
+  await page.locator('#NOCHEH_OFFSITE_BUCKET').fill('example-other');
+  await bar.getByText('2 unsaved changes').waitFor();
+  // Going back drops what was typed for it.
+  await storage.getByRole('radio', {name: 'Backblaze'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.getByText('Connected. Copies go to bucket example-backups.').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('Notion is connected through its sign-in, turned on with an approval choice, and disconnected', async () => {
   const {page, problems} = await open('settings?view=connections');
   const card = page.getByRole('region', {name: 'Notion'});
