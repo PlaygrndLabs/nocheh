@@ -14,7 +14,8 @@ import {authorize,readJson,json,object} from '../src/http.js';
 import {startLoops} from '../src/worker-loops.js';
 import {hermesAdapter} from '../src/hermes-adapter.js';
 import {hermesBrain} from '../src/brain/hermes.js';
-import {runtimeCall} from '../src/runtime.js';
+import {runtimeCall,combinedAdapter} from '../src/runtime.js';
+import {telegramAdapter} from '../src/frontdoor/telegram.js';
 import {workflowClient,connectWorkflows} from '../src/workflows/client.js';
 import {workflowFunctions} from '../src/workflows/engine.js';
 import {pipelineOperations} from '../src/workflows/pipeline.js';
@@ -54,23 +55,25 @@ try{
     const receiptDirectory=join(root,'runtime-receipts');await mkdir(receiptDirectory,{recursive:true,mode:0o700});
     const server=createServer((req,res)=>{void(async()=>{
       authorize(req,process.env.SERVICE_TOKEN!);const body=object(await readJson(req)),path=req.url;
-      if(path==='/internal/file')return json(res,200,{bytes_base64:Buffer.from('Synthetic Ogg bytes').toString('base64')});
+      if(path==='/internal/telegram/file')return json(res,200,{bytes_base64:Buffer.from('Synthetic Ogg bytes').toString('base64')});
       if(path==='/internal/detect')return json(res,200,{literals:[]});
       if(!/^[a-f0-9]{64}$/.test(String(body.event_id)))throw Error('fixture_identity_required');
       const id=digest(JSON.stringify([body.channel??'telegram',body.event_id,body.attempt])),receipt=join(receiptDirectory,id+'.json');
-      if(path==='/internal/run/start'||path==='/internal/dispatch'){
+      const done={state:'done',reply:{text:'Synthetic reply',session_id:'fixture'}};
+      if(path==='/internal/turn/start'){
         if(existsSync(receipt))throw Error('duplicate_fixture_effect');
         await immutableFile(receiptDirectory,id+'.json',Buffer.from(JSON.stringify({id,event_id:body.event_id,attempt:body.attempt,state:'done'})));
         if(existsSync(join(root,'crash-after-effect'))){await unlink(join(root,'crash-after-effect'));process.exit(137);}
-        return json(res,200,{state:'done'});
+        return json(res,200,done);
       }
-      if(path==='/internal/run/resume')return json(res,200,{state:existsSync(receipt)?'done':'not_found'});
+      if(path==='/internal/turn/resume')return json(res,200,existsSync(receipt)?done:{state:'not_found'});
       throw Error('unexpected_fixture_runtime_operation');
     })().catch(()=>{if(!res.headersSent)json(res,503,{error:'fixture_runtime_failed'});else res.destroy();});});
     server.listen(8781,'0.0.0.0');close=()=>new Promise<void>(resolve=>server.close(()=>resolve()));
   }else if(action==='worker'){
-    const client=workflowClient('pipeline'),runtime=runtimeCall(hermesAdapter({url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!}));
-    const brain=hermesBrain({url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!});
+    const fake={url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!};
+    const client=workflowClient('pipeline'),runtime=runtimeCall(combinedAdapter(hermesAdapter(fake),telegramAdapter(fake)));
+    const brain=hermesBrain(fake);
     const connection=await connectWorkflows('pipeline',client,workflowFunctions(client,pool,pipelineOperations(pool,config,runtime,brain)));
     const report=async()=>{if(connection.state==='ACTIVE')await registerWorker(pool,'pipeline',['preparation','telegram']);};
     await report();const timer=setInterval(()=>{void report().catch(()=>{});},1000);
@@ -83,7 +86,6 @@ try{
     console.log(JSON.stringify({runtime_crash:'armed'}));
   }else if(action==='status'||action==='verify'){
     const expected=Number(process.argv[3]??0),deadline=Date.now()+(action==='status'?0:180000);
-    const runtime=runtimeCall(hermesAdapter({url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!}));
     while(true){
       const events=Number((await pool.query('SELECT count(*) FROM events')).rows[0].count);
       const workflows=(await pool.query('SELECT family,state,count(*)::int AS count FROM workflow_registry GROUP BY family,state ORDER BY family,state')).rows;

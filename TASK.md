@@ -1336,7 +1336,7 @@ Earlier upgrades are in [task history](docs/task-history.md).
   the owner reply in 22.1 seconds. The exclusive profile lock, native fencing,
   current authority and original acceptance deadlines remain active.
   [HTTP runner](tools/acceptance/telegram_rehearsal.py),
-  [SDK checks](services/hermes/test_telegram_http_fixture.py),
+  [SDK checks](services/telegram/test_telegram_http_fixture.py),
   [lease decision](docs/adr/0098-isolated-native-lease-recovery.md).
 
   Guard preparation publishes at most four independent copies concurrently,
