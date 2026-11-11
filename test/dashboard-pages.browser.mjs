@@ -835,7 +835,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
     .waitFor();
   assert.match(
     await setup.getByRole('textbox', {name: 'Setup command for lab-vm'}).inputValue(),
-    /^mkdir -p ~\/\.ssh .* 'ssh-ed25519 [A-Za-z0-9+/]+ nocheh lab-vm' >> ~\/\.ssh\/authorized_keys; }$/,
+    /^mkdir -p ~\/\.ssh .* 'ssh-ed25519 [A-Za-z0-9+/]+ nocheh lab-vm' >> ~\/\.ssh\/authorized_keys; }; }$/,
   );
   // A browser that refuses the clipboard, as on a plain http address, leaves the key to select by hand.
   await page.evaluate(() =>
@@ -856,7 +856,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   await page.getByRole('status').filter({hasText: 'The setup command is copied.'}).waitFor();
   assert.match(
     await page.evaluate(() => window.copied),
-    /^mkdir -p ~\/\.ssh .* nocheh lab-vm' >> ~\/\.ssh\/authorized_keys; }$/,
+    /^mkdir -p ~\/\.ssh .* nocheh lab-vm' >> ~\/\.ssh\/authorized_keys; }; }$/,
   );
   await setup.getByRole('button', {name: 'Copy public key'}).click();
   await page.getByRole('status').filter({hasText: 'The public key is copied.'}).waitFor();

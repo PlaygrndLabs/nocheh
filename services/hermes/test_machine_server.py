@@ -75,8 +75,9 @@ def result(data):
 
 
 def alive(pid):
-    try:return Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[0]!='Z'
-    except (OSError,IndexError):return False
+    # A zombie is not alive, unless only its first thread ended and others still run.
+    try:fields=Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split();return fields[0]!='Z' or int(fields[17])>1
+    except (OSError,IndexError,ValueError):return False
 
 
 class MachineServerTests(unittest.TestCase):
@@ -204,6 +205,11 @@ class MachineServerTests(unittest.TestCase):
         self.assertEqual(result(self.run_script('echo $NOCHEH_STARTED; sh -c \'echo $NOCHEH_STARTED; [ /dev/fd/7 -ef ~/.nocheh/jobs/$NOCHEH_STARTED ] && echo held\'')[1]),
                          (((JOB+'\n')*2+'held\n').encode(),0))
         self.assertEqual(sorted(path.name for path in old.parent.iterdir()),[JOB]);self.assertEqual(oct(old.parent.stat().st_mode&0o777),'0o700')
+        # Without its marker nothing runs, since Stop could not find the job's programs.
+        (self.home/'.nocheh').rename(self.home/'kept');(self.home/'.nocheh').write_text('')
+        self.assertEqual(result(self.run_script('echo ran')[1]),
+                         (f"nocheh: cannot open {self.home}/.nocheh/jobs/{JOB}, which Stop needs to find this job's programs; nothing ran.\n".encode(),125))
+        (self.home/'.nocheh').unlink();(self.home/'kept').rename(self.home/'.nocheh')
         # stdin goes to the command; a remote 255 stays 255; -l asks for a login shell.
         status,data=self.run_script('cat; exit 255',stdin='from stdin ✓')
         self.assertEqual((status,result(data)),(200,('from stdin ✓'.encode(),255)))
@@ -408,22 +414,34 @@ class MachineServerTests(unittest.TestCase):
 
     def ended(self,pids):
         for pid in pids:
+            if pid is None:continue
             try:os.kill(pid,9)
             except OSError:pass
 
     def test_cleanup_ends_only_the_programs_of_its_job(self):
-        # The script itself, here: it ends the programs of the job, found by its marker, its tag or as started by one
-        # of them, also one in a new session, and leaves the login's other programs: one with neither, as the owner's
-        # own, and one of another job. Nothing of the job left: it ends at once, and the marker is gone.
+        # The script itself, here: it ends the programs of the job, found by its marker, its tag (one left to init) or as
+        # started by one of them, also one in a new session, one that renamed itself and one whose first thread ended; it
+        # leaves the login's other programs: one with neither, as the owner's own, one of another job, and one with the tag
+        # that a program of the owner's started (as a session manager that took the tag over would). Nothing of the job
+        # left: it ends after two empty rounds, and the marker is gone.
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
+        mine=None
         with tempfile.TemporaryDirectory() as folder:
             job={'both':self.launch(JOB,folder,'both'),'marker':self.launch(JOB,folder,'marker','env -i sleep 600'),
                  'tag':self.launch(None,folder,'tag'),'session':self.launch(JOB,folder,'session','setsid sleep 600'),
-                 'started':self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)')}
+                 'started':self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)'),
+                 'threads':self.launch(JOB,folder,'threads',f"{sys.executable} -c 'import threading,time,ctypes; "
+                                       "threading.Thread(target=time.sleep,args=(600,)).start(); ctypes.CDLL(None).pthread_exit(None)'")}
             job['child']=int((Path(folder)/'child').read_text())
             if shutil.which('perl'):job['renamed']=self.launch(JOB,folder,'renamed',"perl -e '$0=q(worker); sleep 600'")
-            others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other')]
+            others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
+                    self.launch(None,folder,'manager',f'sh -c \'env {ms.TAG}={JOB} sleep 600 & echo $! > {folder}/managed; wait\'',tag=False)]
             try:
+                deadline=time.monotonic()+5;managed=Path(folder)/'managed'
+                while not (managed.exists() and managed.read_text().strip()) and time.monotonic()<deadline:time.sleep(.05)
+                others.append(int(managed.read_text()))
+                while Path(f'/proc/{job["threads"]}/stat').read_text().rsplit(')',1)[1].split()[0]!='Z' and time.monotonic()<deadline:time.sleep(.05)
+                self.assertTrue(alive(job['threads']))
                 self.assertTrue((self.home/'.nocheh'/'jobs'/JOB).exists())
                 self.assertEqual(self.cleanup_here(),0)
                 for name,pid in job.items():self.assertFalse(alive(pid),name)
@@ -431,16 +449,17 @@ class MachineServerTests(unittest.TestCase):
                 self.assertEqual(sorted(path.name for path in (self.home/'.nocheh'/'jobs').iterdir()),['e'*64])
                 self.assertEqual(self.cleanup_here(),0)
                 # Where it cannot keep a probe file, it cannot prove it finds programs: it fails and ends nothing.
-                mine=self.launch(JOB,folder,'mine');other=self.home/'readonly';other.mkdir(mode=0o500)
-                if os.geteuid()!=0:
-                    self.assertEqual(self.cleanup_here(home=other),3);self.assertTrue(alive(mine))
+                mine=self.launch(JOB,folder,'mine');other=self.home/'blocked';other.mkdir();(other/'.nocheh').write_text('')
+                self.assertEqual(self.cleanup_here(home=other),3);self.assertTrue(alive(mine))
                 self.assertEqual(self.cleanup_here(),0);self.assertFalse(alive(mine))
-            finally:self.ended([*job.values(),*others])
+            finally:self.ended([*job.values(),*others,mine])
 
     def test_cleanup_finds_programs_with_lsof_and_ps_where_there_is_no_proc(self):
         # As on macOS: no /proc; `lsof` names the holders of the marker, `ps -E` prints a process's command line, which may
-        # span lines, then its environment, and shows none for the system's own programs (here: sleep).
+        # span lines, then its environment, and shows none for the system's own programs (here: sleep); BWK awk where it
+        # is installed, which refuses a newline in -v.
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
+        mine=None
         check='[ -r /proc/$$/stat ]';self.assertEqual(ms.CLEANUP.count(check),1)
         script=ms.CLEANUP.replace(check,'[ -r /nonexistent/$$ ]')
         with tempfile.TemporaryDirectory() as folder:
@@ -451,14 +470,16 @@ class MachineServerTests(unittest.TestCase):
                           '  *" -p "*) for p; do :; done; [ -r /proc/$p/environ ] || exit 1; printf \'%s %s\\n\' "$(tr \'\\0\' \' \' </proc/$p/cmdline)" "$(shown $p)";;\n'
                           '  *" -E "*) for e in /proc/[0-9]*; do [ -O $e ] && printf \'%6s %s %s\\n\' ${e#/proc/} "$(tr \'\\0\' \' \' <$e/cmdline)" "$(shown ${e#/proc/})"; done;;\n'
                           '  *) for e in /proc/[0-9]*; do [ -O $e ] && read -r s <$e/stat && s=${s##*) } && set -- $s && echo "${e#/proc/} $2 $1"; done;;\n'
-                          'esac\n')
+                          'esac\nexit 0\n')
             lsof.write_text('#!/bin/bash\nfor f; do :; done; for e in /proc/[0-9]*; do for d in $e/fd/*; do [ "$d" -ef "$f" ] && { echo ${e#/proc/}; break; }; done; done\n')
             for path in (ps,lsof):path.chmod(0o755)
+            if shutil.which('original-awk'):(here/'bin'/'awk').symlink_to(shutil.which('original-awk'))
             path=str(here/'bin')+':'+os.environ['PATH']
             job=[self.launch(JOB,folder,'mine'),self.launch(None,folder,'tagged','tail -f /dev/null'),
                  self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)')]
-            # A command line that spans lines, then the environment with the tag.
-            job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'tail -f /dev/null; :' 'one\n2 two'")]
+            # A command line that spans lines, with a line that starts like another process's, then the environment with
+            # the tag; its child shows none.
+            job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'sleep 600; :' 'one\n2 two'")]
             others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other')]
             try:
                 self.assertEqual(self.cleanup_here(script,path),0)

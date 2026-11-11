@@ -105,9 +105,10 @@ owner's VM with a real model.
 Machine jobs on the owner's own login (owner, 2026-11-11: "I want access to main user",
 then "ok so still want use main"): every command of a job carries `NOCHEH_STARTED=<job
 id>` in its environment and holds the job's marker file `~/.nocheh/jobs/<job id>` open as
-fd 7, and the cleanup ends only the login's processes with that tag or marker and those
-they started (from `/proc`, or on macOS `lsof` and `ps -E`), after it proves it finds a
-probe `sleep` by its marker; the wrapper also takes Homebrew's `gtimeout`
+fd 7 (no marker, no command), and the cleanup ends only the login's processes with that
+marker, those left behind with that tag, and those they started (from `/proc`, or on
+macOS `lsof`, `ps` and `ps -E`), after it proves it finds a probe `sleep` by its marker,
+and is done after two empty rounds; the wrapper also takes Homebrew's `gtimeout`
 ([ADR-0237](docs/adr/0237-stop-ends-only-the-programs-a-machine-job-started.md),
 [service](services/hermes/test_machine_server.py), [stores](test/store-machines.test.ts),
 [scenarios](tools/acceptance/product_scenarios.py)). Pending: the cleanup on a real

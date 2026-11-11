@@ -406,8 +406,9 @@ A machine job is asked for in your private chat or in an active project's group.
 Its one plan card, with Approve and Reject, always comes to your private chat.
 **System › Background work** shows the job's machine and the plan you approved.
 Stop, a time or cost limit, a failed run, or turning its machine or Machine
-control off ends the programs the job started on the machine, and none of the
-login's others. Stop's confirm
+control off ends the programs the job started on the machine, with anything
+running inside them (such as in a tmux the job started), and none of the login's
+others. Stop's confirm
 says so for a job that has started; for a job still waiting or approved it says
 nothing has run there yet. While Nocheh ends the programs, the job says "Ending its
 programs on" the machine; when it couldn't, it says to end them yourself. A job that
@@ -423,7 +424,8 @@ session setup and its checks on commands left running. A row opens the command's
 details, including **Fingerprint of what ran** (for a job's command, the whole
 script the machine got) and **Fingerprint of what it printed**; while a command
 runs, what it printed is not known yet. Output itself is not kept. A cleanup that
-couldn't end the programs says to end them by hand. After a restore, a test, command or cleanup says Nocheh has no
+couldn't end the programs says to end them by hand; most of them hold a file named by
+the job in `~/.nocheh/jobs` open, which `lsof +D ~/.nocheh/jobs` shows. After a restore, a test, command or cleanup says Nocheh has no
 key for the machine, and the machine shows Test failed until you remove it and add
 it again.
 
