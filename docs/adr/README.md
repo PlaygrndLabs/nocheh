@@ -41,6 +41,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Chats Nocheh does not serve are archived but never prepared or shown to a model; a private stranger gets one fixed reply a day ([0182](0182-strangers-cost-nothing-and-reach-no-model.md)).
 - Every physical send is re-checked against its approved chat, topic and current policy; a rate-limited send gets at most three journaled attempts, and an uncertain send never resends ([0089](0089-physical-telegram-delivery-boundary.md), [0090](0090-durable-telegram-rate-limit-retries.md)).
 - Hermes shows typing while a turn works and reacts on the answered message: eyes while working, then thumbs up or down ([0188](0188-typing-status-while-a-turn-works.md), [0211](0211-hermes-working-reactions-on-the-answered-message.md)).
+- Every request a front door sends to a chat app, reactions included, leaves one content-free send record (kind, chat, when, outcome and a code), drained into `control.chat_sends` and shown in System › Sent to apps, on Health and in the owner's notices; "typing…" is recorded only when it fails, reads never; a record never decides a send ([0237](0237-record-every-send-to-a-chat-app.md)).
 
 ### Replies and turns
 

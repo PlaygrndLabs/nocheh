@@ -496,6 +496,25 @@ and sends the reply the brain returns, and Hermes is brain only
 Pending: the dashboard's own Bot API calls (Find my ID pre-check, group directory, mini app
 menu button) still read the token and move into the bot later.
 
+Send records (owner, 2026-11-11: "I think we should record every agent that send to apps
+like telegram, slack, etc", then "yes" to recording every send, reactions included, with
+typing skipped): `nocheh-telegram` leaves one content-free record per Bot API request that
+leaves or that its own check holds back, in `spool/sends`; `nocheh-app`
+drains them into `control.chat_sends`, `/v1/status` carries the last day's problems, the
+owner reads the list at `/v1/chat-sends`, the "Keep delivery logs" days expire them, and
+problem notices gain the kind `sends`
+([decision](docs/adr/0237-record-every-send-to-a-chat-app.md),
+[bot](services/telegram/test_sends.py), [store](test/store-chat-sends.test.ts)).
+Built on the `sends/*` branches (bot, store, notices, dashboard, docs), not yet on main.
+"typing…" is recorded only when it fails, once per chat and reason in ten minutes; the
+owner was told this is the default unless they object. Pending: the owner's merge, then a
+live check on a running installation that a real 👀 reaction and a reply appear in
+System › Sent to apps as sent, and that the next failed send shows on Health and in a notice.
+Follow-ups: the dashboard's own `setChatMenuButton` (mini app menu button) is a send with
+no record until it moves into the bot with the other dashboard Bot API calls above (those
+are reads, which stay unrecorded); Settings › Privacy & data describes "Delivery logs" as
+logs of replies only and should name the send records too.
+
 Swappable memory (owner, 2026-11-10: "the main things in nocheh should be data
 and hermes and honcho should be replace able with other things like claude code
 or mem0"): long-term memory now sits behind one memory socket, and Honcho is the
