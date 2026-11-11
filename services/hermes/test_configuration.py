@@ -232,12 +232,14 @@ class ConfigurationTests(unittest.TestCase):
         for bad in ('0','9','two','-1'):
             with patch.dict(os.environ,{'NOCHEH_PARALLEL_RUNS':bad}),self.assertRaises(ValueError,msg=bad):parallel('NOCHEH_PARALLEL_RUNS',4)
 
-    def test_owner_sets_delivery_log_retention_for_hermes(self):
+    def test_owner_sets_delivery_log_retention_for_hermes_and_the_telegram_bot(self):
         import yaml
         from tools.operations.installation.configuration import ROOT,validate
         from tools.operations.installation.settings import EDITABLE
         compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
-        self.assertEqual(compose['hermes']['environment']['NOCHEH_HERMES_JOURNAL_RETENTION_DAYS'],'${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}')
+        # One owner setting prunes Hermes's managed-run receipts and the bot's delivery journals.
+        for service in ('hermes','nocheh-telegram'):
+            self.assertEqual(compose[service]['environment']['NOCHEH_HERMES_JOURNAL_RETENTION_DAYS'],'${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}',service)
         self.assertIn('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS',EDITABLE)
         with tempfile.TemporaryDirectory() as folder:
             values=initialize(Path(folder))

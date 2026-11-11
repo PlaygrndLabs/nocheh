@@ -34,18 +34,23 @@ class GroupTriggerTests(unittest.TestCase):
             with patch.dict(os.environ, {key: bad}), self.assertRaises(ValueError, msg=key):
                 reply_mode(), names()
 
-    def test_settings_validate_and_reach_the_hermes_service(self):
+    def test_settings_validate_and_reach_the_app_and_the_telegram_bot(self):
         import yaml
         from tools.operations.installation.configuration import DEFAULTS, ROOT, validate
         from tools.operations.installation.settings import EDITABLE
-        compose = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())['services']['hermes']['environment']
+        services = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())['services']
+        # The app decides addressing; the bot shows typing and reactions; Hermes gets neither.
+        app, bot, hermes = (services[name]['environment'] for name in ('nocheh-app', 'nocheh-telegram', 'hermes'))
         # Without a colon, Compose keeps an owner's empty list instead of restoring the defaults.
-        self.assertEqual((compose['TELEGRAM_GROUP_REPLIES'], compose['TELEGRAM_BOT_NAMES']),
+        self.assertEqual((app['TELEGRAM_GROUP_REPLIES'], app['TELEGRAM_BOT_NAMES']),
                          ('${TELEGRAM_GROUP_REPLIES:-addressed}', '${TELEGRAM_BOT_NAMES-'+DEFAULT_NAMES+'}'))
         self.assertEqual((DEFAULTS['TELEGRAM_GROUP_REPLIES'], DEFAULTS['TELEGRAM_BOT_NAMES']), ('addressed', DEFAULT_NAMES))
         self.assertLessEqual({'TELEGRAM_GROUP_REPLIES', 'TELEGRAM_BOT_NAMES', 'TELEGRAM_TOPIC_MEMORY', 'TELEGRAM_TYPING', 'TELEGRAM_REACTIONS'}, EDITABLE)
-        self.assertEqual((compose['TELEGRAM_TYPING'], DEFAULTS['TELEGRAM_TYPING']), ('${TELEGRAM_TYPING:-true}', 'true'))
-        self.assertEqual((compose['TELEGRAM_REACTIONS'], DEFAULTS['TELEGRAM_REACTIONS']), ('${TELEGRAM_REACTIONS:-true}', 'true'))
+        self.assertEqual((bot['TELEGRAM_TYPING'], DEFAULTS['TELEGRAM_TYPING']), ('${TELEGRAM_TYPING:-true}', 'true'))
+        self.assertEqual((bot['TELEGRAM_REACTIONS'], DEFAULTS['TELEGRAM_REACTIONS']), ('${TELEGRAM_REACTIONS:-true}', 'true'))
+        moved = {'TELEGRAM_BOT_TOKEN', 'NOCHEH_CAPTURE_ENABLED', 'TELEGRAM_GROUP_REPLIES', 'TELEGRAM_BOT_NAMES', 'TELEGRAM_TYPING', 'TELEGRAM_REACTIONS'}
+        self.assertEqual(moved & set(hermes), set())
+        self.assertEqual({'TELEGRAM_TYPING', 'TELEGRAM_REACTIONS', 'TELEGRAM_BOT_TOKEN'} & set(app), set())
         # Storage services decide recall scope, so the topic-memory choice reaches every service sharing the base environment.
         storage = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())['x-service']['environment']
         self.assertEqual((storage['TELEGRAM_TOPIC_MEMORY'], DEFAULTS['TELEGRAM_TOPIC_MEMORY']), ('${TELEGRAM_TOPIC_MEMORY:-group}', 'group'))

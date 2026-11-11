@@ -409,7 +409,12 @@ class Administration:
                 elif path == '/api/env' and method == 'GET': result = {}
                 elif path in ('/api/status', '/api/gateway/status') and method == 'GET':
                     import urllib.request
-                    with urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=3) as response: live = json.load(response)
+                    # The gateway is nocheh-telegram: Hermes itself never talks to Telegram. A bot that is down
+                    # is a stopped gateway, not a broken status page.
+                    telegram = os.environ.get('TELEGRAM_URL', 'http://nocheh-telegram:8784')
+                    try:
+                        with urllib.request.urlopen(telegram + '/health', timeout=3) as response: live = json.load(response)
+                    except (OSError, ValueError): live = {}
                     running = live.get('telegram') == 'connected'
                     result = {'version': '0.23.0', 'release_date': '', 'active_sessions': 0,
                               'config_version': 1, 'latest_config_version': 1, 'config_path': str(home / 'config.yaml'),

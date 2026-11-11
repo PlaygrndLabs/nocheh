@@ -150,6 +150,18 @@ services:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
 
+  nocheh-telegram:
+    image: ${NOCHEH_DEV_HERMES_BASE:?}
+    build: !reset null
+    restart: unless-stopped
+    entrypoint: [python, -m, tools.development.dev_reload]
+    # Not services/hermes: a brain edit must not restart the poller and leave its sends in flight unconfirmed.
+    # The shared services/durable.py is not watched either; restart nocheh-telegram after changing it.
+    command: [--watch, /workspace/services/telegram, --watch, /workspace/tools, --, python, -m, services.telegram.server]
+    volumes:
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
+
   inngest-redis:
     restart: unless-stopped
   inngest-server:

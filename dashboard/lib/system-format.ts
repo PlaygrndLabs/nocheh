@@ -84,6 +84,7 @@ const serviceNames: Record<string, [string, string]> = {
   'nocheh-db': ['Database', 'Stores messages, settings and background work'],
   'nocheh-security': ['Secret check and permissions', 'Hides secrets and checks every action is allowed'],
   hermes: ['Assistant', 'Writes replies and keeps its own notes'],
+  'nocheh-telegram': ['Telegram bot', 'Receives and sends every Telegram message'],
   'hermes-agent-sb': ['Tool sandbox', 'Starts isolated containers for tools'],
   'nocheh-machines': ['Machine control', 'Runs approved jobs on your machines over SSH'],
   'inngest-server': ['Background work scheduler', 'Schedules, retries and waits for background work'],
@@ -363,9 +364,12 @@ export const telegramStates: Record<string, {label: string; tone: Tone}> = {
   connected: {label: 'Receiving', tone: 'good'},
   ready: {label: 'Ready', tone: 'good'},
   recovering: {label: 'Reconnecting', tone: 'warn'},
+  not_started: {label: 'Starting', tone: 'info'},
   starting: {label: 'Starting', tone: 'info'},
   disabled: {label: 'Turned off', tone: 'neutral'},
   credentials_missing: {label: 'Bot token missing', tone: 'bad'},
+  // nocheh-telegram's poller stopped after a fatal error; the reason says which.
+  failed: {label: 'Stopped', tone: 'bad'},
   connection_failed: {label: 'Can’t connect', tone: 'bad'},
   runtime_failed: {label: 'Stopped', tone: 'bad'},
 };
@@ -376,6 +380,7 @@ const telegramReasons: Record<string, string> = {
   telegram_adapter_failed: 'The Telegram connection stopped.',
   telegram_poll_or_capture_failed: 'The last check for new messages failed.',
   telegram_unauthorized: 'Telegram rejected the bot token.',
+  invalid_token: 'Telegram rejected the bot token.',
   telegram_rate_limited: 'Telegram asked Nocheh to slow down.',
 };
 export const telegramReason = (code: string | null | undefined): string =>

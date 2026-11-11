@@ -295,7 +295,7 @@ def machine_folder(state):
 
 def initialize(state):
     state = Path(state).resolve()
-    for name in ('files', 'spool', 'hermes', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
+    for name in ('files', 'spool', 'hermes', 'telegram', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
     github_folders(state); machine_folder(state)
     path = env_path(state); existing = read_env(path)
     values = dict(DEFAULTS)

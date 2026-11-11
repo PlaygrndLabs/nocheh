@@ -57,8 +57,9 @@ def run(state,action,job,options=None):
     elif action=='restart':
         from tools.operations.installation.operations import compose,environment as compose_env
         # Compose honors service stop grace periods and waits for readiness.
-        subprocess.run(compose(state)+['restart','nocheh-app','nocheh-security','hermes'],env=compose_env(state),check=True,capture_output=True)
-        subprocess.run(compose(state)+['up','-d','--no-build','--wait','--wait-timeout','180','nocheh-app','nocheh-security','hermes'],env=compose_env(state),check=True,capture_output=True)
+        services=['nocheh-app','nocheh-security','hermes','nocheh-telegram']
+        subprocess.run(compose(state)+['restart',*services],env=compose_env(state),check=True,capture_output=True)
+        subprocess.run(compose(state)+['up','-d','--no-build','--wait','--wait-timeout','180',*services],env=compose_env(state),check=True,capture_output=True)
         return {'status':'restarted'}
     elif action=='restore':
         backup=identifier(options.get('backup'));port=options.get('port')

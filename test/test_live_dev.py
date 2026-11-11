@@ -166,8 +166,9 @@ class LiveDevTests(unittest.TestCase):
                         'nocheh-app': {'volumes': mounts({'/data/files': '/synthetic/state/files',
                                                           '/app/src': str(live_dev.ROOT / 'src')})},
                         'hermes': {'volumes': mounts({'/workspace/data/local/hermes': '/synthetic/state/hermes'}),
-                                   'environment': {'TELEGRAM_ENABLED': 'true',
-                                                   'HOME': '/workspace/data/local/hermes'}},
+                                   'environment': {'HOME': '/workspace/data/local/hermes'}},
+                        'nocheh-telegram': {'volumes': mounts({'/telegram-state': '/synthetic/state/telegram'}),
+                                            'environment': {'TELEGRAM_ENABLED': 'true'}},
                         'honcho-api': {'volumes': mounts({'/nocheh': str(live_dev.ROOT / 'services/honcho')})},
                         'honcho-provider-gateway': {'volumes': mounts({
                             '/workspace-honcho': str(live_dev.ROOT / 'services/honcho'),
@@ -180,6 +181,16 @@ class LiveDevTests(unittest.TestCase):
                 live_dev.assert_compose_mounts(['docker', 'compose'], env)
             rendered['services']['honcho-provider-gateway']['volumes'].pop()
             rendered['services']['hermes']['environment']['HOME'] = '/'
+            with self.assertRaisesRegex(ValueError, 'writable home'):
+                live_dev.assert_compose_mounts(['docker', 'compose'], env)
+            rendered['services']['hermes']['environment']['HOME'] = '/workspace/data/local/hermes'
+            # The poller is nocheh-telegram: Telegram on in Hermes alone is not enough.
+            rendered['services']['hermes']['environment']['TELEGRAM_ENABLED'] = 'true'
+            rendered['services']['nocheh-telegram']['environment']['TELEGRAM_ENABLED'] = 'false'
+            with self.assertRaisesRegex(ValueError, 'Telegram'):
+                live_dev.assert_compose_mounts(['docker', 'compose'], env)
+            rendered['services']['nocheh-telegram']['environment']['TELEGRAM_ENABLED'] = 'true'
+            rendered['services']['nocheh-telegram']['volumes'] = mounts({'/telegram-state': '/synthetic/state/hermes'})
             with self.assertRaisesRegex(ValueError, 'writable home'):
                 live_dev.assert_compose_mounts(['docker', 'compose'], env)
 
@@ -198,8 +209,17 @@ class LiveDevTests(unittest.TestCase):
                 service = line.strip()[:-1]
             elif line.strip().startswith('restart:'):
                 policies[service] = line.split(':', 1)[1].strip()
-        self.assertIn('hermes', policies)
+        self.assertLessEqual({'hermes', 'nocheh-telegram'}, set(policies))
         self.assertEqual({name for name, policy in policies.items() if policy != 'unless-stopped'}, set())
+
+    def test_a_brain_edit_never_restarts_the_telegram_poller(self):
+        lines = (live_dev.ROOT / 'docker-compose.dev.yml').read_text().splitlines()
+        start = lines.index('  nocheh-telegram:') + 1
+        end = next(index for index in range(start, len(lines)) if lines[index].startswith('  ') and not lines[index].startswith('   '))
+        command = next(line for line in lines[start:end] if line.strip().startswith('command:'))
+        self.assertIn('/workspace/services/telegram,', command)
+        self.assertNotIn('/workspace/services/hermes', command)
+        self.assertIn('services.telegram.server', command)
 
     def test_rejects_occupied_development_port(self):
         with patch.object(live_dev, 'port_available', side_effect=lambda port: port != 8783), patch.object(live_dev.time, 'sleep'):

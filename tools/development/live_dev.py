@@ -17,7 +17,7 @@ PROJECT = 'nocheh'
 DEV_IMAGES = 'nocheh-dev'
 SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor', 'nocheh-machines',
             'nocheh-security', 'hermes-agent-sb', 'inngest-redis', 'inngest-server',
-            'hermes', 'honcho-postgres', 'honcho-redis',
+            'hermes', 'nocheh-telegram', 'honcho-postgres', 'honcho-redis',
             'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
 PORTS = (8780, 8783, 8785)
 FIXTURE_PROJECT = re.compile(r'nocheh-installation-[0-9a-f]{12}')
@@ -255,8 +255,10 @@ def assert_compose_mounts(cmd, env):
             or mount('honcho-provider-gateway', '/workspace-provider') != str(ROOT / 'tools/operations/provider')
             or mount('honcho-provider-gateway', '/nocheh') is not None):
         raise ValueError('Development source or state mount does not match the approved paths')
-    hermes = rendered['services']['hermes']
-    if (hermes['environment'].get('TELEGRAM_ENABLED') != 'true'
+    # nocheh-telegram polls and keeps its incident file; Hermes still needs a writable home for its own files.
+    telegram, hermes = rendered['services']['nocheh-telegram'], rendered['services']['hermes']
+    if (telegram['environment'].get('TELEGRAM_ENABLED') != 'true'
+            or mount('nocheh-telegram', '/telegram-state') != str(Path(env['NOCHEH_STATE_DIR']) / 'telegram')
             or hermes['environment'].get('HOME') != '/workspace/data/local/hermes'):
         raise ValueError('Telegram or its writable home is not configured in development')
 

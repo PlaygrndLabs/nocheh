@@ -52,17 +52,14 @@ def status(state):
     result['keys']=internal_keys(config)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
-    # Preserve the last known fatal incident even after its replacement is healthy.
+    # Preserve the last known fatal incident even after its replacement is healthy. nocheh-telegram
+    # writes it before it exits for Compose to restart it.
     result['telegram_incident']=None
     try:
-        path=Path(state)/'hermes/telegram-incident.json'
-        if path.exists():
-            data=json.loads(path.read_text())
-        else:
-            data=json.loads((Path(state)/'hermes/gateway_state.json').read_text()).get('platforms',{}).get('telegram',{})
-        if data.get('state') in ('fatal','failed'):
+        data=json.loads((Path(state)/'telegram/telegram-incident.json').read_text())
+        if data.get('state')=='failed':
             code=data.get('error_code')
-            result['telegram_incident']={'at':data.get('recorded_at',data.get('updated_at')),
+            result['telegram_incident']={'at':data.get('recorded_at'),
                 'error_code':code if code in ('telegram_network_error','telegram_polling_conflict','telegram_adapter_failed','invalid_token','missing_credentials') else 'telegram_adapter_failed'}
     except (OSError,ValueError,TypeError):pass
     return result
