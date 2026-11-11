@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {savePolicy} from '../src/security/store.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('Telegram proposals and results stay derived, exact owner approval stays control, and uncertain delivery never resends',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -40,7 +41,7 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
       await assert.rejects(actions.authorizeDelivery({...input,text:'changed after approval'}),{code:'action_delivery_denied'});
       native.set(id,'done');
       if(loseReply){loseReply=false;throw Error('accepted send with lost acknowledgment');}return {state:'done',ignored_payload:'never store arbitrary receipt content'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const actions=services.telegramActions,authority={owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='actions'")).rows[0].epoch)};
   const original=(label:string,text:string,scope=group,from=9):Envelope=>({version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:label,revision:'1',occurred_at:null,text,
     payload:{message:{message_id:Date.now(),date:1700000000,chat:{id:Number(scope),type:scope==='123'?'private':'supergroup',is_forum:false},from:{id:from},text}}});

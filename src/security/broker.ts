@@ -33,7 +33,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|honcho\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
@@ -149,7 +149,7 @@ export function brokerServer(options:BrokerOptions) {
     // broker operations on their shorter deadline; cancellation still aborts both.
     // A machine command runs for up to 15 minutes; its own time limit ends it on the machine before that.
     const exec=req.method==='POST'&&path==='/v1/machines/exec';
-    const timeout=req.method==='POST'&&path==='/v1/memory/honcho/recall'?600000:exec?900000:120000;
+    const timeout=req.method==='POST'&&path==='/v1/memory/longterm/recall'?600000:exec?900000:120000;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
     const closed=()=>{if(!res.writableEnded)controller.abort();};res.on('close',closed);
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;

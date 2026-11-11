@@ -38,7 +38,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'memory.limited',
     title: 'When long-term memory is unavailable',
-    hint: 'Told to Nocheh when Honcho memory can’t be reached.',
+    hint: 'Told to Nocheh when long-term memory can’t be reached.',
   },
   {
     key: 'memory.notes_review',
@@ -48,7 +48,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'learning.interpret',
     title: 'Learning from conversations',
-    hint: 'Tells Honcho memory what to learn from each message. Keep {trigger_id} and {citable_ids}; Nocheh fills them in.',
+    hint: 'Tells long-term memory what to learn from each message. Keep {trigger_id} and {citable_ids}; Nocheh fills them in.',
   },
   {
     key: 'sharing.group_filter',

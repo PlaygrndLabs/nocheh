@@ -8,6 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('an explicit owner refresh names selected groups from Telegram while directory reads never call it',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -24,7 +25,7 @@ test('an explicit owner refresh names selected groups from Telegram while direct
       if(id===moved)return {chat_id:id,state:'migrated',migrate_to_chat_id:'-100'+(base+1)};
       if(id===missing)return {chat_id:id,state:'not_member'};
       return {chat_id:id,state:'available',type:'supergroup',title:id===silent?'Quiet group':'Telegram title',is_forum:true};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   try {
     await s.guards.reconcile();await s.configuration.configure(policy,'on');
     const event:Envelope={version:1,key:'chats:'+base,origin:'live',kind:'telegram_update',bot_id:'chats',scope:observed,source_id:'1',revision:'1',occurred_at:null,text:'hi',

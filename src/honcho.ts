@@ -7,6 +7,10 @@ import {guardState,guardedValue} from './guarded.js';
 import {policyRevision,parentSpace,spacePolicy} from './spaces.js';
 import {allowPrepared,prepareContext} from './prepared-context.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
+import type {HonchoCall} from './memory/honcho.js';
+
+export type {HonchoCall};
+/** The older Honcho layer, reached only by tests and the legacy database module. The live path is src/memory/ (ADR-0232). */
 
 export const honchoSchema=`
 CREATE TABLE IF NOT EXISTS honcho_connection(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
@@ -30,26 +34,6 @@ CREATE TABLE IF NOT EXISTS honcho_prepared_sources(source_id text NOT NULL REFER
 CREATE TABLE IF NOT EXISTS honcho_context_cache(generation text PRIMARY KEY REFERENCES honcho_generations(id),
  content bytea NOT NULL CHECK(octet_length(content)<=80000),refreshed_at timestamptz NOT NULL DEFAULT now());
 `;
-/** GET without a body, POST with one. DELETE treats an already absent resource as deleted. */
-export type HonchoCall=(path:string,body?:unknown,method?:'DELETE')=>Promise<any>;
-export function honchoClient(base:string):HonchoCall {
- const url=new URL(base);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('invalid_honcho_url');
- return async(path,body,method)=>{
-  // Recall includes guarded query preparation, embeddings and subscription reasoning.
-  let response:Response;try{response=await fetch(url.origin+path,{method:method??(body===undefined?'GET':'POST'),redirect:'error',signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
-   headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});}catch{throw new HttpError(503,'honcho_unavailable');}
-  if(method==='DELETE'&&response.status===404)return {deleted:false};
-  if(!response.ok) {
-   // Name the rejection without content: a validation error echoes its input, so only its field and type are kept.
-   const detail=await response.json().then((value:any)=>Array.isArray(value?.detail)?value.detail.slice(0,5).map((item:any)=>({field:Array.isArray(item?.loc)?item.loc.join('.'):undefined,type:item?.type})):undefined,()=>undefined);
-   console.warn(JSON.stringify({event:'honcho_upstream_rejected',status:response.status,route:path.replace(/\/[^/?]{16,}/g,'/:id').split('?')[0],detail}));
-   throw new HttpError(503,'honcho_upstream_rejected');
-  }
-  const text=await response.text();if(text.length>2*1024*1024)throw new HttpError(503,'honcho_response_limit');
-  if(method==='DELETE')return {deleted:true};
-  return JSON.parse(text);
- };
-}
 export async function memoryStatus(pool:pg.Pool) {
  await pool.query('INSERT INTO honcho_connection(singleton,instance) VALUES(true,$1) ON CONFLICT DO NOTHING',[randomUUID()]);
  const connection=(await pool.query('SELECT attached,verified,attached_at,include_history FROM honcho_connection')).rows[0];

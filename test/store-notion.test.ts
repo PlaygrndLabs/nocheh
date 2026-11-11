@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {notionAddress,notionJobFetch,notionOwnInput,notionReads,notionRunRefusal} from '../src/stores/notion.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a Notion read stays in the owner\'s Notion only when every address in its input is the owner\'s',()=>{
   const id='0123456789abcdef0123456789abcdef',uuid='01234567-89ab-cdef-0123-456789abcdef';
@@ -73,7 +74,7 @@ test('Notion runs only from the owner\'s private chat while on, and the owner\'s
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-notion-')),key='notion:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null};
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
-    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},honcho:async()=>{throw Error('no memory provider');}});
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
   const capture=async(scope:string,from:number,text:string)=>{
     const label=String(++serial),value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:label,revision:'1',occurred_at:null,text,

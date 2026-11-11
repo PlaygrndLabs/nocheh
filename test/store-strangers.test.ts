@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('someone Nocheh does not serve costs no download or model call, is never read back, and gets one private fixed reply',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -23,7 +24,7 @@ test('someone Nocheh does not serve costs no download or model call, is never re
       if(operation==='guard.detect'){detections++;return {literals:[]};}
       if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}
       throw Error('unexpected runtime call '+operation);
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const bot=String(Date.now()).slice(-9);
   const capture=async(chat:Record<string,unknown>,from:number,extra:Record<string,unknown>={})=>{
     const update=++updates,payload={update_id:update,message:{message_id:update,date:1700000000,chat,from:{id:from,first_name:'Someone'},text:'hello there',...extra}};

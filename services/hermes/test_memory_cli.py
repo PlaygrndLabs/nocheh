@@ -24,9 +24,9 @@ class MemoryCliTests(unittest.TestCase):
         with patch.object(memory, 'API', return_value=api), \
              patch.object(memory.uuid, 'uuid4', return_value='00000000-0000-4000-8000-000000000001'), \
              contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(memory.main(['honcho', 'attach', '--catch-up']), 0)
-        self.assertEqual(api.call.call_args_list[0].args, ('/v1/memory/honcho',))
-        self.assertEqual(api.call.call_args_list[1].args, ('/v1/memory/honcho', {
+            self.assertEqual(memory.main(['longterm', 'attach', '--catch-up']), 0)
+        self.assertEqual(api.call.call_args_list[0].args, ('/v1/memory/longterm',))
+        self.assertEqual(api.call.call_args_list[1].args, ('/v1/memory/longterm', {
             'attached': True, 'include_history': False, 'catch_up': True,
             'expected_revision': 7, 'operation_id': '00000000-0000-4000-8000-000000000001'}))
 

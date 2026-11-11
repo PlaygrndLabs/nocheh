@@ -219,7 +219,8 @@ const stages: Record<string, string> = {
   conversation: 'Tools and reasoning',
   llm: 'Model response',
   model_guard: 'Secret check',
-  honcho_recall: 'Long-term memory lookup',
+  longterm_recall: 'Long-term memory lookup',
+  longterm_search: 'Long-term memory search',
   telegram_send: 'Sending to Telegram',
   unmeasured: 'Not measured',
 };

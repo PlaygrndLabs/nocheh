@@ -39,7 +39,7 @@ test('the mini app reaches only home, Inbox decisions, tasks with their chats an
     ['GET','/monitoring'],['POST','/workflows/retry-failed'],['GET','/entities/suggestions'],['POST','/entities/'+id+'/fold'],['POST','/entities/'+id+'/split']])
     assert.equal(miniAppRoute(method!,route!),true,method+' '+route);
   for(const [method,route] of [['POST','/settings'],['POST','/settings/apply'],['GET','/database-browser'],['POST','/shutdown'],['POST','/tools/revoke'],
-    ['GET','/storage'],['POST','/memory/honcho/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/ws-ticket'],['POST','/entities/'+id+'/merge'],
+    ['GET','/storage'],['POST','/memory/longterm/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/ws-ticket'],['POST','/entities/'+id+'/merge'],
     ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring']])
     assert.equal(miniAppRoute(method!,route!),false,method+' '+route);
 });

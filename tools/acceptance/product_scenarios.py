@@ -683,7 +683,7 @@ class ProductScenarios(Scenarios):
                   status=refused['status'])
         saved = dashboard.post('/settings', {'changes': {'NOCHEH_EMBEDDING_MODEL': large}, 'revision': settings['revision'], 'rebuild_memory': True})
         self.gate('confirmed_change_saved', saved['models']['embedding_rebuild'] == large, models=saved['models'])
-        before = self.f.app('/v1/memory/honcho')
+        before = self.f.app('/v1/memory/longterm')
         old = (before.get('workspace') or {}).get('id')
         self.gate('old_workspace_known', bool(old))
         # Apply restarts Honcho and its gateway with the new model (the fixture's services are
@@ -705,13 +705,13 @@ class ProductScenarios(Scenarios):
         settings = dashboard.get('/settings')
         self.gate('memory_now_on_large_model', settings['models']['embedding_locked'] == large and not settings['models']['embedding_rebuild'],
                   models=settings['models'])
-        after = self.f.app('/v1/memory/honcho')
+        after = self.f.app('/v1/memory/longterm')
         self.gate('replaced_from_archive', after['connection']['include_history'] is True
                   and after['connection']['workspace_revision'] == before['connection']['workspace_revision']+1, connection=after['connection'])
         # The old workspace leaves Honcho with its small-model vectors.
         self.wait('old_workspace_deleted', lambda: self.honcho("SELECT count(*) FROM workspaces WHERE name='"+old+"'") == '0', 900)
         # Saved messages are learned again into the new workspace, embedded with the large model.
-        workspace = lambda: (self.f.app('/v1/memory/honcho').get('workspace') or {}).get('id')
+        workspace = lambda: (self.f.app('/v1/memory/longterm').get('workspace') or {}).get('id')
         self.wait('new_workspace_created', lambda: workspace() not in (None, old), 600)
         new = workspace()
         self.wait('archive_learned_again', lambda: self.honcho("SELECT count(*) FROM messages WHERE workspace_name='"+new+"' AND content LIKE '%IMPORTTOPIC1%'")

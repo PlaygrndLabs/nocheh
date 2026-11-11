@@ -17,7 +17,7 @@ state.
 ./bin/nocheh admin timings EVENT_ID --json
 ./bin/nocheh admin workflows --event EVENT_ID --json
 ./bin/nocheh admin workflow WORKFLOW_ID --json
-./bin/nocheh admin honcho --json
+./bin/nocheh admin longterm --json
 ./bin/nocheh admin learned --json
 ./bin/nocheh admin reviews --json
 ./bin/nocheh admin approvals --json
@@ -34,7 +34,7 @@ source content on the terminal; keep its output out of commits and logs.
 for one captured source. `trace` combines a direct event lookup, linked
 confirmed reply previews, and workflows for that event. A linked reply is
 observed evidence; the CLI does not mark a live gate as passed or decide an
-ambiguous send. `workflow-health`, `honcho`, `learning`, `search`, and `event`
+ambiguous send. `workflow-health`, `longterm`, `learning`, `search`, and `event`
 provide focused inspection. Run `--help` for all options.
 
 `trace latest` selects the newest captured incoming event, then returns its

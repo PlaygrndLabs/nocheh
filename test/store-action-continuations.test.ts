@@ -14,6 +14,7 @@ import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {workflowDetail} from '../src/workflows/owner.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('an approved operation\'s answer comes back to the chat that asked, after its first reply',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -33,7 +34,7 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
       if(operation==='run.start'){starts.push(input);return started;}
       if(operation==='run.resume'){resumes.push(input);return observed;}
       assert.equal(operation,'run.cancel');cancels.push(input);return {state:'cancelled'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const bot=String(Date.now()).slice(-8)+'7';let updates=0;
   const capture=async(label:string,payload:Record<string,unknown>,scope=group)=>{
     const event:Envelope={version:1,key:`telegram:${bot}:update:${payload.update_id}`,origin:'live',kind:'telegram_update',bot_id:bot,scope,source_id:String(payload.update_id),revision:'1',occurred_at:null,text:label,payload};

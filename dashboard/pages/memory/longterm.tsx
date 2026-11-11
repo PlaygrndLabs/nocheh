@@ -34,6 +34,12 @@ type MemoryStatus = {
   syncing?: boolean;
   receipts?: {state: string; count: number}[];
   workspace?: {id: string; state: string; last_ready_at: string | null; error_code: string | null} | null;
+  /** The memory engine plugged in behind long-term memory. Another engine can replace it later. */
+  engine?: {
+    id: string;
+    name: string;
+    capabilities?: {inspect?: boolean; evidence?: boolean; retry_failed_learning?: boolean};
+  };
 };
 type ServiceStatus = {running: boolean; reasoning_provider_configured: boolean; embedding_credential: boolean};
 type Budget = {
@@ -68,7 +74,7 @@ const usd = (value: number) =>
   }).format(value);
 
 export function LongTerm() {
-  const memory = useResource<MemoryStatus>('/memory/honcho', 10000);
+  const memory = useResource<MemoryStatus>('/memory/longterm', 10000);
   const service = useResource<ServiceStatus>('/honcho/status', 30000);
   const attached = !!memory.data?.connection.attached;
   // Spending limit changes still follow the server's accepted-memory rule.
@@ -78,7 +84,9 @@ export function LongTerm() {
       <StatusCard memory={memory} service={service} />
       <BudgetCard editable={budgetEditable} />
       {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={attached} />}
-      <Browse running={!!service.data?.running} workspace={memory.data?.workspace?.id ?? ''} />
+      {memory.data?.engine?.capabilities?.inspect && (
+        <Browse running={!!service.data?.running} workspace={memory.data.workspace?.id ?? ''} />
+      )}
     </>
   );
 }
@@ -181,7 +189,7 @@ function StatusCard({
       }))
     )
       return;
-    const result = await command.run('/memory/honcho', {
+    const result = await command.run('/memory/longterm', {
       attached: attach,
       include_history: history,
       catch_up: catchUp,
@@ -196,6 +204,13 @@ function StatusCard({
       <CardHeader
         title="Long-term memory"
         description="Remembers across chats and months, beyond the assistant’s short notes."
+        action={
+          data.engine && (
+            <Badge tone="neutral" title="The memory engine Nocheh uses. Another engine can replace it later.">
+              Engine: {data.engine.name}
+            </Badge>
+          )
+        }
       />
       <CardBody className="space-y-5">
         {memory.error && <LoadError what="the latest status" onRetry={() => void refreshResources()} />}

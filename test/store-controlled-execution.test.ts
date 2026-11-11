@@ -13,6 +13,7 @@ import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {policySnapshot,savePolicy} from '../src/security/store.js';
 import {hash,requestWorkflow} from '../src/workflows/store.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('host tool execution fences exact authority and repairs durable results without repeating effects',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -21,7 +22,7 @@ test('host tool execution fences exact authority and repairs durable results wit
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tool-execution-')),key='execution:'+Date.now(),group='-'+Date.now();
   const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
-    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no provider');}});
+    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution,event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:'1',revision:'1',occurred_at:null,text:'Tool execution source',
     payload:{message:{message_id:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Tool execution source'}}};
   try {

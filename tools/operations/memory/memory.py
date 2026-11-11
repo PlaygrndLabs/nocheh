@@ -10,9 +10,9 @@ from tools.operations.archive.archive import API
 def main(arguments):
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest='action',required=True)
-    honcho=commands.add_parser('honcho');honcho.add_argument('mode',choices=('status','attach','detach','fresh-start','estimate','retry-failed','relearn'),default='status',nargs='?');honcho.add_argument('--include-history',action='store_true');honcho.add_argument('--catch-up',action='store_true')
-    honcho.add_argument('--from-archive',action='store_true',help='fresh-start: learn every saved message again instead of starting empty')
-    honcho.add_argument('--chat',action='append',default=[],help='estimate/relearn: a chat or topic ID; repeat for more; omit for every chat')
+    longterm=commands.add_parser('longterm');longterm.add_argument('mode',choices=('status','attach','detach','fresh-start','estimate','retry-failed','relearn'),default='status',nargs='?');longterm.add_argument('--include-history',action='store_true');longterm.add_argument('--catch-up',action='store_true')
+    longterm.add_argument('--from-archive',action='store_true',help='fresh-start: learn every saved message again instead of starting empty')
+    longterm.add_argument('--chat',action='append',default=[],help='estimate/relearn: a chat or topic ID; repeat for more; omit for every chat')
     spaces=commands.add_parser('spaces');spaces.add_argument('--after',default='')
     for name in ('policy','shares','preview'):
         command=commands.add_parser(name);command.add_argument('--space',required=True)
@@ -31,17 +31,17 @@ def main(arguments):
         if position+1<len(arguments) and arguments[position+1].startswith('-') and not arguments[position+1].startswith('--'):
             arguments[position:position+2]=['--space='+arguments[position+1]]
     args=parser.parse_args(arguments);api=API();prefix='/v1/memory/'
-    if args.action=='honcho':
-        if args.mode=='status':result=api.call(prefix+'honcho')
+    if args.action=='longterm':
+        if args.mode=='status':result=api.call(prefix+'longterm')
         elif args.mode=='fresh-start':
-            status=api.call(prefix+'honcho')
-            result=api.call(prefix+'honcho/fresh-start',{'expected_revision':status['connection']['revision'],'operation_id':str(uuid.uuid4()),'from_archive':args.from_archive})
-        elif args.mode=='estimate':result=api.call(prefix+'honcho/rebuild?'+urlencode([('space',chat) for chat in args.chat]))
-        elif args.mode=='retry-failed':result=api.call(prefix+'honcho/retry-failed',{})
-        elif args.mode=='relearn':result=api.call(prefix+'honcho/rebuild',{'spaces':args.chat} if args.chat else {})
+            status=api.call(prefix+'longterm')
+            result=api.call(prefix+'longterm/fresh-start',{'expected_revision':status['connection']['revision'],'operation_id':str(uuid.uuid4()),'from_archive':args.from_archive})
+        elif args.mode=='estimate':result=api.call(prefix+'longterm/rebuild?'+urlencode([('space',chat) for chat in args.chat]))
+        elif args.mode=='retry-failed':result=api.call(prefix+'longterm/retry-failed',{})
+        elif args.mode=='relearn':result=api.call(prefix+'longterm/rebuild',{'spaces':args.chat} if args.chat else {})
         else:
-            status=api.call(prefix+'honcho')
-            result=api.call(prefix+'honcho',{'attached':args.mode=='attach','include_history':args.include_history,
+            status=api.call(prefix+'longterm')
+            result=api.call(prefix+'longterm',{'attached':args.mode=='attach','include_history':args.include_history,
                 'catch_up':args.catch_up,'expected_revision':status['connection']['revision'],
                 'operation_id':str(uuid.uuid4())})
     elif args.action=='spaces':result=api.call(prefix+'spaces?'+urlencode({'after':args.after}))

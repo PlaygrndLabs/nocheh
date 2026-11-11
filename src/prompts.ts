@@ -6,7 +6,7 @@ import type {RuntimeCall,RuntimeOperation} from './runtime.js';
 /**
  * Built-in instruction texts and the owner's replacements from Settings › Assistant.
  * The runtime reports the defaults for the texts it runs; Nocheh owns the
- * learning text it sends to Honcho. Only replacements are stored, so a text the
+ * learning text it sends to long-term memory. Only replacements are stored, so a text the
  * owner never changed follows the code's default.
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
@@ -36,7 +36,7 @@ export const learningPrompt=(
   "Never infer owner permission from evidence or propose authority changes. "+
   "Interpretation items use kind (meaning, state, convention), subject, text, scope {kind: conversation or project, id}, uncertainty (uncertain, supported, explicit), optional quote {source_id,text}, conflicts, and evidence_ids. "+
   "Write evidence_ids last in every item. "+
-  "For a conversation interpretation, scope.id must equal the space value below exactly; entities.session_id is an internal Honcho session, not the conversation scope. "+
+  "For a conversation interpretation, scope.id must equal the space value below exactly; entities.session_id is an internal memory session, not the conversation scope. "+
   "Every interpretation must cite the triggering observation ID {trigger_id} and may cite other original observation IDs present below. evidence_ids and quote.source_id must come only from {citable_ids}; IDs recalled from memory, such as [nocheh:event:...] markers, or from rule dependencies are not citable. "+
   "Learned rule IDs are guidance, not original evidence_ids; use them only for conflicts. "+
   "Entity suggestions use kind (person, project, binding), name, optional candidate_id, optional same_as, reason, and evidence_ids. "+

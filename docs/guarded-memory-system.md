@@ -61,20 +61,20 @@ note archived; transcription is not available." and never holds a reply.
   the embedding reservation and usage estimate, and an owner control for the
   monthly embedding cap after attachment. OpenAI's API Usage page is the source
   for billed usage; Nocheh's reservation is a conservative admission limit.
-- `./bin/nocheh memory honcho status` provides the same connection state.
-- `./bin/nocheh memory honcho attach --catch-up` includes consented sources
+- `./bin/nocheh memory longterm status` provides the same connection state.
+- `./bin/nocheh memory longterm attach --catch-up` includes consented sources
   received while detached. `--include-history` includes older consented sources.
-- `./bin/nocheh memory honcho detach` stops memory use without deleting data.
-- `./bin/nocheh memory honcho fresh-start` moves Honcho to a new, empty
+- `./bin/nocheh memory longterm detach` stops memory use without deleting data.
+- `./bin/nocheh memory longterm fresh-start` moves Honcho to a new, empty
   workspace that learns from messages received from then on, and deletes every
   earlier Nocheh workspace from Honcho with its Nocheh records. Original
   messages stay in the archive. `status` shows deletion progress under
   `workspace_deletions`.
   `fresh-start --from-archive` instead learns every saved message you allowed
   again in the new workspace.
-- `./bin/nocheh memory honcho retry-failed` reruns Honcho learning that ended in
+- `./bin/nocheh memory longterm retry-failed` reruns Honcho learning that ended in
   an error, such as during a provider outage, without resending messages.
-- `./bin/nocheh memory honcho relearn [--chat ID ...]` re-learns every chat, or
+- `./bin/nocheh memory longterm relearn [--chat ID ...]` re-learns every chat, or
   the chosen chats and their topics, from their saved messages: their Honcho
   sessions and what Honcho derived from them are replaced. Retired messages are
   left out. `estimate [--chat ID ...]` shows what each option would send first.
@@ -110,7 +110,7 @@ For initial setup or an embedding HTTP 429:
 3. Keep the configured `text-embedding-3-small` model for an existing small-model
    ledger. Changing a model is a memory rebuild operation, not a quota repair.
 4. Apply with `./bin/nocheh up` or Apply in Settings › Models, then check
-   `./bin/nocheh memory honcho status`.
+   `./bin/nocheh memory longterm status`.
 
 OpenAI documents [separate API billing](https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform)
 and [429 diagnosis](https://help.openai.com/en/articles/5955604-troubleshooting-api-rate-limits-and-429-errors).

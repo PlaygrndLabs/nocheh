@@ -8,6 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 const states=(counts:any)=>({open:counts.open,done:counts.done,dropped:counts.dropped});
 
@@ -19,7 +20,7 @@ test('the owner keeps task lists from the dashboard and their private chat; an u
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null};
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
-    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},honcho:async()=>{throw Error('no memory provider');}});
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
   const capture=async(scope:string,from:number,text:string)=>{
     const label=String(++serial),value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:label,revision:'1',occurred_at:null,text,
@@ -136,7 +137,7 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='telegram.notice'){notices.push(input);return {state:telegram};}
       throw Error('runtime_not_expected');
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
   const capture=async(scope:string,from:number,text:string,name='Owner')=>{
     const label=String(++serial),value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:label,revision:'1',occurred_at:null,text,

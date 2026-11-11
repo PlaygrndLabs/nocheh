@@ -15,6 +15,7 @@ import {safeMetadata} from '../src/workflows/boundary.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('browser execution separates originals, prepared inputs, receipts and same-identity recovery',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -49,7 +50,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
   };
   const s=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Prepared audio fixture-secret';}},
-    honcho:async()=>{throw Error('no providers');}});
+    memoryEngine:honchoEngine(async()=>{throw Error('no providers');})});
   const authority=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
   const capture=async(options:Record<string,unknown>={})=>{const binding=await s.guards.state(),body={scope:'123',profile:options.scope&&options.scope!=='123'?'nocheh-'+digest(String(options.space??options.scope)).slice(0,24):research,conversation:'fixture-'+base+'-'+(++serial),
     id:'input',text:'Original fixture-secret',revision:binding.epoch,...options};const source=await s.browserCapture.capture(owner,body);await drainSourceSpool(s.capture,root,source.event_id);return {...body,...source};};

@@ -14,6 +14,7 @@ import {storeSchemas} from '../src/stores/schema.js';
 import {connectStores,initializeStoreDatabases,storeNames} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('portable bundle transfers exact sources, two engine versions, durable owner edits, and inactive native history through owner HTTP APIs',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -33,7 +34,7 @@ test('portable bundle transfers exact sources, two engine versions, durable owne
   }
   const connections=namespaces.map(schema=>connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords));
   const root=await mkdtemp(join(tmpdir(),'nocheh-bundle-')),token=digest(root),owner={admin:true,scope:null};
-  const services=connections.map((stores,i)=>storageServices(stores,{dataDir:join(root,String(i)),detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),runtime:async()=>({literals:[]}),honcho:async()=>{throw Error('no providers');}}));
+  const services=connections.map((stores,i)=>storageServices(stores,{dataDir:join(root,String(i)),detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no providers');})}));
   const servers=services.map(s=>{const api=new OwnerStorageApi(s);return createServer((req,res)=>{void(async()=>{
     if(!await api.handle(reader(req,token),req,res,new URL(req.url!,'http://fixture')))throw new HttpError(404,'not_found');
   })().catch(error=>json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'service_unavailable'}));});});

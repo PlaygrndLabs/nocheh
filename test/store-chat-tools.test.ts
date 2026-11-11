@@ -11,6 +11,7 @@ import {storageServices} from '../src/stores/services.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {chatToolAllowed,chatToolSettings,toolSpace} from '../src/stores/chat-tools.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 /** Rows as the control table holds them, read the way the resolver reads them. */
 const table=(rows:{space_id:string;shell?:boolean|null;browser?:boolean|null;mcp?:boolean|null;revision?:number}[])=>({
@@ -49,7 +50,7 @@ test('the owner sets tool switches per chat and topic; Nocheh refuses and stops 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-chat-tools-')),key='chat-tools:'+Date.now(),group='-10042',topic=group+'/topic/7';
   const owner:Reader={admin:true,scope:null};let detected=0;
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
-    runtime:async operation=>{if(operation==='guard.detect'){detected++;return {literals:[]};}throw Error('runtime_not_expected');},honcho:async()=>{throw Error('no memory provider');}});
+    runtime:async operation=>{if(operation==='guard.detect'){detected++;return {literals:[]};}throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const api=new OwnerStorageApi(s),a=s.controlledActions,x=s.controlledExecution;
   let serial=0;
   const capture=async(scope:string,from:number,text:string,thread?:number)=>{

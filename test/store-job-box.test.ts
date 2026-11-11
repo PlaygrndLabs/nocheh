@@ -16,6 +16,7 @@ import {JobBoxRepository,boxTokenValid} from '../src/stores/job-box.js';
 import {notionJobFetch,notionReads} from '../src/stores/notion.js';
 import {storageServer} from '../src/stores/server.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('only the owner\'s approved private job gets the sealed box, its binding and live list follow the job, the guard and the switch, and its chat copy is the job\'s own checked chat, whole',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:600000},async()=>{
@@ -34,7 +35,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       if(operation.startsWith('telegram.'))return {state:'done',chat_id:input.chat_id,message_id:'5'};
       throw Error('unexpected runtime call '+operation);
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const relayed:string[]=[];let refuse=(_url:string):Response|null=>null;
   const mock:typeof fetch=async(url,init)=>{
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',api_key:'synthetic-credential',model_context_length:100000});

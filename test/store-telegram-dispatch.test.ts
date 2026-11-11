@@ -16,6 +16,7 @@ import {safeMetadata} from '../src/workflows/boundary.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {observedSource} from '../src/observed-source.js';
 import {HttpError} from '../src/http.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('guarded representations cannot change Telegram routing or embed unobserved reply snapshots',()=>{
   const original={update_id:1,message:{message_id:2,date:3,chat:{id:-4,type:'supergroup',is_forum:true},from:{id:5,is_bot:false},message_thread_id:6,is_topic_message:true}};
@@ -91,7 +92,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   };
   const services=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Selected voice fixture-secret';}},
-    honcho:async()=>{throw Error('no memory providers');}});
+    memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
   const operations=storageWorkflowOperations(services,runtime);
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const envelope=(text:string,extra:any={},scope=group):Envelope=>{
@@ -264,7 +265,7 @@ test('conversation messages start in Telegram update order while an earlier mess
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'run.start');started.push(String(input.event_id));return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');},
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
     transcription:{name:'fixture-asr',version:'1',outputKind:'transcript',async run(){throw new HttpError(422,'invalid_transcription_response');}}});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const capture=async(text:string,topic?:number,update=++serial,extra:any={})=>{
@@ -324,7 +325,7 @@ test('an album gets one turn with every part, answered on its first part',
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');}});
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const capture=async(extra:any)=>{
     const update=++serial,message:any={message_id:update,date:1700000000,chat:{id:Number(group),type:'supergroup'},from:{id:123,is_bot:false,first_name:'Owner'},...extra};
@@ -379,7 +380,7 @@ test('a group turn sees the unaddressed group messages since the last turn, neve
     if(!String(input.text).startsWith('Nocheh'))return {state:'suppressed',error_code:'not_addressed'};
     started.push(input);return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');}});
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const say=async(text:string,from:any={id:123,is_bot:false,first_name:'Owner'})=>{
     const update=++serial,message={message_id:update,date:1700000000+update-base,chat:{id:Number(group),type:'supergroup'},from,text};
@@ -420,7 +421,7 @@ test('a later message is told about an earlier voice note still waiting for tran
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,honcho:async()=>{throw Error('no memory providers');},
+  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
     transcription:{name:'fixture-asr',version:'1',outputKind:'transcript',async run(){if(!speech)throw new HttpError(503,'transcription_unavailable');return 'Synthetic voice words';}}});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const capture=async(text:string|undefined,topic:number,extra:any={})=>{

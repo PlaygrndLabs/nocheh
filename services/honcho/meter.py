@@ -498,7 +498,7 @@ RETRYABLE_PREPARATION=frozenset({'audience_context_changed','runtime_context_con
 
 class ArchivePreparation:
     def __init__(self,url,token):
-        self.url=url.rstrip('/')+'/internal/honcho/prepare';self.token=token
+        self.url=url.rstrip('/')+'/internal/memory/prepare';self.token=token
         self.opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
     def __call__(self,workspace,route,payload,background=False):
         body={'workspace':workspace,'route':route,'payload':payload,**({'background':True} if background else {})}

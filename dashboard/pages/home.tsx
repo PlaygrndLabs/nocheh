@@ -18,7 +18,7 @@ export default function Home() {
   const monitoring = useResource<any>('/monitoring', 15000);
   const status = useResource<any>('/status', 30000);
   const decisions = useResource<any>('/decisions?limit=1', 30000);
-  const memory = useResource<any>('/memory/honcho', 30000);
+  const memory = useResource<any>('/memory/longterm', 30000);
   const usage = useResource<any>('/usage?days=1', 60000);
   const settings = useSettings();
   const setup = settings.data ? setupSteps(settings.data) : [];

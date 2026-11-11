@@ -4,7 +4,7 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inspectRequest} from '../guard.js';
-import type {HonchoCall} from '../honcho.js';
+import {engineErrors,engineId,engineSummary,type EngineWrite,type MemoryEngine} from '../memory/engine.js';
 import {parentSpace,recallCondition,validateSpace} from '../spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
@@ -13,31 +13,31 @@ import type {GuardBinding} from './guards.js';
 import type {PreparedDependency} from './learned.js';
 import type {LearningContextRepository} from './learning-context.js';
 import type {PreparedContextRepository} from './prepared-context.js';
-import type {HonchoProvenanceRepository} from './honcho-provenance.js';
+import type {MemoryProvenanceRepository} from './memory-provenance.js';
 import {OwnerCommands} from './owner-commands.js';
-import {evidencePeerId,honchoPeerId,type EntityContext} from './entities.js';
+import {evidencePeerId,memoryPeerId,type EntityContext} from './entities.js';
 
-const protocol='honcho-entity-v1';
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
 export const assistantPeer='nocheh_assistant';
 const assistantKinds=new Set(['telegram_delivered_message','browser_delivered_message']);
 const limited:{sources:never[];limited_memory:boolean;note:string;syncing?:boolean}={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
 const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after an owner change, such as a retired message. Current context, native notes and archive search remain available.'};
-const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value);
-const sessionName=(workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
-/** Validation failures that mean a written receipt no longer belongs in Honcho. */
+const sessionName=(protocol:string,workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
+/** Validation failures that mean a written receipt no longer belongs in the memory engine. */
 const invalidCodes=new Set(['learning_consent_required','memory_refresh_required','learned_memory_not_found']);
 const contextTokens=4000,contextCharacters=20000;
 type SessionKind='conversation'|'entity_evidence'|'projection';
-/** The installation's Honcho workspace; only a fresh start or an installation reset changes it. */
-const workspaceId=(generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
+/** The installation's memory space; only a fresh start, an installation reset or another engine changes it. */
+const workspaceId=(protocol:string,generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
 type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
 
-/** Honcho owns native memory. Nocheh owns guarded inputs, immutable results and recoverable receipts.
- * One Honcho workspace serves the installation; sessions bound conversations; guard epochs never rebuild it. */
+/** Long-term memory behind the memory socket (ADR-0232). The engine, Honcho today, stores and learns; Nocheh owns guarded
+ * inputs, immutable results, recoverable receipts, sharing rules, corrections and deletions.
+ * One memory space serves the installation; sessions bound conversations; guard epochs never rebuild it. */
 export class NativeMemoryRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
-    readonly provenance:HonchoProvenanceRepository,readonly call:HonchoCall,readonly detect:(text:string,background?:boolean)=>Promise<unknown>){}
+    readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine,readonly detect:(text:string,background?:boolean)=>Promise<unknown>){}
+  private get protocol(){return this.engine.protocol;}
   private get control(){return this.contexts.access.stores.control;}
   private get guards(){return this.contexts.guards;}
   private get owner(){return this.contexts.access.policy().owner_id;}
@@ -58,7 +58,7 @@ export class NativeMemoryRepository {
     const retired=(await this.control.query(`SELECT state,count(*)::int AS workspaces,sum(deleted_sessions)::int AS sessions
       FROM memory_workspace_deletions GROUP BY state ORDER BY state`)).rows;
     return {connection,workspace:workspace?{id:workspace.id,state:workspace.state,last_ready_at:workspace.last_ready_at,error_code:workspace.error_code}:null,
-      sessions,receipts,deletions,workspace_deletions:retired,guard:binding,primary:'honcho',native_notes:['MEMORY.md','USER.md'],syncing:workspace?.state==='building',
+      sessions,receipts,deletions,workspace_deletions:retired,guard:binding,engine:engineSummary(this.engine),native_notes:['MEMORY.md','USER.md'],syncing:workspace?.state==='building',
       limited_memory:!connection.attached||!workspace||!workspace.last_ready_at&&workspace.state!=='ready'};
   }
   /** A short-lived synthetic workspace for live provider acceptance before memory attachment. */
@@ -157,31 +157,31 @@ export class NativeMemoryRepository {
   }
   private async workspace(binding:GuardBinding) {
     return (await this.control.query(`SELECT * FROM memory_generations WHERE installation_generation=$1 AND audience='installation'
-      AND representation_version=$2 AND state<>'retired'`,[binding.generation,protocol])).rows[0] as any;
+      AND representation_version=$2 AND state<>'retired'`,[binding.generation,this.protocol])).rows[0] as any;
   }
   /** The installation workspace stays current across guard epochs; only an installation reset replaces it. */
   async current(id:string) {
     const binding=await this.guards.state(),row=(await this.control.query('SELECT * FROM memory_generations WHERE id=$1',[id])).rows[0];
     const revision=(await this.control.query('SELECT workspace_revision FROM memory_engine_connection WHERE singleton')).rows[0].workspace_revision;
     // A fresh start opens the next workspace revision; nothing writes to or reads from an earlier one again.
-    if(!row?.root_reference||row.audience!=='installation'||row.representation_version!==protocol||id!==workspaceId(binding.generation,revision))
+    if(!row?.root_reference||row.audience!=='installation'||row.representation_version!==this.protocol||id!==workspaceId(this.protocol,binding.generation,revision))
       throw new HttpError(409,'memory_context_retired');
     await this.provenance.current(id,'owner',binding);
     return {row,binding,principal:this.principal('owner',row.root_reference.id,binding)};
   }
   private async ensureWorkspace(source:SourceReference,binding:GuardBinding) {
     const revision=(await this.control.query('SELECT workspace_revision FROM memory_engine_connection WHERE singleton')).rows[0].workspace_revision;
-    const id=workspaceId(binding.generation,revision);
-    // Per-audience, per-epoch workspaces of earlier mappings are superseded and never written again.
+    const id=workspaceId(this.protocol,binding.generation,revision);
+    // Per-audience, per-epoch workspaces of earlier mappings, or of another engine, are superseded and never written again.
     await this.control.query(`UPDATE memory_generations SET state='retired' WHERE installation_generation=$1
-      AND representation_version<>$2 AND state<>'retired'`,[binding.generation,protocol]);
+      AND representation_version<>$2 AND state<>'retired'`,[binding.generation,this.protocol]);
     await this.control.query(`INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience,root_reference,root_space,representation_version)
-      VALUES($1,$2,$3,'installation',$4,$5,$6) ON CONFLICT DO NOTHING`,[id,binding.generation,binding.epoch,source,this.owner,protocol]);
+      VALUES($1,$2,$3,'installation',$4,$5,$6) ON CONFLICT DO NOTHING`,[id,binding.generation,binding.epoch,source,this.owner,this.protocol]);
     await this.current(id);return id;
   }
   private async session(workspace:string,key:string,audience:string,kind:SessionKind) {
     await this.control.query(`INSERT INTO memory_sessions(workspace,key,audience,kind,session_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-      [workspace,key,audience,kind,sessionName(workspace,key,1)]);
+      [workspace,key,audience,kind,sessionName(this.protocol,workspace,key,1)]);
     const row=(await this.control.query('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2',[workspace,key])).rows[0];
     // Owner-private evidence never enters a session another audience may read.
     if(row.audience!==audience||row.kind!==kind)throw new HttpError(409,'memory_session_conflict');
@@ -192,14 +192,15 @@ export class NativeMemoryRepository {
     if(evidence.length<1||evidence.length>30||text.length>600000)throw new HttpError(413,'memory_input_limit');
     const {projection,assistant=false,supersedes=[]}=options,audience=this.audienceOf(space);
     const workspace=await this.ensureWorkspace(source,binding),generation=await this.current(workspace);
-    // Honcho egress is prepared as the workspace owner; reply context is prepared for the audience.
+    // Engine egress is prepared as the space owner; reply context is prepared for the audience.
     const writers=[this.principal(audience,source.id,binding),...(audience==='owner'?[]:[generation.principal])];
     const speaker=assistant?null:entities.speaker;
-    const peer=assistant?assistantPeer:!projection&&speaker?honchoPeerId(speaker):evidencePeerId(source);
+    const peer=assistant?assistantPeer:!projection&&speaker?memoryPeerId(speaker):evidencePeerId(source);
     const subjects=[entities.project,...entities.mentioned_projects,...entities.mentioned_people].filter((value,index,all)=>
       !!value&&value.id!==speaker?.id&&all.findIndex(other=>other?.id===value.id)===index);
-    const allPeers=[peer,...subjects.map(value=>honchoPeerId(value!))].filter((value,index,all)=>all.indexOf(value)===index);
+    const allPeers=[peer,...subjects.map(value=>memoryPeerId(value!))].filter((value,index,all)=>all.indexOf(value)===index);
     const conversation=entities.session_id;
+    const protocol=this.protocol;
     const records=[{text,key:projection?digest(canonical([protocol,'projection',conversation,projection.id])):conversation,
       kind:(projection?'projection':'conversation') as SessionKind,subject:projection?null:speaker?.id??null,peers:allPeers,
       record:projection?'learned_interpretation':'source_evidence'},
@@ -208,7 +209,7 @@ export class NativeMemoryRepository {
         authority:'This observation is about the subject; it is not a statement made by the subject.'}),
         // An interpretation's subject evidence has its own session, so correcting it never rebuilds source evidence.
         key:digest(canonical([protocol,'entity-evidence',conversation,subject!.id,...(projection?[projection.id]:[])])),kind:'entity_evidence' as SessionKind,subject:subject!.id as string|null,
-        peers:[peer,honchoPeerId(subject!)],record:'entity_evidence'}))];
+        peers:[peer,memoryPeerId(subject!)],record:'entity_evidence'}))];
     // Logical identities do not depend on a session's revision, so a rebuild can carry valid writes forward.
     const planned=records.flatMap(record=>{
       const chars=Array.from(record.text),chunks=[];
@@ -253,7 +254,7 @@ export class NativeMemoryRepository {
     await this.guards.assertCurrent(binding);
     return [{audience,workspace,receipts}];
   }
-  /** New work in a session marks the workspace as building until Honcho finishes it. */
+  /** New work in a session marks the space as building until the engine finishes it. */
   private async changed(db:pg.PoolClient,workspace:string,key:string) {
     await db.query('UPDATE memory_sessions SET work_revision=work_revision+1,updated_at=now() WHERE workspace=$1 AND key=$2',[workspace,key]);
     await this.building(db,workspace);
@@ -269,7 +270,7 @@ export class NativeMemoryRepository {
     const binding=await this.guards.state();
     const row=(await this.contexts.access.stores.archive.query('SELECT received_at,kind FROM events WHERE id=$1',[source.id])).rows[0];
     if(!row)throw new HttpError(404,'source_not_found');
-    // Honcho cannot change a message, so an edit replaces the earlier revision's writes and only the latest text is written.
+    // An engine write cannot change, so an edit replaces the earlier revision's writes and only the latest text is written.
     const revisions=await this.revisions(source.id);
     if(revisions.length&&revisions.at(-1)!==source.id)return [];
     const explicit=(await this.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[source.id])).rows[0]?.enabled===true;
@@ -294,7 +295,7 @@ export class NativeMemoryRepository {
     const binding=await this.guards.state(),row=(await this.contexts.access.stores.derived.query(`SELECT v.evidence,v.dependencies,v.retired FROM learned_entries e
       JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[id])).rows[0];
     if(!row||row.retired) {
-      // A retracted interpretation leaves Honcho together with the sessions that held it.
+      // A retracted interpretation leaves the engine together with the sessions that held it.
       const workspace=await this.workspace(binding);if(!workspace)return [];
       const stale=(await this.control.query(`SELECT id,session_key FROM memory_ingestion_receipts WHERE generation=$1 AND retired_at IS NULL
         AND projection_reference->>'id'=$2`,[workspace.id,id])).rows;
@@ -313,27 +314,26 @@ export class NativeMemoryRepository {
   async ingested(sourceId:string):Promise<boolean> {
     return !!(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
       WHERE r.source_reference->>'id'=$1 AND r.retired_at IS NULL AND r.projection_reference IS NULL AND g.state<>'retired'
-      AND g.representation_version=$2 LIMIT 1`,[sourceId,protocol])).rowCount;
+      AND g.representation_version=$2 LIMIT 1`,[sourceId,this.protocol])).rowCount;
   }
-  /** A source's writes are complete and Honcho has no unfinished work for their sessions. */
+  /** A source's writes are complete and the engine has no unfinished work for their sessions. */
   async settled(receipts:string[]):Promise<boolean> {
     const rows=(await this.control.query('SELECT generation,session_id,state,retired_at FROM memory_ingestion_receipts WHERE id=ANY($1::text[])',[receipts])).rows;
     if(rows.length!==receipts.length||rows.some(row=>row.retired_at||row.state!=='done'))return false;
     for(const key of new Set(rows.map(row=>row.generation+'/'+row.session_id))) {
       const [workspace,session]=key.split('/');await this.current(workspace!);
-      const queue=await this.call('/v3/workspaces/'+workspace+'/queue/status?session_id='+session);
-      if(queue.pending_work_units!==0||queue.in_progress_work_units!==0)return false;
+      if(await this.engine.busy(workspace!,session))return false;
     }
     return true;
   }
   private async receipt(id:string) {
     const row=(await this.control.query('SELECT * FROM memory_ingestion_receipts WHERE id=$1',[id])).rows[0];
-    if(!row)throw new HttpError(404,'honcho_receipt_missing');
+    if(!row)throw new HttpError(404,'memory_receipt_missing');
     const output=(await this.derived.pool.query("SELECT content,content_hash FROM derived_artifacts WHERE id=$1 AND kind='memory_input'",[row.prepared_id])).rows[0];
-    if(!output||output.content_hash!==row.content_hash||digest(output.content)!==row.content_hash)throw new HttpError(409,'honcho_input_conflict');
+    if(!output||output.content_hash!==row.content_hash||digest(output.content)!==row.content_hash)throw new HttpError(409,'memory_input_conflict');
     return {...row,content:output.content.toString() as string};
   }
-  /** Throws when a written receipt no longer belongs in Honcho. A later reaction change adds evidence; it does not retract earlier evidence. */
+  /** Throws when a written receipt no longer belongs in the memory engine. A later reaction change adds evidence; it does not retract earlier evidence. */
   private async validate(row:any,binding:GuardBinding):Promise<void> {
     if(row.guard_mode&&row.guard_mode!==binding.mode)throw new HttpError(409,'memory_refresh_required');
     const principal=this.principal(row.audience,row.source_reference.id,binding),historical={historical:true};
@@ -366,7 +366,7 @@ export class NativeMemoryRepository {
     await this.validate(row,current.binding);
     return current;
   }
-  /** When a source's event happened. Honcho otherwise dates a message by its write, so a retried
+  /** When a source's event happened. An engine otherwise dates a write by when it was made, so a retried
    * or imported message would read as new. An interpretation keeps the time it was learned. */
   private async occurredAt(row:{source_reference:SourceReference;projection_reference:unknown}):Promise<string|undefined> {
     if(row.projection_reference)return undefined;
@@ -374,33 +374,33 @@ export class NativeMemoryRepository {
     if(!event)return undefined;
     return /^\d{9,11}$/.test(String(event.occurred_at??''))?new Date(Number(event.occurred_at)*1000).toISOString():event.received_at.toISOString();
   }
-  private observed(row:any,found:unknown):string|null {
-    if(!Array.isArray(found)||found.length>1)throw new HttpError(409,'honcho_receipt_conflict');
+  private observed(row:any,found:EngineWrite[]):string|null {
+    if(found.length>1)throw new HttpError(409,'memory_receipt_conflict');
     if(!found.length)return null;
-    if(!nativeId(found[0]?.id)||found[0].content!==row.content||found[0].metadata?.nocheh_receipt!==row.id)
-      throw new HttpError(409,'honcho_receipt_conflict');
-    return found[0].id;
+    if(!engineId(found[0]!.id)||found[0]!.content!==row.content||found[0]!.receipt!==row.id)
+      throw new HttpError(409,'memory_receipt_conflict');
+    return found[0]!.id;
   }
   async reconcileReceipt(id:string):Promise<boolean> {
     const connection=(await this.control.query('SELECT attached FROM memory_engine_connection WHERE singleton')).rows[0];
     if(!connection.attached)return false;
     const row=await this.receipt(id);if(row.state==='done')return true;if(row.state!=='uncertain')return false;
     // Reconciliation reads only its exact receipt and never writes, even for a replaced session.
-    let result:any;
-    try{result=await this.call('/v3/workspaces/'+row.generation+'/sessions/'+(row.session_id??id)+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});}
+    let found:EngineWrite[];
+    try{found=await this.engine.findWrites(row.generation,row.session_id??id,id);}
     catch(error) {
       // A retired write's session can already be deleted, and the write with it.
-      if(row.retired_at&&error instanceof HttpError&&error.code==='honcho_upstream_rejected') {
-        await this.control.query("UPDATE memory_ingestion_receipts SET state='failed',error_code='honcho_session_deleted' WHERE id=$1 AND state='uncertain'",[id]);return false;
+      if(row.retired_at&&error instanceof HttpError&&error.code===engineErrors.rejected) {
+        await this.control.query("UPDATE memory_ingestion_receipts SET state='failed',error_code='memory_session_deleted' WHERE id=$1 AND state='uncertain'",[id]);return false;
       }
       throw error;
     }
-    const remote=this.observed(row,result.items);
+    const remote=this.observed(row,found);
     if(!remote) {
       // Long after the write ended it is still absent, so it never landed. The next attempt lists before
       // writing again, so a late landing cannot be written twice.
       await this.control.query("UPDATE memory_ingestion_receipts SET uncertain_at=now() WHERE id=$1 AND uncertain_at IS NULL",[id]);
-      await this.control.query(`UPDATE memory_ingestion_receipts SET state='pending',error_code='honcho_write_absent',next_attempt=now()
+      await this.control.query(`UPDATE memory_ingestion_receipts SET state='pending',error_code='memory_write_absent',next_attempt=now()
         WHERE id=$1 AND state='uncertain' AND retired_at IS NULL AND uncertain_at<now()-interval '10 minutes'`,[id]);
       return false;
     }
@@ -410,44 +410,43 @@ export class NativeMemoryRepository {
     const db=await this.control.connect();let fenced=false,locked=false;
     try {
       fenced=await enterFamily(db,'honcho',authority.owner,authority.epoch);if(!fenced)throw new HttpError(409,'workflow_owner_changed');
-      locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'honcho_sync_busy');
+      locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'memory_sync_busy');
       const row=await this.receipt(id);if(row.state==='done')return true;
       if(row.state==='uncertain')return await this.reconcileReceipt(id);
       let rejected=false;
       try {
-        const workspace='/v3/workspaces/'+row.generation,sessionId=row.session_id??id,session=workspace+'/sessions/'+sessionId;
-        await this.authorizedReceipt(row);await this.call('/v3/workspaces',{id:row.generation});
-        const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string');
-        for(const peer of peers){await this.authorizedReceipt(row);await this.call(workspace+'/peers',peer===assistantPeer?{id:peer,configuration:{observe_me:false}}:{id:peer});}
-        await this.authorizedReceipt(row);await this.call(workspace+'/sessions',{id:sessionId,peers:Object.fromEntries(peers.map((peer:string)=>
-          [peer,peer===assistantPeer?{observe_me:false,observe_others:false}:peer===row.peer_id?{observe_me:true,observe_others:false}:{observe_me:false,observe_others:true}]))});
-        const previous=await this.call(session+'/messages/list',{filters:{metadata:{nocheh_receipt:id}}});
-        let remote=this.observed(row,previous.items);
+        const space=row.generation as string,session=(row.session_id??id) as string;
+        await this.authorizedReceipt(row);await this.engine.openSpace(space);
+        const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string') as string[];
+        const role=(peer:string)=>peer===assistantPeer?'silent' as const:peer===row.peer_id?'writer' as const:'subject' as const;
+        for(const peer of peers){await this.authorizedReceipt(row);await this.engine.addParticipant(space,peer,role(peer));}
+        await this.authorizedReceipt(row);await this.engine.openSession(space,session,Object.fromEntries(peers.map(peer=>[peer,role(peer)])));
+        let remote=this.observed(row,await this.engine.findWrites(space,session,id));
         if(!remote) {
           const createdAt=await this.occurredAt(row);
           await this.authorizedReceipt(row);
           await db.query("UPDATE memory_ingestion_receipts SET state='uncertain',uncertain_at=now(),attempts=attempts+1 WHERE id=$1",[id]);
-          let found:unknown;
+          let found:EngineWrite[];
           try {
-            found=await this.call(session+'/messages',{messages:[{peer_id:row.peer_id,content:row.content,created_at:createdAt,
-              metadata:{nocheh_receipt:id,source_revision:row.source_reference.revision,guarded_revision:row.guarded_revision}}]});
+            found=await this.engine.write(space,session,{author:row.peer_id,content:row.content,occurredAt:createdAt,receipt:id,
+              sourceRevision:row.source_reference.revision,guardedRevision:row.guarded_revision});
           } catch(error) {
-            // Honcho answered with an error, so nothing was written; the next attempt lists before writing.
-            if(error instanceof HttpError&&error.code==='honcho_upstream_rejected')rejected=true;
+            // The engine answered with an error, so nothing was written; the next attempt lists before writing.
+            if(error instanceof HttpError&&error.code===engineErrors.rejected)rejected=true;
             throw error;
           }
-          remote=this.observed(row,found);if(!remote)throw new HttpError(409,'honcho_write_unresolved');
+          remote=this.observed(row,found);if(!remote)throw new HttpError(409,'memory_write_unresolved');
         }
         await db.query("UPDATE memory_ingestion_receipts SET state='done',remote_id=$2,error_code=NULL WHERE id=$1",[id,remote]);return true;
       } catch(error) {
         await db.query(`UPDATE memory_ingestion_receipts SET error_code=$2,next_attempt=now()+interval '60 seconds',
           state=CASE WHEN $3::boolean AND state='uncertain' THEN 'pending' ELSE state END WHERE id=$1`,
-          [id,error instanceof HttpError?error.code:'honcho_unavailable',rejected]);throw error;
+          [id,error instanceof HttpError?error.code:engineErrors.unavailable,rejected]);throw error;
       }
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803358)');if(fenced)await leaveFamily(db,'honcho');});}
   }
   /** Replace one session: retire its writes, carry the valid ones into a new revision,
-   * delete the old Honcho session with conclusions derived from it, and re-ingest changed sources. */
+   * delete the old engine session with the facts derived from it, and re-ingest changed sources. */
   async rebuild(workspace:string,key:string,drop:ReadonlySet<string>=new Set()):Promise<string|null> {
     const binding=await this.guards.state();
     const session=(await this.control.query('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2',[workspace,key])).rows[0];
@@ -462,7 +461,7 @@ export class NativeMemoryRepository {
       await db.query('BEGIN');
       const locked=(await db.query('SELECT revision,session_id FROM memory_sessions WHERE workspace=$1 AND key=$2 FOR UPDATE',[workspace,key])).rows[0];
       if(locked.session_id!==session.session_id){await db.query('ROLLBACK');return locked.session_id;}
-      const revision=locked.revision+1,next=sessionName(workspace,key,revision);
+      const revision=locked.revision+1,next=sessionName(this.protocol,workspace,key,revision);
       await db.query('UPDATE memory_sessions SET revision=$3,session_id=$4,updated_at=now() WHERE workspace=$1 AND key=$2',[workspace,key,revision,next]);
       const retired=(await db.query('UPDATE memory_ingestion_receipts SET retired_at=now() WHERE session_id=$1 AND retired_at IS NULL RETURNING id,logical_id',
         [session.session_id])).rows;
@@ -487,8 +486,8 @@ export class NativeMemoryRepository {
     } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   /**
-   * Fresh start: the installation moves to a new, empty Honcho workspace that learns from messages received from now on,
-   * or, from the archive, from every saved message again. Every earlier Nocheh workspace in Honcho is deleted with its
+   * Fresh start: the installation moves to a new, empty memory space that learns from messages received from now on,
+   * or, from the archive, from every saved message again. Every earlier Nocheh space in the engine is deleted with its
    * Nocheh records. Original messages stay in the archive.
    */
   async freshStart(principal:Reader,input:unknown) {
@@ -499,7 +498,7 @@ export class NativeMemoryRepository {
     // From the archive, the new workspace learns every saved message the owner allows again: the refresh this command
     // requests pages the archive, and a retired or withdrawn message is refused as it is for any new write.
     const history=body.from_archive===true;
-    // Only workspaces Nocheh recorded as its own memory generations are deleted; anything else in Honcho is left alone.
+    // Only spaces Nocheh recorded as its own memory generations are deleted; anything else in the engine is left alone.
     await new OwnerCommands(this.control).run(principal,string(body.operation_id,200),body,async db=>{
       const row=(await db.query('SELECT * FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
       if(row.revision!==body.expected_revision)throw new HttpError(409,'memory_connection_conflict');
@@ -516,11 +515,11 @@ export class NativeMemoryRepository {
   }
   private async attachedWorkspace() {
     const connection=(await this.control.query('SELECT attached FROM memory_engine_connection WHERE singleton')).rows[0];
-    if(!connection.attached)throw new HttpError(409,'honcho_memory_detached');
+    if(!connection.attached)throw new HttpError(409,'memory_detached');
     const workspace=await this.workspace(await this.guards.state());if(!workspace)throw new HttpError(409,'memory_workspace_missing');
     await this.current(workspace.id);return workspace.id as string;
   }
-  /** Chosen chats as Honcho audiences: the owner's private chat is the owner audience, and a group includes its topics. */
+  /** Chosen chats as memory audiences: the owner's private chat is the owner audience, and a group includes its topics. */
   private chosen(spaces:unknown):string[]|null {
     if(spaces===null||spaces===undefined)return null;
     if(!Array.isArray(spaces)||spaces.length<1||spaces.length>100)throw new HttpError(400,'invalid_memory_scope');
@@ -534,7 +533,7 @@ export class NativeMemoryRepository {
       WHERE s.workspace=$1 AND ($2::text[] IS NULL OR s.audience=ANY($2::text[]) OR split_part(s.audience,'/topic/',1)=ANY($2::text[]))`,
       [workspace,audiences])).rows[0] as {conversations:number;sessions:number;messages:number;interpretations:number;ids:string[]};
   }
-  /** What each way of re-running Honcho memory would do, so the owner can weigh its cost first. */
+  /** What each way of re-running long-term memory would do, so the owner can weigh its cost first. */
   async rebuildEstimate(principal:Reader,spaces:string[]) {
     admin(principal);
     const audiences=this.chosen(spaces.length?spaces:null),workspace=await this.workspace(await this.guards.state());
@@ -542,30 +541,27 @@ export class NativeMemoryRepository {
     const saved=(await this.contexts.access.stores.archive.query(`SELECT count(*)::int AS count FROM events WHERE origin='live' AND scope=ANY($1::text[])
       AND kind=ANY('{telegram_update,telegram_delivered_message,browser_input,browser_delivered_message}'::text[])`,[chats])).rows[0].count as number;
     let failed:number|null=null;
-    if(workspace)try {
-      const found=await this.call('/v3/workspaces/'+workspace.id+'/nocheh/failed-learning');
-      if(Number.isSafeInteger(found?.failed)&&found.failed>=0)failed=found.failed;
-    } catch {}
+    if(workspace&&this.engine.failedLearning)try{failed=await this.engine.failedLearning(workspace.id);}catch{}
     const {ids:_ids,...relearn}=workspace?await this.scope(workspace.id,audiences):{ids:[],conversations:0,sessions:0,messages:0,interpretations:0};
     return {workspace:workspace?.id??null,failed_learning:failed,relearn,replace:{saved_messages:saved}};
   }
-  /** Ask Honcho to run again the learning that ended in a terminal error, such as a provider outage.
+  /** Ask the engine to run again the learning that ended in a terminal error, such as a provider outage.
    * Its saved messages are learned from where they are; nothing is resent. */
   async retryFailedLearning(principal:Reader) {
     admin(principal);const workspace=await this.attachedWorkspace();
-    const result=await this.call('/v3/workspaces/'+workspace+'/nocheh/failed-learning/retry',{});
-    if(!Number.isSafeInteger(result?.retried)||result.retried<0)throw new HttpError(502,'invalid_honcho_retry');
-    if(result.retried) {
+    if(!this.engine.retryFailedLearning)throw new HttpError(409,engineErrors.unsupported);
+    const retried=await this.engine.retryFailedLearning(workspace);
+    if(retried) {
       const db=await this.control.connect();
       // A retried task keeps its old queue time, so readiness rechecks every failure again rather than only newer work.
       try{await db.query('BEGIN');await db.query('UPDATE memory_generations SET derivation_checked_at=NULL WHERE id=$1',[workspace]);
         await this.building(db,workspace);await db.query('COMMIT');}
       catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     }
-    return {retried:result.retried as number,status:await this.status()};
+    return {retried,status:await this.status()};
   }
-  /** Re-learn chosen chats, or every chat: each of their Honcho sessions is replaced by a new one holding the
-   * still-valid saved messages, and the old session leaves Honcho with every conclusion derived from it. */
+  /** Re-learn chosen chats, or every chat: each of their engine sessions is replaced by a new one holding the
+   * still-valid saved messages, and the old session leaves the engine with every fact derived from it. */
   async relearn(principal:Reader,input:unknown) {
     admin(principal);const body=object(input);
     if(Object.keys(body).some(k=>!['spaces','operation_id'].includes(k)))throw new HttpError(400,'invalid_memory_scope');
@@ -584,22 +580,18 @@ export class NativeMemoryRepository {
     if(!session)return false;
     await this.current(session.workspace);await this.rebuild(session.workspace,session.key);return true;
   }
-  /** Remove one earlier workspace from Honcho: its sessions first, as Honcho requires, then the workspace and Nocheh's records of it. */
+  /** Remove one earlier space from the engine: the engine deletes it a step at a time, then Nocheh's records of it go. */
   async retireWorkspace(id:string,authority:ExecutionAuthority):Promise<boolean> {
     const db=await this.control.connect();let fenced=false,locked=false;
     try {
       fenced=await enterFamily(db,'honcho',authority.owner,authority.epoch);if(!fenced)throw new HttpError(409,'workflow_owner_changed');
-      locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'honcho_sync_busy');
+      locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'memory_sync_busy');
       const row=(await db.query('SELECT * FROM memory_workspace_deletions WHERE workspace=$1',[id])).rows[0];
       if(!row)throw new HttpError(404,'memory_deletion_missing');if(row.state==='done')return true;
       if((await db.query("SELECT 1 FROM memory_generations WHERE id=$1 AND state<>'retired'",[id])).rowCount)throw new HttpError(409,'memory_workspace_current');
-      const base='/v3/workspaces/'+id;
       for(let page=0;page<10;page++) {
-        const found=await this.call(base+'/sessions/list?page=1&size=100',{});
-        const sessions:string[]=Array.isArray(found?.items)?found.items.map((item:any)=>String(item?.id??'')):[];
-        if(sessions.some(session=>!/^[A-Za-z0-9_-]{1,100}$/.test(session)))throw new HttpError(502,'invalid_honcho_sessions');
-        if(!sessions.length) {
-          await this.call(base,undefined,'DELETE');
+        const step=await this.engine.forgetSpace(id);
+        if(step.done) {
           await db.query('BEGIN');
           try {
             for(const table of ['memory_session_deletions','memory_sessions'])await db.query(`DELETE FROM ${table} WHERE workspace=$1`,[id]);
@@ -610,31 +602,26 @@ export class NativeMemoryRepository {
           } catch(error){await db.query('ROLLBACK');throw error;}
           return true;
         }
-        for(const session of sessions)await this.call(base+'/sessions/'+session,undefined,'DELETE');
-        await db.query('UPDATE memory_workspace_deletions SET deleted_sessions=deleted_sessions+$2 WHERE workspace=$1',[id,sessions.length]);
+        await db.query('UPDATE memory_workspace_deletions SET deleted_sessions=deleted_sessions+$2 WHERE workspace=$1',[id,step.removed]);
       }
       return false;
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803358)');if(fenced)await leaveFamily(db,'honcho');});}
   }
-  /** Remove a replaced session from Honcho, first deleting conclusions other sessions derived from it. */
+  /** Remove a replaced session from the engine, first deleting the facts other sessions derived from it. */
   async deleteSession(id:string,authority:ExecutionAuthority):Promise<boolean> {
     const db=await this.control.connect();let fenced=false,locked=false;
     try {
       fenced=await enterFamily(db,'honcho',authority.owner,authority.epoch);if(!fenced)throw new HttpError(409,'workflow_owner_changed');
-      locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'honcho_sync_busy');
+      locked=(await db.query('SELECT pg_try_advisory_lock(803358) AS locked')).rows[0].locked;if(!locked)throw new HttpError(409,'memory_sync_busy');
       const row=(await db.query('SELECT * FROM memory_session_deletions WHERE session_id=$1',[id])).rows[0];
       if(!row)throw new HttpError(404,'memory_deletion_missing');if(row.state==='done')return true;
-      const base='/v3/workspaces/'+row.workspace;
       for(let page=0;page<10;page++) {
         await this.current(row.workspace);
-        const found=await this.call(base+'/nocheh/session-descendants',{session_id:id,limit:100});
-        if(!found||!Array.isArray(found.ids)||found.ids.length>100||found.ids.some((value:unknown)=>!nativeId(value)))throw new HttpError(502,'invalid_honcho_descendants');
-        if(!found.ids.length) {
-          await this.call(base+'/sessions/'+id,undefined,'DELETE');
+        const step=await this.engine.forgetSession(row.workspace,id);
+        if(step.done) {
           await db.query("UPDATE memory_session_deletions SET state='done',completed_at=now() WHERE session_id=$1",[id]);return true;
         }
-        for(const conclusion of found.ids)await this.call(base+'/conclusions/'+conclusion,undefined,'DELETE');
-        await db.query('UPDATE memory_session_deletions SET deleted_conclusions=deleted_conclusions+$2 WHERE session_id=$1',[id,found.ids.length]);
+        await db.query('UPDATE memory_session_deletions SET deleted_conclusions=deleted_conclusions+$2 WHERE session_id=$1',[id,step.removed]);
       }
       return false;
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803358)');if(fenced)await leaveFamily(db,'honcho');});}
@@ -643,7 +630,7 @@ export class NativeMemoryRepository {
   async sweep(after:string,binding:GuardBinding,limit=100):Promise<{after:string;done:boolean;rebuilt:number}> {
     const rows=(await this.control.query(`SELECT r.* FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation
       WHERE g.installation_generation=$1 AND g.representation_version=$2 AND g.state<>'retired' AND r.retired_at IS NULL AND r.id>$3
-      ORDER BY r.id LIMIT $4`,[binding.generation,protocol,after,limit])).rows;
+      ORDER BY r.id LIMIT $4`,[binding.generation,this.protocol,after,limit])).rows;
     const invalid=new Map<string,{workspace:string;key:string}>();
     for(const row of rows)if(!invalid.has(row.session_id)&&!await this.valid(row,binding))invalid.set(row.session_id,{workspace:row.generation,key:row.session_key});
     for(const item of invalid.values())await this.rebuild(item.workspace,item.key);
@@ -653,23 +640,20 @@ export class NativeMemoryRepository {
   async observe(id:string):Promise<boolean> {
     const current=await this.current(id);
     const pending=(await this.control.query("SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND state<>'done' AND retired_at IS NULL LIMIT 1",[id])).rowCount;
-    const checked=new Date(),queue=await this.call('/v3/workspaces/'+id+'/queue/status');
-    // Honcho keeps a failed derivation for 30 days. A failure is reported once; after the queue has
-    // drained, only work queued since then can hold the workspace unready again.
-    const since=current.row.derivation_checked_at?'?since='+encodeURIComponent(current.row.derivation_checked_at.toISOString()):'';
-    const health=await this.call('/v3/workspaces/'+id+'/nocheh/queue-health'+since);await this.current(id);
-    if(typeof health.failed_items!=='boolean')throw new HttpError(502,'honcho_queue_health_invalid');
-    const drained=queue.pending_work_units===0&&queue.in_progress_work_units===0;
-    const ready=!pending&&drained&&!health.failed_items;
+    const checked=new Date(),drained=!await this.engine.busy(id);
+    // An engine can keep a failed learning task for a while (Honcho: 30 days). A failure is reported once; after the queue has
+    // drained, only work queued since then can hold the space unready again.
+    const failing=await this.engine.failing(id,current.row.derivation_checked_at??null);await this.current(id);
+    const ready=!pending&&drained&&!failing;
     const changed=await this.control.query(`UPDATE memory_generations SET state=$2,
-      error_code=CASE WHEN $4::boolean THEN 'honcho_derivation_failed' ELSE NULL END,
+      error_code=CASE WHEN $4::boolean THEN 'memory_learning_failed' ELSE NULL END,
       derivation_checked_at=CASE WHEN $5::boolean THEN $6::timestamptz ELSE derivation_checked_at END,
       last_ready_at=CASE WHEN $2='ready' THEN now() ELSE last_ready_at END
-      WHERE id=$1 AND state<>'retired' AND work_revision=$3`,[id,ready?'ready':'building',current.row.work_revision,health.failed_items,drained,checked]);
-    if(health.failed_items)console.warn(JSON.stringify({event:'honcho_derivation_failed',workspace:id}));
+      WHERE id=$1 AND state<>'retired' AND work_revision=$3`,[id,ready?'ready':'building',current.row.work_revision,failing,drained,checked]);
+    if(failing)console.warn(JSON.stringify({event:'memory_learning_failed',engine:this.engine.id,workspace:id}));
     return ready&&changed.rowCount===1;
   }
-  /** When Honcho finishes new work, prepare the next reply context of each changed conversation. No timer renews it. */
+  /** When the engine finishes new work, prepare the next reply context of each changed conversation. No timer renews it. */
   async requestPrefetch(id:string):Promise<number> {
     await this.current(id);
     const db=await this.control.connect();
@@ -708,7 +692,7 @@ export class NativeMemoryRepository {
     const detect=(text:string)=>this.detect(text,body.background===true);
     const prepared=await this.prepared.prepare(current.principal,payload,detect);await this.current(current.row.id);return {payload:prepared};
   }
-  /** Honcho's derivation requests quote messages Nocheh already guarded. Mark those exact
+  /** The engine's learning requests quote messages Nocheh already guarded. Mark those exact
    * writes as prepared in the current epoch so an unrelated epoch does not re-detect them. */
   private async allowWritten(current:Current,payload:Record<string,unknown>) {
     const sources=new Set<string>();
@@ -733,7 +717,7 @@ export class NativeMemoryRepository {
       const local=await this.contexts.entities.context(source,[]),seeds=[local.speaker?.id,local.project?.id].filter((value):value is string=>!!value);
       connected={...await this.contexts.entities.connectedFrom(principal,seeds,12),ambiguities:[]};
     }
-    const candidates=connected.entities.map(item=>({peer:honchoPeerId(item.entity),path:item.path.join(' → ')}));
+    const candidates=connected.entities.map(item=>({peer:memoryPeerId(item.entity),path:item.path.join(' → ')}));
     if(!candidates.length)return {items:[],partial:connected.partial,clarification:undefined};
     const available=new Set((await this.control.query(`SELECT DISTINCT peer.value AS peer_id FROM memory_ingestion_receipts r
       CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_array_length(r.peer_ids)>0 THEN r.peer_ids ELSE jsonb_build_array(r.peer_id) END) peer(value)
@@ -746,47 +730,44 @@ export class NativeMemoryRepository {
       ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null,audience,group])).rows.map(row=>String(row.peer_id)));
     return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial,clarification:undefined};
   }
-  /** Read Honcho's context for the current conversation and its speaker, guarded once per distinct result.
+  /** Read the engine's context for the current conversation and its speaker, guarded once per distinct result.
    * Owner reads span the workspace; any other audience reads only its own session. */
   private async sessionContext(current:Current,audience:string,source:SourceReference) {
     const entities=await this.contexts.entities.context(source,[]),workspace=current.row.id;
     const session=(await this.control.query('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2 AND audience=$3',[workspace,entities.session_id,audience])).rows[0];
     const written=session?(await this.control.query(`SELECT count(*) FILTER (WHERE state='done')::int AS done,count(*) FILTER (WHERE state<>'done')::int AS pending
       FROM memory_ingestion_receipts WHERE session_id=$1 AND retired_at IS NULL`,[session.session_id])).rows[0]:{done:0,pending:0};
-    const speaker=entities.speaker?honchoPeerId(entities.speaker):null;
+    const speaker=entities.speaker?memoryPeerId(entities.speaker):null;
     const known=!!speaker&&!!(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND retired_at IS NULL AND state='done'
       AND peer_ids ? $2 AND ($3::text IS NULL OR session_id=$3) LIMIT 1`,[workspace,speaker,audience==='owner'?null:session?.session_id??''])).rowCount;
-    const base='/v3/workspaces/'+workspace,empty={text:'',session:session?.session_id??null,syncing:written.pending>0};
-    // A Honcho peer card summarizes a person across every session, so Nocheh never reads one, for any audience (ADR-0225).
+    const empty={text:'',session:session?.session_id??null,syncing:written.pending>0};
+    // A summary of a person across every session, such as a Honcho peer card, is never read, for any audience (ADR-0225).
     let configuration:Record<string,unknown>,summary='',representation='';
     if(session&&written.done) {
-      const query=new URLSearchParams({tokens:String(contextTokens),summary:'true'});
-      if(known){query.set('peer_target',speaker!);if(audience!=='owner')query.set('limit_to_session','true');}
-      configuration={workspace,audience,session:session.session_id,query:query.toString()};
-      const result=await this.call(base+'/sessions/'+session.session_id+'/context?'+query);
-      summary=typeof result?.summary?.content==='string'?result.summary.content:'';
-      representation=typeof result?.peer_representation==='string'?result.peer_representation:'';
+      const options={subject:known?speaker:null,limitToSession:known&&audience!=='owner',tokens:contextTokens};
+      configuration={engine:this.engine.id,workspace,audience,session:session.session_id,subject:options.subject,limit_to_session:options.limitToSession,tokens:options.tokens};
+      ({summary,subject:representation}=await this.engine.context(workspace,session.session_id,options));
     } else if(audience==='owner'&&known) {
-      configuration={workspace,audience,peer:speaker,include_most_frequent:true,max_conclusions:50};
-      representation=string((await this.call(base+'/peers/'+speaker+'/representation',{include_most_frequent:true,max_conclusions:50})).representation,2*1024*1024);
+      configuration={engine:this.engine.id,workspace,audience,peer:speaker,profile:true};
+      representation=await this.engine.profile(workspace,speaker!);
     } else return empty;
     const text=string([summary.trim()?'[conversation summary]\n'+summary:'',representation.trim()?'[what is known about the speaker]\n'+representation:'']
       .filter(Boolean).join('\n\n'),2*1024*1024);
     if(!text)return empty;
-    // Identical Honcho output reuses its guarded copy, so a prefetched context needs no new detection on arrival.
+    // Identical engine output reuses its guarded copy, so a prefetched context needs no new detection on arrival.
     const key='native-context:'+digest(canonical([configuration,digest(text)]));
     const raw=await this.derived.record({operation_id:key,source:current.row.root_reference,kind:'memory_result',content:Buffer.from(text),
-      producer:'honcho',producer_version:protocol,configuration,provenance:{limitations:['representation_has_no_exact_citations']}});
+      producer:this.engine.id,producer_version:this.protocol,configuration,provenance:{limitations:['representation_has_no_exact_citations']}});
     const output=await this.derived.record({operation_id:key+':bounded',source:current.row.root_reference,parents:[raw],kind:'memory_context',
-      content:Buffer.from(Array.from(text).slice(0,contextCharacters).join('')),producer:'nocheh',producer_version:protocol,
+      content:Buffer.from(Array.from(text).slice(0,contextCharacters).join('')),producer:'nocheh',producer_version:this.protocol,
       configuration:{max_characters:contextCharacters,workspace,audience},provenance:{limitations:['representation_has_no_exact_citations']}});
-    await this.guards.prepareContext(output,protocol,this.principal(audience,source.id,current.binding),this.prepared,this.detect);
+    await this.guards.prepareContext(output,this.protocol,this.principal(audience,source.id,current.binding),this.prepared,this.detect);
     const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
     return {...empty,text:String(value.text??'')};
   }
-  /** An owner decision, such as retiring a message, can make Honcho writes invalid. Honcho keeps them until a
-   * correction sweep at that decision's epoch or later rebuilds their sessions and Honcho deletes the old ones with
-   * their conclusions. Summaries, representations and recall answers cite nothing, so none is read until then.
+  /** An owner decision, such as retiring a message, can make engine writes invalid. The engine keeps them until a
+   * correction sweep at that decision's epoch or later rebuilds their sessions and the engine deletes the old ones with
+   * the facts learned from them. Summaries, representations and recall answers cite nothing, so none is read until then.
    * Other epoch changes, such as learning publications, do not hold memory, and neither do owner decisions that
    * cannot make a write invalid, such as answering a suggestion card (ADR-0223). */
   private async correcting(current:Current):Promise<boolean> {
@@ -796,7 +777,7 @@ export class NativeMemoryRepository {
     if(uncorrected.rowCount)return true;
     return !!(await this.control.query(`SELECT 1 FROM memory_session_deletions WHERE workspace=$1 AND state<>'done' LIMIT 1`,[current.row.id])).rowCount;
   }
-  /** Freshness is checked when a message arrives: the turn reads Honcho's current context for its own conversation. */
+  /** Freshness is checked when a message arrives: the turn reads the engine's current context for its own conversation. */
   async context(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
     if(!workspace||!principal.turnEvent)return limited;
@@ -809,7 +790,7 @@ export class NativeMemoryRepository {
       const syncing=read.syncing||current.row.state==='building';
       if(!read.text)return {sources:[],limited_memory:false,syncing};
       await this.prepared.allow(principal,{text:read.text});
-      return {sources:[{source:'nocheh:honcho:'+(read.session??workspace.id),kind:'memory_inference',text:read.text,exact_citations:false,
+      return {sources:[{source:'nocheh:memory:'+(read.session??workspace.id),kind:'memory_inference',text:read.text,exact_citations:false,
         limitations:['representation_has_no_exact_citations']}],limited_memory:false,syncing};
     } catch(error){await this.prepared.audience.assert(principal);return limited;}
   }
@@ -840,12 +821,12 @@ export class NativeMemoryRepository {
     await this.guards.assertCurrent(binding);
     return sources;
   }
-  /** Honcho lists the conclusions it read while answering. The archived messages they cite, listed first, let the
-   * agent check a claim against the original; a conclusion without citations brings its whole derivation batch and
-   * says so in the limitations. A conclusion that was read is not proof the answer relied on it. */
-  private async evidence(workspace:string,audience:string,responses:any[],binding:GuardBinding):Promise<{references:SourceReference[];limitations:string[]}> {
-    const ids=[...new Set(responses.flatMap(response=>Array.isArray(response?.evidence?.conclusions)?response.evidence.conclusions.map((item:any)=>item?.id):[]))]
-      .filter((value):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value));
+  /** The engine lists the facts it read while answering. The archived messages they cite, listed first, let the
+   * agent check a claim against the original; a fact without citations brings its whole learning batch and
+   * says so in the limitations. A fact that was read is not proof the answer relied on it. */
+  private async evidence(workspace:string,audience:string,responses:{evidence:string[]}[],binding:GuardBinding):Promise<{references:SourceReference[];limitations:string[]}> {
+    if(!this.engine.trace)return {references:[],limitations:['evidence_unsupported']};
+    const ids=[...new Set(responses.flatMap(response=>response.evidence))].filter(engineId);
     if(!ids.length)return {references:[],limitations:['no_conclusion_evidence']};
     const limitations=ids.length>32?['evidence_conclusion_limit']:[];
     try {
@@ -865,38 +846,37 @@ export class NativeMemoryRepository {
       const question=await this.prepared.prepare(actor,query,this.detect),requestId=randomUUID();
       const root=await this.prepared.root(actor,current.binding);
       const input=await this.derived.record({operation_id:'native-recall-input:'+requestId,source:root,kind:'runtime_context',content:Buffer.from(String(question)),
-        producer:'nocheh',producer_version:protocol,configuration:{workspace:id,audience,reasoning_level:'low'},provenance:{binding:current.binding}});
+        producer:'nocheh',producer_version:this.protocol,configuration:{workspace:id,audience,reasoning_level:'low'},provenance:{binding:current.binding}});
       // The active question alone is not prior memory. Background context
       // still includes it, and receipts with independent supporting evidence qualify.
       const connected=await this.connectedPeers(current,audience,actor,String(question),principal.turnEvent,group),answers=[];
       const syncing=current.row.state==='building';
       if(connected.clarification)return {sources:corrections,limited_memory:false,syncing,clarification_required:true,note:connected.clarification};
       // Group and topic recall reads only that audience's own sessions, or every session of its group when
-      // the group's topics share memory; owner recall spans the workspace.
+      // the group's topics share memory; owner recall spans the space.
       const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
-      // Each peer is asked side by side, so recall waits for the slowest Honcho answer rather than their sum.
+      // Each peer is asked side by side, so recall waits for the slowest engine answer rather than their sum.
       const asked=sessions?.length===0?[]:connected.items.slice(0,4);
       if(asked.length)await this.current(id);
-      const responses=await Promise.all(asked.map(item=>this.call('/v3/workspaces/'+id+'/peers/'+item.peer+'/chat',
-        {query:question,reasoning_level:'low',stream:false,include_evidence:true,...(sessions?{filters:{session_id:sessions}}:{})})));
+      const responses=await Promise.all(asked.map(item=>this.engine.ask(id,item.peer,String(question),{sessions,evidence:true})));
       for(const [index,response] of responses.entries())
-        answers.push(`[related through ${asked[index]!.path}]\n${string(response.content,20000)}`);
+        answers.push(`[related through ${asked[index]!.path}]\n${string(response.text,20000)}`);
       if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing}:
         {...limited,note:'No authorized person or project memory matched this request.'};
       const evidence=await this.evidence(id,audience,responses,current.binding);
       const limitations=['reasoning_response_has_no_exact_conclusion_citations',...evidence.limitations];
       const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(string(answers.join('\n\n'),20000)),
-        producer:'honcho',producer_version:protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4)},
+        producer:this.engine.id,producer_version:this.protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4)},
         provenance:{partial:connected.partial,evidence:evidence.references,limitations}});
-      await this.current(id);await this.guards.prepareContext(output,protocol,actor,this.prepared,this.detect);
+      await this.current(id);await this.guards.prepareContext(output,this.protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
       await this.current(id);await this.prepared.audience.assert(principal);await this.prepared.allow(principal,value);
-      return {sources:[...corrections,{source:'nocheh:honcho:'+id,kind:'memory_inference',text:value.text,exact_citations:false,
+      return {sources:[...corrections,{source:'nocheh:memory:'+id,kind:'memory_inference',text:value.text,exact_citations:false,
         evidence_sources:evidence.references.map(reference=>'nocheh:event:'+reference.id),limitations}],partial:connected.partial,
         limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing};
     } catch(error){await this.prepared.audience.assert(principal);return corrections.length?{...limited,sources:corrections}:limited;}
   }
-  /** Archived messages Honcho finds by meaning among what was learned for this audience, best first.
+  /** Archived messages the engine finds by meaning among what was learned for this audience, best first.
    * Only their ids leave here: the reader gets the messages back through the archive's own access check. */
   async search(principal:Reader,query:string,count:number):Promise<{ids:string[];learned:boolean;syncing?:boolean}> {
     string(query,2000);if(!query.trim())throw new HttpError(400,'empty_query');
@@ -906,18 +886,15 @@ export class NativeMemoryRepository {
     const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
     const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};
-    // The question is checked for secrets before it reaches Honcho, as a recall question is.
+    // The question is checked for secrets before it reaches the engine, as a recall question is.
     const question=await this.prepared.prepare(actor,query,this.detect);
-    const found=await this.call('/v3/workspaces/'+id+'/search',{query:String(question),limit:Math.min(50,count*3),
-      ...(sessions?{filters:{session_id:{in:sessions}}}:{})});
-    if(!Array.isArray(found))throw new HttpError(502,'invalid_honcho_search');
+    const found=await this.engine.search(id,String(question),{limit:Math.min(50,count*3),sessions});
     const ids:string[]=[];
     for(const message of found.slice(0,50)) {
-      const receipt=message?.metadata?.nocheh_receipt;
-      if(!nativeId(message?.id)||typeof receipt!=='string'||!/^[a-f0-9]{64}$/.test(receipt))continue;
+      if(!engineId(message.id)||!/^[a-f0-9]{64}$/.test(message.receipt))continue;
       const row=(await this.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
         WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done' AND retired_at IS NULL
-        AND ($4::text='owner' OR ${recallCondition('audience','$4','$5')})`,[receipt,id,message.id,audience,group])).rows[0];
+        AND ($4::text='owner' OR ${recallCondition('audience','$4','$5')})`,[message.receipt,id,message.id,audience,group])).rows[0];
       if(!row)continue;
       for(const reference of (row.source_references?.length?row.source_references:[row.source_reference]).slice(0,30))
         if(typeof reference?.id==='string'&&/^[a-f0-9]{64}$/.test(reference.id)&&!ids.includes(reference.id))ids.push(reference.id);

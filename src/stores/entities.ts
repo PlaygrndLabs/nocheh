@@ -61,7 +61,8 @@ const isBot=(payload:unknown):boolean=>{
 export const nameKey=(name:string)=>name.replace(/\([^)]*\)\s*$/,'').replace(/^@/,'').trim().toLocaleLowerCase();
 
 const projectEntityId=(projectId:string)=>digest(canonical([protocol,'project',projectId]));
-export const honchoPeerId=(entity:Pick<MemoryEntity,'kind'|'id'>):string=>`${entity.kind}_${entity.id}`;
+/** A person or project as a memory engine participant. */
+export const memoryPeerId=(entity:Pick<MemoryEntity,'kind'|'id'>):string=>`${entity.kind}_${entity.id}`;
 export const evidencePeerId=(source:SourceReference):string=>`evidence_${digest(canonical(['nocheh-connected-evidence-v1',source.id])).slice(0,48)}`;
 
 export interface FoldedName {id:string;name:string;reason:string;revision:number;source_reference:SourceReference;created_at:string|null}

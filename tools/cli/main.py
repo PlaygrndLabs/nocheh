@@ -167,7 +167,7 @@ def main():
         return honcho(rest)
     if args.command == 'memory':
         sys.path.insert(0, str(ROOT))
-        if rest and rest[0] in ('honcho','spaces','policy','shares','share','revoke','preview','recall','reviews','review','pause','resume'):
+        if rest and rest[0] in ('longterm','spaces','policy','shares','share','revoke','preview','recall','reviews','review','pause','resume'):
             from tools.operations.memory.memory import main as memory
             return memory(rest)
         from tools.runtime.management import dispatch

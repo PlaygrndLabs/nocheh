@@ -66,7 +66,7 @@ class ArchiveTests(unittest.TestCase):
 
     def test_archive_requests_require_a_bound_scope(self):
         with patch.object(archive_tools,'_PROCESS_CREDENTIAL',None),patch('urllib.request.urlopen') as network:
-            with self.assertRaisesRegex(RuntimeError,'archive_scope_not_bound'):archive_tools.request('/v1/memory/honcho/context',{})
+            with self.assertRaisesRegex(RuntimeError,'archive_scope_not_bound'):archive_tools.request('/v1/memory/longterm/context',{})
             network.assert_not_called()
 
 

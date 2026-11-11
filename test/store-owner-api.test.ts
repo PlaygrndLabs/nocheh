@@ -12,6 +12,7 @@ import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src
 import {storageServices} from '../src/stores/services.js';
 import {OwnerStorageApi,ownerStoragePath} from '../src/stores/owner-api.js';
 import {existsSync,readFileSync} from 'node:fs';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 const pathFixture=new URL('../../test/fixtures/owner-storage-paths.json',import.meta.url);
 // The compiled tests run without the source tree in the stores image; the unit run reads the fixture.
@@ -38,7 +39,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-owner-api-')),key='owner-api:'+Date.now(),token=digest(key);
   let engines=0;
   const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[]}),
-    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},honcho:async()=>{throw Error('no provider calls');},
+    runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');}),
     transcription:{name:'fixture',version:'1',outputKind:'transcript',async run(bytes){engines++;assert.equal(bytes.toString(),'Original voice bytes');return 'Generated reading';}}});
   const api=new OwnerStorageApi(services);
   const server=createServer((req,res)=>{void(async()=>{

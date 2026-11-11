@@ -8,6 +8,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('archive reads link current captured reactions while preserving removal, guards and topic access',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -17,7 +18,7 @@ test('archive reads link current captured reactions while preserving removal, gu
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-reaction-read-')),key='reaction-read:'+Date.now(),group='-'+Date.now();
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group],topic_memory:'topic'};
   const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,
-    runtime:async()=>({literals:[]}),honcho:async()=>{throw Error('no provider');}});
+    runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const capture=async(label:string,payload:any)=>{
     const value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(payload.message?.message_id??payload.message_reaction?.message_id??payload.message_reaction_count?.message_id),
       revision:String(payload.update_id),occurred_at:null,text:payload.message?.text??null,payload};

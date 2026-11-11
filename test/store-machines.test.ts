@@ -15,6 +15,7 @@ import {storageGuardService} from '../src/stores/guard-service.js';
 import {machineJob,machineTokenSet} from '../src/stores/machines.js';
 import {storageServer} from '../src/stores/server.js';
 import {storageServices} from '../src/stores/services.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 const sha=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const frame=(type:string,payload:Buffer)=>{const head=Buffer.alloc(5);head.write(type,0,'latin1');head.writeUInt32BE(payload.length,1);return Buffer.concat([head,payload]);};
@@ -84,7 +85,7 @@ test('only the owner\'s own request in their private chat or an active project\'
       if(operation==='telegram.approval')approvals.push(input);
       if(operation.startsWith('telegram.'))return {state:'done',chat_id:input.chat_id,message_id:'5'};
       throw Error('unexpected runtime call '+operation);
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const mock:typeof fetch=async(url,init)=>String(url).endsWith('/internal/security/transport')?
     Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',api_key:'synthetic-credential',model_context_length:100000}):fetch(url,init);
   const archive=storageServer(s,{token,dataDir:root,guardMode:'on',assistant:policy} as unknown as Settings,async()=>({}));

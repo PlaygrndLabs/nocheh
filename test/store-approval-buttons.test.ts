@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {storageServices} from '../src/stores/services.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('allowed members post freely in their own group; everything else waits for the owner\'s button in their private chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -33,7 +34,7 @@ test('allowed members post freely in their own group; everything else waits for 
       if(input.kind==='settle'&&hold){const wait=hold;hold=null;reached();await wait;}
       cards.push(input);
       return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const bot=String(Date.now()).slice(-9);
   const capture=async(label:string,payload:Record<string,unknown>,scope=group)=>{
     const event:Envelope={version:1,key:payload.update_id?`telegram:${bot}:update:${payload.update_id}`:key+':'+label,origin:'live',kind:'telegram_update',bot_id:payload.update_id?bot:key,scope,source_id:payload.update_id?String(payload.update_id):label,revision:'1',occurred_at:null,text:'',payload};
@@ -226,7 +227,7 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(last('settle').text,'To your private chat (from a Telegram group):\nStyled\n\nSent!');
     // Without a reachable runtime the request still waits for the Inbox.
     const sent=cards.length,quiet=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
-      runtime:async(operation)=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime unavailable');},honcho:async()=>{throw Error('no memory provider');}});
+      runtime:async(operation)=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime unavailable');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
     const waiting=await quiet.actionCommands.offer('telegram',await quiet.telegramActions.request(await actor(plain.id,group),{destination:'123',text:'Waits for the Inbox'}));
     assert.equal(waiting.state,'proposed');assert.match(waiting.message,/^Owner approval is required/);assert.equal(cards.length,sent);
 

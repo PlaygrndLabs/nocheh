@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {ownerApprovedJob} from '../src/stores/background-jobs.js';
 import {storageServices} from '../src/stores/services.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a job the owner approved in their private chat reads Notion under the owner\'s setting, its changes always ask, and Stop stops what has not run',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -26,7 +27,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
       if(operation==='run.resume')return {state:'not_found'};
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       assert.equal(operation,'telegram.approval');cards.push(input);return {state:'done',chat_id:input.chat_id,message_id:'5'};
-    },honcho:async()=>{throw Error('no memory provider');}});
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let sent=100;
   const message=async(chat:string,from:number,text:string)=>{
     const id=++sent,event:Envelope={version:1,key:key+':'+id,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,source_id:String(id),revision:'1',occurred_at:null,text,

@@ -365,7 +365,7 @@ def main():
                  chat=123, topic=None, forbidden=('پرستو', 'نیلی', '۷۲', '72'))
     results['original_preserved'] = fixture.query('nocheh_archive', "SELECT count(*) FROM events WHERE id='" + private['event_id'] + "'") == '1'
     results['provider'] = fixture.http('/fixture/stats', host='model-fixture', port=8317)
-    results['memory'] = fixture.http('/v1/memory/honcho')
+    results['memory'] = fixture.http('/v1/memory/longterm')
     save()
     print(json.dumps({'observations': str(output / 'observations.json'), 'quality_review': 'pending'}), flush=True)
 

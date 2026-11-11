@@ -10,7 +10,7 @@ export interface McpTool {readonly name:string;readonly description:string;reado
 type Value=Record<string,unknown>;
 
 /** Today's memory routes, in one place. The memory engine's own names stay behind Nocheh; no tool name or text shows them. */
-export const memoryRoutes={recall:'/v1/memory/honcho/recall',search:'/v1/memory/honcho/search',notes:'/v1/memory/recall',shared:'/v1/memory/context'} as const;
+export const memoryRoutes={recall:'/v1/memory/longterm/recall',search:'/v1/memory/longterm/search',notes:'/v1/memory/recall',shared:'/v1/memory/context'} as const;
 /** What a job request may be told to correct; any other refusal stays opaque. The broker relays exactly these. */
 export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
   'job_machine_not_allowed','job_machine_not_found','job_card_too_long']);

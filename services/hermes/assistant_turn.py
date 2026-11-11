@@ -292,7 +292,7 @@ def run(body, emit=None, relay=None):
     long_term='';memory={}
     if not review:
         from .archive_tools import request
-        try: memory=request('/v1/memory/honcho/context',{})
+        try: memory=request('/v1/memory/longterm/context',{})
         except Exception: memory={'limited_memory':True,'note':prompt('memory.limited')}
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()

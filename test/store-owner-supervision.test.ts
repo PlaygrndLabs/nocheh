@@ -5,6 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
 import {OwnerSupervisionRepository} from '../src/stores/owner-supervision.js';
+import {honchoEngine} from '../src/memory/honcho.js';
 
 test('stored owner directory and decisions span every page without turning reads into reconciliation',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -14,7 +15,7 @@ test('stored owner directory and decisions span every page without turning reads
     await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),key='supervision:'+Date.now(),group='-'+Date.now(),second=String(Number(group)-1),owner={admin:true,scope:null};
     let detectorCalls=0;
     const services=storageServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,second]}),
-      runtime:async(operation)=>{assert.equal(operation,'guard.detect');detectorCalls++;return {literals:[]};},honcho:async()=>{throw Error('read projection must not call Honcho');}});
+      runtime:async(operation)=>{assert.equal(operation,'guard.detect');detectorCalls++;return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('read projection must not call Honcho');})});
     const view=new OwnerSupervisionRepository({...services,knowledge:{proposal:async()=>{throw Error('not used');}}});
     try {
       const capture=async(scope:string,index:number,extra:Record<string,unknown>={})=>{
