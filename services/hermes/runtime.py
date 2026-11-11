@@ -70,6 +70,7 @@ ASSISTANT = None
 ADMIN = None
 SCHEDULER = None
 MANAGED = None
+BRAIN = None
 
 
 def configure():
@@ -137,6 +138,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "telegram_details": ASSISTANT.health() if ASSISTANT else {},
                                 "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable",
                                 "managed_runs":len(MANAGED.runs.active) if MANAGED else 0,
+                                "brain_turns":len(BRAIN.runs.active) if BRAIN else 0,
                                 "scheduler": SCHEDULER.status if SCHEDULER else 'not_started'})
 
     def do_POST(self):
@@ -182,6 +184,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "error_type": type(error).__name__})
 
     def dispatch(self, body):
+        # Telegram turns whose reply Nocheh sends; they never need the Telegram adapter.
+        if self.path in ('/internal/turn/start','/internal/turn/resume','/internal/turn/events','/internal/turn/cancel'):
+            if BRAIN is None:raise RuntimeError('brain_not_started')
+            return getattr(BRAIN,self.path.rsplit('/',1)[-1])(body)
         if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
             if body.get('channel') in ('browser','scheduler','background'):
                 if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
@@ -329,7 +335,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ASSISTANT, ADMIN, SCHEDULER
+    global ASSISTANT, ADMIN, SCHEDULER, BRAIN
     if len(TOKEN) < 24:
         raise SystemExit("Service token is missing or too short")
     logging.disable(logging.CRITICAL)
@@ -356,12 +362,15 @@ def main():
     journal_retention.prune(spool,managed_runs,journal_days)
     journal_stop=threading.Event();journal_retention.start(spool,managed_runs,journal_days,journal_stop)
     ASSISTANT=AssistantGateway(PROFILE_HOME,str(spool),policy,bot_token,MODEL,resolve_credentials,restart_after_failure)
+    from services.hermes.brain_turns import BrainTurns
+    BRAIN=BrainTurns(PROFILE_HOME,str(spool),policy,MODEL,resolve_credentials)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"event": "ready", "service": "hermes"}), flush=True)
     # One process-wide redirect, installed before starting threads. Per-request
     # redirects race and can restore another request's secret-bearing output.
     with open(os.devnull,'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
         ASSISTANT.start()
+        BRAIN.open()
         ADMIN = admin = subprocess.Popen([sys.executable, '-m', 'services.hermes.native_admin'], stdout=quiet, stderr=quiet)
         from .native_admin import Administration,audience_revision
         from .scheduler import Scheduler
@@ -376,6 +385,7 @@ def main():
         finally:
             journal_stop.set()
             MANAGED.stop()
+            BRAIN.stop()
             SCHEDULER.stop()
             admin.terminate()
             try: admin.wait(timeout=10)
