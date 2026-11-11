@@ -27,8 +27,11 @@ then a valid bounded grant, then an explicit ask, then defaults. Example:
 Supported configurable boundaries: controlled shell/browser/MCP operations,
 explicit Telegram action requests, and isolated model/archive/memory reads.
 Native memory writes stay inside the writable profile data directories; no
-setting claims to intercept arbitrary filesystem writes. Guard on/off and sharing
-policy remain separate mandatory controls. Existing selected-group conversation
+setting claims to intercept arbitrary filesystem writes. Guard on/off, sharing
+policy and each chat's tool switches (Commands, Web pages, Outside tools) remain
+separate mandatory controls: a shell, browser or MCP proposal for a tool that is off
+is refused with `tool_disabled_by_owner` before the secret check, and the executor's
+claim checks the switch again. Existing selected-group conversation
 and approved scheduled delivery keep their existing delivery policy.
 
 Use the exact fingerprint returned by Activity or a policy preview to grant a
@@ -51,7 +54,8 @@ grant permissions or read owner effect logs. Runtime policy applies at the next
 authorization; an action already sent cannot be undone.
 
 Effect records contain IDs, scope/profile, source reference, rule, origin, policy
-revision and permission ID. They omit prompts, URLs, credentials and result text.
+revision, permission ID and, for an effect a turn asked for, the brain its pass names
+(`hermes` today). They omit prompts, URLs, credentials and result text.
 Inspect originals/results through the linked action and existing archive UI.
 `allowed` means permission, `claimed` means an executor reservation, `started`
 means a trusted executor/provider request attempt began, and `completed` means a
@@ -63,6 +67,13 @@ that the model's answer was correct. Successful routine activity creates no aler
 Owner API routes are `/v1/security/plugin`, `/policy`, `/preview` and `/effects`
 (each prefixed by `/v1/security`). They are available through the owner archive
 API; the service itself serves all but `/preview`. Scoped turn credentials cannot access them.
+
+The broker also serves Nocheh's data tools at `/mcp` to isolated turns (`nocheh-app`
+serves them to turns without the isolated runtime). Only a turn's own pass reaches
+`/mcp`; the service token and any request with an `Origin` header are refused. Each
+tool calls an existing `/v1` route again with the caller's pass, so every check stays
+where it was and `/mcp` itself grants nothing
+([ADR-0233](adr/0233-data-tools-over-mcp.md)).
 
 The trusted launcher is part of the host's security boundary: it owns Docker
 authority. Agent containers do not. It pins the installed image ID at startup,

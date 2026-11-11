@@ -6,6 +6,7 @@
 
 Nocheh is a personal AI brain with Hermes as its first replaceable runtime.
 Telegram is an adapter; owned source data, useful memory, and reasoning are the product.
+Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Honcho is the current engine.
 
 - Read [SPECS.md](SPECS.md) for the authoritative product requirements and [TASK.md](TASK.md) for current implementation status, blockers, and evidence links. [Task history](docs/task-history.md) summarizes older records; the prior full ledger is in Git history. Specifications do not claim implementation or activation.
 - Read the applicable code before relying on implementation descriptions. Plans under `docs/` provide execution order and acceptance procedures; [ADRs](docs/adr/README.md) explain decisions and their supersession history.
