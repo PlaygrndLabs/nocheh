@@ -25,7 +25,7 @@ test('host imports preserve originals through retries and fence job writes, lear
   const runtime=async()=>{throw Error('imports must not execute an agent or provider');};
   const s=fixtureServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime,memoryEngine:honchoEngine(runtime as any)});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
-    hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
+    hermesUrl:'http://fixture',telegramUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await s.guards.reconcile();await s.configuration.configure(policy,'on');
   const server=storageServer(s,settings,runtime);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();assert.ok(address&&typeof address==='object');const base='http://127.0.0.1:'+address.port;
@@ -119,7 +119,7 @@ test('an import shows how far its messages are prepared, becomes ready once all 
   };
   const s=fixtureServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime:runtime as any,memoryEngine:honchoEngine(runtime as any)});
   const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
-    hermesUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
+    hermesUrl:'http://fixture',telegramUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await s.guards.reconcile();await s.configuration.configure(policy,'on');
   const server=storageServer(s,settings,runtime as any);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const address=server.address();assert.ok(address&&typeof address==='object');const base='http://127.0.0.1:'+address.port;

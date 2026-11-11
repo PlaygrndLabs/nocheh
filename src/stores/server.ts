@@ -78,9 +78,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
     if(req.method==='GET'&&path==='/v1/runtime') {
       admin(principal);
-      // The plugged-in brain and its health, and which helper services answer (ADR-0234).
-      const brainStatus=await s.brain.status().catch(()=>({ok:false,error:brainErrors.unavailable}));
-      return json(res,200,{brain:brainSummary(s.brain),status:brainStatus,capabilities});
+      // The plugged-in brain and its health, Nocheh's own Telegram bot (ADR-0235), and which helper services answer (ADR-0234).
+      const [brainStatus,bot]=await Promise.all([s.brain.status().catch(()=>({ok:false,error:brainErrors.unavailable})),
+        capabilities['telegram.status']?call('telegram.status',{},5000).catch(()=>null):Promise.resolve(null)]);
+      const telegram=bot?{telegram:bot.telegram,telegram_details:bot.telegram_details}:capabilities['telegram.status']?{telegram:'unavailable'}:{};
+      return json(res,200,{brain:brainSummary(s.brain),status:{...brainStatus,...telegram},capabilities});
     }
     if(req.method==='POST'&&path==='/v1/runtime/usage-price'){
       // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.

@@ -1,7 +1,8 @@
 import {settings} from '../config.js';
 import {hermesAdapter} from '../hermes-adapter.js';
+import {telegramAdapter} from '../frontdoor/telegram.js';
 import {memoryEngine} from '../memory/engines.js';
-import {runtimeCall} from '../runtime.js';
+import {combinedAdapter,runtimeCall} from '../runtime.js';
 import {brainWithPrompts,withPrompts} from '../prompts.js';
 import {brain} from '../brain/brains.js';
 import {runtimeStoreGroups} from './runtime-pools.js';
@@ -12,8 +13,9 @@ import {startStorageWorkflows} from './workflow-service.js';
 import {hostTransport} from '../workflows/host-transport.js';
 import {restoredInactive} from './lifecycle.js';
 
-// Turns and service calls that run a built-in instruction text carry the owner's replacements.
-const config=settings(),pools=runtimeStoreGroups(),adapter=hermesAdapter({url:config.hermesUrl,token:config.token}),call=withPrompts(runtimeCall(adapter),pools.api.control);
+// Turns and service calls that run a built-in instruction text carry the owner's replacements. Telegram calls go to
+// Nocheh's own bot (ADR-0235), the other helper services to the Hermes service.
+const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token})),call=withPrompts(runtimeCall(adapter),pools.api.control);
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:()=>config.assistant,runtime:call,brain:brainWithPrompts(brain(config),pools.api.control),memoryEngine:memoryEngine(config)};
 const services=storageServices(pools.api,options),workflowServices=storageServices(pools.workflow,options);

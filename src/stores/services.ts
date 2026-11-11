@@ -7,6 +7,7 @@ import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
+import {groupReplies,type GroupReplies} from '../telegram-addressing.js';
 import type {Brain} from '../brain/brain.js';
 import type {MemoryEngine} from '../memory/engine.js';
 import type {StorePools} from './connections.js';
@@ -63,7 +64,9 @@ import {MachineRepository} from './machines.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
-  runtime:RuntimeCall;brain:Brain;memoryEngine:MemoryEngine;transcription?:DerivationEngine;serviceToken?:string}) {
+  runtime:RuntimeCall;brain:Brain;memoryEngine:MemoryEngine;transcription?:DerivationEngine;serviceToken?:string;
+  /** When groups get replies; the owner's setting from the environment unless given. */
+  groupReplies?:GroupReplies}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
   const transcription=options.transcription??voiceTranscription(options.runtime),extraction=documentExtraction(options.runtime);
@@ -138,8 +141,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
-    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect),
-    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??''),
+    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env)),
+    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,

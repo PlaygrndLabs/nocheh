@@ -4,9 +4,10 @@ import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import type {Brain} from '../brain/brain.js';
+import type {Brain,TurnReceipt} from '../brain/brain.js';
+import {groupReplies as replySettings,groupTurn,identityCache,type GroupReplies} from '../telegram-addressing.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
-import {enterFamily,hash,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
 import type {ArchiveRepository,SourceReference} from './archive.js';
 import type {SourceRepository} from './retrieval.js';
 import type {SourceAccessRepository} from './access.js';
@@ -20,6 +21,7 @@ import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
 import {notAllowedPrivateReply,notAllowedReply,ownerPrompts} from '../prompts.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
+import {cancelReply,deliveredReceipt,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -34,26 +36,11 @@ ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS reconciliation_checked_at timest
 `;
 const protocol='telegram-dispatch-v2';
 const conversationOrderWaitMs=120000;
-type JournalDisposition='pre_delivery'|'uncertain'|'invalid';
-
-/** A complete journal without a delivery-stage event proves Telegram send was never entered. */
-export function interruptedJournalDisposition(value:unknown):JournalDisposition {
-  if(!value||typeof value!=='object'||!Array.isArray((value as any).events))return 'invalid';
-  const events=(value as any).events;if(events.length<3||events.length>100)return 'invalid';
-  let assistant=false,delivery=false;
-  for(let index=0;index<events.length;index++) {
-    const event=events[index];
-    if(!event||typeof event!=='object'||event.sequence!==index+1||!Number.isSafeInteger(event.at)||
-      !['queued','running','done','failed','ambiguous','suppressed','cancelled'].includes(event.state)||
-      !['admission','assistant','delivery'].includes(event.stage))return 'invalid';
-    if(event.state==='running'&&event.stage==='assistant')assistant=true;
-    if(event.stage==='delivery')delivery=true;
-  }
-  const last=events.at(-1);
-  if(last.state!=='ambiguous'||last.stage!=='assistant'||!assistant)return 'invalid';
-  return delivery?'uncertain':'pre_delivery';
-}
-
+/** Checks during a turn renew its presence; between them it lapses after 30 seconds. A done reply is sent this soon. */
+const observeMs=1000;
+/** Context changes after which a finished turn's reply is not sent: the binding or audience moved on, so it runs again. */
+const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
+const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired'];
 /**
  * Who sent a group message and when, as one line for the model. Names come
  * from the guarded representation, the time from the captured original, and
@@ -98,19 +85,30 @@ export function groupAddressing(original:any,botId:string):{direct:boolean;handl
   return {direct,handles:[...handles].sort().slice(0,20)};
 }
 
+/** The owner's command reply, which Nocheh's bot sends without a brain turn. */
+function controlReply(input:Input):TurnReceipt|null {
+  const text=input.body.control_reply;
+  return typeof text==='string'&&text?{state:'done',reply:{text,session_id:'owner-control'}}:null;
+}
+
 export class TelegramDispatchRepository {
   constructor(readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,readonly sources:SourceRepository,
     readonly derived:DerivedRepository,readonly guards:GuardRepository,readonly preparation:PreparationRepository,
     readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:ActionCommandRepository,
-    readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly brain:Brain,readonly token:string,readonly detect:(text:string)=>Promise<unknown>){}
+    readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly brain:Brain,readonly token:string,readonly detect:(text:string)=>Promise<unknown>,
+    readonly groupReplies:GroupReplies=replySettings(process.env)){}
   private get control(){return this.access.stores.control;}
+  /** The bot's own username and display name, which address it in groups. */
+  private readonly identity=identityCache(()=>this.call('telegram.identity',{},5000));
   /** Native cancellation is best effort; the durable receipt remains authoritative. */
   async cancelRetired(ids:string[]):Promise<void> {
     if(!ids.length)return;
     const rows=(await this.control.query("SELECT event_id,attempts FROM dispatches WHERE event_id=ANY($1::text[]) AND state='running' AND attempts>0",[ids])).rows;
-    for(const row of rows)try{
-      await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt:row.attempts});
-    }catch{/* The running workflow retries observation and cancellation under the revoked guard epoch. */}
+    for(const row of rows) {
+      try{await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt:row.attempts});}
+      catch{/* The running workflow retries observation and cancellation under the revoked guard epoch. */}
+      await cancelReply(this.call,row.event_id,row.attempts);
+    }
   }
   private observation(row:any):Observation {
     const states:Record<string,Observation['state']>={pending:'waiting',running:'running',done:'completed',failed:'retryable_failed',ambiguous:'ambiguous',suppressed:'skipped',cancelled:'cancelled'};
@@ -148,9 +146,54 @@ export class TelegramDispatchRepository {
   private async receive(row:any,result:Record<string,unknown>) {
     if(closed.has(String(result.state)))return this.storeResult(row,result);
     await this.control.query(`UPDATE dispatches SET state='running',runtime_stage=$2,error_code='awaiting_dispatch_receipt',
-      next_attempt=now()+interval '5 seconds',revision=revision+1,updated_at=now() WHERE event_id=$1`,
-      [row.event_id,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:row.runtime_stage]);
+      next_attempt=now()+$3*interval '1 millisecond',revision=revision+1,updated_at=now() WHERE event_id=$1`,
+      [row.event_id,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:row.runtime_stage,observeMs]);
     return this.observation(await this.row(row.event_id));
+  }
+  /** A pass for the turn under the current binding, after the turn's own binding and source are checked. */
+  private async credential(input:Input):Promise<string> {
+    if(this.token.length<24)throw new HttpError(503,'service_credential_required');
+    const credential=await this.prepared.audience.turn(this.token,input.principal,input.principal.turnEvent!,Date.now()+600000);
+    await currentTurn(this,input);
+    return credential;
+  }
+  /**
+   * The brain closed the turn. A done turn's reply goes out through Nocheh's bot (ADR-0235), after any earlier reply in
+   * the same chat, and only while the turn's context still holds; otherwise the reply is withdrawn or runs again.
+   * Every other end clears the working reaction, or marks it 👎 when the turn failed and will be retried.
+   */
+  private async settle(row:any,input:Input,receipt:TurnReceipt):Promise<Observation> {
+    const attempt=row.attempts as number,state=String(receipt.state);
+    let credential:string;
+    try{credential=await this.credential(input);}catch(error){
+      if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
+      // The reply was written for a context that changed: it runs again under the new one, or not at all.
+      return await this.storeResult(row,renewedCodes.includes(error.code)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
+    }
+    const target=replyTarget(input,attempt,credential);
+    if(state!=='done') {
+      await finishPresence(this.call,target,unansweredFinish(state));
+      // The brain never sends anything, so a turn it lost to a restart runs again under a new attempt.
+      return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
+    }
+    if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
+    if(await this.earlierReply(row,input,receipt))return await this.receive(row,{state:'running',stage:'delivery'});
+    const sent=await sendReply(this.call,target,String(input.body.source_key),receipt.reply,{notify:false,presence:input.body.control_reply==null});
+    if(!sent||!closed.has(String(sent.state)))return await this.receive(row,{state:'running',stage:'delivery'});
+    return await this.storeResult(row,deliveredReceipt(receipt,sent));
+  }
+  /**
+   * The brain runs one chat's turns in order, but each is observed on its own, so a quick turn can finish just after a
+   * slow one and be seen first. Its reply waits, at most two minutes after its turn ended, while an earlier turn in the
+   * same chat is still running.
+   */
+  private async earlierReply(row:any,input:Input,receipt:TurnReceipt):Promise<boolean> {
+    const ended=Number((receipt.window as {finished?:unknown}|undefined)?.finished);
+    if(!Number.isSafeInteger(ended)||Date.now()-ended>conversationOrderWaitMs)return false;
+    const earlier=(await this.control.query(`SELECT event_id FROM dispatches WHERE state='running' AND attempts>0 AND event_id<>$1
+      AND created_at<$2 AND updated_at>now()-interval '10 minutes' LIMIT 50`,[row.event_id,row.created_at])).rows.map(other=>other.event_id as string);
+    if(!earlier.length)return false;
+    return (await this.archive.pool.query('SELECT 1 FROM events WHERE id=ANY($1::text[]) AND scope=$2 LIMIT 1',[earlier,input.body.scope])).rowCount!>0;
   }
   private async input(reference:DerivativeReference):Promise<Input> {
     const row=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
@@ -280,14 +323,16 @@ export class TelegramDispatchRepository {
       catch{/* Best effort: the message stays archived either way. */}
       return;
     }
-    const botId=/^telegram:(\d+):update:/.exec(key)?.[1]??'',addressing=groupAddressing(payload,botId);
-    try{await this.call('telegram.refusal',{...common,
-      ...(message.is_topic_message===true&&Number.isSafeInteger(message.message_thread_id)?{topic:String(message.message_thread_id)}:{}),
-      group_addressing:addressing,text:typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null,
-      reply:texts['telegram.not_allowed']??notAllowedReply},15000);}
-    catch{/* Best effort: the message stays archived either way. */}
+    // Only a message that addresses Nocheh gets the reply, whatever the group's reply setting.
+    const botId=/^telegram:(\d+):update:/.exec(key)?.[1]??'',text=typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null;
+    try {
+      if(!groupTurn(this.groupReplies,groupAddressing(payload,botId),text,await this.identity(),true))return;
+      await this.call('telegram.refusal',{...common,
+        ...(message.is_topic_message===true&&Number.isSafeInteger(message.message_thread_id)?{topic:String(message.message_thread_id)}:{}),
+        reply:texts['telegram.not_allowed']??notAllowedReply},15000);
+    } catch {/* Best effort: the message stays archived either way. */}
   }
-  private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation> {
+  private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation|'not_addressed'> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
     if(!scope) {
@@ -326,9 +371,6 @@ export class TelegramDispatchRepository {
           kind:binding.mode==='off'&&file.kind==='photo'?'image':'file',text:extracted?Buffer.from(extracted.content_base64,'base64').toString():null});
       }
     }
-    // Command authority comes from the original owner DM, never a guarded edit.
-    const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
-    const untranscribed=await this.untranscribedEarlier(source,space);
     const botId=/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'';
     let addressing=groupAddressing(payload,botId);
     for(const id of parts) {
@@ -336,9 +378,15 @@ export class TelegramDispatchRepository {
       const other=groupAddressing(JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString()),botId);
       if(addressing&&other)addressing={direct:addressing.direct||other.direct,handles:[...new Set([...addressing.handles,...other.handles])].sort().slice(0,20)};
     }
-    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
     // An album's caption usually sits on one part; the turn reads every part's text in order.
-    const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null,body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
+    const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null;
+    // A group message nobody addressed to the bot stays archived without a turn; the next turn sees it as recent.
+    if(!scope.owner&&!groupTurn(this.groupReplies,addressing,text,await this.identity().catch(()=>null)))return 'not_addressed';
+    // Command authority comes from the original owner DM, never a guarded edit.
+    const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
+    const untranscribed=await this.untranscribedEarlier(source,space);
+    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
+    const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
       ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,recent_group:recent});await currentTurn(this,input);
@@ -346,62 +394,6 @@ export class TelegramDispatchRepository {
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
     return {reference,input};
-  }
-  /** Reopen an interrupted turn only when its complete native journal proves delivery never began. */
-  async reconcileInterrupted(limit=1):Promise<number> {
-    const candidates=(await this.control.query(`SELECT event_id,attempts FROM dispatches
-      WHERE state='ambiguous' AND error_code IN ('dispatch_interrupted','runtime_execution_interrupted','runtime_restart_during_dispatch')
-      AND attempts>0 AND reconciliation_checked_at IS NULL
-      ORDER BY updated_at,event_id LIMIT $1`,[limit])).rows;
-    let reopened=0;
-    for(const candidate of candidates) {
-      let journal:Record<string,unknown>;
-      try {journal=await this.brain.turnEvents({channel:'telegram',event_id:candidate.event_id,attempt:candidate.attempts},0);}
-      catch {continue;}
-      const disposition=interruptedJournalDisposition(journal);
-      if(disposition!=='pre_delivery') {
-        await this.control.query(`UPDATE dispatches SET reconciliation_checked_at=now(),revision=revision+1,updated_at=now()
-          WHERE event_id=$1 AND attempts=$2 AND state='ambiguous'
-          AND error_code IN ('dispatch_interrupted','runtime_execution_interrupted','runtime_restart_during_dispatch')
-          AND reconciliation_checked_at IS NULL`,
-          [candidate.event_id,candidate.attempts]);
-        continue;
-      }
-      const db=await this.control.connect();
-      try {
-        await db.query('BEGIN');
-        const locked=(await db.query(`SELECT pg_try_advisory_xact_lock(
-          hashtextextended(current_schema()||':workflow:'||$1,803321)) AS locked`,['telegram'])).rows[0]?.locked;
-        if(!locked){await db.query('ROLLBACK');continue;}
-        const dispatch=(await db.query(`SELECT attempts FROM dispatches WHERE event_id=$1 AND attempts=$2 AND state='ambiguous'
-          AND error_code IN ('dispatch_interrupted','runtime_execution_interrupted','runtime_restart_during_dispatch')
-          AND reconciliation_checked_at IS NULL FOR UPDATE`,[candidate.event_id,candidate.attempts])).rows;
-        const workflows=(await db.query(`SELECT id,dispatch FROM workflow_registry WHERE family='telegram' AND job_id=$1
-          AND state='ambiguous' FOR UPDATE`,[candidate.event_id])).rows;
-        if(dispatch.length!==1||workflows.length!==1){await db.query('ROLLBACK');continue;}
-        const workflow=workflows[0];
-        const receipt=(await db.query(`SELECT state FROM workflow_receipts WHERE workflow_id=$1 AND step='telegram' AND attempt=$2 FOR UPDATE`,
-          [workflow.id,candidate.attempts])).rows;
-        if(receipt.length!==1||receipt[0].state!=='ambiguous'){await db.query('ROLLBACK');continue;}
-        const changed=await db.query(`UPDATE dispatches SET state='failed',error_code='assistant_runtime_unavailable',next_attempt=now(),
-          reconciliation_checked_at=now(),revision=revision+1,updated_at=now()
-          WHERE event_id=$1 AND attempts=$2 AND state='ambiguous'
-          AND error_code IN ('dispatch_interrupted','runtime_execution_interrupted','runtime_restart_during_dispatch')
-          RETURNING event_id`,
-          [candidate.event_id,candidate.attempts]);
-        if(!changed.rowCount){await db.query('ROLLBACK');continue;}
-        await db.query(`UPDATE workflow_receipts SET state='failed',updated_at=now()
-          WHERE workflow_id=$1 AND step='telegram' AND attempt=$2 AND state='ambiguous'`,[workflow.id,candidate.attempts]);
-        const next=Number(workflow.dispatch)+1;
-        await db.query(`UPDATE workflow_registry SET state='retryable_failed',stage='assistant',next_attempt=now(),
-          waiting_reason='runtime_unavailable',dispatch=$2,lease_token=NULL,lease_until=NULL,revision=revision+1,updated_at=now()
-          WHERE id=$1 AND state='ambiguous'`,[workflow.id,next]);
-        await db.query(`INSERT INTO workflow_outbox(id,workflow_id,dispatch) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
-          [hash(workflow.id+':'+next),workflow.id,next]);
-        await db.query('COMMIT');reopened++;
-      } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
-    }
-    return reopened;
   }
   async run(id:string,authority:ExecutionAuthority):Promise<Observation> {
     if(!/^[a-f0-9]{64}$/.test(id))return observation('failed','admission');
@@ -427,19 +419,21 @@ export class TelegramDispatchRepository {
         }
       }
       if(row.next_attempt>new Date())return this.observation(row);
-      let input:Input;
+      let input:Input,credential:string|undefined;
       if(row.state==='running') {
-        let observed:Record<string,unknown>;
+        input=await this.input(row.input_reference);
+        // A fixed owner reply needs no brain: it is the turn's answer as it stands.
+        const fixed=controlReply(input);if(fixed)return await this.settle(row,input,fixed);
+        let observed:TurnReceipt;
         try{observed=await this.brain.observeTurn({channel:'telegram',event_id:id,attempt:row.attempts});}
         catch{return await this.receive(row,{state:'running'});}
-        if(closed.has(String(observed.state)))return await this.receive(row,observed);
-        input=await this.input(row.input_reference);
-        try{await currentTurn(this,input);}catch(error){
-          if(!(error instanceof HttpError)||!['guard_context_changed','audience_context_changed','conversation_not_selected','guard_transition_pending','source_retired'].includes(error.code))throw error;
+        if(closed.has(String(observed.state)))return await this.settle(row,input,observed);
+        try{credential=await this.credential(input);}catch(error){
+          if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
           // Only a retirement or a deselected chat withdraws the reply. A newer epoch alone means
           // it is rebuilt under that epoch: a turn that never started runs again, and a running
-          // turn fails its own delivery check under the revoked credential and is retried.
-          const renewed=['guard_context_changed','audience_context_changed','guard_transition_pending'].includes(error.code);
+          // turn's reply is not sent when it ends, so it runs again (see settle).
+          const renewed=renewedCodes.includes(error.code);
           if(renewed&&observed.state==='not_found') {
             await this.control.query(`UPDATE dispatches SET state='failed',error_code=$2,next_attempt=now()+interval '2 seconds',
               revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='running'`,[id,error.code]);
@@ -450,7 +444,10 @@ export class TelegramDispatchRepository {
           try{return await this.receive(row,await this.brain.cancelTurn({channel:'telegram',event_id:id,attempt:row.attempts}));}
           catch{return await this.receive(row,{state:'running'});}
         }
-        if(!['not_found','queued'].includes(String(observed.state)))return await this.receive(row,observed);
+        if(!['not_found','queued'].includes(String(observed.state))) {
+          await showPresence(this.call,replyTarget(input,row.attempts,credential));
+          return await this.receive(row,observed);
+        }
         // Only explicit absence or a never-started native request may launch the
         // same identity, after current binding checks. Running work is observed.
       } else {
@@ -469,7 +466,12 @@ export class TelegramDispatchRepository {
           return this.observation(await this.row(id));
         }
         const attempt=row.attempts+1,built=await this.build(captured.reference,attempt,album?.state==='leader'?album.others:[]);
-        if('state' in built) {
+        if(built==='not_addressed'||'state' in built) {
+          if(built==='not_addressed') {
+            await db.query(`UPDATE dispatches SET state='suppressed',error_code='not_addressed',revision=revision+1,updated_at=now()
+              WHERE event_id=$1 AND state IN ('pending','failed')`,[id]);
+            return this.observation(await this.row(id));
+          }
           if(built.state==='skipped')await db.query("UPDATE dispatches SET state='suppressed',error_code=$2,updated_at=now() WHERE event_id=$1",
             [id,built.waiting_reason==='not_allowed'?'not_allowed':'conversation_not_selected']);
           // Speech without usable text is a terminal preparation outcome. The
@@ -490,11 +492,14 @@ export class TelegramDispatchRepository {
           await db.query('COMMIT');row=await this.row(id);
         }catch(error){await db.query('ROLLBACK');throw error;}
       }
-      if(this.token.length<24)throw new HttpError(503,'service_credential_required');
-      const credential=await this.prepared.audience.turn(this.token,input.principal,id,Date.now()+600000);await currentTurn(this,input);
-      let result:Record<string,unknown>;
+      const fixed=controlReply(input);if(fixed)return await this.settle(row,input,fixed);
+      credential??=await this.credential(input);
+      // Typing and 👀 show while the brain works; Nocheh renews them at each check.
+      await showPresence(this.call,replyTarget(input,row.attempts,credential));
+      let result:TurnReceipt;
       try{result=await this.brain.startTurn({channel:'telegram',event_id:id,attempt:row.attempts},{...input.body,archive_credential:credential});}
       catch{result={state:'running'};}
+      if(closed.has(String(result.state)))return await this.settle(row,input,result);
       return await this.receive(row,result);
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(hashtextextended($1,803364))',[id]);if(held)await leaveFamily(db,'telegram');});}
   }

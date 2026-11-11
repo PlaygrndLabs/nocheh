@@ -1,10 +1,7 @@
 import {HttpError,object} from '../http.js';
 import {brainInvalid,brainRejected,brainUnavailable,closedTurnStates,type Brain,type TurnEvents,type TurnReceipt,type TurnRef,type TurnState} from './brain.js';
 
-type Options={url:string;token:string;fetch?:typeof fetch;
-  /** Who sends a Telegram turn's reply. `hermes`: Hermes's own Telegram adapter, as it did before Nocheh had its own bot;
-   * the receipt then carries no reply. `nocheh`: the receipt returns the reply and Nocheh's bot sends it. */
-  telegramReplies?:'hermes'|'nocheh'};
+type Options={url:string;token:string;fetch?:typeof fetch};
 
 const states=new Set<TurnState>(['queued','waiting','running','not_found',...closedTurnStates]);
 /** Hermes's own refusals that the owner can act on, kept by their code. */
@@ -12,7 +9,7 @@ const settingCodes=new Set(['configuration_conflict','unsupported_preference','p
 
 /** Hermes behind the brain socket (ADR-0234). Only this file knows Hermes's run, management and notes routes. */
 export function hermesBrain(options:Options):Brain {
-  const transport=options.fetch??fetch,telegramReplies=options.telegramReplies??'hermes';
+  const transport=options.fetch??fetch;
   async function send(path:string,body:Record<string,unknown>|null,timeout:number,settings=false):Promise<Record<string,unknown>> {
     let response:Response;
     try {
@@ -28,8 +25,8 @@ export function hermesBrain(options:Options):Brain {
     }
     try{return object(await response.json());}catch{throw brainInvalid();}
   }
-  // Telegram turns whose reply Nocheh sends run on Hermes's Telegram-free turn routes; every other turn on its run routes.
-  const returns=(ref:TurnRef)=>ref.channel==='telegram'&&telegramReplies==='nocheh';
+  // Telegram turns return their reply, which Nocheh's own bot sends (ADR-0235); every other turn runs on Hermes's run routes.
+  const returns=(ref:TurnRef)=>ref.channel==='telegram';
   const route=(ref:TurnRef,action:string)=>(returns(ref)?'/internal/turn/':'/internal/run/')+action;
   const identity=(ref:TurnRef)=>({channel:ref.channel,event_id:ref.event_id,attempt:ref.attempt});
   const receipt=(ref:TurnRef,value:Record<string,unknown>):TurnReceipt=>{

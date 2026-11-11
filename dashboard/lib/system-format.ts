@@ -372,6 +372,8 @@ export const telegramStates: Record<string, {label: string; tone: Tone}> = {
   failed: {label: 'Stopped', tone: 'bad'},
   connection_failed: {label: 'Can’t connect', tone: 'bad'},
   runtime_failed: {label: 'Stopped', tone: 'bad'},
+  // Nocheh couldn't reach the Telegram bot service itself.
+  unavailable: {label: 'Not answering', tone: 'bad'},
 };
 
 const telegramReasons: Record<string, string> = {

@@ -7,7 +7,7 @@ import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
 import {groupAddressing,speakerLine} from '../src/stores/telegram-dispatch.js';
 import {dispatchPayload} from '../src/stores/telegram-turn.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
@@ -67,7 +67,13 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-')),base=Date.now(),key='dispatch:'+base,group='-'+base,token=digest(key);
   const policy={enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}},calls:{operation:string;input:any}[]=[],native=new Map<string,any>(),journals=new Map<string,any[]>();
-  let serial=base,mode='done',lostControl=false,timingShape:'valid'|'malformed'='valid';const query=stores.control.query.bind(stores.control);
+  let serial=base,mode='done',lostControl=false,timingShape:'valid'|'malformed'='valid',delivery='done';const query=stores.control.query.bind(stores.control);
+  // Nocheh's bot: what it was asked to show and send, and how a send ends.
+  const sends:{operation:string;input:any}[]=[],bot=fixtureTelegram((operation,input)=>sends.push({operation,input}));
+  const telegram:FakeCall=async(operation,input,timeout)=>{
+    const answer=await bot(operation,input,timeout);
+    return operation==='telegram.reply'&&delivery==='ambiguous'&&!input.cancel?{state:'ambiguous',error_code:'delivery_unconfirmed'}:answer;
+  };
   const control=new Proxy(stores.control,{get(target,name){
     if(name==='query')return (sql:any,...args:any[])=>{
       if(lostControl&&String(sql).includes('UPDATE dispatches SET state=$2,result_reference')){lostControl=false;return Promise.reject(Error('lost control completion'));}
@@ -83,14 +89,15 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     if(operation==='run.cancel'){native.set(id,{state:'cancelled'});return {state:'cancelled'};}
     await services.turns.binding(reader({headers:{authorization:'Bearer '+String(input.archive_credential)}} as any,token));
     if(mode==='absent'){mode='done';throw Error('request lost before native admission');}
-    const prior=native.get(id);assert.ok(!prior||['queued','failed'].includes(prior.state),'only an explicitly failed pre-delivery attempt may launch a fresh execution');
+    const prior=native.get(id);assert.ok(!prior||['queued','failed','ambiguous'].includes(prior.state),'only a failed or lost attempt may launch a fresh execution');
     const state=['running','queued','suppressed','failed','ambiguous'].includes(mode)?mode:'done';native.set(id,{state});
     if(mode==='lost_ack'){mode='done';throw Error('native result acknowledgement lost');}
-    const now=Date.now(),timing=state!=='done'?{}:{timings:timingShape==='valid'?{conversation:{ms:30,calls:1},telegram_send:{ms:5,calls:1}}:{conversation:{ms:30,calls:1,text:'private'}},
-      window:{queued:now-100,assistant:now-90,delivery:now-20,finished:now}};
-    return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:state==='done'?'delivery':'assistant',private_output:'not copied into workflow metadata',...timing};
+    // The brain times its own turn; the bot adds the send.
+    const now=Date.now()-50,timing=state!=='done'?{}:{timings:timingShape==='valid'?{conversation:{ms:30,calls:1}}:{conversation:{ms:30,calls:1,text:'private'}},
+      window:{queued:now-100,assistant:now-90,finished:now}};
+    return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:'assistant',private_output:'not copied into workflow metadata',...timing};
   };
-  const services=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
+  const services=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,telegram,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Selected voice fixture-secret';}},
     memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
   const operations=storageWorkflowOperations(services,runtime);
@@ -119,6 +126,14 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const generalCalls=calls.filter(c=>c.input.event_id===general.id&&c.operation==='run.start');
     assert.equal(generalCalls.length,1);assert.equal(generalCalls[0]!.input.payload.message.message_thread_id,undefined);
     assert.equal(reader({headers:{authorization:'Bearer '+generalCalls[0]!.input.archive_credential}} as any,token).space,group);
+    // Nocheh's bot shows presence before the turn starts, then sends the brain's reply as a reply to the asking message.
+    const generalSends=sends.filter(item=>item.input.event_id===general.id);
+    assert.deepEqual(generalSends.map(item=>item.operation),['telegram.presence','telegram.reply']);
+    const answer=generalSends[1]!.input;
+    assert.deepEqual({chat:answer.chat_id,message:answer.message_id,topic:answer.topic,key:answer.dispatch_key,text:answer.text,session:answer.session_id,notify:answer.notify,presence:answer.presence},
+      {chat:group,message:String((generalValue.payload as any).message.message_id),topic:undefined,key:generalValue.key,text:'Fixture reply',session:'fixture-session',notify:false,presence:true});
+    assert.equal(answer.id,digest(general.id+':1'),'one reply id per attempt, shared with its presence');assert.equal(generalSends[0]!.input.id,answer.id);
+    assert.equal(reader({headers:{authorization:'Bearer '+answer.archive_credential}} as any,token).space,group,'the send carries a pass for the same conversation');
     assert.equal((await advance(general.id)).state,'completed');
     assert.equal(calls.filter(c=>c.input.event_id===general.id&&c.operation==='run.start').length,1);
     const timed=(id:string)=>stores.control.query('SELECT stage,attempt,category FROM stage_timings WHERE event_id=$1 ORDER BY stage',[id]).then(r=>r.rows);
@@ -187,11 +202,20 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal(voiceInput.transcripts.length,1);assert.ok(!voiceInput.transcripts[0].includes('fixture-secret'));
     assert.equal(voiceInput.payload.message.voice,undefined,'prepared media does not enter native download handlers');
     assert.deepEqual(await services.attachments.bytes(await services.attachments.file(voice.artifact_ids[0]!)),Buffer.from([79,103,103,0,255]));
-    for(const state of ['suppressed','ambiguous']) {
-      const source=await capture('Terminal '+state);await prepare(source.reference.id);mode=state;
-      const result=await run(source.reference.id);assert.equal(result.state,state==='suppressed'?'skipped':'ambiguous');
-      const count:number=calls.length;await due(source.reference.id);await run(source.reference.id);assert.equal(calls.length,count,'terminal execution cannot automatically restart');
-    }
+    const silent=await capture('Terminal suppressed');await prepare(silent.reference.id);mode='suppressed';
+    assert.equal((await run(silent.reference.id)).state,'skipped');
+    const silentCalls:number=calls.length;await due(silent.reference.id);await run(silent.reference.id);assert.equal(calls.length,silentCalls,'terminal execution cannot automatically restart');
+    assert.deepEqual(sends.filter(item=>item.input.event_id===silent.reference.id).map(item=>item.input.finish??null),[null,'clear'],'no answer clears the working reaction');
+    // Only the send can be uncertain: the brain sends nothing, so a turn it lost runs again.
+    const lost=await capture('Brain lost the turn');await prepare(lost.reference.id);mode='ambiguous';
+    assert.equal((await run(lost.reference.id)).state,'retryable_failed');
+    assert.equal((await stores.control.query('SELECT error_code FROM dispatches WHERE event_id=$1',[lost.reference.id])).rows[0].error_code,'assistant_runtime_unavailable');
+    await due(lost.reference.id);mode='done';assert.equal((await run(lost.reference.id)).state,'completed');
+    assert.deepEqual(calls.filter(c=>c.input.event_id===lost.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    const unconfirmed=await capture('Send unconfirmed');await prepare(unconfirmed.reference.id);mode='done';delivery='ambiguous';
+    assert.equal((await run(unconfirmed.reference.id)).state,'ambiguous');delivery='done';
+    const before=[calls.length,sends.length];await due(unconfirmed.reference.id);await run(unconfirmed.reference.id);
+    assert.deepEqual([calls.length,sends.length],before,'an uncertain send is never repeated');
     const addressed=await capture('@Nocheh_Bot any plans?',{reply_to_message:{message_id:1,date:1700000000,chat:{id:Number(group),type:'supergroup'},from:{id:123456,is_bot:true,first_name:'Nocheh'},text:'Earlier answer'},
       entities:[{type:'mention',offset:0,length:11}]});
     await prepare(addressed.reference.id);mode='done';assert.equal((await run(addressed.reference.id)).state,'completed');
@@ -206,48 +230,16 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     await due(failed.reference.id);mode='done';assert.equal((await run(failed.reference.id)).state,'completed');
     const retried=calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start');
     assert.deepEqual(retried.map(c=>c.input.attempt),[1,2]);
-    for(const code of ['dispatch_interrupted','runtime_execution_interrupted','runtime_restart_during_dispatch']) {
-      const recoverable=await capture('Pre-delivery interruption '+code);await prepare(recoverable.reference.id);mode='ambiguous';
-      assert.equal((await advance(recoverable.reference.id)).state,'ambiguous');
-      await stores.control.query('UPDATE dispatches SET error_code=$2 WHERE event_id=$1',[recoverable.reference.id,code]);
-      journals.set(recoverable.reference.id,[
-        {sequence:1,state:'queued',stage:'admission',at:base+1},
-        {sequence:2,state:'running',stage:'assistant',at:base+2},
-        {sequence:3,state:'ambiguous',stage:'assistant',at:base+3},
-      ]);
-      assert.equal(await services.telegram.reconcileInterrupted(),1,code);
-      const recovered=(await stores.control.query(`SELECT d.state AS dispatch_state,d.error_code,w.id,w.state AS workflow_state,w.dispatch,
-        r.state AS receipt_state FROM dispatches d JOIN workflow_registry w ON w.family='telegram' AND w.job_id=d.event_id
-        JOIN workflow_receipts r ON r.workflow_id=w.id AND r.step='telegram' AND r.attempt=d.attempts WHERE d.event_id=$1`,[recoverable.reference.id])).rows[0];
-      assert.equal(recovered.dispatch_state,'failed');assert.equal(recovered.error_code,'assistant_runtime_unavailable');
-      assert.equal(recovered.workflow_state,'retryable_failed');assert.equal(recovered.receipt_state,'failed');assert.equal(recovered.dispatch,2);
-      assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM workflow_outbox WHERE workflow_id=$1 AND dispatch=2',[recovered.id])).rows[0].n,1);
-      native.delete(recoverable.reference.id);mode='done';
-      assert.equal((await advanceWorkflow(stores.control,recovered.id,2,'telegram','fixture-'+(++serial),operations.telegram!)).state,'completed');
-      assert.deepEqual(calls.filter(c=>c.input.event_id===recoverable.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
-    }
-    const uncertain=await capture('Legacy post-delivery interruption');await prepare(uncertain.reference.id);mode='ambiguous';
-    assert.equal((await advance(uncertain.reference.id)).state,'ambiguous');
-    await stores.control.query("UPDATE dispatches SET error_code='runtime_execution_interrupted' WHERE event_id=$1",[uncertain.reference.id]);
-    journals.set(uncertain.reference.id,[
-      {sequence:1,state:'queued',stage:'admission',at:base+1},
-      {sequence:2,state:'running',stage:'assistant',at:base+2},
-      {sequence:3,state:'running',stage:'delivery',at:base+3},
-      {sequence:4,state:'ambiguous',stage:'assistant',at:base+4},
-    ]);
-    assert.equal(await services.telegram.reconcileInterrupted(),0);
-    const held=(await stores.control.query(`SELECT d.state,d.reconciliation_checked_at,w.state AS workflow_state FROM dispatches d
-      JOIN workflow_registry w ON w.family='telegram' AND w.job_id=d.event_id WHERE d.event_id=$1`,[uncertain.reference.id])).rows[0];
-    assert.equal(held.state,'ambiguous');assert.equal(held.workflow_state,'ambiguous');assert.ok(held.reconciliation_checked_at);
-    const eventCalls=calls.filter(c=>c.operation==='run.events'&&c.input.event_id===uncertain.reference.id).length;
-    assert.equal(await services.telegram.reconcileInterrupted(),0);
-    assert.equal(calls.filter(c=>c.operation==='run.events'&&c.input.event_id===uncertain.reference.id).length,eventCalls,'checked uncertain sends are not polled forever');
     const reaction={...envelope(''),payload:{update_id:++serial,message_reaction:{chat:{id:Number(group)},message_id:1,date:1700000000,user:{id:9},old_reaction:[],new_reaction:[]}}};
     const reactionSource=(await services.capture.capture(reaction)).source.reference;assert.equal((await advance(reactionSource.id)).state,'skipped');
     const imported=await capture('Historical message');await stores.control.query("UPDATE source_intakes SET transport='import' WHERE event_id=$1",[imported.reference.id]);
     const count=calls.length;assert.equal((await run(imported.reference.id)).state,'skipped');assert.equal(calls.length,count);
     const ownerCommand=await capture('/actions',{},'123');await prepare(ownerCommand.reference.id);mode='done';
-    assert.equal((await run(ownerCommand.reference.id)).state,'completed');assert.equal(typeof calls.at(-1)!.input.control_reply,'string');
+    assert.equal((await run(ownerCommand.reference.id)).state,'completed');
+    assert.ok(!calls.some(c=>c.input.event_id===ownerCommand.reference.id),'a fixed command reply needs no brain');
+    const command=sends.filter(item=>item.input.event_id===ownerCommand.reference.id);
+    assert.deepEqual(command.map(item=>[item.operation,item.input.session_id,item.input.presence]),[['telegram.reply','owner-control',false]]);
+    assert.equal(typeof command[0]!.input.text,'string');
     const columns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='dispatches'")).rows.map(r=>r.column_name);
     assert.ok(!columns.some(name=>['text','content','payload','transcripts'].includes(name)));
     assert.equal((await stores.archive.query("SELECT count(*)::int AS n FROM events WHERE kind IN ('runtime_context','runtime_result')")).rows[0].n,0);
@@ -372,18 +364,19 @@ test('a group turn sees the unaddressed group messages since the last turn, neve
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-recent-')),base=Date.now(),group='-'+base,token=digest('recent:'+base);
-  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let serial=base;
-  // Like Hermes, a group message that does not name Nocheh is suppressed without a turn.
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[],sends:{operation:string;input:any}[]=[];let serial=base;
+  // Nocheh decides: a group message that does not address the bot is suppressed before any brain or presence.
   const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
-    assert.equal(operation,'run.start');
-    if(!String(input.text).startsWith('Nocheh'))return {state:'suppressed',error_code:'not_addressed'};
+    if(operation==='telegram.refusal'){sends.push({operation,input});return {state:'done'};}
+    assert.equal(operation,'run.start');assert.match(String(input.text),/^(Nocheh|@Nocheh_Bot)/);
     started.push(input);return {state:'done',stage:'delivery'};
   };
-  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
+    groupReplies:{mode:'addressed',names:['Nocheh']},telegram:fixtureTelegram((operation,input)=>sends.push({operation,input}))});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
-  const say=async(text:string,from:any={id:123,is_bot:false,first_name:'Owner'})=>{
-    const update=++serial,message={message_id:update,date:1700000000+update-base,chat:{id:Number(group),type:'supergroup'},from,text};
+  const say=async(text:string,from:any={id:123,is_bot:false,first_name:'Owner'},extra:any={})=>{
+    const update=++serial,message={message_id:update,date:1700000000+update-base,chat:{id:Number(group),type:'supergroup'},from,text,...extra};
     const id=(await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
       source_id:String(update),revision:'1',occurred_at:null,text,payload:{update_id:update,message}})).source.reference.id;
     assert.equal((await services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'))).state,'completed');
@@ -407,6 +400,17 @@ test('a group turn sees the unaddressed group messages since the last turn, neve
     assert.match(started[2].speaker,/ \[the owner\]$/,'so is the owner\'s turn');
     assert.ok(!JSON.stringify(recent).includes('987654321'),'no Telegram ID reaches the turn');
     await say('Nocheh, and now?');assert.equal(started[3].recent_group,undefined,'messages already carried by a turn are not repeated');
+    const states=(await stores.control.query("SELECT error_code,count(*)::int AS n FROM dispatches WHERE state='suppressed' GROUP BY error_code")).rows;
+    assert.ok(states.some(row=>row.error_code==='not_addressed'&&row.n===3),'unaddressed messages close as not addressed');
+    assert.ok(sends.every(item=>item.operation!=='telegram.presence'||started.some(turn=>turn.event_id===item.input.event_id)),'no typing or 👀 for an unaddressed message');
+    // Its @username addresses the bot, as its front door names it; someone not allowed gets the fixed reply only then.
+    await say('@Nocheh_Bot hi',{id:123,is_bot:false,first_name:'Owner'},{entities:[{type:'mention',offset:0,length:11}]});assert.equal(started.length,5);
+    const stranger={id:555000111,is_bot:false,first_name:'Visitor'};
+    await say('Who wants lunch?',stranger);assert.equal(sends.filter(item=>item.operation==='telegram.refusal').length,0,'unaddressed: no refusal');
+    await say('Nocheh, who are you?',stranger);
+    const refusals=sends.filter(item=>item.operation==='telegram.refusal');assert.equal(refusals.length,1);
+    assert.deepEqual(Object.keys(refusals[0]!.input).sort(),['chat_id','event_id','message_id','reply','user_id'],'the bot gets only what it sends');
+    assert.equal(started.length,5,'a refused message runs no turn');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

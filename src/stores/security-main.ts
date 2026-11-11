@@ -1,7 +1,8 @@
 import {settings} from '../config.js';
 import {hermesAdapter} from '../hermes-adapter.js';
+import {telegramAdapter} from '../frontdoor/telegram.js';
 import {memoryEngine} from '../memory/engines.js';
-import {runtimeCall} from '../runtime.js';
+import {combinedAdapter,runtimeCall} from '../runtime.js';
 import {brainWithPrompts,withPrompts} from '../prompts.js';
 import {brain} from '../brain/brains.js';
 import {brokerServer} from '../security/broker.js';
@@ -10,7 +11,7 @@ import {storageServices} from './services.js';
 import {storageGuardService} from './guard-service.js';
 import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHealth,storageHeartbeat} from './lifecycle.js';
 
-const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(hermesAdapter({url:config.hermesUrl,token:config.token})),stores.control);
+const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token}))),stores.control);
 const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:()=>config.assistant,runtime:call,brain:brainWithPrompts(brain(config),stores.control),memoryEngine:memoryEngine(config)});
 const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',
