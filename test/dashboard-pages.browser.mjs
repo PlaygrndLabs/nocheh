@@ -36,11 +36,10 @@ const routes = [
   ['chats?chat=42', 'Chats'],
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm'].map(view => ['memory?view=' + view, 'Memory']),
-  ...['work', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'advanced'].map(view => [
-    'settings?view=' + view,
-    'Settings',
-  ]),
+  ...['work', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'machines', 'advanced'].map(
+    view => ['settings?view=' + view, 'Settings'],
+  ),
 ];
 
 let server, browser;
@@ -133,7 +132,7 @@ test('the sidebar lists the open page’s tabs and opens any page’s tab direct
   const settingsTabs = nav.getByRole('list', {name: 'Settings tabs'});
   assert.deepEqual(
     (await settingsTabs.getByRole('link').allTextContents()).map(text => text.trim()),
-    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Connections', 'Advanced'],
+    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Connections', 'Machines', 'Advanced'],
   );
   assert.equal(await settingsTabs.getByRole('link', {name: 'Models'}).getAttribute('aria-current'), 'true');
   assert.equal(await nav.getByRole('list', {name: 'Memory tabs'}).count(), 0);
@@ -728,6 +727,242 @@ test('GitHub is connected through its own app, lists the chosen repositories, co
   );
   assert.deepEqual(problems, []);
   await page.close();
+});
+
+test('a machine is added with its public key, tested, edited, turned off and removed, and its commands are in the log', async () => {
+  const {page, problems} = await open('settings?view=machines');
+  const card = page.getByRole('region', {name: 'Machines'});
+  const list = card.getByRole('list', {name: 'Machines'});
+  const row = name => list.getByRole('listitem').filter({has: page.getByText(name, {exact: true})});
+  await row('build-vm').getByText('Ready').waitFor();
+  await row('test-vm').getByText('Test failed: the machine refused the key').waitFor();
+  // The form checks what the store would refuse before anything is sent.
+  await card.getByRole('button', {name: 'Add machine'}).click();
+  const form = page.getByRole('dialog', {name: 'Add a machine'});
+  const local = 'For a VM on this computer, use host.docker.internal, not localhost.';
+  await form.getByText('An IP address or a host name. ' + local).waitFor();
+  await form.getByRole('textbox', {name: 'Name'}).fill('Build-VM');
+  await form.getByRole('textbox', {name: 'Address'}).fill('-oProxyCommand=x');
+  await form.getByRole('button', {name: 'Add machine'}).click();
+  await form.getByText('Another machine already has this name.').waitFor();
+  await form.getByText('Write a host name or an IP address', {exact: false}).waitFor();
+  await form.getByText('Use a Linux login name', {exact: false}).waitFor();
+  // localhost is Nocheh's own container: the form says what to use for a VM on this computer, and still takes it.
+  await form.getByRole('textbox', {name: 'Address'}).fill('127.0.0.1');
+  await form.getByText(local, {exact: true}).waitFor();
+  assert.equal(await form.getByRole('alert').filter({hasText: local}).count(), 0);
+  await form.getByRole('textbox', {name: 'Name'}).fill('lab-vm');
+  await form.getByRole('textbox', {name: 'Address'}).fill('192.0.2.20');
+  await form.getByRole('textbox', {name: 'Login'}).fill('nocheh');
+  await form.getByRole('button', {name: 'Add machine'}).click();
+  const setup = page.getByRole('dialog', {name: 'Put the key on lab-vm'});
+  await setup.getByText('On the VM, add this line to ~nocheh/.ssh/authorized_keys, then press Test.').waitFor();
+  assert.match(
+    await setup.getByRole('textbox', {name: 'Public key of lab-vm'}).inputValue(),
+    /^ssh-ed25519 [A-Za-z0-9+/]+ nocheh lab-vm$/,
+  );
+  // A browser that refuses the clipboard, as on a plain http address, leaves the key to select by hand.
+  await page.evaluate(() =>
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {writeText: async () => Promise.reject(new Error('denied'))},
+    }),
+  );
+  await setup.getByRole('button', {name: 'Copy public key'}).click();
+  await setup.getByText('This browser didn’t allow copying.', {exact: false}).waitFor();
+  await page.evaluate(() =>
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {writeText: async text => void (window.copied = text)},
+    }),
+  );
+  await setup.getByRole('button', {name: 'Copy public key'}).click();
+  await page.getByRole('status').filter({hasText: 'The public key is copied.'}).waitFor();
+  assert.match(await page.evaluate(() => window.copied), / nocheh lab-vm$/);
+  await setup.getByRole('button', {name: 'Test'}).click();
+  await setup.getByText('lab-vm is ready').waitFor();
+  await setup.getByRole('button', {name: 'Done'}).click();
+  await row('lab-vm').getByText('Ready').waitFor();
+  assert.match(await row('lab-vm').textContent(), /Host key: SHA256:[A-Za-z0-9+/]{43}/);
+
+  // Edit: a new name saves at once and keeps the host key.
+  await row('lab-vm').getByRole('button', {name: 'Edit'}).click();
+  const edit = page.getByRole('dialog', {name: 'Edit lab-vm'});
+  assert.equal(await edit.getByRole('textbox', {name: 'Address'}).inputValue(), '192.0.2.20');
+  await edit.getByRole('textbox', {name: 'Name'}).fill('build-VM');
+  await edit.getByRole('button', {name: 'Save'}).click();
+  await edit.getByText('Another machine already has this name.').waitFor();
+  await edit.getByRole('textbox', {name: 'Name'}).fill('lab-vm-2');
+  // A change made meanwhile refuses the first Save; the edit stays, and the next Save goes over the machine as it is now.
+  const changed = await page.evaluate(async () => {
+    const headers = {'Content-Type': 'application/json', 'X-Nocheh-CSRF': window.__NOCHEH_CSRF__ ?? ''};
+    const {machines} = await (await fetch('/api/nocheh/machines', {headers})).json();
+    const lab = machines.find(machine => machine.name === 'lab-vm');
+    const body = JSON.stringify({enabled: true, revision: lab.revision});
+    return (await fetch('/api/nocheh/machines/' + lab.id, {method: 'POST', headers, body})).ok;
+  });
+  assert.equal(changed, true);
+  const reread = page.waitForResponse(
+    response => response.url().endsWith('/api/nocheh/machines') && response.request().method() === 'GET',
+  );
+  await edit.getByRole('button', {name: 'Save'}).click();
+  await edit.getByText('This changed somewhere else. Check it and try again.').waitFor();
+  await reread;
+  assert.equal(await edit.getByRole('textbox', {name: 'Name'}).inputValue(), 'lab-vm-2');
+  await edit.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'lab-vm-2 is saved.'}).waitFor();
+  await row('lab-vm-2').getByText('Ready').waitFor();
+  // A new address, port or login asks first, in plain words; Cancel keeps the machine and the edit.
+  await row('build-vm').getByRole('button', {name: 'Edit'}).click();
+  const move = page.getByRole('dialog', {name: 'Edit build-vm'});
+  await move.getByRole('textbox', {name: 'Port'}).fill('2200');
+  await move.getByRole('button', {name: 'Save'}).click();
+  const moving = page.getByRole('dialog', {name: 'Change where Nocheh reaches build-vm?'});
+  assert.equal(
+    (await moving.textContent()).includes(
+      'A job works on it. Nocheh forgets the host key it trusts for build-vm. Jobs running on it stop, and cards waiting for your approval are withdrawn. Then press Test, so Nocheh trusts the machine again.',
+    ),
+    true,
+  );
+  await moving.getByRole('button', {name: 'Cancel'}).click();
+  assert.equal(await move.getByRole('textbox', {name: 'Port'}).inputValue(), '2200');
+  await move.getByRole('button', {name: 'Cancel'}).click();
+  assert.match(await row('build-vm').textContent(), /nocheh@192\.0\.2\.10:22/);
+  await row('lab-vm-2').getByRole('button', {name: 'Edit'}).click();
+  await page.getByRole('dialog', {name: 'Edit lab-vm-2'}).getByRole('textbox', {name: 'Address'}).fill('192.0.2.21');
+  await page.getByRole('dialog', {name: 'Edit lab-vm-2'}).getByRole('button', {name: 'Save'}).click();
+  await page
+    .getByRole('dialog', {name: 'Change where Nocheh reaches lab-vm-2?'})
+    .getByRole('button', {name: 'Change and forget the host key'})
+    .click();
+  await page.getByRole('status').filter({hasText: 'lab-vm-2 is changed. Press Test to trust its host key.'}).waitFor();
+  await row('lab-vm-2').getByText('Not tested').waitFor();
+  assert.match(await row('lab-vm-2').textContent(), /nocheh@192\.0\.2\.21:22/);
+  await row('lab-vm-2').getByRole('button', {name: 'Test'}).click();
+  await row('lab-vm-2').getByText('Ready').waitFor();
+
+  // A machine that can't be reached says so in words, and its badge stays a warning.
+  await row('spare-vm').getByRole('switch', {name: 'Use spare-vm'}).click();
+  await row('spare-vm').getByText('Not tested').waitFor();
+  await row('spare-vm').getByRole('button', {name: 'Test'}).click();
+  await card.getByRole('alert').filter({hasText: 'spare-vm: Can’t reach the machine.'}).waitFor();
+  await row('spare-vm').getByText('Test failed: can’t reach the machine').waitFor();
+
+  // Turning a machine with a running job off asks first; Cancel leaves it on.
+  await row('build-vm').getByRole('switch', {name: 'Use build-vm'}).click();
+  const offMachine = page.getByRole('dialog', {name: 'Turn off build-vm?'});
+  await offMachine.getByText('A job works on it.', {exact: false}).waitFor();
+  await offMachine.getByRole('button', {name: 'Cancel'}).click();
+  assert.equal(await row('build-vm').getByRole('switch', {name: 'Use build-vm'}).getAttribute('aria-checked'), 'true');
+
+  // The one switch for everything asks first, and the page says it is off until it is on again.
+  await card.getByRole('switch', {name: 'Machine control'}).click();
+  await page.getByRole('dialog', {name: 'Turn off machine control?'}).getByRole('button', {name: 'Turn off'}).click();
+  await page.getByRole('status').filter({hasText: 'No job can work on your machines until you turn it on.'}).waitFor();
+  await card.getByRole('switch', {name: 'Machine control'}).click();
+  await page.getByRole('status').filter({hasText: 'Machine control is on.'}).waitFor();
+  await page.getByText('No job can work on your machines until you turn it on.').waitFor({state: 'detached'});
+
+  // A new host key is trusted only after a confirm and the next Test; Remove asks too.
+  await row('lab-vm-2').getByRole('button', {name: 'Trust a new host key'}).click();
+  await page
+    .getByRole('dialog', {name: 'Trust a new host key for lab-vm-2?'})
+    .getByRole('button', {name: 'Forget the old key'})
+    .click();
+  await row('lab-vm-2').getByText('Not tested').waitFor();
+  await row('lab-vm-2').getByRole('button', {name: 'Remove'}).click();
+  await page.getByRole('dialog', {name: 'Remove lab-vm-2?'}).getByRole('button', {name: 'Remove'}).click();
+  await page.getByRole('status').filter({hasText: 'lab-vm-2 is removed.'}).waitFor();
+  assert.equal(await row('lab-vm-2').count(), 0);
+
+  // Each machine's commands open in the log, filtered to it; internal ones only on request.
+  await row('build-vm').getByRole('link', {name: 'Log'}).click();
+  await page.getByRole('tab', {name: 'Machine log', selected: true}).waitFor();
+  const log = page.getByRole('table', {name: 'Machine commands'});
+  await log.getByText('npm test 2>&1 | tail -n 40').waitFor();
+  assert.equal(await page.getByRole('combobox', {name: 'Machine'}).inputValue(), 'ab12'.repeat(8));
+  assert.equal(await log.getByText('cd ~ && pwd').count(), 0);
+  await page.getByRole('button', {name: 'Next'}).click();
+  await log.getByText('sudo -n true').waitFor();
+  await page.getByRole('checkbox', {name: 'All commands, also internal ones'}).check();
+  await page.getByRole('button', {name: 'Next'}).click();
+  await log.getByText('cd ~ && pwd').waitFor();
+  await log.getByRole('button', {name: 'curl -fsS', exact: false}).click();
+  const drawer = page.getByRole('dialog', {name: 'Command on build-vm'});
+  await drawer.getByText('Can’t reach the machine').waitFor();
+  await drawer.getByText('Didn’t run').waitFor();
+  assert.match(await drawer.textContent(), /Fingerprint of what ran \(SHA-256\)[a-f0-9]{64}/);
+  assert.match(await drawer.textContent(), /Fingerprint of what it printed \(SHA-256\)[a-f0-9]{64}/);
+  await drawer.getByRole('button', {name: 'Close'}).click();
+  // A command still running hasn't been counted yet: its output is not known, not nothing.
+  await page.getByRole('button', {name: 'Previous'}).click();
+  await log.getByRole('button', {name: 'npm test 2>&1 | tail -n 40'}).click();
+  await drawer.getByText('Running').first().waitFor();
+  assert.match(await drawer.textContent(), /PrintedNot known yet/);
+  assert.match(await drawer.textContent(), /Fingerprint of what ran \(SHA-256\)[a-f0-9]{64}/);
+  assert.match(await drawer.textContent(), /Fingerprint of what it printed \(SHA-256\)Not known yet/);
+  await drawer.getByRole('button', {name: 'Close'}).click();
+
+  // Background work shows the machine and the plan its card showed, and links to its commands.
+  await page.goto(origin + '/#system?view=work');
+  const job = page
+    .getByRole('list', {name: 'Background jobs'})
+    .getByRole('listitem')
+    .filter({hasText: 'Set up the garden site on build-vm'});
+  await job.getByRole('list', {name: 'Plan'}).waitFor();
+  assert.match(await job.textContent(), / · on build-vm · started /);
+  assert.deepEqual(
+    (await job.getByRole('list', {name: 'Plan'}).getByRole('listitem').allTextContents()).map(text => text.trim()),
+    [
+      'Install git and the build tools',
+      'Copy the project into ~/projects/garden-site',
+      'Install its packages and run its tests',
+      'Start it and check that it answers on port 8080',
+    ],
+  );
+  // Stop says that it ends the programs on the machine too; Cancel leaves the job running.
+  await job.getByRole('button', {name: 'Stop'}).click();
+  const stop = page.getByRole('dialog', {name: 'Stop this job?'});
+  await stop.getByText('Nocheh also ends every program its login runs on build-vm.', {exact: false}).waitFor();
+  await stop.getByRole('button', {name: 'Cancel'}).click();
+  // A machine job still waiting has run nothing there, and Stop says so.
+  const waiting = page
+    .getByRole('list', {name: 'Background jobs'})
+    .getByRole('listitem')
+    .filter({hasText: 'Rotate the logs on build-vm'});
+  await waiting.getByRole('button', {name: 'Stop'}).click();
+  await stop.getByText('The job is cancelled before it starts.', {exact: false}).waitFor();
+  await stop.getByText('Nothing has run on build-vm yet.', {exact: false}).waitFor();
+  assert.equal(await stop.getByText('The running job', {exact: false}).count(), 0);
+  assert.equal(await stop.getByText('ends every program', {exact: false}).count(), 0);
+  await stop.getByRole('button', {name: 'Cancel'}).click();
+  // Programs Nocheh couldn't end are the owner's to end.
+  await page
+    .getByRole('list', {name: 'Background jobs'})
+    .getByRole('listitem')
+    .filter({hasText: 'Build the photo gallery on build-vm'})
+    .getByText('Nocheh couldn’t end its programs on build-vm. End them yourself.')
+    .waitFor();
+  await job.getByRole('link', {name: 'Commands it ran on build-vm'}).click();
+  await log.getByText('npm test 2>&1 | tail -n 40').waitFor();
+  assert.equal(await page.getByRole('combobox', {name: 'Job'}).inputValue(), '9c'.repeat(32));
+  assert.equal(await page.getByRole('combobox', {name: 'Machine'}).inputValue(), '');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('machine control that isn’t running says so without an alert', async () => {
+  writeFileSync('/tmp/nocheh-ui-scenario', 'unavailable');
+  try {
+    const {page, problems} = await open('settings?view=machines');
+    await page.getByRole('status').filter({hasText: 'Machine control isn’t running'}).waitFor();
+    assert.equal(await page.getByRole('button', {name: 'Add machine'}).isDisabled(), true);
+    assert.equal(await page.getByRole('alert').count(), 0);
+    assert.deepEqual(problems, []);
+    await page.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
 });
 
 test('personal tasks and each project keep separate lists, with tags, a group and people on a task', async () => {

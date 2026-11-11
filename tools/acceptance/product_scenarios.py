@@ -12,6 +12,7 @@ import base64
 import http.client
 import io
 import json
+import os
 import re
 import subprocess
 import threading
@@ -22,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 from tools.acceptance.github_mock import key_line
 from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Scenarios, isolated_turns, synthetic_pdf
+from tools.paths import ROOT
 
 # 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
 MEMBER, GUEST = 778, 779
@@ -31,6 +33,10 @@ TEAM_TOPIC, TEAM_NAME = 31, 'Team plans'
 # Someone who found the bot and started it from their own account.
 STRANGER, STRANGER_NAME = 880, 'STRANGERNAME61'
 PRIVATE_NOT_ALLOWED = 'Sorry, this is a private assistant. It only works for its owner.'
+# The made-up machine of the machine job scenarios: an SSH server on the fixture's default network, the network
+# nocheh-machines uses (deploy/acceptance/vm-fixture.Dockerfile). The tester's own image, built like its browser's.
+VM_SERVICE, VM_NAME, VM_LOGIN, VM_HOME = 'vm-fixture', 'build-vm', 'nocheh', '/home/nocheh'
+VM_IMAGE = 'nocheh-tester-vm:local'
 
 
 class ProductScenarios(Scenarios):
@@ -1620,6 +1626,237 @@ class ProductScenarios(Scenarios):
         first = self.called(events, mark+'X0', first=True)
         self.gate('time_notice_seen', first is not None and any(event.get('directive') == 'notice' and event.get('kind') == 'time' for event in events[first:]))
 
+    # Machines (ADR-0231) ---------------------------------------------------------------------------------
+
+    def vm(self, *command, stdin=None):
+        """A command on the made-up machine, as its administrator runs it there."""
+        return subprocess.run(self.f.command+['exec', '-T', VM_SERVICE, *command], input=stdin, capture_output=True, text=True, timeout=120)
+
+    def vm_fixture(self):
+        """The made-up machine beside the installation, on its default network, the one nocheh-machines uses. Its image is
+        built from deploy/acceptance/vm-fixture.Dockerfile when this host has none."""
+        image = os.environ.get('NOCHEH_TESTER_VM_IMAGE') or VM_IMAGE
+        if self.docker('image', 'inspect', image).returncode != 0:
+            built = self.docker('build', '-t', image, '-f', str(ROOT/'deploy/acceptance/vm-fixture.Dockerfile'), str(ROOT/'deploy/acceptance'))
+            self.gate('vm_image_built', built.returncode == 0, image=image, error=built.stderr[-500:])
+        if VM_SERVICE not in self.f.manifest['services']:
+            # Part of the fixture's own Compose project, so its teardown removes it with everything else.
+            self.f.manifest['services'][VM_SERVICE] = {
+                'image': image, 'init': True, 'restart': 'no', 'hostname': VM_SERVICE, 'networks': {'default': None},
+                'healthcheck': {'test': ['CMD', 'bash', '-c', 'exec 3<>/dev/tcp/127.0.0.1/22'], 'interval': '2s', 'retries': 30}}
+            path = self.f.directory/'compose.json'
+            path.write_text(json.dumps(self.f.manifest))
+            path.chmod(0o600)
+        self.f.run('up', '-d', '--no-build', '--no-deps', '--wait', VM_SERVICE)
+
+    def ready_machine(self, dashboard):
+        """The owner adds the made-up machine on the dashboard, adds its public key on the machine as the dashboard says, and
+        presses Test, which trusts the machine's host key. A machine already set up on this fixture is tested again and kept."""
+        self.vm_fixture()
+        listed = dashboard.get('/machines')
+        self.gate('machine_control_available', listed.get('available') is True and listed.get('enabled') is True,
+                  available=listed.get('available'), enabled=listed.get('enabled'))
+        found = next((row for row in listed['machines'] if row['name'] == VM_NAME), None)
+        if found:
+            again = dashboard.post('/machines/'+found['id']+'/test', {})
+            if again['result'].get('ok') and again['machine']['enabled']:
+                return again['machine']
+            dashboard.post('/machines/'+found['id']+'/remove', {})
+        added = dashboard.post('/machines', {'name': VM_NAME, 'address': VM_SERVICE, 'port': 22, 'login': VM_LOGIN})
+        self.gate('machine_added_with_its_public_key', re.fullmatch(r'ssh-ed25519 [A-Za-z0-9+/=]+ nocheh '+VM_NAME, added.get('public_key') or '') is not None
+                  and added.get('host_key') is None and added.get('tested_at') is None and 'PRIVATE' not in json.dumps(added), public_key=added.get('public_key'))
+        installed = self.vm('sh', '-c', 'cat >> '+VM_HOME+'/.ssh/authorized_keys', stdin=added['public_key']+'\n')
+        self.gate('public_key_added_on_the_machine', installed.returncode == 0, error=installed.stderr[-300:])
+        tested = dashboard.post('/machines/'+added['id']+'/test', {})
+        listing = self.vm('sh', '-c', 'for key in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$key"; done').stdout
+        fingerprints = re.findall(r'SHA256:[A-Za-z0-9+/]{43}', listing)
+        machine, result = tested['machine'], tested['result']
+        self.gate('test_trusts_the_host_key', result.get('ok') is True and result.get('host_key') in fingerprints and machine.get('host_key') == result['host_key']
+                  and str(result.get('system', '')).startswith('Linux'), result=result, fingerprints=fingerprints)
+        self.gate('machine_ready', machine['enabled'] is True and bool(machine.get('tested_at')) and machine.get('test_error') is None,
+                  machine={key: machine.get(key) for key in ('name', 'address', 'port', 'login', 'enabled', 'tested_at', 'test_error', 'jobs')})
+        tests = dashboard.get('/machines/commands?'+urllib.parse.urlencode({'machine': machine['id'], 'limit': 10}))['commands']
+        self.gate('test_logged', any(row['kind'] == 'test' and row['state'] == 'done' and row['exit_code'] == 0 for row in tests),
+                  rows=[{key: row.get(key) for key in ('kind', 'state', 'exit_code', 'error_code')} for row in tests])
+        return machine
+
+    def machine_log(self, dashboard, job):
+        """Every command a job ran on its machine, as the owner's machine log shows them, Hermes's own internal ones too."""
+        return dashboard.get('/machines/commands?'+urllib.parse.urlencode({'job': job, 'kind': 'all', 'limit': 100}))['commands']
+
+    def watch_machine_turns(self, stop, seen):
+        """While a machine job runs: each isolated turn that works on a machine (NOCHEH_MACHINE_RUN=1), as Docker made it."""
+        checked = set()
+        while not stop.is_set():
+            try:
+                for turn in isolated_turns('-q').split():
+                    if turn in checked:
+                        continue
+                    found = json.loads(self.docker('inspect', turn).stdout or '[]')
+                    if found:
+                        checked.add(turn)
+                        if 'NOCHEH_MACHINE_RUN=1' in ((found[0].get('Config') or {}).get('Env') or []):
+                            seen['turns'][turn] = found[0]
+            except Exception as error:
+                seen['errors'].append(type(error).__name__)
+            stop.wait(0.5)
+
+    def machine_secrets(self, machine):
+        """The lines of the machine's private key, which only nocheh-machines reads, and the machine token: never shown, only
+        looked for."""
+        key = (self.f.directory/'state/machines'/machine['id']/'key').read_text()
+        from tools.operations.installation.configuration import read_env
+        token = read_env(self.f.directory/'state/.env').get('NOCHEH_MACHINE_TOKEN') or ''
+        return [line.strip() for line in key.splitlines() if line.strip() and not line.startswith('-----')], token
+
+    def machine_job_runs_after_one_approval(self):
+        # The owner adds a machine on the dashboard, adds its key there and tests it. Then they ask in their private chat for a
+        # job on it with a two-step plan: one card in the private chat shows the machine and the plan, and nothing runs on the
+        # machine before Approve. After it, the job's one run uses Hermes's own terminal and file tools on the machine over
+        # SSH: the file it wrote is there, the machine log has each command with its exit code and output digest, the report
+        # comes, and neither the run's turn nor the model ever has the machine's key or token. A job that ends well leaves
+        # its programs alone, so it gets no cleanup.
+        dashboard = self.dashboard()
+        machine = self.ready_machine(dashboard)
+        nonce = str(self.f.ids())
+        marker, path, title = 'MACHMARK'+nonce, VM_HOME+'/machine-marker-'+nonce+'.txt', 'Machine marker JOB11'
+        command = 'printf %s '+marker+' > '+path+' && cat '+path+' && echo && uname -sn && id -un'
+        calls = (('terminal', {'command': command}), ('read_file', {'path': path}))
+        instruction = 'Write the marker on the machine and read it back. [[delay:3]] '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in calls)
+        steps = ['Write a marker file in the home folder', 'Read it back and say which system it is']
+        request = self.job_request('کار روی ماشین '+nonce, {'title': title, 'instruction': instruction, 'machine': VM_NAME, 'steps': steps, **self.EMPTY})
+        _, before = self.silent_turn(request, OWNER)
+        proposed = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final'
+                    and title in event.get('argument', '')]
+        self.gate('job_asked_for_with_its_machine', bool(proposed) and '"error"' not in proposed[-1]['result'], result=proposed[-1]['result'][:300] if proposed else None)
+        card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        time.sleep(3)
+        everywhere, text = self.cards(before), card['message']['text']
+        self.gate('one_card_in_the_private_chat', len(everywhere) == 1, chats=[row['message']['chat']['id'] for row in everywhere])
+        target = json.loads(card['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
+        self.gate('card_answers_the_request', target == request['message']['message_id'], target=target)
+        self.gate('card_shows_the_machine', '🖥' in text and VM_NAME+' ('+VM_LOGIN+'@'+VM_SERVICE+') over SSH' in text, card=text)
+        self.gate('card_shows_the_plan', '📋' in text and 'Plan:' in text and '1. '+steps[0] in text and '2. '+steps[1] in text, card=text)
+        self.gate('card_two_buttons', len(self.buttons(card)) == 2, buttons=[button['text'] for button in self.buttons(card)])
+        job = self.job_named(title)
+        self.gate('job_pinned_to_the_machine', job['state'] == 'proposed' and job.get('machine') == {'name': VM_NAME} and job.get('steps') == steps,
+                  state=job['state'], machine=job.get('machine'), steps=job.get('steps'))
+        time.sleep(3)
+        self.gate('nothing_runs_before_approval', not [row for row in self.new(before) if not self.is_card(row)] and not self.machine_log(dashboard, job['id'])
+                  and self.vm('test', '-e', path).returncode == 1 and self.job_named(title)['state'] == 'proposed')
+        seen, stop = {'turns': {}, 'errors': []}, threading.Event()
+        watcher = threading.Thread(target=self.watch_machine_turns, args=(stop, seen), daemon=True)
+        watcher.start()
+
+        def reported():
+            rows = [row for row in self.job_replies(before) if '[brain] read_file:' in (row['message'].get('text') or '')]
+            state = {} if rows else self.job_named(title)
+            if state.get('state') in ('failed', 'stopped'):
+                self.gate('job_did_not_fail', False, state=state['state'], error=state.get('error_code'), attempts=state.get('attempts'))
+            return rows
+        try:
+            answer = self.press(card, 'approve')
+            self.gate('job_press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
+            report = self.wait('job_report_sent', reported, 600)
+        finally:
+            stop.set()
+            watcher.join(30)
+        self.gate('job_report_once', len(report) == 1, count=len(report))
+        split = re.split(r'\[brain\] (terminal|read_file): ', report[0]['message']['text'])
+        parts = dict(zip(split[1::2], split[2::2]))
+        terminal = parts.get('terminal', '')
+        self.gate('terminal_ran_on_the_machine', marker in terminal and 'Linux '+VM_SERVICE in terminal and VM_LOGIN in terminal
+                  and re.search(r'"exit_code":\s*0', terminal) is not None, terminal=terminal[:600])
+        self.gate('read_file_read_the_machine', marker in parts.get('read_file', ''), read_file=parts.get('read_file', '')[:300])
+        written = self.vm('stat', '-c', '%U %s', path)
+        self.gate('marker_file_on_the_machine', self.vm('cat', path).stdout == marker and written.stdout.split() == [VM_LOGIN, str(len(marker))],
+                  stat=written.stdout.strip(), error=written.stderr[-200:])
+        self.wait('job_card_shows_done', lambda: 'Done' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
+        found = self.job_named(title)
+        runs = self.job_runs(found['id'])
+        self.gate('job_done_in_one_run', found['state'] == 'done' and found.get('attempts') == 1 and found.get('ended') is None and len(runs) == 1,
+                  state=found['state'], error=found.get('error_code'), runs=runs)
+        self.gate('run_told_about_the_machine', 'This job works on the owner\'s machine "'+VM_NAME+'"' in self.run_input(found['id'], 1)
+                  and '1. '+steps[0] in self.run_input(found['id'], 1))
+        rows = self.machine_log(dashboard, found['id'])
+        run_event = self.f.query('nocheh_control', "SELECT event_id FROM background_runs WHERE job_id='%s' AND attempt=1" % found['id'])
+        self.current['observed'] = {'log': [{key: row.get(key) for key in ('kind', 'state', 'exit_code', 'output_bytes', 'error_code')} for row in rows],
+                                    'turns': len(seen['turns']), 'watch_errors': seen['errors'][:5]}
+        commands = [row for row in rows if row['kind'] == 'command' and marker in row['command']]
+        self.gate('command_logged_with_exit_code_and_output_digest', len(commands) == 1 and commands[0]['state'] == 'done' and commands[0]['exit_code'] == 0
+                  and re.fullmatch(r'[a-f0-9]{64}', commands[0].get('output_sha256') or '') is not None and commands[0]['output_bytes'] > 0
+                  and commands[0]['machine_name'] == VM_NAME and commands[0]['job_title'] == title, commands=commands)
+        self.gate('file_read_logged', any(row['kind'] == 'file' and row['state'] == 'done' and row['exit_code'] == 0 for row in rows),
+                  kinds=[row['kind'] for row in rows])
+        stored = json.loads(self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('kind',kind,'run',run_event_id,'script',script_sha256)),'[]') "
+                                         "FROM machine_commands WHERE job_id='%s'" % found['id']))
+        self.gate('every_command_belongs_to_the_run', bool(stored) and all(row['run'] == run_event and re.fullmatch(r'[a-f0-9]{64}', row['script'] or '') for row in stored),
+                  rows=len(stored))
+        # Neither the run's turn nor anything the model was sent has the key or the token: the key's lines and the token are
+        # looked for in each tool result and answer the model gave, the run's message and every message sent since.
+        lines, token = self.machine_secrets(machine)
+        said = json.dumps(self.f.brain(), ensure_ascii=False)+self.run_input(found['id'], 1)+json.dumps(self.new(before), ensure_ascii=False)
+        self.gate('model_never_saw_key_material', len(lines) >= 3 and len(token) >= 32 and not [value for value in lines+[token] if value in said])
+        turns, default = list(seen['turns'].values()), self.f.manifest['networks']['default']['name']
+        holds = [name for turn in turns for name in ((turn.get('Config') or {}).get('Env') or []) if name.startswith('NOCHEH_MACHINE_TOKEN=') or token in name]
+        mounts = [mount.get('Source') or mount.get('Name') or '' for turn in turns for mount in turn.get('Mounts') or []]
+        networks = sorted({name for turn in turns for name in ((turn.get('NetworkSettings') or {}).get('Networks') or {})})
+        self.gate('run_turn_seen', bool(turns), turns=len(turns))
+        keys = [mount for mount in mounts if 'machines' in mount]
+        self.gate('run_turn_has_no_key_or_token', not holds and not keys, holds=len(holds), mounts=len(mounts), key_mounts=keys)
+        self.gate('run_turn_cannot_reach_nocheh_machines', default not in networks, networks=networks)
+        self.gate('no_cleanup_after_a_good_end', self.f.query('nocheh_control', "SELECT coalesce(machine_cleanup,'none') FROM background_jobs WHERE id='%s'" % found['id']) == 'none')
+
+    def machine_job_refused_for_members_and_stopped(self):
+        # A member asks in the group for a job on the owner's machine: Nocheh refuses it before any card. Then the owner's
+        # machine job starts a program that keeps running there, and Stop on its card ends the job; the cleanup ends every
+        # program of that login on the machine and is logged.
+        dashboard = self.dashboard()
+        machine = self.ready_machine(dashboard)
+        access = next(json.loads(service['environment']['TELEGRAM_GROUP_ACCESS']) for service in self.f.manifest['services'].values()
+                      if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment'])
+        if access != ACCESS:
+            self.current['recreated'] = self.apply_access(ACCESS)
+        nonce = str(self.f.ids())
+        asked = 'Member machine JOB12 '+nonce
+        proposal = {'action': 'start', 'title': asked, 'instruction': 'Set up the project there.', 'machine': VM_NAME, 'steps': ['Set up the project']}
+        update = self.f.message(GROUP, 'روی ماشین '+nonce+' [[tool:nocheh_background_job '+json.dumps(proposal)+']] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
+        _, before = self.silent_turn(update, GROUP, TEAM_TOPIC)
+        refused = [event for event in self.f.brain() if event.get('tool') == 'nocheh_background_job' and event['phase'] == 'final' and asked in event.get('argument', '')]
+        self.gate('member_refused', bool(refused) and json.loads(refused[-1]['result']).get('error') == 'job_machine_not_allowed',
+                  result=refused[-1]['result'][:300] if refused else None)
+        time.sleep(3)
+        self.gate('no_card_and_no_job_for_the_member', not self.cards(before) and not [item for item in self.f.app('/v1/background-jobs').get('jobs', [])
+                                                                                   if item.get('title') == asked])
+        # The owner's job starts a program that keeps running, then waits; every scripted answer waits 30 s.
+        title, program = 'Machine program JOB13', 'sleep 3600'
+        instruction = ('Start the program and check on it. [[delay:30]] [[tool:terminal '+json.dumps({'command': program, 'background': True})+']] '
+                       '[[tool:terminal {"command": "sleep 1"}]]')
+        _, before = self.silent_turn(self.job_request('برنامه روی ماشین '+nonce, {'title': title, 'instruction': instruction, 'machine': VM_NAME,
+                                                                                   'steps': ['Start the program', 'Check that it runs'], **self.EMPTY}), OWNER)
+        card = self.wait('job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        self.press(card, 'approve')
+        running = lambda: self.vm('pgrep', '-u', VM_LOGIN, '-x', 'sleep').stdout.split()
+        self.wait('program_runs_on_the_machine', running, 240, 1)
+        self.wait('job_card_has_stop_button', lambda: self.stop_button(card), 30, 1)
+        self.gate('job_still_running', self.job_named(title)['state'] == 'running')
+        owner = self.press(self.card_message(card), 'stop')
+        self.gate('owner_press_stops_it', 'Stopping the job' in (owner.get('text') or ''), answer=owner.get('text'))
+        found = self.job_ended(title, 180)
+        self.gate('job_stopped', found['state'] == 'stopped', state=found['state'], error=found.get('error_code'))
+        cleanup = lambda: self.f.query('nocheh_control', "SELECT coalesce(machine_cleanup,'none') FROM background_jobs WHERE id='%s'" % found['id'])
+        self.wait('cleanup_done', lambda: cleanup() in ('done', 'failed'), 180)
+        self.gate('cleanup_ended_its_programs', cleanup() == 'done', cleanup=cleanup())
+        self.gate('program_gone', not running(), left=self.vm('ps', '-u', VM_LOGIN, '-o', 'pid=,comm=').stdout.split('\n')[:10])
+        rows = self.machine_log(dashboard, found['id'])
+        self.current['observed'] = {'log': [{key: row.get(key) for key in ('kind', 'state', 'exit_code', 'error_code')} for row in rows]}
+        self.gate('cleanup_logged', any(row['kind'] == 'cleanup' and row['state'] == 'done' and row['command'] == 'end all programs of '+VM_LOGIN for row in rows),
+                  kinds=[[row['kind'], row['state']] for row in rows])
+        self.gate('program_start_logged', any(row['kind'] == 'command' and program in row['command'] for row in rows), commands=[row['command'][:80] for row in rows if row['kind'] == 'command'])
+        self.wait('card_says_stopped', lambda: '🚫 Stopped. Nothing more runs.' in self.card_message(card)['message']['text'] and not self.buttons(self.card_message(card)), 120)
+        time.sleep(5)
+        self.gate('no_report', not [row for row in self.job_replies(before) if '[brain]' in (row['message'].get('text') or '')])
+
     # Settings defaults ----------------------------------------------------------------------------------
 
     def defaults_keep_history_and_notion_off(self):
@@ -1684,6 +1921,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
                  'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
-                 'background_job_time_limit',
+                 'background_job_time_limit', 'machine_job_runs_after_one_approval', 'machine_job_refused_for_members_and_stopped',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory']

@@ -138,12 +138,12 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'background.card',
     title: 'Background job card',
-    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit}, {minutes_limit}, {checked}, {unpriced}, {notion}, {box} and {repo} are filled in. {cost_limit} is missing on a model without a price, and {unpriced} then says only the time limit applies; {notion} says what the job may do in your Notion without asking; {box} says that it runs in a sealed box; {repo} names the GitHub copy it reads. A line whose value is missing is left out; a card without {unpriced}, {notion}, {box} or {repo} still shows that line, at its end.',
+    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit}, {minutes_limit}, {checked}, {unpriced}, {notion}, {box}, {repo}, {machine} and {steps} are filled in. {cost_limit} is missing on a model without a price, and {unpriced} then says only the time limit applies; {notion} says what the job may do in your Notion without asking; {box} says that it runs in a sealed box; {repo} names the GitHub copy it reads; {machine} names the machine it works on and {steps} lists its plan. A line whose value is missing is left out; a card without {unpriced}, {notion}, {box}, {repo}, {machine} or {steps} still shows that line, at its end.',
   },
   {
     key: 'background.texts',
     title: 'Background job card answers',
-    hint: 'One “name: text” line each for what a decided job card says: running, queued, stopping, done, limited, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. box_repo is the sealed box line of a job that reads a GitHub copy, repo its copy line with {repo_name}, {repo_branch}, {repo_commit}, {repo_copied} and {repo_size}, and repo_removed what a card says when Remove withdrew it. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for what a decided job card says: running, running_elsewhere (the running line of a card in your private chat for a job asked in another chat), queued, stopping, done, limited, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. box_repo is the sealed box line of a job that reads a GitHub copy, repo its copy line with {repo_name}, {repo_branch}, {repo_commit}, {repo_copied} and {repo_size}, and repo_removed what a card says when Remove withdrew it. machine is the line of a job that works on one of your machines, with {machine_name}, {machine_login} and {machine_address}; steps is the heading of its plan; machine_off is what a card says when its machine was turned off or changed. A line you remove keeps its default.',
   },
   {
     key: 'background.box',
@@ -154,6 +154,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     key: 'background.repo',
     title: 'Background job: GitHub copy',
     hint: 'Added after the sealed box text to each run of a job that reads a GitHub copy: where the copy is, how to read it, and when to run its code. {repo}, {branch}, {commit} and {copied} are filled in.',
+  },
+  {
+    key: 'background.machine',
+    title: 'Background job: your machine',
+    hint: 'Added to each run of a job that works on one of your machines over SSH: that its terminal and file tools run there, the plan you approved, and what it must never do there. {machine_name}, {machine_login}, {machine_address} and {steps} are filled in.',
   },
 ];
 

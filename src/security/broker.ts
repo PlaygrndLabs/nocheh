@@ -12,6 +12,7 @@ import {anthropicPayload,providerPayload} from './provider-request.js';
 import type {SourceReference} from '../stores/archive.js';
 import type {OperationReference} from '../stores/operations.js';
 import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
+import {MACHINE_BODY,MachineRepository,machineErrors} from '../stores/machines.js';
 import {RuntimeTurnRepository} from '../stores/turns.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
@@ -30,7 +31,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered)\/[a-f0-9]{64}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions\/[a-f0-9]{64}|telegram\/destinations)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
@@ -87,7 +88,10 @@ export class ProviderFailure extends HttpError {
   constructor(readonly providerStatus:number){super([401,403,429].includes(providerStatus)?providerStatus:503,'provider_request_failed');}
 }
 /** What a job request may be told to correct, as services/hermes/archive_tools.py JOB_ERRORS names it; any other refusal stays opaque. */
-export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed']);
+export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
+  'job_machine_not_allowed','job_machine_not_found','job_card_too_long']);
+/** What a machine command may be told, as services/hermes/machine_box.py names it: a refusal or a failure on the machine's side. */
+export {machineErrors};
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
 async function refusalCode(response:Response,max=4096):Promise<string|null> {
   const chunks=[];let size=0;
@@ -106,6 +110,8 @@ export function brokerServer(options:BrokerOptions) {
   const call=options.fetch??fetch;
   // Sealed job boxes follow Nocheh's own rows, so without storage no turn gets one.
   const box=options.storage instanceof RuntimeTurnRepository?new JobBoxRepository(options.storage.access):null;
+  // So do machine jobs (ADR-0231). This service holds no machine token: storage refuses each command without one.
+  const machines=options.storage instanceof RuntimeTurnRepository?new MachineRepository(options.storage.access):null;
   // A job's run goes on across reaction and learning epochs; each of its checks waits out a publication still pending (ADR-0208).
   const assertCurrent=(principal:Reader)=>afterPending(jobRun(principal),async()=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal));
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
@@ -137,7 +143,9 @@ export function brokerServer(options:BrokerOptions) {
     const credential=req.headers.authorization!;
     // A cold Honcho recall includes multiple guarded provider calls. Keep other
     // broker operations on their shorter deadline; cancellation still aborts both.
-    const timeout=req.method==='POST'&&path==='/v1/memory/longterm/recall'?600000:120000;
+    // A machine command runs for up to 15 minutes; its own time limit ends it on the machine before that.
+    const exec=req.method==='POST'&&path==='/v1/machines/exec';
+    const timeout=req.method==='POST'&&path==='/v1/memory/longterm/recall'?600000:exec?900000:120000;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
     const closed=()=>{if(!res.writableEnded)controller.abort();};res.on('close',closed);
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
@@ -157,7 +165,8 @@ export function brokerServer(options:BrokerOptions) {
         const transport=object(await rpc(options.hermes,'/internal/security/transport',{metadata:true},'Bearer '+options.token));
         if(!Number.isSafeInteger(transport.model_context_length)||Number(transport.model_context_length)<1)throw new HttpError(503,'model_context_metadata_required');
         // Without the box token the launcher can fill no box, so no step gets one.
-        return json(res,200,{...binding,box:box&&boxTokenSet()?await box.binding(binding):null,model:options.model,model_context_length:transport.model_context_length,plugin:manifest});
+        return json(res,200,{...binding,box:box&&boxTokenSet()?await box.binding(binding):null,machine:machines?await machines.binding(binding):null,
+          model:options.model,model_context_length:transport.model_context_length,plugin:manifest});
       }
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
@@ -180,20 +189,25 @@ export function brokerServer(options:BrokerOptions) {
         // Fixed scoped routes keep runtime tools away from owner credentials.
         // Storage independently verifies a current live owner-private turn.
         if(knowledge&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
-        const input=req.method==='POST'?await readJson(req,1024*1024):undefined,body=input===undefined?undefined:JSON.stringify(input);
+        const input=req.method==='POST'?await readJson(req,exec?MACHINE_BODY:1024*1024):undefined,body=input===undefined?undefined:JSON.stringify(input);
         // A job asks for the box only where one can be filled: refused now, not failed at every step.
         if(relay==='/v1/jobs/start'&&(input as {box?:unknown}|null)?.box===true&&!boxTokenSet())throw new HttpError(409,'job_box_not_allowed');
         // Context preparation and proposals have their own enforcement. Read policies
         // apply to retrieval; native memory remains writable within the owned profile.
-        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/start','/v1/jobs/stop'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
+        // A machine command is approved by its job's card and logged by storage in machine_commands.
+        if(relay!=='/v1/context/prepare'&&!['/v1/tools/propose','/v1/action-requests','/v1/knowledge/proposals','/v1/jobs/start','/v1/jobs/stop','/v1/machines/exec'].includes(relay))await authorizeEffect(req.method==='POST'&&relay.startsWith('/v1/owner/tasks')?'memory.write':relay.includes('/memory/')||knowledge?'memory.read':'archive.read',{relay,query:url.search});
         const response=await call(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok) {
-          // A job request is told what to correct, such as a member's daily limit or a box it may not have.
-          const code=relay.startsWith('/v1/jobs/')&&response.status>=400&&response.status<500?await refusalCode(response):(await response.body?.cancel(),null);
-          throw new HttpError(response.status,code&&jobErrors.has(code)?code:'scoped_archive_unavailable');
+          // A job request is told what to correct, such as a member's daily limit or a box it may not have; a machine command
+          // why it did not run, also when the machine could not be reached.
+          const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:null;
+          const code=codes&&response.status>=400?await refusalCode(response):(await response.body?.cancel(),null);
+          throw new HttpError(response.status,code&&codes!.has(code)?code:'scoped_archive_unavailable');
         }
         // A box page holds at most 600,000 characters of message texts, which stays well within 8 MiB.
-        await stream(response,principal,res,file?26*1024*1024:8*1024*1024);
+        // A machine command's frames, headers included, are capped at 8 MiB by nocheh-machines; its notes, storage's keepalives
+        // and its exit code add a few hundred bytes.
+        await stream(response,principal,res,file?26*1024*1024:exec?8*1024*1024+64*1024:8*1024*1024);
         if(trace){await recordEffect(options.pool,trace.effect,'completed',trace.decision,binding.reference??binding.event_id);trace.closed=true;}return;
       }
       const anthropic=path===ANTHROPIC_MESSAGES;

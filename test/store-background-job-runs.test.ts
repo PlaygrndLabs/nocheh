@@ -98,7 +98,7 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
     assert.ok((await s.jobs.runs.run((await latest(priced)).event_id,await authority())).next_attempt-Date.now()>=14000,'so is its run');
     const one=await claim(priced),started=await job(priced),{soft,hard,credential}=jobDeadlines(started);
     assert.equal(hard-soft,180000);assert.equal(soft-new Date(started.started_at).getTime(),45*60000);
-    assert.deepEqual(one.context.background,{job_id:priced,attempt:1,max_iterations:300,box:false,soft_deadline:Math.floor(soft/1000),hard_deadline:Math.floor(hard/1000),
+    assert.deepEqual(one.context.background,{job_id:priced,attempt:1,max_iterations:300,box:false,machine:false,soft_deadline:Math.floor(soft/1000),hard_deadline:Math.floor(hard/1000),
       rates:{input:2,output:10,cache_read:0.2,cache_write:2.5,request:null},cost_limit_usd:5,prior_cost_usd:0});
     const claims=JSON.parse(Buffer.from(String(one.claimed.archive_credential).split('.')[1]!,'base64url').toString());
     assert.ok(Math.abs(claims.expires-credential)<1000&&credential===hard+120000,'the credential lasts until 2 minutes after the hard deadline');

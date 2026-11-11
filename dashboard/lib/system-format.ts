@@ -85,6 +85,7 @@ const serviceNames: Record<string, [string, string]> = {
   'nocheh-security': ['Secret check and permissions', 'Hides secrets and checks every action is allowed'],
   hermes: ['Assistant', 'Writes replies and keeps its own notes'],
   'hermes-agent-sb': ['Tool sandbox', 'Starts isolated containers for tools'],
+  'nocheh-machines': ['Machine control', 'Runs approved jobs on your machines over SSH'],
   'inngest-server': ['Background work scheduler', 'Schedules, retries and waits for background work'],
   'inngest-redis': ['Background work queue', 'Holds queued background work'],
   'honcho-api': ['Long-term memory', 'Remembers people and facts across chats'],

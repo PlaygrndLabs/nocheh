@@ -16,3 +16,15 @@ class ServiceCatalogTests(unittest.TestCase):
         self.assertEqual(services['nocheh-dashboard']['location'],'docker')
         self.assertEqual(services['inngest-server']['state'],'unhealthy')
         for row in services.values():self.assertTrue(row['tool'] and row['purpose'])
+
+    def test_the_machine_service_is_expected_running_and_every_compose_service_is_listed(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT
+        from tools.operations.installation.services import CATALOG
+        # It starts with the rest even while machine control is unused: without it no machine can be added or tested.
+        services={row['service']:row for row in describe([{'service':'nocheh-machines','state':'running','health':'healthy'}],{})}
+        self.assertEqual((services['nocheh-machines']['expected_state'],services['nocheh-machines']['state']),('running','running'))
+        self.assertEqual({row['service']:row for row in describe([],{})}['nocheh-machines']['state'],'unhealthy')
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        listed={name for name,*_ in CATALOG}
+        self.assertEqual({name for name,service in compose.items() if 'reset' not in (service.get('profiles') or [])}-listed,set())

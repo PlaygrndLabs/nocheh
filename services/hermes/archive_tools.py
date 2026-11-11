@@ -40,11 +40,17 @@ def bind_process_deadline(deadline, background=False):
     _PROCESS_DEADLINE=float(deadline)
 
 
-def request(path,body=None,timeout=None):
+def endpoint():
+    """Where this process asks Nocheh and as whom: the archive's base URL and the bound turn credential."""
     credential = _PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get()
     if not credential:
         raise RuntimeError('archive_scope_not_bound')
-    req = urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780') + path,
+    return os.environ.get('ARCHIVE_URL','http://nocheh-app:8780'),credential
+
+
+def request(path,body=None,timeout=None):
+    base,credential = endpoint()
+    req = urllib.request.Request(base + path,
                                  data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Prepared context can include a cold guard-model pass. It is still bounded,
@@ -118,7 +124,11 @@ def meaning_tool(args, **kwargs):
         return json.dumps({'error':'memory_search_unavailable'})
 
 
-JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed')
+JOB_ERRORS=('invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
+            'job_machine_not_allowed','job_machine_not_found','job_card_too_long')
+# What the owner must do first, for a refusal the agent cannot correct by itself.
+JOB_NOTES={'job_machine_not_found':'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '
+                                   'there until the test passes. action=status lists the machines and whether each is ready.'}
 
 
 def isolated_runtime():
@@ -137,13 +147,18 @@ def job_tool(args, **kwargs):
         body={key:args[key] for key in ('title','instruction','chat','from','to','id') if isinstance(args.get(key),str) and args[key]}
         if action=='start' and type(args.get('box')) is bool:body['box']=args['box']
         if action=='start' and isinstance(args.get('repo'),str) and args['repo']:body['repo']=args['repo']
+        if action=='start' and isinstance(args.get('machine'),str) and args['machine']:body['machine']=args['machine']
+        if action=='start' and isinstance(args.get('steps'),list):body['steps']=args['steps']
         if body.get('box') and not isolated_runtime():return json.dumps({'error':'job_box_not_allowed'})
+        # A machine job's commands go through the isolated runtime's broker, the only way to the machine.
+        if body.get('machine') and not isolated_runtime():return json.dumps({'error':'isolated_runtime_required'})
         return json.dumps(request('/v1/jobs/'+action,body),ensure_ascii=False)
     except HTTPError as error:
         # Storage says what to correct, such as a member's daily limit; other failures stay opaque.
         try:code=json.loads(error.read(4096)).get('error')
         except Exception:code=None
-        return json.dumps({'error':code if code in JOB_ERRORS else {400:'invalid_job_request',403:'job_not_permitted',404:'job_not_found'}.get(error.code,'background_jobs_unavailable')})
+        code=code if code in JOB_ERRORS else {400:'invalid_job_request',403:'job_not_permitted',404:'job_not_found'}.get(error.code,'background_jobs_unavailable')
+        return json.dumps({'error':code,**({'note':JOB_NOTES[code]} if code in JOB_NOTES else {})},ensure_ascii=False)
     except Exception:
         return json.dumps({'error':'background_jobs_unavailable'})
 
@@ -208,9 +223,10 @@ def register(ctx):
         ('nocheh_action_request','Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',
          {'destination':{'type':'string','description':'Use current for this Telegram conversation including its topic, a numeric Telegram chat ID, or CHAT_ID/topic/THREAD_ID. The server resolves current from the authenticated source turn.'},'text':{'type':'string','maxLength':3500}},['destination','text'],action_tool),
         ('nocheh_background_job','Background jobs: work too big for one reply runs in a session of its own and reports back here. '
-         'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD) and box. '
+         'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD), and box or machine with steps. '
          'Nocheh counts and prices it and posts an Approve card; nothing runs until it is approved, and the result says who approves. '
-         'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos). '
+         'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos); '
+         'for the owner\'s own request it also lists the owner\'s machines and whether each is ready (machines). '
          'action=stop with id stops a job you may stop. Only the owner may name another chat.',
          {'action':{'type':'string','enum':['start','status','stop']},'title':{'type':'string','maxLength':100},'instruction':{'type':'string','maxLength':8000},
           'chat':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},'id':{'type':'string'},
@@ -218,7 +234,12 @@ def register(ctx):
                  'It then gets a sealed box with no internet that holds a checked copy of the job\'s own chat and, with repo, a read-only copy of that GitHub repository. '
                  'Only for a job the owner asks for in their private chat.'},
           'repo':{'type':'string','maxLength':140,'description':'With start and box=true, for a job the owner asks for in their private chat: a GitHub repository '
-                  'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'}},['action'],job_tool),
+                  'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'},
+          'machine':{'type':'string','maxLength':40,'description':'For work on one of the owner\'s machines (see action=status machines): the machine\'s name and a short plan '
+                     'of 1-12 steps the owner approves on one card. Only for the owner\'s own request in their private chat or a project group. '
+                     'Your terminal and file tools then run on that machine.'},
+          'steps':{'type':'array','minItems':1,'maxItems':12,'items':{'type':'string','maxLength':200},
+                   'description':'With start and machine: the plan, one short step per item, in order. The owner approves exactly this plan.'}},['action'],job_tool),
         ('nocheh_telegram_destinations','In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner\'s approval.',
          {},[],destinations_tool),
     ):

@@ -40,8 +40,8 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Messages | Messages: every original message, its agent copy and versions, files, transcripts and reactions; hide (retire) a message or restore it. Import: choose a Telegram export, review access and files, then start or resume an import. |
 | Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, project chats and organization, and whether a project's chats share what they know). Assistant notes: native notes and history for one chat. Long-term memory: Honcho readiness, attachment, budget, re-run or replace, and stored data. |
 | Usage | Model calls, tokens and cost by part and by model, calls per day, and reply speed with a per-stage breakdown for each reply. |
-| System | Health: services, connections, storage and diagnostics. Background work: background jobs with Stop, workflow totals, history charts and the task list with retry and cancel. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
-| Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (backups, secret check, how long history is kept, password), Assistant (owner freedom, role and skills, limits, background jobs), Tasks (statuses, priorities, columns, time zone), Connections (Notion, GitHub) and Advanced. |
+| System | Health: services, connections, storage and diagnostics. Background work: background jobs with Stop (a machine job also shows its machine and plan), workflow totals, history charts and the task list with retry and cancel. Machine log: every command jobs ran on your machines. Backups: backups, restore, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
+| Settings | Telegram, Models (providers and which model each part uses), Speed, Privacy & data (backups, secret check, how long history is kept, password), Assistant (owner freedom, role and skills, limits, background jobs), Tasks (statuses, priorities, columns, time zone), Connections (Notion, GitHub), Machines (your VMs that jobs can work on over SSH, and the Machine control switch) and Advanced. |
 
 Every settings edit, on any page, is a draft. On Settings and Chats the page header
 always stays at the top of the screen with Discard and Save, turned off until something
@@ -349,6 +349,64 @@ preferences can disable each tool. Enabling a tool still requires action approva
 `up` starts one approved-tool worker; `down` and backup drain it. Restored tool
 workers remain inactive. Bash entrypoints and the optional Honcho CLI are retained.
 
+## Machines
+
+**Settings › Machines** keeps your own machines, such as a VM, that a job you
+approve can work on over SSH
+([ADR-0231](adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md)).
+**Add machine** asks for a name, an address (an IP address, a host name, or
+`host.docker.internal` for a VM on the computer that runs Nocheh), a port (22 by
+default) and a login. Nocheh connects from its own container, so the form flags
+`localhost`, `127.x.x.x` and `::1` and says to use `host.docker.internal` instead.
+Nocheh then makes the machine's key, keeps it, and shows its public key with **Copy
+public key**: on the machine, add that line to the login's `~/.ssh/authorized_keys`,
+then press **Test**. The first good test trusts the machine's host key. Use a
+separate login for Nocheh, with bash as its shell and `ps` (procps) installed,
+because Stop ends every program it runs.
+
+Each machine shows its login, address and port, its state (Not tested, Ready, Test
+failed with the reason and what to do, or Off), its last good test and its host key
+fingerprint. Ready means its last Test passed; after a failed Test no new job can
+ask for it until a Test passes again. Its row has **Test**, an on/off switch,
+**Edit**, **Copy public key**, **Trust a new host key** (after you reinstalled the
+machine, for example), **Log** and **Remove**. **Edit** uses the same fields and
+checks as Add machine. A new name saves at once. A new address, port or login asks
+first: Nocheh forgets the host key, jobs running on the machine stop, cards waiting
+for your approval are withdrawn, and the machine needs a new Test. Its key stays, so
+the public key already on the machine still works. Trusting a new host key, turning a
+machine off or removing it also withdraws the cards still waiting for it and stops
+its running jobs. Before a new address, port or login, a new host key or a removal,
+Nocheh first ends the programs of every job on that machine whose cleanup is still
+due, one job at a time, while the old key and host key still work. The **Machine
+control** switch turns all machine work off at once; it asks first, and a notice
+stays on the page while it is off. When the machine service is not set up, the page
+says so and nothing else changes.
+
+A machine job is asked for in your private chat or in an active project's group.
+Its one plan card, with Approve and Reject, always comes to your private chat.
+**System › Background work** shows the job's machine and the plan you approved.
+Stop, a time or cost limit, a failed run, or turning its machine or Machine
+control off ends every program of the job's login on the machine. Stop's confirm
+says so for a job that has started; for a job still waiting or approved it says
+nothing has run there yet. While Nocheh ends the programs, the job says "Ending its
+programs on" the machine; when it couldn't, it says to end them yourself. A job that
+ends normally leaves what it started running, also when its report couldn't be
+delivered. A waiting card withdrawn by a switch, a new address, port or login, a new
+host key or a removal says its machine was turned off or changed.
+
+**System › Machine log** lists every command jobs ran on your machines, and each
+test and cleanup, newest first: time, machine, job, kind, the command as the
+assistant asked for it, exit code and state. Filter it by machine or job; **All
+commands, also internal ones** adds the commands Hermes runs by itself, such as its
+session setup and its checks on commands left running. A row opens the command's
+details, including **Fingerprint of what ran** (for a job's command, the whole
+script the machine got) and **Fingerprint of what it printed**; while a command
+runs, what it printed is not known yet. Output itself is not kept. A cleanup that
+couldn't end the programs, because the machine has no `ps`, says to end them by hand
+and install procps. After a restore, a test, command or cleanup says Nocheh has no
+key for the machine, and the machine shows Test failed until you remove it and add
+it again.
+
 ## Space policies and native review
 
 Your private assistant can recall across the entire archive and registered native
@@ -563,7 +621,8 @@ PostgreSQL workflow aggregates and synthetic page data. Its action/settings/impo
 controls change only synthetic state; integration links show a fixture boundary.
 For injected browser failures, `/tmp/nocheh-ui-scenario` inside that preview
 container accepts `offline`, `unavailable`, `conflict`, `fresh`, `no-provider`, `slow-apply` or `lost-apply`; `normal`
-restores normal behavior. Never apply these probes to installation containers.
+restores normal behavior; `unavailable` also shows machine control as not running.
+Never apply these probes to installation containers.
 
 For the existing native inspection and database bootstrap tests, combine the
 preview file with `deploy/acceptance/dashboard-native-checks-compose.yml`, enable the

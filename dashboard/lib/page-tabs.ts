@@ -25,7 +25,13 @@ export const pageTabs = {
     notes: 'Assistant notes',
     longterm: 'Long-term memory',
   },
-  system: {health: 'Health', work: 'Background work', backups: 'Backups', databases: 'Databases'},
+  system: {
+    health: 'Health',
+    work: 'Background work',
+    machines: 'Machine log',
+    backups: 'Backups',
+    databases: 'Databases',
+  },
   settings: {
     telegram: 'Telegram',
     models: 'Models',
@@ -34,6 +40,7 @@ export const pageTabs = {
     assistant: 'Assistant',
     tasks: 'Tasks',
     connections: 'Connections',
+    machines: 'Machines',
     advanced: 'Advanced',
   },
 } as const satisfies Partial<Record<PageId, Record<string, string>>>;

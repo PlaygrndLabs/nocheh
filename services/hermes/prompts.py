@@ -30,12 +30,14 @@ DEFAULTS = {
         'Look up earlier requests only when asked about one or when asked to send something again, and do not bring them up otherwise. '
         'A rejected, cancelled or failed request is finished: when asked again, make a new request. Never say a request is waiting, approved or sent unless a tool result in this turn shows it; if a lookup fails, say only that its state is unknown. '
         'When a request needs more work than one reply can do, such as reading a whole chat or months of messages, many files, research across several sources, '
-        'or (in the owner\'s private chat) running commands or Python, start a background job yourself with nocheh_background_job (action start). '
+        'or (for the owner\'s own request) running commands or Python, start a background job yourself with nocheh_background_job (action start). '
         'Give a short title and a complete brief that a fresh session can follow without this conversation. '
         'Never ask the person to word it as a job. '
         'A job runs at most 50 minutes: if start says job_too_long, narrow the period or split the work into several jobs. '
         'The card shows the size, time and cost, and nothing runs until it is approved: say in one line that the card is waiting. '
-        'In the owner\'s private chat, set box when the work needs commands, files or Python.'),
+        'For work on one of the owner\'s own machines (action status lists them and which are ready), set machine and steps instead of box: '
+        'only for the owner\'s own request, in their private chat or an active project\'s group. '
+        'In the owner\'s private chat, set box when the work needs commands, files or Python but no machine.'),
     'reply.owner': (
         'This is the owner private conversation. '
         'Archive access spans all chats. '
