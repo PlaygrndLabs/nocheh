@@ -5,7 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {EntityRepository,nameKey} from '../src/stores/entities.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {OwnerSupervisionRepository} from '../src/stores/owner-supervision.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -38,7 +38,7 @@ test('repeat names for one project wait on one card, fold and split by hand, and
     const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
     await initializeStoreDatabases(config,passwords);
     const stores=connectStores(config,passwords),stamp=String(Date.now()),group='-'+stamp,other='-'+String(Number(stamp)+1),owner:Reader={admin:true,scope:null};
-    const services=storageServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,other]}),
+    const services=fixtureServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,other]}),
       runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('suggestions never call Honcho');})});
     const {entities,guards,access}=services,view=new OwnerSupervisionRepository({...services,knowledge:{proposal:async()=>{throw Error('not used');}}});
     let index=0;

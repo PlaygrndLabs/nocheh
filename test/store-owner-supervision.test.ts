@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {OwnerSupervisionRepository} from '../src/stores/owner-supervision.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -14,7 +14,7 @@ test('stored owner directory and decisions span every page without turning reads
     const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
     await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),key='supervision:'+Date.now(),group='-'+Date.now(),second=String(Number(group)-1),owner={admin:true,scope:null};
     let detectorCalls=0;
-    const services=storageServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,second]}),
+    const services=fixtureServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,second]}),
       runtime:async(operation)=>{assert.equal(operation,'guard.detect');detectorCalls++;return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('read projection must not call Honcho');})});
     const view=new OwnerSupervisionRepository({...services,knowledge:{proposal:async()=>{throw Error('not used');}}});
     try {

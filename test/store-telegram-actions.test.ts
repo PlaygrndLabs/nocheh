@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -30,7 +30,7 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
       }});
     };const value=Reflect.get(target,name);return typeof value==='function'?value.bind(target):value;
   }});
-  const services=storageServices({...stores,control:wrapped},{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const services=fixtureServices({...stores,control:wrapped},{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:String(input.text).includes('fixture-secret')?['fixture-secret']:[]};
       assert.equal(operation,'action.execute');calls.push(input);

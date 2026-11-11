@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import {digest} from './archive.js';
 import {HttpError,object} from './http.js';
-import type {RuntimeCall} from './runtime.js';
+import {brainOperation,type Brain} from './brain/brain.js';
 import type {Settings} from './config.js';
 import {guardState,guardedValue} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
@@ -77,7 +77,7 @@ export async function prepareReviews(pool:pg.Pool,live:boolean,eventId:string|nu
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
 }
-export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCall,jobId:string|null=null,authority:ExecutionAuthority) {
+export async function runReviewJobs(pool:pg.Pool,config:Settings,brain:Brain,jobId:string|null=null,authority:ExecutionAuthority) {
   if(!config.assistant.owner_id)return;
   const client=await pool.connect();let locked=false,fenced=false;
   try{fenced=await enterFamily(client,'memory_review',authority.owner,authority.epoch);if(!fenced)return;
@@ -90,8 +90,8 @@ export async function runReviewJobs(pool:pg.Pool,config:Settings,call:RuntimeCal
     try{
       const policy={space:config.assistant.owner_id,revision:await policyRevision(pool),guard_epoch:guard.epoch};
       await allowPrepared(pool,{admin:false,scope:null,turnEvent:job.event_id,...policy},{text:job.content});
-      const result=await call('memory.review',{id:digest(job.id+':'+job.generation),scope:config.assistant.owner_id,content:job.content,event_id:job.event_id,
-        guard_mode:guard.mode,archive_credential:turnToken(config.token,null,Date.now()+600000,job.event_id,{...policy,purpose:'memory-review'})},240000);
+      const result=await brainOperation(brain,'reviewNotes')({id:digest(job.id+':'+job.generation),scope:config.assistant.owner_id,content:job.content,event_id:job.event_id,
+        guard_mode:guard.mode,archive_credential:turnToken(config.token,null,Date.now()+600000,job.event_id,{...policy,purpose:'memory-review'})});
       if((await guardState(pool)).epoch!==guard.epoch)throw new HttpError(409,'guard_context_changed');
       if(result.state==='waiting'&&result.error_code==='profile_busy') {
         await client.query("UPDATE memory_review_jobs SET state='pending',attempts=greatest(0,attempts-1),error_code='waiting_for_profile',next_attempt=now()+interval '5 seconds',updated_at=now() WHERE id=$1",[job.id]);

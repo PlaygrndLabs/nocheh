@@ -7,13 +7,13 @@
 
 # Nocheh: a personal AI brain that you own
 
-**Your data, your rules and your memory, owned by you.** Nocheh keeps what you and the people around you say in an archive you own, decides who may see and do what, and turns it into memory and answers. Nocheh is the part that stays. The engine that remembers plugs into it and can be swapped, and the brain that reasons is moving behind a socket of its own.
+**Your data, your rules and your memory, owned by you.** Nocheh keeps what you and the people around you say in an archive you own, decides who may see and do what, and turns it into memory and answers. Nocheh is the part that stays. The engine that remembers and the brain that reasons each plug into it through a socket of their own.
 
 ## Why Nocheh
 
 Today's AI assistants are rented brains. What they learn about you lives inside one app, one model and one company's memory, and switching tools means starting over.
 
-Nocheh turns that around. Your source data stays in Nocheh, in a portable format, and memory is built from it and can be rebuilt from it. Nocheh also keeps the rules: who may see what, what may be shared and what needs your approval. The long-term memory engine (Honcho today) plugs in through the memory socket: swap it, and your data, your rules and your history stay where they are. The brain (Hermes today) already reaches your data through Nocheh's tools, and a brain socket that makes it swappable too is in progress.
+Nocheh turns that around. Your source data stays in Nocheh, in a portable format, and memory is built from it and can be rebuilt from it. Nocheh also keeps the rules: who may see what, what may be shared and what needs your approval. The long-term memory engine (Honcho today) plugs in through the memory socket: swap it, and your data, your rules and your history stay where they are. The brain (Hermes today) reaches your data through Nocheh's tools, and Nocheh runs every turn through the brain socket. Replacing Hermes still needs the helpers and the Telegram connection it hosts to move into Nocheh first.
 
 ## The design
 
@@ -34,10 +34,10 @@ flowchart LR
 | Nocheh | Keeps the archive, files, tasks, sharing rules, approvals and the secret check, and runs the dashboard | Nocheh | Permanent |
 | Data socket | The brain reads the archive, memory, tasks and Notion, and asks to act, through Nocheh's tools served over MCP. Every call passes the same checks, so a chat gets only what it may see | Nocheh's `/mcp`, 18 tools | Live |
 | Memory socket | Nocheh feeds long-term memory and asks it questions. The brain never talks to the engine | Honcho | Live |
-| Brain socket | Nocheh starts each turn on the brain that is plugged in, one brain at a time | Hermes | In progress |
+| Brain socket | Nocheh starts, follows and cancels each turn on the brain that is plugged in, one brain at a time, and reaches the brain's own settings, role and skills, notes and schedules only through it. A page for a feature the brain lacks says so | Hermes | Live |
 | Front doors | Where you talk to Nocheh | Telegram, still connected through Hermes for now, and Chat in the dashboard, which opens Hermes's own chat page for now | Moving Telegram into Nocheh is in progress |
 
-Hermes still does more than reason. It also reads files and voice notes, makes the secret check's model call, holds the model provider keys and runs schedules. These move into Nocheh step by step; see [What's next](#whats-next). Each chat's role, skills and notes are kept in its Hermes profile.
+Hermes still does more than reason. It also reads files and voice notes, makes the secret check's model call, holds the model provider keys and runs schedules. These move into Nocheh step by step; see [What's next](#whats-next). Each chat's role, skills and notes are kept in its Hermes profile, and Nocheh reaches them through the brain socket.
 
 ## What Nocheh does for you
 
@@ -141,8 +141,8 @@ Nocheh is TypeScript services, a React dashboard and mini app, and Python for it
 - **Three databases.** `nocheh_archive` keeps original messages and file records and is never rewritten; file bytes are saved on disk beside it, named by their checksum. `nocheh_derived` keeps masked copies and everything generated. `nocheh_control` keeps settings, access rules, tool switches, approvals and jobs. Hermes, Honcho and Inngest keep their own stores.
 - **Capture first.** Incoming messages land in a durable spool before they are acknowledged, then commit once. Restarts, retries and database outages don't drop or duplicate messages.
 - **Workflows.** Inngest runs every reply, learning step, import and background job as a durable workflow with retries, waits and full history.
-- **Brain.** [Hermes](https://github.com/NousResearch/hermes-agent) is the brain today. It runs each reply in an isolated turn, and each turn's pass names the brain it is for. Hermes also still owns the Telegram connection, sessions, schedules, the role and skills of each chat and project, and each chat's notes, and its own tools read documents, transcribe voice notes and read images. The archive stays portable across brains.
-- **Data socket.** Nocheh serves its data tools at its own `/mcp` endpoint, as the MCP server `nocheh`. Only a turn's own pass reaches it. Each of the 18 tools calls an existing Nocheh route with the turn's pass, so every audience, sharing, secret and approval check stays inside Nocheh. A refused or failed call comes back as a normal answer with an error code, such as `tool_disabled_by_owner`, not as an MCP error. The tools are plain MCP, so another brain with an MCP client could use them once the brain socket gives it a pass. A long memory recall in a background job can take up to ten minutes. See [ADR-0233](docs/adr/0233-data-tools-over-mcp.md).
+- **Brain.** [Hermes](https://github.com/NousResearch/hermes-agent) is the brain today. It runs each reply in an isolated turn, and each turn's pass names the brain it is for. Nocheh reaches it only through the brain socket, one `Brain` interface for turns and the brain's own settings, role and skills, notes and schedules. A missing feature answers `brain_capability_unavailable`. See [ADR-0234](docs/adr/0234-brain-socket.md). Hermes also still owns the Telegram connection, sessions, schedules, the role and skills of each chat and project, and each chat's notes, and its own tools read documents, transcribe voice notes and read images. The archive stays portable across brains.
+- **Data socket.** Nocheh serves its data tools at its own `/mcp` endpoint, as the MCP server `nocheh`. Only a turn's own pass reaches it. Each of the 18 tools calls an existing Nocheh route with the turn's pass, so every audience, sharing, secret and approval check stays inside Nocheh. A refused or failed call comes back as a normal answer with an error code, such as `tool_disabled_by_owner`, not as an MCP error. The tools are plain MCP, so another brain with an MCP client could use them once it is plugged into the brain socket, which gives each of its turns a pass. A long memory recall in a background job can take up to ten minutes. See [ADR-0233](docs/adr/0233-data-tools-over-mcp.md).
 - **Memory socket.** One `MemoryEngine` interface covers feeding memory, start-of-turn context, recall, search, corrections and deletions. [Honcho](https://github.com/plastic-labs/honcho) is the only engine today, using its own model of people and sessions, and its model calls go through a metered gateway that records their cost. Nocheh keeps the receipts, sessions, sharing rules and deletion bookkeeping. A different engine starts a new, empty memory space, and you choose whether it learns the archive again. See [ADR-0232](docs/adr/0232-memory-engine-socket.md).
 - **Machines.** The `nocheh-machines` service alone holds each machine's SSH key; it has no database login and no Docker socket. A job's commands reach it only through the broker and Nocheh's checks, and the log keeps each command and a fingerprint of its output, never the output itself. Keys are not backed up. See [ADR-0231](docs/adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md).
 - **Isolation.** Brain turns run in containers with one profile and scoped access: no provider keys, no Docker socket and no unrestricted internet. Approved shell work runs in disposable containers with no network.
@@ -162,7 +162,6 @@ Service map: [docs/services.md](docs/services.md).
 
 ## What's next
 
-- **Brain socket** (in progress). Nocheh starts each turn on whichever brain is plugged in, one brain at a time.
 - **Telegram moves into Nocheh** (in progress). A Nocheh service becomes the only bot, so the brain no longer holds the bot token.
 - **More out of Hermes.** The secret check's model call, file and voice reading, provider keys and schedules move into Nocheh. Then another brain, such as Claude Code, can replace Hermes.
 - **Later.** Another memory engine, such as mem0, behind the memory socket. Slack as another front door. Nocheh's own chat page that talks to whichever brain is plugged in. Several brains at once is a long-term idea, not planned work.
@@ -180,7 +179,7 @@ make dev-build           # rebuild after dependency or Dockerfile changes
 
 `make dev` runs the code in your current checkout with the same settings and data as `up`. It starts only while Telegram is on and the background stack is stopped, so finish the Quick start, run `./bin/nocheh down`, then start `make dev`. See [Start and develop](docs/deploy.md#start-and-develop).
 
-The sockets live in `src/mcp` (data tools) and `src/memory` (memory engines). A new memory engine is one file that implements `MemoryEngine`, plus one line in `src/memory/engines.ts`.
+The sockets live in `src/brain` (brains), `src/mcp` (data tools) and `src/memory` (memory engines). A new brain is one file that implements `Brain`, plus one line in `src/brain/brains.ts`. A new memory engine is one file that implements `MemoryEngine`, plus one line in `src/memory/engines.ts`.
 
 [SPECS.md](SPECS.md) defines what Nocheh must be and do, [TASK.md](TASK.md) tracks status and open checks, and [AGENTS.md](AGENTS.md) holds the working rules. Decisions live in the [ADRs](docs/adr/README.md), and [docs/repository-layout.md](docs/repository-layout.md) explains every folder. Agent skills for [admin inspection](.agent/skills/nocheh-admin-cli/SKILL.md), [deployment](.agent/skills/nocheh-deploy/SKILL.md) and [Graphify](.agent/skills/graphify/SKILL.md) live in `.agent/skills`. Code from before Hermes is kept on the `archive/pre-hermes-nocheh` branch.
 

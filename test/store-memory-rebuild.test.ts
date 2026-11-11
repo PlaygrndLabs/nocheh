@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('the owner re-runs Honcho memory for chosen chats, retries failed learning and replaces it from the archive',
@@ -19,7 +19,7 @@ test('the owner re-runs Honcho memory for chosen chats, retries failed learning 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-rebuild-')),key='rebuild:'+Date.now();
   const first='-1'+Date.now(),second='-2'+Date.now(),owner:Reader={admin:true,scope:null};
   const calls:{path:string;body:any;method?:string}[]=[],remote=new Map<string,any[]>();let sequence=0,retried=2,failed=2;
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[first,second]}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[first,second]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any,method)=>{
       calls.push({path,body,...(method?{method}:{})});
       if(method==='DELETE')return {deleted:true};

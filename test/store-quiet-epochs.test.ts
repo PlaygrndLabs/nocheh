@@ -8,7 +8,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Interpretation} from '../src/interpretations.js';
 import {defaultLogicalProfile} from '../src/stores/runtime-profile.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import type {GuardBinding} from '../src/stores/guards.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -19,7 +19,7 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-quiet-epochs-')),key='quiet-epochs:'+Date.now(),asking='-100555',other='-100777';
-  const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[asking,other]}),
+  const owner={admin:true,scope:null},s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[asking,other]}),
     runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution;
   const capture=async(group:string,label:string,payload:any)=>{
@@ -141,7 +141,7 @@ test('automatic learning revisions are quiet; owner corrections are not; learnin
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-learning-epochs-')),key='learning-epochs:'+Date.now(),asking='-100556';
-  const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[asking]}),
+  const owner={admin:true,scope:null},s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[asking]}),
     runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution;
   const host=async(id:string)=>{

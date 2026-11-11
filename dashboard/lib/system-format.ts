@@ -155,6 +155,10 @@ const reasons: Record<string, string> = {
   provider_unavailable: 'The model provider isn’t answering',
   provider_not_configured: 'No model is set up',
   runtime_unavailable: 'The assistant isn’t answering',
+  brain_unavailable: 'The assistant isn’t answering',
+  brain_rejected: 'The assistant refused the request',
+  brain_invalid_response: 'The assistant answered in a way Nocheh can’t read',
+  brain_capability_unavailable: 'The connected assistant can’t do this',
   workflow_execution_failed: 'It couldn’t start',
   legacy_owner: 'Handled by the older runner, so it can’t be retried or cancelled here',
   closed: 'It has finished, so there is nothing to retry or cancel',
@@ -403,29 +407,18 @@ const storeNames: Record<string, string> = {
 export const storeName = (row: {database: string; role?: string}): string =>
   storeNames[row.database] ?? row.role ?? row.database;
 
-/** Plain words for what the assistant runtime can do. */
+/** Plain words for what the connected assistant (the brain) can do. */
 const capabilityNames: Record<string, string> = {
-  status: 'Report its status',
-  'profiles.list': 'List chat profiles',
-  'config.read': 'Read its settings',
-  'config.write': 'Change its settings',
-  'memory.read': 'Read its own notes',
-  'persona.read': 'Read roles and skills',
-  'persona.write': 'Change roles and skills',
-  'prompts.defaults': 'Share its built-in instructions',
-  'run.start': 'Answer messages',
-  'run.resume': 'Continue a paused answer',
-  'run.cancel': 'Stop an answer',
-  'run.events': 'Stream answers to the browser',
-  lifecycle: 'Restart cleanly',
-  'source.file': 'Read attached files',
-  'guard.detect': 'Check messages for secrets',
-  'action.execute': 'Carry out approved actions',
-  'memory.review': 'Learn from conversations',
-  'memory.recall': 'Look things up in long-term memory',
-  'memory.filter': 'Keep each chat’s memory to itself',
-  'schedule.advance': 'Run scheduled jobs',
-  'telegram.chat': 'Read Telegram chat details',
-  'usage.price': 'Price model usage',
+  telegram: 'Answer Telegram messages',
+  browser: 'Answer in the dashboard chat',
+  scheduler: 'Run scheduled tasks',
+  background: 'Run background jobs',
+  settings: 'Per-chat limits',
+  persona: 'Per-chat role and skills',
+  prompts: 'Built-in instructions you can replace',
+  notes: 'Its own notes, for you to browse',
+  recall: 'Search its own notes and past chats',
+  review: 'Learn notes from finished conversations',
+  schedules: 'Its own scheduled tasks',
 };
 export const capabilityName = (name: string): string => capabilityNames[name] ?? readable(name.replaceAll('.', ' '));

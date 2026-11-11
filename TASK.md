@@ -472,6 +472,16 @@ development-machine installation ran the fresh start (H5) and live acceptance
 (H6) on the Claude provider; see item 7. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
+Swappable brain (owner, 2026-11-11: "yes start Telegram and brain socket"): the brain
+now sits behind one brain socket, and Hermes is the only brain plugged in. Every turn,
+and the brain's own settings, role and skills, notes and scheduled tasks, go through it;
+the brain never sends to a platform, and Hermes's Telegram adapter keeps sending replies
+until Nocheh's own bot does. The brain route moved to `/v1/brain/manage`, and Health
+shows the brain and what it can do ([decision](docs/adr/0234-brain-socket.md),
+[socket](src/brain/brain.ts), [checks](test/brain.test.ts),
+[Hermes turn routes](services/hermes/test_brain_turns.py)). Pending: Nocheh's own
+Telegram bot sending the replies, then a second brain when the owner wants one.
+
 Swappable memory (owner, 2026-11-10: "the main things in nocheh should be data
 and hermes and honcho should be replace able with other things like claude code
 or mem0"): long-term memory now sits behind one memory socket, and Honcho is the
@@ -709,11 +719,11 @@ read them and cannot write them, and topics use their group's
 ([decision](docs/adr/0151-chat-role-and-skills-in-hermes-profiles.md),
 [profile checks](services/hermes/test_persona.py),
 [tool checks](services/hermes/test_scopes.py),
-[runtime checks](test/runtime.test.ts),
+[brain checks](test/brain.test.ts),
 [browser checks](test/dashboard-pages.browser.mjs)). The storage service had no
-`/v1/manage/hermes` route, so per-chat assistant limits, Memory › Assistant notes
-and the CLI's profile commands could not reach Hermes; the route now serves them
-too. Projects have no role and skills of their own for now (owner, October 17:
+brain management route, so per-chat assistant limits, Memory › Assistant notes
+and the CLI's profile commands could not reach Hermes; `/v1/brain/manage` now
+serves them too. Projects have no role and skills of their own for now (owner, October 17:
 "follow your recommend"). The first live group check (October 19) failed: the
 reply ignored the role and never used the skill, because Hermes looked for
 `SOUL.md` and `skills/` beside the session database in `native-state/` and

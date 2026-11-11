@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {HttpError} from '../src/http.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {claimHostWorkflow,finishHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {workflowDetail} from '../src/workflows/owner.js';
@@ -21,7 +21,7 @@ test('host tool execution fences exact authority and repairs durable results wit
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tool-execution-')),key='execution:'+Date.now(),group='-'+Date.now();
-  const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const owner={admin:true,scope:null},s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution,event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:'1',revision:'1',occurred_at:null,text:'Tool execution source',
     payload:{message:{message_id:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Tool execution source'}}};

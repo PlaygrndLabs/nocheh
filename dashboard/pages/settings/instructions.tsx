@@ -238,7 +238,7 @@ export function BuiltInInstructions() {
       />
       <div className="mt-3 border-t border-line">
         {prompts.error && !data ? (
-          <LoadError what="the instructions" className="m-5" />
+          <LoadError what="the instructions" error={prompts.error} className="m-5" />
         ) : !data ? (
           <LoadingRows rows={3} />
         ) : (

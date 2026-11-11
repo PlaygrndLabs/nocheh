@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {foregroundReplyActive} from '../src/stores/automatic-publication.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
@@ -26,7 +26,7 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
   // What the runtime answers to the next start and observation of a follow-up turn.
   let started:Record<string,unknown>={state:'done'},observed:Record<string,unknown>={state:'running'},denied:string[]=[];
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied}}});
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='action.execute')return {state:'done'};

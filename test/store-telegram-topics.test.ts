@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {topicReference} from '../src/stores/telegram-topics.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -26,7 +26,7 @@ test('owner-added topics, topic lifecycle messages and observed names form one t
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-telegram-topics-')),base=Date.now(),group='-100'+base,owner:Reader={admin:true,scope:null};
   const policy={enabled:true,owner_id:'123',group_ids:[group]};
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
   const capture=async(topic:number,extra:Record<string,unknown>)=>{const id=++serial;await s.capture.capture({version:1,key:'topics:'+base+':'+id,origin:'live',kind:'telegram_update',
     bot_id:'topics',scope:group,source_id:String(id),revision:'1',occurred_at:null,text:null,payload:{update_id:id,message:{message_id:id,date:id,

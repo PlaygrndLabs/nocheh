@@ -180,7 +180,7 @@ function Limits() {
       />
       <div className="mt-3 border-t border-line">
         {prefs.error && !data ? (
-          <LoadError what="assistant limits" className="m-5" />
+          <LoadError what="assistant limits" error={prefs.error} className="m-5" />
         ) : !data ? (
           <LoadingRows rows={3} />
         ) : (

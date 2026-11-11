@@ -3,7 +3,7 @@ import type pg from 'pg';
 import {type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceAccessRepository} from './access.js';
@@ -53,7 +53,7 @@ export abstract class ManagedExecutionRepository {
   protected async credentialExpiry(_row:any):Promise<number>{return Date.now()+600000;}
   protected workflowJob(id:string){return this.channel==='browser'?id:'run:'+id;}
   constructor(readonly access:SourceAccessRepository,readonly derived:DerivedRepository,
-    readonly turns:RuntimeTurnRepository,readonly token:string,readonly call:RuntimeCall){}
+    readonly turns:RuntimeTurnRepository,readonly token:string,readonly brain:Brain){}
   protected get control(){return this.access.stores.control;}
   protected get guards(){return this.access.guards;}
   protected async row(id:string){return (await this.control.query("SELECT * FROM managed_runs WHERE event_id=$1 AND channel=$2",[id,this.channel])).rows[0];}
@@ -170,13 +170,13 @@ export abstract class ManagedExecutionRepository {
     const code=body.error_code===null||body.error_code===undefined?null:['managed_execution_failed','runtime_execution_interrupted','execution_interrupted','model_unavailable','intentional_silence','job_box_unavailable','job_machine_unavailable'].includes(String(body.error_code))?body.error_code:'managed_execution_failed';
     const result={state,text:string(body.text??'',1000000),session:managedIdentity(body.session),error_code:code};
     const reference=await this.derived.record({operation_id:this.channel+'-result:'+row.event_id,source:row.source_reference,parents:[row.input_reference],
-      kind:this.resultKind,content:Buffer.from(canonical(result)),producer:'hermes',producer_version:this.protocol,configuration:{binding:row.binding},
+      kind:this.resultKind,content:Buffer.from(canonical(result)),producer:this.brain.id,producer_version:this.protocol,configuration:{binding:row.binding},
       provenance:{actor:row.actor,input:row.input_reference}});
     return this.complete(row,result,reference);
   }
   protected async recover(row:any){const result=await this.derived.checkpoint(this.channel+'-result:'+row.event_id);
     if(!result)return false;
-    if(result.kind!==this.resultKind||result.producer!=='hermes'||result.producer_version!==this.protocol||digest(result.content)!==result.content_hash||
+    if(result.kind!==this.resultKind||result.producer!==this.brain.id||result.producer_version!==this.protocol||digest(result.content)!==result.content_hash||
       result.provenance.actor!==row.actor||canonical(result.provenance.input)!==canonical(row.input_reference)||canonical(result.provenance.source)!==canonical(row.source_reference))throw new HttpError(409,'run_result_conflict');
     await this.complete(row,JSON.parse(result.content.toString()),{store:'derived',kind:'artifact',id:result.id,input_hash:result.content_hash});return true;
   }
@@ -224,18 +224,18 @@ export abstract class ManagedExecutionRepository {
         // A run that carries waits out a publication still pending; the next look decides (ADR-0208).
         if(this.carries&&current&&error.code==='guard_transition_pending'&&!row.cancel_requested)return this.status(row);
         current=false;}
-      const body={channel:this.channel,event_id:id,attempt:1,owner_epoch:row.owner_epoch??authority.epoch,asynchronous:true};
+      const ref={channel:this.channel,event_id:id,attempt:1},start={owner_epoch:row.owner_epoch??authority.epoch};
       if(!current||row.cancel_requested){
         await this.cancelRow(id);
-        try{await this.call('run.cancel',body,10000);}catch{}
+        try{await this.brain.cancelTurn(ref);}catch{}
         row=await this.row(id);if(row.state==='captured'||row.state==='cancelled')return this.status(row);
       }
       if(row.state==='captured'){
         const ready=await this.readiness(row);if(ready.state!=='completed')return observation('waiting',ready.stage,0,ready.next_attempt,'prerequisite');
       }
       try {
-        const native=await this.call('run.resume',{...body,observe_only:true},10000);
-        if(current&&!row.cancel_requested&&row.state==='captured'&&['not_found','queued'].includes(String(native.state)))await this.call('run.start',body,10000);
+        const native=await this.brain.observeTurn(ref);
+        if(current&&!row.cancel_requested&&row.state==='captured'&&['not_found','queued'].includes(String(native.state)))await this.brain.startTurn(ref,start);
         else if(native.state==='not_found'&&row.state==='running'||['ambiguous','failed','cancelled','done'].includes(String(native.state))) {
           await this.interrupt(id,'runtime_receipt_missing');
         }

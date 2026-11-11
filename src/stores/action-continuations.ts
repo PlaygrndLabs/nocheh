@@ -3,7 +3,7 @@ import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
-import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import {actionContinued,fillTemplate,ownerPrompts} from '../prompts.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
@@ -71,14 +71,14 @@ export function continuationText(template:string,actions:{id:string;kind:string;
 export class ActionContinuationRepository {
   constructor(readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,readonly derived:DerivedRepository,
     readonly guards:GuardRepository,readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,
-    readonly call:RuntimeCall,readonly token:string){}
+    readonly brain:Brain,readonly token:string){}
   private get control(){return this.access.stores.control;}
   /** Native cancellation is best effort; the durable receipt remains authoritative. */
   async cancelRetired(ids:string[]):Promise<void> {
     if(!ids.length)return;
     const rows=(await this.control.query("SELECT action_id,event_id,attempts FROM action_continuations WHERE event_id=ANY($1::text[]) AND state='running' AND attempts>0",[ids])).rows;
     for(const row of rows)try{
-      await this.call('run.cancel',{channel:'telegram',event_id:row.event_id,attempt:continuationAttempt(row.action_id,row.attempts)},10000);
+      await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt:continuationAttempt(row.action_id,row.attempts)});
     }catch{/* The running workflow observes it again and cancels it under the revoked guard epoch. */}
   }
   private observation(row:any):Observation {
@@ -109,7 +109,7 @@ export class ActionContinuationRepository {
     }
     const output=await this.derived.record({operation_id:`action-continuation-result:${row.action_id}:${row.attempts}`,
       source:(await this.archive.captured(row.event_id)).reference,parents:[row.input_reference],kind:'runtime_result',content:Buffer.from(canonical(result)),
-      producer:'hermes',producer_version:protocol,configuration:{attempt:continuationAttempt(row.action_id,row.attempts)},provenance:{binding:row.binding}});
+      producer:this.brain.id,producer_version:protocol,configuration:{attempt:continuationAttempt(row.action_id,row.attempts)},provenance:{binding:row.binding}});
     return this.finish(row,result,output);
   }
   private async finish(row:any,result:{state:string;error_code?:string},reference:DerivativeReference) {
@@ -156,7 +156,7 @@ export class ActionContinuationRepository {
       let input:TurnInput;
       if(row.state==='running') {
         const attempt=continuationAttempt(id,row.attempts);let observed:Record<string,unknown>;
-        try{observed=await this.call('run.resume',{channel:'telegram',event_id:row.event_id,attempt,observe_only:true},10000);}
+        try{observed=await this.brain.observeTurn({channel:'telegram',event_id:row.event_id,attempt});}
         catch{return await this.receive(row,{state:'running'});}
         if(closedTurnStates.has(String(observed.state)))return await this.receive(row,observed);
         input=await this.input(row.input_reference);
@@ -171,7 +171,7 @@ export class ActionContinuationRepository {
           }
           if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
-          try{return await this.receive(row,await this.call('run.cancel',{channel:'telegram',event_id:row.event_id,attempt},10000));}
+          try{return await this.receive(row,await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt}));}
           catch{return await this.receive(row,{state:'running'});}
         }
         if(!['not_found','queued'].includes(String(observed.state)))return await this.receive(row,observed);
@@ -255,7 +255,7 @@ export class ActionContinuationRepository {
       if(this.token.length<24)throw new HttpError(503,'service_credential_required');
       const credential=await this.prepared.audience.turn(this.token,input.principal,row.event_id,Date.now()+600000);await currentTurn(this,input);
       let result:Record<string,unknown>;
-      try{result=await this.call('run.start',{...input.body,asynchronous:true,archive_credential:credential},10000);}
+      try{result=await this.brain.startTurn({channel:'telegram',event_id:row.event_id,attempt:continuationAttempt(id,row.attempts)},{...input.body,archive_credential:credential});}
       catch{result={state:'running'};}
       return await this.receive(row,result);
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query("SELECT pg_advisory_unlock(hashtextextended('continue:'||$1,803364))",[id]);if(held)await leaveFamily(db,'telegram');});}

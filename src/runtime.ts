@@ -1,9 +1,10 @@
 import { HttpError } from './http.js';
 
-/** Nocheh capabilities, independent of a harness's URL or native profile names. */
-export const runtimeOperations = ['status', 'profiles.list', 'config.read', 'config.write',
-  'memory.read', 'persona.read', 'persona.write', 'prompts.defaults', 'run.start', 'run.resume', 'run.cancel', 'run.events', 'lifecycle',
-  'source.file', 'guard.detect', 'action.execute', 'memory.review', 'memory.recall', 'memory.filter','schedule.advance','telegram.chat','telegram.approval','telegram.refusal','telegram.notice','usage.price','file.extract','voice.transcribe','image.read'] as const;
+/** Helper services Nocheh calls besides the brain: secret checks, file, voice and image reading, prices and the memory
+ * filter, plus the Telegram calls the Hermes service still answers. Turns and the brain's own state go through the brain
+ * socket instead (ADR-0234). */
+export const runtimeOperations = ['source.file', 'guard.detect', 'action.execute', 'memory.filter','telegram.chat','telegram.approval',
+  'telegram.refusal','telegram.notice','usage.price','file.extract','voice.transcribe','image.read'] as const;
 export type RuntimeOperation = typeof runtimeOperations[number];
 export type RuntimeCall = (operation: RuntimeOperation, input: Record<string, unknown>, timeout?: number) => Promise<Record<string, unknown>>;
 export interface RuntimeAdapter {

@@ -101,7 +101,7 @@ export function RoleAndSkills({scope, where, description}: {scope: string; where
       <CardHeader title="Role and skills" description={description} />
       <div className="px-5 pt-3 pb-5">
         {persona.error && !data ? (
-          <LoadError what="the role and skills" />
+          <LoadError what="the role and skills" error={persona.error} />
         ) : !data ? (
           <LoadingRows rows={2} />
         ) : (

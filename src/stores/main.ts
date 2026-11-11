@@ -2,7 +2,8 @@ import {settings} from '../config.js';
 import {hermesAdapter} from '../hermes-adapter.js';
 import {memoryEngine} from '../memory/engines.js';
 import {runtimeCall} from '../runtime.js';
-import {withPrompts} from '../prompts.js';
+import {brainWithPrompts,withPrompts} from '../prompts.js';
+import {brain} from '../brain/brains.js';
 import {runtimeStoreGroups} from './runtime-pools.js';
 import {storageServices} from './services.js';
 import {storageServer} from './server.js';
@@ -11,10 +12,10 @@ import {startStorageWorkflows} from './workflow-service.js';
 import {hostTransport} from '../workflows/host-transport.js';
 import {restoredInactive} from './lifecycle.js';
 
-// Calls that run a built-in instruction text carry the owner's replacements.
+// Turns and service calls that run a built-in instruction text carry the owner's replacements.
 const config=settings(),pools=runtimeStoreGroups(),adapter=hermesAdapter({url:config.hermesUrl,token:config.token}),call=withPrompts(runtimeCall(adapter),pools.api.control);
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
-  policy:()=>config.assistant,runtime:call,memoryEngine:memoryEngine(config)};
+  policy:()=>config.assistant,runtime:call,brain:brainWithPrompts(brain(config),pools.api.control),memoryEngine:memoryEngine(config)};
 const services=storageServices(pools.api,options),workflowServices=storageServices(pools.workflow,options);
 const capture=startStorageCapture(services,config),workflows=startStorageWorkflows(workflowServices,config,call);
 const transport=process.env.INNGEST_SIGNING_KEY?hostTransport(process.env.INNGEST_SIGNING_KEY,undefined,undefined,()=>!restoredInactive(config.dataDir)):undefined;

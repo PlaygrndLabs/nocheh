@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('a job\'s changes wait for its end, then come on as few cards as fit, each approved or rejected as a whole; Stop ends them',
@@ -18,7 +18,7 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-changes-')),key='job-changes:'+Date.now(),group='-100555';
   const cards:Record<string,any>[]=[],notices:Record<string,any>[]=[],owner:Reader={admin:true,scope:null};
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};

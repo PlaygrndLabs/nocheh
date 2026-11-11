@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -19,7 +19,7 @@ test('someone Nocheh does not serve costs no download or model call, is never re
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-strangers-')),key='strangers:'+Date.now(),group='-'+Date.now(),unselected=group+'9';
   const refusals:Record<string,any>[]=[];let detections=0,updates=0;
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{},topic_memory:'group' as const});
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect'){detections++;return {literals:[]};}
       if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}

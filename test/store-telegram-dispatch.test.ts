@@ -7,7 +7,7 @@ import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices,type FakeCall} from './fixture-brain.js';
 import {groupAddressing,speakerLine} from '../src/stores/telegram-dispatch.js';
 import {dispatchPayload} from '../src/stores/telegram-turn.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
@@ -74,7 +74,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
       return (query as any)(sql,...args);
     };const value=Reflect.get(target,name);return typeof value==='function'?value.bind(target):value;
   }});
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+  const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:String(input.text).includes('fixture-secret')?['fixture-secret']:[]};
     calls.push({operation,input});assert.ok(['run.start','run.resume','run.events','run.cancel'].includes(operation));
     const id=String(input.event_id);
@@ -90,7 +90,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
       window:{queued:now-100,assistant:now-90,delivery:now-20,finished:now}};
     return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:state==='done'?'delivery':'assistant',private_output:'not copied into workflow metadata',...timing};
   };
-  const services=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
+  const services=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Selected voice fixture-secret';}},
     memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
   const operations=storageWorkflowOperations(services,runtime);
@@ -261,11 +261,11 @@ test('conversation messages start in Telegram update order while an earlier mess
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-order-')),base=Date.now(),group='-'+base,token=digest('order:'+base);
   const policy={enabled:true,owner_id:'123',group_ids:[group]},started:string[]=[];let serial=base;
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+  const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'run.start');started.push(String(input.event_id));return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
     transcription:{name:'fixture-asr',version:'1',outputKind:'transcript',async run(){throw new HttpError(422,'invalid_transcription_response');}}});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const capture=async(text:string,topic?:number,update=++serial,extra:any={})=>{
@@ -321,11 +321,11 @@ test('an album gets one turn with every part, answered on its first part',
   // Fixture-only clock and order adjustments; the archive role itself cannot change originals.
   const archiveAdmin=new pg.Pool({...config,database:'nocheh_archive'});
   const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let serial=base;
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+  const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const capture=async(extra:any)=>{
     const update=++serial,message:any={message_id:update,date:1700000000,chat:{id:Number(group),type:'supergroup'},from:{id:123,is_bot:false,first_name:'Owner'},...extra};
@@ -374,13 +374,13 @@ test('a group turn sees the unaddressed group messages since the last turn, neve
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-recent-')),base=Date.now(),group='-'+base,token=digest('recent:'+base);
   const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let serial=base;
   // Like Hermes, a group message that does not name Nocheh is suppressed without a turn.
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+  const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'run.start');
     if(!String(input.text).startsWith('Nocheh'))return {state:'suppressed',error_code:'not_addressed'};
     started.push(input);return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const say=async(text:string,from:any={id:123,is_bot:false,first_name:'Owner'})=>{
     const update=++serial,message={message_id:update,date:1700000000+update-base,chat:{id:Number(group),type:'supergroup'},from,text};
@@ -417,11 +417,11 @@ test('a later message is told about an earlier voice note still waiting for tran
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-voice-wait-')),base=Date.now(),group='-'+base,token=digest('voice-wait:'+base);
   const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[];let serial=base,speech=false;
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(operation,input)=>{
+  const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'delivery'};
   };
-  const services=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),
     transcription:{name:'fixture-asr',version:'1',outputKind:'transcript',async run(){if(!speech)throw new HttpError(503,'transcription_unavailable');return 'Synthetic voice words';}}});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const capture=async(text:string|undefined,topic:number,extra:any={})=>{

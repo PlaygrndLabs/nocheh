@@ -8,7 +8,7 @@ import pg from 'pg';
 import {canonical,digest} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices,type FakeCall} from './fixture-brain.js';
 import {drainSourceSpool} from '../src/stores/capture.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
@@ -30,7 +30,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
       return (client.query as any)(sql,...args);};const value=Reflect.get(client,name);return typeof value==='function'?value.bind(client):value;}});
   };const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
   const native=new Map<string,any>(),calls:{op:string;body:any}[]=[],claims=new Map<string,any>(),contexts=new Map<string,any>();
-  const runtime:Parameters<typeof storageServices>[1]['runtime']=async(op,body)=>{
+  const runtime:FakeCall=async(op,body)=>{
     if(op==='guard.detect')return {literals:String(body.text).includes('fixture-secret')?['fixture-secret']:[]};
     calls.push({op,body});const id=String(body.event_id);
     if(op==='run.resume'){assert.equal(body.observe_only,true);return native.get(id)??{state:'not_found'};}
@@ -48,7 +48,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     await s.browser.finish(receipt);native.set(id,{state:'done'});
     if(mode==='ack_lost'){mode='done';throw Error('lost reply after completion');}return {state:'done'};
   };
-  const s=storageServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
+  const s=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Prepared audio fixture-secret';}},
     memoryEngine:honchoEngine(async()=>{throw Error('no providers');})});
   const authority=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});

@@ -7,6 +7,7 @@ import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import type {MemoryEngine} from '../memory/engine.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository} from './archive.js';
@@ -62,7 +63,7 @@ import {MachineRepository} from './machines.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
-  runtime:RuntimeCall;memoryEngine:MemoryEngine;transcription?:DerivationEngine;serviceToken?:string}) {
+  runtime:RuntimeCall;brain:Brain;memoryEngine:MemoryEngine;transcription?:DerivationEngine;serviceToken?:string}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),attachments=new AttachmentRepository(stores,archive,options.dataDir);
   const transcription=options.transcription??voiceTranscription(options.runtime),extraction=documentExtraction(options.runtime);
@@ -92,7 +93,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
-  const ownerAutonomy=new OwnerAutonomyRepository(stores.control),notion=new NotionRepository(stores.control),prompts=new PromptRepository(stores.control,options.runtime);
+  const ownerAutonomy=new OwnerAutonomyRepository(stores.control),notion=new NotionRepository(stores.control),prompts=new PromptRepository(stores.control,options.brain);
   const chatTools=new ChatToolSettingsRepository(stores.control,()=>options.policy().owner_id);
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
@@ -119,7 +120,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
     return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
   },{call:options.runtime,owner:()=>options.policy().owner_id});
-  const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,detect,options.serviceToken??'');
+  const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
@@ -129,20 +130,20 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
-  return {jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {brain:options.brain,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,
-    schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.runtime,schedules,telegramActions),
+    schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.brain,schedules,telegramActions),
     runtimeProfiles:new RuntimeProfileRepository(access),
-    browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.runtime,browserDelivery),
+    browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
-    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.serviceToken??'',detect),
-    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.runtime,options.serviceToken??''),
+    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect),
+    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??''),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,
-    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.runtime,options.serviceToken??''),
+    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??''),
     shared,
     detectorVersion:options.detectorVersion,detect};
 }

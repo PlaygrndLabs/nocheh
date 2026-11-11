@@ -57,6 +57,10 @@ def prune(spool: Path, managed: Path, days: int, now: float | None = None) -> in
     for result in (spool / 'async-runs').glob('*.result'):
         if _closed(result, cutoff, CLOSED):
             removed += _remove(result, ('.request', '.events', '.started'))
+    # Brain turns keep their reply in .outcome, which goes with its run.
+    for result in (spool / 'brain-turns').glob('*.result'):
+        if _closed(result, cutoff, CLOSED):
+            removed += _remove(result, ('.request', '.events', '.started', '.outcome'))
     for result in managed.glob('*.result'):
         # A receipt that was never published is still owed to Nocheh.
         if result.with_suffix('.receipt').exists() and not result.with_suffix('.published').exists():

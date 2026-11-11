@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import type {Settings} from '../config.js';
 import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import {HttpError} from '../http.js';
 import {guardState} from '../guarded.js';
 import {prepareReviews,runReviewJobs} from '../learning.js';
@@ -13,7 +14,7 @@ async function fenced(pool:pg.Pool,family:WorkflowFamily,authority:ExecutionAuth
   try {held=await enterFamily(client,family,authority.owner,authority.epoch);return held?await operation():observation('waiting','admission',0,Date.now()+30000,'owner_paused');}
   finally{await releaseOperation(client,async()=>{if(held)await leaveFamily(client,family);});}
 }
-export function memoryOperations(pool:pg.Pool,config:Settings,runtime:RuntimeCall,honcho:HonchoCall):Partial<Record<WorkflowFamily,WorkflowOperation>> {
+export function memoryOperations(pool:pg.Pool,config:Settings,runtime:RuntimeCall,brain:Brain,honcho:HonchoCall):Partial<Record<WorkflowFamily,WorkflowOperation>> {
   return {
     memory_review:async(jobId,authority)=>{
       if(jobId==='refresh'||/^source:[a-f0-9]{64}$/.test(jobId))return fenced(pool,'memory_review',authority,async()=>{
@@ -29,7 +30,7 @@ export function memoryOperations(pool:pg.Pool,config:Settings,runtime:RuntimeCal
       let job=await load();if(!job)return observation('failed','review');
       if(!job.consent)return observation('denied','review',job.attempts,Date.now(),'consent_required');
       if(Number(job.guard_epoch)!==(await guardState(pool)).epoch)return observation('skipped','review',job.attempts,Date.now(),'superseded');
-      if(['pending','failed','running'].includes(job.state)&&job.next_attempt<=new Date()){await runReviewJobs(pool,config,runtime,id,authority);job=await load();}
+      if(['pending','failed','running'].includes(job.state)&&job.next_attempt<=new Date()){await runReviewJobs(pool,config,brain,id,authority);job=await load();}
       const state=job.state==='done'?'completed':job.state==='ambiguous'?'ambiguous':job.state==='failed'?'retryable_failed':job.state==='running'?'running':'waiting';
       return observation(state,'review',job.attempts,job.state==='paused'?Date.now()+30000:job.next_attempt.getTime(),job.state==='paused'?'owner_paused':state==='retryable_failed'?'runtime_unavailable':state==='waiting'?'prerequisite':null);
     },

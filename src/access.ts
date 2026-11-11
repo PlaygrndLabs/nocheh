@@ -4,6 +4,7 @@ import { HttpError, object, string } from './http.js';
 import type pg from 'pg';
 import {policyRevision,validateSpace,parentSpace} from './spaces.js';
 import {guardState} from './guarded.js';
+import {activeBrain} from './brain/brains.js';
 
 export interface Reader {readonly scope:string|null; readonly admin:boolean;readonly turnEvent?:string;readonly space?:string;readonly revision?:number;readonly guard_epoch?:number;readonly generation?:string;readonly logical_profile?:string;readonly purpose?:'assistant'|'memory-review'|'filter';readonly brain?:string}
 const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length && timingSafeEqual(x,y);};
@@ -11,8 +12,8 @@ export function scopeToken(secret:string,scope:string|null,expires:number,bindin
   const body=Buffer.from(JSON.stringify({scope,expires,audience:'nocheh-archive',...binding})).toString('base64url');
   return `scope.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 }
-/** The brain a turn's pass is for. Hermes is the one brain today; the pass names it so its effects can be told apart (ADR-0233). */
-export const defaultBrain='hermes';
+/** The brain a turn's pass is for: the one plugged into the brain socket (ADR-0234). The pass names it so its effects can be told apart (ADR-0233). */
+export const defaultBrain=activeBrain;
 const brainName=/^[a-z][a-z0-9-]{0,31}$/;
 export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;brain?:string}):string {
   const body=Buffer.from(JSON.stringify({scope,expires,event_id:eventId,audience:'nocheh-assistant',brain:defaultBrain,...policy})).toString('base64url');

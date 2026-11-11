@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('controlled proposals and bounded permissions preserve guarded content outside control and archive',
@@ -15,7 +15,7 @@ test('controlled proposals and bounded permissions preserve guarded content outs
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-controlled-')),key='controlled:'+Date.now(),group='-'+Date.now();
-  const owner={admin:true,scope:null},s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const owner={admin:true,scope:null},s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{assert.equal(operation,'guard.detect');return {literals:String(input.text).includes('fixture-secret')?['fixture-secret']:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:'1',revision:'1',occurred_at:null,text:'Propose a tool',
     payload:{message:{message_id:1,date:1700000000,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Propose a tool'}}};

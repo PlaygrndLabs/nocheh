@@ -186,7 +186,7 @@ def main():
                 selected.output.chmod(0o600)
             else:print(encoded)
             return 0
-        result=dispatch({'operation':'hermes.manage','request':{'action':{'list':'profiles','show':'memory','preferences':'preferences'}[selected.action],
+        result=dispatch({'operation':'brain.manage','request':{'action':{'list':'profiles','show':'memory','preferences':'preferences'}[selected.action],
                         'scope':selected.scope,'profile':selected.profile,'session':selected.session,'offset':selected.offset}})
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
     if args.command in ('dashboard', 'jobs', 'import'):

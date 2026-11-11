@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('an explicit owner refresh names selected groups from Telegram while directory reads never call it',
@@ -18,7 +18,7 @@ test('an explicit owner refresh names selected groups from Telegram while direct
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-telegram-chats-')),base=Date.now();
   const observed='-100'+base,silent='-'+(base%1000000000+7),moved='-'+(base%1000000000+8),missing='-'+(base%1000000000+9),owner:Reader={admin:true,scope:null};
   const calls:string[]=[],policy={enabled:true,owner_id:'123',group_ids:[observed,silent,moved,missing]};
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       assert.equal(operation,'telegram.chat');const id=String(input.chat_id);calls.push(id);

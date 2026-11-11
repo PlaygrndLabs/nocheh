@@ -391,23 +391,23 @@ export async function startManagement() {
       if (req.method === 'POST' && route === '/honcho/budget') return exclusive('honcho-budget',async()=>
         json(res,200,await python({operation:'honcho.budget.update',request:object(await readJson(req))})));
       if (req.method === 'POST' && route === '/honcho/read') return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
-      if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'hermes.manage',request:{action:'profiles'}}));
+      if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'brain.manage',request:{action:'profiles'}}));
       if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {
-        return json(res,200,await python({operation:'hermes.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
+        return json(res,200,await python({operation:'brain.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
           scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
       }
       if (req.method === 'POST' && route === '/memory/preferences') return exclusive('writer-start',async()=>{
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         const body=object(await readJson(req));
-        return json(res,200,await python({operation:'hermes.manage',request:{action:'preferences',scope:body.scope,changes:body.changes,revision:body.revision}}));
+        return json(res,200,await python({operation:'brain.manage',request:{action:'preferences',scope:body.scope,changes:body.changes,revision:body.revision}}));
       });
       // Role (SOUL.md) and skills of one chat's native profile, or `default` for every chat.
       if (req.method === 'GET' && route === '/memory/persona')
-        return json(res,200,await python({operation:'hermes.manage',request:{action:'persona',scope:url.searchParams.get('scope')}}));
+        return json(res,200,await python({operation:'brain.manage',request:{action:'persona',scope:url.searchParams.get('scope')}}));
       if (req.method === 'POST' && route === '/memory/persona') return exclusive('writer-start',async()=>{
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         const body=object(await readJson(req,1024*1024));
-        return json(res,200,await python({operation:'hermes.manage',request:{action:'persona',scope:body.scope,role:body.role,skills:body.skills,revision:body.revision}}));
+        return json(res,200,await python({operation:'brain.manage',request:{action:'persona',scope:body.scope,role:body.role,skills:body.skills,revision:body.revision}}));
       });
       if (req.method === 'POST' && route === '/settings') return exclusive('writer-start',async()=>{
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');

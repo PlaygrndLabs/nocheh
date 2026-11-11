@@ -260,6 +260,9 @@ export function settingsError(error: ApiError | string): string {
   if (code === 'embedding_model_change_requires_rebuild')
     return 'Changing the memory search model rebuilds long-term memory. Save again and confirm the rebuild.';
   if (code === 'unsupported_setting') return 'One of these settings can’t be changed from the dashboard.';
+  if (code === 'brain_capability_unavailable') return 'The connected assistant doesn’t have this setting.';
+  if (code === 'brain_unavailable' || code === 'brain_rejected' || code === 'brain_invalid_response')
+    return 'The assistant isn’t answering. Try again shortly.';
   if (code === 'installation_maintenance') return 'Nocheh is busy with maintenance. Try again shortly.';
   if (code === 'ValueError' || code === 'operation_interrupted')
     return 'Nocheh didn’t accept these settings. Check every field you changed and try again.';

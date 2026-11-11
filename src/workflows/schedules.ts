@@ -1,7 +1,7 @@
 /** Native definitions stay in Hermes; archive rows address durable occurrences. */
 import type pg from 'pg';
 import type {Settings} from '../config.js';
-import type {RuntimeCall} from '../runtime.js';
+import {brainOperation,type Brain} from '../brain/brain.js';
 import {HttpError,object,string} from '../http.js';
 import {hash,type ExecutionAuthority} from './store.js';
 import {observation,type WorkflowOperation} from './pipeline.js';
@@ -54,14 +54,14 @@ export async function scheduledObservation(pool:pg.Pool,input:unknown){
     WHERE r.event_id=$1 AND e.channel='scheduler' AND e.scope=$2`,[b.event_id,b.scope])).rows[0];
   if(!row||JSON.parse(row.payload.toString()).profile!==b.profile)throw new HttpError(404,'captured_run_not_found');return {state:row.state};
 }
-export function scheduleOperation(pool:pg.Pool,call:RuntimeCall,run:WorkflowOperation):WorkflowOperation{
+export function scheduleOperation(pool:pg.Pool,brain:Brain,run:WorkflowOperation):WorkflowOperation{
   return async(job,authority)=>{
     if(job.startsWith('run:'))return run(job.slice(4),authority);
     const match=/^schedule:([a-f0-9]{64}):([a-f0-9]{64})$/.exec(job);
     if(!match)return observation('failed','admission');
     const row=(await pool.query('SELECT * FROM workflow_schedules WHERE id=$1',[match[1]])).rows[0];
     if(!row||row.cursor!==match[2])return observation('skipped','schedule');
-    const result=await call('schedule.advance',{logical_profile:row.logical_profile,job_id:row.job_id,cursor:row.cursor,owner_epoch:authority.epoch},20000);
+    const result=await brainOperation(brain,'advanceSchedules')({logical_profile:row.logical_profile,job_id:row.job_id,cursor:row.cursor,owner_epoch:authority.epoch});
     if(!['waiting','completed','skipped'].includes(String(result.state)))throw new HttpError(503,'invalid_schedule_observation');
     if(result.state==='waiting'&&(!Number.isSafeInteger(result.next_attempt)||Number(result.next_attempt)<0))throw new HttpError(503,'invalid_schedule_observation');
     return observation(result.state as 'waiting'|'completed'|'skipped','schedule',0,result.state==='waiting'?Number(result.next_attempt):Date.now(),result.state==='waiting'?'prerequisite':null);

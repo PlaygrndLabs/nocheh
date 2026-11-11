@@ -1,7 +1,7 @@
 /** Browser transport keeps content in the archive and protected native journal. */
 import type pg from 'pg';
 import type {Settings} from '../config.js';
-import type {RuntimeCall} from '../runtime.js';
+import type {Brain} from '../brain/brain.js';
 import {HttpError,object,string} from '../http.js';
 import {preparationStatus,waitForPreparation} from './preparation-status.js';
 import {guardState} from '../guarded.js';
@@ -81,10 +81,10 @@ export async function browserAuthority(pool:pg.Pool,config:Settings,input:unknow
   return {owner:'inngest',epoch:Number(b.owner_epoch)};
 }
 
-export function browserOperation(pool:pg.Pool,config:Settings,call:RuntimeCall):WorkflowOperation {
-  return managedRunOperation(pool,config,call,'browser');
+export function browserOperation(pool:pg.Pool,config:Settings,brain:Brain):WorkflowOperation {
+  return managedRunOperation(pool,config,brain,'browser');
 }
-export function managedRunOperation(pool:pg.Pool,config:Settings,call:RuntimeCall,channel:'browser'|'scheduler'):WorkflowOperation {
+export function managedRunOperation(pool:pg.Pool,config:Settings,brain:Brain,channel:'browser'|'scheduler'):WorkflowOperation {
   const family=channel==='browser'?'browser':'schedules';
   return async(event,authority)=>{
     const load=async()=> (await pool.query('SELECT * FROM managed_runs WHERE event_id=$1',[event])).rows[0];
@@ -94,13 +94,15 @@ export function managedRunOperation(pool:pg.Pool,config:Settings,call:RuntimeCal
       if(prepared.state!=='completed')return waitForPreparation(prepared);
     }
     if(['captured','running'].includes(row.state)) {
-      const body={channel,event_id:event,attempt:1,owner_epoch:authority.epoch,asynchronous:true};
+      const ref={channel,event_id:event,attempt:1},start={owner_epoch:authority.epoch};
       let runtime:Record<string,unknown>;
       try {
-        if(row.cancel_requested)await call('run.cancel',body);
-        runtime=await call('run.resume',body);
+        if(row.cancel_requested)await brain.cancelTurn(ref);
+        runtime=await brain.observeTurn(ref);
+        // A queued turn whose start was lost is started again under the same ref.
+        if(runtime.state==='queued'&&!row.cancel_requested)runtime=await brain.startTurn(ref,start);
         if(runtime.state==='not_found') {
-          if(row.state==='captured'&&!row.cancel_requested)runtime=await call('run.start',body);
+          if(row.state==='captured'&&!row.cancel_requested)runtime=await brain.startTurn(ref,start);
           else if(row.state==='running')await pool.query("UPDATE managed_runs SET state='interrupted',error_code='runtime_receipt_missing',lease_until=NULL WHERE event_id=$1 AND state='running'",[event]);
         }
         if(['ambiguous','failed','cancelled'].includes(String(runtime.state)))await pool.query(`UPDATE managed_runs SET state=$2,error_code=$3,lease_until=NULL WHERE event_id=$1 AND state IN ('captured','running')`,

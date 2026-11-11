@@ -17,7 +17,7 @@ import {HttpError} from '../src/http.js';
 import {assertGuardConfiguration} from '../src/stores/lifecycle.js';
 import {OwnerCommands} from '../src/stores/owner-commands.js';
 import {storageServer} from '../src/stores/server.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import type {Settings} from '../src/config.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -35,7 +35,7 @@ test('a running job run carries across reaction and learning epochs, any other c
   let during:(()=>Promise<unknown>)|null=null;
   /** Made-up secrets the secret check finds wherever it sees them. */
   const flagged:string[]=[];
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect'){const work=during;during=null;if(work)await work();return {literals:flagged.filter(literal=>String(input.text).includes(literal))};}
       if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5}};

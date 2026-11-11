@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {storageServices} from '../src/stores/services.js';
+import {fixtureServices} from './fixture-brain.js';
 import {byteBudget,jobDeadlines,jobTokens,reportParts} from '../src/stores/background-jobs.js';
 import {brokerServer} from '../src/security/broker.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
@@ -23,7 +23,7 @@ test('a background job is started with one call, approved on its card, runs as o
   const sonnet={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0};
   const cards:Record<string,any>[]=[],runs:string[]=[];let rates:Record<string,number|null>=sonnet,updates=0;
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9','8'],denied:[]},[other]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
-  const s=storageServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       if(operation==='usage.price'){assert.deepEqual(input,{rates:'reply'});return {rates};}

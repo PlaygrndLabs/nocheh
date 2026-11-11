@@ -2,6 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from './access.js';
 import {HttpError,object} from './http.js';
 import type {RuntimeCall,RuntimeOperation} from './runtime.js';
+import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.js';
 
 /**
  * Built-in instruction texts and the owner's replacements from Settings › Assistant.
@@ -223,22 +224,34 @@ export function learningInstruction(text:string|undefined,values:{trigger_id:str
   return (text??learningPrompt).replaceAll('{trigger_id}',values.trigger_id).replaceAll('{citable_ids}',values.citable_ids);
 }
 
-const carried=new Set<RuntimeOperation>(['run.start','memory.review','guard.detect','memory.filter','image.read']);
-/** Send the owner's replacement texts with every runtime call that runs one of them. */
+/** The owner's replacements for texts Nocheh does not run itself. */
+const replacements=async(control:Pick<pg.Pool,'query'>)=>Object.fromEntries(Object.entries(await ownerPrompts(control)).filter(([key])=>!(key in nochehTexts)));
+const carried=new Set<RuntimeOperation>(['guard.detect','memory.filter','image.read']);
+/** Send the owner's replacement texts with every service call that runs one of them. */
 export function withPrompts(call:RuntimeCall,control:Pick<pg.Pool,'query'>):RuntimeCall {
   return async(operation,input,timeout)=>{
     if(!carried.has(operation))return call(operation,input,timeout);
-    const prompts=Object.fromEntries(Object.entries(await ownerPrompts(control)).filter(([key])=>!(key in nochehTexts)));
-    return call(operation,{...input,prompts},timeout);
+    return call(operation,{...input,prompts:await replacements(control)},timeout);
   };
+}
+/** The brain, with the owner's replacement texts sent with every turn it starts and every notes review it runs. */
+export function brainWithPrompts(brain:Brain,control:Pick<pg.Pool,'query'>):Brain {
+  const withTexts=async(input:Readonly<Record<string,unknown>>)=>({...input,prompts:await replacements(control)}),review=brain.reviewNotes;
+  // Every other operation, and the lack of one, comes from the brain itself.
+  return Object.assign(Object.create(brain) as Brain,{
+    startTurn:async(ref:TurnRef,input:TurnInput)=>brain.startTurn(ref,await withTexts(input)),
+    ...(review?{reviewNotes:async(input:Readonly<Record<string,unknown>>)=>review.call(brain,await withTexts(input))}:{}),
+  });
 }
 
 export class PromptRepository {
-  constructor(readonly control:pg.Pool,readonly runtime:RuntimeCall){}
+  constructor(readonly control:pg.Pool,readonly brain:Brain){}
   async get(principal:Reader) {
     admin(principal);
     const row=(await this.control.query('SELECT texts,revision FROM owner_prompts WHERE singleton')).rows[0];
-    const reported=object((await this.runtime('prompts.defaults',{})).defaults);
+    // Hermes also reports the texts of the services it runs today, such as the secret check (ADR-0234).
+    if(!this.brain.promptDefaults)throw new HttpError(409,brainErrors.unsupported);
+    const reported=await this.brain.promptDefaults();
     const defaults=Object.fromEntries(promptKeys.map(key=>[key,nochehTexts[key]??reported[key]]));
     if(Object.values(defaults).some(text=>typeof text!=='string'))throw new HttpError(502,'runtime_prompts_unavailable');
     return {revision:String(row?.revision??0),defaults,texts:await ownerPrompts(this.control),limit:PROMPT_LIMIT,placeholders:promptPlaceholders};

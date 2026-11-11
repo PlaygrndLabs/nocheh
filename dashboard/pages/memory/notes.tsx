@@ -63,7 +63,7 @@ export function Notes() {
   );
 
   if (profiles.error && !profiles.data)
-    return <LoadError what="chat profiles" onRetry={() => void refreshResources()} />;
+    return <LoadError what="chat profiles" error={profiles.error} onRetry={() => void refreshResources()} />;
   if (!profiles.data) return <LoadingRows rows={4} />;
   if (!list.length)
     return (
@@ -89,7 +89,9 @@ export function Notes() {
           ))}
         </Select>
       </Field>
-      {memory.error && <LoadError what="notes for this chat" onRetry={() => void refreshResources()} />}
+      {memory.error && (
+        <LoadError what="notes for this chat" error={memory.error} onRetry={() => void refreshResources()} />
+      )}
 
       <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
         <Card>
