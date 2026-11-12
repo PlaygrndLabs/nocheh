@@ -34,13 +34,11 @@ and C and A.
 
 - The review fragments it sends are stored guarded copies: the fragment texts of
   finished reviews whose guard mode was `on`. Jobs in guard mode `off` are skipped.
-- The owner's current notes (`MEMORY.md`, `USER.md`, which also fill the memory evidence
-  block) go to the provider as stored. Hermes writes them through the stores' context
-  preparation, so with the guard on they are stored as guarded copies; step 3 stops when
-  the guard is not on. The owner's own prompt texts are not sent: every run uses the
-  default prompts (step 6), the same in every arm.
+- Every run starts with empty notes (`MEMORY.md`, `USER.md`, step 5), and the owner's
+  own prompt texts are not sent: every run uses the default prompts (step 6), the same
+  in every arm.
 - It writes nothing to the live stack. The databases are read once with read-only
-  SELECTs, and the owner's profile files are copied. The replay container joins no
+  SELECTs, and the owner's profile settings are copied. The replay container joins no
   Nocheh network and mounts no live folder. Its inputs are mounted read-only; only its
   output folder is writable.
 - Every run works on a copy of the profile template in the container's `/profile`
@@ -124,12 +122,14 @@ that wait, or a 200 answer whose usage the relay could not read.
 Differences from live, by design:
 
 - No secret check or context preparation runs. The guarded fragments pass unchanged,
-  and so do the owner's current notes, which live pass the stores'
-  preparation and the broker's guard on every request (a note written while the guard
-  was off is stored unchecked). The model's own output is not masked.
+  and the model's own output is not masked.
 - Every run uses the default prompt texts; live, a review uses any the owner replaced.
-- Every run starts from the same template: the owner's current notes, less the entries
-  citing the source, not the notes the original review saw.
+- Every run starts with empty notes, as a profile does at the start of each guard epoch
+  (Hermes native notes stay in the earlier epoch's profile, ADR-0163); live, notes grow
+  within an epoch. A full template would push every arm into batches that also replace or
+  remove entries, which Hermes stages for approval instead of applying (and which use up
+  the review's input budget), hiding the decision this replay measures: whether a review
+  saves anything.
 - Live, a turn container's `/profile` is temporary apart from its mounted folders, so
   removes Hermes stages for approval vanish when the turn ends. The replay counts them.
 - The review's chat and user are a synthetic owner ID; no request carries them.
@@ -235,15 +235,16 @@ On the development machine that holds the live installation and its image. Place
    rm -r "$REPLAY/work/export"
    ```
 
-5. Copy the owner's current assistant profile into the template: the profile whose
-   `reviews/` holds the newest job's receipt (if none does, the owner's newest profile
-   folder), and the global preferences beside the profiles. A review loads neither the
-   role (`SOUL.md`) nor skills.
+5. Copy the settings of the owner's current assistant profile into the template: the
+   profile whose `reviews/` holds the newest job's receipt (if none does, the owner's
+   newest profile folder), and the global preferences beside the profiles. The notes
+   start empty, as at the start of a guard epoch. A review loads neither the role
+   (`SOUL.md`) nor skills.
 
    ```sh
    PROFILE=$(dirname "$(dirname "$(ls -d <state>/hermes/profiles/*/reviews/"$NEWEST")")")
    cp "$PROFILE/config.yaml" "$REPLAY/work/in/template/"
-   cp "$PROFILE/memories/MEMORY.md" "$PROFILE/memories/USER.md" "$REPLAY/work/in/template/memories/"
+   : > "$REPLAY/work/in/template/memories/MEMORY.md"; : > "$REPLAY/work/in/template/memories/USER.md"
    [ -f <state>/hermes/nocheh-policy.yaml ] && cp <state>/hermes/nocheh-policy.yaml "$REPLAY/work/in/template/"
    ```
 
@@ -288,10 +289,12 @@ On the development machine that holds the live installation and its image. Place
     replay --out /out/smoke --smoke --budget-dollars 2
     ```
 
-    Expect three runs in state `done`: arm A's calls on `chat`, B's and C's on
-    `messages`, all with status 200, the first naming `memory` when the model wrote a note,
-    `GET .../models 403` lines, no `/v1/guard 403` line, and `C thinking sent:
-    between_tools`. Anything else is a reason to stop and look. Note the `spent:` line.
+    Expect three runs in state `done`, or `failed` with cause `pending_tool_result` when
+    the review's input budget stopped it right after a tool call (live records that as
+    `empty_answer`); arm A's calls on `chat`, B's and C's on `messages`, all with status
+    200, a call naming `memory` when the model asked to write a note, `GET .../models
+    403` lines, no `/v1/guard 403` line, and `C thinking sent: between_tools`. Anything
+    else is a reason to stop and look. Note the `spent:` line.
 
 10. Full run, two repeats per source and arm by default. `--budget-dollars` applies to
     one `--out` folder, so give it what the smoke run left of the approved total: 15

@@ -439,8 +439,10 @@ def replay(args):
             append(results, record)
             spent += record['cost']
             costs.append(record['cost'] + late)
-            print(f"{record['run_id']} {record['source']} {record['kind']:>3} {arm} {record['state']} calls={record['hermes_calls']} "
-                  f"relay={record['calls']} notes_changed={record['notes_changed']} ${record['cost']:.4f} total ${spent:.2f}", flush=True)
+            why = '' if record['state'] == 'done' else f" ({record['failure_reason'] or '-'}:{record['failure_cause'] or '-'})"
+            print(f"{record['run_id']} {record['source']} {record['kind']:>3} {arm} {record['state']}{why} calls={record['hermes_calls']} "
+                  f"relay={record['calls']} notes_changed={record['notes_changed']} staged={record['staged']} ${record['cost']:.4f} "
+                  f"total ${spent:.2f}", flush=True)
             if args.smoke:
                 for call in record['call_detail']:
                     print(f"   {call.get('route') or call.get('method', '') + ' ' + call.get('path', '')} {call.get('status')} "
