@@ -35,9 +35,19 @@ export function learnedOrganization(organization:Record<string,unknown>):Organiz
  return parseKnowledgeProposal({...organization,creates,assignments:kept,kind:'organization',
   reason:organization.reason??'Organize the permitted conversation evidence.'}) as OrganizationProposal;
 }
-/** A space a proposal may share from or into, or assign to a project: a group or topic only (ADR-0242). */
-const shareable=(value:unknown,code:string):string=>{const space=validateSpace(value);if(!groupSpace(space))throw new HttpError(400,code);return space;};
-export function parseKnowledgeProposal(input:unknown):KnowledgeProposal {
+/** The private chats a proposal would share from or into, or put in a project; only a group or topic may be (ADR-0242). */
+export function proposalPrivateChats(value:KnowledgeProposal):string[] {
+ const named=value.kind==='organization'?value.assignments.map(a=>a.space_id):value.kind==='project_assignment'?(value.payload.mode==='assigned'?[value.payload.space_id]:[]):
+  value.kind==='sharing_rule'?[...value.payload.sources,value.payload.destination]:value.kind==='fact_grant'?[value.payload.destination]:[];
+ return [...new Set(named.filter((space:string)=>!groupSpace(space)))].sort();
+}
+/**
+ * A proposal the agent makes, or one already saved. A new one never names a private chat where it would share from or
+ * into, or put in a project (ADR-0242). A saved one (`stored`) is read as it was saved, so a proposal from before that
+ * rule still lists and opens, and the owner can cancel it; applying it parses it as new and so is refused.
+ */
+export function parseKnowledgeProposal(input:unknown,options:{stored?:boolean}={}):KnowledgeProposal {
+ const shareable=(value:unknown,code:string):string=>{const space=validateSpace(value);if(!options.stored&&!groupSpace(space))throw new HttpError(400,code);return space;};
  const head=object(input);
  if(head.kind==='organization') {
   const row=knowledgeObject(input,['kind','reason','creates','assignments']);

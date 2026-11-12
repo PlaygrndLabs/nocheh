@@ -8,7 +8,7 @@ import {AllowedActions} from './actions';
 import {MemoryCard} from './memory';
 import {WhoCanTalk} from './people';
 import {NochehHere} from './presence';
-import {ProjectCard} from './project';
+import {PrivateChatProject, ProjectCard} from './project';
 import {RoleAndSkills} from './role-skills';
 import {chatHref, useChat, useChats, type Telegram} from './shared';
 import {ToolSwitches} from './tools';
@@ -132,11 +132,7 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       {groupSpace(space) ? (
         <ProjectCard chat={chat} />
       ) : (
-        <p className="px-1 text-[13px] text-muted">
-          {owner || (!!parentId && parentId === telegram.owner)
-            ? 'Your private chat never joins a project.'
-            : 'A private chat never joins a project.'}
-        </p>
+        <PrivateChatProject chat={chat} yours={owner || (!!parentId && parentId === telegram.owner)} />
       )}
       {forum && <TopicsCard group={chat} topics={topics} />}
     </div>

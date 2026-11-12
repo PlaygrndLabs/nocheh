@@ -229,6 +229,18 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    for(const scope of ['123','123/topic/5','desktop:personal_chat:9'])
     await assert.rejects(s.knowledge.saveDelegation(owner,{name:'Private organization',enabled:true,scopes:[group,scope],project_ids:[],allow_create:true,
      expires_at:null,expected_revision:0,operation_id:key+':private-delegation:'+scope}),{code:'organization_private_chat'},scope);
+   // One saved earlier over a private chat never acts on it, and can be turned off as it is, but not turned on again.
+   const olderDelegation=await s.knowledge.saveDelegation(owner,{name:'Older organization',enabled:true,scopes:[other],project_ids:[],allow_create:true,
+    expires_at:null,expected_revision:0,operation_id:key+':older-delegation'});
+   await stores.control.query(`UPDATE organization_delegations SET scopes=jsonb_build_array('123',$2::text),baselines=baselines||'{"123":0}'::jsonb WHERE id=$1`,[olderDelegation.id,other]);
+   const privateOrganization=await capture('123');
+   assert.equal(await match({kind:'organization',reason:'Synthetic',creates:[{key:'p',name:key+':private-project',description:'',evidence_ids:[privateOrganization.id]}],assignments:[]},
+    privateOrganization,'123'),null,'an older delegation never organizes from a private chat');
+   const olderBody={id:olderDelegation.id,name:'Older organization',scopes:['123',other],project_ids:[],allow_create:true,expires_at:null,expected_revision:olderDelegation.revision};
+   assert.equal((await s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,operation_id:key+':older-delegation-off'})).enabled,false);
+   await assert.rejects(s.knowledge.saveDelegation(owner,{...olderBody,enabled:true,expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-on'}),{code:'organization_private_chat'});
+   await assert.rejects(s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,scopes:['123','124',other],expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-more'}),{code:'organization_private_chat'});
+   await s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,scopes:[other],expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-fixed'});
 
    // A card that shares a fact from the owner's private chat names that chat, and applies once the owner approves it.
    knowledge.completed=async()=> 'ready';
@@ -245,6 +257,22 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    await s.knowledge.decide(owner,grantId,{decision:'approve',expected_revision:grantCard.revision,operation_id:key+':approve-private-grant'});
    assert.equal((await s.knowledge.process('proposal:'+grantId)).state,'applied');
    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM memory_fact_grants WHERE fact_id=$1 AND destination=$2 AND state='active'",[fact.id,group])).rows[0].n,1);
+
+   // A proposal saved before private chats were refused still lists and opens, marked, and the owner can cancel it; it never applies.
+   const older=async(label:string,value:any)=>{const binding=await s.guards.state(),id=digest(key+':older:'+label);
+    await knowledge.persist(id,value,{origin:'turn',source:privateSource,space:'123',profile:'hermes',job:null,binding,dependencies:await knowledge.snapshot(owner,[privateSource.id],binding)});return id;};
+   const assignOwner=await older('assign',{kind:'project_assignment',reason:'Synthetic: put my chat in the project',payload:{space_id:'123',project_id:factProject.id,mode:'assigned',expected_revision:0}});
+   const shareOwner=await older('rule',{kind:'sharing_rule',reason:'Synthetic: share my chat',payload:{name:'Synthetic older rule',sources:['123',other],destination:group,enabled:true,mode:'approved',instructions:'',expected_revision:0}});
+   const listed=(await s.knowledge.proposals(owner)).proposals.filter((row:any)=>[assignOwner,shareOwner].includes(row.id));
+   assert.deepEqual(listed.map((row:any)=>row.private_chats).sort(),[['123'],['123']],'one older proposal never breaks the whole list');
+   assert.deepEqual((await s.knowledge.proposal(owner,assignOwner)).private_chats,['123']);
+   assert.deepEqual(((await s.supervision.decision(owner,'knowledge',assignOwner)).detail as any).private_chats,['123'],'its card still opens');
+   const assignCard=await s.knowledge.proposal(owner,assignOwner);
+   await assert.rejects(s.knowledge.decide(owner,assignOwner,{decision:'approve',expected_revision:assignCard.revision,operation_id:key+':approve-older'}),{code:'project_private_chat'});
+   assert.equal((await s.knowledge.decide(owner,assignOwner,{decision:'reject',expected_revision:assignCard.revision,operation_id:key+':reject-older'})).state,'cancelled');
+   await stores.control.query('UPDATE knowledge_proposals SET approved=true,state=$2 WHERE id=$1',[shareOwner,'queued']);
+   assert.deepEqual(await s.knowledge.process('proposal:'+shareOwner),{state:'failed',revision:2,reason:'sharing_private_chat'},'applying re-checks it as new');
+   assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM sharing_rules WHERE name=$1',['Synthetic older rule'])).rows[0].n,0);
    knowledge.completed=completed;
   } finally {knowledge.completed=completed;await stores.close();}
  });

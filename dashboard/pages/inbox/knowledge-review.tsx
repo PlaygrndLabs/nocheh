@@ -34,6 +34,8 @@ export type Proposal = {
     confirm_required: boolean;
     readers: {space: string; group: string | null} | null;
   } | null;
+  /** Private chats a proposal saved before they were refused still names; it never applies (ADR-0242). */
+  private_chats?: string[];
 };
 
 const titles: Record<string, string> = {
@@ -106,6 +108,7 @@ export function KnowledgeReview({
   const destination = typeof content.payload?.destination === 'string' ? content.payload.destination : null;
   // While a group's topics share memory, a fact shared into a topic reaches all of its group.
   const seers = destination && topicMemory === 'group' ? (parentOf(destination) ?? destination) : destination;
+  const privateChats = proposal.private_chats ?? [];
   const controls = knowledgeDecisionControls(proposal.state, {
     unavailable: review.unavailable,
     changed: review.changed,
@@ -155,7 +158,7 @@ export function KnowledgeReview({
         <Button
           variant="primary"
           busy={command.busy === 'approve'}
-          disabled={!controls.approve}
+          disabled={!controls.approve || privateChats.length > 0}
           onClick={() => void decide('approve', 'Approved. It applies in a moment.')}
         >
           Approve
@@ -230,6 +233,15 @@ export function KnowledgeReview({
       {review.stale && proposal.state === 'review' && (
         <Notice tone="warn" title="Can’t be approved any more">
           Something it depends on changed. You can still reject it.
+        </Notice>
+      )}
+      {privateChats.length > 0 && (
+        <Notice tone="warn" title="Names a private chat. Nocheh won’t apply it.">
+          Private chats never share, get shared with or join a project, so this leaves out{' '}
+          {privateChats.map(space => chat(space)).join(', ')}.{' '}
+          {['review', 'queued', 'waiting', 'stale', 'failed'].includes(proposal.state)
+            ? 'Reject or dismiss it; Nocheh suggests a fresh one if still needed.'
+            : 'It was made before private chats were left out.'}
         </Notice>
       )}
       {sharing.length > 0 && (

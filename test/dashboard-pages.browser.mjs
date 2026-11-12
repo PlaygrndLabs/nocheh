@@ -1168,6 +1168,9 @@ test('the owner’s private chat stays out of sharing rules and projects', async
   const {page: rules, problems} = await open('chats?view=rules');
   const legacy = rules.getByRole('listitem').filter({hasText: 'Notes from my chat'});
   await legacy.getByText('Reads a private chat. Nocheh skips it.').waitFor();
+  // That older rule can still be turned off as it is.
+  await legacy.getByRole('switch', {name: 'Turn off Notes from my chat'}).click();
+  await rules.getByRole('status').filter({hasText: 'Rule turned off.'}).waitFor();
   await rules.getByRole('button', {name: 'New rule'}).click();
   const dialog = rules.getByRole('dialog', {name: 'New sharing rule'});
   const from = dialog.getByRole('listbox', {name: 'Share facts from'});
@@ -1189,10 +1192,15 @@ test('the owner’s private chat stays out of sharing rules and projects', async
   assert.equal(await from.getByRole('button', {name: /Use the ID/}).count(), 0);
   await rules.close();
 
-  // The owner's chat page offers no project.
+  // The owner's chat page offers no project, and clears one an older setting still names.
   const {page: own, problems: ownProblems} = await open('chats?chat=42');
-  await own.getByText('Your private chat never joins a project.').waitFor();
+  const older = own.getByRole('status').filter({hasText: 'An older setting puts this chat in a project'});
+  await older.getByText('Nocheh ignores the setting that puts it in Aurora field guide.', {exact: false}).waitFor();
   assert.equal(await own.locator('#chat-project').count(), 0);
+  await own.getByRole('button', {name: 'Remove it'}).click();
+  await own.getByRole('status').filter({hasText: 'Removed from its project.'}).waitFor();
+  await own.getByText('Your private chat never joins a project.', {exact: true}).waitFor();
+  assert.equal(await own.getByRole('button', {name: 'Remove it'}).count(), 0);
   assert.deepEqual([...problems, ...ownProblems], []);
   await own.close();
 });

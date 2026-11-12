@@ -131,13 +131,14 @@ export class ProjectRepository {
   }
   async effective(space:string):Promise<{space:string;own_assignment:Assignment|null;assignment:Assignment|null;project:Project|null;inherited:boolean}> {
     validateSpace(space);const parent=parentSpace(space);
-    // A private chat is in no project, even through a row written before private chats were refused (ADR-0242).
-    if(!groupSpace(space))return {space,own_assignment:null,assignment:null,project:null,inherited:false};
     const {rows}=await this.control.query(`SELECT a.*,row_to_json(p) AS project FROM project_assignments a
       LEFT JOIN projects p ON p.id=a.project_id WHERE a.space_id=$1 OR a.space_id=$2`,[space,parent]);
     const own=rows.find(r=>r.space_id===space),inherited=!own||own.mode==='inherit';
-    const chosen=inherited?rows.find(r=>r.space_id===parent):own;
     const assignment=(row:any):Assignment=>({space_id:row.space_id,project_id:row.project_id,mode:row.mode,share_into:row.share_into,revision:row.revision});
+    // A private chat is in no project, even through a row written before private chats were refused. That row is
+    // still returned as its own, so the owner sees it and can clear it (ADR-0242).
+    if(!groupSpace(space))return {space,own_assignment:own?assignment(own):null,assignment:null,project:null,inherited:false};
+    const chosen=inherited?rows.find(r=>r.space_id===parent):own;
     return {space,own_assignment:own?assignment(own):null,assignment:chosen?assignment(chosen):null,project:chosen?.project??null,inherited:!!chosen&&inherited};
   }
   async list(principal:Reader,after='') {
@@ -158,14 +159,19 @@ export class SharingPolicyRepository {
     const operationId=string(body.operation_id,200),ruleId=body.id===undefined?digest('sharing:'+operationId):id(body.id);
     if(!Array.isArray(body.sources)||body.sources.length>100)throw new HttpError(400,'invalid_sharing_sources');
     const sources=[...new Set(body.sources.map(validateSpace))].sort(),destination=validateSpace(body.destination),expected=revision(body.expected_revision);
+    const privateSources=sources.filter(space=>!groupSpace(space)),privateDestination=!groupSpace(destination);
     // A rule never reads from or shares into a private chat, the owner's included (ADR-0242).
-    if(![...sources,destination].every(groupSpace))throw new HttpError(400,'sharing_private_chat');
+    if((privateSources.length||privateDestination)&&body.enabled!==false)throw new HttpError(400,'sharing_private_chat');
     if(sources.includes(destination)||typeof body.enabled!=='boolean'||!['approved','filtered'].includes(String(body.mode))||body.enabled&&!sources.length)
       throw new HttpError(400,'invalid_sharing_rule');
     const rule:SharingRule={id:ruleId,name:string(body.name,200),sources,destination,enabled:body.enabled,mode:body.mode as SharingRule['mode'],
       instructions:string(body.instructions??'',4000),revision:expected+1};
     return this.commands.run(principal,operationId,{kind:'sharing_rule',...rule,expected_revision:expected},async db=>{
-      const prior=(await db.query('SELECT revision,project_id FROM sharing_rules WHERE id=$1 FOR UPDATE',[ruleId])).rows[0];
+      const prior=(await db.query('SELECT revision,project_id,sources,destination FROM sharing_rules WHERE id=$1 FOR UPDATE',[ruleId])).rows[0];
+      // A rule saved earlier that still names a private chat can be turned off and kept off as it is, so the owner can
+      // stop it; it never gains a private chat, and turning it on needs them removed first.
+      if((privateSources.length||privateDestination)&&(!prior||privateSources.some(space=>!prior.sources.includes(space))||privateDestination&&prior.destination!==destination))
+        throw new HttpError(400,'sharing_private_chat');
       // A project's own rules change only from the project, and no owner rule takes an ID a project uses (ADR-0226).
       if(prior?.project_id||!prior&&(await db.query(projectRuleTaken,[ruleId,destination])).rowCount)throw new HttpError(409,'sharing_rule_project_managed');
       if((prior?.revision??0)!==expected)throw new HttpError(409,'sharing_revision_conflict');

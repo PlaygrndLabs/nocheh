@@ -2,6 +2,7 @@
 import {useState} from 'react';
 import {Button, Field, Input, Segmented, Switch, Textarea} from '../../ui/core';
 import {Dialog} from '../../ui/overlay';
+import {groupSpace} from '../../lib/chats-model';
 import {ChatPicker} from './chat-picker';
 import {ActionError, useAction} from './shared';
 
@@ -59,8 +60,11 @@ export function RuleDialog({
   presetDestination?: string;
 }) {
   const [name, setName] = useState(rule?.name ?? '');
-  const [sources, setSources] = useState<string[]>(rule?.sources ?? []);
-  const [destination, setDestination] = useState(rule?.destination ?? presetDestination ?? '');
+  // A rule saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
+  const [sources, setSources] = useState<string[]>((rule?.sources ?? []).filter(groupSpace));
+  const [destination, setDestination] = useState(
+    rule ? (groupSpace(rule.destination) ? rule.destination : '') : (presetDestination ?? ''),
+  );
   const [mode, setMode] = useState<Rule['mode']>(rule?.mode ?? 'approved');
   const [instructions, setInstructions] = useState(rule?.instructions ?? '');
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);

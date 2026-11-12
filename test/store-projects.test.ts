@@ -81,6 +81,15 @@ test('an owner rule never reads from or shares into a private chat, and an older
     for(;;){const page=await sharing.list(owner,after);for(const row of page.rules)listed.set(row.id,row);if(!page.next)break;after=page.next;}
     assert.deepEqual(listed.get(older).private_sources,[privateChat],'the rules list names the private chat Nocheh skips');
     assert.deepEqual(listed.get(into).private_sources,[privateChat]);
+    // Such a rule can be turned off as it is, but never turned on or given another private chat while it names one.
+    const saved=(id:string)=>({...rule,id,name:listed.get(id).name,sources:listed.get(id).sources,destination:listed.get(id).destination,expected_revision:1});
+    assert.equal((await sharing.save(owner,{...saved(older),enabled:false,operation_id:key+':older-off'})).enabled,false,'an older rule can be turned off');
+    assert.equal((await sharing.save(owner,{...saved(into),enabled:false,operation_id:key+':into-off'})).enabled,false,'one into a private chat too');
+    await assert.rejects(sharing.save(owner,{...saved(older),expected_revision:2,operation_id:key+':older-on'}),{code:'sharing_private_chat'},'it is never turned on again');
+    await assert.rejects(sharing.save(owner,{...saved(older),enabled:false,sources:[group,privateChat,privateChat+'1'],expected_revision:2,operation_id:key+':older-more'}),{code:'sharing_private_chat'});
+    await assert.rejects(sharing.save(owner,{...saved(into),enabled:false,destination:privateChat+'1',expected_revision:2,operation_id:key+':into-other'}),{code:'sharing_private_chat'});
+    await assert.rejects(sharing.save(owner,{...rule,enabled:false,sources:[group],destination:privateChat,operation_id:key+':new-off'}),{code:'sharing_private_chat'},'a new rule, even off, never names one');
+    assert.deepEqual((await sharing.save(owner,{...saved(older),sources:[group],expected_revision:2,operation_id:key+':older-fixed'})).sources,[group],'with the private chat removed it turns on');
 
     const project=await projects.save(owner,{name:'Synthetic project',description:'',state:'active',expected_revision:0,operation_id:key+':project'});
     for(const space of [privateChat,privateChat+'/topic/5','desktop:personal_chat:9'])
@@ -88,7 +97,10 @@ test('an owner rule never reads from or shares into a private chat, and an older
     assert.equal((await projects.assign(owner,{space_id:privateChat,mode:'none',expected_revision:0,operation_id:key+':none'})).mode,'none','a private chat may be kept out');
     await stores.control.query("UPDATE project_assignments SET project_id=$2,mode='assigned' WHERE space_id=$1",[privateChat,project.id]);
     const effective=await projects.effective(privateChat);
-    assert.deepEqual([effective.project,effective.assignment,effective.own_assignment],[null,null,null],'an older row puts a private chat in no project');
+    assert.deepEqual([effective.project,effective.assignment],[null,null],'an older row puts a private chat in no project');
+    assert.deepEqual([effective.own_assignment?.mode,effective.own_assignment?.project_id],['assigned',project.id],'the row is shown, so the owner can clear it');
+    await projects.assign(owner,{space_id:privateChat,mode:'none',expected_revision:effective.own_assignment!.revision,operation_id:key+':clear'});
+    assert.equal((await projects.effective(privateChat)).own_assignment?.mode,'none');
   } finally {await stores.close();}
 });
 
