@@ -120,14 +120,33 @@ j=$1 m=~/.nocheh/jobs u=$(id -un) proc=
 # Linux one that wrote over it) shows none. Its text never spells out a tag it looks for, which it would then find in its
 # own command line.
 # Without /proc: the words of process $1's environment, one per line, which `ps -E` prints after its command line (none
-# where the environment cannot be read); fails where ps answers otherwise.
+# where the environment cannot be read); fails where ps answers otherwise. (It cuts by length: a pattern would take time
+# that grows with the square of a long command line.)
 vars() {
   local a b
-  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "${b#"$a"}" != "$b" ] || return 1
-  printf '%s\n' "${b#"$a"}" | tr ' ' '\n'
+  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "${b:0:${#a}}" = "$a" ] || return 1
+  printf '%s\n' "${b:${#a}}" | tr ' ' '\n'
 }
-has() { vars "$1" | grep -qxF -- "$2"; }
-shows() { local v; v=$(vars "$1") && printf '%s\n' "$v" | grep -q '^[A-Za-z_][A-Za-z0-9_]*=' && ! printf '%s\n' "$v" | grep -qxF -- "$2"; }
+# Whether process $1 carries tag $2 (0), only names it in its command line (1), or neither (2). ps takes as many words
+# for the command line as the program had arguments, so where a program wrote a longer name over them (Node's
+# process.title), the start of its environment shows in the command line: where the first word is not the program's
+# name, the tag counts anywhere.
+has() {
+  local a b w c
+  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") || return 2
+  printf '%s\n' "$b" | tr ' ' '\n' | grep -qxF -- "$2" || return 2
+  if [ "${b:0:${#a}}" = "$a" ]; then printf '%s\n' "${b:${#a}}" | tr ' ' '\n' | grep -qxF -- "$2" && return 0; fi
+  w=$(printf '%s\n' "$a" | awk 'NR==1 {print $1}') && c=$(ps -o ucomm= -p "$1" | awk 'NR==1 {sub(/[ \t]+$/, ""); print}') || return 2
+  w=${w#-}; w=${w##*/}
+  [ -n "$c" ] && [ "${w:0:${#c}}" = "$c" ] && return 1
+  return 0
+}
+# Whether process $1 shows its own environment, without tag $2 anywhere in what ps -E prints.
+shows() {
+  local v
+  v=$(vars "$1") && printf '%s\n' "$v" | grep -q '^[A-Za-z_][A-Za-z0-9_]*=' || return 1
+  ! ps -E -ww -o command= -p "$1" | tr ' ' '\n' | grep -qxF -- "$2"
+}
 hits() {
   local tag=$1 file=$2 e d p f v w rest dirs all table= marked= tagged= plain=
   if [ -n "$proc" ]; then
@@ -153,12 +172,10 @@ hits() {
     table=$(ps -x -U "$u" -o pid= -o ppid= -o stat=) && [ -n "$table" ] || return 1
     table=$(printf '%s\n' "$table" | awk '$3 !~ /^Z/ {print $1, $2}')
     # ps -E prints each command line, which may span lines, then the environment: each process that shows the tag is
-    # checked on its own, and where the tag is in neither its environment nor its command line, which only names it, the
-    # line was another's: then every process is.
+    # checked on its own, and where one shows it nowhere, the line was another's: then every process is.
     all=
     for p in $(ps -E -ww -x -U "$u" -o pid= -o command= | awk -v t="$tag" '$1 ~ /^[0-9]+$/ {p=$1} {for (i=1; i<=NF; i++) if ($i==t) {print p; next}}'); do
-      if has "$p" "$tag"; then tagged="$tagged $p"
-      elif ! ps -E -ww -o command= -p "$p" | tr ' ' '\n' | grep -qxF -- "$tag"; then all=1; fi
+      has "$p" "$tag"; case $? in 0) tagged="$tagged $p";; 2) all=1;; esac
     done
     if [ -n "$all" ]; then for p in $(printf '%s\n' "$table" | awk '{print $1}'); do ! has "$p" "$tag" || tagged="$tagged $p"; done; fi
     # Only the programs above one with the tag, up to the marker's holders and what they started, matter: each is asked

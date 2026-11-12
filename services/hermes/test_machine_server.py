@@ -464,7 +464,10 @@ class MachineServerTests(unittest.TestCase):
         # span lines, then its environment, and shows none for the system's own programs (here: sleep and a sh in sys);
         # BWK awk where it is installed, which refuses a newline in -v. A program with the tag counts also under such a
         # system program left to init by a launcher that closed what it inherited, but not under the owner's program that
-        # shows its environment; the owner's program that only names the tag in its command line is not the job's.
+        # shows its environment; the owner's program that only names the tag in its command line is not the job's, but a
+        # program whose command line starts with a name other than its own and shows the tag there is (as ps shows a
+        # program that wrote a longer name over its arguments, with the start of its environment). Where such a name
+        # starts with the program's own, the program is not found, but it never hides one with the tag that it started.
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
         mine=None
         check='[ -r /proc/$$/stat ]';self.assertEqual(ms.CLEANUP.count(check),1)
@@ -474,6 +477,7 @@ class MachineServerTests(unittest.TestCase):
             ps.write_text('#!/bin/bash\n'
                           'shown() { case $(readlink /proc/$1/exe) in *sleep|*/sys/sh) ;; *) tr \'\\0\' \' \' </proc/$1/environ;; esac; }\n'
                           'case " $* " in\n'
+                          '  *" ucomm= "*) for p; do :; done; [ -r /proc/$p/comm ] || exit 1; printf \'%-16s\\n\' "$(cat /proc/$p/comm)";;\n'
                           '  *" -p "*) for p; do :; done; [ -r /proc/$p/environ ] || exit 1; c=$(tr \'\\0\' \' \' </proc/$p/cmdline); v=\n'
                           '    case " $* " in *" -E "*) v=$(shown $p);; esac; if [ -n "$v" ]; then printf \'%s %s\\n\' "$c" "$v"; else printf \'%s\\n\' "$c"; fi;;\n'
                           '  *" -E "*) for e in /proc/[0-9]*; do [ -O $e ] && printf \'%6s %s %s\\n\' ${e#/proc/} "$(tr \'\\0\' \' \' <$e/cmdline)" "$(shown ${e#/proc/})"; done;;\n'
@@ -491,15 +495,24 @@ class MachineServerTests(unittest.TestCase):
             job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'sleep 600; :' 'one\n2 two'")]
             launcher=self.launch(JOB,folder,'launcher',f'{sys.executable} -c \'import subprocess; subprocess.Popen(["{here}/sys/sh", "-c", '
                                  f'"echo $$ > {folder}/syssh; tail -f /dev/null & echo $! > {folder}/systail; wait"])\'')
+            sleeper=f'-c "import time; time.sleep(600)" {ms.TAG}={JOB}'
+            job.append(self.launch(None,folder,'renamed',f"bash -c 'exec -a job-api-server {sys.executable} {sleeper}'",tag=False))
+            (here/'worker.py').write_text('import os,subprocess,sys,time\n'
+                                          "p=subprocess.Popen(['tail','-f','/dev/null'],env={**os.environ,sys.argv[1].split('=')[0]:sys.argv[1].split('=')[1]},"
+                                          'stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n'
+                                          "open(sys.argv[2],'w').write(str(p.pid));time.sleep(600)\n")
+            prefixed=self.launch(None,folder,'prefixed',f"bash -c 'exec -a {Path(sys.executable).name[:15]}-server {sys.executable} {here}/worker.py "
+                                 f"{ms.TAG}={JOB} {folder}/worker'",tag=False)
             (here/'names.sh').write_text(f"sh -c 'tail -f /dev/null & echo $! > {folder}/namedchild; wait; : {ms.TAG}={JOB}' & echo $! > {folder}/named; wait\n")
             others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
                     self.launch(None,folder,'manager',f'sh -c \'{ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/managed; wait\' sh {JOB}',tag=False),
-                    self.launch(None,folder,'names',f'{here}/sys/sh {here}/names.sh',tag=False)]
+                    self.launch(None,folder,'names',f'{here}/sys/sh {here}/names.sh',tag=False),
+                    self.launch(None,folder,'named-py',f'{sys.executable} {sleeper}',tag=False)]
             try:
                 deadline=time.monotonic()+5
-                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild')) and time.monotonic()<deadline:time.sleep(.05)
+                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild','worker')) and time.monotonic()<deadline:time.sleep(.05)
                 while alive(launcher) and time.monotonic()<deadline:time.sleep(.05)
-                job+=[int((here/'syssh').read_text()),int((here/'systail').read_text())]
+                job+=[int((here/name).read_text()) for name in ('syssh','systail','worker')]
                 others+=[int((here/name).read_text()) for name in ('managed','named','namedchild')]
                 self.assertFalse(alive(launcher))
                 self.assertEqual(self.cleanup_here(script,path),0)
@@ -511,7 +524,7 @@ class MachineServerTests(unittest.TestCase):
                 self.assertEqual(self.cleanup_here(script,path),3);self.assertTrue(alive(mine))
                 lsof.unlink();ps.write_text('#!/bin/sh\nexit 0\n')
                 self.assertEqual(self.cleanup_here(script,path),3);self.assertTrue(alive(mine))
-            finally:self.ended([*job,*others,mine])
+            finally:self.ended([*job,*others,mine,prefixed])
 
     def test_cleanups_of_one_machine_run_one_at_a_time(self):
         # Cleanups of one machine run one at a time; those of two machines at once.
