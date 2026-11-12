@@ -131,7 +131,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The agent proposes knowledge changes; delegated project creation and chat assignment apply later, with receipts and inbox review ([0091](0091-bounded-agent-knowledge-organization.md)).
 - A project has its own role and skills; a chat's role wins, and skills stack ([0196](0196-projects-have-their-own-role-and-skills.md)).
 - A project's chats share what they know only when the owner ticks it on the project, through rules the project keeps; a chat can be left out, private chats never take part, and automatic organization never moves a chat into or out of such a project ([0226](0226-a-project-can-share-what-its-chats-know.md)); a private chat never joins any project ([0242](0242-private-chats-stay-out-of-group-sharing.md)).
-- A project's chat sees a task only as it is on that project's board, from when it joined, with the columns the owner shares; from the owner's private chat, a change those chats would see waits for a card that names them ([0243](0243-project-boards-get-the-private-side-only-through-a-card.md)).
+- A project's chat sees a task only as it is on that project's board, from when it joined, with the columns the owner shares; from the owner's private chat, a change those chats would see waits for a card that names them, and only the owner moves a chat into a project with tasks ([0243](0243-project-boards-get-the-private-side-only-through-a-card.md)).
 
 ### Imports
 

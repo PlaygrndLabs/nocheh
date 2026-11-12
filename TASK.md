@@ -29,9 +29,11 @@ else start build.", approving the Members design). One pull request in three par
   project's board, from when it joined, with only the columns the owner shares, and its edits
   keep what it cannot see; from the owner's private chat, a change those chats would see waits
   for a card that names them, and a move into a list from the dashboard or mini app names them
-  first ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
-  [store](test/store-tasks.test.ts), [columns](test/task-settings.test.ts),
-  [dashboard](test/dashboard-pages.browser.mjs)). By the recommended default, pending the
+  first. Only the owner moves a chat into a project with tasks: automatic organization waits
+  for review, and the review, "Add a chat" and a chat's project choice say the chat will see
+  and change the list ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
+  [store](test/store-tasks.test.ts), [organization](test/store-knowledge-management.test.ts),
+  [columns](test/task-settings.test.ts), [dashboard](test/dashboard-pages.browser.mjs)). By the recommended default, pending the
   owner's confirmation, a private-chat change to a listed task that only sets status,
   priority, start and due days and times, archive or trash, or takes it off every list,
   applies without a card; repeat and reminders wait for the card (fail closed), and the chat

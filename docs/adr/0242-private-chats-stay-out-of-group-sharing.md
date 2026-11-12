@@ -32,12 +32,17 @@ follow-up).
 </context>
 
 <decision>
-- `groupSpace(space)` in `src/spaces.ts`: only a group (a negative chat ID) or
-  one of its topics can share, be shared with, or join a project. Everything else
-  counts as private and fails closed: the owner's private chat and its topics,
-  any other private chat, `desktop:*` imports, `system` and an unknown
-  conversation. `groupChatId` is the shared group test. A later split between
-  the owner and members can change the helper without changing its callers.
+- `groupSpace(space)` in `src/spaces.ts`: only a group (a negative chat ID as
+  Telegram writes it, with no leading zero and at most 19 digits) or one of its
+  topics can share, be shared with, or join a project. Everything else counts as
+  private and fails closed: the owner's private chat and its topics, any other
+  private chat, `desktop:*` imports, `system`, an ID such as `-0123` that
+  Telegram never gives a group, and an unknown conversation. `groupChatId` is
+  the shared group test, and `groupSpaceSql` is the same test in SQL, used for
+  the chats that see a project's task list, so the chats a card names are the
+  chats that read the list. The dashboard and the reset check use the same
+  pattern. A later split between the owner and members can change the helper
+  without changing its callers.
 - Writes refuse a private chat:
   - an owner sharing rule with a private source or destination: 400
     `sharing_private_chat`;
@@ -117,7 +122,11 @@ follow-up).
   - memory access requests carry `source_spaces`, `audience` and
     `post_default`;
   - knowledge cards for `fact_grant` and `entity_correct` carry
-    `fact_audience`;
+    `fact_audience`. When it cannot be worked out, as in a passing outage, the
+    card carries `fact_audience_error` (`audience_unavailable`, or the code of
+    a fact that is gone) in its place, says it cannot be approved right now,
+    and offers only Reject until it can, so an approval never confirms a
+    source the owner did not see;
   - the People share form lists only groups and topics, and asks first, naming
     the private chat, before sharing a fact that came from one;
   - "Who will see it" names the whole group, also for a topic, because every
