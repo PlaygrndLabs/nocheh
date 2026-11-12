@@ -79,16 +79,14 @@ class ReviewBudgetTests(unittest.TestCase):
 
 
 class FullNotesReviewTests(unittest.TestCase):
-    def test_a_review_frees_room_in_full_notes_and_saves_the_new_note(self):
-        # Hermes holds a background review's patch or remove for a person's approval in the
-        # profile's pending folder. A review turn has no person to approve it, and that folder
-        # goes with the turn's container, so full notes would never take a new note. A real
-        # review, in its own process as in production, against a scripted local model server:
-        # the add is refused as over the limit, then sent again with a remove in one batch.
+    def review(self,steps,prompt_tokens):
+        """A real review, in its own process as in production, against a scripted local model
+        server on notes 2,172 of 2,200 characters full: each tool step sends the next memory
+        operations until one is applied, then a summary. Returns the result, what the memory
+        tool answered each step, the notes before and after, and the profile."""
         import os,subprocess,sys,threading
         from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
-        old=['Stale note %d: '%n+'x'*530 for n in range(4)];new='The owner moved the launch to Friday.'
-        add=[{'action':'add','content':new}];batch=[{'action':'remove','old_text':'Stale note 0:'},*add]
+        old=['Stale note %d: '%n+'x'*530 for n in range(4)];old[-1]=old[-1][:-13]
         results=[]
         class Model(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
@@ -97,11 +95,12 @@ class FullNotesReviewTests(unittest.TestCase):
             def do_GET(self):self.reply(json.dumps({'object':'list','data':[{'id':'synthetic','object':'model','context_length':128000}]}).encode())
             def do_POST(self):
                 payload=json.loads(self.rfile.read(int(self.headers.get('content-length',0))))
-                usage={'prompt_tokens':10,'completion_tokens':2,'total_tokens':12}
-                answers=[json.loads(m['content']) for m in payload.get('messages',[]) if m.get('role')=='tool']
+                usage={'prompt_tokens':prompt_tokens,'completion_tokens':2,'total_tokens':prompt_tokens+2}
+                # Hermes may add a note after a tool result's JSON, such as a tool loop warning.
+                answers=[json.JSONDecoder().raw_decode(m['content'])[0] for m in payload.get('messages',[]) if m.get('role')=='tool']
                 if payload.get('tools'):results[:]=answers
-                # First a lone add; after it is refused, the batch that frees room; then the summary.
-                operations=None if not payload.get('tools') or answers and answers[-1].get('success') else batch if answers else add
+                done=not payload.get('tools') or answers and answers[-1].get('success') or len(answers)>=len(steps)
+                operations=None if done else steps[len(answers)]
                 call=operations is not None
                 tool={'id':'call_%d'%len(answers),'type':'function','function':{'name':'memory','arguments':json.dumps({'target':'memory','operations':operations})}}
                 message={'role':'assistant','content':None,'tool_calls':[tool]} if call else {'role':'assistant','content':'Saved.'}
@@ -121,19 +120,42 @@ class FullNotesReviewTests(unittest.TestCase):
         server=ThreadingHTTPServer(('127.0.0.1',0),Model);threading.Thread(target=server.serve_forever,daemon=True).start()
         base='http://127.0.0.1:%d/v1'%server.server_address[1]
         try:
-            with tempfile.TemporaryDirectory() as folder:
-                profile=Path(folder)/'profile';(profile/'native-state').mkdir(parents=True);(profile/'memories').mkdir()
-                notes=profile/'memories'/'MEMORY.md';notes.write_text('\n§\n'.join(old))
-                body={'review':True,'review_id':'a'*64,'text':'The owner said the launch moved to Friday.','session_id':'review-'+'a'*64,
-                      'chat_id':'5','user_id':'5','owner':True,'memory_context':'evidence','prompts':{},'model':'synthetic','api_key':'synthetic',
-                      'base_url':base,'provider':'openai','api_mode':'chat_completions','archive_credential':'turn.synthetic'}
-                process=subprocess.run([sys.executable,'-c',child,base],input=json.dumps(body),cwd=Path(__file__).resolve().parents[2],
-                                       env={**os.environ,'HERMES_HOME':str(profile)},capture_output=True,text=True,timeout=240)
-                self.assertEqual(process.returncode,0,process.stderr[-2000:])
-                self.assertEqual(json.loads(process.stdout.strip().splitlines()[-1])['state'],'done')
-                self.assertEqual([r.get('success') for r in results],[False,True],results)
-                self.assertNotIn('staged',results[-1])
-                saved=notes.read_text()
-                self.assertIn(new,saved);self.assertNotIn('Stale note 0:',saved);self.assertIn('Stale note 3:',saved)
-                self.assertFalse((profile/'pending').exists(),'nothing is held for an approval no one can give')
+            folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup)
+            profile=Path(folder.name)/'profile';(profile/'native-state').mkdir(parents=True);(profile/'memories').mkdir()
+            notes=profile/'memories'/'MEMORY.md';notes.write_text('\n§\n'.join(old));before=notes.read_text()
+            body={'review':True,'review_id':'a'*64,'text':'The owner said the launch moved to Friday.','session_id':'review-'+'a'*64,
+                  'chat_id':'5','user_id':'5','owner':True,'memory_context':'evidence','prompts':{},'model':'synthetic','api_key':'synthetic',
+                  'base_url':base,'provider':'openai','api_mode':'chat_completions','archive_credential':'turn.synthetic'}
+            process=subprocess.run([sys.executable,'-c',child,base],input=json.dumps(body),cwd=Path(__file__).resolve().parents[2],
+                                   env={**os.environ,'HERMES_HOME':str(profile)},capture_output=True,text=True,timeout=240)
+            self.assertEqual(process.returncode,0,process.stderr[-2000:])
+            return json.loads(process.stdout.strip().splitlines()[-1]),results,before,notes.read_text(),profile
         finally:server.shutdown();server.server_close()
+
+    def test_a_review_frees_room_in_full_notes_and_saves_the_new_note(self):
+        # Hermes holds a background review's patch or remove for a person's approval in the
+        # profile's pending folder. A review turn has no person to approve it, and that folder
+        # goes with the turn's container, so full notes would never take a new note. The add is
+        # refused as over the limit, then sent again with a remove in one batch.
+        add=[{'action':'add','content':NEW}]
+        result,results,_,saved,profile=self.review([add,[{'action':'remove','old_text':'Stale note 0:'},*add]],10)
+        self.assertEqual(result['state'],'done')
+        self.assertEqual([r.get('success') for r in results],[False,True],results)
+        self.assertNotIn('staged',results[-1])
+        self.assertIn(NEW,saved);self.assertNotIn('Stale note 0:',saved);self.assertIn('Stale note 3:',saved)
+        self.assertFalse((profile/'pending').exists(),'nothing is held for an approval no one can give')
+
+    def test_a_refused_batch_on_full_notes_leaves_room_to_try_again(self):
+        # At a live-sized prompt per call, a review that needs a second try (here a patch whose
+        # old_text matches no note, which refuses its whole batch) still gets the call that
+        # saves the note and the summary after it, inside the review's input budget.
+        add=[{'action':'add','content':NEW}]
+        steps=[add,[{'action':'patch','old_text':'Stale entry 0','content':'S'},*add],[{'action':'remove','old_text':'Stale note 0:'},*add]]
+        result,results,before,saved,_=self.review(steps,9600)
+        self.assertEqual(result['state'],'done',result)
+        self.assertEqual(result['usage']['calls'],4)
+        self.assertEqual([r.get('success') for r in results],[False,False,True],results)
+        self.assertNotEqual(saved,before);self.assertIn(NEW,saved)
+
+
+NEW='The owner moved the launch to Friday.'
