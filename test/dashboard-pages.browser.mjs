@@ -1227,7 +1227,11 @@ test('a share from the private side names where it came from and who will see it
   await people.getByRole('status').filter({hasText: 'Aurora planning may now use this.'}).waitFor();
   // The correction editor says who can read the new wording.
   await card.getByRole('button', {name: 'Correct'}).click();
-  await card.getByText('Who can read the new wording: only you, plus chats you share it with.').waitFor();
+  await card
+    .getByText(
+      'Who can read the new wording: only you. Chats you shared it with pause until you approve the new wording.',
+    )
+    .waitFor();
   await people.close();
 
   // A suggestion names its source and its readers, posts once by default, and posts a lasting share only when ticked.
@@ -1238,6 +1242,11 @@ test('a share from the private side names where it came from and who will see it
   await drawer.getByRole('button', {name: 'Post it once in Aurora planning'}).waitFor();
   await drawer.getByText('Nocheh posts this exact wording there now.').waitFor();
   await drawer.getByRole('radio', {name: 'Until I revoke it'}).click();
+  await drawer
+    .getByText(
+      'Nocheh may use it when it answers in Aurora planning and all its topics, until you revoke it under Chats.',
+    )
+    .waitFor();
   assert.equal(await drawer.getByRole('checkbox', {name: 'Also post it in Aurora planning now'}).isChecked(), false);
   assert.deepEqual([...peopleProblems, ...inboxProblems], []);
   await inbox.close();

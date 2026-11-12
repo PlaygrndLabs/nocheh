@@ -4,7 +4,6 @@ import {Badge, Button, Details, Notice, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
 import {projectSharingWarning} from '../chats/rule-dialog';
-import {useResource} from '../../lib/resource';
 import {parentOf} from '../../lib/chats-model';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {stateLabel, useChatNames, useCommand} from './shared';
@@ -100,14 +99,10 @@ export function KnowledgeReview({
   const kind = String(content.kind ?? proposal.kind);
   const sharing = proposal.sharing_projects ?? [];
   const sharingProject = (id: string | null | undefined) => sharing.find(project => project.id === id);
-  const settings = useResource<{fields?: {key: string; value: unknown}[]}>('/settings');
-  const topicMemory = String(
-    settings.data?.fields?.find(field => field.key === 'TELEGRAM_TOPIC_MEMORY')?.value || 'group',
-  );
   const audience = proposal.fact_audience;
   const destination = typeof content.payload?.destination === 'string' ? content.payload.destination : null;
-  // While a group's topics share memory, a fact shared into a topic reaches all of its group.
-  const seers = destination && topicMemory === 'group' ? (parentOf(destination) ?? destination) : destination;
+  // Every member of a group can read all of its topics, so a share into a topic is seen by the whole group.
+  const seers = destination ? (parentOf(destination) ?? destination) : null;
   const privateChats = proposal.private_chats ?? [];
   const controls = knowledgeDecisionControls(proposal.state, {
     unavailable: review.unavailable,
@@ -328,7 +323,7 @@ export function KnowledgeReview({
             <Fact label="Who can read the new wording">
               {(audience.readers
                 ? 'Everyone in ' + chat(audience.readers.group ?? audience.readers.space)
-                : 'Only you') + ', plus chats you share it with'}
+                : 'Only you') + '. Any chat you shared it with pauses until you approve the new wording there.'}
             </Fact>
           )}
         </Facts>

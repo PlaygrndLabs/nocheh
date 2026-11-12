@@ -3,6 +3,7 @@
 import {useId, useState} from 'react';
 import {Badge, Button, Details, Field, Notice, Segmented, Technical, Textarea} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
+import {parentOf} from '../../lib/chats-model';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {fromNow, fullTime, stateLabel, useChatNames, useCommand} from './shared';
 
@@ -19,7 +20,7 @@ type Request = {
   provenance?: unknown;
   /** The chats the fact came from; null is a source Nocheh can no longer place. */
   source_spaces?: (string | null)[];
-  /** Who reads the shared wording: the destination, or every chat of its group when topics share memory. */
+  /** Where Nocheh may reuse a lasting share: the destination, or every chat of its group when topics share memory. */
   audience?: {space: string; group: string | null};
   /** Whether "Until I revoke it" also posts the wording now, unless the owner changes it. */
   post_default?: boolean;
@@ -44,7 +45,8 @@ export function MemoryAccessReview({
   const pending = request.state === 'pending';
   const locked = !!(review.changed || review.unavailable) || !!command.busy;
   const where = chat(request.destination);
-  const readers = chat(request.audience?.group ?? request.audience?.space ?? request.destination);
+  // Every member of a group can read all of its topics, so whatever is posted or answered there is seen by the whole group.
+  const readers = chat(parentOf(request.destination) ?? request.destination);
   const sources = request.source_spaces ?? [];
   const [label, tone] = stateLabel(request.state);
 
@@ -152,7 +154,9 @@ export function MemoryAccessReview({
             <p className="text-xs text-muted">
               {mode === 'one_time'
                 ? 'Nocheh posts this exact wording there now.'
-                : 'This chat can use it again until you revoke it under Chats.'}
+                : request.audience?.group
+                  ? `Nocheh may use it when it answers in ${chat(request.audience.group)} and all its topics, until you revoke it under Chats.`
+                  : `Nocheh may use it when it answers in ${where} only, until you revoke it under Chats.`}
             </p>
             {mode === 'persistent' && (
               <label className="flex cursor-pointer items-start gap-2.5 pt-1 text-[13px]">

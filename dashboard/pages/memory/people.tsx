@@ -61,6 +61,7 @@ type Grant = {
   revision: number;
   wording: string | null;
   expires_at: string | null;
+  suspended_reason?: string | null;
 };
 
 const attributionLabel: Record<string, string> = {
@@ -394,7 +395,7 @@ function ClaimItem({
           )}
         </div>
       )}
-      {mode === 'edit' && <ClaimEditor claim={claim} onDone={() => setMode('view')} />}
+      {mode === 'edit' && <ClaimEditor claim={claim} shared={grants.length > 0} onDone={() => setMode('view')} />}
       {mode === 'share' && <ShareForm claim={claim} onDone={() => setMode('view')} />}
       {grants.length > 0 && mode === 'view' && <GrantList grants={grants} />}
       {claim.revision > 1 && mode === 'view' && <ClaimHistory claim={claim} />}
@@ -467,17 +468,16 @@ type Audience = {
   readers: {space: string; group: string | null} | null;
 };
 
-/** The owner's ID and whether a group's topics share one memory, for naming who reads what. */
-function usePeopleSettings() {
+/** The owner's ID, for naming their own chat. */
+function useOwnerId() {
   const settings = useResource<{fields?: {key: string; value: unknown}[]}>('/settings');
-  const value = (key: string) => String(settings.data?.fields?.find(field => field.key === key)?.value ?? '');
-  return {owner: value('TELEGRAM_OWNER_ID'), topicMemory: value('TELEGRAM_TOPIC_MEMORY') || 'group'};
+  return String(settings.data?.fields?.find(field => field.key === 'TELEGRAM_OWNER_ID')?.value ?? '');
 }
 
 /** Plain names for the chats a fact came from, with the owner's own chat as "your private chat". */
 function useSourceNames() {
   const chats = useChats();
-  const {owner} = usePeopleSettings();
+  const owner = useOwnerId();
   return (spaces: (string | null)[]) =>
     spaces
       .map(space =>
@@ -490,7 +490,7 @@ function useSourceNames() {
       .join(', ');
 }
 
-function ClaimEditor({claim, onDone}: {claim: Claim; onDone: () => void}) {
+function ClaimEditor({claim, shared, onDone}: {claim: Claim; shared: boolean; onDone: () => void}) {
   const feedback = useFeedback();
   const command = useCommand();
   const [content, setContent] = useState(claim.content);
@@ -545,9 +545,10 @@ function ClaimEditor({claim, onDone}: {claim: Claim; onDone: () => void}) {
       </Field>
       {audience.data && (
         <p className="text-xs text-muted">
-          Who can read the new wording:{' '}
-          {readers ? 'everyone in ' + chats.name(readers.group ?? readers.space) : 'only you'}, plus chats you share it
-          with.
+          {'Who can read the new wording: ' +
+            (readers ? 'everyone in ' + chats.name(readers.group ?? readers.space) : 'only you') +
+            '.'}
+          {shared && ' Chats you shared it with pause until you approve the new wording.'}
         </p>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
@@ -619,13 +620,12 @@ function ShareForm({claim, onDone}: {claim: Claim; onDone: () => void}) {
   const [length, setLength] = useState<'always' | 'until'>('always');
   const [until, setUntil] = useState('');
   const audience = useResource<Audience>('/entities/claims/' + claim.id + '/audience');
-  const {topicMemory} = usePeopleSettings();
   const sourceNames = useSourceNames();
   const id = 'share-' + claim.id.slice(0, 8);
   const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
-  // Only a group or topic can be shared into. While a group's topics share memory, all of the group reads it.
+  // Only a group or topic can be shared into. Every member of a group can read all of its topics, so the whole group sees it.
   const groups = chats.items.filter(chat => groupSpace(chat.space_id));
-  const seers = destination ? (topicMemory === 'group' ? (parentOf(destination) ?? destination) : destination) : '';
+  const seers = destination ? (parentOf(destination) ?? destination) : '';
   const confirm = !!audience.data?.confirm_required;
   return (
     <form
@@ -742,7 +742,9 @@ function GrantList({grants}: {grants: Grant[]}) {
               {chats.name(grant.destination)}
               <span className="text-muted">
                 {grant.state === 'suspended'
-                  ? ' · paused until you approve the new wording'
+                  ? grant.suspended_reason === 'private_evidence_unconfirmed'
+                    ? ' · paused: it came from a private chat, share it again to confirm'
+                    : ' · paused until you approve the new wording'
                   : grant.expires_at
                     ? ' · until ' + new Date(grant.expires_at).toLocaleDateString()
                     : ' · until you stop it'}

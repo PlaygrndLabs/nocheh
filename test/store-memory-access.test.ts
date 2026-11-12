@@ -56,6 +56,18 @@ test('fact grants authorize exact destinations while relationships only create r
     policy.topic_memory='topic';
     assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources.length,0,'separate topics keep their own boundary');
     delete policy.topic_memory;
+    // A grant on a private source made without the owner's confirm, as before it existed, pauses until they share it again.
+    const olderFact=await services.entities.publishClaim({subject_id:projectEntity.id,predicate:'budget',content:'Apollo budget review is done.',attribution:'reported',uncertainty:'supported',evidence:[privateSource]},await services.guards.state(),key+':older-grant-fact');
+    const placed=services.access.space;services.access.space=async()=>otherGroup;let olderGrants:{id:string}[];
+    try {olderGrants=[await services.memoryAccess.grant(owner,{fact_id:olderFact.id,fact_revision:olderFact.revision,destination:group,operation_id:key+':older-grant'}),
+      await services.memoryAccess.grant(owner,{fact_id:olderFact.id,fact_revision:olderFact.revision,destination:otherGroup,operation_id:key+':older-grant-other'})];
+    }finally{services.access.space=placed;}
+    actor=await principal(groupSource);
+    assert.equal((await services.memoryAccess.context(actor,'Apollo budget review done')).sources.length,0,'never served without the confirm');
+    const paused=await find('grants',olderGrants[0]!.id);assert.deepEqual([paused.state,paused.suspended_reason],['suspended','private_evidence_unconfirmed']);
+    const listed=(await services.memoryAccess.grants(owner,'',otherGroup)).grants.find(item=>item.id===olderGrants[1]!.id);
+    assert.deepEqual([listed?.state,listed?.suspended_reason],['suspended','private_evidence_unconfirmed'],'the list shows it paused before any turn there');
+    assert.equal((await services.memoryAccess.context(actor,'checkpoint complete')).sources.length,1,'a share the owner confirmed keeps working');
     assert.equal((await services.memoryAccess.settings(owner,group)).global.auto_followup,false,'automatic follow-up starts off');
     // Never a fact whose evidence includes the owner's private chat.
     const privateFact=await services.entities.publishClaim({subject_id:projectEntity.id,predicate:'launch_window',content:'Apollo launch schedule milestone is October.',attribution:'reported',uncertainty:'supported',evidence:[privateSource]},await services.guards.state(),key+':private-fact');
@@ -82,6 +94,11 @@ test('fact grants authorize exact destinations while relationships only create r
       proposal_reference,binding,relationship_path,evidence,expires_at FROM memory_access_requests WHERE id=$1`,[pending.id,intoPrivate,digest(key+':into-private-hash')]);
     await assert.rejects(services.memoryAccess.decide(owner,intoPrivate,{decision:'persistent',expected_revision:1,operation_id:key+':into-private'}),{code:'memory_access_private_destination'});
     assert.equal((await find('requests',intoPrivate)).state,'cancelled');
+    // A passing store failure while placing the evidence is not a private source: the request stays to be decided.
+    services.access.space=async()=>{throw Error('synthetic store outage');};
+    try {await assert.rejects(services.memoryAccess.decide(owner,pending.id,{decision:'one_time',expected_revision:pending.revision,operation_id:key+':outage'}),/synthetic store outage/);}
+    finally{services.access.space=space;}
+    assert.equal((await find('requests',pending.id)).state,'pending','an outage never cancels a request');
     const rejected=await services.memoryAccess.decide(owner,pending.id,{decision:'reject',expected_revision:pending.revision,operation_id:key+':reject'});assert.equal(rejected.state,'rejected');
     const nextSource=await capture(group,3,'Apollo launch schedule October?'),again=await services.memoryAccess.suggest(await principal(nextSource),'Apollo launch schedule October');assert.ok(again);assert.notEqual(again!.id,pending.id,'a later independent request may suggest again');
     const corrected=await services.entities.correct(owner,suggestedFact.id,{content:'Apollo launch schedule milestone is November.',relationship_kind:'associated',attribution:'reported',uncertainty:'supported',retired:false,expected_revision:suggestedFact.revision,operation_id:key+':correct'});

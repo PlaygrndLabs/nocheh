@@ -87,30 +87,29 @@ export class MemoryAccessRepository {
     const current=(await this.stores.derived.query('SELECT active_revision FROM entity_claims WHERE id=$1',[fact.id])).rows[0];
     if(Number(current?.active_revision)!==fact.revision)throw new HttpError(409,'memory_fact_changed');
   }
-  private async representation(fact:Fact,wording:string,binding:GuardBinding,operation:string):Promise<{reference:DerivativeReference;guard_revision:number|null;text:string;hash:string}> {
+  /** `confirmed` records that the owner shared a fact with a private source after seeing where it came from (ADR-0242). */
+  private async representation(fact:Fact,wording:string,binding:GuardBinding,operation:string,confirmed=false):Promise<{reference:DerivativeReference;guard_revision:number|null;text:string;hash:string}> {
     const source=fact.evidence[0];if(!source)throw new HttpError(409,'memory_fact_evidence_missing');await this.access.archive.verify(source);
     const reference=await this.derived.record({operation_id:'memory-access-wording:'+digest(canonical([operation,fact.id,fact.revision,wording,binding])),source,
       kind:'shared_knowledge',content:Buffer.from(wording),producer:'owner',producer_version:protocol,configuration:{fact_id:fact.id,fact_revision:fact.revision},
-      provenance:{fact_id:fact.id,fact_revision:fact.revision,evidence:fact.evidence,destination_authority:'fact_grant'}});
+      provenance:{fact_id:fact.id,fact_revision:fact.revision,evidence:fact.evidence,destination_authority:'fact_grant',...(confirmed?{private_evidence_confirmed:true}:{})}});
     await this.guards.prepare(reference,protocol,this.detect);const guarded=await this.guards.read('derived_artifacts:'+reference.id,binding);
     const text=string((guarded.value as any).text,12000);if(!text.trim())throw new HttpError(422,'empty_safe_wording');
     return {reference,guard_revision:guarded.revision,text,hash:digest(text)};
   }
   private principal(row:any):Reader {return {admin:false,scope:row.source_scope,space:row.destination,turnEvent:row.source_reference.id,
     logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:Number(row.binding.epoch)};}
-  /** The conversation each piece of evidence came from; null when it is unknown. */
-  private async evidenceSpaces(evidence:SourceReference[]):Promise<(string|null)[]> {
-    return Promise.all(evidence.map(reference=>this.access.space(reference).catch(()=>null)));
-  }
-  /** Whether a fact rests on anything but group or topic messages: a private chat, the owner's included, or an
-   * unknown conversation. Such a fact never reaches a group without the owner naming its source (ADR-0242). */
-  private async privateEvidence(evidence:SourceReference[]):Promise<boolean> {
-    const spaces=await this.evidenceSpaces(evidence);return !spaces.length||spaces.some(space=>!groupSpace(space));
+  /** A grant whose fact rests on a private or unplaced source that the owner never confirmed sharing, as one made before
+   * that confirm existed. It pauses until the owner shares it again through the confirm (ADR-0242). */
+  private async unconfirmedPrivate(row:any,fact:Fact):Promise<boolean> {
+    if(!await this.access.privateEvidence(fact.evidence))return false;
+    const artifact=(await this.stores.derived.query('SELECT provenance FROM derived_artifacts WHERE id=$1',[row.representation_reference.id])).rows[0];
+    return artifact?.provenance?.private_evidence_confirmed!==true;
   }
   /** What a review card names: where the fact came from, who would see it, and whether approving posts it by default. */
   async describe(row:{destination:string;evidence?:SourceReference[]},provenance:any):Promise<{source_spaces:(string|null)[];audience:{space:string;group:string|null};post_default:boolean}> {
     const saved=Array.isArray(provenance?.evidence_spaces)?provenance.evidence_spaces as string[]:null;
-    const source_spaces=saved??[...new Set(await this.evidenceSpaces(row.evidence??[]))];
+    const source_spaces=saved??[...new Set(await this.access.evidenceSpaces(row.evidence??[]))];
     const post_default=await this.effective(row.destination).then(value=>value.effective.auto_followup,()=>false);
     return {source_spaces,audience:recallScope(row.destination,this.access.policy().topic_memory),post_default};
   }
@@ -130,12 +129,11 @@ export class MemoryAccessRepository {
     for(const fact of candidates.slice(0,100)) {
       if(!relevant(query,fact.content))continue;
       // A fact that rests on a private chat, the owner's included, or on an unknown conversation is never suggested (ADR-0242).
-      const spaces:string[]=[];let shareable=fact.evidence.length>0;
-      for(const reference of fact.evidence){const space=await this.access.space(reference).catch(()=>null);if(!groupSpace(space)){shareable=false;break;}spaces.push(space);}
-      if(!shareable)continue;
+      const spaces=await this.access.evidenceSpaces(fact.evidence);
+      if(!spaces.length||!spaces.every(groupSpace))continue;
       if((await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE ${recallCondition('destination','$1','$3')} AND fact_id=$2 AND state='active' AND (expires_at IS NULL OR expires_at>now()) LIMIT 1`,[principal.space,fact.id,this.access.recall(principal)?.group??null])).rowCount)continue;
       const readable=(await Promise.all(fact.evidence.map(ref=>this.access.canRead(principal,ref,binding)))).every(Boolean);if(readable)continue;
-      selected=fact;evidenceSpaces=[...new Set(spaces)].sort();path=pathByEntity.get(fact.subject_entity_id)??pathByEntity.get(fact.object_entity_id??'')??[];break;
+      selected=fact;evidenceSpaces=[...new Set(spaces as string[])].sort();path=pathByEntity.get(fact.subject_entity_id)??pathByEntity.get(fact.object_entity_id??'')??[];break;
     }
     if(!selected)return null;
     const source=(await this.access.archive.captured(principal.turnEvent)).reference,requestHash=digest(canonical([protocol,'suggestion',source,principal.space,selected.id,selected.revision]));
@@ -163,18 +161,26 @@ export class MemoryAccessRepository {
     const page=rows.slice(0,100),artifacts=await this.artifacts(page,'proposal_reference'),requests=await Promise.all(page.map(async row=>{const artifact=artifacts.get(row.proposal_reference.id);
       return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null,...await this.describe(row,artifact?.provenance)};}));
     return {requests,next:rows.length>100?rows[99].id:null};}
-  async grants(principal:Reader,after='',destination='') {admin(principal);if(after)identity(after);if(destination)validateSpace(destination);await this.reconcile();const rows=(await this.stores.control.query("SELECT * FROM memory_fact_grants WHERE id>$1 AND ($2='' OR destination=$2) ORDER BY id LIMIT 101",[after,destination])).rows;
+  async grants(principal:Reader,after='',destination='') {admin(principal);if(after)identity(after);if(destination)validateSpace(destination);await this.reconcile();
+    const read=async():Promise<any[]>=>(await this.stores.control.query("SELECT * FROM memory_fact_grants WHERE id>$1 AND ($2='' OR destination=$2) ORDER BY id LIMIT 101",[after,destination])).rows;
+    let rows=await read(),paused=false;
+    // A grant on a private source the owner never confirmed shows as paused now, not only at the next turn there (ADR-0242).
+    for(const row of rows.slice(0,100)){if(row.state!=='active')continue;const fact=await this.fact(row.fact_id).catch(()=>null);
+      if(fact&&fact.revision===row.fact_revision&&await this.unconfirmedPrivate(row,fact)){await this.suspend(row.id,'private_evidence_unconfirmed');paused=true;}}
+    if(paused)rows=await read();
     const page=rows.slice(0,100),artifacts=await this.artifacts(page,'representation_reference'),grants=page.map(row=>{const artifact=artifacts.get(row.representation_reference.id);return {...row,wording:artifact?.content.toString()??null,provenance:artifact?.provenance??null};});
     return {grants,next:rows.length>100?rows[99].id:null};}
   /** Repair a pre-atomic handoff only on replay of its exact owner command, under current authority, and only when that
-   * command posted: never because of today's follow-up setting (ADR-0242). */
-  private async recoverFollowup(request:any,grantId:string,posted:boolean) {
-    if(!posted||request.state!=='approved'||request.followup_action_id||request.expires_at<=new Date())return;
+   * command posted: it prepared this exact follow-up before it committed. Never because of the decision's kind or
+   * today's follow-up setting (ADR-0242). */
+  private async recoverFollowup(request:any,grantId:string) {
+    if(request.state!=='approved'||request.followup_action_id||request.expires_at<=new Date())return;
     const grant=(await this.stores.control.query('SELECT * FROM memory_fact_grants WHERE id=$1 AND request_id=$2',[grantId,request.id])).rows[0];
     if(!grant||grant.state!=='active'||grant.expires_at&&grant.expires_at<=new Date())return;
     const binding=await this.guards.state(),text=await this.validateGrant(grant,binding);
     if(!text||canonical(request.binding)!==canonical(binding))return;
-    const fact=await this.fact(grant.fact_id);if(await this.privateEvidence(fact.evidence))return;
+    const fact=await this.fact(grant.fact_id);if(await this.access.privateEvidence(fact.evidence))return;
+    if(!await this.actions.systemPrepared(request.source_reference,binding,request.destination,text,'memory-access-followup:'+grantId))return;
     const prepared=await this.actions.prepareSystem(this.principal(request),request.source_reference,binding,
       request.destination,text,'memory-access-followup:'+grantId);
     if(prepared.text_hash!==grant.text_hash)throw new HttpError(409,'memory_access_wording_changed');
@@ -215,7 +221,7 @@ export class MemoryAccessRepository {
     const command={kind:'memory_access_decision',requestId,decision,wording:body.wording??null,expected,...(body.post===undefined?{}:{post:body.post})},hash=digest(canonical(command));
     const prior=(await this.stores.control.query('SELECT request_hash,grant_id,decision,revision FROM memory_access_decisions WHERE operation_id=$1',[operation])).rows[0];
     if(prior){const receipt=this.decisionReceipt(requestId,hash,prior);
-      if(prior.grant_id)await this.recoverFollowup(request,prior.grant_id,decision==='one_time'||body.post===true);
+      if(prior.grant_id)await this.recoverFollowup(request,prior.grant_id);
       return receipt;}
     if(request.revision!==expected||request.state!=='pending')throw new HttpError(409,'memory_access_request_changed');
     if(request.expires_at<=new Date()){await this.stores.control.query("UPDATE memory_access_requests SET state='expired',revision=revision+1,updated_at=now() WHERE id=$1 AND state='pending'",[requestId]);throw new HttpError(409,'memory_access_request_expired');}
@@ -230,7 +236,7 @@ export class MemoryAccessRepository {
     if(fact.revision!==request.fact_revision){await this.suspendRequest(requestId,expected);throw new HttpError(409,'memory_fact_changed');}
     // A request suggested before private chats were left out of suggestions never shares from or into one (ADR-0242).
     const privateDestination=!groupSpace(request.destination);
-    if(privateDestination||await this.privateEvidence(fact.evidence)){
+    if(privateDestination||await this.access.privateEvidence(fact.evidence)){
       await this.stores.control.query("UPDATE memory_access_requests SET state='cancelled',revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2 AND state='pending'",[requestId,expected]);
       throw new HttpError(409,privateDestination?'memory_access_private_destination':'memory_access_private_evidence');
     }
@@ -264,10 +270,11 @@ export class MemoryAccessRepository {
     if(fact.revision!==revision(body.fact_revision))throw new HttpError(409,'memory_fact_changed');const destination=validateSpace(body.destination),operation=string(body.operation_id,200);
     if(!groupSpace(destination))throw new HttpError(400,'memory_grant_private_destination');
     if(body.private_evidence_confirmed!==undefined&&typeof body.private_evidence_confirmed!=='boolean')throw new HttpError(400,'invalid_memory_grant');
-    if(body.private_evidence_confirmed!==true&&await this.privateEvidence(fact.evidence))throw new HttpError(409,'memory_grant_private_sources');
+    const privateSources=await this.access.privateEvidence(fact.evidence);
+    if(body.private_evidence_confirmed!==true&&privateSources)throw new HttpError(409,'memory_grant_private_sources');
     const binding=await this.guards.state();
     if(principal.guard_epoch!==undefined&&(principal.guard_epoch!==binding.epoch||principal.generation!==binding.generation))throw new HttpError(409,'guard_context_changed');
-    const wording=body.wording===undefined?fact.content:string(body.wording,12000),representation=await this.representation(fact,wording,binding,operation);
+    const wording=body.wording===undefined?fact.content:string(body.wording,12000),representation=await this.representation(fact,wording,binding,operation,privateSources);
     const expires=body.expires_at===undefined?null:new Date(string(body.expires_at,100));if(expires&&(!Number.isFinite(expires.getTime())||expires<=new Date()))throw new HttpError(400,'invalid_grant_expiration');
     const id=digest(canonical([protocol,'manual-grant',operation,destination,fact.id,fact.revision,representation.hash])),hash=digest(canonical({kind:'manual_memory_grant',id,destination,fact:fact.id,revision:fact.revision}));
     const receipt=async(prior:any,db:Pick<pg.PoolClient,'query'>)=>{
@@ -319,6 +326,7 @@ export class MemoryAccessRepository {
   private async validateGrant(row:any,binding:GuardBinding):Promise<string|null> {
     if(canonical(row.binding)!==canonical(binding)){await this.suspend(row.id,'authorization_generation_changed');return null;}
     const fact=await this.fact(row.fact_id).catch(()=>null);if(!fact||fact.revision!==row.fact_revision){await this.suspend(row.id,'fact_revision_changed');return null;}
+    if(await this.unconfirmedPrivate(row,fact)){await this.suspend(row.id,'private_evidence_unconfirmed');return null;}
     try {const guarded=await this.guards.read('derived_artifacts:'+row.representation_reference.id,binding),raw=string((guarded.value as any).text,12000);
       // Older grants hashed the trimmed wording while preserving the full
       // guarded bytes. Accept only the exact wording named by the saved hash.

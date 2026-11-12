@@ -522,7 +522,7 @@ export class EntityRepository {
     const row=(await this.stores.derived.query(`SELECT e.active_revision AS revision,v.evidence FROM entity_claims e
       JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[claim])).rows[0];
     if(!row)throw new HttpError(404,'entity_claim_not_found');
-    const spaces=await Promise.all((row.evidence as SourceReference[]).map(reference=>this.access.space(reference).catch(()=>null)));
+    const spaces=await this.access.evidenceSpaces(row.evidence as SourceReference[]);
     const sources=[...new Set(spaces)],owner=this.access.policy().owner_id,topicMemory=this.access.policy().topic_memory??'group';
     const private_sources=[...new Set(spaces.filter((space):space is string=>space!==null&&!groupSpace(space)))].sort();
     const owner_private=!!owner&&spaces.some(space=>space!==null&&(parentSpace(space)??space)===owner);
