@@ -206,9 +206,12 @@ export class TelegramActionRepository {
       // apply first. The owner's own request from a group for their private
       // chat needs no approval either.
       // A follow-up was not asked by the owner: its private chat gets nothing from it without a card (ADR-0212).
+      // The freedom setting covers only what stays on the owner's private side: a message for any group or topic
+      // always waits for its card in the private chat, which names that chat and shows the exact text (ADR-0244).
+      const owner=this.access.policy().owner_id,toOwner=!!owner&&destination.split('/topic/')[0]===owner;
       const group=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?this.groupRequest(principal,turn,destination,requester):null;
       const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
-        (group==='owner_private_request'&&await followUpTurn(db,principal)?null:group)??await ownerAutonomyGrant(db,principal,turn):null;
+        (group==='owner_private_request'&&await followUpTurn(db,principal)?null:group)??(toOwner?await ownerAutonomyGrant(db,principal,turn):null):null;
       if(autonomy)decision=await evaluate(db,effect,autonomy);
       await recordEffect(db,effect,'proposed',decision,source);
       if(autonomy&&decision.outcome==='allow') {

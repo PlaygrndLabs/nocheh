@@ -718,8 +718,10 @@ class Scenarios:
         directory = {item['space_id']: item for item in self.f.app('/v1/conversations?limit=100')['items']}
         self.gate('directory_shows_migration', directory[str(OTHER_GROUP)].get('telegram', {}).get('migrate_to_chat_id') == '-1001234567890')
 
-    def owner_freedom_executes_owner_requests(self):
-        topic, wording = 17, 'پیام بدون تأیید از طرف مالک'
+    def owner_freedom_keeps_group_cards(self):
+        # The freedom setting covers only the owner's private side: a post the owner asks for in their private chat for a
+        # group or topic still shows its card there first, naming the group and showing the exact text (ADR-0244).
+        topic, wording, note = 17, 'پیام گروه فقط با کارت مالک', 'یادداشت برای خودم بدون کارت'
         current = self.f.app('/v1/owner-autonomy')
         self.gate('approval_required_by_default', current['mode'] == 'approval_required')
         enabled = self.f.app('/v1/owner-autonomy', {'mode': 'owner_requests_execute', 'expected_revision': current['revision'],
@@ -729,10 +731,28 @@ class Scenarios:
             before = len(self.f.sent())
             self.turn(self.f.message(OWNER, 'بفرست [[action:'+str(GROUP)+'/topic/'+str(topic)+'|'+wording+']]'), OWNER)
             created = [row for row in self.proposals() if row['id'] not in known]
-            self.gate('owner_request_approved_by_setting', len(created) == 1 and created[0]['state'] in ('approved', 'running', 'done'), state=created[0]['state'])
-            self.wait('sent_without_decision', lambda: [row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording], 180)
+            self.gate('group_post_waits_with_setting_on', len(created) == 1 and created[0]['state'] == 'proposed',
+                      state=created[0]['state'] if created else None)
+            cards = self.cards_since(before, OWNER)
+            text = cards[0]['message']['text'] if cards else ''
+            self.gate('one_card_names_the_group', len(cards) == 1 and 'Synthetic Forum' in text and wording in text, count=len(cards), card=text)
+            time.sleep(5)
+            self.gate('nothing_in_group_before_approve', not self.replies(before, GROUP, topic))
+            proposal = created[0]
+            decision = self.f.app('/v1/tools/telegram-decision', {'id': proposal['id'], 'fingerprint': proposal['fingerprint'], 'decision': 'approve',
+                                                                  'operation_id': 'scenario-freedom-approve-'+proposal['id'][:16]})
+            self.gate('approved', decision['state'] == 'approved')
+            self.wait('sent_after_approve', lambda: [row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording], 180)
             self.gate('sent_once', len([row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording]) == 1)
-            self.gate('no_card_with_setting_on', not self.cards_since(before, OWNER))
+            # A message to the owner's own private chat still goes without a card.
+            known = {row['id'] for row in self.proposals()}
+            mark = len(self.f.sent())
+            self.turn(self.f.message(OWNER, 'یادداشت کن [[action:'+str(OWNER)+'|'+note+']]'), OWNER, posted=note)
+            created = [row for row in self.proposals() if row['id'] not in known]
+            self.gate('own_chat_approved_by_setting', len(created) == 1 and created[0]['state'] in ('approved', 'running', 'done'),
+                      state=created[0]['state'] if created else None)
+            self.wait('own_chat_sent_without_decision', lambda: [row for row in self.replies(mark, OWNER) if row['message']['text'] == note], 180)
+            self.gate('no_card_for_own_chat', not self.cards_since(mark, OWNER))
             # Group-to-group cards with this setting off are product_scenarios.owner_from_group_to_other_group.
         finally:
             self.f.app('/v1/owner-autonomy', {'mode': 'approval_required', 'expected_revision': enabled['revision'],
@@ -854,7 +874,7 @@ ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
          'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'photo_is_read',
-         'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_executes_owner_requests', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
+         'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_keeps_group_cards', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
 
 

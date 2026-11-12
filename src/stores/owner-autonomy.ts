@@ -19,6 +19,9 @@ export type OwnerAutonomyMode='approval_required'|'owner_requests_execute';
  * The owner's freedom level. By default every external effect waits for exact
  * owner approval. When enabled, a request the owner makes in their own live
  * private conversation is approved by that request; deny rules still apply.
+ * It covers tools and messages to the owner's own private chat only: a message
+ * for any group or topic always waits for its card (ADR-0244), and the caller
+ * asks for this grant only for the owner's own chat.
  * Changing this setting changes no content, so it does not revoke contexts.
  */
 export class OwnerAutonomyRepository {

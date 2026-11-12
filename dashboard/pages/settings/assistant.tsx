@@ -20,7 +20,7 @@ const freedom = [
   {
     value: 'owner_requests_execute',
     title: 'Do what I ask',
-    text: 'When you ask in your private chat, it acts without a separate yes. Requests from groups, schedules and background work still wait.',
+    text: 'When you ask in your private chat, it acts without a separate yes. Messages to groups always show you a card first. Requests from groups, schedules and background work still wait.',
   },
 ];
 
