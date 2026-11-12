@@ -26,6 +26,17 @@ Omit `--group-id` for DM only, or repeat it to select multiple groups. These IDs
 are examples; use the discovered values. The ignored `.env`
 holds the policy. To disable the assistant, set `TELEGRAM_ENABLED=false` and run `up`.
 
+Once your user ID is saved, the dashboard shows it read-only; it changes only from
+the command line ([ADR-0244](adr/0244-owner-defaults-posts-and-machine-reports-stay-private.md)):
+
+```sh
+./bin/nocheh config set TELEGRAM_OWNER_ID 123456789
+./bin/nocheh config apply
+```
+
+`config set` refuses an ID that is allowed or denied as a person in a group, and
+`configure-telegram` checks the whole policy before it writes `.env`.
+
 Only the owner may address Nocheh in a selected group by default. The owner can
 manage individual participant IDs in **Chats**, by opening the group, then Save in
 the bar at the bottom of the screen. Selected group titles,

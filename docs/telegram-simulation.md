@@ -140,6 +140,7 @@ ordered bursts, chunked long replies, intentional silence, blank answers,
 owner-private archive search, model context and Honcho recall against group
 and other-group isolation, literal guarding, exact Telegram approvals and
 denials with stale fingerprints and repeated decisions, `current` destinations,
+the owner freedom setting, which still shows a card for each post to a group,
 a fixed reply to a participant not allowed, replies only when addressed in a group,
 unselected and granted/revoked participants, retirement, a voice note
 transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule that fires on its
