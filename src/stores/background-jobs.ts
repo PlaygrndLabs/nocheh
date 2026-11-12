@@ -427,7 +427,8 @@ export class BackgroundJobRepository {
     if(row.fingerprint!==fingerprint)throw new HttpError(409,'job_changed');
     return {id,state:row.state,approver:row.approver,fingerprint,estimate:row.estimate,limits:{cost_usd:jobPriced(row.rates)?Number(row.cost_limit_usd):null,minutes:row.minutes_limit},box:row.box as boolean,
       repo:row.repo?{name:row.repo.name,branch:row.repo.branch,commit:row.repo.commit,copied_at:row.repo.copied_at}:null,
-      ...(row.machine?{machine:{name:row.machine.name},steps:row.steps}:{}),
+      // A machine job asked in a group shows its machine and plan only on the owner's private card (ADR-0244).
+      ...(row.machine&&row.scope===owner?{machine:{name:row.machine.name},steps:row.steps}:{}),
       message:row.state==='proposed'?'Nothing runs until it is approved.':'This job was already decided; its state is shown.'};
   }
   /** The exact proposal a card shows, read through the secret check of its audience. */
@@ -506,8 +507,8 @@ export class BackgroundJobRepository {
     return row.approver==='requester'&&!!row.requester&&row.requester===user&&row.scope===chat;
   }
   /** Jobs this chat can see: its own, or every job for the owner. A live turn in the owner's private chat also sees the
-   *  GitHub copies a box job may read, while the box switch is on; the owner's own live message there or in an active
-   *  project's group also sees the machines a job may work on, while machine control is on. */
+   *  GitHub copies a box job may read, while the box switch is on, and the machines a job may work on, while machine control
+   *  is on. A group never sees a machine job's machine, plan or to-do list: those are in the owner's private chat. */
   async list(principal:Reader) {
     let rows,repos:{name:string;branch:string;commit:string;copied_at:string}[]|undefined,machines:{name:string;ready:boolean}[]|undefined;
     if(principal.admin)rows=(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 50')).rows;
@@ -524,20 +525,23 @@ export class BackgroundJobRepository {
     const jobs=[];
     for(const row of rows) {
       let title:string|null=null;try{title=(await this.proposal(row)).title;}catch(error){if(!(error instanceof HttpError))throw error;}
+      const hidden=!!row.machine&&!principal.admin&&principal.scope!==null;
       jobs.push({id:row.id,title,state:row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.state,chat:row.target,asked_in:row.space_id,
         attempts:row.attempts,ended:row.ended,cost_usd:Number(row.cost_usd),cost_limit_usd:Number(row.cost_limit_usd),priced:jobPriced(row.rates),minutes_limit:row.minutes_limit,estimate:row.estimate,
-        todo:row.todo,started_at:row.started_at,finished_at:row.finished_at,created_at:row.created_at,error_code:row.error_code,
-        machine:row.machine?{name:row.machine.name}:null,steps:row.steps??null,
+        todo:hidden?null:row.todo,started_at:row.started_at,finished_at:row.finished_at,created_at:row.created_at,error_code:row.error_code,
+        machine:row.machine&&!hidden?{name:row.machine.name}:null,steps:hidden?null:row.steps??null,
+        ...(hidden?{private:'A job on the owner\'s machine. Its plan and report are in the owner\'s private chat.'}:{}),
         ...(principal.admin?{logical_profile:row.logical_profile,approver:row.approver,machine_cleanup:row.machine_cleanup??null}:{})});
     }
     return {jobs,...(repos?{repos}:{}),...(machines?{machines}:{})};
   }
-  /** Whether a turn may see the machines: the owner's own live message, not a job's run or a follow-up, in their private chat or
-   *  an active project's group, while machine control is on and set up. */
+  /** Whether a turn may see the machines: the owner's own live message, not a job's run or a follow-up, in their private chat,
+   *  while machine control is on and set up. A group never sees them, the owner's own message there included (ADR-0244): the
+   *  owner names the machine there. */
   private async machinesShown(principal:Reader):Promise<boolean> {
-    if(!machineTokenSet()||!(await this.control.query('SELECT 1 FROM machine_settings WHERE singleton AND enabled')).rowCount)return false;
+    if(principal.scope!==null||!machineTokenSet()||!(await this.control.query('SELECT 1 FROM machine_settings WHERE singleton AND enabled')).rowCount)return false;
     try{if((await this.liveTurn(principal)).requester!==null)return false;}catch(error){if(error instanceof HttpError)return false;throw error;}
-    return !await followUpTurn(this.control,principal)&&(principal.scope===null||(await new ProjectRepository(this.control).effective(principal.space!)).project?.state==='active');
+    return !await followUpTurn(this.control,principal);
   }
   /** The GitHub copies a box job may read, and the digests jobs still pin: an approved job, a running job within its box
    *  time and a proposal still waiting for its decision, none stopped and none whose copy was removed. github.py keeps
@@ -778,34 +782,49 @@ export class BackgroundJobRepository {
       WHERE id=$1 AND state='running'`,[row.id,limit,note]);
     return this.report({...row,state:'reporting',ended:limit,report_reference:note});
   }
-  /** The job's audience in the current epoch, for the report it sends to the chat where it was asked. */
+  /** The job's audience in the current epoch, for the report it sends to the chat where it was asked, or to the owner. */
   private audience(row:any,binding:GuardBinding):Reader {
     const owner=this.access.policy().owner_id;
     return {admin:false,scope:row.scope===owner?null:row.scope,space:row.space_id,turnEvent:row.source_reference.id,
       logical_profile:row.logical_profile,generation:binding.generation,guard_epoch:binding.epoch};
   }
-  /** Send the final answer to the chat where the job was asked, part after part. */
+  /** Send the final answer to the chat where the job was asked, part after part. A job on one of the owner's machines sends
+   *  its report, or its note at a limit, to the owner's private chat instead; when it was asked elsewhere, that chat then gets
+   *  one fixed line with no machine, plan or report (ADR-0244). */
   private async report(row:any):Promise<Observation> {
     const result=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[row.report_reference?.id])).rows[0];
     if(!result||digest(result.content)!==row.report_reference.input_hash)return this.finish(row,'failed','job_report_missing');
     const parts=reportParts(String(JSON.parse(result.content.toString()).text??''));
     if(!parts.length)return this.finish(row,'failed','job_report_empty');
-    const sent=(await this.control.query(`SELECT b.part,a.state FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
+    const owner=this.access.policy().owner_id!,machine=!!row.machine&&row.scope!==owner;
+    const sent=(await this.control.query(`SELECT b.part,a.state,a.destination FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
       WHERE b.job_id=$1 ORDER BY b.part`,[row.id])).rows;
+    // A report that began in the group before machine reports went private keeps the parts sent there; the owner then gets
+    // the whole report and the group its line. One the group got whole before then is done.
+    let early=0;
+    if(machine)while(early<Math.min(sent.length,parts.length)&&sent[early].destination===row.space_id)early++;
+    const away=machine&&early<parts.length;
+    const targets=[...parts.slice(0,early).map(text=>({to:row.space_id as string,text})),...parts.slice(away?0:early).map(text=>({to:away?owner:row.space_id as string,text}))];
+    if(away)targets.push({to:row.space_id,text:labeledLines(backgroundTexts,(await ownerPrompts(this.control))['background.texts'])[row.ended?'limited_private':'report_private']!});
     const last=sent.at(-1);
-    if(last&&['failed','ambiguous','cancelled','rejected'].includes(last.state))return this.finish(row,'failed','job_report_not_delivered');
+    // The group's line comes last: the report already reached the owner, so a lost line still ends the job done.
+    if(last&&['failed','ambiguous','cancelled','rejected'].includes(last.state))return away&&sent.length===targets.length?this.finish(row,'done'):this.finish(row,'failed','job_report_not_delivered');
     if(last&&last.state!=='done')return observation('waiting','delivery',sent.length,Date.now()+5000,'receipt_pending');
-    if(sent.length>=parts.length)return this.finish(row,'done');
+    if(sent.length>=targets.length)return this.finish(row,'done');
+    // Only the group's line is left: it names nothing the run read, so no later epoch holds it back, and a Stop or a
+    // refused line still ends the job done.
+    const line=away&&sent.length===targets.length-1;
     // A stopped job sends no further part.
-    if(row.cancel_requested)return this.finish(row,'stopped');
+    if(row.cancel_requested)return this.finish(row,line?'done':'stopped');
     // A member removed from the chat since the job ran gets nothing sent there.
     if(!sent.length&&!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
-    const part=sent.length+1,binding=await this.guards.state(),run=await this.latest(row.id);
+    const part=sent.length+1,binding=await this.guards.state(),run=line?null:await this.latest(row.id);
     // The last run wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
     // have passed since (ADR-0201); any other change may have withdrawn what it read.
-    if(!run||!await carriesForward(this.control,run.run_binding,binding))return this.finish(row,'failed','job_report_outdated');
+    if(!line&&(!run||!await carriesForward(this.control,run.run_binding,binding)))return this.finish(row,'failed','job_report_outdated');
     try {
-      const prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,row.space_id,parts[part-1]!,'background-report:'+row.id+':'+part);
+      // Checked for secrets with the job's own audience, wherever the part goes.
+      const target=targets[part-1]!,prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,target.to,target.text,'background-report:'+row.id+':'+part);
       // A part's message and its record commit together under the job's lock, so neither a retry
       // in a later epoch nor a second tick sends a part twice, and none is staged after Stop.
       const db=await this.control.connect();
@@ -822,6 +841,7 @@ export class BackgroundJobRepository {
       // under the binding then current, by the rule above, instead of the job's workflow closing with the job still reporting.
       if(error instanceof HttpError&&['guard_transition_pending','guard_context_changed','audience_context_changed','action_context_changed'].includes(error.code))
         return observation('waiting','delivery',sent.length,Date.now()+2000,'guard_pending');
+      if(line&&error instanceof HttpError)return this.finish(row,'done');
       throw error;
     }
     return observation('waiting','delivery',part,Date.now()+5000,'receipt_pending');

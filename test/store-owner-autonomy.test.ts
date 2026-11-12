@@ -11,7 +11,7 @@ import {fixtureServices} from './fixture-brain.js';
 import {savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
-test('owner freedom lets only the owner\'s live private requests approve themselves, defaults to approval and keeps deny rules',
+test('owner freedom lets only the owner\'s live private requests approve themselves, never for a group, defaults to approval and keeps deny rules',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -42,10 +42,16 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
     assert.deepEqual(await s.ownerAutonomy.save(owner,{mode:'owner_requests_execute',expected_revision:initial.revision,operation_id:key+':enable'}),enabled,'idempotent');
     await assert.rejects(s.ownerAutonomy.save(owner,{mode:'approval_required',expected_revision:initial.revision,operation_id:key+':stale'}),{code:'owner_autonomy_conflict'});
     const epoch=(await s.guards.state()).epoch;
-    const direct=await s.telegramActions.request(await actor((await capture('123',123,'Send it now')).id,null,'123'),{destination:group,text:'Owner request runs'});
+    const toGroup=await s.telegramActions.request(await actor((await capture('123',123,'Post it in the group')).id,null,'123'),{destination:group,text:'Group waits for its card'});
+    assert.equal(toGroup.state,'proposed');assert.equal(await state(toGroup.id),'proposed');assert.equal(await queued(toGroup.id),0,'freedom never posts to a group without its card');
+    const toTopic=await s.telegramActions.request(await actor((await capture('123',123,'Post it in the topic')).id,null,'123'),{destination:group+'/topic/5',text:'Topic waits for its card'});
+    assert.equal(await state(toTopic.id),'proposed');assert.equal(await queued(toTopic.id),0,'nor to one of its topics');
+    const direct=await s.telegramActions.request(await actor((await capture('123',123,'Send it now')).id,null,'123'),{destination:'123',text:'Owner request runs'});
     assert.equal(direct.state,'approved');assert.equal(await state(direct.id),'approved');assert.equal(await queued(direct.id),1);
     const rule=(await stores.control.query("SELECT rule,origin FROM security_events WHERE state='allowed' AND effect_id=(SELECT effect_id FROM security_events WHERE rule LIKE 'owner_autonomy:%' LIMIT 1)")).rows[0];
     assert.deepEqual(rule,{rule:'owner_autonomy:'+enabled.revision,origin:'grant'},'the decision records the setting revision that authorized it');
+    const current=await s.telegramActions.request(await actor((await capture('123',123,'Send it here')).id,null,'123'),{destination:'current',text:'Owner chat runs'});
+    assert.equal(await state(current.id),'approved','the owner\'s own chat, named as current, needs no card');
     assert.equal((await s.guards.state()).epoch,epoch,'changing the setting and approving a request revoke no context');
 
     const fromGroup=await s.telegramActions.request(await actor((await capture(group,123,'Owner in a group')).id,group,group),{destination:'123',text:'To my private chat'});
@@ -61,12 +67,12 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
 
     const security=(await stores.control.query('SELECT revision FROM security_policy WHERE singleton')).rows[0].revision;
     await savePolicy(stores.control,owner,{expected_revision:Number(security),policy:{version:1,rules:[{id:key+':deny',kind:'telegram.send',outcome:'deny'}]}});
-    const denied=await s.telegramActions.request(await actor((await capture('123',123,'Denied send')).id,null,'123'),{destination:group,text:'Deny rule wins'});
+    const denied=await s.telegramActions.request(await actor((await capture('123',123,'Denied send')).id,null,'123'),{destination:'123',text:'Deny rule wins'});
     assert.equal(await state(denied.id),'proposed');assert.equal(await queued(denied.id),0,'an explicit deny rule still blocks');
     await savePolicy(stores.control,owner,{expected_revision:Number(security)+1,policy:{version:1,rules:[]}});
 
     await s.ownerAutonomy.save(owner,{mode:'approval_required',expected_revision:enabled.revision,operation_id:key+':disable'});
-    const after=await s.telegramActions.request(await actor((await capture('123',123,'After disabling')).id,null,'123'),{destination:group,text:'Waits again'});
+    const after=await s.telegramActions.request(await actor((await capture('123',123,'After disabling')).id,null,'123'),{destination:'123',text:'Waits again'});
     assert.equal(await state(after.id),'proposed');
     assert.equal((await s.ownerAutonomy.get(owner)).history.length,2);
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}

@@ -359,7 +359,7 @@ export class ActionCommandRepository {
         'The owner was asked privately, with Approve and Reject buttons, to approve this job, because its cost is over what a member may start or cannot be measured. Say so briefly with the estimate; nothing runs until the owner approves.':
         // The owner asking in a group is told where their card is, as for an operation they asked for there.
         asked&&asked.chat!==this.access.policy().owner_id?
-        'The person who asked is the owner, so the decision is theirs: a card with Approve and Reject buttons for this job was sent to them in their private chat with you. In this chat answer them as "you", briefly: their card is waiting in their private chat, and the report will follow here once it runs. Do not say it waits for the owner or anyone else; do not show the plan or details.':
+        'The person who asked is the owner, so the decision is theirs: a card with Approve and Reject buttons for this job was sent to them in their private chat with you. In this chat answer them as "you", briefly: their card is waiting in their private chat; the report goes there too, and a short line follows here when it is done. Do not say it waits for the owner or anyone else; do not show the plan, the machine or details.':
         'A card with Approve and Reject buttons for this job was posted here as the reply to the request. It shows the job, its size, time and cost, so say at most one short sentence; nothing runs until it is approved.'};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
@@ -370,8 +370,9 @@ export class ActionCommandRepository {
     const card=await this.jobs.card(id),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
     const state=row.error_code==='job_repo_removed'?'repo_removed':row.error_code==='job_machine_off'?'machine_off':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
       row.state==='done'&&row.ended?'limited':row.state;
-    // A card in the owner's private chat for a job asked elsewhere does not say the report comes here.
-    const away=String(row.space_id).split('/topic/')[0]!==place.chat;
+    // A card in another chat than the one the job reports to does not say the report comes here. A job on the owner's machine
+    // reports to the owner's private chat, wherever it was asked (ADR-0244).
+    const away=(row.machine?this.access.policy().owner_id:String(row.space_id).split('/topic/')[0])!==place.chat;
     const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines[away?'running_elsewhere':'running']:card.lines[state];
     const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;
     if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{}),...seenIn(seen,place.chat)});

@@ -16,7 +16,7 @@ export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_n
   'job_machine_not_allowed','job_machine_not_found','job_card_too_long']);
 /** What the owner must do first, for a refusal the brain cannot correct by itself. */
 const jobNotes:Record<string,string>={job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
-  'there until the test passes. action=status lists the machines and whether each is ready.'};
+  'there until the test passes. In the owner\'s private chat action=status lists the machines and whether each is ready; a group never lists them, so ask the owner for the exact name.'};
 
 /** A route's refusal: its status and the small error body, if any. */
 class Refused extends Error {constructor(readonly status:number,readonly body:unknown){super('refused');}}
@@ -403,13 +403,15 @@ export const mcpTools:readonly McpTool[]=[
     inputSchema:shape({query:{type:'string'},limit:{type:'integer',minimum:1,maximum:10}},['query']),run:memorySearch},
   {name:'memory_recall',description:'Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions memory holds, so read them with mcp__nocheh__archive_read before relying on a claim that matters.',
     inputSchema:shape({query:{type:'string'},profile:{type:'string'},limit:{type:'integer',minimum:1,maximum:50}},['query']),run:memoryRecall},
-  {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. The result says which.',
+  {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. '+
+    'From the owner\'s private chat, a message for any group or topic always waits for the owner\'s card, whatever the freedom setting. The result says which.',
     inputSchema:shape({destination:{type:'string',description:'Use current for this Telegram conversation including its topic, a numeric Telegram chat ID, or CHAT_ID/topic/THREAD_ID. The server resolves current from the authenticated source turn.'},text:{type:'string',maxLength:3500}},['destination','text']),run:actionRequest},
   {name:'background_job',description:'Background jobs: work too big for one reply runs in a session of its own and reports back here. '+
     'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD), and box or machine with steps. '+
     'Nocheh counts and prices it and posts an Approve card; nothing runs until it is approved, and the result says who approves. '+
     'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos); '+
-    'for the owner\'s own request it also lists the owner\'s machines and whether each is ready (machines). '+
+    'for the owner\'s own request there it also lists the owner\'s machines and whether each is ready (machines). '+
+    'A job on the owner\'s machine reports to the owner\'s private chat; in a group its status shows no machine, plan or to-do list. '+
     'action=stop with id stops a job you may stop. Only the owner may name another chat.',
     inputSchema:shape({action:{type:'string',enum:['start','status','stop']},title:{type:'string',maxLength:100},instruction:{type:'string',maxLength:8000},
       chat:{type:'string'},from:{type:'string'},to:{type:'string'},id:{type:'string'},
@@ -418,7 +420,7 @@ export const mcpTools:readonly McpTool[]=[
         'Only for a job the owner asks for in their private chat.'},
       repo:{type:'string',maxLength:140,description:'With start and box=true, for a job the owner asks for in their private chat: a GitHub repository '+
         'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'},
-      machine:{type:'string',maxLength:40,description:'For work on one of the owner\'s machines (see action=status machines): the machine\'s name and a short plan '+
+      machine:{type:'string',maxLength:40,description:'For work on one of the owner\'s machines (listed by action=status in the owner\'s private chat; in a group, the name the owner gives): the machine\'s name and a short plan '+
         'of 1-12 steps the owner approves on one card. Only for the owner\'s own request in their private chat or a project group. '+
         'Your terminal and file tools then run on that machine.'},
       steps:{type:'array',minItems:1,maxItems:12,items:{type:'string',maxLength:200},

@@ -59,7 +59,7 @@ TITLES = {
     'group_answers_only_when_addressed': 'Groups: answers only when addressed', 'unselected_group': 'Groups not selected stay silent',
     'retirement_hides_fact': 'Hidden message leaves search', 'voice_is_transcribed': 'Voice notes are turned into text', 'photo_is_read': 'Photos are read for their text',
     'owner_directory_lists_conversations': 'Your chat list', 'unparseable_update_does_not_wedge_polling': 'A broken update does not stop Telegram',
-    'telegram_refresh_names': 'Group names refresh', 'owner_freedom_executes_owner_requests': 'Setting: your private requests run without approval',
+    'telegram_refresh_names': 'Group names refresh', 'owner_freedom_keeps_group_cards': 'Setting: your private requests run without approval, except posts to groups',
     'launcher_stop_mid_turn': 'Stopping mid-answer recovers', 'deleted_topic': 'A deleted topic does not leak elsewhere',
     'polling_outage': 'Telegram outage recovers', 'lost_send_response': 'A lost Telegram answer is not sent twice',
     'blocked_private_then_recovery': 'Blocked bot recovers', 'restart_preserves_receipts': 'Restart sends nothing twice',

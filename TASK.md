@@ -307,6 +307,24 @@ not affected
 [check](services/hermes/test_native_memory.py)). Pending: a review on full notes on a
 running installation that saves its note.
 
+Members step 1: keep the owner's private side out of groups (owner, 2026-11-12: "I just
+review the tables and seems what I want if there is a important point or need my answer
+ask, else start build."; approves the Members design):
+- Owner defaults, group posts and machine reports stay private
+  ([ADR-0244](docs/adr/0244-owner-defaults-posts-and-machine-reports-stay-private.md)):
+  with "Do what I ask", a post the owner asks for in the private chat for any group or
+  topic still waits for its card there ([check](test/store-owner-autonomy.test.ts),
+  [cards](test/store-approval-buttons.test.ts)); the private chat and groups have their
+  own default role and skills, and the one for groups starts empty
+  ([check](services/hermes/test_persona.py)); a machine job reports to the private chat
+  and the group that asked gets one line ([check](test/store-machine-group-report.test.ts));
+  the owner ID is never a person in a group and, once saved, changes only with
+  `config set` ([check](services/hermes/test_configuration.py)). Unit, store, dashboard
+  and browser checks pass. Pending: a full-tester run with the renamed scenario
+  `owner_freedom_keeps_group_cards`, and the canary gate in a follow-up. Owner step:
+  groups lose the role and skills of the old shared default until you fill in "Role and
+  skills in groups" in Settings › Assistant.
+
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
 task table against a group chat): long tool results are read in parts

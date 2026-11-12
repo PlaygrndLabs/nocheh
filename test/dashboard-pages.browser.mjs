@@ -256,10 +256,24 @@ test('a new installation is guided on Home and finds its Telegram ID without a t
   } finally {
     rmSync('/tmp/nocheh-ui-scenario', {force: true});
   }
-  // Without a saved bot token there is nothing to look in yet.
+  // A saved ID changes only from the command line: the field is read-only and says how.
   const {page} = await open('settings?view=telegram');
-  assert.equal(await page.getByRole('button', {name: 'Find my ID'}).isDisabled(), true);
+  const owner = page.locator('#telegram-owner');
+  assert.equal(await owner.inputValue(), '42');
+  assert.equal(await owner.getAttribute('readonly'), '');
+  await page.getByText('./bin/nocheh config set TELEGRAM_OWNER_ID <id>').waitFor();
+  assert.equal(await page.getByRole('button', {name: 'Find my ID'}).count(), 0);
   await page.close();
+  writeFileSync('/tmp/nocheh-ui-scenario', 'no-owner');
+  try {
+    // Without a saved bot token there is nothing to look in yet.
+    const {page: empty} = await open('settings?view=telegram');
+    assert.equal(await empty.getByRole('button', {name: 'Find my ID'}).isDisabled(), true);
+    assert.equal(await empty.locator('#telegram-owner').getAttribute('readonly'), null);
+    await empty.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
 });
 
 test('a settings edit survives switching tabs and Save at the top of the page saves and applies it', async () => {
@@ -363,6 +377,39 @@ test('a group’s role and skills are edited on its chat page and saved from the
   await topic.getByText('This topic uses its group’s role and skills.').waitFor();
   assert.equal(await topic.getByRole('heading', {name: 'Role and skills'}).count(), 0);
   await topic.close();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the private chat and groups each start from their own default role and skills', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const mine = page.locator('section', {
+    has: page.getByRole('heading', {name: 'Role and skills in your private chat'}),
+  });
+  const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills in groups'})});
+  await mine.getByText('Your private chat can use these.').waitFor();
+  await groups.getByText('Every group and topic can use these.').waitFor();
+  assert.equal(await mine.getByRole('textbox', {name: 'Name'}).inputValue(), 'weekly-menu');
+  assert.equal(
+    await groups.getByRole('textbox', {name: 'Name'}).count(),
+    0,
+    'groups never start from the private chat’s skills',
+  );
+  const saved = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/memory/persona'))
+      saved.push(request.postDataJSON().scope);
+  });
+  await groups.getByRole('textbox', {name: 'Role'}).fill('You help each group plan its week.');
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByText('1 unsaved change').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.deepEqual(saved, ['default:groups']);
+  await page.reload();
+  await groups.getByRole('textbox', {name: 'Role'}).waitFor();
+  assert.equal(await groups.getByRole('textbox', {name: 'Role'}).inputValue(), 'You help each group plan its week.');
+  assert.equal(await mine.getByRole('textbox', {name: 'Role'}).inputValue(), '');
   assert.deepEqual(problems, []);
   await page.close();
 });
