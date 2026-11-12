@@ -42,9 +42,15 @@ way to a model.
   before Honcho sees it. An answer that calls a tool its request did not offer,
   in a whole reply or a stream, or that cannot be read, is refused with a 502
   and logged as `honcho_unoffered_tool_refused` with the tool names only (a
-  name outside `[A-Za-z0-9_.-]` is logged as `other`). Honcho asks again, and
-  an answer that keeps naming one fails that memory read, which a reply sees as
-  limited memory. The provider answered, so the call is still counted and paid.
+  name that is not one of Honcho's own tools is logged as `other`, since a
+  made-up name may carry chat text). The request's `stream`
+  flag decides how the answer is read, as Honcho's OpenAI client does, so a
+  provider's Content-Type cannot steer an answer past the check.
+- The refusal carries `X-Should-Retry: false`, so Honcho's OpenAI client does
+  not resend it; Honcho's own retry asks up to three times in all. An answer
+  that keeps naming an unoffered tool then fails that memory read, which a
+  reply sees as limited memory. The provider answered, so each call is still
+  counted and paid.
 - Honcho itself is not changed.
 - The full tester gains `private_chat_stays_out_of_groups`. The owner says a
   private mark in their private chat, which the fixture's Honcho learning keeps
@@ -59,8 +65,10 @@ way to a model.
 - A group's memory reads keep to the group's sessions even when the model names
   a tool Honcho should not have run there. The check also stops a model from
   writing or deleting conclusions through a tool it was not offered.
-- An answer that names an unoffered tool costs one more model call when Honcho
-  asks again.
+- An answer that keeps naming an unoffered tool, for example after a planted
+  instruction, costs up to three paid model calls for each memory-chat step
+  before the read fails. They count toward the optional monthly memory-thinking
+  limit.
 - The protection holds while peer cards and dreams stay off, group context
   reads keep `limit_to_session=true`, session filters never hold `*`, and
   Honcho keeps its vectors in PostgreSQL.
