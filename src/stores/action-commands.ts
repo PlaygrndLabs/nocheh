@@ -288,7 +288,8 @@ export class ActionCommandRepository {
   }
   /**
    * A task card: what changes in which project's list, every group and topic that sees that list by name, what stays
-   * private, then exactly what those chats will see. Null when it does not fit one Telegram card (ADR-0243).
+   * private, then exactly what those chats will see, with each task that moves in under it. Null when it does not fit
+   * one Telegram card (ADR-0243).
    */
   private async taskCard(id:string) {
     const texts=await this.texts(),urls:string[]=[],owner={admin:true,scope:null};
@@ -300,7 +301,7 @@ export class ActionCommandRepository {
     const request=await this.tasks!.request(owner,id,space);
     const chats=[];for(const chat of request.chats){const [group,topic]=chat.split('/topic/');chats.push(await this.where(group!,line,mark,{topic,showTopic:true}));}
     const project=`“${(request.project??'').replace(controls,'')}”`,slot='\u0001\u0003';
-    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project}),chats:chats.length?chats.join(', '):line.task_no_chats,
+    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project,count:String(request.subtasks)}),chats:chats.length?chats.join(', '):line.task_no_chats,
       private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
     const card=linked(filled.replaceAll(slot,()=>fields(request.fields)),urls);
     if(card.text.length>cardLimit-outcomeRoom||card.links.length>entityLimit)return null;

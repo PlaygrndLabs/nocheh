@@ -12,10 +12,13 @@ else start build.").
   for a card that names them, and a move into a list from the dashboard or mini app names them
   first ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
   [store](test/store-tasks.test.ts), [columns](test/task-settings.test.ts),
-  [dashboard](test/dashboard-pages.browser.mjs)). Status, priority, dates, order, archive and
-  trash apply without a card by the recommended default; owner confirmation pending. Pending:
-  live acceptance with a real project group, and task cards in the dashboard Inbox (decided
-  in Telegram only). The item 11 full-tester canary builds on this.
+  [dashboard](test/dashboard-pages.browser.mjs)). By the recommended default, pending the
+  owner's confirmation, a private-chat change to a listed task that only sets status,
+  priority, start and due days and times, archive or trash, or takes it off every list,
+  applies without a card; repeat and reminders wait for the card (fail closed), and the chat
+  tool sets no order. Pending: live acceptance with a real project group, and task cards in
+  the dashboard Inbox (decided in Telegram only). The item 11 full-tester canary builds on
+  this.
 
 Production move (owner, 2026-10-28): Nocheh moves to an always-on server as a
 clean install once the MVP checks pass (stuck notes-review fix, full tester on

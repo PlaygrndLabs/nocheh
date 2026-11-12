@@ -103,9 +103,11 @@ export const approvalTexts=[
   'only_owner: Only the owner can approve or reject this.','only_requester: Only the person who asked or the owner can approve or reject this.',
   'changed: This request changed or no longer exists. Review it in the dashboard Inbox.',
   'decided: This request was already decided or can no longer change. Review it in the dashboard Inbox.',
-  'task_add: Add a task to the list of {project}','task_move: Move a task into the list of {project}','task_change: Change a task in the list of {project}',
+  'task_add: Add a task to the list of {project}','task_move: Move a task into the list of {project}',
+  'task_move_family: Move a task, with {count} under it, into the list of {project}','task_change: Change a task in the list of {project}',
   'task_comment: Comment on a task in the list of {project}','task_no_chats: no chat yet. Chats you add to this project later will see it too.',
   'task_private_move: Its earlier comments and history, the archived messages attached to it, its IDs in outside tools such as Notion and the columns you have not shared stay private.',
+  'task_private_family: Their earlier comments and history, the archived messages attached to them, their IDs in outside tools such as Notion and the columns you have not shared stay private.',
   'task_private_parts: The archived messages attached to it and the columns you have not shared stay private.',
   'task_done: ✅ Approved and changed.','task_rejected: ❌ Rejected. Nothing changed.',
   'task_changed: 🚫 Not changed: the task, its list or the chats that see it changed after it was asked. Ask again if you still want it.'].join('\n');
@@ -117,7 +119,7 @@ export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_alw
   'kind_shell'|'kind_browser'|'kind_tools'|'details'|
   'failed_action'|'unsure'|'not_run'|'read_closed'|'marked_ran'|'marked_not_run'|'marked_sent'|'marked_not_sent'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
   'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
-  'task_add'|'task_move'|'task_change'|'task_comment'|'task_no_chats'|'task_private_move'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed';
+  'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
   return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;

@@ -1127,13 +1127,24 @@ test('moving a task into a project’s list names the chats that will see it fir
     .last()
     .getByRole('checkbox', {name: 'Project chats can see this column'});
   assert.equal(await shared.isChecked(), false);
-  await columns
-    .getByRole('listitem')
-    .last()
-    .getByRole('textbox')
-    .first()
-    .fill('Effort ' + String(Date.now()).slice(-4));
-  await shared.check();
+  const effort = 'Effort ' + String(Date.now()).slice(-4);
+  await columns.getByRole('listitem').last().getByRole('textbox').first().fill(effort);
+  // Sharing it names every project's chats first, and says the values already in it show there too.
+  const share = page.getByRole('dialog', {name: `Let project chats see “${effort}”?`});
+  await shared.click();
+  await share
+    .getByText(
+      `People in each project’s chats will see “${effort}” on that project’s tasks, with every value already in it, also what was written before a task joined a project’s list: Studio launch (Aurora planning).`,
+      {exact: false},
+    )
+    .waitFor();
+  await share.getByRole('button', {name: 'Cancel'}).click();
+  await share.waitFor({state: 'detached'});
+  assert.equal(await shared.isChecked(), false, 'cancelled, it stays private');
+  await shared.click();
+  await share.getByRole('button', {name: 'Let them see it'}).click();
+  await share.waitFor({state: 'detached'});
+  assert.equal(await shared.isChecked(), true);
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByRole('button', {name: 'Save'}).click();
   await bar.getByText('No unsaved changes').waitFor();

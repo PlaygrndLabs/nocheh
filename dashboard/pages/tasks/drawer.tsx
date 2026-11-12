@@ -117,10 +117,11 @@ const ids = (items: {id: string}[]) => items.map(item => item.id).sort();
 const listed = (names: string[]) =>
   names.length < 2 ? (names[0] ?? '') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
 
-/** Who sees a task moved into a project's list from now on, and what stays private. */
-export function joinNotice(scope: Scope, groupName: (space: string) => string, subtasks: boolean): string {
+/** Who sees a task moved into a project's list from now on, and what stays private. `under` counts every task
+ * under it, archived and in the trash too, as they all move with it. */
+export function joinNotice(scope: Scope, groupName: (space: string) => string, under: number): string {
   const chats = (scope.chats ?? []).map(groupName);
-  const what = subtasks ? 'this task and its subtasks' : 'this task';
+  const what = under ? `this task and the ${under} ${under === 1 ? 'task' : 'tasks'} under it` : 'this task';
   const kept = 'Earlier comments and history, attached messages and the columns you haven’t shared stay private.';
   return chats.length
     ? `People in ${listed(chats)} will see ${what} from now on. ${kept}`
@@ -216,7 +217,7 @@ export function TaskDrawer({
       joining &&
       !(await feedback.confirm({
         title: `Move to ${scopeName(joining)}?`,
-        body: joinNotice(joining, groupName, task.subtasks.length > 0),
+        body: joinNotice(joining, groupName, task.descendants ?? task.subtasks.length),
         confirm: 'Move',
       }))
     )
@@ -969,7 +970,7 @@ function AttachmentsField({
     <Field
       label="Links and messages"
       htmlFor="task-panel-link"
-      hint="Web links, and messages Nocheh keeps that belong with this task."
+      hint="Web links, and messages Nocheh keeps that belong with this task: up to 20 of each."
     >
       <div className="space-y-2">
         {!!attachments.length && (
@@ -1001,7 +1002,7 @@ function AttachmentsField({
             ))}
           </ul>
         )}
-        {attachments.length < 20 && (
+        {attachments.filter(item => item.kind === 'link').length < 20 && (
           <div className="flex flex-wrap gap-2">
             <Input
               id="task-panel-link"

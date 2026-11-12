@@ -62,6 +62,8 @@ export type Detail = Omit<Task, 'subtasks' | 'comments'> & {
   duplicates: LinkedTask[];
   comments: {id: string; body: string; author: Actor; origin: string; created_at: string}[];
   activity: {id: string; at: string; actor: Actor; origin: string; changes: Record<string, any>}[];
+  /** How many tasks sit under it at every level, archived and in the trash too; a move takes them all. */
+  descendants?: number;
 };
 
 export type StatusCategory = 'not_started' | 'active' | 'done' | 'cancelled';

@@ -326,9 +326,9 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
-  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-board:'+Date.now(),group='-'+Date.now();
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-board:'+Date.now(),group='-'+Date.now(),porch='-3'+Date.now();
   const owner:Reader={admin:true,scope:null};
-  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group,porch]}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
   const capture=async(scope:string,from:number,text:string,name='Owner')=>{
@@ -350,6 +350,7 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     const mark=String(Date.now()),launch=digest(key+':launch'),house=digest(key+':house');
     for(const [id,name] of [[launch,'Launch'],[house,'House']])await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,$2,'active',1)",[id,name]);
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[group,launch]);
+    await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[porch,house]);
     // Effort is shared with project chats; Secret is the owner's own.
     const settings=await s.tasks.settings(owner);
     await s.tasks.saveSettings(owner,{revision:settings.revision,properties:[{id:'effort',name:'Effort',type:'number',shared:true},{id:'secret',name:'Secret',type:'text'}]});
@@ -400,6 +401,46 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     assert.ok(full.activity.some((item:any)=>item.changes.title?.from==='canary-title-'+mark));
     assert.equal(full.reminders.length,2);
 
+    // A link edit from the group replaces only the links it sees: the owner's links to tasks elsewhere stay.
+    const errand=await s.tasks.create(owner,{operation_id:key+':errand',title:'canary-errand-'+mark});
+    const flyers=await s.tasks.create(owner,{operation_id:key+':flyers',title:'Print the flyers',scope:launch});
+    const tied=await s.tasks.update(owner,task.id,{operation_id:key+':tie',expected_revision:full.revision,blocked_by:[errand.id],related:[errand.id,flyers.id]});
+    const retied=await s.tasks.chatGet(member,task.id);
+    assert.deepEqual([retied.blocked_by,retied.related.map((item:any)=>item.id)],[[],[flyers.id]],'a link to a task elsewhere is not shown');
+    const waits=await s.tasks.chatUpdate(member,task.id,{expected_revision:tied.revision,blocked_by:[flyers.id],related:[]});
+    assert.deepEqual([waits.blocked_by.map((item:any)=>item.id),JSON.stringify(waits).includes('canary-errand-'+mark)],[[flyers.id],false]);
+    const linkedUp=await s.tasks.get(owner,task.id);
+    assert.deepEqual(linkedUp.blocked_by.map((item:any)=>item.id).sort(),[errand.id,flyers.id].sort(),'the owner\'s link to a personal task stays');
+    assert.deepEqual(linkedUp.related.map((item:any)=>item.id),[errand.id]);
+
+    // The group always has its own 20 links, whatever the owner attached: the hidden messages are not counted.
+    const many=Array.from({length:20},(_,index)=>({kind:'message',id:digest(key+':m'+index),title:'canary-many-'+mark}));
+    const loaded=await s.tasks.update(owner,task.id,{operation_id:key+':many',expected_revision:linkedUp.revision,attachments:[...many,{kind:'link',url:'https://example.com/a'}]});
+    const twenty=Array.from({length:20},(_,index)=>({kind:'link',url:'https://example.com/'+index}));
+    const filled=await s.tasks.chatUpdate(member,task.id,{expected_revision:loaded.revision,attachments:twenty});
+    assert.deepEqual([filled.attachments.length,JSON.stringify(filled).includes('canary-many-'+mark)],[20,false]);
+    await assert.rejects(s.tasks.chatUpdate(member,task.id,{expected_revision:filled.revision,attachments:[...twenty,{kind:'link',url:'https://example.com/x'}]}),{code:'invalid_task_attachments'});
+    const both=await s.tasks.get(owner,task.id);
+    assert.deepEqual(['message','link'].map(kind=>both.attachments.filter((item:any)=>item.kind===kind).length),[20,20]);
+    await assert.rejects(s.tasks.update(owner,task.id,{operation_id:key+':more',expected_revision:both.revision,attachments:[...many,{kind:'message',id:digest(key+':m20')}]}),
+      {code:'invalid_task_attachments'},'up to 20 archived messages');
+
+    // A task made and finished in another project's group shows neither that group nor who made or finished it.
+    const porchTask=await s.tasks.create(owner,{operation_id:key+':porch',title:'Paint the porch',scope:house,group:porch});
+    await stores.control.query(`UPDATE owner_tasks SET created_by='{"kind":"member","name":"Alice"}',finished_by='{"kind":"member","name":"Alice"}',state='done',
+      status_id='done',done_at=now() WHERE id=$1`,[porchTask.id]);
+    const painted=await s.tasks.get(owner,porchTask.id);
+    await s.tasks.update(owner,porchTask.id,{operation_id:key+':porch-move',expected_revision:painted.revision,scope:launch});
+    const repainted=await s.tasks.chatGet(member,porchTask.id);
+    assert.deepEqual([repainted.group_id,repainted.created_by,repainted.finished_by],[null,null,null]);
+    assert.ok(!JSON.stringify(repainted).includes(porch)&&!JSON.stringify(repainted).includes('Alice'),'another group and its people stay private');
+    assert.deepEqual((await s.tasks.chatList(member,{group:porch,state:'all'})).tasks,[],'nor is a task found by that group');
+    const banner=await s.tasks.chatCreate(member,{title:'Hang the banner'});
+    assert.deepEqual([banner.group_id,banner.created_by],[group,{kind:'member',name:'Sara'}],'a task made on the list shows its group and who made it');
+    assert.deepEqual((await s.tasks.chatList(member,{group,state:'all'})).tasks.map((item:any)=>item.id),[banner.id]);
+    const own=await s.tasks.get(owner,porchTask.id);
+    assert.deepEqual([own.group_id,own.created_by.name],[porch,'Alice'],'the owner still sees them');
+
     // A personal task moved under a project's task joins that list with everything under it, from then on.
     const top=await s.tasks.create(owner,{operation_id:key+':top',title:'Plan the launch',scope:launch});
     const box=await s.tasks.chatCreate(chat,{title:'Pack the boxes'}),inner=await s.tasks.chatCreate(chat,{title:'Label the boxes',parent:box.id});
@@ -426,6 +467,33 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     const unknown=await s.tasks.chatGet(member,task.id);
     assert.deepEqual([unknown.comments,unknown.activity],[[],[]]);
     assert.equal((await s.tasks.chatList(member)).tasks.find((item:any)=>item.id===task.id).comments,0);
+    // Its next comment or change gives it a joining time: what is written from then on shows, nothing before it does.
+    const again=await s.tasks.chatComment(member,task.id,{text:'Still on for Friday'});
+    assert.deepEqual(again.comments.map((item:any)=>item.body),['Still on for Friday']);
+    const renamed=await s.tasks.chatUpdate(member,task.id,{expected_revision:again.revision,title:'Check the venue again'});
+    assert.deepEqual(renamed.revision,again.revision+1);
+    assert.deepEqual((await s.tasks.chatGet(member,task.id)).activity.map((item:any)=>item.changes.title?.to),['Check the venue again']);
+
+    // A comment written while a task moves in, on a task under it, stays private: the move holds every task under it
+    // before it reads its joining time.
+    const shelf=await s.tasks.create(owner,{operation_id:key+':shelf',title:'Build the shelf'});
+    const plank=await s.tasks.create(owner,{operation_id:key+':plank',title:'Cut the planks',parent:shelf.id});
+    const hold=new pg.Client({...config,database:'nocheh_control'});await hold.connect();
+    try {
+      await hold.query('BEGIN');await hold.query('SELECT 1 FROM owner_tasks WHERE id=$1 FOR UPDATE',[shelf.id]);
+      const moving=s.tasks.update(owner,shelf.id,{operation_id:key+':shelf-move',expected_revision:shelf.revision,scope:launch});
+      // The move has begun and waits for the task; a comment on the task under it starts and ends meanwhile.
+      const holder=(await hold.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      for(let tries=0;!(await hold.query('SELECT 1 FROM pg_locks WHERE NOT granted AND $1=ANY(pg_blocking_pids(pid))',[holder])).rows.length;tries++){
+        assert.ok(tries<200,'the move waits for the task');await new Promise(done=>setTimeout(done,25));
+      }
+      await s.tasks.comment(owner,plank.id,{operation_id:key+':plank-note',text:'canary-race-'+mark});
+      await hold.query('COMMIT');
+      assert.equal((await moving).project_id,launch);
+    }finally{await hold.end();}
+    const cut=await s.tasks.chatGet(member,plank.id);
+    assert.deepEqual([cut.project_id,cut.comments],[launch,[]]);
+    assert.ok(!JSON.stringify(cut).includes('canary-race-'+mark));
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
@@ -500,6 +568,9 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     // Status, priority and dates change at once; other changes wait for a card that shows the task and the change.
     const started=await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:made.revision,status:'doing',priority:2,due_on:'2030-01-04'}));
     assert.deepEqual([started.status,started.priority,started.due_on],['doing',2,'2030-01-04']);
+    // A repeat or a reminder, which the list's chats see too, is not among them: it waits.
+    for(const change of [{reminders:['2030-01-03T09:00']},{repeat:{every:1,unit:'week',from:'due'}}])
+      assert.equal((await s.tasks.chatUpdate(chat,made.id,{expected_revision:started.revision,...change})).state,'proposed');
     const before=cards.length;
     const rename=await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:started.revision,title:'Book the hall',priority:0}));
     assert.equal(rename.state,'proposed');
@@ -520,6 +591,14 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     assert.match(last('answer').text,/^🚫 Not changed/,'the card no longer names every chat that would see it');
     assert.deepEqual((await s.tasks.get(owner,made.id)).comments,[]);
     await stores.control.query('DELETE FROM project_assignments WHERE space_id=$1',[other]);
+    // A comment card on a task changed since, such as renamed, changes nothing either.
+    const current=await s.tasks.get(owner,made.id);
+    await s.actionCommands.offer('task',await s.tasks.chatComment(chat,made.id,{text:'Ask for the window room'}));
+    assert.match(last('card').text,/Task: Book the venue\nComment: Ask for the window room$/);
+    await s.tasks.update(owner,made.id,{operation_id:key+':rename',expected_revision:current.revision,title:'Cancel the venue'});
+    await s.actionCommands.callback(await press(last('card').buttons[0][1]));
+    assert.match(last('answer').text,/^🚫 Not changed/,'the task is no longer as its card showed it');
+    assert.deepEqual((await s.tasks.get(owner,made.id)).comments,[]);
 
     // Moving a personal task in names what stays private; Reject leaves it where it was.
     const own=await s.tasks.chatCreate(chat,{title:'Check the lights'});
@@ -532,6 +611,30 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     assert.equal(last('answer').text,'❌ Rejected. Nothing changed.');
     assert.equal((await s.tasks.get(owner,own.id)).project_id,null);
     assert.equal(last('settle').text.split('\n').at(-1),'❌ Rejected. Nothing changed.');
+
+    // A task moves in with every task under it, archived and in the trash too: the card shows each of them, and a
+    // task added or changed under it after the card makes it stale.
+    const boxes=await s.tasks.chatCreate(chat,{title:'Pack the crates'});
+    const label=await s.tasks.chatCreate(chat,{title:'Label the crates',parent:boxes.id,notes:'canary-under'});
+    const old=await s.tasks.chatCreate(chat,{title:'Old labels',parent:label.id});
+    await s.tasks.update(owner,old.id,{operation_id:key+':old-trash',expected_revision:old.revision,trashed:true});
+    const family=await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,boxes.id,{expected_revision:boxes.revision,scope:launch}));
+    assert.equal(family.state,'proposed');
+    const shown=last('card').text;
+    assert.ok(shown.startsWith(`📋 Move a task, with 2 under it, into the list of “Launch”\n${seenIn}\n🔒 Their earlier comments and history, `),shown);
+    assert.match(shown,/Title: Pack the crates\nStatus: To do\n\nSubtasks › 1\nTitle: Label the crates\nNotes: canary-under\nStatus: To do\nUnder: Pack the crates\n\nSubtasks › 2\nTitle: Old labels\nStatus: To do\nUnder: Label the crates\nIn the trash: true$/);
+    const later=await s.tasks.chatCreate(chat,{title:'Tape the crates',parent:boxes.id});
+    assert.equal(later.project_id,null,'a personal task is written at once');
+    await s.actionCommands.callback(await press(last('card').buttons[0][1]));
+    assert.match(last('answer').text,/^🚫 Not changed/,'the card no longer shows every task that would move');
+    assert.deepEqual((await tasks('Label the crates')).map(item=>item.project_id),[null]);
+    // Asked again, the card shows all three, and approving moves them all.
+    const chat2=await actor((await ask('Move the crates to the launch list')).id);
+    await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat2,boxes.id,{expected_revision:boxes.revision,scope:launch}));
+    assert.match(last('card').text,/^📋 Move a task, with 3 under it, into the list of “Launch”/);
+    await s.actionCommands.callback(await press(last('card').buttons[0][1]));
+    assert.equal(last('answer').text,'✅ Approved and changed.');
+    for(const title of ['Pack the crates','Label the crates','Old labels','Tape the crates'])assert.deepEqual((await tasks(title)).map(item=>item.project_id),[launch],title);
 
     // A list no chat sees yet still asks first, and says so.
     await s.actionCommands.offer('task',await s.tasks.chatCreate(chat,{title:'Fix the gate',scope:house}));
