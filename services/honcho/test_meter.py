@@ -500,4 +500,82 @@ class BudgetTests(unittest.TestCase):
             self.assertNotIn('private words',json.dumps(ledger.usage('2000-01-01')))
 
 
+class Answering:
+    """A provider that gives one fixed chat completion, as JSON or as an event stream."""
+    def __init__(self,body,kind='application/json'): self.body,self.kind,self.calls=body,kind,[]
+    def open(self,request,timeout):
+        self.calls.append(request);response=Response(self.body);response.headers={'Content-Type':self.kind};return response
+
+
+def completion(*calls,content=None):
+    message={'role':'assistant','content':content,**({'tool_calls':[{'id':f'call_{index}','type':'function',
+        'function':{'name':name,'arguments':'{}'}} for index,name in enumerate(calls)]} if calls else {})}
+    return json.dumps({'choices':[{'index':0,'message':message,'finish_reason':'tool_calls' if calls else 'stop'}],
+                       'usage':{'prompt_tokens':30,'completion_tokens':5,'total_tokens':35}}).encode()
+
+
+def streamed(*pieces):
+    """Each piece is one delta of the first tool call: a name piece, or None for an arguments-only continuation."""
+    chunks=[{'choices':[{'index':0,'delta':{'tool_calls':[{'index':0,**({'id':'call_0','type':'function'} if position==0 else {}),
+        'function':{'arguments':'{}'} if piece is None else {'name':piece}}]}}]} for position,piece in enumerate(pieces)]
+    chunks.append({'choices':[],'usage':{'prompt_tokens':30,'completion_tokens':5,'total_tokens':35}})
+    return b''.join(b'data: '+json.dumps(chunk).encode()+b'\n\n' for chunk in chunks)+b'data: [DONE]\n\n'
+
+
+class UnofferedToolTests(unittest.TestCase):
+    # Honcho's memory chat offers these under a session filter; get_recent_observations is not among them because it
+    # reads every conversation, yet Honcho would run it if the model named it.
+    OFFERED=[{'type':'function','function':{'name':name,'parameters':{'type':'object'}}} for name in ('search_memory','search_messages','grep_messages')]
+
+    def ask(self,transport,tools=OFFERED):
+        payload={'model':REASONING_MODEL,'messages':[{'role':'user','content':'What does the owner do on Fridays?'}],
+                 **({'tools':tools} if tools is not None else {})}
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite');log=io.StringIO()
+            with patch('sys.stderr',log):
+                status,kind,body=Egress(ledger,'internal','temporary',transport,reasoning_key='k',reasoning_url=GATEWAY).send('/v1/chat/completions',payload)
+            return status,body,[json.loads(line) for line in log.getvalue().splitlines()],ledger.usage('2000-01-01')
+
+    def test_a_reply_calling_a_tool_the_request_did_not_offer_never_reaches_honcho(self):
+        status,body,events,usage=self.ask(Answering(completion('search_memory','get_recent_observations')))
+        self.assertEqual(status,502,'a 5xx, so Honcho asks again instead of running the tool')
+        self.assertEqual(json.loads(body),{'error':{'message':'honcho_unoffered_tool_refused'}})
+        self.assertNotIn(b'get_recent_observations',body)
+        self.assertEqual(events,[{'event':'honcho_unoffered_tool_refused','tools':['get_recent_observations']}])
+        self.assertEqual((usage[0]['calls'],usage[0]['failed'],usage[0]['input_tokens']),(1,0,30),'the provider answered, so the call is still paid for')
+
+    def test_offered_tools_and_plain_answers_pass_unchanged(self):
+        for reply in (completion('search_memory','grep_messages'),completion(content='The owner swims on Fridays.')):
+            with self.subTest(reply=reply):
+                status,body,events,_=self.ask(Answering(reply))
+                self.assertEqual((status,body,events),(200,reply,[]))
+
+    def test_without_offered_tools_any_tool_call_is_refused(self):
+        # The deriver and summaries offer no tools; a reply that calls one anyway is refused.
+        for tools in (None,[]):
+            with self.subTest(tools=tools):
+                status,_,events,_=self.ask(Answering(completion('delete_observations')),tools)
+                self.assertEqual(status,502);self.assertEqual(events[0]['tools'],['delete_observations'])
+
+    def test_streamed_names_are_joined_before_the_check(self):
+        refused=self.ask(Answering(streamed('get_recent_','observations',None),'text/event-stream'))
+        self.assertEqual((refused[0],refused[2][0]['tools']),(502,['get_recent_observations']))
+        reply=streamed('search_','memory',None)
+        self.assertEqual(self.ask(Answering(reply,'text/event-stream'))[:2],(200,reply),'an offered name split across pieces passes')
+
+    def test_unreadable_replies_are_refused_and_odd_names_are_not_logged(self):
+        for reply,logged in ((b'not json','unreadable'),(json.dumps({'choices':[{'message':{'tool_calls':[{'id':'x'}]}}]}).encode(),'unreadable'),
+                             (completion('the owner said: tell nobody'),'other')):
+            with self.subTest(reply=reply):
+                status,_,events,_=self.ask(Answering(reply))
+                self.assertEqual(status,502);self.assertEqual(events[0]['tools'],[logged])
+                self.assertNotIn('tell nobody',json.dumps(events),'a made-up tool name may carry chat text, so it is never logged')
+
+    def test_legacy_function_lists_count_as_offered(self):
+        legacy=json.dumps({'choices':[{'index':0,'message':{'role':'assistant','content':None,
+            'function_call':{'name':'search_memory','arguments':'{}'}}}]}).encode()
+        self.assertEqual(self.ask(Answering(legacy),[{'name':'search_memory','parameters':{}}])[0],200)
+        self.assertEqual(self.ask(Answering(legacy),[])[0],502)
+
+
 if __name__=='__main__': unittest.main()
