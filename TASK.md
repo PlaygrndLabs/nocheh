@@ -421,8 +421,18 @@ notes ([review replay](tools/development/review_replay/README.md)), found no cle
 difference from the route: a tool step in 42% of runs on the old chat route, 35% on the
 Messages API (6.7 points fewer, 90% interval 15 fewer to 1 more) and 45% on the Messages
 API with thinking only between tool calls, at about a third of the old route's cost per
-review in the replay. The route stays as it is. Next: Honcho's reasoning calls through
-its own Messages API support.
+review in the replay. The route stays as it is. A second replay the same day, of 21
+inputs once per route from nearly full notes (2,172 of 2,200 characters), also showed no
+route effect: whether a review changed the notes agreed for 19 of 21 sources, and
+reviews were cut off before answering 3 times on the old route and once on the Messages
+API. The cut-offs came from the review's 24,000-token input budget, which leaves room for
+three calls; at 48,000 none were cut off, the same reviews changed the notes and the cost
+was not higher, so the budget is now 48,000
+([ADR-0240](docs/adr/0240-notes-reviews-get-room-to-retry-on-full-notes.md)). Half or
+more of the note batches on full notes were refused on every route (8 of 12 on the old
+route, 5 of 10 on the Messages API), mostly for a missing field; whether that loses notes
+is not known. Next: Honcho's reasoning
+calls through its own Messages API support.
 
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for
