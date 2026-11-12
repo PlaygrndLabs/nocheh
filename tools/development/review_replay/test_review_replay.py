@@ -385,6 +385,25 @@ class Relay(unittest.TestCase):
         self.assertEqual((plain['memory_ops'], plain['usage']['input'], plain['usage']['cache_read']), ([['add', 'memory']], 5, 4))
         self.assertEqual(relay.response_metrics('messages', True, b'data: {"type":"message_start","message":{"usage":{"input_tokens":"x"}}}\n\n')['usage']['input'], 0)
 
+    def test_counts_memory_results_returned_to_the_model(self):
+        over = json.dumps({'success': False, 'error': 'Applying all 3 operations would put memory at 2,300/2,200 chars: free at least 100 chars more. '
+                                                      'No operations were applied (batch is all-or-nothing).'})
+        miss = json.dumps({'success': False, 'error': "Operation 2 (patch): No entry matched 'synthetic'."})
+        staged = json.dumps({'success': True, 'staged': True, 'pending_id': 'p1'})
+        applied = json.dumps({'success': True, 'message': 'Entry added.'})
+        old = json.dumps({'success': False, 'error': 'Too early: answered before the last assistant message.'})
+        chat = {'messages': [{'role': 'user', 'content': 'q'}, {'role': 'assistant', 'content': None}, {'role': 'tool', 'content': old},
+                             {'role': 'assistant', 'content': None}, {'role': 'tool', 'content': over}, {'role': 'tool', 'content': applied}]}
+        self.assertEqual(relay.tool_outcomes('chat', chat), {'refused:over_limit:batch': 1, 'applied': 1})
+        messages = {'messages': [{'role': 'user', 'content': 'q'}, {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'a'}]},
+                                 {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'a', 'content': miss},
+                                                              {'type': 'tool_result', 'tool_use_id': 'b', 'content': [{'type': 'text', 'text': staged}]},
+                                                              {'type': 'text', 'text': 'not a result'}]}]}
+        self.assertEqual(relay.tool_outcomes('messages', messages), {'refused:no_match': 1, 'staged': 1})
+        self.assertEqual(relay.tool_outcomes('messages', {'messages': [{'role': 'user', 'content': 'first turn'}]}), {})
+        self.assertEqual([relay.outcome(text) for text in ('not json', '[]', json.dumps({'success': False, 'done': True,
+                          'error': 'Memory consolidation failed 4 times this turn. Stop retrying memory calls.'}))], ['other', 'other', 'refused:retry_cap'])
+
     def test_an_error_inside_a_200_stream_is_no_completed_call(self):
         raw = anthropic_stream('m', False)
         metrics = relay.response_metrics('messages', True, anthropic_stream('m', False, error=True))

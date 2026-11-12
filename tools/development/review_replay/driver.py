@@ -232,6 +232,9 @@ def execute(source, arm, repeat, run_id, args, server, prompts):
               'hermes_calls': result['usage'].get('calls') if isinstance(result.get('usage'), dict) else None,
               'call_detail': [{key: value for key, value in call.items() if key != 'run_id'} for call in calls],
               'memory_ops': dict(Counter(f'{action}:{target}' for call in answered for action, target in call.get('memory_ops') or [])),
+              # What Hermes answered the model's memory writes, as the next call returned them (a run that ends on a tool
+              # call shows its last results nowhere).
+              'tool_results': dict(sum((Counter(call.get('tool_results') or {}) for call in model), Counter())),
               'notes_before': counts(before), 'notes_after': counts(after), 'dropped_entries': dropped,
               'memory_changed': before[0] != after[0], 'user_changed': before[1] != after[1], 'notes_changed': before != after,
               'staged': staged, 'tokens': usage, 'cost': round(cost(usage), 6), 'unaccounted': unaccounted(calls, settled),
@@ -266,6 +269,8 @@ def group(rows):
     return {'runs': runs, 'multi_call_share': sum(model_calls(r) >= 2 for r in rows) / runs, 'mean_calls': sum(model_calls(r) for r in rows) / runs,
             'notes_changed_share': sum(r['notes_changed'] for r in rows) / runs, **actions(rows),
             'failures': sum(r['state'] != 'done' for r in rows),
+            'refused': sum(count for r in rows for kind, count in (r.get('tool_results') or {}).items() if kind.startswith('refused')),
+            'results': dict(sum((Counter(r.get('tool_results') or {}) for r in rows), Counter())),
             # Runs where the relay's completed calls and Hermes's count differ, such as a retry after an error in a stream.
             'counts_differ': sum(type(r.get('hermes_calls')) is int and r['hermes_calls'] != r['calls'] for r in rows),
             'cost': round(sum(r['cost'] for r in rows), 4),
@@ -323,7 +328,7 @@ def analyze(rows, seed=0, resamples=10000):
 
 
 COLUMNS = {'runs': 'runs', 'multi_call_share': '2+calls', 'mean_calls': 'calls', 'notes_changed_share': 'changed', 'add': 'adds',
-           'replace': 'replaces', 'remove': 'removes', 'failures': 'failed', 'counts_differ': 'differ', 'cost': 'dollars'}
+           'replace': 'replaces', 'remove': 'removes', 'refused': 'refused', 'failures': 'failed', 'counts_differ': 'differ', 'cost': 'dollars'}
 
 
 def report(stats):
@@ -332,6 +337,8 @@ def report(stats):
     for title in ('arms', 'arm_kind'):
         lines += [f'{name:<8} ' + ''.join(f'{cell(row[column]):>9}' for column in COLUMNS) for name, row in stats[title].items()]
     lines.append('calls are Hermes\'s own count; differ: runs where the relay counted other completed calls')
+    for name, row in stats['arms'].items():
+        lines.append(f'{name} memory results: ' + (', '.join(f'{kind} x{count}' for kind, count in sorted(row['results'].items())) or 'none'))
     for name, row in stats['arms'].items():
         lines.append(f'{name} thinking sent: ' + (', '.join(f'{setting} x{count}' for setting, count in sorted(row['thinking'].items())) or 'no calls'))
     lines.append(f"spent: ${sum(row['cost'] for row in stats['arms'].values()):.2f} over {sum(row['runs'] for row in stats['arms'].values())} runs")

@@ -295,6 +295,44 @@ def response_metrics(route, streamed, raw):
             **({'stream_error': error} if error else {}), **({} if isinstance(usage, dict) and usage else {'usage_missing': True})}
 
 
+# Kinds of a refused memory write, from words in Hermes's error text (tools/memory_tool_store.py, tools/memory_tool.py);
+# only the kind is kept, never the text.
+REFUSALS = (('stop retrying', 'retry_cap'), ('would exceed', 'over_limit'), ('would put memory at', 'over_limit'),
+            ('no entry matched', 'no_match'), ('matched multiple', 'ambiguous'), ('multiple entries matched', 'ambiguous'),
+            ('times in the matched entry', 'ambiguous'), ('changed since it was staged', 'stale'), ('drift', 'drift'),
+            ('could not be read', 'read_failed'), ('refusing to empty', 'would_empty'), ('is required', 'missing_field'),
+            ('cannot be empty', 'missing_field'), ('unknown action', 'invalid_args'), ('no-op', 'invalid_args'),
+            ('target', 'invalid_args'), ('disabled', 'unavailable'), ('not available', 'unavailable'))
+
+
+def outcome(text):
+    """What a memory tool result says happened: applied, staged, or refused and why (a kind, never the text)."""
+    try: result = json.loads(text)
+    except (TypeError, ValueError): return 'other'
+    if not isinstance(result, dict): return 'other'
+    if result.get('success') is True: return 'staged' if result.get('staged') else 'applied'
+    error = str(result.get('error') or '').lower()
+    reason = next((kind for word, kind in REFUSALS if word in error), 'other')
+    return 'refused:' + reason + (':batch' if 'all-or-nothing' in error else '')
+
+
+def tool_outcomes(route, payload):
+    """Outcomes of the tool results this request returns to the model: those after its last assistant message."""
+    messages = payload.get('messages') if isinstance(payload, dict) else None
+    if not isinstance(messages, list): return {}
+    last = max((i for i, m in enumerate(messages) if isinstance(m, dict) and m.get('role') == 'assistant'), default=-1)
+    found = Counter()
+    text = lambda content: content if isinstance(content, str) else ''.join(
+        part.get('text') or '' for part in content if isinstance(part, dict)) if isinstance(content, list) else ''
+    for message in messages[last + 1:]:
+        if not isinstance(message, dict): continue
+        if route == 'chat' and message.get('role') == 'tool': found[outcome(text(message.get('content')))] += 1
+        elif route == 'messages' and isinstance(message.get('content'), list):
+            for block in message['content']:
+                if isinstance(block, dict) and block.get('type') == 'tool_result': found[outcome(text(block.get('content')))] += 1
+    return dict(found)
+
+
 def error_type(raw):
     """The provider's error type only, never its message."""
     try:
@@ -413,6 +451,7 @@ class Handler(BaseHTTPRequestHandler):
         # The thinking and effort settings sent, by name.
         setting = lambda key, field: payload[key].get(field) if isinstance(payload.get(key), dict) else None
         entry.update(stream=payload.get('stream') is True, messages=len(payload['messages']) if isinstance(payload.get('messages'), list) else 0,
+                     tool_results=tool_outcomes(route, payload),
                      thinking=name(setting('thinking', 'type')),
                      effort=name(payload.get('reasoning_effort') or setting('reasoning', 'effort') or setting('output_config', 'effort')))
         if not self.server.key:
