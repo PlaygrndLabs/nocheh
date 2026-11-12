@@ -166,6 +166,19 @@ test('the mini app server forwards checked owner calls to the local dashboard wi
     for(const route of ['/owner-lock','/owner-lock/password','/owner-lock/sign-out-others','/login','/mini-app/sign-in'])
       assert.equal((await fetch(base+'/api/nocheh'+route,route==='/owner-lock'?{headers}:{method:'POST',headers,body:'{"password":"taken-over-99"}'})).status,404,'the password is changed only from the dashboard');
     assert.equal(calls.length,before,'refused calls never reach the dashboard');
+    // A person allowed or denied in a group (TELEGRAM_GROUP_ACCESS) is not the owner: their launch is refused with the
+    // same fixed answer before anything is read or forwarded, even holding the owner's phone session.
+    const access={'-1001000000001':{granted:['778','779'],denied:['780']}},lockBefore=lockCalls.length;
+    for(const id of Object.values(access).flatMap(group=>[...group.granted,...group.denied])) {
+      const member=launch({auth_date:fresh,user:user(id)}),asked={'x-telegram-init-data':member,'x-nocheh-mini-session':token};
+      for(const [path,init] of [['/api/nocheh/tasks',{headers:asked}],['/api/nocheh/settings',{headers:asked}],['/api/nocheh/decisions',{headers:asked}],
+        ['/api/nocheh/tasks',{method:'POST',headers:{...asked,'content-type':'application/json'},body:'{"title":"Read the owner\'s list"}'}],
+        ['/api/mini/session',{headers:asked}],['/api/mini/sign-in',{method:'POST',headers:{...asked,'content-type':'application/json'},body:'{"password":"river-lamp-42"}'}]] as [string,RequestInit][]) {
+        const answer=await fetch(base+path,init);
+        assert.equal(answer.status,403,id+' '+path);assert.deepEqual(await answer.json(),{error:'owner_required'},id+' '+path);
+      }
+    }
+    assert.deepEqual([calls.length,lockCalls.length],[before,lockBefore],'no payload, sign-in or session check for a group member');
     assert.equal((await fetch(base+'/api/mini/sign-out',{method:'POST',headers})).status,200);
     assert.equal((await fetch(base+'/api/nocheh/tasks',{headers})).status,401,'signed out at once on this phone');
   } finally {server.close();dashboard.close();await rm(assets,{recursive:true,force:true});await rm(directory,{recursive:true,force:true});}
