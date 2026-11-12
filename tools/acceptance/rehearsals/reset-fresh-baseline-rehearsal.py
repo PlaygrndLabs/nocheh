@@ -41,7 +41,7 @@ await derived.query(`INSERT INTO derived_artifacts(id,event_id,kind,content,cont
  VALUES($1,$2,'runtime_context',$3,$4,'{}','1',$4,'fixture','1',$4,'fixture',$5)`,['b'.repeat(64),'a'.repeat(64),Buffer.from(marker),digest(marker),marker]);
 await control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify(assistant),digest(canonical(assistant))]);
 await control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
-await control.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Fixture share','[\"42\"]','-10',true,'filtered','Only fixture facts.',1)",['c'.repeat(64)]);
+await control.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Fixture share','[\"-11\"]','-10',true,'filtered','Only fixture facts.',1)",['c'.repeat(64)]);
 await control.query("INSERT INTO runtime_profiles(id,name,owner_id,state,revision) VALUES($1,'research','42','active',1)",[process.env.CUSTOM_PROFILE]);
 for(const client of [archive,derived,control])await client.end();'''
 
@@ -207,7 +207,7 @@ def main():
             assert configuration.load(state)['NOCHEH_STORAGE_LAYOUT'] == 'original-only-v1'
             assert setup['snapshot']['layout'] == 'original-only-v1'
             assert setup['snapshot']['configuration']['sharing_rules'] == [{
-                'id': 'c' * 64, 'name': 'Fixture share', 'sources': ['42'], 'destination': '-10',
+                'id': 'c' * 64, 'name': 'Fixture share', 'sources': ['-11'], 'destination': '-10',
                 'enabled': True, 'mode': 'filtered', 'instructions': 'Only fixture facts.', 'project_id': None}]
             assert setup['snapshot']['configuration']['runtime_profiles'] == [
                 {'id': CUSTOM_PROFILE, 'name': 'research', 'owner_id': '42'}]

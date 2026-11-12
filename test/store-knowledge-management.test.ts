@@ -224,5 +224,11 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    const recovered=await s.knowledge.proposal(owner,recoveryId);assert.equal(recovered.result.receipt.id,commandReceipt.id);assert.equal(recovered.result.receipt.revision,1);
    assert.equal((await stores.control.query('SELECT revision FROM projects WHERE id=$1',[commandReceipt.id])).rows[0].revision,1,'recovery never repeats an already committed owner command');
    assert.deepEqual(await permissions(),beforeAuthority);
+
+   // Organizing puts chats in projects, so a private chat, the owner's included, is never one it may organize.
+   for(const scope of ['123','123/topic/5','desktop:personal_chat:9'])
+    await assert.rejects(s.knowledge.saveDelegation(owner,{name:'Private organization',enabled:true,scopes:[group,scope],project_ids:[],allow_create:true,
+     expires_at:null,expected_revision:0,operation_id:key+':private-delegation:'+scope}),{code:'organization_private_chat'},scope);
+
   } finally {knowledge.completed=completed;await stores.close();}
  });

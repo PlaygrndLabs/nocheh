@@ -1,6 +1,7 @@
 /** Small pieces shared by the Memory tabs: saving, plain error words, chat names and evidence links. */
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {apiPost} from '../../lib/api';
+import {privateChatErrors} from '../../lib/chats-model';
 import {refreshResources, useResource} from '../../lib/resource';
 import {cn} from '../../lib/utils';
 
@@ -9,6 +10,7 @@ export const CONFLICT_TEXT = 'This changed somewhere else. Reload to see the lat
 /** Plain words for an error code the owner API returns. */
 export function errorWords(error: unknown): string {
   const code = String((error as Error)?.message ?? error ?? '');
+  if (privateChatErrors[code]) return privateChatErrors[code]!;
   if (/conflict|changed/.test(code)) return CONFLICT_TEXT;
   const known: Record<string, string> = {
     honcho_live_acceptance_pending: 'Long-term memory hasn’t passed its checks yet, so it can’t be connected.',

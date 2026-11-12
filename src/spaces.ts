@@ -69,12 +69,20 @@ export function validateSpace(id:unknown):string {
   return value;
 }
 export function parentSpace(id:string):string|null {return id.includes('/topic/')?id.split('/topic/')[0]!:null;}
+/** A Telegram group's chat ID: group IDs are negative, private chats positive (assistant-policy.ts). */
+export const groupChatId=(id:string)=>/^-\d+$/.test(id);
+/**
+ * Whether a conversation is a group or one of its topics, the only conversations that may share or be shared
+ * with. Everything else counts as private and fails closed: the owner's private chat and its topics, any other
+ * private chat, `desktop:*` imports, `system`, and an unknown conversation (null) (ADR-0242).
+ */
+export const groupSpace=(space:string|null|undefined):space is string=>!!space&&groupChatId(parentSpace(space)??space);
 /** The conversations a group or topic turn recalls: its own, or, when the group's topics share
  * memory, the group's base conversation and every one of its topics. Owner turns read everything. */
 export interface RecallScope {space:string;group:string|null}
 export function recallScope(space:string,topicMemory:'group'|'topic'='group'):RecallScope {
   const chat=parentSpace(space)??space;
-  return {space,group:topicMemory==='group'&&/^-\d+$/.test(chat)?chat:null};
+  return {space,group:topicMemory==='group'&&groupChatId(chat)?chat:null};
 }
 export const inRecall=(scope:RecallScope,space:string)=>space===scope.space||scope.group!==null&&(parentSpace(space)??space)===scope.group;
 /** SQL test that `column` names a conversation of the recall scope bound as `space` and `group`. */

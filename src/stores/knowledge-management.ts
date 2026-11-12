@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {parentSpace,validateSpace} from '../spaces.js';
+import {groupSpace,parentSpace,validateSpace} from '../spaces.js';
 import {learningResult} from '../interpretations.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {StorePools} from './connections.js';
@@ -59,6 +59,8 @@ export class KnowledgeManagementRepository {
   const operation=string(b.operation_id,200),identity=b.id===undefined?digest('organization-delegation:'+operation):id(b.id),expected=revision(b.expected_revision);
   if(!operation.trim()||typeof b.enabled!=='boolean'||typeof b.allow_create!=='boolean'||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.length>100||!Array.isArray(b.project_ids)||b.project_ids.length>100)throw new HttpError(400,'invalid_organization_delegation');
   const scopes=[...new Set<string>(b.scopes.map(validateSpace))].sort(),projects=[...new Set<string>(b.project_ids.map(id))].sort(),name=string(b.name,200).trim();
+  // Organizing puts chats in projects, and a private chat never joins one (ADR-0242).
+  if(!scopes.every(groupSpace))throw new HttpError(400,'organization_private_chat');
   const expires=b.expires_at==null||b.expires_at===''?null:new Date(string(b.expires_at,100));
   if(!name||expires&&(!Number.isFinite(expires.getTime())||b.enabled&&expires<=new Date()))throw new HttpError(400,'invalid_organization_delegation');
   const hash=digest(canonical({...b,id:identity})),db=await this.stores.control.connect();
@@ -357,7 +359,7 @@ export class KnowledgeManagementRepository {
   let proposal:OrganizationProposal,context:any;
   try{context=JSON.parse(contextRow.content.toString());const parsed:any=learningResult(result.content.toString());
    if(!parsed.organization)return null;
-   proposal=learnedOrganization(parsed.organization);
+   const learned=learnedOrganization(parsed.organization);if(!learned)return null;proposal=learned;
   }catch{return null;}
   const captured=await this.s.access.archive.verify(job.source_reference);
   if(captured.origin!=='live')return null;

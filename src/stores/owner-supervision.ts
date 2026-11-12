@@ -3,7 +3,7 @@ import {digest} from '../archive.js';
 import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
 import {graphChatType,graphGroupLabel} from '../graph-labels.js';
 import {HttpError} from '../http.js';
-import {parentSpace,validateSpace} from '../spaces.js';
+import {groupChatId,parentSpace,validateSpace} from '../spaces.js';
 import type {TelegramChatRepository} from './telegram-chats.js';
 import type {TelegramTopicRepository} from './telegram-topics.js';
 import type {StorePools} from './connections.js';
@@ -253,7 +253,7 @@ export class OwnerSupervisionRepository {
     ]);
     const guard=memory.guard,policy=configuration?.policy,access=policy?.group_access?.[parent],owner=space===policy?.owner_id;
     // While a group's topics share memory, a turn there reads the rules into the group and every one of its topics too.
-    const groupWide=(policy?.topic_memory??'group')==='group'&&/^-\d+$/.test(parent);
+    const groupWide=(policy?.topic_memory??'group')==='group'&&groupChatId(parent);
     const sharingRules=rules.rows.filter(row=>row.destination===space||groupWide).map(row=>row.destination===space?row:{...row,through_group:true});
     const conversation=directory.find(item=>item.space_id===space)??{space_id:space,name:null,kind:parentSpace(space)?'topic':space.startsWith('-')?'group':'private',parent_space:parentSpace(space),parent_name:directory.find(item=>item.space_id===parent)?.name??null,observed_at:null,configured:false};
     const currentBinding=(binding:any)=>binding?.generation===guard.generation&&Number(binding?.epoch)===Number(guard.epoch);

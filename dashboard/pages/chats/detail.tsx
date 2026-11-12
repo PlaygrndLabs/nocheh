@@ -1,8 +1,8 @@
-/** One chat: where Nocheh answers, who may talk, what it remembers and may do, the tools it may use, and its project. */
+/** One chat: where Nocheh answers, who may talk, what it remembers and may do, the tools it may use, and, for a group or topic, its project. */
 import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
-import {chatName, parentOf, topicNumber, type Chat} from '../../lib/chats-model';
+import {chatName, groupSpace, parentOf, topicNumber, type Chat} from '../../lib/chats-model';
 import {Button, LoadError} from '../../ui/core';
 import {AllowedActions} from './actions';
 import {MemoryCard} from './memory';
@@ -129,7 +129,15 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
           }
         />
       )}
-      <ProjectCard chat={chat} />
+      {groupSpace(space) ? (
+        <ProjectCard chat={chat} />
+      ) : (
+        <p className="px-1 text-[13px] text-muted">
+          {owner || (!!parentId && parentId === telegram.owner)
+            ? 'Your private chat never joins a project.'
+            : 'A private chat never joins a project.'}
+        </p>
+      )}
       {forum && <TopicsCard group={chat} topics={topics} />}
     </div>
   );

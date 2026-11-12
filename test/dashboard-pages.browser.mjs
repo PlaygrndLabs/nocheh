@@ -1163,6 +1163,40 @@ test('a project’s chats share what they know only once it is ticked, and its r
   await rules.close();
 });
 
+test('the owner’s private chat stays out of sharing rules and projects', async () => {
+  // A rule picks only groups and topics; an older rule that names a private chat is flagged.
+  const {page: rules, problems} = await open('chats?view=rules');
+  const legacy = rules.getByRole('listitem').filter({hasText: 'Notes from my chat'});
+  await legacy.getByText('Reads a private chat. Nocheh skips it.').waitFor();
+  await rules.getByRole('button', {name: 'New rule'}).click();
+  const dialog = rules.getByRole('dialog', {name: 'New sharing rule'});
+  const from = dialog.getByRole('listbox', {name: 'Share facts from'});
+  await from
+    .getByRole('option', {name: /Aurora planning/})
+    .first()
+    .waitFor();
+  assert.equal(await from.getByRole('option', {name: /You|Mira Chen/}).count(), 0);
+  const search = dialog.getByPlaceholder('Search chats by name or ID').first();
+  await search.fill('42');
+  await from
+    .getByRole('option', {name: /Aurora planning/})
+    .first()
+    .waitFor();
+  assert.equal(await from.getByRole('option', {name: /You/}).count(), 0);
+  assert.equal(await from.getByRole('button', {name: /Use the ID/}).count(), 0);
+  await search.fill('73');
+  await from.getByText('Only groups and topics can be chosen here, never a private chat.').waitFor();
+  assert.equal(await from.getByRole('button', {name: /Use the ID/}).count(), 0);
+  await rules.close();
+
+  // The owner's chat page offers no project.
+  const {page: own, problems: ownProblems} = await open('chats?chat=42');
+  await own.getByText('Your private chat never joins a project.').waitFor();
+  assert.equal(await own.locator('#chat-project').count(), 0);
+  assert.deepEqual([...problems, ...ownProblems], []);
+  await own.close();
+});
+
 test('usage shows calls, tokens and cost, and never prices an unknown cost as free', async () => {
   const {page, problems} = await open('usage');
   await page.getByRole('table', {name: 'Usage by part'}).waitFor();

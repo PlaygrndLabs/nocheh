@@ -51,6 +51,47 @@ test('owner project inheritance, explicit sharing and revocation are separate, v
   } finally {await stores.close();}
 });
 
+test('an owner rule never reads from or shares into a private chat, and an older or imported one is skipped',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
+  try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
+  const key='private-rules:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),third=String(Number(group)-2),privateChat=String(Date.now());
+  try {
+    const rule={name:'Synthetic rule',enabled:true,mode:'approved',instructions:'',expected_revision:0};
+    for(const space of [privateChat,privateChat+'/topic/5','desktop:personal_chat:9']) {
+      await assert.rejects(sharing.save(owner,{...rule,sources:[group,space],destination:second,operation_id:key+':from:'+space}),{code:'sharing_private_chat'},space);
+      await assert.rejects(sharing.save(owner,{...rule,sources:[group],destination:space,operation_id:key+':into:'+space}),{code:'sharing_private_chat'},space);
+    }
+    assert.equal((await sharing.save(owner,{...rule,sources:[group,group+'/topic/3'],destination:second,operation_id:key+':groups'})).destination,second,'groups and topics share');
+
+    // Rows written before private chats were refused, or imported, are read as reading and sharing into no private chat.
+    const older=digest(key+':older'),into=digest(key+':into');
+    await stores.control.query(`INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision)
+      VALUES($1,'Older rule',$2,$3,true,'approved','',1),($4,'Older rule into a private chat',$5,$6,true,'approved','',1)`,
+      [older,JSON.stringify([group,privateChat]),third,into,JSON.stringify([group]),privateChat]);
+    const [stored]=await sharing.forDestination(third);assert.equal(stored!.id,older);
+    assert.equal(await sharing.covers(stored!,privateChat),false,'a private source is never read');
+    assert.equal(await sharing.covers({...stored!,sources:[privateChat+'/topic/5']},privateChat+'/topic/5'),false);
+    assert.equal(await sharing.covers(stored!,group),true);
+    assert.deepEqual(await sharing.forDestination(privateChat),[],'nothing is shared into a private chat');
+    const listed=new Map<string,any>();let after='';
+    for(;;){const page=await sharing.list(owner,after);for(const row of page.rules)listed.set(row.id,row);if(!page.next)break;after=page.next;}
+    assert.deepEqual(listed.get(older).private_sources,[privateChat],'the rules list names the private chat Nocheh skips');
+    assert.deepEqual(listed.get(into).private_sources,[privateChat]);
+
+    const project=await projects.save(owner,{name:'Synthetic project',description:'',state:'active',expected_revision:0,operation_id:key+':project'});
+    for(const space of [privateChat,privateChat+'/topic/5','desktop:personal_chat:9'])
+      await assert.rejects(projects.assign(owner,{space_id:space,mode:'assigned',project_id:project.id,expected_revision:0,operation_id:key+':assign:'+space}),{code:'project_private_chat'},space);
+    assert.equal((await projects.assign(owner,{space_id:privateChat,mode:'none',expected_revision:0,operation_id:key+':none'})).mode,'none','a private chat may be kept out');
+    await stores.control.query("UPDATE project_assignments SET project_id=$2,mode='assigned' WHERE space_id=$1",[privateChat,project.id]);
+    const effective=await projects.effective(privateChat);
+    assert.deepEqual([effective.project,effective.assignment,effective.own_assignment],[null,null,null],'an older row puts a private chat in no project');
+  } finally {await stores.close();}
+});
+
 test('a project shares between its group chats only when the owner turns it on, and never into a chat left out',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
@@ -58,7 +99,7 @@ test('a project shares between its group chats only when the owner turns it on, 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
-  const key='project-sharing:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),topic=group+'/topic/17',privateChat='123';let n=0;
+  const key='project-sharing:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),topic=group+'/topic/17',privateChat=String(Date.now());let n=0;
   const op=(label:string)=>key+':'+label+':'+(++n);
   const fields:Record<string,unknown>={name:'Synthetic shared project',description:'',state:'active'};
   try {
@@ -71,7 +112,10 @@ test('a project shares between its group chats only when the owner turns it on, 
     const rows=async()=>(await stores.control.query('SELECT * FROM sharing_rules WHERE project_id=$1 ORDER BY destination',[project.id])).rows;
     const into=(space:string)=>digest('project-sharing:'+project.id+':'+space);
     const rule=async(space:string)=>(await rows()).find(row=>row.destination===space);
-    for(const space of [group,second,privateChat])await assign(space,'assigned');
+    for(const space of [group,second])await assign(space,'assigned');
+    await assert.rejects(assign(privateChat,'assigned'),{code:'project_private_chat'},'a private chat never joins a project');
+    // A row written before that refusal is never read as a source or a destination either.
+    await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[privateChat,project.id]);
     assert.deepEqual(await rows(),[],'a project that does not share writes no rule');
     assert.deepEqual(await sharing.forDestination(second),[]);
 

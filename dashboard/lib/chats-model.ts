@@ -25,6 +25,9 @@ export const isSpaceId = (text: string) => /^-?[1-9]\d{0,18}(\/topic\/[1-9]\d{0,
 export const validUserId = (text: string) => /^[1-9]\d{0,18}$/.test(text.trim());
 export const parentOf = (space: string) => (space.includes('/topic/') ? space.split('/topic/')[0]! : null);
 export const topicNumber = (space: string) => Number(space.split('/topic/')[1]);
+/** A group or one of its topics: the only chats that share, are shared with or join a project. Every other
+ * chat counts as private, as the server's groupSpace does (ADR-0242). */
+export const groupSpace = (space: string) => /^-\d+$/.test(parentOf(space) ?? space);
 export const inferKind = (space: string) =>
   space.includes('/topic/') ? 'topic' : space.startsWith('-') ? 'group' : 'private';
 
@@ -196,8 +199,16 @@ export function lifetimeLabel(seconds: number): string {
 }
 
 /** Plain words for an API error code from this page's actions. */
+/** Plain words for a refusal because a private chat would share, be shared with or join a project (ADR-0242). */
+export const privateChatErrors: Record<string, string> = {
+  sharing_private_chat: 'Private chats never share or get shared with. Choose only groups or topics.',
+  project_private_chat: 'A private chat never joins a project. Choose a group or topic.',
+  organization_private_chat: 'Nocheh organizes only groups and topics. Leave private chats out.',
+};
+
 export function chatError(error: unknown): string {
   const code = (error as Error)?.message || String(error || 'request_failed');
+  if (privateChatErrors[code]) return privateChatErrors[code]!;
   if (/conflict|changed/.test(code)) return 'This changed somewhere else. Reload to see the latest, your text is kept.';
   if (code === 'sharing_source_not_selected')
     return 'One of the chosen messages isn’t from a chat this rule shares from.';

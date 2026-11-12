@@ -49,9 +49,31 @@ test('review proposals cannot smuggle owner operation routing or grant whole pro
 
 test('a learning answer\'s null lists and fields mean absent, so a lone assignment is kept',()=>{
   const assignment={space_id:'-1000/topic/7',project_id:project,project_key:null,expected_revision:2,reason:'This topic exists for that project',purpose_evidence:true,evidence_ids:[source]};
-  const proposal=learnedOrganization({reason:'Evidence identifies a project',creates:null,assignments:[assignment]});
+  const proposal=learnedOrganization({reason:'Evidence identifies a project',creates:null,assignments:[assignment]})!;
   assert.deepEqual(proposal.creates,[]);
   assert.deepEqual(proposal.assignments,[{space_id:'-1000/topic/7',project_id:project,expected_revision:2,evidence_ids:[source],reason:'This topic exists for that project',purpose_evidence:true}]);
-  assert.equal(learnedOrganization({reason:null,creates:[{key:'new_project',name:'Project Aurora',description:null,evidence_ids:[source]}],assignments:null}).creates.length,1);
+  assert.equal(learnedOrganization({reason:null,creates:[{key:'new_project',name:'Project Aurora',description:null,evidence_ids:[source]}],assignments:null})!.creates.length,1);
   assert.throws(()=>learnedOrganization({reason:'Nothing to organize',creates:null,assignments:null}),{code:'organization_batch_limit'});
+});
+
+test('a private chat, the owner\'s included, never joins a project or a sharing rule through a proposal',()=>{
+  const assignment=(space_id:string)=>({...organization().assignments[0]!,space_id});
+  for(const space of ['123','123/topic/5','desktop:personal_chat:9','system']){
+    assert.throws(()=>parseKnowledgeProposal({...organization(),assignments:[assignment(space)]}),{code:'project_private_chat'},space);
+    assert.throws(()=>parseKnowledgeProposal({kind:'project_assignment',reason:'Move it',payload:{space_id:space,project_id:project,mode:'assigned',expected_revision:0}}),{code:'project_private_chat'},space);
+    const rule={name:'Share',sources:['-1000'],destination:'-1001',enabled:true,mode:'approved',instructions:'',expected_revision:0};
+    assert.throws(()=>parseKnowledgeProposal({kind:'sharing_rule',reason:'Share',payload:{...rule,sources:['-1000',space]}}),{code:'sharing_private_chat'},space);
+    assert.throws(()=>parseKnowledgeProposal({kind:'sharing_rule',reason:'Share',payload:{...rule,destination:space}}),{code:'sharing_private_chat'},space);
+  }
+  // A private chat may still be kept out of every project.
+  assert.equal(parseKnowledgeProposal({kind:'project_assignment',reason:'Keep it out',payload:{space_id:'123',mode:'none',expected_revision:1}}).kind,'project_assignment');
+});
+
+test('learning drops a private chat\'s assignment and keeps the groups; only private ones propose nothing',()=>{
+  const assignment=(space_id:string)=>({space_id,project_id:project,project_key:null,expected_revision:0,reason:'This chat exists for that project',purpose_evidence:true,evidence_ids:[source]});
+  const kept=learnedOrganization({reason:'Evidence identifies a project',creates:null,assignments:[assignment('123'),assignment('-1000'),assignment('123/topic/4')]})!;
+  assert.deepEqual(kept.assignments.map(a=>a.space_id),['-1000']);
+  assert.equal(learnedOrganization({reason:'Only the owner',creates:null,assignments:[assignment('123')]}),null,'not an organization_batch_limit error');
+  const created=learnedOrganization({reason:'A project',creates:[{key:'new_project',name:'Project Aurora',description:null,evidence_ids:[source]}],assignments:[assignment('123')]})!;
+  assert.deepEqual([created.creates.length,created.assignments.length],[1,0]);
 });

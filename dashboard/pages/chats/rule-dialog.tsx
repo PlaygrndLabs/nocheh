@@ -16,6 +16,8 @@ export type Rule = {
   revision: number;
   /** Set when a project that shares owns this rule; it changes only from the project. */
   project_id?: string | null;
+  /** Private chats an older rule still names. Nocheh skips them: only groups and topics share. */
+  private_sources?: string[];
 };
 
 /** Shown wherever the owner turns on, or sees, a project whose chats share what they know. */
@@ -109,7 +111,8 @@ export function RuleDialog({
           multiple
           owner={owner}
           exclude={destination ? [destination] : []}
-          hint="Only these exact chats or topics."
+          groupsOnly
+          hint="Only these exact groups or topics. Private chats never share."
         />
         <ChatPicker
           label="Into this chat"
@@ -117,6 +120,8 @@ export function RuleDialog({
           onChange={ids => setDestination(ids[0] ?? '')}
           owner={owner}
           exclude={sources}
+          groupsOnly
+          hint="Groups and topics only. Private chats never share."
         />
         <div className="space-y-1.5">
           <p className="text-[13px] font-medium">How</p>

@@ -47,6 +47,14 @@ test('reset setup restores only current configuration under a new generation and
     const owned=snapshot.configuration.sharing_rules.find(rule=>rule.project_id)!;
     for(const forged of [{...owned,project_id:'d'.repeat(64)},{...owned,destination:'-1003'}])
       assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a project rule belongs to a saved project and its chat');
+    // A private chat, the owner's included, never joins a project or a sharing rule (ADR-0242).
+    const saved=snapshot.configuration.sharing_rules.find(rule=>!rule.project_id)!;
+    for(const forged of [{...saved,sources:['-1001','123']},{...saved,sources:['123/topic/5']},{...saved,destination:'123'},{...saved,sources:['desktop:personal_chat:9']}])
+      assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a rule never names a private chat');
+    const assignment={space_id:'123',project_id:'a'.repeat(64),mode:'assigned',share_into:true};
+    assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,project_assignments:[assignment]}}),/snapshot_invalid/,'a private chat never joins a project');
+    const keptOut={...snapshot,configuration:{...snapshot.configuration,project_assignments:[{...assignment,project_id:null,mode:'none'}]}};
+    assert.deepEqual(resetSetupSnapshot(keptOut),keptOut,'a private chat may be kept out of every project');
     for(const forged of [{space_id:'every',shell:false,browser:null,mcp:null},{space_id:'-1001',shell:'off',browser:null,mcp:null},{space_id:'-1001',shell:null,browser:null}])
       assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,chat_tool_settings:[forged]}}),/snapshot_invalid/,'a tool switch row is exact');
     await assert.rejects(restoreResetSetup(stores,{...input,unexpected:true} as any),/snapshot_invalid/);

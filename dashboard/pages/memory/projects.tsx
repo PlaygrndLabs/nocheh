@@ -540,10 +540,11 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
             onChange={ids => setAdding(ids.at(-1) ?? '')}
             exclude={members.map(member => member.space_id)}
             disabled={command.busy}
+            groupsOnly
             hint={
               adding && elsewhere(adding)
                 ? `It is in ${elsewhere(adding)} now; adding it here moves it.`
-                : 'A chat belongs to one project at a time.'
+                : 'A group or topic belongs to one project at a time. Private chats never join a project.'
             }
           />
           <Button variant="primary" busy={command.busy} disabled={!adding} onClick={() => void add()}>
@@ -810,7 +811,8 @@ function DelegationDialog({
           multiple
           value={scopes}
           onChange={setScopes}
-          hint="Choosing a group doesn’t include its topics."
+          groupsOnly
+          hint="Groups and topics only. Choosing a group doesn’t include its topics."
         />
         {active.length > 0 && (
           <fieldset>
