@@ -193,4 +193,45 @@ class ScriptedBrainTests(unittest.TestCase):
                          {'directive':'restart','phase':'seen','todo':False,'earlier':0})
 
 
+class PrivacyCanaryTests(unittest.TestCase):
+    MEMORY=('search_memory','search_messages','grep_messages')
+
+    def setUp(self):
+        self.counts={}
+        self.canary=load().PrivacyCanary(self.counts)
+
+    def memory_chat(self,*messages,tools=MEMORY,response_format=None):
+        return SimpleNamespace(**vars(request(*messages,tools=tools)),response_format=response_format)
+
+    def test_honcho_learning_keeps_a_private_mark_as_a_conclusion_citing_its_message(self):
+        prompt=('Analyze messages to extract **explicit atomic facts** about the target peer.\n<messages>\n'
+                '<message idx="0" peer="person_owner" target="false" time="t">hello</message>\n'
+                '<message idx="1" peer="person_owner" target="true" time="t">[nocheh:event:abc] I see a doctor PRIVATEMARK42</message>\n</messages>')
+        self.assertEqual(json.loads(self.canary.learned(prompt)),
+                         {'explicit':[{'source_indices':[1],'content':'person_owner keeps a private Friday routine PRIVATEMARK42'}]})
+        self.assertIsNone(self.canary.learned(prompt.replace('PRIVATEMARK42','nothing private')),'other learning keeps the ordinary mock')
+        self.assertIsNone(self.canary.learned('Interpret this PRIVATEMARK42'),'only Honcho\'s own learning prompt')
+        self.assertIsNone(self.canary.learned(prompt.replace('target="true"','target="false"')),'only what the target peer said')
+
+    def test_a_group_question_asks_honcho_for_the_unoffered_tool_once_before_any_tool_ran(self):
+        question=message('user','What does the owner do on Fridays? PROBEMARK42')
+        self.assertEqual(self.canary.probe(self.memory_chat(question),['What does the owner do on Fridays? PROBEMARK42']),
+                         {'tool':'get_recent_observations','arguments':{'limit':100}})
+        self.assertEqual(self.counts['privacy_probes'],1)
+        for body,texts in ((self.memory_chat(question,message('assistant',None),message('tool','found nothing')),['PROBEMARK42']),
+                           (self.memory_chat(message('user','an owner question')),['an owner question']),
+                           (self.memory_chat(question,response_format={'type':'json_object'}),['PROBEMARK42']),
+                           (self.memory_chat(question,tools=('mcp__nocheh__memory_recall',)),['PROBEMARK42']),
+                           (self.memory_chat(question,tools=(*self.MEMORY,'get_recent_observations')),['PROBEMARK42'])):
+            with self.subTest(texts=texts):self.assertIsNone(self.canary.probe(body,texts))
+        self.assertEqual(self.counts['privacy_probes'],1,'learning, Hermes and an offered tool are never probed')
+
+    def test_private_text_next_to_a_group_question_is_counted_except_in_the_secret_check(self):
+        self.canary.check(['Found 2 recent observations: person_owner keeps a private Friday routine PRIVATEMARK42','PROBEMARK42'])
+        self.canary.check(['PRIVATEMARK42 in the owner\'s own chat'])
+        self.canary.check(['PROBEMARK42 in the group'])
+        self.canary.check(['Find secret values in the supplied data.','PRIVATEMARK42 PROBEMARK42'])
+        self.assertEqual(self.counts['private_text_in_group'],1)
+
+
 if __name__=='__main__':unittest.main()
