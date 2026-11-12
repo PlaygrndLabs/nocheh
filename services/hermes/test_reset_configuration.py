@@ -75,6 +75,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertEqual(sorted(rules), ['-10', '-20', '-30', '-50'])
         self.assertEqual(rules['-10']['sources'], ['-40']); self.assertEqual(rules['-50']['sources'], [])
         self.assertFalse(rules['-50']['enabled'])
+        self.assertEqual(converted['memory_access_settings'][0]['auto_followup'], False)
         self.assertTrue(rules['-10']['enabled']); self.assertEqual(rules['-10']['mode'], 'filtered')
         self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
         self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')

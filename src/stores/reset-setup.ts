@@ -149,7 +149,8 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     if(!same(savedPolicy.document,desired)) {if(Number(savedPolicy.revision)!==1)throw Error('reset_setup_target_changed');
       const revision=(await db.query("INSERT INTO security_policy_versions(document,actor) VALUES($1,'reset') RETURNING revision",[JSON.stringify(desired)])).rows[0].revision;
       await db.query('UPDATE security_policy SET revision=$1',[revision]);}
-    const defaultAccess=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}];
+    // The schema's seeded row: a fresh install starts with automatic follow-up off (ADR-0242).
+    const defaultAccess=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time'}];
     if(!same(current.memory_access_settings,defaultAccess)&&!same(current.memory_access_settings,configuration.memory_access_settings))throw Error('reset_setup_target_changed');
     for(const [name,rows] of Object.entries(current))if(name!=='memory_access_settings'&&(rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
     // Project rules come back as saved; no preview or release is restored, so revision 1 is safe.

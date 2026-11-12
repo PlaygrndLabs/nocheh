@@ -253,7 +253,11 @@ export class KnowledgeManagementRepository {
    await this.sharingProjects(moves,this.stores.control);
   const undo_sharing_projects=row.state==='applied'&&row.kind==='organization'?await this.sharingProjects((row.result?.assignments??[]).map((change:any)=>({space_id:change.after.space_id,
    mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})),this.stores.control):[];
-  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,decision_history};}
+  // A card that shares or rewords a fact names where it came from and who can read it (ADR-0242).
+  const fact=proposal.kind==='fact_grant'?proposal.payload.fact_id:proposal.kind==='entity_correct'?proposal.target_id:null;
+  const fact_audience=fact?await this.s.entities.audience(principal,fact).catch(()=>null):null;
+  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,
+   ...(fact?{fact_audience}:{}),decision_history};}
  async proposals(principal:Reader,after=''){admin(principal);if(after)id(after);const rows=(await this.stores.control.query(`SELECT id FROM knowledge_proposals WHERE $1='' OR
   (created_at,id)<(SELECT created_at,id FROM knowledge_proposals WHERE id=$1) ORDER BY created_at DESC,id DESC LIMIT 101`,[after])).rows;
   return {proposals:await Promise.all(rows.slice(0,100).map(row=>this.proposal(principal,row.id))),next:rows.length>100?rows[99].id:null};}
@@ -473,7 +477,8 @@ export class KnowledgeManagementRepository {
    case 'entity_merge':return this.s.entities.merge(principal,target,input);
    case 'entity_unmerge':return this.s.entities.unmerge(principal,target,input);
    case 'sharing_rule':return this.s.sharing.save(principal,input);
-   case 'fact_grant':return this.s.memoryAccess.grant(principal,input);
+   // The owner approved a card that named where the fact came from (ADR-0242).
+   case 'fact_grant':return this.s.memoryAccess.grant(principal,{...input,private_evidence_confirmed:true});
    case 'fact_revoke':return this.s.memoryAccess.revoke(principal,target,input);
   }
  }

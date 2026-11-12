@@ -14,6 +14,7 @@ import type {ControlledActionRepository} from './controlled-actions.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {NativeMemoryRepository} from './native-memory.js';
 import type {SharingContentRepository} from './sharing.js';
+import type {MemoryAccessRepository} from './memory-access.js';
 
 export const decisionKinds=['controlled_action','telegram_action','memory_access','entity','knowledge'] as const;
 export type DecisionKind=typeof decisionKinds[number];
@@ -33,6 +34,7 @@ export interface OwnerSupervisionDependencies {
   shared:Pick<SharingContentRepository,'inspect'>;telegramChats?:Pick<TelegramChatRepository,'observations'>;
   telegramTopics?:Pick<TelegramTopicRepository,'registrations'>;
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
+  memoryAccess?:Pick<MemoryAccessRepository,'describe'>;
 }
 type PageInput={q?:string;after?:string;limit?:number};
 type DecisionInput={kind?:string;after?:string;limit?:number};
@@ -225,7 +227,9 @@ export class OwnerSupervisionRepository {
       if(!artifact||digest(artifact.content)!==artifact.content_hash||artifact.content_hash!==row.proposal_reference.input_hash)throw new HttpError(409,'memory_proposal_changed');
       const fact=(await this.stores.derived.query('SELECT active_revision FROM entity_claims WHERE id=$1',[row.fact_id])).rows[0];
       changed=fact?.active_revision!==row.fact_revision||new Date(row.expires_at).getTime()<=Date.now();
-      detail={...row,wording:artifact.content.toString(),provenance:artifact.provenance,current_fact_revision:fact?.active_revision??null};
+      // The card names where the fact came from and who will see it (ADR-0242).
+      detail={...row,wording:artifact.content.toString(),provenance:artifact.provenance,current_fact_revision:fact?.active_revision??null,
+        ...await this.services.memoryAccess?.describe(row,artifact.provenance)};
     }
     const guard=(await this.stores.control.query('SELECT g.epoch,g.mode,i.generation FROM guard_state g CROSS JOIN installation i WHERE g.singleton AND i.singleton')).rows[0];
     // A controlled action still carries across later quiet epochs (ADR-0200); the other kinds need their own epoch.

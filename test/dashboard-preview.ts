@@ -154,7 +154,8 @@ const conversations:any[]=[
  {space_id:topic,name:'Iceland planning',kind:'topic',parent_space:conversation,parent_name:'Aurora planning',observed_at:new Date().toISOString(),configured:false,closed:false},
 ];
 permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
-const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true}};
+const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true},
+ source_spaces:['-10077'],audience:{space:conversation,group:conversation},post_default:false};
 const memoryGrant={id:grantId,destination:topic,fact_id:factId,fact_revision:1,mode:'persistent',state:'active',revision:1,wording:'Mira prefers quiet aurora viewpoints.',suspended_reason:null,provenance:{fixture:true}};
 // Chats page: sharing rules, shared texts, suggestion settings and project assignments (synthetic, in memory).
 const sharingRules:any[]=[{id:'7'.repeat(64),name:'Trip notes from the topic',enabled:true,sources:[topic],destination:conversation,mode:'approved',instructions:'',revision:1},
@@ -166,7 +167,7 @@ const sharingRules:any[]=[{id:'7'.repeat(64),name:'Trip notes from the topic',en
 const groupSpace=(space:string)=>/^-\d+$/.test(space.split('/topic/')[0]!);
 const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
 const sharingReleases:any[]=[];
-const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
+const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
 const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',share_into:true,revision:1}];
 // Memory page: learned facts, people and their facts, projects, automatic organizing, long-term memory (synthetic, in memory).
 const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.now()-m*60000).toISOString();
@@ -551,6 +552,12 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/preview')return json(res,200,{originals:[],shares,filtered_sources:[]});
   if(route==='/memory/reviews')return json(res,200,{jobs:[{id:'e'.repeat(64),event_id:id,reason:'import',state:'paused',chunk_index:0}],next:null});
   if(route==='/memory-map'){const query=(url.searchParams.get('q')??'').trim().toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'';const stateEdges=state?memoryMapEdges.filter(edge=>edge.state===state||edge.label===state):memoryMapEdges,stateNodes=new Set(stateEdges.flatMap(edge=>[edge.source,edge.target])),nodes=memoryMapNodes.filter(node=>(!kind||node.kind===kind)&&(!state||node.state===state||stateNodes.has(node.id))&&(!query||`${node.label} ${node.kind}`.toLocaleLowerCase().includes(query))),ids=new Set(nodes.map(node=>node.id));return json(res,200,{format:'nocheh-memory-map-v1',nodes,edges:stateEdges.filter(edge=>ids.has(edge.source)||ids.has(edge.target)),next:null,collapsed_facts:true,focus:null,counts:{nodes:nodes.length,edges:memoryMapEdges.length},relationship_edges_grant_access:false});}
+  const claimAudience=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/audience$/);
+  if(claimAudience){const item=claims.find(c=>c.id===claimAudience[1]);if(!item)throw new HttpError(404,'entity_claim_not_found');
+   // The field guide's scope came from the group; everything else from the owner's private chat.
+   const fromGroup=item.id===hx('d4');
+   return json(res,200,{claim_id:item.id,revision:item.revision,sources:[fromGroup?conversation:'42'],private_sources:fromGroup?[]:['42'],owner_private:!fromGroup,
+    confirm_required:!fromGroup,readers:fromGroup?{space:conversation,group:conversation}:null});}
   if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant,...factGrants].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.filter(row=>!q||[row.space_id,row.name,row.parent_name].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
@@ -631,6 +638,8 @@ const server=createServer((req,res)=>{void(async()=>{
    if(entityChange[2]==='rename')entity.name=String(body.name).trim();else if(entityChange[2]==='merge'){entity.state='merged';entity.merged_into=body.target_id;}else{entity.state='active';entity.merged_into=null;}
    entity.revision++;return json(res,200,{id:entity.id,name:entity.name,state:entity.state,revision:entity.revision});}
   if(route==='/memory-access/grants'){const fact=claims.find(c=>c.id===body.fact_id&&!c.retired);if(!fact)throw new HttpError(404,'memory_fact_not_found');if(fact.revision!==body.fact_revision)throw new HttpError(409,'memory_fact_changed');
+   if(!groupSpace(String(body.destination)))throw new HttpError(400,'memory_grant_private_destination');
+   if(fact.id!==hx('d4')&&body.private_evidence_confirmed!==true)throw new HttpError(409,'memory_grant_private_sources');
    const grant={id:randomUUID().replace(/-/g,'').repeat(2),destination:body.destination,fact_id:fact.id,fact_revision:fact.revision,mode:'persistent',state:'active',revision:1,wording:body.wording??fact.content,expires_at:body.expires_at??null,suspended_reason:null,provenance:{fixture:true}};
    factGrants.push(grant);return json(res,200,{id:grant.id,state:'active',revision:1});}
   const factRevoke=route.match(/^\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/),ownGrant=factRevoke&&factGrants.find(g=>g.id===factRevoke[1]);

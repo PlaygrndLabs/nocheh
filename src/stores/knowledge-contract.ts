@@ -57,7 +57,7 @@ export function parseKnowledgeProposal(input:unknown):KnowledgeProposal {
  const row=knowledgeObject(input,['kind','reason','target_id','payload']),kind=row.kind as ReviewKind;
  if(!reviewKinds.includes(kind))throw new HttpError(400,'unsupported_knowledge_operation');
  const payload=knowledgeObject(row.payload,payloadKeys[kind]);
- if(kind!=='fact_grant')knowledgeRevision(payload.expected_revision);else {knowledgeId(payload.fact_id);knowledgeRevision(payload.fact_revision);validateSpace(payload.destination);words(payload.wording,12000);}
+ if(kind!=='fact_grant')knowledgeRevision(payload.expected_revision);else {knowledgeId(payload.fact_id);knowledgeRevision(payload.fact_revision);shareable(payload.destination,'memory_grant_private_destination');words(payload.wording,12000);}
  const targeted=kind.startsWith('entity_')||kind==='fact_revoke';
  if(targeted!==(row.target_id!==undefined))throw new HttpError(400,'knowledge_target_required');
  if(payload.id!==undefined)knowledgeId(payload.id);

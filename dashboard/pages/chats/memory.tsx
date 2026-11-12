@@ -119,7 +119,7 @@ function SharedFacts({space}: {space: string}) {
                   {grant.wording || 'The approved wording isn’t available.'}
                 </p>
                 <div className="mt-1 flex flex-wrap gap-1.5">
-                  <Badge>{grant.mode === 'one_time' ? 'For one reply' : 'Until revoked'}</Badge>
+                  <Badge>{grant.mode === 'one_time' ? 'Posts once' : 'Until revoked'}</Badge>
                   {grant.state === 'suspended' && <Badge tone="warn">Paused until you approve its new wording</Badge>}
                 </div>
               </div>

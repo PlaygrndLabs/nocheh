@@ -194,7 +194,7 @@ def original_only(snapshot_value, values, preferences, reset_id):
         'projects': [], 'project_assignments': [],
         'sharing_rules': _legacy_rules(source['configuration']['memory_spaces']),
         'memory_access_settings': [{'destination': '*', 'suggestions': 'related', 'notify_owner': True,
-                                    'auto_followup': True, 'request_ttl_seconds': 86400,
+                                    'auto_followup': False, 'request_ttl_seconds': 86400,
                                     'default_grant_mode': 'one_time'}],
         'chat_tool_settings': [],
         'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id'])}}

@@ -7,6 +7,7 @@ import {ChevronRight, Pencil, Search, Share2, UserRound} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
 import {refreshResources, useResource} from '../../lib/resource';
+import {groupSpace, parentOf} from '../../lib/chats-model';
 import {
   Badge,
   Button,
@@ -455,6 +456,40 @@ function ClaimHistory({claim}: {claim: Claim}) {
   );
 }
 
+/** Where a fact came from and who can read it without a share; readers null means only the owner (ADR-0242). */
+type Audience = {
+  claim_id: string;
+  revision: number;
+  sources: (string | null)[];
+  private_sources: string[];
+  owner_private: boolean;
+  confirm_required: boolean;
+  readers: {space: string; group: string | null} | null;
+};
+
+/** The owner's ID and whether a group's topics share one memory, for naming who reads what. */
+function usePeopleSettings() {
+  const settings = useResource<{fields?: {key: string; value: unknown}[]}>('/settings');
+  const value = (key: string) => String(settings.data?.fields?.find(field => field.key === key)?.value ?? '');
+  return {owner: value('TELEGRAM_OWNER_ID'), topicMemory: value('TELEGRAM_TOPIC_MEMORY') || 'group'};
+}
+
+/** Plain names for the chats a fact came from, with the owner's own chat as "your private chat". */
+function useSourceNames() {
+  const chats = useChats();
+  const {owner} = usePeopleSettings();
+  return (spaces: (string | null)[]) =>
+    spaces
+      .map(space =>
+        !space
+          ? 'a chat Nocheh can’t place'
+          : owner && (parentOf(space) ?? space) === owner
+            ? 'your private chat'
+            : chats.name(space),
+      )
+      .join(', ');
+}
+
 function ClaimEditor({claim, onDone}: {claim: Claim; onDone: () => void}) {
   const feedback = useFeedback();
   const command = useCommand();
@@ -462,6 +497,9 @@ function ClaimEditor({claim, onDone}: {claim: Claim; onDone: () => void}) {
   const [attribution, setAttribution] = useState(claim.attribution);
   const [uncertainty, setUncertainty] = useState(claim.uncertainty);
   const [kind, setKind] = useState(claim.relationship_kind ?? 'associated');
+  const audience = useResource<Audience>('/entities/claims/' + claim.id + '/audience');
+  const chats = useChats();
+  const readers = audience.data?.readers;
   const save = async (retired: boolean) => {
     if (
       retired &&
@@ -505,6 +543,13 @@ function ClaimEditor({claim, onDone}: {claim: Claim; onDone: () => void}) {
           onChange={event => setContent(event.target.value)}
         />
       </Field>
+      {audience.data && (
+        <p className="text-xs text-muted">
+          Who can read the new wording:{' '}
+          {readers ? 'everyone in ' + chats.name(readers.group ?? readers.space) : 'only you'}, plus chats you share it
+          with.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Who said it" htmlFor={id + '-who'}>
           <Select
@@ -573,19 +618,36 @@ function ShareForm({claim, onDone}: {claim: Claim; onDone: () => void}) {
   const [wording, setWording] = useState(claim.content);
   const [length, setLength] = useState<'always' | 'until'>('always');
   const [until, setUntil] = useState('');
+  const audience = useResource<Audience>('/entities/claims/' + claim.id + '/audience');
+  const {topicMemory} = usePeopleSettings();
+  const sourceNames = useSourceNames();
   const id = 'share-' + claim.id.slice(0, 8);
   const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  // Only a group or topic can be shared into. While a group's topics share memory, all of the group reads it.
+  const groups = chats.items.filter(chat => groupSpace(chat.space_id));
+  const seers = destination ? (topicMemory === 'group' ? (parentOf(destination) ?? destination) : destination) : '';
+  const confirm = !!audience.data?.confirm_required;
   return (
     <form
       className="mt-3 space-y-3 border-t border-line pt-3"
       onSubmit={async event => {
         event.preventDefault();
+        if (
+          confirm &&
+          !(await feedback.confirm({
+            title: 'Share something from a private chat?',
+            body: `This fact comes from ${sourceNames(audience.data?.private_sources.length ? audience.data.private_sources : (audience.data?.sources ?? []))}. Everyone in ${chats.name(seers)} will see the wording below.`,
+            confirm: 'Share it',
+          }))
+        )
+          return;
         const result = await command.run('/memory-access/grants', {
           fact_id: claim.id,
           fact_revision: claim.revision,
           destination,
           wording: wording.trim(),
           ...(length === 'until' && until ? {expires_at: new Date(until + 'T23:59:59').toISOString()} : {}),
+          ...(confirm ? {private_evidence_confirmed: true} : {}),
         });
         if (result) {
           feedback.toast(`${chats.name(destination)} may now use this.`);
@@ -594,10 +656,20 @@ function ShareForm({claim, onDone}: {claim: Claim; onDone: () => void}) {
       }}
     >
       <p className="text-[13px] text-muted">Only the wording below is shared. The original messages stay private.</p>
-      <Field label="Chat" htmlFor={id + '-chat'}>
+      {audience.data && (
+        <p className="text-[13px]">
+          <span className="text-muted">Came from: </span>
+          {sourceNames(audience.data.sources)}
+        </p>
+      )}
+      <Field
+        label="Chat"
+        htmlFor={id + '-chat'}
+        hint={destination ? 'Who will see it: everyone in ' + chats.name(seers) + '.' : 'Groups and topics only.'}
+      >
         <Select id={id + '-chat'} value={destination} onChange={event => setDestination(event.target.value)}>
-          <option value="">Choose a chat…</option>
-          {chats.items.map(chat => (
+          <option value="">Choose a group or topic…</option>
+          {groups.map(chat => (
             <option key={chat.space_id} value={chat.space_id}>
               {chats.name(chat.space_id)}
             </option>
@@ -643,7 +715,9 @@ function ShareForm({claim, onDone}: {claim: Claim; onDone: () => void}) {
           variant="primary"
           size="sm"
           busy={command.busy}
-          disabled={!destination || !wording.trim() || (length === 'until' && !until)}
+          disabled={
+            !destination || !wording.trim() || (length === 'until' && !until) || (!audience.data && !audience.error)
+          }
         >
           Share
         </Button>

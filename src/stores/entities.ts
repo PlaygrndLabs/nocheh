@@ -9,6 +9,7 @@ import {OwnerCommands} from './owner-commands.js';
 import type {Project,ProjectRepository} from './projects.js';
 import type {PreparedLearningContext} from './learning-context.js';
 import {resultItems,withoutNulls,type LearningRejection} from '../interpretations.js';
+import {groupSpace,parentSpace} from '../spaces.js';
 
 const protocol='nocheh-connected-entities-v1';
 export type EntityKind='person'|'project';
@@ -22,6 +23,12 @@ export interface KnownPeople {owner:MemoryEntity|null;participants:MemoryEntity[
 export interface WaitingSuggestion {id:string;kind:'person'|'project';name:string;also_called:string[]}
 /** Cards a learning turn may see, so a new name for the same person or project joins its card. */
 export interface WaitingCards {waiting?:WaitingSuggestion[]}
+/** Where a fact's wording came from and who can read it besides the owner (ADR-0242). `sources` holds the conversation
+ * of each piece of evidence, null when unknown; `readers` is null when only the owner can read it. */
+export interface FactAudience {
+ claim_id:string;revision:number;sources:(string|null)[];private_sources:string[];owner_private:boolean;
+ confirm_required:boolean;readers:{space:string;group:string|null}|null;
+}
 export interface EntityClaimInput {
  subject_id:string;predicate:string;content:string;object_entity_id?:string;relationship_kind?:RelationshipKind;
  attribution:'direct'|'reported'|'inferred';speaker_entity_id?:string;uncertainty:'uncertain'|'supported'|'explicit';evidence:SourceReference[];
@@ -503,6 +510,31 @@ export class EntityRepository {
         await db.query('UPDATE entity_claims SET active_revision=$2 WHERE id=$1',[claim,next]);await db.query('COMMIT');return {id:claim,revision:next,retired:body.retired};
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     });
+  }
+  /**
+   * Who can read a fact's current wording, the same way a group's turn reads people-facts: only when it can read every
+   * piece of evidence. That is the whole group while its topics share memory, or the one exact chat or topic when each
+   * topic keeps its own. Anything from a private chat or an unknown conversation, or from more than one group, is the
+   * owner's alone. Sharing a fact with any private evidence needs the owner to confirm (ADR-0242).
+   */
+  async audience(principal:Reader,id:string):Promise<FactAudience> {
+    admin(principal);const claim=entityId(id);
+    const row=(await this.stores.derived.query(`SELECT e.active_revision AS revision,v.evidence FROM entity_claims e
+      JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[claim])).rows[0];
+    if(!row)throw new HttpError(404,'entity_claim_not_found');
+    const spaces=await Promise.all((row.evidence as SourceReference[]).map(reference=>this.access.space(reference).catch(()=>null)));
+    const sources=[...new Set(spaces)],owner=this.access.policy().owner_id,topicMemory=this.access.policy().topic_memory??'group';
+    const private_sources=[...new Set(spaces.filter((space):space is string=>space!==null&&!groupSpace(space)))].sort();
+    const owner_private=!!owner&&spaces.some(space=>space!==null&&(parentSpace(space)??space)===owner);
+    const confirm_required=!spaces.length||spaces.some(space=>!groupSpace(space));
+    const groups=new Set(spaces.map(space=>space&&(parentSpace(space)??space)));
+    let readers:FactAudience['readers']=null;
+    if(!confirm_required&&groups.size===1){
+      const group=[...groups][0]!;
+      if(topicMemory==='group')readers={space:group,group};
+      else if(sources.length===1)readers={space:sources[0]!,group:null};
+    }
+    return {claim_id:claim,revision:Number(row.revision),sources,private_sources,owner_private,confirm_required,readers};
   }
   private async visible(principal:Reader,entity:MemoryEntity):Promise<boolean> {
     if(principal.admin||principal.scope===null)return true;

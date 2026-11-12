@@ -1,4 +1,5 @@
-/** A chat asked to use something from your memory: edit the wording, choose how long, approve or not. */
+/** A chat asked to use something from your memory: see where it came from and who will see it, edit the wording,
+ * choose how long, approve or not. */
 import {useId, useState} from 'react';
 import {Badge, Button, Details, Field, Notice, Segmented, Technical, Textarea} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
@@ -16,6 +17,12 @@ type Request = {
   relationship_path?: string[];
   evidence?: {id: string}[];
   provenance?: unknown;
+  /** The chats the fact came from; null is a source Nocheh can no longer place. */
+  source_spaces?: (string | null)[];
+  /** Who reads the shared wording: the destination, or every chat of its group when topics share memory. */
+  audience?: {space: string; group: string | null};
+  /** Whether "Until I revoke it" also posts the wording now, unless the owner changes it. */
+  post_default?: boolean;
 };
 
 export function MemoryAccessReview({
@@ -33,15 +40,23 @@ export function MemoryAccessReview({
   const id = useId();
   const [wording, setWording] = useState(request.wording ?? '');
   const [mode, setMode] = useState<'one_time' | 'persistent'>('one_time');
+  const [post, setPost] = useState(!!request.post_default);
   const pending = request.state === 'pending';
   const locked = !!(review.changed || review.unavailable) || !!command.busy;
   const where = chat(request.destination);
+  const readers = chat(request.audience?.group ?? request.audience?.space ?? request.destination);
+  const sources = request.source_spaces ?? [];
   const [label, tone] = stateLabel(request.state);
 
   const decide = async (decision: 'one_time' | 'persistent' | 'reject') => {
     const done = await command.run(
       '/memory-access/requests/' + encodeURIComponent(request.id) + '/decide',
-      {decision, expected_revision: request.revision, ...(decision === 'reject' ? {} : {wording})},
+      {
+        decision,
+        expected_revision: request.revision,
+        ...(decision === 'reject' ? {} : {wording}),
+        ...(decision === 'persistent' ? {post} : {}),
+      },
       decision === 'reject' ? 'reject' : 'approve',
     );
     if (!done) return;
@@ -49,8 +64,8 @@ export function MemoryAccessReview({
       decision === 'reject'
         ? 'Not shared.'
         : decision === 'one_time'
-          ? `Shared once with ${where}.`
-          : `${where} can use this until you revoke it.`,
+          ? `Posted once in ${where}.`
+          : `${where} can use this until you revoke it.` + (post ? ' Nocheh posts it there now.' : ''),
     );
     onClose();
   };
@@ -71,7 +86,7 @@ export function MemoryAccessReview({
               disabled={locked || review.stale || !wording.trim()}
               onClick={() => void decide(mode)}
             >
-              {mode === 'one_time' ? 'Share once' : 'Share until I revoke it'}
+              {mode === 'one_time' ? `Post it once in ${where}` : 'Share until I revoke it'}
             </Button>
             <Button busy={command.busy === 'reject'} disabled={locked} onClick={() => void decide('reject')}>
               Don’t share
@@ -92,6 +107,12 @@ export function MemoryAccessReview({
       )}
       <Facts>
         <Fact label="Chat">{where}</Fact>
+        <Fact label="Came from">
+          {sources.length
+            ? sources.map(space => (space ? chat(space) : 'A chat Nocheh can’t place')).join(', ')
+            : 'Unknown'}
+        </Fact>
+        <Fact label="Who will see it">Everyone in {readers}</Fact>
         <Fact label="Answer needed">
           <span title={fullTime(request.expires_at)}>
             {new Date(request.expires_at).getTime() > Date.now() ? 'Ends ' + fromNow(request.expires_at) : 'Expired'}
@@ -130,10 +151,21 @@ export function MemoryAccessReview({
             />
             <p className="text-xs text-muted">
               {mode === 'one_time'
-                ? 'Used for one reply in this chat, then it ends.'
-                : 'This chat can use it again until you revoke it under Chats.'}{' '}
-              If this chat’s settings allow it, Nocheh posts its follow-up there right after you approve.
+                ? 'Nocheh posts this exact wording there now.'
+                : 'This chat can use it again until you revoke it under Chats.'}
             </p>
+            {mode === 'persistent' && (
+              <label className="flex cursor-pointer items-start gap-2.5 pt-1 text-[13px]">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 accent-accent"
+                  checked={post}
+                  disabled={!!command.busy}
+                  onChange={event => setPost(event.target.checked)}
+                />
+                <span>Also post it in {where} now</span>
+              </label>
+            )}
           </div>
         </>
       ) : (

@@ -37,7 +37,8 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
     };
     const project=await services.projects.save(owner,{name:'Orion '+sequence,description:'Synthetic fixture',state:'active',expected_revision:0,operation_id:label+':project'});
     await services.projects.assign(owner,{space_id:destination,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:label+':assign'});
-    const evidence=await capture('123',1,'Orion launch schedule milestone is October.'),source=await capture(group,2,'What is the Orion launch schedule?');
+    // The fact comes from another group: a fact from a private chat is never suggested (ADR-0242).
+    const evidence=await capture(group+'9',1,'Orion launch schedule milestone is October.'),source=await capture(group,2,'What is the Orion launch schedule?');
     const entity=await services.entities.ensureProject(project),binding=await services.guards.state();
     const fact=await services.entities.publishClaim({subject_id:entity.id,predicate:'launch_schedule',content:'Orion launch schedule milestone is October.',attribution:'reported',uncertainty:'supported',evidence:[evidence]},binding,label+':fact');
     await services.memoryAccess.saveSettings(owner,{destination,notify_owner:false,auto_followup:autoFollowup,expected_revision:1,operation_id:label+':settings'});
@@ -240,10 +241,44 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
       assert.equal((await stores.control.query('SELECT delivery_action_id FROM memory_fact_grants WHERE id=$1',[approval.grant_id])).rows[0].delivery_action_id,null);
       assert.equal(f.sent.length,0);
     });
-    await t.test('automatic follow-up disabled does not silently create an action',async()=>{
+    await t.test('one-time access posts once even with automatic follow-up off',async()=>{
       const f=await fixture(undefined,false),first=await f.approve();assert.deepEqual(await f.approve(),first);
-      assert.equal((await f.saved()).followup_action_id,null);
-      assert.equal((await stores.control.query('SELECT id FROM telegram_action_requests WHERE source_reference->>\'id\'=$1',[f.source.id])).rowCount,0);
+      const request=await f.saved();assert.ok(request.followup_action_id,'one-time means post it once now');
+      await f.services.telegramActions.run(request.followup_action_id,f.authority);await f.approve();assert.equal(f.sent.length,1);
+    });
+    await t.test('a lasting grant posts only when the owner asks, or when follow-up is on and they leave it out',async()=>{
+      const actions=async(f:Awaited<ReturnType<typeof fixture>>)=>(await stores.control.query('SELECT id FROM telegram_action_requests WHERE source_reference->>\'id\'=$1',[f.source.id])).rowCount;
+      const quiet=await fixture(undefined,false),kept={...quiet.decision,decision:'persistent'};
+      await quiet.services.memoryAccess.decide(owner,quiet.request.id,kept);
+      assert.equal((await quiet.saved()).followup_action_id,null);assert.equal(await actions(quiet),0,'automatic follow-up off does not silently create an action');
+      const asked=await fixture(undefined,false);
+      await asked.services.memoryAccess.decide(owner,asked.request.id,{...asked.decision,decision:'persistent',post:true});
+      const posted=await asked.saved();assert.ok(posted.followup_action_id);
+      await asked.services.telegramActions.run(posted.followup_action_id,asked.authority);assert.equal(asked.sent.length,1);
+      const declined=await fixture();
+      await declined.services.memoryAccess.decide(owner,declined.request.id,{...declined.decision,decision:'persistent',post:false});
+      assert.equal((await declined.saved()).followup_action_id,null,'the owner\'s choice wins over the chat setting');
+      const f=await fixture();
+      await assert.rejects(f.services.memoryAccess.decide(owner,f.request.id,{...f.decision,post:true}),{code:'invalid_memory_access_decision'},'one-time always posts');
+      await assert.rejects(f.services.memoryAccess.decide(owner,f.request.id,{...f.decision,decision:'persistent',post:'yes'}),{code:'invalid_memory_access_decision'});
+    });
+    await t.test('a replay repairs a lost follow-up only when the replayed command posted',async()=>{
+      const unlink=async(f:Awaited<ReturnType<typeof fixture>>,grant:string,action:string)=>{
+        await stores.control.query("DELETE FROM workflow_outbox WHERE workflow_id IN (SELECT id FROM workflow_registry WHERE family='actions' AND job_id=$1)",[action]);
+        await stores.control.query("DELETE FROM workflow_registry WHERE family='actions' AND job_id=$1",[action]);
+        await stores.control.query('DELETE FROM telegram_action_requests WHERE id=$1',[action]);
+        await stores.control.query('UPDATE memory_fact_grants SET delivery_action_id=NULL WHERE id=$1',[grant]);
+        await stores.control.query('UPDATE memory_access_requests SET followup_action_id=NULL WHERE id=$1',[f.request.id]);
+      };
+      // Posted only because the chat's follow-up was on: a replay never posts on its own.
+      const setting=await fixture(),bySetting={...setting.decision,decision:'persistent'},first=await setting.services.memoryAccess.decide(owner,setting.request.id,bySetting);
+      await unlink(setting,first.grant_id!,(await setting.saved()).followup_action_id);
+      assert.deepEqual(await setting.services.memoryAccess.decide(owner,setting.request.id,bySetting),first);assert.equal((await setting.saved()).followup_action_id,null);
+      // Posted because the owner asked: a replay repairs it.
+      const asked=await fixture(),byOwner={...asked.decision,decision:'persistent',post:true},approved=await asked.services.memoryAccess.decide(owner,asked.request.id,byOwner);
+      const id=(await asked.saved()).followup_action_id;await unlink(asked,approved.grant_id!,id);
+      assert.deepEqual(await asked.services.memoryAccess.decide(owner,asked.request.id,byOwner),approved);assert.equal((await asked.saved()).followup_action_id,id);
+      await assert.rejects(asked.services.memoryAccess.decide(owner,asked.request.id,{...byOwner,post:false}),{code:'memory_access_decision_conflict'},'the post choice is part of the command');
     });
     await t.test('repairing a missing old receipt link never sends the delivered wording again',async()=>{
       const f=await fixture(),approval=await f.approve(),request=await f.saved(),id=request.followup_action_id;

@@ -204,6 +204,10 @@ export const privateChatErrors: Record<string, string> = {
   sharing_private_chat: 'Private chats never share or get shared with. Choose only groups or topics.',
   project_private_chat: 'A private chat never joins a project. Choose a group or topic.',
   organization_private_chat: 'Nocheh organizes only groups and topics. Leave private chats out.',
+  memory_grant_private_destination: 'A fact can be shared only into a group or topic, never into a private chat.',
+  memory_grant_private_sources: 'This fact comes from a private chat. Confirm you want to share it first.',
+  memory_access_private_evidence: 'This fact comes from a private chat, so Nocheh cancelled the request.',
+  memory_access_private_destination: 'This request was for a private chat, so Nocheh cancelled it.',
 };
 
 export function chatError(error: unknown): string {

@@ -4,6 +4,8 @@ import {Badge, Button, Details, Notice, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
 import {projectSharingWarning} from '../chats/rule-dialog';
+import {useResource} from '../../lib/resource';
+import {parentOf} from '../../lib/chats-model';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {stateLabel, useChatNames, useCommand} from './shared';
 
@@ -25,6 +27,13 @@ export type Proposal = {
   /** Projects whose chats share what they know that this change, or undoing it, touches; worked out by the server. */
   sharing_projects?: {id: string; name: string}[];
   undo_sharing_projects?: {id: string; name: string}[];
+  /** For a fact share or correction: where the fact came from and who reads it without a share (null: only you). */
+  fact_audience?: {
+    sources: (string | null)[];
+    private_sources: string[];
+    confirm_required: boolean;
+    readers: {space: string; group: string | null} | null;
+  } | null;
 };
 
 const titles: Record<string, string> = {
@@ -89,6 +98,14 @@ export function KnowledgeReview({
   const kind = String(content.kind ?? proposal.kind);
   const sharing = proposal.sharing_projects ?? [];
   const sharingProject = (id: string | null | undefined) => sharing.find(project => project.id === id);
+  const settings = useResource<{fields?: {key: string; value: unknown}[]}>('/settings');
+  const topicMemory = String(
+    settings.data?.fields?.find(field => field.key === 'TELEGRAM_TOPIC_MEMORY')?.value || 'group',
+  );
+  const audience = proposal.fact_audience;
+  const destination = typeof content.payload?.destination === 'string' ? content.payload.destination : null;
+  // While a group's topics share memory, a fact shared into a topic reaches all of its group.
+  const seers = destination && topicMemory === 'group' ? (parentOf(destination) ?? destination) : destination;
   const controls = knowledgeDecisionControls(proposal.state, {
     unavailable: review.unavailable,
     changed: review.changed,
@@ -288,6 +305,27 @@ export function KnowledgeReview({
               </Fact>
             ))}
         </Facts>
+      )}
+
+      {audience && (
+        <Facts>
+          <Fact label="Came from">{audience.sources.map(space => chat(space)).join(', ') || 'Unknown'}</Fact>
+          {kind === 'fact_grant' && seers ? (
+            <Fact label="Who will see it">Everyone in {chat(seers)}</Fact>
+          ) : (
+            <Fact label="Who can read the new wording">
+              {(audience.readers
+                ? 'Everyone in ' + chat(audience.readers.group ?? audience.readers.space)
+                : 'Only you') + ', plus chats you share it with'}
+            </Fact>
+          )}
+        </Facts>
+      )}
+      {kind === 'fact_grant' && audience?.confirm_required && (
+        <Notice tone="warn" title="This fact comes from a private chat">
+          Approving shares its wording from{' '}
+          {audience.private_sources.map(space => chat(space)).join(', ') || 'a chat Nocheh can’t place'}.
+        </Notice>
       )}
 
       {topics.length > 0 && (

@@ -64,9 +64,12 @@ test('a private chat, the owner\'s included, never joins a project or a sharing 
     const rule={name:'Share',sources:['-1000'],destination:'-1001',enabled:true,mode:'approved',instructions:'',expected_revision:0};
     assert.throws(()=>parseKnowledgeProposal({kind:'sharing_rule',reason:'Share',payload:{...rule,sources:['-1000',space]}}),{code:'sharing_private_chat'},space);
     assert.throws(()=>parseKnowledgeProposal({kind:'sharing_rule',reason:'Share',payload:{...rule,destination:space}}),{code:'sharing_private_chat'},space);
+    assert.throws(()=>parseKnowledgeProposal({kind:'fact_grant',reason:'Share',payload:{fact_id:project,fact_revision:1,destination:space,wording:'A fact'}}),{code:'memory_grant_private_destination'},space);
   }
   // A private chat may still be kept out of every project.
   assert.equal(parseKnowledgeProposal({kind:'project_assignment',reason:'Keep it out',payload:{space_id:'123',mode:'none',expected_revision:1}}).kind,'project_assignment');
+  // The agent cannot confirm a private source for the owner.
+  assert.throws(()=>parseKnowledgeProposal({kind:'fact_grant',reason:'Share',payload:{fact_id:project,fact_revision:1,destination:'-1000',wording:'A fact',private_evidence_confirmed:true}}),{code:'unknown_knowledge_field'});
 });
 
 test('learning drops a private chat\'s assignment and keeps the groups; only private ones propose nothing',()=>{
