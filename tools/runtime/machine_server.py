@@ -128,17 +128,18 @@ vars() {
   printf '%s\n' "${b:${#a}}" | tr ' ' '\n'
 }
 # Whether process $1 carries tag $2 (0), only names it in its command line (1), shows it nowhere (2), or is gone (3).
-# ps takes as many words for the command line as the program had arguments, so where a program wrote a longer name
-# over them (Node's process.title), its first argument is followed at once by the start of its environment (NAME=value):
-# there the tag counts anywhere.
+# ps takes as many words for the command line as the program had arguments, so a program that wrote a longer name over
+# them (Node's process.title) shows the start of its environment there: the tag counts anywhere where the first argument
+# no longer starts with the program's name (ucomm) and a NAME=value word follows it at once.
 has() {
-  local a b n r
+  local a b n c
   a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "$a" != '<defunct>' ] || return 3
   printf '%s\n' "$b" | tr ' ' '\n' | grep -qxF -- "$2" || return 2
   if [ "${b:0:${#a}}" = "$a" ]; then printf '%s\n' "${b:${#a}}" | tr ' ' '\n' | grep -qxF -- "$2" && return 0; fi
-  n=$(ps -ww -o comm= -p "$1") && [ -n "$n" ] && [ "${a:0:${#n}}" = "$n" ] || return 1
-  r=$(printf '%s\n' "${a:${#n}}" | awk 'NR==1 {print $1}')
-  case ${r%%=*} in "$r"|''|[0-9]*|*[!A-Za-z0-9_]*) return 1;; esac
+  n=$(ps -ww -o comm= -p "$1") && c=$(ps -o ucomm= -p "$1" | awk 'NR==1 {sub(/[ \t]+$/, ""); print}') || return 1
+  [ -n "$n" ] && [ -n "$c" ] && [ "${a:0:${#n}}" = "$n" ] || return 1
+  case $(printf '%s\n' "$n" | awk 'NR==1 {sub(/.*\//, ""); sub(/^-/, ""); print}') in "$c"*) return 1;; esac
+  printf '%s\n' "${a:${#n}}" | awk 'NR==1 {print $1}' | grep -q '^[A-Za-z_][A-Za-z0-9_]*='
 }
 # Whether process $1 shows its own environment, without tag $2 anywhere in what ps -E prints.
 shows() {

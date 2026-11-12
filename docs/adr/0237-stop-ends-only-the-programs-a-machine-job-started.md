@@ -58,8 +58,8 @@ else stays.
   line merely names it. `ps` takes as many words for the command line as the
   program had arguments, so a program that wrote a longer name over them (Node's
   `process.title`) shows the start of its environment there, right after its
-  first argument: where a `NAME=value` word follows the first argument, the tag
-  counts anywhere. The same comparison tells whether the programs above one with
+  first argument: where the first argument does not start with the program's own
+  name (`ucomm`) and a `NAME=value` word follows it, the tag counts anywhere. The same comparison tells whether the programs above one with
   the tag show an environment; one that shows the tag anywhere does not count as
   showing one without it. A listed process that is gone by its own check is
   skipped. Lists reach `awk` through its

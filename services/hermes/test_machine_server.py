@@ -465,9 +465,10 @@ class MachineServerTests(unittest.TestCase):
         # BWK awk where it is installed, which refuses a newline in -v. A program with the tag counts also under such a
         # system program left to init by a launcher that closed what it inherited, but not under the owner's program that
         # shows its environment; the owner's program that only names the tag in its command line is not the job's, also
-        # one started under another name (as macOS's sh runs bash), but a program whose first argument is followed at
-        # once by environment words is (as ps shows one that wrote a longer name over its arguments). One that renamed
-        # itself otherwise is not found, but it never hides one with the tag that it started.
+        # one started under another name (as macOS's sh runs bash) or whose first argument is NAME=value (grep), but one
+        # whose first argument is not its program's name and is followed at once by environment words is (as ps shows a
+        # program that wrote a longer name over its arguments). One that renamed itself otherwise is not found, but it
+        # never hides one with the tag that it started.
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
         mine=None
         check='[ -r /proc/$$/stat ]';self.assertEqual(ms.CLEANUP.count(check),1)
@@ -478,6 +479,7 @@ class MachineServerTests(unittest.TestCase):
                           'shown() { case $(readlink /proc/$1/exe) in *sleep|*/sys/sh) ;; *) tr \'\\0\' \' \' </proc/$1/environ;; esac; }\n'
                           'case " $* " in\n'
                           '  *" comm= "*) for p; do :; done; [ -r /proc/$p/cmdline ] || exit 1; tr \'\\0\' \'\\n\' </proc/$p/cmdline | head -n 1;;\n'
+                          '  *" ucomm= "*) for p; do :; done; [ -r /proc/$p/comm ] || exit 1; printf \'%-16s\\n\' "$(cat /proc/$p/comm)";;\n'
                           '  *" -p "*) for p; do :; done; [ -r /proc/$p/environ ] || exit 1; c=$(tr \'\\0\' \' \' </proc/$p/cmdline); v=\n'
                           '    case " $* " in *" -E "*) v=$(shown $p);; esac; if [ -n "$v" ]; then printf \'%s %s\\n\' "$c" "$v"; else printf \'%s\\n\' "$c"; fi;;\n'
                           '  *" -E "*) for e in /proc/[0-9]*; do [ -O $e ] && printf \'%6s %s %s\\n\' ${e#/proc/} "$(tr \'\\0\' \' \' <$e/cmdline)" "$(shown ${e#/proc/})"; done;;\n'
@@ -504,18 +506,20 @@ class MachineServerTests(unittest.TestCase):
                                           "open(sys.argv[2],'w').write(str(p.pid));time.sleep(600)\n")
             prefixed=self.launch(None,folder,'prefixed',f"bash -c 'exec -a {Path(sys.executable).name[:15]}-server {sys.executable} {here}/worker.py "
                                  f"{ms.TAG}={JOB} {folder}/worker'",tag=False)
+            os.mkfifo(here/'fifo')
             (here/'names.sh').write_text(f"bash -c 'exec -a sh bash -c \"tail -f /dev/null & echo \\$! > {folder}/namedchild; wait; : {ms.TAG}={JOB}\"' & "
                                          f"echo $! > {folder}/named; wait\n")
             others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
                     self.launch(None,folder,'manager',f'sh -c \'{ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/managed; wait\' sh {JOB}',tag=False),
                     self.launch(None,folder,'names',f'{here}/sys/sh {here}/names.sh',tag=False),
-                    self.launch(None,folder,'named-py',f'{sys.executable} {sleeper}',tag=False)]
+                    self.launch(None,folder,'named-py',f'{sys.executable} {sleeper}',tag=False),
+                    self.launch(None,folder,'grep',f"{here}/sys/sh -c 'grep {ms.TAG}={JOB} {folder}/fifo & echo $! > {folder}/grepped; wait'",tag=False)]
             try:
                 deadline=time.monotonic()+5
-                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild','worker')) and time.monotonic()<deadline:time.sleep(.05)
+                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild','worker','grepped')) and time.monotonic()<deadline:time.sleep(.05)
                 while alive(launcher) and time.monotonic()<deadline:time.sleep(.05)
                 job+=[int((here/name).read_text()) for name in ('syssh','systail','worker')]
-                others+=[int((here/name).read_text()) for name in ('managed','named','namedchild')]
+                others+=[int((here/name).read_text()) for name in ('managed','named','namedchild','grepped')]
                 self.assertFalse(alive(launcher))
                 self.assertEqual(self.cleanup_here(script,path),0)
                 for pid in job:self.assertFalse(alive(pid),pid)
