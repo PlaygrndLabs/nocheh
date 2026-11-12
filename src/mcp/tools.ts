@@ -440,7 +440,7 @@ export const mcpTools:readonly McpTool[]=[
     'In progress, Waiting, Done or Dropped), a priority (0 none to 4 urgent, or its name from settings.priorities), optional start_on and due_on calendar days '+
     '(YYYY-MM-DD) with optional start_time and due_time (HH:MM in settings.time_zone), tags such as Health or Money, a group (a group or topic ID), '+
     'assignees (who does it) and people (who it is about), both IDs of people Nocheh knows, the owner\'s own columns (properties, by column name or id from '+
-    'settings.properties), notes, a parent task (a subtask), tasks it is blocked_by, related tasks, links (attachments of kind link with a url), '+
+    'settings.properties), notes, a parent task (a subtask), tasks it is blocked_by, related tasks, links (attachments of kind link with a url, up to 20), '+
     'reminders and a repeat. Use it when someone asks you to remember something to do, to list what is open, due today or coming up, or to finish, drop, '+
     'reopen, rename, reschedule, tag, assign, move, comment on, archive or delete a task. '+
     'action=list reads tasks (state open by default; done, dropped or all; when today or upcoming; scope all, personal or a project id; optionally one tag, '+
@@ -453,7 +453,12 @@ export const mcpTools:readonly McpTool[]=[
     'reminders are times like 2030-01-04T09:00 in settings.time_zone and are sent to the owner\'s private chat; repeat is '+
     '{"every":1,"unit":"day|week|month|year","weekdays":[1,4],"from":"due|done"} (weekdays only with week, 0 is Sunday) or null. '+
     'In the owner private conversation every list is available; in a chat that belongs to a project only that project\'s list is, and nothing else; '+
-    'elsewhere none.',
+    'elsewhere none. In a project\'s chat a task shows only as it is on that project\'s board: comments and history only from when it joined the list, '+
+    'only the columns the owner shares with project chats, no attached archived messages and no outside IDs such as Notion\'s; nothing is missing by error. '+
+    'In the owner private conversation, a change that a project\'s chats would see (adding a task to a project\'s list, moving one into it, a comment on '+
+    'one of its tasks, or changing anything on them but status, priority, start and due days and times, archive and trash) waits for the owner\'s card, '+
+    'which shows every task under a task that moves in: the '+
+    'result has state proposed, and nothing changes until the owner approves it.',
     inputSchema:shape({action:{type:'string',enum:['list','get','add','update','comment']},state:{type:'string',enum:['open','done','dropped','all']},
       when:{type:'string',enum:['today','upcoming']},sort:{type:'string',enum:['due','priority','manual','created','updated']},
       id:{type:'string'},expected_revision:{type:'integer',minimum:1},title:{type:'string',maxLength:300},
@@ -463,7 +468,7 @@ export const mcpTools:readonly McpTool[]=[
       people:ids,assignees:ids,blocked_by:ids,related:ids,parent:{type:['string','null']},
       properties:{type:'object'},repeat:{type:['object','null']},
       reminders:{type:'array',items:{type:'string'},maxItems:10},
-      attachments:{type:'array',items:{type:'object'},maxItems:20},
+      attachments:{type:'array',items:{type:'object'},maxItems:40},
       archived:{type:'boolean'},trashed:{type:'boolean'},text:{type:'string',maxLength:4000},
       tag:{type:'string',maxLength:40},person:{type:'string'},q:{type:'string',maxLength:200},after:{type:'string'}},['action']),run:tasks},
   {name:'notion',description:'The owner\'s own Notion, through Notion\'s MCP server, when the owner has connected it and turned it on. Only in the owner\'s '+

@@ -44,6 +44,7 @@ import {
   day,
   priorityOf,
   repeatText,
+  scopeName,
   statusOf,
   weekdayNames,
   type Attachment,
@@ -111,6 +112,21 @@ function draftOf(task: Detail): Draft {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const ids = (items: {id: string}[]) => items.map(item => item.id).sort();
+
+/** "A", "A and B", or "A, B and C". */
+const listed = (names: string[]) =>
+  names.length < 2 ? (names[0] ?? '') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
+
+/** Who sees a task moved into a project's list from now on, and what stays private. `under` counts every task
+ * under it, archived and in the trash too, as they all move with it. */
+export function joinNotice(scope: Scope, groupName: (space: string) => string, under: number): string {
+  const chats = (scope.chats ?? []).map(groupName);
+  const what = under ? `this task and the ${under} ${under === 1 ? 'task' : 'tasks'} under it` : 'this task';
+  const kept = 'Earlier comments and history, attached messages and the columns you haven’t shared stay private.';
+  return chats.length
+    ? `People in ${listed(chats)} will see ${what} from now on. ${kept}`
+    : `No chat is in this project yet. Chats you add to it later will see ${what}. ${kept}`;
+}
 
 /** Only what changed, in the form the owner API takes. */
 function changes(before: Draft, after: Draft, pendingTag: string): Record<string, unknown> {
@@ -192,6 +208,20 @@ export function TaskDrawer({
   };
   const save = async () => {
     if (!task || !dirty) return;
+    // A task that joins a project's list is seen by that project's chats from now on: name them first.
+    const joining =
+      typeof edited.scope === 'string' && edited.scope !== 'personal'
+        ? scopes.find(row => row.id === edited.scope)
+        : undefined;
+    if (
+      joining &&
+      !(await feedback.confirm({
+        title: `Move to ${scopeName(joining)}?`,
+        body: joinNotice(joining, groupName, task.descendants ?? task.subtasks.length),
+        confirm: 'Move',
+      }))
+    )
+      return;
     const saved = await command.run('/tasks/' + task.id, {expected_revision: revision, ...edited});
     if (saved) {
       const fresh = draftOf({...task, ...saved});
@@ -940,7 +970,7 @@ function AttachmentsField({
     <Field
       label="Links and messages"
       htmlFor="task-panel-link"
-      hint="Web links, and messages Nocheh keeps that belong with this task."
+      hint="Web links, and messages Nocheh keeps that belong with this task: up to 20 of each."
     >
       <div className="space-y-2">
         {!!attachments.length && (
@@ -972,7 +1002,7 @@ function AttachmentsField({
             ))}
           </ul>
         )}
-        {attachments.length < 20 && (
+        {attachments.filter(item => item.kind === 'link').length < 20 && (
           <div className="flex flex-wrap gap-2">
             <Input
               id="task-panel-link"

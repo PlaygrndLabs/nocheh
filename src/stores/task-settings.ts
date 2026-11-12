@@ -11,7 +11,9 @@ export type TaskStatus={id:string;name:string;category:StatusCategory;color:Task
 export type TaskPriority={level:number;name:string;color:TaskColor};
 export type PropertyType='text'|'number'|'select'|'multi_select'|'date'|'checkbox'|'url'|'person';
 export type PropertyOption={id:string;name:string;color:TaskColor};
-export type TaskProperty={id:string;name:string;type:PropertyType;options:PropertyOption[]};
+/** One of the owner's own columns. `shared` lets the chats of a project see it on that project's tasks;
+ * a column is private to the owner until the owner shares it. */
+export type TaskProperty={id:string;name:string;type:PropertyType;options:PropertyOption[];shared:boolean};
 export type TaskSettings={statuses:TaskStatus[];priorities:TaskPriority[];properties:TaskProperty[];time_zone:string};
 
 export const categories:StatusCategory[]=['not_started','active','done','cancelled'];
@@ -79,7 +81,8 @@ export function readTaskSettings(input:unknown):TaskSettings {
           option=>option.name,'duplicate_task_option');
       })();
       unique(options,option=>option.id,'duplicate_task_option');
-      return {id:key(row.id,'invalid_task_property'),name:name(row.name,'invalid_task_property'),type:row.type as PropertyType,options};});
+      if(row.shared!==undefined&&typeof row.shared!=='boolean')throw new HttpError(400,'invalid_task_property');
+      return {id:key(row.id,'invalid_task_property'),name:name(row.name,'invalid_task_property'),type:row.type as PropertyType,options,shared:row.shared===true};});
     unique(rows,row=>row.id,'duplicate_task_property');return unique(rows,row=>row.name,'duplicate_task_property');
   })();
   return {statuses,priorities,properties,time_zone:body.time_zone===undefined?defaultTaskSettings.time_zone:timeZone(body.time_zone)};
