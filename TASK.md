@@ -403,10 +403,16 @@ image reads and Honcho's deriver are too short or one-off to cache. Live since
 call, and a two-call reply about 26% less than the same calls uncached (measured with the
 evidence as the request's last block). In that layout reviews took a second model call,
 a tool step, in 34% of runs instead of 83%, with no note changes in either period, so
-the evidence moved back before the conversation, where it was. Pending: the same share
-on live reviews after the move; if it stays low, a side-by-side replay of fixed sources,
-old route against new, to test the thinking default. Next:
-Honcho's reasoning calls through its own Messages API support.
+the evidence moved back before the conversation, where it was. After the move, live
+reviews took a tool step in 65% of runs on Hermes 0.22.5 and 51% on Hermes 0.23, with the
+same kind of sources. A side-by-side replay on 2026-11-12 (owner chose "Run the
+side-by-side test") of 60 stored review inputs, twice per route on Hermes 0.23 from empty
+notes ([review replay](tools/development/review_replay/README.md)), found no clear
+difference from the route: a tool step in 42% of runs on the old chat route, 35% on the
+Messages API (6.7 points fewer, 90% interval 15 fewer to 1 more) and 45% on the Messages
+API with thinking only between tool calls, at about a third of the old route's cost per
+review in the replay. The route stays as it is. Next: Honcho's reasoning calls through
+its own Messages API support.
 
 Owner login (owner, 2026-10-28: "better to set a password for it, can set and
 change from main dash", "an auth"; 2026-10-29: "all yes" to the same login for
