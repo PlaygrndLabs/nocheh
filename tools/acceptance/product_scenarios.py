@@ -500,6 +500,10 @@ class ProductScenarios(Scenarios):
         self.wait('memory_not_correcting', lambda: self.f.query('nocheh_control', "SELECT (SELECT count(*) FROM owner_commands c WHERE c.holds_memory "
             "AND c.epoch>coalesce((SELECT max(guard_epoch) FROM learning_refresh_sweeps WHERE family='honcho' AND stage='done'),0))"
             "+(SELECT count(*) FROM memory_session_deletions WHERE state<>'done')") == '0', 900)
+        # Gateway logs survive restarts, so only refusals logged during this turn count.
+        refusal = '"event": "honcho_unoffered_tool_refused", "tools": ["get_recent_observations"]'
+        refusals = lambda: self.f.run('logs', '--no-color', 'honcho-provider-gateway', capture_output=True, text=True).stdout.count(refusal)
+        earlier = refusals()
         before = self.f.http('/fixture/stats')
         question = 'What does the owner do on Fridays? '+probe
         _, text = self.turn(self.f.message(GROUP, question+' [[recall:'+question+']]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
@@ -507,9 +511,10 @@ class ProductScenarios(Scenarios):
         final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
         self.current['observed'] = {'stats': {key: after.get(key) for key in ('privacy_probes', 'private_text_in_group')}, 'recall': final['result'][:400]}
         self.gate('probe_reached_honcho', after['privacy_probes'] > before['privacy_probes'], probes=after['privacy_probes'])
-        logs = self.f.run('logs', '--no-color', 'honcho-provider-gateway', capture_output=True, text=True).stdout
-        self.gate('gateway_refused_unoffered_tool', '"event": "honcho_unoffered_tool_refused", "tools": ["get_recent_observations"]' in logs)
-        self.gate('private_text_never_reached_a_group_read', after['private_text_in_group'] == 0, count=after['private_text_in_group'])
+        refused = refusals()-earlier
+        self.gate('gateway_refused_unoffered_tool', refused > 0, refusals=refused)
+        leaked = after['private_text_in_group']-before['private_text_in_group']
+        self.gate('private_text_never_reached_a_group_read', leaked == 0, count=leaked)
         self.gate('group_reply_withholds_private_fact', private not in text and private not in final['result'], excerpt=text[:300])
 
     def inbox_never_asks_about_the_owner(self):
