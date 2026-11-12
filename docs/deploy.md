@@ -135,9 +135,12 @@ machine control is unavailable and nothing else changes. `nocheh-machines` runs
 from the management image, which carries the SSH client and a user for
 `NOCHEH_UID`: `./bin/nocheh up` builds it, `make dev-build` rebuilds it for
 `make dev`, and after `NOCHEH_UID` changes it needs a rebuild, or the service
-reports unhealthy because `ssh` cannot run. On each machine, give Nocheh a login
-of its own with bash as its shell and `ps` (procps) installed, so Stop can end its
-programs. For a VM on the same computer, use `host.docker.internal`, not `localhost`:
+reports unhealthy because `ssh` cannot run. On each machine, Nocheh can use any
+login that has bash, also your own, since Stop ends only the programs a job started.
+With coreutils' `timeout` (on macOS, Homebrew's `gtimeout`, on the PATH that SSH
+commands get, for example from `~/.zshenv`), a command past its time limit also ends
+on the machine; with bash 4 or later too, a command's reply ends when its script does,
+even when it leaves a program running. For a VM on the same computer, use `host.docker.internal`, not `localhost`:
 `nocheh-machines` connects from its own container. On Linux, `host.docker.internal`
 reaches the host through Docker's host gateway; a host firewall can still block it.
 An address, port or login changes with Edit in Settings › Machines; the machine then

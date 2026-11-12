@@ -21,6 +21,8 @@ from tools.runtime import machine_server as ms
 
 TOKEN='m'*40
 MACHINE='0123456789abcdef0123456789abcdef'
+# A made-up background job: the tag of the programs its commands start.
+JOB='fedcba9876543210'*4
 # A made-up ed25519 host key and its fingerprint, as ssh-keygen -l prints it.
 BLOB=struct.pack('>I',11)+b'ssh-ed25519'+struct.pack('>I',32)+bytes(range(32))
 HOST_KEY='SHA256:'+base64.b64encode(hashlib.sha256(BLOB).digest()).decode().rstrip('=')
@@ -53,7 +55,7 @@ elif not os.path.exists(known):
     sys.stderr.write('Host key verification failed.\\n');sys.exit(255)
 sys.stdout.write(scenario.get('noise',''));sys.stdout.flush()
 shell=scenario.get('shell','sh');env=dict(os.environ,**scenario.get('env',{{}}))
-if 'ps -o pid=' in remote:
+if 'lsof' in remote:
     os.execvpe(shell,[shell,'-c',remote.split(';',1)[0]+'; %s; exit %d'%(scenario.get('cleanup',':'),scenario.get('code',0))],env)
 if mode=='killed':os.execvpe(shell,[shell,'-c',remote.split(';',1)[0]+'; echo ending; kill -9 $$'],env)
 os.execvpe(shell,[shell,'-c',remote],env)
@@ -73,8 +75,9 @@ def result(data):
 
 
 def alive(pid):
-    try:return Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[0]!='Z'
-    except (OSError,IndexError):return False
+    # A zombie is not alive, unless only its first thread ended and others still run.
+    try:fields=Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split();return fields[0]!='Z' or int(fields[17])>1
+    except (OSError,IndexError,ValueError):return False
 
 
 class MachineServerTests(unittest.TestCase):
@@ -83,9 +86,12 @@ class MachineServerTests(unittest.TestCase):
         self.bin=base/'bin';self.bin.mkdir();self.root=base/'machines';self.root.mkdir(mode=0o700)
         (self.bin/'ssh').write_text(FAKE.format(python=sys.executable));(self.bin/'ssh').chmod(0o755)
         self.control=base/'control';self.control.mkdir()
-        for name,value in (('CONTROL',self.control),('GRACE',1),('SHORT',5)):
+        for name,value in (('CONTROL',self.control),('GRACE',1),('SHORT',5),('CLEANING',5)):
             patcher=patch.object(ms,name,value);patcher.start();self.addCleanup(patcher.stop)
-        patcher=patch.dict(os.environ,{'PATH':str(self.bin)+os.pathsep+os.environ.get('PATH','')});patcher.start();self.addCleanup(patcher.stop)
+        # The machine's login: its home holds the jobs' marker files.
+        self.home=base/'home';self.home.mkdir()
+        patcher=patch.dict(os.environ,{'PATH':str(self.bin)+os.pathsep+os.environ.get('PATH',''),'HOME':str(self.home)});patcher.start()
+        self.addCleanup(patcher.stop)
         self.scenario({})
         self.server=self.serve(TOKEN)
 
@@ -116,7 +122,7 @@ class MachineServerTests(unittest.TestCase):
         return response.status,(json.loads(data) if response.getheader('Content-Type')=='application/json' else data)
 
     def run_script(self,script,stdin=None,timeout=30,login=False,**extra):
-        return self.post('/exec',{**TARGET,'host_key':HOST_KEY,'script':script,'stdin':stdin,'timeout':timeout,'login_shell':login,**extra})
+        return self.post('/exec',{**TARGET,'host_key':HOST_KEY,'job':JOB,'script':script,'stdin':stdin,'timeout':timeout,'login_shell':login,**extra})
 
     def test_health_needs_no_token_and_every_other_route_needs_the_right_one(self):
         connection=http.client.HTTPConnection('127.0.0.1',self.server.server_address[1],timeout=10)
@@ -151,12 +157,15 @@ class MachineServerTests(unittest.TestCase):
         for target in bad:
             self.assertEqual(self.post('/test',{**target,'host_key':None}),(400,{'error':'invalid_machine_request'}),target)
             self.assertEqual(self.run_script('true',**target),(400,{'error':'invalid_machine_request'}),target)
-        for extra in ({'host_key':'SHA256:short'},{'host_key':None},{'timeout':0},{'timeout':3601},{'timeout':1.5},{'login_shell':1},
+        for extra in ({'host_key':'SHA256:short'},{'host_key':None},{'job':MACHINE},{'job':JOB.upper()},{'job':None},{'job':'-'+JOB[1:]},{'timeout':0},{'timeout':3601},{'timeout':1.5},{'login_shell':1},
                       {'script':'a\x00b'},{'script':None},{'stdin':5},{'stdin':'x'*(4<<20|1)}):
-            self.assertEqual(self.post('/exec',{**TARGET,'host_key':HOST_KEY,'script':'true','stdin':None,'timeout':5,'login_shell':False,**extra}),
+            self.assertEqual(self.post('/exec',{**TARGET,'host_key':HOST_KEY,'job':JOB,'script':'true','stdin':None,'timeout':5,'login_shell':False,**extra}),
                              (400,{'error':'invalid_machine_request'}),extra)
         self.assertEqual(self.post('/test',{**TARGET,'host_key':None,'extra':1}),(400,{'error':'invalid_machine_request'}))
         self.assertEqual(self.post('/test',TARGET),(400,{'error':'invalid_machine_request'}))
+        for job in (None,MACHINE,'g'*64):
+            self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY,'job':job}),(400,{'error':'invalid_machine_request'}),job)
+        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY}),(400,{'error':'invalid_machine_request'}))
         self.assertEqual(self.post('/keys',{'id':MACHINE,'comment':'-x'}),(400,{'error':'invalid_machine_request'}))
         self.assertEqual(self.post('/forget',{'id':'x'}),(400,{'error':'invalid_machine_request'}))
         self.assertEqual(self.post('/nothing',{}),(404,{'error':'not_found'}))
@@ -185,10 +194,22 @@ class MachineServerTests(unittest.TestCase):
                        f'ControlPath={self.control}/cm-{MACHINE}-%C'):
             self.assertIn(option,options)
         self.assertEqual(argv[argv.index('-i')+1],str(self.root/MACHINE/'key'));self.assertIn('-n',argv[:end])
-        # The login's shell gets the marker, then the fixed wrapper with the time limit, the login flag and the script.
-        self.assertRegex(argv[end+2],r"^printf '%s' '\x1enocheh-[0-9a-f]{16}\x1e'; exec bash --norc -c '")
+        # The login's shell gets the marker, then the fixed wrapper with the job's tag, the time limit, the login flag and the
+        # script.
+        self.assertRegex(argv[end+2],r"^printf '%s' '\x1enocheh-[0-9a-f]{16}\x1e'; exec env NOCHEH_STARTED="+JOB+" bash --norc -c '")
         self.assertTrue(argv[end+2].endswith(" nocheh 30 '' "+ms.quote(b"printf 'it'\"'\"'s here\\n'; printf 'err\\n' >&2; exit 3").decode()))
         self.assertIn(ms.quote(ms.WRAP).decode(),argv[end+2])
+        # The job's tag is in the command's environment and in that of the programs it starts, and so is fd 7 on the job's
+        # marker file, which stays; a marker older than 30 days goes.
+        old=self.home/'.nocheh'/'jobs'/('e'*64);old.parent.mkdir(parents=True,exist_ok=True);old.touch();os.utime(old,(time.time()-31*86400,)*2)
+        self.assertEqual(result(self.run_script('echo $NOCHEH_STARTED; sh -c \'echo $NOCHEH_STARTED; [ /dev/fd/7 -ef ~/.nocheh/jobs/$NOCHEH_STARTED ] && echo held\'')[1]),
+                         (((JOB+'\n')*2+'held\n').encode(),0))
+        self.assertEqual(sorted(path.name for path in old.parent.iterdir()),[JOB]);self.assertEqual(oct(old.parent.stat().st_mode&0o777),'0o700')
+        # Without its marker nothing runs, since Stop could not find the job's programs.
+        (self.home/'.nocheh').rename(self.home/'kept');(self.home/'.nocheh').write_text('')
+        self.assertEqual(result(self.run_script('echo ran')[1]),
+                         (f"nocheh: cannot open {self.home}/.nocheh/jobs/{JOB}, which Stop needs to find this job's programs; nothing ran.\n".encode(),125))
+        (self.home/'.nocheh').unlink();(self.home/'kept').rename(self.home/'.nocheh')
         # stdin goes to the command; a remote 255 stays 255; -l asks for a login shell.
         status,data=self.run_script('cat; exit 255',stdin='from stdin ✓')
         self.assertEqual((status,result(data)),(200,('from stdin ✓'.encode(),255)))
@@ -245,7 +266,7 @@ class MachineServerTests(unittest.TestCase):
         # A script that closes its own output, or execs another program.
         self.assertEqual(result(self.run_script('exec >&- 2>&-; sleep 1; exit 5')[1]),(b'',5))
         self.assertEqual(result(self.run_script("exec sh -c 'echo from exec; exit 6'")[1]),(b'from exec\n',6))
-        self.assertEqual(result(self.run_script('ls /proc/$$/fd; exit 0')[1]),(b'0\n1\n2\n',0),'only stdin, stdout and stderr')
+        self.assertEqual(result(self.run_script('ls /proc/$$/fd; exit 0')[1]),(b'0\n1\n2\n7\n',0),'only stdin, stdout, stderr and the marker')
         # set -e and set -u from an exported SHELLOPTS hold for the script, and the wrapper still ends the reply.
         self.scenario({'env':{'SHELLOPTS':'errexit:nounset'}})
         self.assertEqual(result(self.run_script('false; echo never')[1]),(b'',1))
@@ -299,7 +320,7 @@ class MachineServerTests(unittest.TestCase):
             self.scenario({'mode':'fail','before':text})
             self.assertEqual(self.run_script('echo never'),(502,{'error':code}),text)
             self.assertEqual(self.post('/test',{**TARGET,'host_key':HOST_KEY})[1]['error'],code)
-            self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY}),(200,{'ok':False,'error':code}))
+            self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY,'job':JOB}),(200,{'ok':False,'error':code}))
         detail=self.post('/test',{**TARGET,'host_key':HOST_KEY})[1]['detail']
         self.assertEqual(detail,'No user exists for uid 4243')
         # A shell that prints and prints but never reaches the marker is ended too.
@@ -321,6 +342,16 @@ class MachineServerTests(unittest.TestCase):
         status,data=self.run_script('echo started; sleep 30',timeout=1)
         self.assertEqual((status,result(data)),(200,(b'started\n',124)))
         self.assertLess(time.monotonic()-started,15);self.assertFalse(alive(int((self.bin/'pid').read_text())))
+        # Homebrew's gtimeout, as on macOS, ends them at the limit as coreutils' timeout does.
+        real=shutil.which('timeout',path=os.pathsep.join(part for part in os.environ['PATH'].split(os.pathsep) if Path(part)!=self.bin))
+        (self.bin/'gtimeout').write_text(f'#!/bin/sh\nexec {real} "$@"\n');(self.bin/'gtimeout').chmod(0o755);started=time.monotonic()
+        with patch.object(ms,'GRACE',30):status,data=self.run_script('sleep 30 & echo $!; echo started; sleep 30',timeout=1)
+        output,code=result(data);pid=int(output.split()[0])
+        self.assertEqual((status,output.split()[1:],code),(200,[b'started'],124));self.assertLess(time.monotonic()-started,10)
+        deadline=time.monotonic()+5
+        while alive(pid) and time.monotonic()<deadline:time.sleep(.05)
+        self.assertFalse(alive(pid),'the program the script started ended too')
+        (self.bin/'gtimeout').unlink()
         # Before the marker the time limit answers 502.
         self.scenario({'mode':'hang'})
         self.assertEqual(self.run_script('echo never',timeout=1),(502,{'error':'machine_timeout'}))
@@ -328,7 +359,7 @@ class MachineServerTests(unittest.TestCase):
 
     def test_a_client_that_goes_away_ends_ssh(self):
         self.machine();folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup);script=Path(folder.name)/'script'
-        body=json.dumps({**TARGET,'host_key':HOST_KEY,'script':f'echo $$ >{script}; echo started; sleep 30','stdin':None,'timeout':60,
+        body=json.dumps({**TARGET,'host_key':HOST_KEY,'job':JOB,'script':f'echo $$ >{script}; echo started; sleep 30','stdin':None,'timeout':60,
                          'login_shell':False}).encode()
         def end():
             # Here the "machine" is this one: end the script, which on a machine keeps running until the time limit.
@@ -354,42 +385,185 @@ class MachineServerTests(unittest.TestCase):
 
     def test_cleanup_runs_the_fixed_script_and_reports_how_it_ended(self):
         self.machine()
-        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY}),(200,{'ok':True}))
+        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY,'job':JOB}),(200,{'ok':True}))
         remote=self.calls()[-1][-1]
-        self.assertRegex(remote,r"^printf '%s' '\x1enocheh-[0-9a-f]{16}\x1e'; exec sh -c '")
-        self.assertIn(ms.CLEANUP,remote.replace("'\\''","'"));self.assertIn('StrictHostKeyChecking=yes',self.calls()[-1])
+        self.assertRegex(remote,r"^printf '%s' '\x1enocheh-[0-9a-f]{16}\x1e'; exec bash --norc -c '")
+        self.assertTrue(remote.endswith("' nocheh "+JOB));self.assertIn(ms.CLEANUP,remote.replace("'\\''","'"))
+        self.assertIn('StrictHostKeyChecking=yes',self.calls()[-1])
         self.scenario({'code':3})
-        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY}),(200,{'ok':False,'error':'machine_cleanup_failed'}))
-        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':OTHER}),(200,{'ok':False,'error':'machine_host_key_changed'}))
-        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':None}),(400,{'error':'invalid_machine_request'}))
-        # The script itself, run here as the child of a stand-in sshd session: it ends the login's other programs and
-        # spares itself and that session. ps is swapped for a list of the made-up session's own processes only.
-        self.assertEqual(ms.CLEANUP.count('ps -o pid= -u "$(id -u)"'),1)
+        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY,'job':JOB}),(200,{'ok':False,'error':'machine_cleanup_failed'}))
+        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':OTHER,'job':JOB}),(200,{'ok':False,'error':'machine_host_key_changed'}))
+        self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':None,'job':JOB}),(400,{'error':'invalid_machine_request'}))
+
+    def cleanup_here(self,script=None,path=None,home=None):
+        """Runs a cleanup script here as the remote command does, for JOB: its exit code."""
+        env={**os.environ,'HOME':str(home or self.home),**({'PATH':path} if path else {})}
+        return subprocess.run(['bash','--norc','-c',script or ms.CLEANUP,'nocheh',JOB],env=env,timeout=60).returncode
+
+    def launch(self,job,folder,name,script='sleep 600',tag=True):
+        """A program that keeps running, started in the background by a command of job as WRAP runs it (with its tag and
+        marker), or with job's tag only (tag=True and no WRAP: job=None uses JOB's tag), or neither (tag=False)."""
+        env={k:v for k,v in os.environ.items() if k!=ms.TAG}
+        line=f'{script} </dev/null >/dev/null 2>&1 & echo $! > {folder}/{name}'
+        if job:command=['bash','--norc','-c',ms.WRAP,'nocheh','30','',line];env[ms.TAG]=job
+        else:
+            command=['sh','-c',line]
+            if tag:env[ms.TAG]=JOB
+        subprocess.run(command,env=env,check=True,timeout=30)
+        return int((Path(folder)/name).read_text())
+
+    def ended(self,pids):
+        for pid in pids:
+            if pid is None:continue
+            try:os.kill(pid,9)
+            except OSError:pass
+
+    def test_cleanup_ends_only_the_programs_of_its_job(self):
+        # The script itself, here: it ends the programs of the job, found by its marker, its tag (one left to init, also
+        # under a program left to init that shows no environment) or as started by one of them, also one in a new session,
+        # one that renamed itself and one whose first thread ended; it leaves the login's other programs: one with neither,
+        # as the owner's own, one of another job, and one with the tag that a program of the owner's started (as a session
+        # manager that took the tag over would). Nothing of the job left: it ends after two empty rounds, and the marker is
+        # gone.
+        if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
+        mine=None
         with tempfile.TemporaryDirectory() as folder:
-            here=Path(folder);(here/'session.sh').write_text('sleep 30 & echo $! > "$1/sleeper"\nwhile [ ! -s "$1/pids" ]; do sleep .05; done\n'
-                                                            'sh -c "$2"; echo $? > "$1/code.tmp"; mv "$1/code.tmp" "$1/code"; sleep 30\n')
-            session=subprocess.Popen(['sh',str(here/'session.sh'),folder,ms.CLEANUP.replace('ps -o pid= -u "$(id -u)"','cat "$LIST"')],
-                                     env={**os.environ,'LIST':str(here/'pids')},start_new_session=True)
+            job={'both':self.launch(JOB,folder,'both'),'marker':self.launch(JOB,folder,'marker','env -i sleep 600'),
+                 'tag':self.launch(None,folder,'tag'),'session':self.launch(JOB,folder,'session','setsid sleep 600'),
+                 'started':self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)'),
+                 'threads':self.launch(JOB,folder,'threads',f"{sys.executable} -c 'import threading,time,ctypes; "
+                                       "threading.Thread(target=time.sleep,args=(600,)).start(); ctypes.CDLL(None).pthread_exit(None)'")}
+            job['child']=int((Path(folder)/'child').read_text())
+            job['hidden']=self.launch(None,folder,'hidden',f"env -i /bin/sh -c '/usr/bin/env {ms.TAG}={JOB} sleep 600 & echo $! > {folder}/under; wait'",tag=False)
+            if shutil.which('perl'):job['renamed']=self.launch(JOB,folder,'renamed',"perl -e '$0=q(worker); sleep 600'")
+            others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
+                    self.launch(None,folder,'manager',f'sh -c \'env {ms.TAG}={JOB} sleep 600 & echo $! > {folder}/managed; wait\'',tag=False)]
             try:
-                deadline=time.monotonic()+10
-                while not (here/'sleeper').exists() and time.monotonic()<deadline:time.sleep(.05)
-                sleeper=int((here/'sleeper').read_text());self.assertTrue(alive(sleeper))
-                (here/'pids.tmp').write_text(f'{sleeper}\n{session.pid}\n');(here/'pids.tmp').rename(here/'pids')
-                while not (here/'code').exists() and time.monotonic()<deadline:time.sleep(.05)
-                self.assertEqual((here/'code').read_text().strip(),'0')
+                deadline=time.monotonic()+5;managed=Path(folder)/'managed'
+                while not (managed.exists() and managed.read_text().strip()) and time.monotonic()<deadline:time.sleep(.05)
+                others.append(int(managed.read_text()))
+                under=Path(folder)/'under'
+                while not (under.exists() and under.read_text().strip()) and time.monotonic()<deadline:time.sleep(.05)
+                job['under']=int(under.read_text())
+                while Path(f'/proc/{job["threads"]}/stat').read_text().rsplit(')',1)[1].split()[0]!='Z' and time.monotonic()<deadline:time.sleep(.05)
+                self.assertTrue(alive(job['threads']))
+                self.assertTrue((self.home/'.nocheh'/'jobs'/JOB).exists())
+                self.assertEqual(self.cleanup_here(),0)
+                for name,pid in job.items():self.assertFalse(alive(pid),name)
+                for pid in others:self.assertTrue(alive(pid),pid)
+                self.assertEqual(sorted(path.name for path in (self.home/'.nocheh'/'jobs').iterdir()),['e'*64])
+                self.assertEqual(self.cleanup_here(),0)
+                # Where it cannot keep a probe file, it cannot prove it finds programs: it fails and ends nothing.
+                mine=self.launch(JOB,folder,'mine');other=self.home/'blocked';other.mkdir();(other/'.nocheh').write_text('')
+                self.assertEqual(self.cleanup_here(home=other),3);self.assertTrue(alive(mine))
+                self.assertEqual(self.cleanup_here(),0);self.assertFalse(alive(mine))
+            finally:self.ended([*job.values(),*others,mine])
+
+    def test_cleanup_finds_programs_with_lsof_and_ps_where_there_is_no_proc(self):
+        # As on macOS: no /proc; `lsof` names the holders of the marker, `ps -E` prints a process's command line, which may
+        # span lines, then its environment, and shows none for the system's own programs (here: sleep and a sh in sys);
+        # BWK awk where it is installed, which refuses a newline in -v. A program with the tag counts also under such a
+        # system program left to init by a launcher that closed what it inherited, but not under the owner's program that
+        # shows its environment; the owner's program that only names the tag in its command line is not the job's, also
+        # one started under another name (as macOS's sh runs bash, or Homebrew's grep runs ggrep) or whose first argument
+        # is NAME=value (grep), but one left to init whose first argument is not its program's name and is followed at
+        # once by environment words is (as ps shows a daemon that wrote a longer name over its arguments). One that
+        # renamed itself otherwise is not found, but it never hides one with the tag that it started. A program with the tag
+        # under one left to init that started before the job, which shows no environment (the owner's editor), is not the
+        # job's; under the login's older sshd session, whose parent is another user's (here: a sh in priv), it is.
+        if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
+        mine=None
+        check='[ -r /proc/$$/stat ]';self.assertEqual(ms.CLEANUP.count(check),1)
+        script=ms.CLEANUP.replace(check,'[ -r /nonexistent/$$ ]')
+        with tempfile.TemporaryDirectory() as folder:
+            here=Path(folder);(here/'bin').mkdir();ps,lsof=here/'bin'/'ps',here/'bin'/'lsof'
+            ps.write_text('#!/bin/bash\n'
+                          'shown() { case $(readlink /proc/$1/exe) in *sleep|*/sys/sh) ;; *) tr \'\\0\' \' \' </proc/$1/environ;; esac; }\n'
+                          'mine() { [ -O $1 ] && case $(readlink $1/exe) in */priv/sh) false;; *) true;; esac; }\n'
+                          'case " $* " in\n'
+                          '  *" comm= "*) for p; do :; done; [ -r /proc/$p/cmdline ] || exit 1; tr \'\\0\' \'\\n\' </proc/$p/cmdline | head -n 1;;\n'
+                          '  *" ucomm= "*) for p; do :; done; [ -r /proc/$p/comm ] || exit 1; printf \'%-16s\\n\' "$(cat /proc/$p/comm)";;\n'
+                          '  *" -o ppid= -p "*) for p; do :; done; read -r s </proc/$p/stat || exit 1; s=${s##*) }; set -- $s; printf \'%5s\\n\' $2;;\n'
+                          '  *" -o etime= -p "*) for p; do :; done; read -r s </proc/$p/stat || exit 1; s=${s##*) }; set -- $s; read -r u x </proc/uptime\n'
+                          '    e=$(( ${u%.*} - ${20} / $(getconf CLK_TCK) )); printf \'%02d:%02d:%02d\\n\' $((e/3600)) $((e%3600/60)) $((e%60));;\n'
+                          '  *" -p "*) for p; do :; done; [ -r /proc/$p/environ ] || exit 1; c=$(tr \'\\0\' \' \' </proc/$p/cmdline); v=\n'
+                          '    case " $* " in *" -E "*) v=$(shown $p);; esac; if [ -n "$v" ]; then printf \'%s %s\\n\' "$c" "$v"; else printf \'%s\\n\' "$c"; fi;;\n'
+                          '  *" -E "*) for e in /proc/[0-9]*; do mine $e && printf \'%6s %s %s\\n\' ${e#/proc/} "$(tr \'\\0\' \' \' <$e/cmdline)" "$(shown ${e#/proc/})"; done;;\n'
+                          '  *) for e in /proc/[0-9]*; do mine $e && read -r s <$e/stat && s=${s##*) } && set -- $s && echo "${e#/proc/} $2 $1"; done;;\n'
+                          'esac\nexit 0\n')
+            lsof.write_text('#!/bin/bash\nfor f; do :; done; for e in /proc/[0-9]*; do for d in $e/fd/*; do [ "$d" -ef "$f" ] && { echo ${e#/proc/}; break; }; done; done\n')
+            for path in (ps,lsof):path.chmod(0o755)
+            if shutil.which('original-awk'):(here/'bin'/'awk').symlink_to(shutil.which('original-awk'))
+            (here/'sys').mkdir();shutil.copy('/bin/sh',here/'sys'/'sh');shutil.copy(shutil.which('grep'),here/'sys'/'ggrep');os.mkfifo(here/'fifo')
+            path=str(here/'bin')+':'+os.environ['PATH']
+            # The owner's editor, whose environment macOS hides, started before the job; the job's `code <folder>` gives
+            # it the tag, and a program it starts then has the tag.
+            os.mkfifo(here/'trigger')
+            # The login's sshd session, which shows no environment and started before the job too (as where a connection is
+            # reused), under a sshd of root that the listing leaves out; a command of the job there that did not keep the
+            # marker (bash 3.2 runs a one-command script in place) starts a program with the tag.
+            (here/'priv').mkdir();shutil.copy('/bin/sh',here/'priv'/'sh');os.mkfifo(here/'opened')
+            (here/'session.sh').write_text(f'echo $$ > {folder}/session; read x < {folder}/opened\n'
+                                           f"{ms.TAG}=$1 {here}/sys/sh -c 'tail -f /dev/null & echo $! > {folder}/sshtail; wait' &\n"
+                                           f'echo $! > {folder}/sshtop; read x < {folder}/fifo\n')
+            monitor=self.launch(None,folder,'monitor',f"{here}/priv/sh -c '{here}/sys/sh {here}/session.sh \"$1\" & wait' sh {JOB}",tag=False)
+            editor=self.launch(None,folder,'editor',f"{here}/sys/sh -c 'read x < {folder}/trigger; {ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/edited; wait' sh {JOB}",tag=False)
+            # ps and stat give whole seconds, so each side may be off by one: wait well over the two seconds.
+            time.sleep(5)
+            job=[self.launch(JOB,folder,'mine'),self.launch(None,folder,'tagged','tail -f /dev/null'),
+                 self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)')]
+            # A command line that spans lines, with a line that starts like another process's, then the environment with
+            # the tag; its child shows none.
+            job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'sleep 600; :' 'one\n2 two'")]
+            launcher=self.launch(JOB,folder,'launcher',f'{sys.executable} -c \'import subprocess; subprocess.Popen(["{here}/sys/sh", "-c", '
+                                 f'"echo $$ > {folder}/syssh; tail -f /dev/null & echo $! > {folder}/systail; wait"])\'')
+            sleeper=f'-c "import time; time.sleep(600)" {ms.TAG}={JOB}'
+            (here/'TERM_PROGRAM=Terminal').write_text('import time; time.sleep(600)\n')
+            job.append(self.launch(None,folder,'renamed',f"bash -c 'cd {folder} && exec -a \"job-api [prod]\" {sys.executable} TERM_PROGRAM=Terminal {ms.TAG}={JOB}'",tag=False))
+            (here/'worker.py').write_text('import os,subprocess,sys,time\n'
+                                          "p=subprocess.Popen(['tail','-f','/dev/null'],env={**os.environ,sys.argv[1].split('=')[0]:sys.argv[1].split('=')[1]},"
+                                          'stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n'
+                                          "open(sys.argv[2],'w').write(str(p.pid));time.sleep(600)\n")
+            prefixed=self.launch(None,folder,'prefixed',f"bash -c 'exec -a {Path(sys.executable).name[:15]}-server {sys.executable} {here}/worker.py "
+                                 f"{ms.TAG}={JOB} {folder}/worker'",tag=False)
+            (here/'names.sh').write_text(f"bash -c 'exec -a sh bash -c \"tail -f /dev/null & echo \\$! > {folder}/namedchild; wait; : {ms.TAG}={JOB}\"' & "
+                                         f"echo $! > {folder}/named; wait\n")
+            others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
+                    self.launch(None,folder,'manager',f'sh -c \'{ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/managed; wait\' sh {JOB}',tag=False),
+                    self.launch(None,folder,'names',f'{here}/sys/sh {here}/names.sh',tag=False),
+                    self.launch(None,folder,'named-py',f'{sys.executable} {sleeper}',tag=False),
+                    self.launch(None,folder,'grep',f"{here}/sys/sh -c 'grep {ms.TAG}={JOB} {folder}/fifo & echo $! > {folder}/grepped; wait'",tag=False),
+                    self.launch(None,folder,'shim',f"bash -c 'exec -a sh bash -c \"read x < {folder}/fifo; : {ms.TAG}={JOB}\"'",tag=False),
+                    self.launch(None,folder,'orphan-grep',f'grep {ms.TAG}={JOB} {folder}/fifo',tag=False),
+                    self.launch(None,folder,'ggrep',f"{here}/sys/sh -c 'bash -c \"exec -a grep {here}/sys/ggrep {ms.TAG}={JOB} {folder}/fifo\" & "
+                                f"echo $! > {folder}/ggrepped; wait'",tag=False)]
+            try:
+                for name in ('trigger','opened'):
+                    with open(here/name,'w') as trigger:trigger.write('go\n')
                 deadline=time.monotonic()+5
-                while alive(sleeper) and time.monotonic()<deadline:time.sleep(.05)
-                self.assertFalse(alive(sleeper));self.assertIsNone(session.poll())
-            finally:
-                os.killpg(session.pid,9);session.wait()
+                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild','worker','grepped','ggrepped','edited','session','sshtop','sshtail')) and time.monotonic()<deadline:time.sleep(.05)
+                while alive(launcher) and time.monotonic()<deadline:time.sleep(.05)
+                job+=[int((here/name).read_text()) for name in ('syssh','systail','worker','sshtop','sshtail')]
+                others+=[editor,monitor,*(int((here/name).read_text()) for name in ('managed','named','namedchild','grepped','ggrepped','edited','session'))]
+                self.assertFalse(alive(launcher))
+                self.assertEqual(self.cleanup_here(script,path),0)
+                for pid in job:self.assertFalse(alive(pid),pid)
+                for pid in others:self.assertTrue(alive(pid),pid)
+                # Where lsof finds nothing (or is missing), or ps lists nothing, it cannot find its probe: it fails and ends
+                # nothing.
+                mine=self.launch(JOB,folder,'mine');lsof.write_text('#!/bin/sh\nexit 1\n')
+                self.assertEqual(self.cleanup_here(script,path),3);self.assertTrue(alive(mine))
+                lsof.unlink();ps.write_text('#!/bin/sh\nexit 0\n')
+                self.assertEqual(self.cleanup_here(script,path),3);self.assertTrue(alive(mine))
+            finally:self.ended([*job,*others,mine,prefixed])
 
     def test_cleanups_of_one_machine_run_one_at_a_time(self):
-        # Each ends every program of the login but its own: two at once on one machine would end each other's shells.
+        # Cleanups of one machine run one at a time; those of two machines at once.
         other='f'*32;self.machine();shutil.copytree(self.root/MACHINE,self.root/other);log=self.bin/'cleanups'
         self.scenario({'cleanup':f'echo start >>{log}; sleep .5; echo end >>{log}'})
         for machines,expected in (((MACHINE,MACHINE),['start','end','start','end']),((MACHINE,other),['start','start','end','end'])):
             log.unlink(missing_ok=True);answers=[]
-            threads=[threading.Thread(target=lambda ident=ident:answers.append(self.post('/cleanup',{**TARGET,'id':ident,'host_key':HOST_KEY})))
+            threads=[threading.Thread(target=lambda ident=ident:answers.append(self.post('/cleanup',{**TARGET,'id':ident,'host_key':HOST_KEY,'job':JOB})))
                      for ident in machines]
             for thread in threads:thread.start()
             for thread in threads:thread.join(30)
@@ -438,7 +612,7 @@ class MachineServerTests(unittest.TestCase):
                 self.assertEqual(self.post('/test',{**TARGET,'host_key':host_key}),
                                  (200,{'ok':False,'error':'machine_key_missing','detail':'Nocheh has no key for this machine. Keys are not in backups.'}))
             self.assertEqual(self.run_script('echo never'),(502,{'error':'machine_key_missing'}))
-            self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY}),(200,{'ok':False,'error':'machine_key_missing'}))
+            self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY,'job':JOB}),(200,{'ok':False,'error':'machine_key_missing'}))
         self.assertEqual(self.calls(),[])
 
     def test_fingerprints_match_ssh_keygen(self):

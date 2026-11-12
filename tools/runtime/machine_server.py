@@ -7,8 +7,8 @@ host key live in /machines/<id>/ (key, key.pub, known_hosts); no route returns o
 
 ssh runs with fixed options only: the request names a machine id, address, port and login, each checked against a
 fixed pattern, never an option. The remote command prints a random marker and then execs bash with a fixed wrapper
-(WRAP) and the script as one argument; what comes before the marker (shell start-up noise, ssh's own warnings) is
-dropped and, when ssh ends before it, tells why the connection failed. POST /exec answers 502 {error} for such a
+(WRAP) and the script as one argument, with the job's tag (TAG) in its environment; what comes before the marker (shell
+start-up noise, ssh's own warnings) is dropped and, when ssh ends before it, tells why the connection failed. POST /exec answers 502 {error} for such a
 failure; once the marker came it answers 200 with frames, as tools/runtime/box_server.py does: b'O', a 4-byte length
 and output bytes, then b'X', 4 and the exit code as a signed 4-byte int (124 at the time limit). A client that goes
 away ends ssh. A machine whose key file is missing (keys are not in backups) answers machine_key_missing.
@@ -33,6 +33,8 @@ from pathlib import Path
 
 PORT=8789
 ID=re.compile(r'[a-f0-9]{32}')
+# A background job's id: the tag of the programs its commands start.
+JOB=re.compile(r'[a-f0-9]{64}')
 ADDRESS=re.compile(r'[A-Za-z0-9][A-Za-z0-9.:-]{0,252}')
 LOGIN=re.compile(r'[a-z_][a-z0-9_-]{0,31}')
 HOST_KEY=re.compile(r'SHA256:[A-Za-z0-9+/]{43}')
@@ -61,15 +63,22 @@ TAIL=.3
 # its PID over the pipe that tells WRAP when cat ends (cat holds its write end as fd 4). Once the script's bash has ended,
 # cat stops when it has copied everything (end of file, the only case it is not killed), or after 0.3 s while a program
 # the script started still runs, or after at most 10 s when none does, which leaves time for output still on its way. Where coreutils'
-# timeout exists, the script runs under `timeout -k 5`: at the time limit it ends the script and the programs it started,
-# all in timeout's own process group (whose id is that PID), and the command ends with 124. Without that timeout the cat
-# gets 0.3 s; without mkfifo, mktemp or bash 4 the script runs as it did before, its programs holding the reply. stdin and
+# timeout exists (or gtimeout, its name from Homebrew on macOS), the script runs under `timeout -k 5`: at the time limit it
+# ends the script and the programs it started, all in timeout's own process group (whose id is that PID), and the command
+# ends with 124. Without that timeout, or without /proc for the PID hand-off (macOS), the cat gets 0.3 s; without mkfifo,
+# mktemp or bash 4 the script runs as it did before, its programs holding the reply. First of all WRAP opens the job's marker
+# file as fd 7 (see TAG), which the script and every program it starts inherit; where it cannot, nothing runs and the
+# command ends with 125 and says why, since Stop could not find the job's programs. stdin and
 # exit codes pass through. WRAP itself never prints (its stderr goes to /dev/null at once) and does not rely on set -e or
 # set -u being off, which an exported SHELLOPTS could turn on. --norc: a bash that sshd started would read ~/.bashrc again,
 # after the marker. The login's shell only parses `exec bash ... 'WRAP' ...`, so a dash or busybox login shell works too.
 WRAP=b'''exec 8>&2 2>/dev/null
-t= d= c= p= r=0 s=0
-if v=$(timeout --version) && [[ $v == *coreutils* ]]; then t="timeout -k 5 $1"; fi
+t= d= c= p= r=0 s=0 m=~/.nocheh/jobs
+if ! { mkdir -p -m 700 "$m" && touch -- "$m/$NOCHEH_STARTED" && exec 7<"$m/$NOCHEH_STARTED"; }; then
+echo "nocheh: cannot open $m/$NOCHEH_STARTED, which Stop needs to find this job's programs; nothing ran." >&8; exit 125
+fi
+find "$m" -type f -mtime +30 -exec rm -f {} + </dev/null >/dev/null
+for x in timeout gtimeout; do if v=$($x --version) && [[ $v == *coreutils* ]]; then t="$x -k 5 $1"; break; fi; done
 if ((BASH_VERSINFO[0]<4)) || ! d=$(mktemp -d "${TMPDIR:-/tmp}/nocheh.XXXXXXXXXX") || ! mkfifo -m 600 "$d/o"; then
 if [ -n "$d" ]; then rm -rf -- "$d"; fi
 exec $t bash --norc $2 -c "$3" 2>&8 8>&-
@@ -83,17 +92,148 @@ if ((s>128)) && [ -n "$t" ] && [ -n "$p" ] && ! kill -0 -- -$p; then s=0; read -
 if ((s!=1)); then kill -KILL $c || :; fi
 exit $r
 '''
-# Connection tests and cleanups each get this long.
+# Connection tests get this long, cleanups CLEANING.
 SHORT=30
+CLEANING=60
 # Multiplexed connections live in the container's own /tmp, one set per machine.
 CONTROL=Path('/tmp')
-# Ends every program of the login except this shell and its sshd: what a stopped job left running there.
-# Without ps it fails rather than claim it ended something.
-CLEANUP=('me=$$; up=$PPID; pids=$(ps -o pid= -u "$(id -u)") || exit 3; '
-         'for p in $pids; do [ "$p" = "$me" ] || [ "$p" = "$up" ] || kill -KILL "$p" 2>/dev/null; done; true')
+# Every command of a job runs with TAG=<the job's id> in its environment and, from WRAP, with fd 7 open on the job's marker
+# file (~/.nocheh/jobs/<the job's id>, kept 30 days); the programs it starts inherit both.
+TAG='NOCHEH_STARTED'
+# Ends the programs a job started as the login ($1 is the job's id), and nothing else the login runs: not the owner's own,
+# since the login may be one the owner uses, nor what other jobs left. A program is the job's when it holds the job's marker
+# open, carries its tag, or was started by one that does (see hits). Each way alone misses some: a program may close what it
+# inherited, write a new name over its environment (redis, or Perl and Node programs that rename themselves), or keep its
+# environment from being read (on macOS the system's own programs, such as sleep; on Linux an ssh-agent). On Linux it reads
+# /proc; elsewhere (macOS) it asks `lsof` for the marker's holders and `ps -E` for tags, checking each process that shows
+# the tag on its own. It first proves it can find a program by a marker: a `sleep` that holds a probe file open must be
+# found, else it fails rather than claim it ended something. Up to five rounds end the programs started meanwhile; if the
+# job's programs are still there after them it fails too. It ends after two rounds in a row find none. Lists reach awk
+# through its environment, since BWK awk (macOS) refuses a newline in -v. bash 3.2 runs it as well.
+CLEANUP=r'''exec 2>/dev/null </dev/null
+j=$1 m=~/.nocheh/jobs u=$(id -un) proc=
+[ -r /proc/$$/stat ] && proc=1
+# The login's live processes, other than this shell, that are the job's: those that hold file $2 open, those that any of
+# these started, and those with tag $1, unless a program of the login that shows its own environment without the tag is
+# above them before init (launchd), a process of another user or one of the job's (such as a session manager that took the
+# tag over and started them). A program whose environment cannot be read (on macOS the system's own, such as /bin/sh; on
+# Linux one that wrote over it) shows none. Its text never spells out a tag it looks for, which it would then find in its
+# own command line.
+# Without /proc: the words of process $1's environment, one per line, which `ps -E` prints after its command line (none
+# where the environment cannot be read); fails where ps answers otherwise. (It cuts by length: a pattern would take time
+# that grows with the square of a long command line.)
+vars() {
+  local a b
+  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "${b:0:${#a}}" = "$a" ] || return 1
+  printf '%s\n' "${b:${#a}}" | tr ' ' '\n'
+}
+# Whether process $1 carries tag $2 (0), only names it in its command line (1), shows it nowhere (2), or is gone (3).
+# ps takes as many words for the command line as the program had arguments, so a program that wrote a longer name over
+# them (Node's process.title) shows the start of its environment there. For one left to launchd (a daemon), the tag
+# counts anywhere where the first argument no longer starts with the program's name (ucomm) and a NAME=value word
+# follows it at once; a program the owner runs has their shell above it.
+has() {
+  local a b n c
+  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") || return 3
+  # A program that is ending shows as <defunct> or, before that, (its name) without its arguments.
+  case $a in '<defunct>') return 3;; '('*')') [ "$a" != "$b" ] || return 3;; esac
+  printf '%s\n' "$b" | tr ' ' '\n' | grep -qxF -- "$2" || return 2
+  if [ "${b:0:${#a}}" = "$a" ]; then printf '%s\n' "${b:${#a}}" | tr ' ' '\n' | grep -qxF -- "$2" && return 0; fi
+  [ "$(ps -o ppid= -p "$1" | awk '{print $1}')" = 1 ] || return 1
+  n=$(ps -ww -o comm= -p "$1") && c=$(ps -o ucomm= -p "$1" | awk 'NR==1 {sub(/[ \t]+$/, ""); print}') || return 1
+  [ -n "$n" ] && [ -n "$c" ] && [ "${a:0:${#n}}" = "$n" ] || return 1
+  case $(printf '%s\n' "$n" | awk 'NR==1 {sub(/.*\//, ""); sub(/^-/, ""); print}') in "$c"*) return 1;; esac
+  printf '%s\n' "${a:${#n}}" | awk 'NR==1 {print $1}' | grep -q '^[A-Za-z_][A-Za-z0-9_]*='
+}
+# Whether process $1, left to launchd, started over two seconds before the job's marker (born, now: seconds), so cannot be
+# the job's. The login's sshd session, also older where a connection is reused, has a root sshd above it.
+older() {
+  local e
+  [ -n "$born" ] && [ "$(ps -o ppid= -p "$1" | awk '{print $1}')" = 1 ] && e=$(ps -o etime= -p "$1" | awk 'NR==1 {n=split($1, a, /[-:]/); s=a[n]+60*a[n-1]; if (n>2) s+=3600*a[n-2]; if (n>3) s+=86400*a[n-3]; print s}') &&
+    [ -n "$e" ] && [ $((now-e)) -lt $((born-2)) ]
+}
+# Whether process $1 shows its own environment, without tag $2 anywhere in what ps -E prints.
+shows() {
+  local v
+  v=$(vars "$1") && printf '%s\n' "$v" | grep -q '^[A-Za-z_][A-Za-z0-9_]*=' || return 1
+  ! ps -E -ww -o command= -p "$1" | tr ' ' '\n' | grep -qxF -- "$2"
+}
+hits() {
+  local tag=$1 file=$2 e d p f v w rest dirs all born now table= marked= tagged= plain=
+  if [ -n "$proc" ]; then
+    for e in /proc/[0-9]*; do
+      p=${e#/proc/}
+      [ "$p" != $$ ] && [ -O "$e" ] && read -r rest <"$e/stat" || continue
+      rest=${rest##*) }; set -- $rest; dirs=$e w=
+      # A program whose first thread ended while others run shows as a zombie; its threads hold its files and environment.
+      if [ "$1" = Z ]; then [ "${18}" -gt 1 ] || continue; dirs=$(echo "$e"/task/*); fi
+      table="$table$p $2
+"
+      for d in $dirs; do
+        for f in "$d"/fd/*; do if [ "$f" -ef "$file" ]; then marked="$marked $p"; continue 3; fi; done
+        while IFS= read -r -d '' v; do
+          if [ "$v" = "$tag" ]; then tagged="$tagged $p"; continue 3; fi
+          [ -n "$w" ] || case ${v%%=*} in "$v"|''|[0-9]*|*[!A-Za-z0-9_]*) ;; *) w=1;; esac
+        done <"$d/environ"
+      done
+      [ -z "$w" ] || plain="$plain $p"
+    done
+  else
+    marked=$(lsof -t -w -- "$file" | tr '\n' ' ')
+    table=$(ps -x -U "$u" -o pid= -o ppid= -o stat=) && [ -n "$table" ] || return 1
+    table=$(printf '%s\n' "$table" | awk '$3 !~ /^Z/ {print $1, $2}')
+    # ps -E prints each command line, then the environment; where a command line spans lines (macOS's ps prints none
+    # that do), one may start like another process's. Each process that shows the tag is checked on its own, and where
+    # one shows it nowhere, the line was another's: then every process is. One that is gone by then is skipped.
+    all=
+    for p in $(ps -E -ww -x -U "$u" -o pid= -o command= | awk -v t="$tag" '$1 ~ /^[0-9]+$/ {p=$1} {for (i=1; i<=NF; i++) if ($i==t) {print p; next}}'); do
+      has "$p" "$tag"
+      case $? in 0) tagged="$tagged $p";; 2) all=1;; esac
+    done
+    if [ -n "$all" ]; then for p in $(printf '%s\n' "$table" | awk '{print $1}'); do ! has "$p" "$tag" || tagged="$tagged $p"; done; fi
+    # Only the programs above one with the tag, up to the marker's holders and what they started, matter: each is asked
+    # on its own whether it shows an environment, or was left to launchd before the marker (born), as the owner's editor,
+    # whose environment macOS hides, may have been given the tag by the job (`code <folder>` passes its environment on).
+    born=$(stat -c %W -- "$file" || stat -f %B -- "$file") && now=$(date +%s) || born=
+    case $born in ''|0|*[!0-9]*) born=;; esac
+    for p in $(printf '%s\n' "$table" | M=$marked T=$tagged awk '
+      BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) k[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1}
+      NF>=2 {up[$1]=$2}
+      END {do {more=0; for (p in up) if (!(p in k) && (up[p] in k)) {k[p]=1; more=1}} while (more)
+           for (p in tg) if (!(p in k)) {q=p; for (n=0; n<64 && (q in up); n++) {q=up[q]; if (q==1 || !(q in up) || (q in k)) break; if (!(q in tg) && !(q in seen)) {seen[q]=1; print q}}}}'); do
+      if older "$p" || shows "$p" "$tag"; then plain="$plain $p"; fi
+    done
+  fi
+  printf '%s\n' "$table" | M=$marked T=$tagged P=$plain awk -v me=$$ '
+    function left(p,  q, n) {for (q=up[p]; n<64; n++) {if (q==1 || !(q in up) || (q in k)) return 1; if (q in pl) return 0; q=up[q]}; return 0}
+    BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) mk[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1
+           n=split(ENVIRON["P"], a, " "); for (i=1; i<=n; i++) pl[a[i]]=1}
+    NF>=2 && $1!=me {up[$1]=$2; id[++c]=$1}
+    END {for (i=1; i<=c; i++) if (id[i] in mk) k[id[i]]=1
+         do {more=0; for (i=1; i<=c; i++) {p=id[i]; if (!(p in k) && ((up[p] in k) || ((p in tg) && left(p)))) {k[p]=1; more=1}}} while (more)
+         for (i=1; i<=c; i++) if (id[i] in k) print id[i]}'
+}
+mkdir -p -m 700 "$m" && : >"$m/probe-$$" && exec 6<"$m/probe-$$" || exit 3
+sleep 60 >/dev/null & s=$!
+exec 6<&-
+case " $(hits "NOCHEH_PROBE=$$" "$m/probe-$$" | tr '\n' ' ') " in *" $s "*) ok=1;; *) ok=;; esac
+kill -KILL $s; rm -f -- "$m/probe-$$"
+[ -n "$ok" ] || exit 3
+n=0 e=0
+while :; do
+  pids=$(hits "NOCHEH_STARTED=$j" "$m/$j") || exit 3
+  if [ -n "$pids" ]; then
+    [ $n -lt 5 ] || exit 4
+    kill -KILL $pids; n=$((n+1)) e=0
+  else
+    # Done after two empty rounds a second apart: a program that left its parent during a round is found in the next.
+    e=$((e+1)); if [ $e -ge 2 ]; then rm -f -- "$m/$j"; exit 0; fi
+  fi
+  sleep 1
+done'''
 REQUESTS={'/keys':('id','comment'),'/test':('id','address','port','login','host_key'),
-          '/exec':('id','address','port','login','host_key','script','stdin','timeout','login_shell'),
-          '/cleanup':('id','address','port','login','host_key'),'/forget':('id',),'/remove':('id',)}
+          '/exec':('id','address','port','login','host_key','job','script','stdin','timeout','login_shell'),
+          '/cleanup':('id','address','port','login','host_key','job'),'/forget':('id',),'/remove':('id',)}
 KEYS=threading.Lock()
 
 
@@ -162,6 +302,13 @@ def target(value,exec_=False):
             or host_key is not None and not (isinstance(host_key,str) and HOST_KEY.fullmatch(host_key))
             or exec_ and host_key is None):raise Refused(400,'invalid_machine_request')
     return ident,address,port,login,host_key
+
+
+def job_of(value):
+    """The job a command or cleanup is for, checked: its id goes on the machine as the programs' tag."""
+    job=value.get('job')
+    if not (isinstance(job,str) and JOB.fullmatch(job)):raise Refused(400,'invalid_machine_request')
+    return job
 
 
 def kill(proc):
@@ -234,6 +381,7 @@ class Machines:
                 chunk=os.read(output,65536)
                 if not chunk:poller.unregister(output);open_=False;continue
                 held+=chunk;at=held.find(marker)
+                if at>NOISE:return held,'noise'
                 if at>=0:return held[at+len(marker):],None
                 if len(held)>NOISE+len(marker):return held,'noise'
             if proc.poll() is not None:
@@ -260,11 +408,11 @@ class Machines:
                 if not open_ or time.monotonic()-ended>TAIL:return proc.returncode if proc.returncode>=0 else 128-proc.returncode
             elif time.monotonic()>deadline:return 124
 
-    def short(self,ident,address,port,login,command,trust=False,shared=True):
+    def short(self,ident,address,port,login,command,trust=False,shared=True,seconds=None):
         """Runs one short command; (exit code, output) or (None, failure code, detail)."""
         known=self.root/ident/'known_hosts';marker=('\x1enocheh-'+secrets.token_hex(8)+'\x1e').encode()
         remote=b"printf '%s' '"+marker+b"'; "+command
-        proc=self.start(self.ssh(ident,address,port,login,remote,None,trust,shared));deadline=time.monotonic()+SHORT
+        proc=self.start(self.ssh(ident,address,port,login,remote,None,trust,shared));deadline=time.monotonic()+(seconds or SHORT)
         try:
             rest,why=self.opened(proc,marker,deadline)
             if why:return None,failure(rest,known) if why=='exited' else 'machine_unreachable',line(rest) or 'The machine did not answer in time.'
@@ -312,12 +460,12 @@ class Machines:
         return {'ok':True,'host_key':next(iter(found)),'system':line(result[0])}
 
     def cleanup(self,value):
-        ident,address,port,login,host_key=target(value,exec_=True)
+        ident,address,port,login,host_key=target(value,exec_=True);job=job_of(value)
         self.folder(ident)
-        # A cleanup ends every program of the login but its own: two at once on one machine would end each other.
+        # Cleanups of one machine run one at a time, each over its own connection.
         with self.cleaning.setdefault(ident,threading.Lock()):
             if refused:=self.untrusted(ident,host_key):return {'ok':False,'error':refused}
-            code,*result=self.short(ident,address,port,login,b'exec sh -c '+quote(CLEANUP.encode()))
+            code,*result=self.short(ident,address,port,login,b'exec bash --norc -c '+quote(CLEANUP.encode())+b' nocheh '+job.encode(),seconds=CLEANING)
         if code is None:return {'ok':False,'error':result[0]}
         return {'ok':True} if code==0 else {'ok':False,'error':'machine_cleanup_failed'}
 
@@ -384,14 +532,14 @@ class Handler(BaseHTTPRequestHandler):
     def chunk(self,data):self.wfile.write(b'%x\r\n%s\r\n'%(len(data),data))
 
     def execute(self,value):
-        machines=self.server.machines;ident,address,port,login,host_key=target(value,exec_=True)
+        machines=self.server.machines;ident,address,port,login,host_key=target(value,exec_=True);job=job_of(value)
         script,stdin,timeout,login_shell=value['script'],value['stdin'],value['timeout'],value['login_shell']
         if (not isinstance(script,str) or '\x00' in script or stdin is not None and not isinstance(stdin,str)
                 or type(timeout) is not int or not 1<=timeout<=3600 or type(login_shell) is not bool):raise Refused(400,'invalid_machine_request')
         data=raw(script);given=None if stdin is None else raw(stdin)
         if given is not None and len(given)>MAX_STDIN:raise Refused(400,'invalid_machine_request')
         marker=('\x1enocheh-'+secrets.token_hex(8)+'\x1e').encode()
-        remote=(b"printf '%s' '"+marker+b"'; exec bash --norc -c "+quote(WRAP)+b' nocheh %d '%timeout+(b'-l' if login_shell else b"''")
+        remote=(b"printf '%s' '"+marker+b"'; exec env "+TAG.encode()+b'='+job.encode()+b" bash --norc -c "+quote(WRAP)+b' nocheh %d '%timeout+(b'-l' if login_shell else b"''")
                 +b' '+quote(data))
         if len(data)>MAX_SCRIPT or len(remote)>MAX_REMOTE:raise Refused(409,'machine_script_too_long')
         machines.folder(ident)
