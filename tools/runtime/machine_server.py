@@ -134,7 +134,9 @@ vars() {
 # follows it at once; a program the owner runs has their shell above it.
 has() {
   local a b n c
-  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "$a" != '<defunct>' ] || return 3
+  a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") || return 3
+  # A program that is ending shows as <defunct> or, before that, (its name) without its arguments.
+  case $a in '<defunct>') return 3;; '('*')') [ "$a" != "$b" ] || return 3;; esac
   printf '%s\n' "$b" | tr ' ' '\n' | grep -qxF -- "$2" || return 2
   if [ "${b:0:${#a}}" = "$a" ]; then printf '%s\n' "${b:${#a}}" | tr ' ' '\n' | grep -qxF -- "$2" && return 0; fi
   [ "$(ps -o ppid= -p "$1" | awk '{print $1}')" = 1 ] || return 1
@@ -143,6 +145,12 @@ has() {
   case $(printf '%s\n' "$n" | awk 'NR==1 {sub(/.*\//, ""); sub(/^-/, ""); print}') in "$c"*) return 1;; esac
   printf '%s\n' "${a:${#n}}" | awk 'NR==1 {print $1}' | grep -q '^[A-Za-z_][A-Za-z0-9_]*='
 }
+# Whether process $1 started over two seconds before the job's marker (born, now: seconds), so cannot be the job's.
+older() {
+  local e
+  [ -n "$born" ] && e=$(ps -o etime= -p "$1" | awk 'NR==1 {n=split($1, a, /[-:]/); s=a[n]+60*a[n-1]; if (n>2) s+=3600*a[n-2]; if (n>3) s+=86400*a[n-3]; print s}') &&
+    [ -n "$e" ] && [ $((now-e)) -lt $((born-2)) ]
+}
 # Whether process $1 shows its own environment, without tag $2 anywhere in what ps -E prints.
 shows() {
   local v
@@ -150,7 +158,7 @@ shows() {
   ! ps -E -ww -o command= -p "$1" | tr ' ' '\n' | grep -qxF -- "$2"
 }
 hits() {
-  local tag=$1 file=$2 e d p f v w rest dirs all table= marked= tagged= plain=
+  local tag=$1 file=$2 e d p f v w rest dirs all born now table= marked= tagged= plain=
   if [ -n "$proc" ]; then
     for e in /proc/[0-9]*; do
       p=${e#/proc/}
@@ -183,13 +191,16 @@ hits() {
     done
     if [ -n "$all" ]; then for p in $(printf '%s\n' "$table" | awk '{print $1}'); do ! has "$p" "$tag" || tagged="$tagged $p"; done; fi
     # Only the programs above one with the tag, up to the marker's holders and what they started, matter: each is asked
-    # on its own whether it shows an environment.
+    # on its own whether it shows an environment, or started before the marker (born), as the owner's editor, whose
+    # environment macOS hides, may have been given the tag by the job (`code <folder>` passes its environment on).
+    born=$(stat -c %W -- "$file" || stat -f %B -- "$file") && now=$(date +%s) || born=
+    case $born in ''|0|*[!0-9]*) born=;; esac
     for p in $(printf '%s\n' "$table" | M=$marked T=$tagged awk '
       BEGIN {n=split(ENVIRON["M"], a, " "); for (i=1; i<=n; i++) k[a[i]]=1; n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) tg[a[i]]=1}
       NF>=2 {up[$1]=$2}
       END {do {more=0; for (p in up) if (!(p in k) && (up[p] in k)) {k[p]=1; more=1}} while (more)
            for (p in tg) if (!(p in k)) {q=p; for (n=0; n<64 && (q in up); n++) {q=up[q]; if (q==1 || !(q in up) || (q in k)) break; if (!(q in tg) && !(q in seen)) {seen[q]=1; print q}}}}'); do
-      ! shows "$p" "$tag" || plain="$plain $p"
+      if older "$p" || shows "$p" "$tag"; then plain="$plain $p"; fi
     done
   fi
   printf '%s\n' "$table" | M=$marked T=$tagged P=$plain awk -v me=$$ '

@@ -44,12 +44,16 @@ else stays.
   a process of another user or one of the job's: a session manager that took the
   tag over and started it, for example. A program whose environment cannot be read,
   such as a system program on macOS or one that wrote over its environment, shows
-  none, so it never hides the job's programs below it. A Linux process whose first
-  thread ended while others run counts by its other threads. The cleanup ends the job's processes, in
-  up to five rounds for programs started meanwhile, and nothing else: not the
-  owner's own programs, and not what other jobs left running. It is done after two
-  rounds a second apart find none, so a program that left its parent during a
-  round is found in the next; then it removes the marker.
+  none, so it never hides the job's programs below it. On macOS, one that started
+  more than two seconds before the job's marker counts as one without the tag,
+  since it cannot be the job's: the owner's editor, whose environment macOS hides,
+  gets the tag for a window that a job's `code <folder>` opens. A Linux process
+  whose first thread ended while others run counts by its other threads. The
+  cleanup ends the job's processes, in up to five rounds for programs started
+  meanwhile, and nothing else: not the owner's own programs, and not what other
+  jobs left running. It is done after two rounds a second apart find none, so a
+  program that left its parent during a round is found in the next; then it
+  removes the marker.
 - **How it looks.** On Linux it reads `/proc`. On macOS it asks `lsof` for the
   marker's holders, `ps` for who started whom, and `ps -E` for tags, checking each
   process that shows the tag on its own, and every process where one of those does
@@ -85,8 +89,8 @@ else stays.
 - The job's instructions say that the login may be the owner's own, that Stop or a
   limit ends the programs the job started with everything running inside them,
   and that the job must not stop or change the owner's programs, nor start a
-  server or daemon the owner may also use (such as tmux or a build tool's daemon),
-  unless the plan says so.
+  server or daemon the owner may also use (such as tmux, a build tool's daemon or
+  an editor), unless the plan says so.
 </decision>
 
 <consequences>
@@ -105,8 +109,10 @@ else stays.
 - A server or daemon the job starts ends on Stop with everything running inside
   it, also what the owner or another job started there later: tmux, an
   `emacs --daemon`, a build tool's daemon such as Gradle's, or a gpg-agent a
-  command started. The instructions ask the job not to start such servers unless
-  the plan says so, but a tool may start one by itself.
+  command started. So does what runs in an editor window the job opened (`code` or
+  `cursor` pass the job's environment on) where the editor was not running yet.
+  The instructions ask the job not to start such servers or editors unless the
+  plan says so, but a tool may start one by itself.
 - Where the owner's own setup copies the whole environment into a launcher that
   starts programs as init's children, such as `launchctl setenv` in macOS
   dotfiles, programs it starts later carry the tag and count as the job's.
