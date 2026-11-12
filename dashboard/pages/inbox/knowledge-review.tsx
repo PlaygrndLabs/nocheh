@@ -4,6 +4,7 @@ import {Badge, Button, Details, Notice, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
 import {projectSharingWarning} from '../chats/rule-dialog';
+import {parentOf} from '../../lib/chats-model';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {stateLabel, useChatNames, useCommand} from './shared';
 
@@ -25,6 +26,15 @@ export type Proposal = {
   /** Projects whose chats share what they know that this change, or undoing it, touches; worked out by the server. */
   sharing_projects?: {id: string; name: string}[];
   undo_sharing_projects?: {id: string; name: string}[];
+  /** For a fact share or correction: where the fact came from and who reads it without a share (null: only you). */
+  fact_audience?: {
+    sources: (string | null)[];
+    private_sources: string[];
+    confirm_required: boolean;
+    readers: {space: string; group: string | null} | null;
+  } | null;
+  /** Private chats a proposal saved before they were refused still names; it never applies (ADR-0242). */
+  private_chats?: string[];
 };
 
 const titles: Record<string, string> = {
@@ -89,6 +99,11 @@ export function KnowledgeReview({
   const kind = String(content.kind ?? proposal.kind);
   const sharing = proposal.sharing_projects ?? [];
   const sharingProject = (id: string | null | undefined) => sharing.find(project => project.id === id);
+  const audience = proposal.fact_audience;
+  const destination = typeof content.payload?.destination === 'string' ? content.payload.destination : null;
+  // Every member of a group can read all of its topics, so a share into a topic is seen by the whole group.
+  const seers = destination ? (parentOf(destination) ?? destination) : null;
+  const privateChats = proposal.private_chats ?? [];
   const controls = knowledgeDecisionControls(proposal.state, {
     unavailable: review.unavailable,
     changed: review.changed,
@@ -138,7 +153,7 @@ export function KnowledgeReview({
         <Button
           variant="primary"
           busy={command.busy === 'approve'}
-          disabled={!controls.approve}
+          disabled={!controls.approve || privateChats.length > 0}
           onClick={() => void decide('approve', 'Approved. It applies in a moment.')}
         >
           Approve
@@ -215,6 +230,15 @@ export function KnowledgeReview({
           Something it depends on changed. You can still reject it.
         </Notice>
       )}
+      {privateChats.length > 0 && (
+        <Notice tone="warn" title="Names a private chat. Nocheh won’t apply it.">
+          Private chats never share, get shared with or join a project, so this leaves out{' '}
+          {privateChats.map(space => chat(space)).join(', ')}.{' '}
+          {['review', 'queued', 'waiting', 'stale', 'failed'].includes(proposal.state)
+            ? 'Reject or dismiss it; Nocheh suggests a fresh one if still needed.'
+            : 'It was made before private chats were left out.'}
+        </Notice>
+      )}
       {sharing.length > 0 && (
         <Notice tone="warn" title="A project here shares what its chats know">
           {projectSharingWarning}
@@ -288,6 +312,27 @@ export function KnowledgeReview({
               </Fact>
             ))}
         </Facts>
+      )}
+
+      {audience && (
+        <Facts>
+          <Fact label="Came from">{audience.sources.map(space => chat(space)).join(', ') || 'Unknown'}</Fact>
+          {kind === 'fact_grant' && seers ? (
+            <Fact label="Who will see it">Everyone in {chat(seers)}</Fact>
+          ) : (
+            <Fact label="Who can read the new wording">
+              {(audience.readers
+                ? 'Everyone in ' + chat(audience.readers.group ?? audience.readers.space)
+                : 'Only you') + '. Any chat you shared it with pauses until you approve the new wording there.'}
+            </Fact>
+          )}
+        </Facts>
+      )}
+      {kind === 'fact_grant' && audience?.confirm_required && (
+        <Notice tone="warn" title="This fact comes from a private chat">
+          Approving shares its wording from{' '}
+          {audience.private_sources.map(space => chat(space)).join(', ') || 'a chat Nocheh can’t place'}.
+        </Notice>
       )}
 
       {topics.length > 0 && (

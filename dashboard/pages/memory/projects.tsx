@@ -28,6 +28,7 @@ import {
   type Tone,
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
+import {groupSpace} from '../../lib/chats-model';
 import {ChatPicker} from '../chats/chat-picker';
 import {modeText, projectSharingWarning} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
@@ -108,9 +109,12 @@ export function Projects() {
     if (mine && mine.mode !== 'inherit') return mine.mode === 'assigned' ? mine.project_id : null;
     return parent ? projectOf(parent) : null;
   };
+  // A private chat is in no project, even one an older setting still names (ADR-0242).
   const chatCount = (id: string) => {
     const spaces = new Set([...chats.items.map(chat => chat.space_id), ...own.map(row => row.space_id)]);
-    return [...spaces].filter(space => projectOf(space, space.match(/^(.+)\/topic\/\d+$/)?.[1]) === id).length;
+    return [...spaces].filter(
+      space => groupSpace(space) && projectOf(space, space.match(/^(.+)\/topic\/\d+$/)?.[1]) === id,
+    ).length;
   };
 
   return (
@@ -540,10 +544,11 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
             onChange={ids => setAdding(ids.at(-1) ?? '')}
             exclude={members.map(member => member.space_id)}
             disabled={command.busy}
+            groupsOnly
             hint={
               adding && elsewhere(adding)
                 ? `It is in ${elsewhere(adding)} now; adding it here moves it.`
-                : 'A chat belongs to one project at a time.'
+                : 'A group or topic belongs to one project at a time. Private chats never join a project.'
             }
           />
           <Button variant="primary" busy={command.busy} disabled={!adding} onClick={() => void add()}>
@@ -688,6 +693,11 @@ function AutoOrganize({projects}: {projects: Project[]}) {
                         {item.allow_create ? ' · may create projects' : ''}
                         {item.expires_at ? ' · until ' + new Date(item.expires_at).toLocaleDateString() : ''}
                       </span>
+                      {item.scopes.some(scope => !groupSpace(scope)) && (
+                        <span className="mt-0.5 block text-xs text-warn">
+                          Covers a private chat. Nocheh skips it; edit to remove it.
+                        </span>
+                      )}
                     </span>
                     <Button size="sm" variant="ghost" onClick={() => setEditing(item)}>
                       Edit
@@ -751,7 +761,8 @@ function DelegationDialog({
   const feedback = useFeedback();
   const command = useCommand();
   const [name, setName] = useState(item?.name ?? 'Organize my chats');
-  const [scopes, setScopes] = useState<string[]>(item?.scopes ?? []);
+  // One saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
+  const [scopes, setScopes] = useState<string[]>((item?.scopes ?? []).filter(groupSpace));
   const [allowed, setAllowed] = useState<string[]>(item?.project_ids ?? []);
   // A new permission starts off and without project creation until the owner turns them on.
   const [create, setCreate] = useState(item?.allow_create ?? false);
@@ -810,7 +821,8 @@ function DelegationDialog({
           multiple
           value={scopes}
           onChange={setScopes}
-          hint="Choosing a group doesn’t include its topics."
+          groupsOnly
+          hint="Groups and topics only. Choosing a group doesn’t include its topics."
         />
         {active.length > 0 && (
           <fieldset>

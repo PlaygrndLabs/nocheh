@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {parentSpace,validateSpace} from '../spaces.js';
+import {groupSpace,parentSpace,validateSpace} from '../spaces.js';
 import {learningResult} from '../interpretations.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {StorePools} from './connections.js';
@@ -20,7 +20,7 @@ import {selectionId} from './selections.js';
 import type {SharingContentRepository} from './sharing.js';
 import {ProjectRepository,SharingPolicyRepository,listedRule,writeProject,writeAssignment,type Assignment} from './projects.js';
 import {foregroundReplyActive} from './automatic-publication.js';
-import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,learnedOrganization,organizationIdentity,
+import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,learnedOrganization,organizationIdentity,proposalPrivateChats,
  type KnowledgeProposal,type OrganizationProposal,type ReviewProposal} from './knowledge-contract.js';
 
 const protocol='knowledge-management-v1';
@@ -59,6 +59,8 @@ export class KnowledgeManagementRepository {
   const operation=string(b.operation_id,200),identity=b.id===undefined?digest('organization-delegation:'+operation):id(b.id),expected=revision(b.expected_revision);
   if(!operation.trim()||typeof b.enabled!=='boolean'||typeof b.allow_create!=='boolean'||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.length>100||!Array.isArray(b.project_ids)||b.project_ids.length>100)throw new HttpError(400,'invalid_organization_delegation');
   const scopes=[...new Set<string>(b.scopes.map(validateSpace))].sort(),projects=[...new Set<string>(b.project_ids.map(id))].sort(),name=string(b.name,200).trim();
+  // Organizing puts chats in projects, and a private chat never joins one (ADR-0242).
+  const privateScopes=scopes.filter(scope=>!groupSpace(scope));if(privateScopes.length&&b.enabled!==false)throw new HttpError(400,'organization_private_chat');
   const expires=b.expires_at==null||b.expires_at===''?null:new Date(string(b.expires_at,100));
   if(!name||expires&&(!Number.isFinite(expires.getTime())||b.enabled&&expires<=new Date()))throw new HttpError(400,'invalid_organization_delegation');
   const hash=digest(canonical({...b,id:identity})),db=await this.stores.control.connect();
@@ -66,6 +68,8 @@ export class KnowledgeManagementRepository {
    const replay=(await db.query('SELECT request_hash,record FROM organization_delegation_history WHERE operation_id=$1',[operation])).rows[0];
    if(replay){if(replay.request_hash!==hash)throw new HttpError(409,'organization_command_conflict');await db.query('COMMIT');return replay.record;}
    const prior=(await db.query('SELECT * FROM organization_delegations WHERE id=$1 FOR UPDATE',[identity])).rows[0];
+   // One saved earlier over a private chat can be turned off and kept off as it is; it never gains one.
+   if(privateScopes.some(scope=>!prior?.scopes.includes(scope)))throw new HttpError(400,'organization_private_chat');
    if((prior?.revision??0)!==expected)throw new HttpError(409,'organization_delegation_changed');
    if(b.enabled&&(await db.query("SELECT id FROM projects WHERE id=ANY($1::text[]) AND state='active'",[projects])).rowCount!==projects.length)throw new HttpError(400,'active_project_required');
    // Sequence allocation is conservative even when capture commits out of order.
@@ -230,12 +234,13 @@ export class KnowledgeManagementRepository {
  }
 
  private async row(identity:string):Promise<ProposalRow>{const row=(await this.stores.control.query('SELECT * FROM knowledge_proposals WHERE id=$1',[id(identity)])).rows[0];if(!row)throw new HttpError(404,'knowledge_proposal_not_found');return row;}
- private async content(row:ProposalRow,binding?:GuardBinding):Promise<KnowledgeProposal>{
+ /** A saved proposal; `stored` reads it as saved, for showing it, while applying it re-checks it as new (ADR-0242). */
+ private async content(row:ProposalRow,binding?:GuardBinding,stored=false):Promise<KnowledgeProposal>{
   const artifact=(await this.stores.derived.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1 AND NOT imported',[row.proposal_reference.id])).rows[0];
   if(!artifact||artifact.content_hash!==row.proposal_reference.input_hash||digest(artifact.content)!==artifact.content_hash)throw new HttpError(409,'knowledge_proposal_changed');
   if(binding){const prepared=await this.s.guards.read('derived_artifacts:'+row.proposal_reference.id,binding);
    if(prepared.revision!==row.dependencies.proposal_revision||digest(String((prepared.value as any).text??''))!==row.dependencies.proposal_hash)throw new HttpError(409,'knowledge_proposal_changed');}
-  return parseKnowledgeProposal(JSON.parse(artifact.content.toString()));
+  return parseKnowledgeProposal(JSON.parse(artifact.content.toString()),{stored});
  }
  async proposal(principal:Reader,identity:string):Promise<Record<string,any>>{if(!principal.admin)await this.ownerTurn(principal);const row=await this.row(identity);
   if(!principal.admin){
@@ -243,7 +248,7 @@ export class KnowledgeManagementRepository {
    const status={id:row.id,kind:row.kind,state:row.state,revision:row.revision,approved:row.approved,error_code:row.error_code};
    await this.s.prepared.allow(principal,status);await this.s.turns.assertAudience(principal);return status;
   }
-  const proposal=await this.content(row),decision_history=(await this.stores.control.query('SELECT operation_id,result,created_at FROM knowledge_decisions WHERE proposal_id=$1 ORDER BY created_at,operation_id',[row.id])).rows;
+  const proposal=await this.content(row,undefined,true),decision_history=(await this.stores.control.query('SELECT operation_id,result,created_at FROM knowledge_decisions WHERE proposal_id=$1 ORDER BY created_at,operation_id',[row.id])).rows;
   // The owner's review and undo say when a project whose chats share what they know is involved now (ADR-0226).
   const moves=proposal.kind==='organization'?proposal.assignments.map(a=>({space_id:a.space_id,mode:'assigned',project_id:a.project_id??null})):
    proposal.kind==='project_assignment'?[{space_id:String(proposal.payload.space_id),mode:String(proposal.payload.mode),project_id:proposal.payload.project_id??null}]:[];
@@ -251,7 +256,13 @@ export class KnowledgeManagementRepository {
    await this.sharingProjects(moves,this.stores.control);
   const undo_sharing_projects=row.state==='applied'&&row.kind==='organization'?await this.sharingProjects((row.result?.assignments??[]).map((change:any)=>({space_id:change.after.space_id,
    mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})),this.stores.control):[];
-  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,decision_history};}
+  // A card that shares or rewords a fact names where it came from and who can read it (ADR-0242).
+  const fact=proposal.kind==='fact_grant'?proposal.payload.fact_id:proposal.kind==='entity_correct'?proposal.target_id:null;
+  const fact_audience=fact?await this.s.entities.audience(principal,fact).catch(()=>null):null;
+  // A proposal saved before private chats were refused still opens, marked, so the owner can cancel it; it never applies.
+  const private_chats=proposalPrivateChats(proposal);
+  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,
+   ...(fact?{fact_audience}:{}),...(private_chats.length?{private_chats}:{}),decision_history};}
  async proposals(principal:Reader,after=''){admin(principal);if(after)id(after);const rows=(await this.stores.control.query(`SELECT id FROM knowledge_proposals WHERE $1='' OR
   (created_at,id)<(SELECT created_at,id FROM knowledge_proposals WHERE id=$1) ORDER BY created_at DESC,id DESC LIMIT 101`,[after])).rows;
   return {proposals:await Promise.all(rows.slice(0,100).map(row=>this.proposal(principal,row.id))),next:rows.length>100?rows[99].id:null};}
@@ -296,8 +307,10 @@ export class KnowledgeManagementRepository {
   }
   for(const permission of rows){
    if(required&&(permission.id!==required.id||permission.revision!==required.revision))continue;
-   if(input.origin==='learning'&&(!permission.scopes.includes(input.space)||BigInt(captured.sequence)<=BigInt(permission.capture_watermark))||proposal.creates.length&&!permission.allow_create)continue;
-   if([...evidence.values()].some(space=>!permission.scopes.includes(space)))continue;
+   // A delegation saved earlier over a private chat never acts on it (ADR-0242).
+   const scopes=permission.scopes.filter(groupSpace);
+   if(input.origin==='learning'&&(!scopes.includes(input.space)||BigInt(captured.sequence)<=BigInt(permission.capture_watermark))||proposal.creates.length&&!permission.allow_create)continue;
+   if([...evidence.values()].some(space=>!scopes.includes(space)))continue;
    let permitted=true;
    for(const create of proposal.creates)if((await control.query("SELECT 1 FROM projects WHERE lower(name)=lower($1) LIMIT 1",[create.name])).rowCount)permitted=false;
    for(const space of new Set([...evidence.values(),...(input.origin==='learning'?[input.space]:[])])){
@@ -305,7 +318,7 @@ export class KnowledgeManagementRepository {
    }
    for(const change of [...proposal.creates,...proposal.assignments])if(input.origin==='learning'&&!change.evidence_ids.includes(input.source.id))permitted=false;
    for(const assignment of proposal.assignments){
-    if(!assignment.purpose_evidence||!permission.scopes.includes(assignment.space_id)||input.origin==='learning'&&assignment.space_id!==input.space){permitted=false;break;}
+    if(!assignment.purpose_evidence||!scopes.includes(assignment.space_id)||input.origin==='learning'&&assignment.space_id!==input.space){permitted=false;break;}
     // Evidence of another project's existence is not evidence of this conversation's purpose.
     if(assignment.evidence_ids.some(e=>evidence.get(e)!==assignment.space_id)){permitted=false;break;}
     const current=(await control.query('SELECT revision FROM project_assignments WHERE space_id=$1',[assignment.space_id])).rows[0];
@@ -316,7 +329,7 @@ export class KnowledgeManagementRepository {
     // Joining or leaving a project whose chats share what they know changes who knows what: only the owner does that (ADR-0226).
     if((await this.sharingProjects([{space_id:assignment.space_id,mode:'assigned',project_id:assignment.project_id??null}],control)).length){permitted=false;break;}
     for(const topic of await this.affectedTopics(assignment.space_id,control)){
-     if(!permission.scopes.includes(topic)||!await this.baselineMatches(permission,topic,control))permitted=false;
+     if(!scopes.includes(topic)||!await this.baselineMatches(permission,topic,control))permitted=false;
     }
    }
    if(permitted)return permission;
@@ -357,7 +370,7 @@ export class KnowledgeManagementRepository {
   let proposal:OrganizationProposal,context:any;
   try{context=JSON.parse(contextRow.content.toString());const parsed:any=learningResult(result.content.toString());
    if(!parsed.organization)return null;
-   proposal=learnedOrganization(parsed.organization);
+   const learned=learnedOrganization(parsed.organization);if(!learned)return null;proposal=learned;
   }catch{return null;}
   const captured=await this.s.access.archive.verify(job.source_reference);
   if(captured.origin!=='live')return null;
@@ -471,7 +484,8 @@ export class KnowledgeManagementRepository {
    case 'entity_merge':return this.s.entities.merge(principal,target,input);
    case 'entity_unmerge':return this.s.entities.unmerge(principal,target,input);
    case 'sharing_rule':return this.s.sharing.save(principal,input);
-   case 'fact_grant':return this.s.memoryAccess.grant(principal,input);
+   // The owner approved a card that named where the fact came from (ADR-0242).
+   case 'fact_grant':return this.s.memoryAccess.grant(principal,{...input,private_evidence_confirmed:true});
    case 'fact_revoke':return this.s.memoryAccess.revoke(principal,target,input);
   }
  }

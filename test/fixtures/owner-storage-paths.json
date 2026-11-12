@@ -47,6 +47,7 @@
  {"path": "/v1/entities/suggestions", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/claims/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/correct", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/claims/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/history", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/entities/claims/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/audience", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/decide", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/entities/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/fold", "owner_storage": true, "allowed_path": true},

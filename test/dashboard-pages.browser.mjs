@@ -1163,6 +1163,95 @@ test('a project’s chats share what they know only once it is ticked, and its r
   await rules.close();
 });
 
+test('the owner’s private chat stays out of sharing rules and projects', async () => {
+  // A rule picks only groups and topics; an older rule that names a private chat is flagged.
+  const {page: rules, problems} = await open('chats?view=rules');
+  const legacy = rules.getByRole('listitem').filter({hasText: 'Notes from my chat'});
+  await legacy.getByText('Reads a private chat. Nocheh skips it.').waitFor();
+  // That older rule can still be turned off as it is.
+  await legacy.getByRole('switch', {name: 'Turn off Notes from my chat'}).click();
+  await rules.getByRole('status').filter({hasText: 'Rule turned off.'}).waitFor();
+  await rules.getByRole('button', {name: 'New rule'}).click();
+  const dialog = rules.getByRole('dialog', {name: 'New sharing rule'});
+  const from = dialog.getByRole('listbox', {name: 'Share facts from'});
+  await from
+    .getByRole('option', {name: /Aurora planning/})
+    .first()
+    .waitFor();
+  assert.equal(await from.getByRole('option', {name: /You|Mira Chen/}).count(), 0);
+  const search = dialog.getByPlaceholder('Search chats by name or ID').first();
+  await search.fill('42');
+  await from
+    .getByRole('option', {name: /Aurora planning/})
+    .first()
+    .waitFor();
+  assert.equal(await from.getByRole('option', {name: /You/}).count(), 0);
+  assert.equal(await from.getByRole('button', {name: /Use the ID/}).count(), 0);
+  await search.fill('73');
+  await from.getByText('Only groups and topics can be chosen here, never a private chat.').waitFor();
+  assert.equal(await from.getByRole('button', {name: /Use the ID/}).count(), 0);
+  await rules.close();
+
+  // The owner's chat page offers no project, and clears one an older setting still names.
+  const {page: own, problems: ownProblems} = await open('chats?chat=42');
+  const older = own.getByRole('status').filter({hasText: 'An older setting puts this chat in a project'});
+  await older.getByText('Nocheh ignores the setting that puts it in Aurora field guide.', {exact: false}).waitFor();
+  assert.equal(await own.locator('#chat-project').count(), 0);
+  await own.getByRole('button', {name: 'Remove it'}).click();
+  await own.getByRole('status').filter({hasText: 'Removed from its project.'}).waitFor();
+  await own.getByText('Your private chat never joins a project.', {exact: true}).waitFor();
+  assert.equal(await own.getByRole('button', {name: 'Remove it'}).count(), 0);
+  assert.deepEqual([...problems, ...ownProblems], []);
+  await own.close();
+});
+
+test('a share from the private side names where it came from and who will see it', async () => {
+  // Sharing a fact from the private chat lists groups only, names where it came from and who sees it, and asks first.
+  const {page: people, problems: peopleProblems} = await open('memory?view=people&person=' + '1'.repeat(64));
+  const card = people.getByRole('listitem').filter({hasText: 'Mira prefers quiet aurora viewpoints'}).first();
+  await card.getByRole('button', {name: 'Let a chat use it'}).click();
+  await card.getByText('Came from: your private chat').waitFor();
+  const choice = card.getByLabel('Chat', {exact: true});
+  assert.deepEqual(
+    (await choice.locator('option').allTextContents()).filter(text => /Owner|Mira Chen|Private/.test(text)),
+    [],
+  );
+  await choice.selectOption({label: 'Aurora planning'});
+  await card.getByText('Who will see it: everyone in Aurora planning.').waitFor();
+  await card.getByRole('button', {name: 'Share', exact: true}).click();
+  const ask = people.getByRole('dialog', {name: 'Share something from a private chat?'});
+  await ask
+    .getByText('This fact comes from your private chat. Everyone in Aurora planning will see the wording below.')
+    .waitFor();
+  await ask.getByRole('button', {name: 'Share it'}).click();
+  await people.getByRole('status').filter({hasText: 'Aurora planning may now use this.'}).waitFor();
+  // The correction editor says who can read the new wording.
+  await card.getByRole('button', {name: 'Correct'}).click();
+  await card
+    .getByText(
+      'Who can read the new wording: only you. Chats you shared it with pause until you approve the new wording.',
+    )
+    .waitFor();
+  await people.close();
+
+  // A suggestion names its source and its readers, posts once by default, and posts a lasting share only when ticked.
+  const {page: inbox, problems: inboxProblems} = await open('inbox?kind=memory_access&decision=' + '4'.repeat(64));
+  const drawer = inbox.getByRole('dialog');
+  await drawer.getByText('Came from', {exact: true}).waitFor();
+  await drawer.getByText('Everyone in Aurora planning').waitFor();
+  await drawer.getByRole('button', {name: 'Post it once in Aurora planning'}).waitFor();
+  await drawer.getByText('Nocheh posts this exact wording there now.').waitFor();
+  await drawer.getByRole('radio', {name: 'Until I revoke it'}).click();
+  await drawer
+    .getByText(
+      'Nocheh may use it when it answers in Aurora planning and all its topics, until you revoke it under Chats.',
+    )
+    .waitFor();
+  assert.equal(await drawer.getByRole('checkbox', {name: 'Also post it in Aurora planning now'}).isChecked(), false);
+  assert.deepEqual([...peopleProblems, ...inboxProblems], []);
+  await inbox.close();
+});
+
 test('usage shows calls, tokens and cost, and never prices an unknown cost as free', async () => {
   const {page, problems} = await open('usage');
   await page.getByRole('table', {name: 'Usage by part'}).waitFor();

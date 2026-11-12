@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {eventSpace,validateOverrides,spacePolicy,saveSpace,recallScope,inRecall,recallCondition} from '../src/spaces.js';
+import {eventSpace,validateOverrides,spacePolicy,saveSpace,recallScope,inRecall,recallCondition,groupSpace} from '../src/spaces.js';
 import {assistantPolicy} from '../src/assistant-policy.js';
 import {initialize} from '../src/database.js';
 import {ingest,type Envelope} from '../src/archive.js';
@@ -25,6 +25,12 @@ test('space identity uses explicit topics and rejects ambiguous policy values',(
   assert.throws(()=>eventSpace('-20',{message:{message_thread_id:-1,is_topic_message:true}}),{code:'invalid_topic'});
   assert.throws(()=>validateOverrides({mode:'public'}),{code:'invalid_memory_mode'});
   assert.throws(()=>validateOverrides({owner:true}),{code:'unknown_space_preference'});
+});
+test('only a group or one of its topics may share; everything else counts as private',()=>{
+  for(const space of ['-1001000000001','-1001000000001/topic/7','-20'])assert.equal(groupSpace(space),true,space);
+  // The owner's chat and its topics, other private chats, desktop imports, system and an unknown conversation fail closed.
+  for(const space of ['123','123/topic/5','456','desktop:personal_chat:9','desktop:private_supergroup:1234567890','system','','-','-12a',null,undefined])
+    assert.equal(groupSpace(space),false,String(space));
 });
 test('a group\'s topics share one memory unless the owner keeps topics separate',()=>{
   const shared=recallScope('-20/topic/42');

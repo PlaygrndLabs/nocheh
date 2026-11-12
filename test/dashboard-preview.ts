@@ -154,16 +154,23 @@ const conversations:any[]=[
  {space_id:topic,name:'Iceland planning',kind:'topic',parent_space:conversation,parent_name:'Aurora planning',observed_at:new Date().toISOString(),configured:false,closed:false},
 ];
 permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
-const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true}};
+const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true},
+ source_spaces:['-10077'],audience:{space:conversation,group:conversation},post_default:false};
 const memoryGrant={id:grantId,destination:topic,fact_id:factId,fact_revision:1,mode:'persistent',state:'active',revision:1,wording:'Mira prefers quiet aurora viewpoints.',suspended_reason:null,provenance:{fixture:true}};
 // Chats page: sharing rules, shared texts, suggestion settings and project assignments (synthetic, in memory).
 const sharingRules:any[]=[{id:'7'.repeat(64),name:'Trip notes from the topic',enabled:true,sources:[topic],destination:conversation,mode:'approved',instructions:'',revision:1},
  // Kept by the project from when it shared with another group; only the project changes it.
- {id:'7b'.repeat(32),name:'Aurora field guide',enabled:false,sources:['-10077'],destination:conversation,mode:'filtered',instructions:'',revision:2,project_id:projectId}];
+ {id:'7b'.repeat(32),name:'Aurora field guide',enabled:false,sources:['-10077'],destination:conversation,mode:'filtered',instructions:'',revision:2,project_id:projectId},
+ // Saved before private chats were refused: Nocheh skips the private chat it still names.
+ {id:'7c'.repeat(32),name:'Notes from my chat',enabled:true,sources:['42'],destination:conversation,mode:'approved',instructions:'',revision:1}];
+/** Only a group or one of its topics shares, is shared with or joins a project (ADR-0242). */
+const groupSpace=(space:string)=>/^-\d+$/.test(space.split('/topic/')[0]!);
 const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
 const sharingReleases:any[]=[];
-const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
-const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',share_into:true,revision:1}];
+const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
+const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',share_into:true,revision:1},
+ // Saved before private chats were refused: it puts the owner's chat in no project, and the owner can clear it.
+ {space_id:'42',project_id:projectId,mode:'assigned',share_into:true,revision:1}];
 // Memory page: learned facts, people and their facts, projects, automatic organizing, long-term memory (synthetic, in memory).
 const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.now()-m*60000).toISOString();
 // Background jobs: one reading a chat now, one that finished with its report.
@@ -269,6 +276,7 @@ let memoryRevision=4,memoryIncludeHistory=true;
 let failedLearning=3;
 const fixtureProject=(pid?:string)=>memoryProjects.find(p=>p.id===pid)??memoryMapNodes[1].detail.project;
 function effectiveProject(space:string){const parent=space.includes('/topic/')?space.split('/topic/')[0]:null,own=assignments.find(a=>a.space_id===space)??null,inherited=!own||own.mode==='inherit',chosen=inherited?assignments.find(a=>a.space_id===parent):own;
+ if(!groupSpace(space))return {space,own_assignment:own,assignment:null,project:null,inherited:false};
  return {space,own_assignment:own,assignment:chosen??null,project:chosen?.project_id?fixtureProject(chosen.project_id):null,inherited:!!chosen&&inherited};}
 const previewView=(row:any)=>({...row,input:{rule:sharingRules.find(r=>r.id===row.rule_id),sources:[{id}]},guard_revision:1,text_hash:'9'.repeat(64),current:sharingRules.find(r=>r.id===row.rule_id)?.revision===row.rule_revision,output_provenance:{fixture:true}});
 // Inbox fixtures: synthetic decided actions, Telegram messages, an identity suggestion and an organization proposal.
@@ -547,6 +555,12 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/preview')return json(res,200,{originals:[],shares,filtered_sources:[]});
   if(route==='/memory/reviews')return json(res,200,{jobs:[{id:'e'.repeat(64),event_id:id,reason:'import',state:'paused',chunk_index:0}],next:null});
   if(route==='/memory-map'){const query=(url.searchParams.get('q')??'').trim().toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'';const stateEdges=state?memoryMapEdges.filter(edge=>edge.state===state||edge.label===state):memoryMapEdges,stateNodes=new Set(stateEdges.flatMap(edge=>[edge.source,edge.target])),nodes=memoryMapNodes.filter(node=>(!kind||node.kind===kind)&&(!state||node.state===state||stateNodes.has(node.id))&&(!query||`${node.label} ${node.kind}`.toLocaleLowerCase().includes(query))),ids=new Set(nodes.map(node=>node.id));return json(res,200,{format:'nocheh-memory-map-v1',nodes,edges:stateEdges.filter(edge=>ids.has(edge.source)||ids.has(edge.target)),next:null,collapsed_facts:true,focus:null,counts:{nodes:nodes.length,edges:memoryMapEdges.length},relationship_edges_grant_access:false});}
+  const claimAudience=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/audience$/);
+  if(claimAudience){const item=claims.find(c=>c.id===claimAudience[1]);if(!item)throw new HttpError(404,'entity_claim_not_found');
+   // The field guide's scope came from the group; everything else from the owner's private chat.
+   const fromGroup=item.id===hx('d4');
+   return json(res,200,{claim_id:item.id,revision:item.revision,sources:[fromGroup?conversation:'42'],private_sources:fromGroup?[]:['42'],owner_private:!fromGroup,
+    confirm_required:!fromGroup,readers:fromGroup?{space:conversation,group:conversation}:null});}
   if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant,...factGrants].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.filter(row=>!q||[row.space_id,row.name,row.parent_name].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
@@ -557,7 +571,7 @@ const server=createServer((req,res)=>{void(async()=>{
     external_actions:{policy:null,permissions:permissions.filter(row=>row.scope===group),note:'Synthetic preview.'},
     organization:{effective:{project:space.startsWith(conversation)?{id:projectId,name:'Aurora field guide'}:null,inherited:space===topic},delegations:[],note:'Synthetic preview.'},
     memory:{connection:{attached:memoryAttached,verified:true},availability:memoryAttached?'available':'unavailable',syncing:false,sessions:[],note:'Synthetic preview.'}});}
-  if(route==='/sharing/rules')return json(res,200,{rules:sharingRules,next:null});
+  if(route==='/sharing/rules')return json(res,200,{rules:sharingRules.map(rule=>({...rule,private_sources:[...rule.sources,rule.destination].filter(space=>!groupSpace(space))})),next:null});
   if(route==='/sharing/previews')return json(res,200,{previews:sharingPreviews.map(({text,...row})=>row),next:null});
   if(route.startsWith('/sharing/previews/')){const row=sharingPreviews.find(p=>p.id===route.split('/')[3]);if(!row)throw new HttpError(404,'sharing_preview_not_found');return json(res,200,previewView(row));}
   if(route==='/sharing/releases')return json(res,200,{releases:sharingReleases,next:null});
@@ -627,6 +641,8 @@ const server=createServer((req,res)=>{void(async()=>{
    if(entityChange[2]==='rename')entity.name=String(body.name).trim();else if(entityChange[2]==='merge'){entity.state='merged';entity.merged_into=body.target_id;}else{entity.state='active';entity.merged_into=null;}
    entity.revision++;return json(res,200,{id:entity.id,name:entity.name,state:entity.state,revision:entity.revision});}
   if(route==='/memory-access/grants'){const fact=claims.find(c=>c.id===body.fact_id&&!c.retired);if(!fact)throw new HttpError(404,'memory_fact_not_found');if(fact.revision!==body.fact_revision)throw new HttpError(409,'memory_fact_changed');
+   if(!groupSpace(String(body.destination)))throw new HttpError(400,'memory_grant_private_destination');
+   if(fact.id!==hx('d4')&&body.private_evidence_confirmed!==true)throw new HttpError(409,'memory_grant_private_sources');
    const grant={id:randomUUID().replace(/-/g,'').repeat(2),destination:body.destination,fact_id:fact.id,fact_revision:fact.revision,mode:'persistent',state:'active',revision:1,wording:body.wording??fact.content,expires_at:body.expires_at??null,suspended_reason:null,provenance:{fixture:true}};
    factGrants.push(grant);return json(res,200,{id:grant.id,state:'active',revision:1});}
   const factRevoke=route.match(/^\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/),ownGrant=factRevoke&&factGrants.find(g=>g.id===factRevoke[1]);
@@ -723,10 +739,14 @@ const server=createServer((req,res)=>{void(async()=>{
   if(/^\/entities\/[a-f0-9]{64}\/fold$/.test(route))return json(res,200,{id:route.split('/')[2],merged_into:body.target_id});
   if(route==='/knowledge/proposals/'+knowledgeProposal.id+'/decide'||route==='/knowledge/proposals/'+knowledgeProposal.id+'/undo'){if(body.expected_revision!==knowledgeProposal.revision)throw new HttpError(409,'knowledge_proposal_changed');knowledgeProposal.state=route.endsWith('/undo')?'undone':body.decision==='approve'?'queued':'cancelled';knowledgeProposal.revision++;return json(res,200,{id:knowledgeProposal.id,state:knowledgeProposal.state,revision:knowledgeProposal.revision});}
   if(route==='/tools/revoke'){const item=permissions.find(p=>p.id===body.id);if(item)item.revoked_at=new Date().toISOString();return json(res,200,{ok:true});}
-  if(route==='/projects/assignments'){const own=assignments.find(a=>a.space_id===body.space_id);if((own?.revision??0)!==body.expected_revision)throw new HttpError(409,'assignment_revision_conflict');if(body.share_into!==undefined&&(typeof body.share_into!=='boolean'||body.mode!=='assigned'))throw new HttpError(400,'invalid_project_assignment');const next={space_id:body.space_id,project_id:body.mode==='assigned'?body.project_id:null,mode:body.mode,share_into:body.share_into??own?.share_into??true,revision:body.expected_revision+1};if(own)Object.assign(own,next);else assignments.push(next);return json(res,200,next);}
+  if(route==='/projects/assignments'){if(body.mode==='assigned'&&!groupSpace(String(body.space_id)))throw new HttpError(400,'project_private_chat');
+   const own=assignments.find(a=>a.space_id===body.space_id);if((own?.revision??0)!==body.expected_revision)throw new HttpError(409,'assignment_revision_conflict');if(body.share_into!==undefined&&(typeof body.share_into!=='boolean'||body.mode!=='assigned'))throw new HttpError(400,'invalid_project_assignment');const next={space_id:body.space_id,project_id:body.mode==='assigned'?body.project_id:null,mode:body.mode,share_into:body.share_into??own?.share_into??true,revision:body.expected_revision+1};if(own)Object.assign(own,next);else assignments.push(next);return json(res,200,next);}
   if(route==='/memory-access/settings'){const row=memorySettings.find(r=>r.destination===body.destination);if(row?row.revision!==body.expected_revision:body.expected_revision!==1)throw new HttpError(409,'memory_access_settings_conflict');const values={suggestions:body.suggestions??null,notify_owner:body.notify_owner??null,auto_followup:body.auto_followup??null,request_ttl_seconds:body.request_ttl_seconds??null,default_grant_mode:body.default_grant_mode??null};const revision=row?row.revision+1:1;if(row)Object.assign(row,values,{revision});else memorySettings.push({destination:body.destination,...values,revision});return json(res,200,{destination:body.destination,revision});}
   if(/^\/memory-access\/grants\/[a-f0-9]{64}\/revoke$/.test(route)){if(memoryGrant.revision!==body.expected_revision||!['active','suspended'].includes(memoryGrant.state))throw new HttpError(409,'memory_fact_grant_changed');memoryGrant.state='revoked';memoryGrant.revision++;return json(res,200,{id:memoryGrant.id,state:'revoked',revision:memoryGrant.revision});}
-  if(route==='/sharing/rules'){const rule=body.id?sharingRules.find(r=>r.id===body.id):null;if(rule?.project_id)throw new HttpError(409,'sharing_rule_project_managed');if((rule?.revision??0)!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const next={id:rule?.id??randomUUID().replaceAll('-','').padEnd(64,'0'),name:body.name,sources:body.sources,destination:body.destination,enabled:body.enabled,mode:body.mode,instructions:body.instructions??'',revision:body.expected_revision+1};if(rule)Object.assign(rule,next);else sharingRules.push(next);return json(res,200,next);}
+  if(route==='/sharing/rules'){const rule=body.id?sharingRules.find(r=>r.id===body.id):null;
+   // A rule saved earlier that names a private chat can be turned off as it is; nothing else may name one.
+   const named=[...(body.sources??[]),body.destination].map(String).filter(space=>!groupSpace(space));
+   if(named.length&&(body.enabled!==false||!named.every(space=>rule&&[...rule.sources,rule.destination].includes(space))))throw new HttpError(400,'sharing_private_chat');if(rule?.project_id)throw new HttpError(409,'sharing_rule_project_managed');if((rule?.revision??0)!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const next={id:rule?.id??randomUUID().replaceAll('-','').padEnd(64,'0'),name:body.name,sources:body.sources,destination:body.destination,enabled:body.enabled,mode:body.mode,instructions:body.instructions??'',revision:body.expected_revision+1};if(rule)Object.assign(rule,next);else sharingRules.push(next);return json(res,200,next);}
   if(route==='/sharing/preview'){const rule=sharingRules.find(r=>r.id===body.rule_id);if(!rule||rule.revision!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const row={id:randomUUID().replaceAll('-','').padEnd(64,'0'),rule_id:rule.id,rule_revision:rule.revision,state:'ready',created_at:new Date().toISOString(),text:body.content??''};sharingPreviews.push(row);return json(res,200,previewView(row));}
   if(/^\/sharing\/previews\/[a-f0-9]{64}\/approve$/.test(route)){const row=sharingPreviews.find(p=>p.id===route.split('/')[3]);if(!row)throw new HttpError(404,'sharing_preview_not_found');const release={id:randomUUID().replaceAll('-','').padEnd(64,'0'),preview_id:row.id,rule_id:row.rule_id,state:'active',mode:'approved',revision:1,expires_at:null,created_at:new Date().toISOString()};sharingReleases.push(release);return json(res,200,{id:release.id,revision:1});}
   if(/^\/sharing\/releases\/[a-f0-9]{64}\/revoke$/.test(route)){const release=sharingReleases.find(r=>r.id===route.split('/')[3]);if(!release||release.revision!==body.expected_revision||release.state!=='active')throw new HttpError(409,'sharing_revision_conflict');release.state='revoked';release.revision++;return json(res,200,{id:release.id,revision:release.revision,state:'revoked'});}

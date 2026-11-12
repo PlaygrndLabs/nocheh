@@ -29,6 +29,9 @@ const validDestination=(value:string)=>/^-?[1-9]\d{0,18}(?:\/topic\/[1-9]\d{0,15
   (!value.includes('/topic/')||Number.isSafeInteger(Number(value.split('/topic/')[1])));
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
   scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null};
+/** A trusted send's identity: its workflow key, source, authorization, destination and exact text. */
+const systemActionId=(source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string)=>
+  digest(canonical(['nocheh-trusted-telegram-v1',key,source,binding,destination,text]));
 export class TelegramActionRepository {
   constructor(readonly stores:StorePools,readonly access:SourceAccessRepository,readonly derived:DerivedRepository,
     readonly guards:GuardRepository,readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,
@@ -52,10 +55,12 @@ export class TelegramActionRepository {
     let current=false;
     try {
       const guarded=await this.guards.read('derived_artifacts:'+grant.representation_reference.id,row.binding),raw=String((guarded.value as any).text??'');
-      const fact=(await this.stores.derived.query(`SELECT e.active_revision,v.retired FROM entity_claims e
+      const fact=(await this.stores.derived.query(`SELECT e.active_revision,v.retired,v.evidence FROM entity_claims e
         JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[grant.fact_id])).rows[0];
       current=!!fact&&!fact.retired&&fact.active_revision===grant.fact_revision&&guarded.revision===grant.guard_revision&&
         (digest(raw)===grant.text_hash||digest(raw.trim())===grant.text_hash);
+      // A follow-up staged before private sources were left out never posts a fact that rests on one (ADR-0242).
+      if(current&&await this.access.privateEvidence(fact.evidence))current=false;
     } catch(error) {if(!(error instanceof HttpError))throw error;}
     if(!current) {
       await this.stores.control.query(`UPDATE memory_fact_grants SET state='suspended',suspended_reason='followup_authority_changed',
@@ -234,12 +239,16 @@ export class TelegramActionRepository {
     try {await db.query('BEGIN');const action=await this.stageSystem(db,prepared);await db.query('COMMIT');return action;}
     catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
+  /** Whether this exact trusted send was ever prepared: the proposal `prepareSystem` records first, before any commit. */
+  async systemPrepared(source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<boolean> {
+    return !!(await this.stores.derived.query('SELECT 1 FROM derived_artifacts WHERE operation_id=$1',['telegram-system-proposal:'+systemActionId(source,binding,destination,text,key)])).rowCount;
+  }
   /** Prepare derived bytes before acquiring control locks; preparation can itself publish guard records. */
   async prepareSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<PreparedSystemAction> {
     if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
     if(!validDestination(destination)||!text.trim()||text.length>trustedTextLimit)throw new HttpError(400,'invalid_action');
     await this.guards.assertCurrent(binding);await this.access.archive.verify(source);
-    const id=digest(canonical(['nocheh-trusted-telegram-v1',key,source,binding,destination,text]));
+    const id=systemActionId(source,binding,destination,text,key);
     const proposal=await this.derived.record({operation_id:'telegram-system-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
       producer:'nocheh',producer_version:protocol,configuration:{destination,binding,key},provenance:{purpose:'exact_owner_approval',trusted_workflow:key}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);

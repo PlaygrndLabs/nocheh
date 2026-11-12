@@ -197,6 +197,29 @@ Assistant › Built-in instructions › Approval buttons and results was ever sa
 `allowed_always` lines or reset it to the built-in text, since saved lines keep the old
 wording.
 
+Members step 1: keep the owner's private side out of groups (owner, 2026-11-12: "I just
+review the tables and seems what I want if there is a important point or need my answer
+ask, else start build.", approving the Members design):
+- Private chats stay out of group sharing: only groups and their topics share, are shared
+  with or join a project. Owner rules, project assignments, organization, agent proposals
+  and reset snapshots refuse a private chat, and sharing skips one that an older row still
+  names (the Sharing page says "Reads a private chat. Nocheh skips it."). Suggestions never
+  come from or go into a private chat. One-time approval posts the wording once, now;
+  automatic follow-up starts off, and a lasting share posts only when the owner ticks it.
+  Grants go only to groups and topics, and a fact from the owner's chat is shared only after
+  a confirm that names that chat. Every card and editor says where a fact came from and who
+  will see it ([ADR-0242](docs/adr/0242-private-chats-stay-out-of-group-sharing.md),
+  [projects](test/store-projects.test.ts), [memory access](test/store-memory-access.test.ts),
+  [follow-ups](test/store-memory-followup.test.ts),
+  [audience](test/store-entity-owner-corrections.test.ts),
+  [reset](services/hermes/test_reset_configuration.py)). An existing install keeps its saved
+  `auto_followup=true` until the owner turns "Answer right after I approve" off. Grants
+  already made on private-source facts pause until the owner shares them again with the
+  confirm. Older rules and organizing that name a private chat can still be turned off, and
+  older proposals still open to be rejected. A reset stops before erasure while a rule or
+  project still names a private chat ("Remove it" on the chat's page, or edit the rule).
+  Pending: a check on the owner's live install.
+
 Project sharing (owner, 2026-11-09: "isnt better to have check box to share entities
 in create/edit project to do it?", then "yes" to the checkbox and five safety fixes):
 a project's checkbox "Chats in this project share what they know", off by default,

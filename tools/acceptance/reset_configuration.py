@@ -44,6 +44,11 @@ ORIGINAL = {
 }
 
 
+def group_space(value):
+    """A group or one of its topics, the only chats that share (ADR-0242); anything else counts as private."""
+    return isinstance(value, str) and re.fullmatch(r'-\d+', value.split('/topic/')[0]) is not None
+
+
 def catalog(layout):
     if layout not in ('legacy', 'original-only-v1'):
         raise ValueError('reset_configuration_layout_invalid')
@@ -82,6 +87,13 @@ def validate(snapshot):
         runtime = values['runtime_configuration']
         if len(runtime) > 1 or any(row['name'] != 'assistant' or not isinstance(row['document'], dict) for row in runtime):
             raise ValueError('reset_runtime_configuration_requires_transfer')
+        # A private chat never joins a project or a sharing rule (ADR-0242). The restore refuses such a row, so a
+        # reset stops here, before anything is erased, until the owner removes the private chat from it.
+        if any(not isinstance(row['sources'], list) for row in values['sharing_rules']):
+            raise ValueError('reset_configuration_fields_invalid')
+        if (any(row['mode'] == 'assigned' and not group_space(row['space_id']) for row in values['project_assignments']) or
+                any(not all(group_space(space) for space in [*row['sources'], row['destination']]) for row in values['sharing_rules'])):
+            raise ValueError('reset_configuration_private_chat_requires_review')
     if len(reset_protocol.canonical(snapshot)) > reset_protocol.LIMIT:
         raise ValueError('reset_configuration_limit')
     return snapshot
@@ -118,6 +130,8 @@ def _legacy_rules(rows):
     The legacy filtered mode selected source spaces automatically. Approved and
     isolated modes did not authorize filtered recall, so their migrated rules are
     disabled while retaining the owner's source selection and instructions.
+    A private chat never shares or is shared with (ADR-0242): a private source is
+    dropped, and a private destination's policy is not carried over.
     """
     result, destinations = [], set()
     for item in rows:
@@ -136,9 +150,12 @@ def _legacy_rules(rows):
         sources = sorted({_space(source) for source in raw_sources})
         if destination in sources:
             raise ValueError('reset_legacy_space_requires_review')
+        sources = [source for source in sources if group_space(source)]
         instructions = values.get('privacy_instructions', LEGACY_PRIVACY)
         if not isinstance(instructions, str) or len(instructions.encode()) > 4000:
             raise ValueError('reset_legacy_space_invalid')
+        if not group_space(destination):
+            continue
         identifier = hashlib.sha256(reset_protocol.canonical(
             ['legacy-space-policy-v1', destination])).hexdigest()
         result.append({'id': identifier, 'name': f'Migrated legacy {mode} policy {identifier[:12]}',
@@ -177,7 +194,7 @@ def original_only(snapshot_value, values, preferences, reset_id):
         'projects': [], 'project_assignments': [],
         'sharing_rules': _legacy_rules(source['configuration']['memory_spaces']),
         'memory_access_settings': [{'destination': '*', 'suggestions': 'related', 'notify_owner': True,
-                                    'auto_followup': True, 'request_ttl_seconds': 86400,
+                                    'auto_followup': False, 'request_ttl_seconds': 86400,
                                     'default_grant_mode': 'one_time'}],
         'chat_tool_settings': [],
         'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id'])}}

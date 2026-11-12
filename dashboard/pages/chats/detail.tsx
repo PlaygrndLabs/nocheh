@@ -1,14 +1,14 @@
-/** One chat: where Nocheh answers, who may talk, what it remembers and may do, the tools it may use, and its project. */
+/** One chat: where Nocheh answers, who may talk, what it remembers and may do, the tools it may use, and, for a group or topic, its project. */
 import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
-import {chatName, parentOf, topicNumber, type Chat} from '../../lib/chats-model';
+import {chatName, groupSpace, parentOf, topicNumber, type Chat} from '../../lib/chats-model';
 import {Button, LoadError} from '../../ui/core';
 import {AllowedActions} from './actions';
 import {MemoryCard} from './memory';
 import {WhoCanTalk} from './people';
 import {NochehHere} from './presence';
-import {ProjectCard} from './project';
+import {PrivateChatProject, ProjectCard} from './project';
 import {RoleAndSkills} from './role-skills';
 import {chatHref, useChat, useChats, type Telegram} from './shared';
 import {ToolSwitches} from './tools';
@@ -129,7 +129,11 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
           }
         />
       )}
-      <ProjectCard chat={chat} />
+      {groupSpace(space) ? (
+        <ProjectCard chat={chat} />
+      ) : (
+        <PrivateChatProject chat={chat} yours={owner || (!!parentId && parentId === telegram.owner)} />
+      )}
       {forum && <TopicsCard group={chat} topics={topics} />}
     </div>
   );

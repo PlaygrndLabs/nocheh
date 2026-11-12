@@ -2,6 +2,7 @@
 import {useState} from 'react';
 import {Button, Field, Input, Segmented, Switch, Textarea} from '../../ui/core';
 import {Dialog} from '../../ui/overlay';
+import {groupSpace} from '../../lib/chats-model';
 import {ChatPicker} from './chat-picker';
 import {ActionError, useAction} from './shared';
 
@@ -16,6 +17,8 @@ export type Rule = {
   revision: number;
   /** Set when a project that shares owns this rule; it changes only from the project. */
   project_id?: string | null;
+  /** Private chats an older rule still names. Nocheh skips them: only groups and topics share. */
+  private_sources?: string[];
 };
 
 /** Shown wherever the owner turns on, or sees, a project whose chats share what they know. */
@@ -57,8 +60,11 @@ export function RuleDialog({
   presetDestination?: string;
 }) {
   const [name, setName] = useState(rule?.name ?? '');
-  const [sources, setSources] = useState<string[]>(rule?.sources ?? []);
-  const [destination, setDestination] = useState(rule?.destination ?? presetDestination ?? '');
+  // A rule saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
+  const [sources, setSources] = useState<string[]>((rule?.sources ?? []).filter(groupSpace));
+  const [destination, setDestination] = useState(
+    rule ? (groupSpace(rule.destination) ? rule.destination : '') : (presetDestination ?? ''),
+  );
   const [mode, setMode] = useState<Rule['mode']>(rule?.mode ?? 'approved');
   const [instructions, setInstructions] = useState(rule?.instructions ?? '');
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
@@ -109,7 +115,8 @@ export function RuleDialog({
           multiple
           owner={owner}
           exclude={destination ? [destination] : []}
-          hint="Only these exact chats or topics."
+          groupsOnly
+          hint="Only these exact groups or topics. Private chats never share."
         />
         <ChatPicker
           label="Into this chat"
@@ -117,6 +124,8 @@ export function RuleDialog({
           onChange={ids => setDestination(ids[0] ?? '')}
           owner={owner}
           exclude={sources}
+          groupsOnly
+          hint="Groups and topics only. Private chats never share."
         />
         <div className="space-y-1.5">
           <p className="text-[13px] font-medium">How</p>
