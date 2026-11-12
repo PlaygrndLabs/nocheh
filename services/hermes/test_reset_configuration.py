@@ -105,9 +105,11 @@ class ResetConfigurationTests(unittest.TestCase):
         assigned = {'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned', 'share_into': True}
         values = copy.deepcopy(self.values); values['sharing_rules'] = [rule]; values['project_assignments'] = [assigned]
         self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values)
-        for change in ('source', 'topic', 'destination', 'desktop', 'assignment'):
+        for change in ('source', 'topic', 'destination', 'desktop', 'assignment', 'padded'):
             values = copy.deepcopy(self.values); values['sharing_rules'] = [dict(rule)]; values['project_assignments'] = [dict(assigned)]
             if change == 'source': values['sharing_rules'][0]['sources'] = ['-1001', '123']
+            # An ID Telegram never gives a group counts as private, as the server's groupSpace decides.
+            if change == 'padded': values['sharing_rules'][0]['sources'] = ['-01001']
             if change == 'topic': values['sharing_rules'][0]['sources'] = ['123/topic/5']
             if change == 'destination': values['sharing_rules'][0]['destination'] = '123'
             if change == 'desktop': values['sharing_rules'][0]['sources'] = ['desktop:personal_chat:9']

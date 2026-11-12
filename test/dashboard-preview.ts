@@ -170,7 +170,7 @@ const sharingRules:any[]=[{id:'7'.repeat(64),name:'Trip notes from the topic',en
  // Saved before private chats were refused: Nocheh skips the private chat it still names.
  {id:'7c'.repeat(32),name:'Notes from my chat',enabled:true,sources:['42'],destination:conversation,mode:'approved',instructions:'',revision:1}];
 /** Only a group or one of its topics shares, is shared with or joins a project (ADR-0242). */
-const groupSpace=(space:string)=>/^-\d+$/.test(space.split('/topic/')[0]!);
+const groupSpace=(space:string)=>/^-[1-9]\d{0,18}(\/topic\/[1-9]\d{0,15})?$/.test(space);
 const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
 const sharingReleases:any[]=[];
 const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];

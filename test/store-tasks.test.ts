@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {groupSpace,groupSpaceSql} from '../src/spaces.js';
 
 const states=(counts:any)=>({open:counts.open,done:counts.done,dropped:counts.dropped});
 
@@ -539,13 +540,19 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     await stores.control.query('DELETE FROM owner_tasks');await stores.control.query("UPDATE owner_task_settings SET settings='{}'::jsonb");
     const launch=digest(key+':launch'),house=digest(key+':house');
     for(const [id,name] of [[launch,'Launch'],[house,'House']])await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,$2,'active',1)",[id,name]);
-    // The launch list is seen in a group and in one topic of a forum; a private chat assigned to it is not a group, so it is not named.
-    for(const space of [group,forum+'/topic/7','456'])
+    // The launch list is seen in a group and in one topic of a forum; a private chat assigned to it, or an ID Telegram never
+    // gives a group, is not a group, so it is not named.
+    const padded='-0'+group.slice(1);
+    for(const space of [group,forum+'/topic/7','456',padded,padded+'/topic/7'])
       await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[space,launch]);
     for(const [chat,title,forumChat] of [[group,'Launch team',false],[forum,'Plans team',true]] as const)
       await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
         VALUES($1,'available','supergroup',$2,NULL,$3,NULL,now()) ON CONFLICT DO NOTHING`,[chat,title,forumChat]);
     await stores.control.query("INSERT INTO telegram_topic_registrations(chat_id,topic_id,name) VALUES($1,7,'Venue')",[forum]);
+    // The chats a card names are the ones groupSpace counts as groups: the same test, in SQL (ADR-0242).
+    const spaces=[group,forum+'/topic/7','456','123/topic/5','-0123','-0','-0123/topic/7','-12345678901234567890','-20/topic/abc','-20/topic/0','desktop:personal_chat:9','system',''];
+    assert.deepEqual((await stores.control.query(`SELECT ${groupSpaceSql('x')} AS grouped FROM unnest($1::text[]) WITH ORDINALITY u(x,n) ORDER BY n`,[spaces])).rows.map(row=>row.grouped),
+      spaces.map(space=>groupSpace(space)));
     // Chats added to the project later see the list too, so every card says so (ADR-0243).
     const seenIn='👥 Seen in “Plans team” › Venue, “Launch team”. Chats you add to this project later will see it too.';
 

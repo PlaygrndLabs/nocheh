@@ -69,14 +69,20 @@ export function validateSpace(id:unknown):string {
   return value;
 }
 export function parentSpace(id:string):string|null {return id.includes('/topic/')?id.split('/topic/')[0]!:null;}
-/** A Telegram group's chat ID: group IDs are negative, private chats positive (assistant-policy.ts). */
-export const groupChatId=(id:string)=>/^-\d+$/.test(id);
+/** A Telegram group's chat ID, as Telegram writes it: negative, with no leading zero (private chats are positive;
+ * assistant-policy.ts). A group or topic is this ID, or it followed by one of its topics. Every test of whether a
+ * conversation is a group uses these, in code and in SQL, so they always agree. */
+const groupChat='-[1-9][0-9]{0,18}',groupTopic='/topic/[1-9][0-9]{0,15}';
+const groupChatPattern=new RegExp(`^${groupChat}$`),groupSpacePattern=new RegExp(`^${groupChat}(${groupTopic})?$`);
+export const groupChatId=(id:string)=>groupChatPattern.test(id);
 /**
  * Whether a conversation is a group or one of its topics, the only conversations that may share or be shared
  * with. Everything else counts as private and fails closed: the owner's private chat and its topics, any other
  * private chat, `desktop:*` imports, `system`, and an unknown conversation (null) (ADR-0242).
  */
-export const groupSpace=(space:string|null|undefined):space is string=>!!space&&groupChatId(parentSpace(space)??space);
+export const groupSpace=(space:string|null|undefined):space is string=>!!space&&groupSpacePattern.test(space);
+/** SQL test that `column` names a group or one of its topics, exactly as groupSpace decides it. */
+export const groupSpaceSql=(column:string)=>`${column} ~ '^${groupChat}(${groupTopic})?$'`;
 /** The conversations a group or topic turn recalls: its own, or, when the group's topics share
  * memory, the group's base conversation and every one of its topics. Owner turns read everything. */
 export interface RecallScope {space:string;group:string|null}

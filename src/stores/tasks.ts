@@ -5,7 +5,7 @@ import {HttpError,object,string} from '../http.js';
 import {fillTemplate,ownerPrompts,taskReminder} from '../prompts.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
-import {validateSpace} from '../spaces.js';
+import {groupSpaceSql,validateSpace} from '../spaces.js';
 import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
 export const taskSchema=`
@@ -147,9 +147,10 @@ type Held={held:{project:string;chats:string[];joining:boolean;preview:Record<st
 const states=['open','done','dropped'];
 const hex=/^[a-f0-9]{64}$/;
 /** The chats that see a project's list: the groups and topics assigned to it. Anything that is not clearly a group (a
- * negative Telegram chat ID) or a topic of one counts as private and is left out (ADR-0243). */
+ * negative Telegram chat ID) or a topic of one counts as private and is left out, by the same test as groupSpace, so the
+ * chats a card names are the chats that read the list (ADR-0243). */
 const projectChats=(project:string)=>`(SELECT coalesce(array_agg(a.space_id ORDER BY a.space_id),'{}'::text[]) FROM project_assignments a
-  WHERE a.project_id=${project} AND a.mode='assigned' AND a.space_id ~ '^-[1-9][0-9]{0,18}(/topic/[1-9][0-9]{0,15})?$')`;
+  WHERE a.project_id=${project} AND a.mode='assigned' AND ${groupSpaceSql('a.space_id')})`;
 /**
  * Fields a change asked in the owner's private chat may set on a task in a project's list without a card: its status,
  * priority, start and due days and times, archive and trash, and the list it is already in. This is the recommended

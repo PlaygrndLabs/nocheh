@@ -27,7 +27,7 @@ export const parentOf = (space: string) => (space.includes('/topic/') ? space.sp
 export const topicNumber = (space: string) => Number(space.split('/topic/')[1]);
 /** A group or one of its topics: the only chats that share, are shared with or join a project. Every other
  * chat counts as private, as the server's groupSpace does (ADR-0242). */
-export const groupSpace = (space: string) => /^-\d+$/.test(parentOf(space) ?? space);
+export const groupSpace = (space: string) => /^-[1-9]\d{0,18}(\/topic\/[1-9]\d{0,15})?$/.test(space);
 export const inferKind = (space: string) =>
   space.includes('/topic/') ? 'topic' : space.startsWith('-') ? 'group' : 'private';
 

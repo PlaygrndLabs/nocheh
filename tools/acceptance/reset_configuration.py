@@ -46,7 +46,7 @@ ORIGINAL = {
 
 def group_space(value):
     """A group or one of its topics, the only chats that share (ADR-0242); anything else counts as private."""
-    return isinstance(value, str) and re.fullmatch(r'-\d+', value.split('/topic/')[0]) is not None
+    return isinstance(value, str) and re.fullmatch(r'-[1-9][0-9]{0,18}(/topic/[1-9][0-9]{0,15})?', value) is not None
 
 
 def catalog(layout):
