@@ -102,5 +102,8 @@ class SettingsErrorRelayTests(unittest.TestCase):
 
         self.assertEqual(run('settings.save', ValueError('Memory (Honcho) needs a model name')), 'Memory (Honcho) needs a model name')
         self.assertEqual(run('settings.save', ValueError('configuration_conflict')), 'configuration_conflict')
+        from tools.operations.installation.configuration import OWNER_CONFLICT
+        from tools.operations.installation.settings import OWNER_FROM_CLI
+        for message in (OWNER_CONFLICT, OWNER_FROM_CLI):self.assertEqual(run('settings.save', ValueError(message)), message)
         self.assertEqual(run('archive.view', ValueError('upstream said secret-value here')), 'ValueError')
         self.assertEqual(run('settings.save', RuntimeError('provider body')), 'RuntimeError')

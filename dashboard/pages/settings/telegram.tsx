@@ -22,6 +22,8 @@ export const telegramKeys = [
   'CLOUDFLARE_TUNNEL_TOKEN',
 ];
 
+const changeOwner = './bin/nocheh config set TELEGRAM_OWNER_ID <id>';
+
 /** Marks a control whose value differs from the saved one. */
 export function Unsaved({show}: {show: boolean}) {
   return show ? (
@@ -35,6 +37,8 @@ export function TelegramSettings() {
   const s = useSettings();
   const identities = useResource<any>('/telegram/identities');
   const owner = s.value('TELEGRAM_OWNER_ID');
+  // Set here the first time; once saved it changes only from the command line (ADR-0244).
+  const ownerFixed = !!s.saved('TELEGRAM_OWNER_ID');
   const known = (identities.data?.groups ?? []).flatMap((g: any) => g.users ?? []).find((u: any) => u.id === owner);
   const enabled = s.value('TELEGRAM_ENABLED') === 'true';
   const token = s.field('TELEGRAM_BOT_TOKEN');
@@ -190,13 +194,21 @@ export function TelegramSettings() {
               </>
             }
             description={
-              known
-                ? `This is ${known.name}${known.username ? ' (' + known.username + ')' : ''}. Only you can manage Nocheh.`
-                : savedOn
-                  ? 'The number for your own Telegram account. To look it up here, turn Telegram off and save. Only you can manage Nocheh.'
-                  : findable
-                    ? 'The number for your own Telegram account. Send your bot any message in Telegram, then press Find my ID. Only you can manage Nocheh.'
-                    : 'The number for your own Telegram account. Save the bot token first, then you can find it here. Only you can manage Nocheh.'
+              ownerFixed ? (
+                <>
+                  {known ? `This is ${known.name}${known.username ? ' (' + known.username + ')' : ''}. ` : ''}Only you
+                  can manage Nocheh. To change it, run <code className="text-xs">{changeOwner}</code> on the computer
+                  that runs Nocheh.
+                </>
+              ) : known ? (
+                `This is ${known.name}${known.username ? ' (' + known.username + ')' : ''}. Only you can manage Nocheh.`
+              ) : savedOn ? (
+                'The number for your own Telegram account. To look it up here, turn Telegram off and save. Only you can manage Nocheh.'
+              ) : findable ? (
+                'The number for your own Telegram account. Send your bot any message in Telegram, then press Find my ID. Only you can manage Nocheh.'
+              ) : (
+                'The number for your own Telegram account. Save the bot token first, then you can find it here. Only you can manage Nocheh.'
+              )
             }
             htmlFor="telegram-owner"
           >
@@ -207,14 +219,15 @@ export function TelegramSettings() {
                 value={owner}
                 placeholder="123456789"
                 disabled={s.busy}
+                readOnly={ownerFixed}
                 onChange={e => s.set('TELEGRAM_OWNER_ID', e.target.value.trim())}
               />
-              {!savedOn && (
+              {!savedOn && !ownerFixed && (
                 <FindIdButton disabled={s.busy || !findable} busy={finder.busy} onClick={() => void finder.find()} />
               )}
             </div>
           </SettingRow>
-          {!savedOn && (
+          {!savedOn && !ownerFixed && (
             <FoundPeople
               found={finder.found}
               problem={finder.problem}

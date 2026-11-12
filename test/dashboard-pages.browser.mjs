@@ -256,10 +256,24 @@ test('a new installation is guided on Home and finds its Telegram ID without a t
   } finally {
     rmSync('/tmp/nocheh-ui-scenario', {force: true});
   }
-  // Without a saved bot token there is nothing to look in yet.
+  // A saved ID changes only from the command line: the field is read-only and says how.
   const {page} = await open('settings?view=telegram');
-  assert.equal(await page.getByRole('button', {name: 'Find my ID'}).isDisabled(), true);
+  const owner = page.locator('#telegram-owner');
+  assert.equal(await owner.inputValue(), '42');
+  assert.equal(await owner.getAttribute('readonly'), '');
+  await page.getByText('./bin/nocheh config set TELEGRAM_OWNER_ID <id>').waitFor();
+  assert.equal(await page.getByRole('button', {name: 'Find my ID'}).count(), 0);
   await page.close();
+  writeFileSync('/tmp/nocheh-ui-scenario', 'no-owner');
+  try {
+    // Without a saved bot token there is nothing to look in yet.
+    const {page: empty} = await open('settings?view=telegram');
+    assert.equal(await empty.getByRole('button', {name: 'Find my ID'}).isDisabled(), true);
+    assert.equal(await empty.locator('#telegram-owner').getAttribute('readonly'), null);
+    await empty.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
 });
 
 test('a settings edit survives switching tabs and Save at the top of the page saves and applies it', async () => {
