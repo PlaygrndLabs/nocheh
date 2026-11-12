@@ -44,10 +44,12 @@ else stays.
   a process of another user or one of the job's: a session manager that took the
   tag over and started it, for example. A program whose environment cannot be read,
   such as a system program on macOS or one that wrote over its environment, shows
-  none, so it never hides the job's programs below it. On macOS, one that started
-  more than two seconds before the job's marker counts as one without the tag,
-  since it cannot be the job's: the owner's editor, whose environment macOS hides,
-  gets the tag for a window that a job's `code <folder>` opens. A Linux process
+  none, so it never hides the job's programs below it. On macOS, one left to
+  launchd that started more than two seconds before the job's marker counts as one
+  without the tag, since it cannot be the job's: the owner's editor, whose
+  environment macOS hides, gets the tag for a window that a job's `code <folder>`
+  opens. The login's sshd session, older too where Nocheh reuses a connection, has
+  root's sshd above it, so it does not count. A Linux process
   whose first thread ended while others run counts by its other threads. The
   cleanup ends the job's processes, in up to five rounds for programs started
   meanwhile, and nothing else: not the owner's own programs, and not what other
@@ -102,10 +104,11 @@ else stays.
   So does a program that loses both traces and its parent: one that closes what it
   inherited, hides or overwrites its environment and leaves its parent, such as an
   ssh-agent on Linux, or a system program on macOS started by a program that
-  closes inherited files and then ends. So does a program still holding a marker
-  that was deleted and made again, for example by a job that cleaned the home
-  folder. The job's instructions name the first kind, and its report names what it
-  left running.
+  closes inherited files and then ends. On macOS, where such a program is the first
+  command of a job on a login that took over two seconds to start, what it started
+  keeps running too. So does a program still holding a marker that was deleted
+  and made again, for example by a job that cleaned the home folder. The job's
+  instructions name the first kind, and its report names what it left running.
 - A server or daemon the job starts ends on Stop with everything running inside
   it, also what the owner or another job started there later: tmux, an
   `emacs --daemon`, a build tool's daemon such as Gradle's, or a gpg-agent a

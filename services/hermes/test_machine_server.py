@@ -469,7 +469,8 @@ class MachineServerTests(unittest.TestCase):
         # is NAME=value (grep), but one left to init whose first argument is not its program's name and is followed at
         # once by environment words is (as ps shows a daemon that wrote a longer name over its arguments). One that
         # renamed itself otherwise is not found, but it never hides one with the tag that it started. A program with the tag
-        # under one that started before the job, which shows no environment (the owner's editor), is not the job's.
+        # under one left to init that started before the job, which shows no environment (the owner's editor), is not the
+        # job's; under the login's older sshd session, whose parent is another user's (here: a sh in priv), it is.
         if not os.access(f'/proc/{os.getpid()}/environ',os.R_OK):self.skipTest('no /proc environments here')
         mine=None
         check='[ -r /proc/$$/stat ]';self.assertEqual(ms.CLEANUP.count(check),1)
@@ -478,6 +479,7 @@ class MachineServerTests(unittest.TestCase):
             here=Path(folder);(here/'bin').mkdir();ps,lsof=here/'bin'/'ps',here/'bin'/'lsof'
             ps.write_text('#!/bin/bash\n'
                           'shown() { case $(readlink /proc/$1/exe) in *sleep|*/sys/sh) ;; *) tr \'\\0\' \' \' </proc/$1/environ;; esac; }\n'
+                          'mine() { [ -O $1 ] && case $(readlink $1/exe) in */priv/sh) false;; *) true;; esac; }\n'
                           'case " $* " in\n'
                           '  *" comm= "*) for p; do :; done; [ -r /proc/$p/cmdline ] || exit 1; tr \'\\0\' \'\\n\' </proc/$p/cmdline | head -n 1;;\n'
                           '  *" ucomm= "*) for p; do :; done; [ -r /proc/$p/comm ] || exit 1; printf \'%-16s\\n\' "$(cat /proc/$p/comm)";;\n'
@@ -486,8 +488,8 @@ class MachineServerTests(unittest.TestCase):
                           '    e=$(( ${u%.*} - ${20} / $(getconf CLK_TCK) )); printf \'%02d:%02d:%02d\\n\' $((e/3600)) $((e%3600/60)) $((e%60));;\n'
                           '  *" -p "*) for p; do :; done; [ -r /proc/$p/environ ] || exit 1; c=$(tr \'\\0\' \' \' </proc/$p/cmdline); v=\n'
                           '    case " $* " in *" -E "*) v=$(shown $p);; esac; if [ -n "$v" ]; then printf \'%s %s\\n\' "$c" "$v"; else printf \'%s\\n\' "$c"; fi;;\n'
-                          '  *" -E "*) for e in /proc/[0-9]*; do [ -O $e ] && printf \'%6s %s %s\\n\' ${e#/proc/} "$(tr \'\\0\' \' \' <$e/cmdline)" "$(shown ${e#/proc/})"; done;;\n'
-                          '  *) for e in /proc/[0-9]*; do [ -O $e ] && read -r s <$e/stat && s=${s##*) } && set -- $s && echo "${e#/proc/} $2 $1"; done;;\n'
+                          '  *" -E "*) for e in /proc/[0-9]*; do mine $e && printf \'%6s %s %s\\n\' ${e#/proc/} "$(tr \'\\0\' \' \' <$e/cmdline)" "$(shown ${e#/proc/})"; done;;\n'
+                          '  *) for e in /proc/[0-9]*; do mine $e && read -r s <$e/stat && s=${s##*) } && set -- $s && echo "${e#/proc/} $2 $1"; done;;\n'
                           'esac\nexit 0\n')
             lsof.write_text('#!/bin/bash\nfor f; do :; done; for e in /proc/[0-9]*; do for d in $e/fd/*; do [ "$d" -ef "$f" ] && { echo ${e#/proc/}; break; }; done; done\n')
             for path in (ps,lsof):path.chmod(0o755)
@@ -497,8 +499,17 @@ class MachineServerTests(unittest.TestCase):
             # The owner's editor, whose environment macOS hides, started before the job; the job's `code <folder>` gives
             # it the tag, and a program it starts then has the tag.
             os.mkfifo(here/'trigger')
+            # The login's sshd session, which shows no environment and started before the job too (as where a connection is
+            # reused), under a sshd of root that the listing leaves out; a command of the job there that did not keep the
+            # marker (bash 3.2 runs a one-command script in place) starts a program with the tag.
+            (here/'priv').mkdir();shutil.copy('/bin/sh',here/'priv'/'sh');os.mkfifo(here/'opened')
+            (here/'session.sh').write_text(f'echo $$ > {folder}/session; read x < {folder}/opened\n'
+                                           f"{ms.TAG}=$1 {here}/sys/sh -c 'tail -f /dev/null & echo $! > {folder}/sshtail; wait' &\n"
+                                           f'echo $! > {folder}/sshtop; read x < {folder}/fifo\n')
+            monitor=self.launch(None,folder,'monitor',f"{here}/priv/sh -c '{here}/sys/sh {here}/session.sh \"$1\" & wait' sh {JOB}",tag=False)
             editor=self.launch(None,folder,'editor',f"{here}/sys/sh -c 'read x < {folder}/trigger; {ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/edited; wait' sh {JOB}",tag=False)
-            time.sleep(3.2)
+            # ps and stat give whole seconds, so each side may be off by one: wait well over the two seconds.
+            time.sleep(5)
             job=[self.launch(JOB,folder,'mine'),self.launch(None,folder,'tagged','tail -f /dev/null'),
                  self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)')]
             # A command line that spans lines, with a line that starts like another process's, then the environment with
@@ -527,12 +538,13 @@ class MachineServerTests(unittest.TestCase):
                     self.launch(None,folder,'ggrep',f"{here}/sys/sh -c 'bash -c \"exec -a grep {here}/sys/ggrep {ms.TAG}={JOB} {folder}/fifo\" & "
                                 f"echo $! > {folder}/ggrepped; wait'",tag=False)]
             try:
-                with open(here/'trigger','w') as trigger:trigger.write('go\n')
+                for name in ('trigger','opened'):
+                    with open(here/name,'w') as trigger:trigger.write('go\n')
                 deadline=time.monotonic()+5
-                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild','worker','grepped','ggrepped','edited')) and time.monotonic()<deadline:time.sleep(.05)
+                while not all((here/name).exists() and (here/name).read_text().strip() for name in ('syssh','systail','managed','named','namedchild','worker','grepped','ggrepped','edited','session','sshtop','sshtail')) and time.monotonic()<deadline:time.sleep(.05)
                 while alive(launcher) and time.monotonic()<deadline:time.sleep(.05)
-                job+=[int((here/name).read_text()) for name in ('syssh','systail','worker')]
-                others+=[editor,*(int((here/name).read_text()) for name in ('managed','named','namedchild','grepped','ggrepped','edited'))]
+                job+=[int((here/name).read_text()) for name in ('syssh','systail','worker','sshtop','sshtail')]
+                others+=[editor,monitor,*(int((here/name).read_text()) for name in ('managed','named','namedchild','grepped','ggrepped','edited','session'))]
                 self.assertFalse(alive(launcher))
                 self.assertEqual(self.cleanup_here(script,path),0)
                 for pid in job:self.assertFalse(alive(pid),pid)

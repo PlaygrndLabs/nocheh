@@ -145,10 +145,11 @@ has() {
   case $(printf '%s\n' "$n" | awk 'NR==1 {sub(/.*\//, ""); sub(/^-/, ""); print}') in "$c"*) return 1;; esac
   printf '%s\n' "${a:${#n}}" | awk 'NR==1 {print $1}' | grep -q '^[A-Za-z_][A-Za-z0-9_]*='
 }
-# Whether process $1 started over two seconds before the job's marker (born, now: seconds), so cannot be the job's.
+# Whether process $1, left to launchd, started over two seconds before the job's marker (born, now: seconds), so cannot be
+# the job's. The login's sshd session, also older where a connection is reused, has a root sshd above it.
 older() {
   local e
-  [ -n "$born" ] && e=$(ps -o etime= -p "$1" | awk 'NR==1 {n=split($1, a, /[-:]/); s=a[n]+60*a[n-1]; if (n>2) s+=3600*a[n-2]; if (n>3) s+=86400*a[n-3]; print s}') &&
+  [ -n "$born" ] && [ "$(ps -o ppid= -p "$1" | awk '{print $1}')" = 1 ] && e=$(ps -o etime= -p "$1" | awk 'NR==1 {n=split($1, a, /[-:]/); s=a[n]+60*a[n-1]; if (n>2) s+=3600*a[n-2]; if (n>3) s+=86400*a[n-3]; print s}') &&
     [ -n "$e" ] && [ $((now-e)) -lt $((born-2)) ]
 }
 # Whether process $1 shows its own environment, without tag $2 anywhere in what ps -E prints.
@@ -191,8 +192,8 @@ hits() {
     done
     if [ -n "$all" ]; then for p in $(printf '%s\n' "$table" | awk '{print $1}'); do ! has "$p" "$tag" || tagged="$tagged $p"; done; fi
     # Only the programs above one with the tag, up to the marker's holders and what they started, matter: each is asked
-    # on its own whether it shows an environment, or started before the marker (born), as the owner's editor, whose
-    # environment macOS hides, may have been given the tag by the job (`code <folder>` passes its environment on).
+    # on its own whether it shows an environment, or was left to launchd before the marker (born), as the owner's editor,
+    # whose environment macOS hides, may have been given the tag by the job (`code <folder>` passes its environment on).
     born=$(stat -c %W -- "$file" || stat -f %B -- "$file") && now=$(date +%s) || born=
     case $born in ''|0|*[!0-9]*) born=;; esac
     for p in $(printf '%s\n' "$table" | M=$marked T=$tagged awk '
