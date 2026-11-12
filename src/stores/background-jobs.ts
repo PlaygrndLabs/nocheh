@@ -796,24 +796,32 @@ export class BackgroundJobRepository {
     if(!result||digest(result.content)!==row.report_reference.input_hash)return this.finish(row,'failed','job_report_missing');
     const parts=reportParts(String(JSON.parse(result.content.toString()).text??''));
     if(!parts.length)return this.finish(row,'failed','job_report_empty');
-    const owner=this.access.policy().owner_id!,away=!!row.machine&&row.scope!==owner;
-    const targets=parts.map(text=>({to:away?owner:row.space_id as string,text}));
-    if(away)targets.push({to:row.space_id,text:labeledLines(backgroundTexts,(await ownerPrompts(this.control))['background.texts'])[row.ended?'limited_private':'report_private']!});
-    const sent=(await this.control.query(`SELECT b.part,a.state FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
+    const owner=this.access.policy().owner_id!,machine=!!row.machine&&row.scope!==owner;
+    const sent=(await this.control.query(`SELECT b.part,a.state,a.destination FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
       WHERE b.job_id=$1 ORDER BY b.part`,[row.id])).rows;
+    // A report that began in the group before machine reports went private keeps the parts sent there; the owner then gets
+    // the whole report and the group its line. One the group got whole before then is done.
+    let early=0;
+    if(machine)while(early<Math.min(sent.length,parts.length)&&sent[early].destination===row.space_id)early++;
+    const away=machine&&early<parts.length;
+    const targets=[...parts.slice(0,early).map(text=>({to:row.space_id as string,text})),...parts.slice(away?0:early).map(text=>({to:away?owner:row.space_id as string,text}))];
+    if(away)targets.push({to:row.space_id,text:labeledLines(backgroundTexts,(await ownerPrompts(this.control))['background.texts'])[row.ended?'limited_private':'report_private']!});
     const last=sent.at(-1);
     // The group's line comes last: the report already reached the owner, so a lost line still ends the job done.
     if(last&&['failed','ambiguous','cancelled','rejected'].includes(last.state))return away&&sent.length===targets.length?this.finish(row,'done'):this.finish(row,'failed','job_report_not_delivered');
     if(last&&last.state!=='done')return observation('waiting','delivery',sent.length,Date.now()+5000,'receipt_pending');
     if(sent.length>=targets.length)return this.finish(row,'done');
+    // Only the group's line is left: it names nothing the run read, so no later epoch holds it back, and a Stop or a
+    // refused line still ends the job done.
+    const line=away&&sent.length===targets.length-1;
     // A stopped job sends no further part.
-    if(row.cancel_requested)return this.finish(row,'stopped');
+    if(row.cancel_requested)return this.finish(row,line?'done':'stopped');
     // A member removed from the chat since the job ran gets nothing sent there.
     if(!sent.length&&!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
-    const part=sent.length+1,binding=await this.guards.state(),run=await this.latest(row.id);
+    const part=sent.length+1,binding=await this.guards.state(),run=line?null:await this.latest(row.id);
     // The last run wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
     // have passed since (ADR-0201); any other change may have withdrawn what it read.
-    if(!run||!await carriesForward(this.control,run.run_binding,binding))return this.finish(row,'failed','job_report_outdated');
+    if(!line&&(!run||!await carriesForward(this.control,run.run_binding,binding)))return this.finish(row,'failed','job_report_outdated');
     try {
       // Checked for secrets with the job's own audience, wherever the part goes.
       const target=targets[part-1]!,prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,target.to,target.text,'background-report:'+row.id+':'+part);
@@ -833,6 +841,7 @@ export class BackgroundJobRepository {
       // under the binding then current, by the rule above, instead of the job's workflow closing with the job still reporting.
       if(error instanceof HttpError&&['guard_transition_pending','guard_context_changed','audience_context_changed','action_context_changed'].includes(error.code))
         return observation('waiting','delivery',sent.length,Date.now()+2000,'guard_pending');
+      if(line&&error instanceof HttpError)return this.finish(row,'done');
       throw error;
     }
     return observation('waiting','delivery',part,Date.now()+5000,'receipt_pending');

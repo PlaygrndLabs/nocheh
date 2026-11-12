@@ -125,6 +125,43 @@ test('a job on the owner\'s machine asked in a group reports to the owner\'s pri
     await delivered(lost[1].id,'rejected');
     assert.equal((await tick(second.id)).state,'completed');assert.deepEqual([(await job(second.id)).state,(await job(second.id)).error_code],['done',null]);
 
+    // Once the report reached the owner, a later change does not hold back the group's line: it names nothing the run read.
+    const edited=await s.jobs.start(await said(project,123,'Set it up, a third time'),{...request,title:'Set up the made-up project a third time'});
+    const third=await run(edited);await finish(third,'Report PRIVATEMARK7, third.');
+    await tick(edited.id);await delivered((await reports(edited.id))[0].id);
+    const noted=await message(project,9,'A made-up note in the group');
+    const copy=await s.guards.read('events:'+noted.id,await s.guards.state());
+    await s.guards.edit('events:'+noted.id,copy.revision,{...copy.value as any,text:'An edited made-up note'},key+':edit');
+    await tick(edited.id);
+    const late=await reports(edited.id);assert.deepEqual(late.map(row=>row.destination),['123',project],'the line still goes to the group');
+    assert.equal(late[1].text_hash,digest(groupLine));
+    await delivered(late[1].id);
+    assert.equal((await tick(edited.id)).state,'completed');assert.deepEqual([(await job(edited.id)).state,(await job(edited.id)).error_code],['done',null]);
+    // A Stop pressed after the report reached the owner ends the job done, and the group gets no line.
+    const halted=await s.jobs.start(await said(project,123,'Set it up, a fourth time'),{...request,title:'Set up the made-up project a fourth time'});
+    const fourth=await run(halted);await finish(fourth,'Report PRIVATEMARK7, fourth.');
+    await tick(halted.id);await delivered((await reports(halted.id))[0].id);
+    await stores.control.query('UPDATE background_jobs SET cancel_requested=true WHERE id=$1',[halted.id]);
+    assert.equal((await tick(halted.id)).state,'completed');assert.deepEqual([(await job(halted.id)).state,(await job(halted.id)).error_code],['done',null]);
+    assert.deepEqual((await reports(halted.id)).map(row=>row.destination),['123']);
+
+    // A report an older release had begun sending to the group keeps that part there; the owner then gets the whole report
+    // and the group the line. One the group got whole before then is done.
+    const long=['Report PRIVATEMARK7, first half. '+'a'.repeat(6000),'Second half. '+'b'.repeat(6000)];
+    const older=await s.jobs.start(await said(project,123,'Set it up, a fifth time'),{...request,title:'Set up the made-up project a fifth time'});
+    const fifth=await run(older);await finish(fifth,long.join('\n\n'));
+    await tick(older.id);const begun=(await reports(older.id))[0];
+    await stores.control.query('UPDATE telegram_action_requests SET destination=$2 WHERE id=$1',[begun.id,project]);await delivered(begun.id);
+    for(let part=2;part<=4;part++){await tick(older.id);await delivered((await reports(older.id)).at(-1).id);}
+    const resumed=await reports(older.id);
+    assert.deepEqual(resumed.map(row=>[row.destination,row.text_hash]),[[project,digest(long[0]!)],['123',digest(long[0]!)],['123',digest(long[1]!)],[project,digest(groupLine)]]);
+    assert.equal((await tick(older.id)).state,'completed');assert.equal((await job(older.id)).state,'done');
+    const whole=await s.jobs.start(await said(project,123,'Set it up, a sixth time'),{...request,title:'Set up the made-up project a sixth time'});
+    const sixth=await run(whole);await finish(sixth,'Report PRIVATEMARK7, sixth.');
+    await tick(whole.id);const all=(await reports(whole.id))[0];
+    await stores.control.query('UPDATE telegram_action_requests SET destination=$2 WHERE id=$1',[all.id,project]);await delivered(all.id);
+    assert.equal((await tick(whole.id)).state,'completed');assert.deepEqual((await reports(whole.id)).map(row=>row.destination),[project]);
+
     // At a limit the note goes to the owner and the group gets the limit line.
     const capped=await s.jobs.start(await said(project,123,'A long setup'),{...request,title:'Long made-up setup'});
     const reading=await run(capped);

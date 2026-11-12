@@ -60,8 +60,11 @@ end to end comes in a follow-up.
   or its note at a limit, to the owner's private chat, also when the owner
   asked in a group. That group gets one fixed line from the owner-editable
   background texts (`report_private`, `limited_private`) that names no machine,
-  plan or result. When only that line cannot be delivered, the job still ends
-  done. In a group, `start` returns no machine or steps, `status` lists no
+  plan or result. That line holds nothing the run read: once the whole report
+  has reached the owner, a later change, a Stop or a line that cannot be
+  delivered still ends the job done. A report that an earlier release had
+  begun sending to the group keeps the parts already there; the owner then gets
+  the whole report and the group its line. In a group, `start` returns no machine or steps, `status` lists no
   machines, and a machine job's status shows no machine, plan or to-do list,
   only that its plan and report are in the private chat. The plan card was
   already in the private chat (ADR-0231).
