@@ -76,3 +76,64 @@ class ReviewBudgetTests(unittest.TestCase):
             self.assertEqual(native_review(object(),'source'),{'state':'done'})
         self.assertEqual(seen,[False,False,True])
         self.assertIs(loop._review_input_budget_exhausted,original)
+
+
+class FullNotesReviewTests(unittest.TestCase):
+    def test_a_review_frees_room_in_full_notes_and_saves_the_new_note(self):
+        # Hermes holds a background review's patch or remove for a person's approval in the
+        # profile's pending folder. A review turn has no person to approve it, and that folder
+        # goes with the turn's container, so full notes would never take a new note. A real
+        # review, in its own process as in production, against a scripted local model server:
+        # the add is refused as over the limit, then sent again with a remove in one batch.
+        import os,subprocess,sys,threading
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        old=['Stale note %d: '%n+'x'*530 for n in range(4)];new='The owner moved the launch to Friday.'
+        add=[{'action':'add','content':new}];batch=[{'action':'remove','old_text':'Stale note 0:'},*add]
+        results=[]
+        class Model(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def reply(self,body,kind='application/json'):
+                self.send_response(200);self.send_header('content-type',kind);self.send_header('content-length',str(len(body)));self.end_headers();self.wfile.write(body)
+            def do_GET(self):self.reply(json.dumps({'object':'list','data':[{'id':'synthetic','object':'model','context_length':128000}]}).encode())
+            def do_POST(self):
+                payload=json.loads(self.rfile.read(int(self.headers.get('content-length',0))))
+                usage={'prompt_tokens':10,'completion_tokens':2,'total_tokens':12}
+                answers=[json.loads(m['content']) for m in payload.get('messages',[]) if m.get('role')=='tool']
+                if payload.get('tools'):results[:]=answers
+                # First a lone add; after it is refused, the batch that frees room; then the summary.
+                operations=None if not payload.get('tools') or answers and answers[-1].get('success') else batch if answers else add
+                call=operations is not None
+                tool={'id':'call_%d'%len(answers),'type':'function','function':{'name':'memory','arguments':json.dumps({'target':'memory','operations':operations})}}
+                message={'role':'assistant','content':None,'tool_calls':[tool]} if call else {'role':'assistant','content':'Saved.'}
+                finish='tool_calls' if call else 'stop'
+                if not payload.get('stream'):
+                    return self.reply(json.dumps({'id':'r','object':'chat.completion','created':0,'model':'synthetic','usage':usage,
+                        'choices':[{'index':0,'message':message,'finish_reason':finish}]}).encode())
+                delta={'role':'assistant','tool_calls':[{'index':0,**tool}]} if call else {'role':'assistant','content':'Saved.'}
+                chunks=[{'choices':[{'index':0,'delta':delta,'finish_reason':None}]},{'choices':[{'index':0,'delta':{},'finish_reason':finish}],'usage':usage}]
+                self.reply(b''.join(b'data: '+json.dumps({'id':'r','object':'chat.completion.chunk','created':0,'model':'synthetic',**c}).encode()+b'\n\n' for c in chunks)+b'data: [DONE]\n\n','text/event-stream')
+        child=("import sys\nfrom unittest.mock import patch\n"
+               "from services.hermes import archive_tools,assistant_turn,request_boundary,subscription\n"
+               "install=request_boundary.install\n"
+               "with patch.object(request_boundary,'install',lambda:install(request_boundary.Boundary('on',transform=lambda url,payload:payload))),"
+               "patch.object(subscription,'configured_urls',lambda:{sys.argv[1]}),patch.object(archive_tools,'request',lambda path,value:value):\n"
+               "    assistant_turn.main()\n")
+        server=ThreadingHTTPServer(('127.0.0.1',0),Model);threading.Thread(target=server.serve_forever,daemon=True).start()
+        base='http://127.0.0.1:%d/v1'%server.server_address[1]
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                profile=Path(folder)/'profile';(profile/'native-state').mkdir(parents=True);(profile/'memories').mkdir()
+                notes=profile/'memories'/'MEMORY.md';notes.write_text('\n§\n'.join(old))
+                body={'review':True,'review_id':'a'*64,'text':'The owner said the launch moved to Friday.','session_id':'review-'+'a'*64,
+                      'chat_id':'5','user_id':'5','owner':True,'memory_context':'evidence','prompts':{},'model':'synthetic','api_key':'synthetic',
+                      'base_url':base,'provider':'openai','api_mode':'chat_completions','archive_credential':'turn.synthetic'}
+                process=subprocess.run([sys.executable,'-c',child,base],input=json.dumps(body),cwd=Path(__file__).resolve().parents[2],
+                                       env={**os.environ,'HERMES_HOME':str(profile)},capture_output=True,text=True,timeout=240)
+                self.assertEqual(process.returncode,0,process.stderr[-2000:])
+                self.assertEqual(json.loads(process.stdout.strip().splitlines()[-1])['state'],'done')
+                self.assertEqual([r.get('success') for r in results],[False,True],results)
+                self.assertNotIn('staged',results[-1])
+                saved=notes.read_text()
+                self.assertIn(new,saved);self.assertNotIn('Stale note 0:',saved);self.assertIn('Stale note 3:',saved)
+                self.assertFalse((profile/'pending').exists(),'nothing is held for an approval no one can give')
+        finally:server.shutdown();server.server_close()

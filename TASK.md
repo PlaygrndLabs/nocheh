@@ -246,6 +246,16 @@ their place while their own text is unchanged
 ([ADR-0217](docs/adr/0217-waiting-fragments-keep-their-place.md)). The deleted fragment
 is not queued again.
 
+Notes reviews on full notes (2026-11-12): once a chat's Hermes native notes were nearly
+full, a notes review that needed room saved nothing. Hermes held its remove-and-add for a
+person's approval in the profile's `pending/` folder, which an isolated turn does not
+keep, and the review still ended done. Reviews now run as requested ones that may change
+or remove notes, and Hermes's approval switch for note writes stays off; reply turns were
+not affected
+([ADR-0239](docs/adr/0239-notes-reviews-make-room-in-full-notes.md),
+[check](services/hermes/test_native_memory.py)). Pending: a review on full notes on a
+running installation that saves its note.
+
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
 task table against a group chat): long tool results are read in parts

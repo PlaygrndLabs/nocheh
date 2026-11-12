@@ -38,6 +38,7 @@ class ProfileConfigurationTests(unittest.TestCase):
             raw['display'] = {'skin': 'personal', 'inline_images': 'auto'}
             raw['model'] = {'provider': 'untrusted'}
             raw['memory']['provider'] = 'honcho'
+            raw['memory']['write_approval'] = True
             raw['plugins']['enabled'].append('unapproved')
             raw['fallback_models'] = ['untrusted']
             raw['curator'] = {'enabled': True, 'archive_after_days': 30}
@@ -55,6 +56,8 @@ class ProfileConfigurationTests(unittest.TestCase):
             self.assertEqual(saved['stt'], {'enabled': False})
             self.assertEqual(saved['plugins']['enabled'], ['nocheh'])
             self.assertEqual(saved['memory']['provider'], '')
+            # No note write is held for an approval nobody can give.
+            self.assertIs(saved['memory']['write_approval'], False)
             self.assertEqual(saved['fallback_models'], [])
             # Owner-set skills are never archived by the native curator.
             self.assertEqual(saved['curator'], {'enabled': False})
