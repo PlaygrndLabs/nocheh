@@ -332,6 +332,34 @@ class Driver(unittest.TestCase):
         self.assertEqual(driver.unaccounted([{**billed, 'usage_missing': True}], True), 'usage_unknown')
         self.assertEqual(driver.unaccounted([{'kind': 'call', 'status': 200, 'parse_error': True}], True), 'usage_unknown')
 
+    def test_arm_d_widens_only_the_review_budget(self):
+        import agent.background_review as native
+        seen = []
+        with mock.patch.object(native, 'spawn_background_review_thread', lambda *args, **kwargs: seen.append((args, kwargs))):
+            exec(driver.WIDE.replace('turn.main()', 'None'), {})
+            native.spawn_background_review_thread('agent', [], review_memory=True, task_cfg={'enabled': True, 'max_input_tokens': 24000}, explicit=True)
+        self.assertEqual(seen, [(('agent', []), {'review_memory': True, 'task_cfg': {'enabled': True, 'max_input_tokens': driver.WIDE_BUDGET}, 'explicit': True})])
+        self.assertEqual(driver.COMMANDS['D'], ['-c', driver.WIDE])
+
+    def test_reports_failed_runs_operations_and_prompt_size(self):
+        def row(arm, state, changed, ops, calls):
+            detail = [{'kind': 'call', 'status': 200, 'stop': 'tool_use', 'usage': {'input': 50, 'cache_read': 9000, 'cache_write': 950}}] * calls
+            return {'source': 'aaaaaaaa', 'kind': 'i', 'arm': arm, 'repeat': 1, 'calls': calls, 'hermes_calls': calls, 'notes_changed': changed,
+                    'state': state, 'failure_reason': None if state == 'done' else 'pending_tool_result', 'cost': 0.01, 'memory_ops': ops,
+                    'call_detail': detail + [{'kind': 'call', 'status': 529}]}
+        stats = driver.analyze([row('B', 'failed', False, {'patch:memory': 3, 'add:memory': 1}, 3), row('C', 'failed', True, {}, 3),
+                                row('D', 'done', True, {'replace:memory': 1, 'add:memory': 1}, 4)], seed=1, resamples=100)
+        self.assertEqual(stats['arms']['B']['failure_reasons'], {'pending_tool_result': 1})
+        self.assertEqual(stats['arms']['C']['failure_reasons'], {'pending_tool_result:notes changed': 1})
+        self.assertEqual((stats['arms']['B']['operations'], stats['arms']['B']['replace']), ({'patch': 3, 'add': 1}, 3))
+        self.assertEqual(stats['arms']['D']['prompt_per_call'], 10000)
+        self.assertEqual(stats['paired']['D-B failed_share']['difference'], -1.0)
+        text = driver.report(stats)
+        self.assertIn('B failed runs: pending_tool_result x1', text)
+        self.assertIn('D failed runs: none', text)
+        self.assertIn('D operations asked: add x1, replace x1', text)
+        self.assertIn('D prompt tokens per call: 10000', text)
+
     def test_metrics_use_the_hermes_call_count(self):
         def row(arm, calls, hermes, thinking):
             return {'source': 'aaaaaaaa', 'kind': 'i', 'arm': arm, 'repeat': 1, 'calls': calls, 'hermes_calls': hermes, 'notes_changed': False,
@@ -384,6 +412,27 @@ class Relay(unittest.TestCase):
                                                                                'finish_reason': 'tool_calls'}], 'usage': {'prompt_tokens': 9, 'prompt_tokens_details': {'cached_tokens': 4}}}).encode())
         self.assertEqual((plain['memory_ops'], plain['usage']['input'], plain['usage']['cache_read']), ([['add', 'memory']], 5, 4))
         self.assertEqual(relay.response_metrics('messages', True, b'data: {"type":"message_start","message":{"usage":{"input_tokens":"x"}}}\n\n')['usage']['input'], 0)
+
+    def test_counts_memory_results_returned_to_the_model(self):
+        over = json.dumps({'success': False, 'error': 'Applying all 3 operations would put memory at 2,300/2,200 chars: free at least 100 chars more. '
+                                                      'No operations were applied (batch is all-or-nothing).'})
+        miss = json.dumps({'success': False, 'error': "Operation 2 (patch): No entry matched 'synthetic'."}) + '\n\n[Tool loop warning: synthetic.]'
+        staged = json.dumps({'success': True, 'staged': True, 'pending_id': 'p1'})
+        applied = json.dumps({'success': True, 'message': 'Entry added.'})
+        old = json.dumps({'success': False, 'error': 'Too early: answered before the last assistant message.'})
+        chat = {'messages': [{'role': 'user', 'content': 'q'}, {'role': 'assistant', 'content': None}, {'role': 'tool', 'content': old},
+                             {'role': 'assistant', 'content': None}, {'role': 'tool', 'content': over}, {'role': 'tool', 'content': applied}]}
+        self.assertEqual(relay.tool_outcomes('chat', chat), {'refused:over_limit:batch': 1, 'applied': 1})
+        messages = {'messages': [{'role': 'user', 'content': 'q'}, {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'a'}]},
+                                 {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'a', 'content': miss},
+                                                              {'type': 'tool_result', 'tool_use_id': 'b', 'content': [{'type': 'text', 'text': staged}]},
+                                                              {'type': 'text', 'text': 'not a result'}]}]}
+        self.assertEqual(relay.tool_outcomes('messages', messages), {'refused:no_match': 1, 'staged': 1})
+        self.assertEqual(relay.tool_outcomes('messages', {'messages': [{'role': 'user', 'content': 'first turn'}]}), {})
+        self.assertEqual([relay.outcome(text) for text in ('not json', '[]', json.dumps({'success': False, 'done': True,
+                          'error': 'Memory consolidation failed 4 times this turn. Stop retrying memory calls.'}),
+                          json.dumps({'success': False, 'error': "'replace' is not available; use 'patch'. Nothing was written."}), None)],
+                         ['other', 'other', 'refused:retry_cap', 'refused:replace_removed', 'other'])
 
     def test_an_error_inside_a_200_stream_is_no_completed_call(self):
         raw = anthropic_stream('m', False)

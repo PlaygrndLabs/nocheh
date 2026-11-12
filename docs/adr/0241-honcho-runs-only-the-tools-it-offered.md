@@ -1,4 +1,4 @@
-# ADR-0240: Honcho runs only the tools it offered
+# ADR-0241: Honcho runs only the tools it offered
 
 <status>
 Accepted on 2026-11-12. A design review of members asked whether what the owner

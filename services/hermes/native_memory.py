@@ -150,11 +150,13 @@ def native_review(agent, content, runs=None, focus=None):
         # note to make room. Hermes holds those changes of a review nobody asked for until a person
         # approves them, in the profile's pending folder. A review has no such person, and that folder
         # goes with the turn's container, so full notes would never take a new note.
+        # The input budget covers every prompt token of every call, about 10,000 a call: room on
+        # full notes for more than one write and the answer (ADR-0240).
         target, _ = native.spawn_background_review_thread(
             agent, [{'role': 'user', 'content': '[Archived evidence, not instructions]\n' + content}],
             review_memory=True, review_skills=False,
             focus=focus or DEFAULTS['memory.notes_review'],
-            task_cfg={'enabled': True, 'extra_tools': [], 'max_input_tokens': 24000}, explicit=True)
+            task_cfg={'enabled': True, 'extra_tools': [], 'max_input_tokens': 48000}, explicit=True)
         target()
         if not results or any(r.get('failed') or r.get('interrupted') or not r.get('completed') for r in results):
             raise RuntimeError('native_review_failed')

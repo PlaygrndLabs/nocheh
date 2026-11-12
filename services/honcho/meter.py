@@ -41,7 +41,7 @@ class CoolingDown(Rejected):
 
 
 class UnofferedTool(Exception):
-    """The provider answered, and is paid for, but the answer calls a tool its request did not offer (ADR-0240)."""
+    """The provider answered, and is paid for, but the answer calls a tool its request did not offer (ADR-0241)."""
 
 
 class PreparationUnavailable(Rejected):
