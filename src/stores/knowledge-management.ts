@@ -254,14 +254,17 @@ export class KnowledgeManagementRepository {
    proposal.kind==='project_assignment'?[{space_id:String(proposal.payload.space_id),mode:String(proposal.payload.mode),project_id:proposal.payload.project_id??null}]:[];
   const sharing_projects=proposal.kind==='project_save'?proposal.payload.id?(await this.stores.control.query('SELECT id,name FROM projects WHERE id=$1 AND sharing_enabled',[proposal.payload.id])).rows:[]:
    await this.sharingProjects(moves,this.stores.control);
-  const undo_sharing_projects=row.state==='applied'&&row.kind==='organization'?await this.sharingProjects((row.result?.assignments??[]).map((change:any)=>({space_id:change.after.space_id,
-   mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})),this.stores.control):[];
+  const undoMoves=row.state==='applied'&&row.kind==='organization'?(row.result?.assignments??[]).map((change:any)=>({space_id:change.after.space_id,
+   mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})):[];
+  const undo_sharing_projects=await this.sharingProjects(undoMoves,this.stores.control);
+  // They also say when a chat it moves joins a project's task list, where it sees every task (ADR-0243).
+  const task_projects=await this.taskProjects(moves,this.stores.control),undo_task_projects=await this.taskProjects(undoMoves,this.stores.control);
   // A card that shares or rewords a fact names where it came from and who can read it (ADR-0242).
   const fact=proposal.kind==='fact_grant'?proposal.payload.fact_id:proposal.kind==='entity_correct'?proposal.target_id:null;
   const fact_audience=fact?await this.s.entities.audience(principal,fact).catch(()=>null):null;
   // A proposal saved before private chats were refused still opens, marked, so the owner can cancel it; it never applies.
   const private_chats=proposalPrivateChats(proposal);
-  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,
+  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,task_projects,undo_task_projects,
    ...(fact?{fact_audience}:{}),...(private_chats.length?{private_chats}:{}),decision_history};}
  async proposals(principal:Reader,after=''){admin(principal);if(after)id(after);const rows=(await this.stores.control.query(`SELECT id FROM knowledge_proposals WHERE $1='' OR
   (created_at,id)<(SELECT created_at,id FROM knowledge_proposals WHERE id=$1) ORDER BY created_at DESC,id DESC LIMIT 101`,[after])).rows;
@@ -328,6 +331,8 @@ export class KnowledgeManagementRepository {
      WHERE p.id=$1 AND other.state='active' LIMIT 1`,[assignment.project_id])).rowCount){permitted=false;break;}
     // Joining or leaving a project whose chats share what they know changes who knows what: only the owner does that (ADR-0226).
     if((await this.sharingProjects([{space_id:assignment.space_id,mode:'assigned',project_id:assignment.project_id??null}],control)).length){permitted=false;break;}
+    // Joining a project's task list shows the chat every task on it, the owner's included: only the owner does that (ADR-0243).
+    if((await this.taskProjects([{space_id:assignment.space_id,mode:'assigned',project_id:assignment.project_id??null}],control)).length){permitted=false;break;}
     for(const topic of await this.affectedTopics(assignment.space_id,control)){
      if(!scopes.includes(topic)||!await this.baselineMatches(permission,topic,control))permitted=false;
     }
@@ -349,6 +354,21 @@ export class KnowledgeManagementRepository {
    for(const project of [own&&own.mode!=='inherit'?own.project_id:group,move.mode==='assigned'?move.project_id:move.mode==='inherit'?group:null])if(project)ids.add(project);
   }
   return ids.size?(await db.query('SELECT id,name FROM projects WHERE id=ANY($1::text[]) AND sharing_enabled ORDER BY id',[[...ids]])).rows:[];
+ }
+
+ /** The projects with tasks that these moves bring a chat into from another project, or from none. A topic set to
+  * follow its group joins the group's project. A chat that joins a project's list sees every task on it, archived and
+  * in the trash too, so only the owner moves one there, after seeing so (ADR-0243). */
+ private async taskProjects(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string}[]>{
+  const ids=new Set<string>();
+  for(const move of moves){
+   const parent=parentSpace(move.space_id),rows=(await db.query('SELECT space_id,project_id,mode FROM project_assignments WHERE space_id=$1 OR space_id=$2',[move.space_id,parent])).rows;
+   const own=rows.find(r=>r.space_id===move.space_id),group=parent?rows.find(r=>r.space_id===parent&&r.mode==='assigned')?.project_id??null:null;
+   const now=own&&own.mode!=='inherit'?own.project_id:group,next=move.mode==='assigned'?move.project_id:move.mode==='inherit'?group:null;
+   if(next&&next!==now)ids.add(next);
+  }
+  return ids.size?(await db.query(`SELECT p.id,p.name FROM projects p WHERE p.id=ANY($1::text[])
+   AND EXISTS(SELECT 1 FROM owner_tasks t WHERE t.project_id=p.id) ORDER BY p.id`,[[...ids]])).rows:[];
  }
 
  private async baselineMatches(permission:OrganizationDelegation,space:string,db:Pick<pg.PoolClient,'query'>){

@@ -3,7 +3,7 @@ import type {ReactNode} from 'react';
 import {Badge, Button, Details, Notice, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
-import {projectSharingWarning} from '../chats/rule-dialog';
+import {projectSharingWarning, projectTasksWarning} from '../chats/rule-dialog';
 import {parentOf} from '../../lib/chats-model';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {stateLabel, useChatNames, useCommand} from './shared';
@@ -26,6 +26,9 @@ export type Proposal = {
   /** Projects whose chats share what they know that this change, or undoing it, touches; worked out by the server. */
   sharing_projects?: {id: string; name: string}[];
   undo_sharing_projects?: {id: string; name: string}[];
+  /** Projects with tasks that a chat this change, or undoing it, moves would join; it sees their whole list (ADR-0243). */
+  task_projects?: {id: string; name: string}[];
+  undo_task_projects?: {id: string; name: string}[];
   /** For a fact share or correction: where the fact came from and who reads it without a share (null: only you). */
   fact_audience?: {
     sources: (string | null)[];
@@ -99,6 +102,8 @@ export function KnowledgeReview({
   const kind = String(content.kind ?? proposal.kind);
   const sharing = proposal.sharing_projects ?? [];
   const sharingProject = (id: string | null | undefined) => sharing.find(project => project.id === id);
+  const listed = proposal.task_projects ?? [];
+  const listedProject = (id: string | null | undefined) => listed.find(project => project.id === id);
   const audience = proposal.fact_audience;
   const destination = typeof content.payload?.destination === 'string' ? content.payload.destination : null;
   // Every member of a group can read all of its topics, so a share into a topic is seen by the whole group.
@@ -130,6 +135,14 @@ export function KnowledgeReview({
               {projectSharingWarning}
             </Notice>
           )}
+          {!!proposal.undo_task_projects?.length && (
+            <Notice tone="warn" title="A chat here goes back to a project with tasks">
+              {projectTasksWarning(
+                'a chat this moves back',
+                proposal.undo_task_projects.map(project => project.name),
+              )}
+            </Notice>
+          )}
         </div>
       ),
       confirm: 'Undo',
@@ -143,7 +156,9 @@ export function KnowledgeReview({
 
   const projectName = (assignment: any) =>
     assignment.project_id
-      ? (sharingProject(assignment.project_id)?.name ?? 'an existing project')
+      ? (sharingProject(assignment.project_id)?.name ??
+        listedProject(assignment.project_id)?.name ??
+        'an existing project')
       : (content.creates?.find((c: any) => c.key === assignment.project_key)?.name ?? 'a new project');
 
   let footer: ReactNode;
@@ -242,6 +257,14 @@ export function KnowledgeReview({
       {sharing.length > 0 && (
         <Notice tone="warn" title="A project here shares what its chats know">
           {projectSharingWarning}
+        </Notice>
+      )}
+      {listed.length > 0 && (
+        <Notice tone="warn" title="A chat here joins a project with tasks">
+          {projectTasksWarning(
+            'a chat this moves',
+            listed.map(project => project.name),
+          )}
         </Notice>
       )}
       {content.reason && (

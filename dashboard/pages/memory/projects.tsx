@@ -30,7 +30,7 @@ import {
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 import {groupSpace} from '../../lib/chats-model';
 import {ChatPicker} from '../chats/chat-picker';
-import {modeText, projectSharingWarning} from '../chats/rule-dialog';
+import {modeText, projectSharingWarning, projectTasksWarning} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
 
@@ -428,14 +428,21 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
       : null;
   };
 
+  // Adding a chat is confirmed first: it sees this project's task list, and what the other chats know when they share.
   const add = async () => {
-    const other = elsewhere(adding);
+    const other = elsewhere(adding),
+      name = chats.name(adding);
     if (
-      other &&
       !(await feedback.confirm({
-        title: `Move ${chats.name(adding)}?`,
-        body: `It is in ${other} now. A chat belongs to one project at a time.`,
-        confirm: 'Move here',
+        title: other ? `Move ${name}?` : `Add ${name} to ${project.name}?`,
+        body: (
+          <div className="space-y-3">
+            {other && <p>It is in {other} now. A chat belongs to one project at a time.</p>}
+            <p>{projectTasksWarning(name, [project.name])}</p>
+            {shares && <Notice tone="warn">{projectSharingWarning}</Notice>}
+          </div>
+        ),
+        confirm: other ? 'Move here' : 'Add',
       }))
     )
       return;
@@ -548,7 +555,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
             hint={
               adding && elsewhere(adding)
                 ? `It is in ${elsewhere(adding)} now; adding it here moves it.`
-                : 'A group or topic belongs to one project at a time. Private chats never join a project.'
+                : 'A group or topic belongs to one project at a time, and sees and changes its task list. Private chats never join a project.'
             }
           />
           <Button variant="primary" busy={command.busy} disabled={!adding} onClick={() => void add()}>

@@ -4,7 +4,7 @@ import {href} from '../../lib/routes';
 import {parentOf, type Chat} from '../../lib/chats-model';
 import {Button, Card, CardBody, CardHeader, Notice, Select, Spinner, Switch} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
-import {modeText, projectSharingWarning} from './rule-dialog';
+import {modeText, projectSharingWarning, projectTasksWarning} from './rule-dialog';
 import {ActionError, useAction} from './shared';
 
 type Project = {
@@ -61,15 +61,21 @@ export function ProjectCard({chat}: {chat: Chat}) {
           ? {mode: 'none', project_id: null}
           : {mode: 'assigned', project_id: next};
     const name = choices.find(project => project.id === next)?.name;
-    // Joining a project whose chats share what they know is confirmed first, as ticking it on the project is.
+    // Joining a project is confirmed first: the chat sees the project's task list, and, when the project's chats
+    // share what they know, what they know, as ticking that on the project warns.
     const target = next === INHERIT ? groupProject : choices.find(project => project.id === next);
     if (
       chat.kind !== 'private' &&
-      sharing(target) &&
+      target &&
       target.id !== data?.project?.id &&
       !(await feedback.confirm({
-        title: `Share with the chats in ${target.name}?`,
-        body: <Notice tone="warn">{projectSharingWarning}</Notice>,
+        title: (sharing(target) ? 'Share with the chats in ' : 'Move to ') + target.name + '?',
+        body: (
+          <div className="space-y-3">
+            <p>{projectTasksWarning('this chat', [target.name])}</p>
+            {sharing(target) && <Notice tone="warn">{projectSharingWarning}</Notice>}
+          </div>
+        ),
         confirm: next === INHERIT ? 'Follow the group' : 'Move here',
       }))
     )

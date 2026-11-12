@@ -51,6 +51,7 @@ test('approval card templates leave out a line whose value is missing and keep d
   assert.equal(fillTemplate(approvalTask,{change:'Add a task to the list of “P1”',chats:'“Group A”',private:null,fields:'Title: Book the room'}),
     '📋 Add a task to the list of “P1”\n👥 Seen in “Group A”\n\nTitle: Book the room','a card with nothing private leaves that line out');
   assert.match(approvalLines('').task_changed,/changed after it was asked/);
+  assert.equal(approvalLines('').task_later,'Chats you add to this project later will see it too.','every task card says chats added later see the list');
 });
 
 test('the GitHub copy has its own instruction text, card line and card answers, and the card keeps its other lines',()=>{

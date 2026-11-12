@@ -1156,7 +1156,9 @@ test('moving a task into a project’s list names the chats that will see it fir
   await panel.getByRole('button', {name: 'Save'}).click();
   const ask = page.getByRole('dialog', {name: 'Move to Studio launch?'});
   await ask
-    .getByText(/People in Aurora planning will see this task from now on\. Earlier comments and history/)
+    .getByText(
+      /People in Aurora planning will see this task from now on, and so will chats you add to this project later\. Earlier comments and history/,
+    )
     .waitFor();
   // Cancel keeps the task where it was.
   await ask.getByRole('button', {name: 'Cancel'}).click();
@@ -1249,6 +1251,10 @@ test('a project’s chats share what they know only once it is ticked, and its r
   await choice.selectOption({label: 'Same as the group (Aurora field guide · shares)'});
   const ask = topic.getByRole('dialog', {name: 'Share with the chats in Aurora field guide?'});
   await ask.getByText('Everyone allowed in any of these chats will see what the others know.').waitFor();
+  // Joining a project shows the chat its task list, so the question says so too (ADR-0243).
+  await ask
+    .getByText('Everyone allowed in this chat will see and change every task on the list of Aurora field guide.')
+    .waitFor();
   await ask.getByRole('button', {name: 'Cancel'}).click();
   assert.equal(await choice.inputValue(), '__none');
   await choice.selectOption({label: 'Same as the group (Aurora field guide · shares)'});

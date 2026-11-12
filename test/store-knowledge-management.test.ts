@@ -153,6 +153,25 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).sharing_projects,[]);
    assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
 
+   // A project with tasks is joined only with the owner's review too: a chat there sees every task on its list (ADR-0243).
+   const onList=await s.tasks.create(owner,{operation_id:key+':listed-task',title:'Synthetic listed task',notes:'Synthetic private note',scope:plain.id});
+   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'automatic organization never moves a chat into a project with tasks');
+   const join=await persist('join-tasks',{kind:'project_assignment',reason:'Synthetic: the topic serves the plain project',
+    payload:{space_id:inheritedTopic,mode:'assigned',project_id:plain.id,expected_revision:0}} as any,sharingSource);
+   assert.equal(join.state,'review');
+   const joinView=await s.knowledge.proposal(owner,join.id);
+   assert.deepEqual(joinView.task_projects,[{id:plain.id,name:key+':plain'}]);assert.deepEqual(joinView.sharing_projects,[]);
+   const trashed=await s.tasks.update(owner,onList.id,{operation_id:key+':listed-trash',expected_revision:onList.revision,trashed:true});
+   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'a task in the trash still shows on the list');
+   // Leaving a project with tasks needs no review, and a topic that would follow its group into one says so.
+   const kept=await s.tasks.create(owner,{operation_id:key+':kept-task',title:'Synthetic task on the group\'s list',scope:created.id});
+   await s.tasks.remove(owner,trashed.id);
+   assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
+   assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[]);
+   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).task_projects,[{id:created.id,name:current.name}]);
+   const gone=await s.tasks.update(owner,kept.id,{operation_id:key+':kept-trash',expected_revision:kept.revision,trashed:true});await s.tasks.remove(owner,gone.id);
+   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).task_projects,[]);
+
    // Clean undo restores the prior assignment and archives, rather than erases, the created project.
    delegation=null;await save({scopes:[other]},'other');const otherSource=await capture(other),otherDraft=await persist('other',proposal(otherSource,'other',other),otherSource,other);
    assert.equal((await s.knowledge.process('proposal:'+otherDraft.id)).state,'applied');

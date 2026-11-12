@@ -538,7 +538,8 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
       await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
         VALUES($1,'available','supergroup',$2,NULL,$3,NULL,now()) ON CONFLICT DO NOTHING`,[chat,title,forumChat]);
     await stores.control.query("INSERT INTO telegram_topic_registrations(chat_id,topic_id,name) VALUES($1,7,'Venue')",[forum]);
-    const seenIn='👥 Seen in “Plans team” › Venue, “Launch team”';
+    // Chats added to the project later see the list too, so every card says so (ADR-0243).
+    const seenIn='👥 Seen in “Plans team” › Venue, “Launch team”. Chats you add to this project later will see it too.';
 
     // A new task for the launch list: one card, the reply to the request, naming both chats and showing the task exactly.
     const turn=await ask('Add booking the venue to the launch list'),chat=await actor(turn.id);

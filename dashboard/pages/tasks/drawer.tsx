@@ -117,14 +117,14 @@ const ids = (items: {id: string}[]) => items.map(item => item.id).sort();
 const listed = (names: string[]) =>
   names.length < 2 ? (names[0] ?? '') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
 
-/** Who sees a task moved into a project's list from now on, and what stays private. `under` counts every task
- * under it, archived and in the trash too, as they all move with it. */
+/** Who sees a task moved into a project's list from now on, chats added to the project later included, and what stays
+ * private. `under` counts every task under it, archived and in the trash too, as they all move with it. */
 export function joinNotice(scope: Scope, groupName: (space: string) => string, under: number): string {
   const chats = (scope.chats ?? []).map(groupName);
   const what = under ? `this task and the ${under} ${under === 1 ? 'task' : 'tasks'} under it` : 'this task';
   const kept = 'Earlier comments and history, attached messages and the columns you haven’t shared stay private.';
   return chats.length
-    ? `People in ${listed(chats)} will see ${what} from now on. ${kept}`
+    ? `People in ${listed(chats)} will see ${what} from now on, and so will chats you add to this project later. ${kept}`
     : `No chat is in this project yet. Chats you add to it later will see ${what}. ${kept}`;
 }
 

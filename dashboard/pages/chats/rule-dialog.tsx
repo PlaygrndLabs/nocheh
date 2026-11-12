@@ -24,6 +24,12 @@ export type Rule = {
 /** Shown wherever the owner turns on, or sees, a project whose chats share what they know. */
 export const projectSharingWarning = 'Everyone allowed in any of these chats will see what the others know.';
 
+/** Shown wherever a chat joins a project: everyone allowed there sees and changes the project's task list (ADR-0243). */
+export const projectTasksWarning = (chat: string, projects: string[]) =>
+  `Everyone allowed in ${chat} will see and change every task on the ${projects.length > 1 ? 'lists' : 'list'} of ` +
+  (projects.length < 2 ? (projects[0] ?? '') : projects.slice(0, -1).join(', ') + ' and ' + projects.at(-1)) +
+  '.';
+
 export const modeText: Record<Rule['mode'], {label: string; hint: string}> = {
   approved: {label: 'I approve each text', hint: 'You write or check the exact text before the chat can use it.'},
   filtered: {
