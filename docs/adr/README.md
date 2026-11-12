@@ -81,6 +81,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Owner recall spans every chat Nocheh serves; each group has its own memory audience, and its topics share it unless `TELEGRAM_TOPIC_MEMORY=topic` ([0030](0030-configurable-space-memory.md), [0135](0135-group-topics-share-memory.md)).
 - Relationships never grant access; the owner approves one-time or lasting fact grants per group or topic ([0057](0057-memory-relationship-access-map.md)); a project grants access only while its chats share what they know ([0226](0226-a-project-can-share-what-its-chats-know.md)).
 - A grant, its follow-up message and its workflow request commit together; delivery re-checks the exact grant; replays are serialized and keep expiry; an unstarted handoff resumes on an exact owner replay ([0093](0093-atomic-memory-approval-followups.md), [0094](0094-current-memory-authority-at-delivery.md), [0095](0095-recover-unstarted-memory-handoffs.md), [0096](0096-serialize-memory-decision-replays.md)).
+- Only groups and their topics share, are shared with or join a project; every other chat, the owner's included, counts as private and fails closed. Suggestions skip facts with private evidence, one-time access posts once now, lasting access posts only when chosen, and every share names where the fact came from and who will see it ([0242](0242-private-chats-stay-out-of-group-sharing.md)).
 
 ### Actions and approvals
 
@@ -122,7 +123,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The owner's tasks live in the control store as personal or project lists, with links, tags and Notion-like fields ([0160](0160-owner-task-list.md), [0164](0164-task-lists-links-and-tags.md), [0167](0167-tasks-like-a-notion-table.md)).
 - The agent proposes knowledge changes; delegated project creation and chat assignment apply later, with receipts and inbox review ([0091](0091-bounded-agent-knowledge-organization.md)).
 - A project has its own role and skills; a chat's role wins, and skills stack ([0196](0196-projects-have-their-own-role-and-skills.md)).
-- A project's chats share what they know only when the owner ticks it on the project, through rules the project keeps; a chat can be left out, private chats never take part, and automatic organization never moves a chat into or out of such a project ([0226](0226-a-project-can-share-what-its-chats-know.md)).
+- A project's chats share what they know only when the owner ticks it on the project, through rules the project keeps; a chat can be left out, private chats never take part, and automatic organization never moves a chat into or out of such a project ([0226](0226-a-project-can-share-what-its-chats-know.md)); a private chat never joins any project ([0242](0242-private-chats-stay-out-of-group-sharing.md)).
 
 ### Imports
 
