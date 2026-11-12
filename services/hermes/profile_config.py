@@ -50,7 +50,7 @@ def preferences(config):
     return result
 
 
-MANAGED = ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'prompt_caching', 'terminal', 'code_execution', 'tool_output',
+MANAGED = ['model', 'plugins', 'fallback_models', 'tools', 'auxiliary', 'curator', 'memory.provider', 'memory.write_approval', 'prompt_caching', 'terminal', 'code_execution', 'tool_output',
            'compression.threshold_tokens', 'display.inline_images']
 # Hermes compacts a conversation once its prompt passes this many tokens. A background job's run of up to 50 minutes
 # reaches it; a reply turn, of at most 16 iterations, rarely does.
@@ -77,7 +77,9 @@ def resolved(config, model):
     config['plugins'] = {'enabled': ['nocheh']}
     config['fallback_models'] = []
     config.setdefault('tools', {})['tool_search'] = {'enabled': 'off'}
-    config.setdefault('memory', {}).update(memory_enabled=True, user_profile_enabled=True, provider='')
+    # Hermes would hold a note write for a person's approval in the profile's pending folder. No person
+    # can approve it there, and that folder goes with the turn's container.
+    config.setdefault('memory', {}).update(memory_enabled=True, user_profile_enabled=True, provider='', write_approval=False)
     # One-shot helper calls (session search, context compression, titles) keep the
     # OpenAI-compatible route: nothing in them is reused, so caching gains nothing.
     config['auxiliary'] = {task: {'provider': provider, 'model': model}
