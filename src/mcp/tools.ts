@@ -453,7 +453,11 @@ export const mcpTools:readonly McpTool[]=[
     'reminders are times like 2030-01-04T09:00 in settings.time_zone and are sent to the owner\'s private chat; repeat is '+
     '{"every":1,"unit":"day|week|month|year","weekdays":[1,4],"from":"due|done"} (weekdays only with week, 0 is Sunday) or null. '+
     'In the owner private conversation every list is available; in a chat that belongs to a project only that project\'s list is, and nothing else; '+
-    'elsewhere none.',
+    'elsewhere none. In a project\'s chat a task shows only as it is on that project\'s board: comments and history only from when it joined the list, '+
+    'only the columns the owner shares with project chats, no attached archived messages and no outside IDs such as Notion\'s; nothing is missing by error. '+
+    'In the owner private conversation, a change that a project\'s chats would see (adding a task to a project\'s list, moving one into it, a comment on '+
+    'one of its tasks, or changing anything on them but status, priority, dates, repeat, reminders, archive and trash) waits for the owner\'s card: the '+
+    'result has state proposed, and nothing changes until the owner approves it.',
     inputSchema:shape({action:{type:'string',enum:['list','get','add','update','comment']},state:{type:'string',enum:['open','done','dropped','all']},
       when:{type:'string',enum:['today','upcoming']},sort:{type:'string',enum:['due','priority','manual','created','updated']},
       id:{type:'string'},expected_revision:{type:'integer',minimum:1},title:{type:'string',maxLength:300},

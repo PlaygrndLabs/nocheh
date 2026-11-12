@@ -29,6 +29,8 @@ export type Task = {
   parent_id: string | null;
   position: number;
   project_id: string | null;
+  /** When it joined its project's list; that project's chats see its comments and history only from then. */
+  project_since: string | null;
   group_id: string | null;
   tags: string[];
   properties: Record<string, unknown>;
@@ -70,6 +72,8 @@ export type TaskProperty = {
   name: string;
   type: PropertyType;
   options: {id: string; name: string; color: Tone}[];
+  /** Project chats see this column on their project's tasks; otherwise it is private to the owner. */
+  shared?: boolean;
 };
 export type TaskSettings = {
   statuses: TaskStatus[];
@@ -77,8 +81,8 @@ export type TaskSettings = {
   properties: TaskProperty[];
   time_zone: string;
 };
-/** A list: 'personal', or a project's own list. */
-export type Scope = {id: string; name: string | null; open: number};
+/** A list: 'personal', or a project's own list, with the groups and topics that see it. */
+export type Scope = {id: string; name: string | null; open: number; chats?: string[]};
 export type TaskPage = {
   tasks: Task[];
   next: string | null;

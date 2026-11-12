@@ -23,11 +23,13 @@ const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLoc
 await initialize(pool);
 await ownerLock.create('preview-password');
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
-await pool.query('DROP TABLE IF EXISTS owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
+await pool.query('DROP TABLE IF EXISTS owner_task_requests,owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
 // Two synthetic projects, each with its own list beside the personal one.
 const garden='9'.repeat(64),studio='8'.repeat(64);
 for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
   await pool.query("INSERT INTO projects(id,name,state,revision) VALUES($1,$2,'active',1) ON CONFLICT(id) DO NOTHING",[id,name]);
+// The studio's list is seen in the Aurora planning group, so moving a task there names that group first.
+await pool.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES('-10042',$1,'assigned',1) ON CONFLICT(space_id) DO UPDATE SET project_id=$1,mode='assigned'",[studio]);
 // The same synthetic people as the Memory page's, so tasks can point to them.
 for(const [id,name] of [['1'.repeat(64),'Mira Chen'],['d1'.repeat(32),'Devon']])
   await pool.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person',$2,'active') ON CONFLICT(id) DO NOTHING",[id,name]);

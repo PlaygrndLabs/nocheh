@@ -1097,6 +1097,60 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await page.close();
 });
 
+test('moving a task into a project’s list names the chats that will see it first', async () => {
+  const {page, problems} = await open('tasks');
+  const title = 'Ask for the studio keys ' + Date.now();
+  await page.getByLabel('New task').fill(title);
+  await page.getByRole('button', {name: 'Add'}).click();
+  const added = page.getByRole('listitem').filter({hasText: title});
+  await added.getByRole('button', {name: `Edit “${title}”`}).click();
+  const panel = page.getByRole('dialog').filter({has: page.locator('#task-panel-list')});
+  await panel.locator('#task-panel-list').selectOption({label: 'Studio launch'});
+  await panel.getByRole('button', {name: 'Save'}).click();
+  const ask = page.getByRole('dialog', {name: 'Move to Studio launch?'});
+  await ask
+    .getByText(/People in Aurora planning will see this task from now on\. Earlier comments and history/)
+    .waitFor();
+  // Cancel keeps the task where it was.
+  await ask.getByRole('button', {name: 'Cancel'}).click();
+  await ask.waitFor({state: 'detached'});
+  assert.equal(await panel.locator('#task-panel-list').inputValue(), '8'.repeat(64), 'the choice stays unsaved');
+  await panel.getByRole('button', {name: 'Save'}).click();
+  await ask.getByRole('button', {name: 'Move'}).click();
+  await page.getByRole('status').filter({hasText: 'Task saved.'}).waitFor();
+  // A column stays private to the owner until it is shared with project chats.
+  await page.goto(origin + '/#settings?view=tasks');
+  await page.getByRole('button', {name: 'Add column'}).click();
+  const columns = page.getByRole('list', {name: 'Your columns'});
+  const shared = columns
+    .getByRole('listitem')
+    .last()
+    .getByRole('checkbox', {name: 'Project chats can see this column'});
+  assert.equal(await shared.isChecked(), false);
+  await columns
+    .getByRole('listitem')
+    .last()
+    .getByRole('textbox')
+    .first()
+    .fill('Effort ' + String(Date.now()).slice(-4));
+  await shared.check();
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.reload();
+  assert.equal(
+    await page
+      .getByRole('list', {name: 'Your columns'})
+      .getByRole('listitem')
+      .last()
+      .getByRole('checkbox', {name: 'Project chats can see this column'})
+      .isChecked(),
+    true,
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a project’s chats share what they know only once it is ticked, and its rules change on the project', async () => {
   const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
   const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});

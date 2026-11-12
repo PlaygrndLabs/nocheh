@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,learningInstruction,learningPrompt,promptKeys,promptProblem,withPrompts} from '../src/prompts.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,learningInstruction,learningPrompt,promptKeys,promptProblem,withPrompts} from '../src/prompts.js';
 import {brainSummary} from '../src/brain/brain.js';
 import {fixtureBrain,type FakeCall} from './fixture-brain.js';
 
@@ -44,6 +44,13 @@ test('approval card templates leave out a line whose value is missing and keep d
   assert.match(approvalLines('').failed_action,/\{reason\}/);assert.match(approvalLines('').not_run,/\{reason\}/);
   assert.equal(approvalLines('reason_sign_in: Sign in to Notion again.').reason_sign_in,'Sign in to Notion again.','the owner words why a tool did not finish');
   assert.equal(promptProblem('telegram.approval_card','No message here'),'prompt_placeholder_missing','the exact message is always shown');
+  // A project task's card always says what changes in which list, names the chats that see it and shows the change.
+  assert.equal(promptProblem('telegram.approval_task',approvalTask),null);
+  for(const missing of ['{change}','{chats}','{fields}'])
+    assert.equal(promptProblem('telegram.approval_task',approvalTask.replace(missing,'')),'prompt_placeholder_missing',missing);
+  assert.equal(fillTemplate(approvalTask,{change:'Add a task to the list of “P1”',chats:'“Group A”',private:null,fields:'Title: Book the room'}),
+    '📋 Add a task to the list of “P1”\n👥 Seen in “Group A”\n\nTitle: Book the room','a card with nothing private leaves that line out');
+  assert.match(approvalLines('').task_changed,/changed after it was asked/);
 });
 
 test('the GitHub copy has its own instruction text, card line and card answers, and the card keeps its other lines',()=>{

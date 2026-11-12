@@ -2,6 +2,21 @@
 
 <current>
 
+Members step 1: keep the owner's private side out of groups (owner, 2026-11-12: "I just
+review the tables and seems what I want if there is a important point or need my answer ask,
+else start build.").
+- Project task boards (items 8 and 4b; owner: "task access and edit should behave like data
+  access for project and groups"): a project's chat sees a task only as it is on that
+  project's board, from when it joined, with only the columns the owner shares, and its edits
+  keep what it cannot see; from the owner's private chat, a change those chats would see waits
+  for a card that names them, and a move into a list from the dashboard or mini app names them
+  first ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
+  [store](test/store-tasks.test.ts), [columns](test/task-settings.test.ts),
+  [dashboard](test/dashboard-pages.browser.mjs)). Status, priority, dates, order, archive and
+  trash apply without a card by the recommended default; owner confirmation pending. Pending:
+  live acceptance with a real project group, and task cards in the dashboard Inbox (decided
+  in Telegram only). The item 11 full-tester canary builds on this.
+
 Production move (owner, 2026-10-28): Nocheh moves to an always-on server as a
 clean install once the MVP checks pass (stuck notes-review fix, full tester on
 main, one clean day of use); dev-mode rules end at the move. Daily automatic

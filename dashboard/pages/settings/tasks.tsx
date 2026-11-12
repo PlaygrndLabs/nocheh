@@ -310,7 +310,7 @@ export function TaskSettingsPanel() {
       <Card>
         <CardHeader
           title="Your columns"
-          description="Extra fields every task can have, like a column in a Notion table: text, a number, choices, a date, a checkbox, a link or people. Removing a column, or one of its choices, clears it from tasks."
+          description="Extra fields every task can have, like a column in a Notion table: text, a number, choices, a date, a checkbox, a link or people. Removing a column, or one of its choices, clears it from tasks. A column stays private to you unless you let project chats see it."
         />
         {!!value.properties.length && (
           <ul className="mt-3 divide-y divide-line border-t border-line" aria-label="Your columns">
@@ -357,6 +357,15 @@ export function TaskSettingsPanel() {
                       <Trash2 aria-hidden />
                     </Button>
                   </div>
+                  <label className="flex items-center gap-2 text-[13px]">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-[var(--accent)]"
+                      checked={!!property.shared}
+                      onChange={event => change({shared: event.target.checked})}
+                    />
+                    Project chats can see this column
+                  </label>
                   {choices && (
                     <div
                       className="flex flex-wrap items-center gap-1.5"
@@ -437,6 +446,7 @@ export function TaskSettingsPanel() {
                     name: '',
                     type: 'text',
                     options: [],
+                    shared: false,
                   },
                 ],
               })

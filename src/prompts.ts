@@ -12,13 +12,13 @@ import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_texts','telegram.action_continued','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
+  'telegram.approval_task','telegram.approval_texts','telegram.action_continued','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.action_continued':['{actions}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}'],'background.machine':['{steps}']};
 
 /** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
@@ -68,6 +68,10 @@ export const learningPrompt=(
  * the fields fold into one quote that opens on a tap, unless they are a command. */
 export const approvalCard='📨 Send to {destination}\n💬 Asked in {origin}\n\n{text}';
 export const approvalAction='⚙️ {kind}\n📝 {summary}\n💬 Asked in {origin}\n\n{arguments}';
+/** The card for a change asked in the owner's private chat that a project's chats would see: {change} says what changes
+ * in which project's list, {chats} names every group and topic that sees that list, {private} what stays private, and
+ * {fields} shows exactly what those chats will see, field by field (ADR-0243). */
+export const approvalTask='📋 {change}\n👥 Seen in {chats}\n🔒 {private}\n\n{fields}';
 /** One "name: text" line for each button, outcome and notice on an approval card. */
 export const approvalTexts=[
   'approve: ✅ Approve','reject: ❌ Reject','allow_once: ✅ Allow once','allow_here: 🕒 Allow where asked, 12 hours','allow_always: 📌 Always allow this site where asked',
@@ -98,7 +102,13 @@ export const approvalTexts=[
   'list_partly_rejected: ❌ Rejected {done} of {count}. The rest were already decided; see the dashboard Inbox.',
   'only_owner: Only the owner can approve or reject this.','only_requester: Only the person who asked or the owner can approve or reject this.',
   'changed: This request changed or no longer exists. Review it in the dashboard Inbox.',
-  'decided: This request was already decided or can no longer change. Review it in the dashboard Inbox.'].join('\n');
+  'decided: This request was already decided or can no longer change. Review it in the dashboard Inbox.',
+  'task_add: Add a task to the list of {project}','task_move: Move a task into the list of {project}','task_change: Change a task in the list of {project}',
+  'task_comment: Comment on a task in the list of {project}','task_no_chats: no chat yet. Chats you add to this project later will see it too.',
+  'task_private_move: Its earlier comments and history, the archived messages attached to it, its IDs in outside tools such as Notion and the columns you have not shared stay private.',
+  'task_private_parts: The archived messages attached to it and the columns you have not shared stay private.',
+  'task_done: ✅ Approved and changed.','task_rejected: ❌ Rejected. Nothing changed.',
+  'task_changed: 🚫 Not changed: the task, its list or the chats that see it changed after it was asked. Ask again if you still want it.'].join('\n');
 /** Starts an operation's follow-up turn in the chat that asked, as a reply to the asking message. {actions} lists ids, tools and states only. */
 export const actionContinued=['[Operations ended] Operations you asked for while answering this conversation have ended:','{actions}',
   'Read each one with mcp__nocheh__action_status, then give the answer it was for, here, in the language of the conversation. If one was rejected, failed or could not be confirmed, say so in one short line instead.',
@@ -106,7 +116,8 @@ export const actionContinued=['[Operations ended] Operations you asked for while
 export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_always'|'allow_command'|'rule_note'|'allowed_here'|'allowed_always'|'private_chat'|'unnamed_group'|'topic'|'unnamed_topic'|'general_topic'|'sent'|'sending'|'done'|'approved'|'failed'|'rejected'|'rejected_action'|'cancelled'|
   'kind_shell'|'kind_browser'|'kind_tools'|'details'|
   'failed_action'|'unsure'|'not_run'|'read_closed'|'marked_ran'|'marked_not_run'|'marked_sent'|'marked_not_sent'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
-  'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop';
+  'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
+  'task_add'|'task_move'|'task_change'|'task_comment'|'task_no_chats'|'task_private_move'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
   return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;
@@ -193,7 +204,7 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'steps: Plan:','machine_off: 🚫 Withdrawn: its machine was turned off or changed. Nothing runs.'].join('\n');
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine};
 

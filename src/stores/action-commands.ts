@@ -2,8 +2,8 @@ import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {approvalAction,approvalCard,approvalLines,fillTemplate,labeledLines,ownerPrompts,problemButtons,type ApprovalText} from '../prompts.js';
-import {controls,cut,entityLimit,exactJson,heading,linked,operationCard,operationText,type Link,type OperationText} from '../action-text.js';
+import {approvalAction,approvalCard,approvalLines,approvalTask,fillTemplate,labeledLines,ownerPrompts,problemButtons,type ApprovalText} from '../prompts.js';
+import {controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
 import {followUpLeft} from './action-continuations.js';
 import {evaluate} from '../security/store.js';
@@ -13,8 +13,9 @@ import type {SourceAccessRepository} from './access.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import {closedStates,type BackgroundJobRepository} from './background-jobs.js';
+import type {TaskRepository} from './tasks.js';
 
-type ActionKind='telegram'|'controlled'|'background'|'list';
+type ActionKind='telegram'|'controlled'|'background'|'list'|'task';
 /** One card of a job's waiting changes, as frozen when it was sent. */
 type ListCard={id:string;fingerprint:string;members:[string,string][];long?:number};
 // Telegram allows 64 bytes of button data: a marker, the choice (approve, deny, stop a job, or approve and
@@ -95,7 +96,7 @@ export function telegramLink(chat:string,username:string|null,path:(string|null|
  * it was asked, where that person or the owner decides it. */
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
-    readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository){}
+    readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository,readonly tasks?:TaskRepository){}
   private async approval(input:Record<string,unknown>,timeout=15000) {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
@@ -114,7 +115,7 @@ export class ActionCommandRepository {
   private async texts() {
     const prompts=await ownerPrompts(this.access.stores.control);
     return {card:prompts['telegram.approval_card']??approvalCard,action:prompts['telegram.approval_action']??approvalAction,
-      line:approvalLines(prompts['telegram.approval_texts'])};
+      task:prompts['telegram.approval_task']??approvalTask,line:approvalLines(prompts['telegram.approval_texts'])};
   }
   /** A group's name, public username, topic flag and latest message, from its captured messages or else the owner's last refresh. */
   private async chat(chat:string) {
@@ -236,6 +237,7 @@ export class ActionCommandRepository {
   /** Offer buttons on a new pending action to whoever reviews it; best
    * effort, the owner's Inbox always remains. */
   async offer<T extends Record<string,any>>(kind:ActionKind,result:T):Promise<T> {
+    if(kind==='task')return this.offerTask(result);
     const owner=this.access.policy().owner_id;
     if(result?.state!=='proposed'||typeof result.id!=='string'||!this.call||!owner)return result;
     if(kind==='background')return this.offerJob(result);
@@ -283,6 +285,53 @@ export class ActionCommandRepository {
         'Approve and Reject buttons for this exact request were sent to you in this chat. It waits for your decision; it can also be reviewed in the dashboard Inbox.'+
         (follows?' Once it has run, its answer follows here as a reply.':'')};
     }catch(error){if(error instanceof HttpError)return result;throw error;}
+  }
+  /**
+   * A task card: what changes in which project's list, every group and topic that sees that list by name, what stays
+   * private, then exactly what those chats will see. Null when it does not fit one Telegram card (ADR-0243).
+   */
+  private async taskCard(id:string) {
+    const texts=await this.texts(),urls:string[]=[],owner={admin:true,scope:null};
+    const line=Object.fromEntries(Object.entries(texts.line).map(([key,value])=>[key,value.replace(controls,'')])) as Record<ApprovalText,string>;
+    const mark:Mark=(label,url)=>url?`\u0001${urls.push(url)-1}\u0002${label}\u0003`:label;
+    // A group or topic among the task's fields is named in plain words, as every field's value is.
+    const space=async(chat:string)=>{const [group,topic]=chat.split('/topic/'),facts=await this.chat(group!),name=facts.title??line.unnamed_group;
+      return topic?`${name} › ${await this.topicName(group!,topic)??line.unnamed_topic}`:name;};
+    const request=await this.tasks!.request(owner,id,space);
+    const chats=[];for(const chat of request.chats){const [group,topic]=chat.split('/topic/');chats.push(await this.where(group!,line,mark,{topic,showTopic:true}));}
+    const project=`“${(request.project??'').replace(controls,'')}”`,slot='\u0001\u0003';
+    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project}),chats:chats.length?chats.join(', '):line.task_no_chats,
+      private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
+    const card=linked(filled.replaceAll(slot,()=>fields(request.fields)),urls);
+    if(card.text.length>cardLimit-outcomeRoom||card.links.length>entityLimit)return null;
+    return {...card,line,state:request.state,fingerprint:request.fingerprint,source:request.source_reference};
+  }
+  /** Approve and Reject buttons on a held task change, in the owner's private chat; there, the reply to the request. */
+  private async offerTask<T extends Record<string,any>>(result:T):Promise<T> {
+    const owner=this.access.policy().owner_id,id=result?.request_id;
+    if(result?.state!=='proposed'||typeof id!=='string'||!this.tasks)return result;
+    try {
+      const card=await this.taskCard(id);
+      if(!card){await this.tasks.refuse({admin:true,scope:null},id);return {...result,state:'refused',error:'task_card_too_long',
+        note:'Nothing changed: this change is too long to show exactly on a Telegram card. Tell the owner they can make it in the dashboard\'s Tasks page.'};}
+      const unsent={...result,message:'The card for this change could not be posted, so nothing changed. If no card shows up, the owner can make it in the dashboard\'s Tasks page.'};
+      if(card.state!=='proposed')return result;
+      if(!owner||!this.call)return unsent;
+      const asked=await this.asked(card.source),here=asked&&asked.chat===owner?asked.message??null:null;
+      const sent=await this.approval({kind:'card',chat_id:owner,...(here?{reply_to:here}:{}),id,text:card.text,links:card.links,
+        buttons:[[card.line.approve.slice(0,40),'na'+id.slice(0,40)+card.fingerprint.slice(0,16)],[card.line.reject.slice(0,40),'nd'+id.slice(0,40)+card.fingerprint.slice(0,16)]]});
+      if(sent?.state!=='done')return unsent;
+      return {...result,message:here?
+        'A card with Approve and Reject buttons for this exact change was posted here as the reply to it. It names the project\'s list, every chat that sees that list and what stays private, and shows the change exactly, so it is the whole answer: do not repeat or announce it; return [NO_REPLY] unless something else needs an answer. Nothing changes until the owner approves.':
+        'Approve and Reject buttons for this exact change were sent to the owner\'s private Telegram chat, on a card that names the chats that will see it. Nothing changes until the owner approves; say so briefly.'};
+    }catch(error){if(error instanceof HttpError)return result;throw error;}
+  }
+  /** A decided task card keeps its text and says how it ended. */
+  private async settleTask(id:string,seen?:Seen) {
+    const owner=this.access.policy().owner_id;if(!owner||!this.tasks)return;
+    const card=await this.taskCard(id);if(!card)return;
+    const outcome=card.state==='done'?card.line.task_done:card.state==='rejected'?card.line.task_rejected:card.state==='changed'?card.line.task_changed:null;
+    if(outcome)await this.approval({kind:'settle',chat_id:owner,id,text:`${card.text}\n\n${outcome}`,links:card.links,...seenIn(seen,owner)});
   }
   /** Where a job's card goes: the chat and topic where it was asked, or the owner's private chat when the owner approves a
    * member's job or any machine job; there it answers the request when it was asked there. */
@@ -414,6 +463,7 @@ export class ActionCommandRepository {
     try {
       if(kind==='background')return await this.settleJob(id,seen);
       if(kind==='list')return await this.settleList(id,seen);
+      if(kind==='task')return await this.settleTask(id,seen);
       // An operation on a list card shows on that card.
       const listed=kind==='controlled'?await this.listCard({member:id}):null;
       if(listed)return await this.settle('list',listed.card.id);
@@ -437,7 +487,8 @@ export class ActionCommandRepository {
       UNION ALL SELECT 'controlled',id,fingerprint FROM controlled_actions WHERE left(id,40)=$1
       UNION ALL SELECT 'background',id,fingerprint FROM background_jobs WHERE left(id,40)=$1
       UNION ALL SELECT 'list',c->>'id',c->>'fingerprint' FROM background_jobs j CROSS JOIN LATERAL jsonb_array_elements(j.changes) c
-        WHERE j.changes IS NOT NULL AND left(c->>'id',40)=$1`,[data[2]])).rows;
+        WHERE j.changes IS NOT NULL AND left(c->>'id',40)=$1
+      UNION ALL SELECT 'task',id,fingerprint FROM owner_task_requests WHERE left(id,40)=$1`,[data[2]])).rows;
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
     // Telegram fills in the pressed message; only one that carries this very button names this card's message.
     const carries=(query.message?.reply_markup?.inline_keyboard??[]).flat().some((button:any)=>button?.callback_data===query.data);
@@ -458,8 +509,16 @@ export class ActionCommandRepository {
     const body={id:action.id,fingerprint:action.fingerprint,decision,operation_id:'telegram-button:'+source.id,...(allow?{allow}:{})};
     let reply:string;
     try {
-      const result=kind==='telegram'?await this.telegram.decide(owner,body,source):await this.tools.decide(owner,body,source);
-      reply=result.state==='rejected'?(kind==='telegram'?line.rejected:line.rejected_action):allow==='here'?line.allowed_here:allow?line.allowed_always:line.approved;
+      if(kind==='task') {
+        // Only the owner decides a task card; its change is made as the owner's own, from their private chat (ADR-0243).
+        if(!this.tasks){await answer(line.changed);return true;}
+        const result=await this.tasks.decide(owner,body);
+        reply=result.state==='rejected'?line.task_rejected:result.state==='changed'?line.task_changed:line.task_done;
+      }
+      else {
+        const result=kind==='telegram'?await this.telegram.decide(owner,body,source):await this.tools.decide(owner,body,source);
+        reply=result.state==='rejected'?(kind==='telegram'?line.rejected:line.rejected_action):allow==='here'?line.allowed_here:allow?line.allowed_always:line.approved;
+      }
     }catch(error) {
       if(!(error instanceof HttpError)||![400,403,404,409].includes(error.status))throw error;
       reply=kind==='controlled'&&outdated.has(error.code)?fillTemplate(line.not_run,{reason:line.reason_changed}):line.decided;
