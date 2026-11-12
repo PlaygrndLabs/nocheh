@@ -129,13 +129,15 @@ vars() {
 }
 # Whether process $1 carries tag $2 (0), only names it in its command line (1), shows it nowhere (2), or is gone (3).
 # ps takes as many words for the command line as the program had arguments, so a program that wrote a longer name over
-# them (Node's process.title) shows the start of its environment there: the tag counts anywhere where the first argument
-# no longer starts with the program's name (ucomm) and a NAME=value word follows it at once.
+# them (Node's process.title) shows the start of its environment there. For one left to launchd (a daemon), the tag
+# counts anywhere where the first argument no longer starts with the program's name (ucomm) and a NAME=value word
+# follows it at once; a program the owner runs has their shell above it.
 has() {
   local a b n c
   a=$(ps -ww -o command= -p "$1") && b=$(ps -E -ww -o command= -p "$1") && [ "$a" != '<defunct>' ] || return 3
   printf '%s\n' "$b" | tr ' ' '\n' | grep -qxF -- "$2" || return 2
   if [ "${b:0:${#a}}" = "$a" ]; then printf '%s\n' "${b:${#a}}" | tr ' ' '\n' | grep -qxF -- "$2" && return 0; fi
+  [ "$(ps -o ppid= -p "$1" | awk '{print $1}')" = 1 ] || return 1
   n=$(ps -ww -o comm= -p "$1") && c=$(ps -o ucomm= -p "$1" | awk 'NR==1 {sub(/[ \t]+$/, ""); print}') || return 1
   [ -n "$n" ] && [ -n "$c" ] && [ "${a:0:${#n}}" = "$n" ] || return 1
   case $(printf '%s\n' "$n" | awk 'NR==1 {sub(/.*\//, ""); sub(/^-/, ""); print}') in "$c"*) return 1;; esac
@@ -148,7 +150,7 @@ shows() {
   ! ps -E -ww -o command= -p "$1" | tr ' ' '\n' | grep -qxF -- "$2"
 }
 hits() {
-  local tag=$1 file=$2 e d p f v w rest dirs all ids table= marked= tagged= plain=
+  local tag=$1 file=$2 e d p f v w rest dirs all table= marked= tagged= plain=
   if [ -n "$proc" ]; then
     for e in /proc/[0-9]*; do
       p=${e#/proc/}
@@ -173,11 +175,11 @@ hits() {
     table=$(printf '%s\n' "$table" | awk '$3 !~ /^Z/ {print $1, $2}')
     # ps -E prints each command line, then the environment; where a command line spans lines (macOS's ps prints none
     # that do), one may start like another process's. Each process that shows the tag is checked on its own, and where
-    # one shows it nowhere, or is not in the table and gone, the line was another's: then every process is.
-    all= ids=" $(printf '%s\n' "$table" | awk '{printf "%s ", $1}')"
+    # one shows it nowhere, the line was another's: then every process is. One that is gone by then is skipped.
+    all=
     for p in $(ps -E -ww -x -U "$u" -o pid= -o command= | awk -v t="$tag" '$1 ~ /^[0-9]+$/ {p=$1} {for (i=1; i<=NF; i++) if ($i==t) {print p; next}}'); do
       has "$p" "$tag"
-      case $? in 0) tagged="$tagged $p";; 2) all=1;; 3) case $ids in *" $p "*) ;; *) all=1;; esac;; esac
+      case $? in 0) tagged="$tagged $p";; 2) all=1;; esac
     done
     if [ -n "$all" ]; then for p in $(printf '%s\n' "$table" | awk '{print $1}'); do ! has "$p" "$tag" || tagged="$tagged $p"; done; fi
     # Only the programs above one with the tag, up to the marker's holders and what they started, matter: each is asked
