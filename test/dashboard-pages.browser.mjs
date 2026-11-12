@@ -367,6 +367,39 @@ test('a group’s role and skills are edited on its chat page and saved from the
   await page.close();
 });
 
+test('the private chat and groups each start from their own default role and skills', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const mine = page.locator('section', {
+    has: page.getByRole('heading', {name: 'Role and skills in your private chat'}),
+  });
+  const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills in groups'})});
+  await mine.getByText('Your private chat can use these.').waitFor();
+  await groups.getByText('Every group and topic can use these.').waitFor();
+  assert.equal(await mine.getByRole('textbox', {name: 'Name'}).inputValue(), 'weekly-menu');
+  assert.equal(
+    await groups.getByRole('textbox', {name: 'Name'}).count(),
+    0,
+    'groups never start from the private chat’s skills',
+  );
+  const saved = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/memory/persona'))
+      saved.push(request.postDataJSON().scope);
+  });
+  await groups.getByRole('textbox', {name: 'Role'}).fill('You help each group plan its week.');
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByText('1 unsaved change').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.deepEqual(saved, ['default:groups']);
+  await page.reload();
+  await groups.getByRole('textbox', {name: 'Role'}).waitFor();
+  assert.equal(await groups.getByRole('textbox', {name: 'Role'}).inputValue(), 'You help each group plan its week.');
+  assert.equal(await mine.getByRole('textbox', {name: 'Role'}).inputValue(), '');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a page for a feature the connected assistant lacks says so instead of offering a retry', async () => {
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});
   await page.route(/\/api\/nocheh\/memory\/persona\?/, route =>

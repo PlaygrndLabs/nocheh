@@ -380,7 +380,7 @@ function ProjectDetail({
           <RoleAndSkills
             scope={'project:' + project.id}
             where={project.name}
-            description="Only you set these. Every chat in this project uses them, with the chat’s own on top. Defaults are in Settings › Assistant."
+            description="Only you set these. Every chat in this project uses them, on top of the default for groups, with the chat’s own on top. Defaults are in Settings › Assistant."
           />
           <ProjectKnowledge project={project} context={context} />
           {context.decisions.total > 0 && (

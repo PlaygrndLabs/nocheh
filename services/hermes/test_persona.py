@@ -40,7 +40,7 @@ class PersonaTests(unittest.TestCase):
 
     def test_removing_a_skill_deletes_its_folder(self):
         with tempfile.TemporaryDirectory() as folder:
-            path = persona.default_path(folder)
+            path = persona.default_path(folder, 'group')
             saved = persona.save(path, '', [COOKING, {**COOKING, 'name': 'groceries'}], persona.view(path)['revision'])
             persona.save(path, '', [COOKING], saved['revision'])
             self.assertEqual(sorted(p.name for p in (path / 'skills').iterdir()), ['weekly-menu'])
@@ -48,7 +48,7 @@ class PersonaTests(unittest.TestCase):
     def test_turn_profile_gets_chat_role_over_default_and_both_skill_sets(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            default, chat = persona.default_path(root), persona.chat_path(root, '-20')
+            default, chat = persona.default_path(root, 'group'), persona.chat_path(root, '-20')
             persona.save(default, 'Default role', [COOKING, {**COOKING, 'name': 'reminders', 'body': 'Default reminders.'}],
                          persona.view(default)['revision'])
             persona.save(chat, '', [{**COOKING, 'name': 'reminders', 'body': 'Group reminders.'}], persona.view(chat)['revision'])
@@ -84,7 +84,7 @@ class PersonaTests(unittest.TestCase):
         project = 'a' * 64
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            default, shared, chat = persona.default_path(root), persona.project_path(root, project), persona.chat_path(root, '-20')
+            default, shared, chat = persona.default_path(root, 'group'), persona.project_path(root, project), persona.chat_path(root, '-20')
             persona.save(default, 'Default role', [COOKING], persona.view(default)['revision'])
             persona.save(shared, 'Client project role', [{**COOKING, 'body': 'Project menu.'}, {**COOKING, 'name': 'done-marks',
                          'description': 'When deciding whether a task is finished.', 'body': 'A green check means done.'}],
@@ -115,6 +115,54 @@ class PersonaTests(unittest.TestCase):
             self.assertEqual(persona.read(other), {'role': '', 'skills': []})
             self.assertEqual((other / 'SOUL.md').read_text(), '')
 
+    def test_the_owners_default_loads_only_in_the_private_chat_and_groups_read_their_own(self):
+        menu = {**COOKING, 'name': 'menu', 'body': 'Group menu.'}
+        diary = {'name': 'diary', 'description': 'When the owner writes about their day.', 'body': 'PRIVATEMARK1 diary body.'}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            owner, groups = persona.default_path(root, 'owner'), persona.default_path(root, 'group')
+            self.assertEqual((owner.name, groups.name), ('nocheh-default', 'nocheh-default-groups'))
+            persona.save(owner, 'Private role PRIVATEMARK1', [diary], persona.view(owner)['revision'])
+            group = root / 'profiles' / Scopes.profile('-20:policy:3'); group.mkdir(parents=True)
+            private = root / 'profiles' / Scopes.profile('123:guard:3'); private.mkdir(parents=True)
+            persona.materialize(root, group, '-20', '', 'group')
+            persona.materialize(root, private, '123', '', 'owner')
+            self.assertEqual(persona.read(group), {'role': '', 'skills': []}, 'with no groups default a group gets nothing of the owner\'s')
+            self.assertEqual(persona.read(private), {'role': 'Private role PRIVATEMARK1', 'skills': [diary]})
+            persona.save(groups, 'Group role', [menu], persona.view(groups)['revision'])
+            persona.materialize(root, group, '-20', '', 'group')
+            persona.materialize(root, private, '123', '', 'owner')
+            self.assertEqual(persona.read(group), {'role': 'Group role', 'skills': [menu]})
+            self.assertEqual(persona.read(private), {'role': 'Private role PRIVATEMARK1', 'skills': [diary]}, 'a groups default never reaches the private chat')
+            unnamed = root / 'profiles' / Scopes.profile('-30:policy:1'); unnamed.mkdir(parents=True)
+            persona.materialize(root, unnamed, '-30')
+            self.assertEqual(persona.read(unnamed), {'role': 'Group role', 'skills': [menu]}, 'a turn with no audience reads the groups default')
+            for path in (group, unnamed):
+                text = ''.join(item.read_text(errors='replace') for item in path.rglob('*') if item.is_file())
+                self.assertNotIn('PRIVATEMARK1', text, 'the owner\'s default never lands in a group profile')
+            with self.assertRaisesRegex(ValueError, 'invalid_audience'): persona.default_path(root, 'member')
+            with self.assertRaisesRegex(ValueError, 'invalid_audience'): persona.materialize(root, group, '-20', '', 'everyone')
+
+    def test_a_groups_default_change_reinstalls_group_turns_and_leaves_the_private_chat_alone(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            owner, groups = persona.default_path(root, 'owner'), persona.default_path(root, 'group')
+            persona.save(owner, 'Private role', [], persona.view(owner)['revision'])
+            group = root / 'profiles' / Scopes.profile('-20:policy:3'); group.mkdir(parents=True)
+            private = root / 'profiles' / Scopes.profile('123:guard:3'); private.mkdir(parents=True)
+            persona.materialize(root, group, '-20'); persona.materialize(root, private, '123', '', 'owner')
+            persona.save(groups, 'Group role', [COOKING], persona.view(groups)['revision'])
+            with patch.object(persona, '_refresh_prompts') as refresh:
+                persona.materialize(root, group, '-20'); persona.materialize(root, private, '123', '', 'owner')
+            refresh.assert_called_once_with(group)
+            self.assertEqual(persona.read(private)['role'], 'Private role')
+
+    def test_only_the_owners_private_chat_is_the_owner_audience(self):
+        from .scopes import Scope
+        self.assertEqual(persona.audience(Scope('123', '123', True, 'p', '123/topic/4')), 'owner')
+        for scope in (Scope('-20', '123', False, 'p', '-20'), Scope('-20', '123', False, 'p', '-20/topic/4'), Scope('-20', '5', False, 'p', '-20')):
+            self.assertEqual(persona.audience(scope), 'group', 'the owner in a group, a topic and a member all read the groups default')
+
     def test_symlinked_role_or_skills_are_refused(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -125,6 +173,25 @@ class PersonaTests(unittest.TestCase):
 
 
 class PersonaTurnTests(unittest.TestCase):
+    def test_turn_preparation_reads_the_default_of_its_audience(self):
+        from .scopes import Scope
+        from .assistant_gateway import prepare_profile
+        claims = {'generation': '11111111-1111-1111-1111-111111111111', 'guard_epoch': 5, 'revision': 5}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for audience, role in (('owner', 'Private role'), ('group', 'Group role')):
+                path = persona.default_path(root, audience)
+                persona.save(path, role, [], persona.view(path)['revision'])
+            cases = [(Scope('-20', '123', False, Scopes.profile('-20'), '-20'), {}, 'Group role'),
+                     (Scope('-20', '5', False, Scopes.profile('-20'), '-20/topic/4'), {}, 'Group role'),
+                     (Scope('-20', '123', False, Scopes.profile('-20'), '-20'), {'logical_profile': 'job-1'}, 'Group role'),
+                     (Scope('123', '123', True, Scopes.profile('123'), '123'), {}, 'Private role'),
+                     (Scope('123', '123', True, Scopes.profile('123'), '123/topic/4'), {}, 'Private role'),
+                     (Scope('123', '123', True, Scopes.profile('123'), '123'), {'logical_profile': 'job-2'}, 'Private role')]
+            for scope, extra, role in cases:
+                profile = prepare_profile(root, Scopes.apply_revision(scope, {**claims, **extra}), 'fixture-model')
+                self.assertEqual(persona.read(profile)['role'], role, (scope.space, extra))
+
     def test_turn_prompt_uses_the_chats_role_and_lists_its_skills_without_skill_writing(self):
         from contextvars import copy_context
         from hermes_state import SessionDB
@@ -174,7 +241,7 @@ class PersonaTurnTests(unittest.TestCase):
         self.addCleanup(install_tool_search_policy())
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            default, chat = persona.default_path(root), persona.chat_path(root, '-20')
+            default, chat = persona.default_path(root, 'group'), persona.chat_path(root, '-20')
             persona.save(chat, 'You are role A.', [COOKING], persona.view(chat)['revision'])
             turn = root / 'profiles' / Scopes.profile('-20:policy:2'); turn.mkdir(parents=True)
             (turn / 'native-state').mkdir()

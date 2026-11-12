@@ -1,4 +1,4 @@
-/** Settings › Assistant: how much Nocheh may do without asking, its role and skills, the tools every chat may use, limits for each chat and for background jobs, the sealed box for jobs, and its built-in instructions. */
+/** Settings › Assistant: how much Nocheh may do without asking, its role and skills for your private chat and for groups, the tools every chat may use, limits for each chat and for background jobs, the sealed box for jobs, and its built-in instructions. */
 import {useEffect, useState} from 'react';
 import {RotateCcw} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
@@ -256,8 +256,15 @@ export function AssistantSettings() {
       <OwnerFreedom />
       <RoleAndSkills
         scope="default"
-        where="every chat"
-        description="Every chat starts from these. A chat’s own role replaces this one; set it on the chat’s page in Chats."
+        title="Role and skills in your private chat"
+        where="your private chat"
+        description="Your private chat starts from these. Nocheh never uses them in a group. The role on your chat’s page in Chats replaces this one."
+      />
+      <RoleAndSkills
+        scope="default:groups"
+        title="Role and skills in groups"
+        where="groups"
+        description="Every group and topic starts from these. People in the group read the answers Nocheh writes with them. A project’s or a group’s own role replaces this one."
       />
       <ToolSwitches
         space="*"

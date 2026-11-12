@@ -98,10 +98,11 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         <RoleAndSkills
           scope={space}
           where={where}
+          audience={group ? 'group' : 'owner'}
           description={
             group
-              ? 'Only you set these. Every topic in this group uses them, on top of its project’s if it has one. Defaults are in Settings › Assistant.'
-              : 'Only you set these, on top of its project’s if it has one. Defaults for every chat are in Settings › Assistant.'
+              ? 'Only you set these. Every topic in this group uses them, on top of its project’s if it has one. Defaults for groups are in Settings › Assistant.'
+              : 'Only you set these. The default for your private chat is in Settings › Assistant; groups never use either.'
           }
         />
       )}
