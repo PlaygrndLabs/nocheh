@@ -5,7 +5,8 @@ services/hermes/review_worker.py _review builds in isolated mode (plus the model
 security launcher adds), on a fresh copy of a profile template, against the relay in this folder.
 The arms use the same model, inputs and Hermes and differ only in the route:
 A Anthropic's OpenAI-compatible chat API (the route before prompt caching), B its Messages API as
-live, C as B with assistant_turn.reasoning returning {'enabled': False}. For claude-sonnet-5-5 Hermes
+live, C as B with assistant_turn.reasoning returning {'enabled': False}, D as B with the review's whole-prompt budget at
+WIDE_BUDGET tokens instead of services/hermes/native_memory.py's 24,000. For claude-sonnet-5-5 Hermes
 then sends thinking {type: between_tools} (agent/anthropic_adapter.py _thinking_kwargs): no thinking
 up front, but notes between tool calls still allowed, where B sends no thinking field and gets the
 API's default adaptive thinking. C is not "thinking off". Every run sees the live paths, HERMES_HOME
@@ -33,7 +34,7 @@ except ImportError:  # run as a script: python /replay/driver.py
 import services.hermes
 
 ROOT = Path(services.hermes.__file__).resolve().parents[2]
-ARMS = ('A', 'B', 'C')
+ARMS = ('A', 'B', 'C', 'D')
 KINDS = ('i', 'ii', 'iii')
 # Dollars per million tokens.
 PRICES = {'input': 2.0, 'output': 10.0, 'cache_read': 0.20, 'cache_write': 2.50}
@@ -45,6 +46,13 @@ NOTES = ('MEMORY.md', 'USER.md')
 OWNER = '1000000001'
 # Arm C: the live subprocess, with assistant_turn.reasoning returning {'enabled': False} (thinking between_tools, see above).
 THINKING_OFF = "import services.hermes.assistant_turn as turn;turn.reasoning=lambda credentials,prefs:{'enabled':False};turn.main()"
+# Arm D: the live subprocess, with the review's input budget (task_cfg max_input_tokens, which native_memory.native_review
+# passes to Hermes's spawn_background_review_thread) at WIDE_BUDGET: room for a refused write and its retry on full notes.
+WIDE_BUDGET = 48000
+WIDE = ("import agent.background_review as native, services.hermes.assistant_turn as turn;spawn=native.spawn_background_review_thread;"
+        f"native.spawn_background_review_thread=lambda *a,task_cfg=None,**k:spawn(*a,task_cfg={{**(task_cfg or {{}}),'max_input_tokens':{WIDE_BUDGET}}},**k);"
+        "turn.main()")
+COMMANDS = {'C': ['-c', THINKING_OFF], 'D': ['-c', WIDE]}
 # Run state a fresh profile does not have; the policy file stays in the template, which is the policy root.
 RUN_STATE = {'native-state', 'sessions', 'reviews', 'pending', 'plugins', 'state.db', '.memory.lock', '.turn.lock', '.foreground', 'nocheh-policy.yaml'}
 # The image's own environment, which the live turn container inherits besides the variables the launcher sets.
@@ -200,7 +208,7 @@ def execute(source, arm, repeat, run_id, args, server, prompts):
         wipe(home, user)
         prefs, dropped = prepare_home(Path(args.profile), home, source['event_id'])
         before = notes(home)
-        command = [sys.executable, '-c', THINKING_OFF] if arm == 'C' else [sys.executable, '-m', 'services.hermes.assistant_turn']
+        command = [sys.executable, *COMMANDS.get(arm, ['-m', 'services.hermes.assistant_turn'])]
         try:
             done = subprocess.run(command, input=json.dumps(review_body(source, arm, run_id, args, prefs, prompts)).encode(), stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, env=run_env(home, user, args.broker), timeout=220, cwd=ROOT)
@@ -251,11 +259,22 @@ def load(path):
     return [json.loads(line) for line in Path(path).read_text(encoding='utf-8').splitlines() if line.strip()]
 
 
-def actions(rows):
+def operations(rows):
     total = Counter()
     for row in rows:
         for key, count in (row.get('memory_ops') or {}).items(): total[key.split(':', 1)[0]] += count
+    return total
+
+
+def actions(rows):
+    total = operations(rows)
     return {'add': total['add'], 'replace': total['replace'] + total['patch'], 'remove': total['remove']}
+
+
+def prompt_tokens(row):
+    """The run's whole-prompt tokens per completed call: uncached, cache read and cache write, as the review budget counts them."""
+    calls = [call for call in row.get('call_detail') or [] if completed(call)]
+    return [sum((call.get('usage') or {}).get(key, 0) for key in ('input', 'cache_read', 'cache_write')) for call in calls]
 
 
 def model_calls(row):
@@ -271,13 +290,20 @@ def group(rows):
             'failures': sum(r['state'] != 'done' for r in rows),
             'refused': sum(count for r in rows for kind, count in (r.get('tool_results') or {}).items() if kind.startswith('refused')),
             'results': dict(sum((Counter(r.get('tool_results') or {}) for r in rows), Counter())),
+            'operations': dict(operations(rows)),
+            'failure_reasons': dict(Counter(f"{r.get('failure_reason') or r['state']}{':notes changed' if r['notes_changed'] else ''}"
+                                            for r in rows if r['state'] != 'done')),
+            'prompt_per_call': (lambda sizes: round(sum(sizes) / len(sizes)) if sizes else None)([size for r in rows for size in prompt_tokens(r)]),
             # Runs where the relay's completed calls and Hermes's count differ, such as a retry after an error in a stream.
             'counts_differ': sum(type(r.get('hermes_calls')) is int and r['hermes_calls'] != r['calls'] for r in rows),
             'cost': round(sum(r['cost'] for r in rows), 4),
             'thinking': dict(Counter(call.get('thinking') or 'none' for r in rows for call in r.get('call_detail') or [] if call.get('kind') == 'call'))}
 
 
-METRICS = {'multi_call_share': lambda r: model_calls(r) >= 2, 'notes_changed_share': lambda r: r['notes_changed']}
+METRICS = {'multi_call_share': lambda r: model_calls(r) >= 2, 'notes_changed_share': lambda r: r['notes_changed'],
+           'failed_share': lambda r: r['state'] != 'done'}
+# Paired comparisons, arm against base: the routes against the old one, the wider budget against the live route.
+PAIRS = (('B', 'A'), ('C', 'A'), ('D', 'B'))
 
 
 def by_source(rows, arm, metric):
@@ -317,12 +343,12 @@ def analyze(rows, seed=0, resamples=10000):
              'arm_kind': {f'{arm} {kind}': group(found) for arm in arms for kind in KINDS
                           if (found := [r for r in rows if r['arm'] == arm and r['kind'] == kind])},
              'paired': {}, 'agreement': {}}
-    for arm in ('B', 'C'):
-        if arm not in arms or 'A' not in arms: continue
+    for arm, against in PAIRS:
+        if arm not in arms or against not in arms: continue
         for metric in METRICS:
-            base, other = by_source(rows, 'A', metric), by_source(rows, arm, metric)
-            stats['paired'][f'{arm}-A {metric}'] = bootstrap([other[s] - base[s] for s in sorted(base) if s in other], seed, resamples)
-    for first, second in (('A', 'A'), ('B', 'A'), ('C', 'A')):
+            base, other = by_source(rows, against, metric), by_source(rows, arm, metric)
+            stats['paired'][f'{arm}-{against} {metric}'] = bootstrap([other[s] - base[s] for s in sorted(base) if s in other], seed, resamples)
+    for first, second in (('A', 'A'), ('B', 'A'), ('C', 'A'), ('D', 'B')):
         if first in arms and second in arms: stats['agreement'][f'{first}-vs-{second} notes changed'] = agreement(rows, first, second)
     return stats
 
@@ -339,6 +365,9 @@ def report(stats):
     lines.append('calls are Hermes\'s own count; differ: runs where the relay counted other completed calls')
     for name, row in stats['arms'].items():
         lines.append(f'{name} memory results: ' + (', '.join(f'{kind} x{count}' for kind, count in sorted(row['results'].items())) or 'none'))
+        lines.append(f'{name} operations asked: ' + (', '.join(f'{kind} x{count}' for kind, count in sorted(row['operations'].items())) or 'none'))
+        lines.append(f'{name} failed runs: ' + (', '.join(f'{kind} x{count}' for kind, count in sorted(row['failure_reasons'].items())) or 'none'))
+        lines.append(f"{name} prompt tokens per call: {row['prompt_per_call']}")
     for name, row in stats['arms'].items():
         lines.append(f'{name} thinking sent: ' + (', '.join(f'{setting} x{count}' for setting, count in sorted(row['thinking'].items())) or 'no calls'))
     lines.append(f"spent: ${sum(row['cost'] for row in stats['arms'].values()):.2f} over {sum(row['runs'] for row in stats['arms'].values())} runs")
@@ -377,7 +406,7 @@ def arguments(argv=None):
     if not all((args.sources, args.profile, args.out)) or args.context_length is None or args.context_length < 1:
         parser.error('--sources, --profile, --context-length and --out are required')
     args.arms = [arm.strip() for arm in args.arms.split(',') if arm.strip()]
-    if not args.arms or any(arm not in ARMS for arm in args.arms) or len(set(args.arms)) != len(args.arms): parser.error('--arms takes A, B and C')
+    if not args.arms or any(arm not in ARMS for arm in args.arms) or len(set(args.arms)) != len(args.arms): parser.error('--arms takes A, B, C and D')
     if args.repeats < 1: parser.error('--repeats must be at least 1')
     return args
 

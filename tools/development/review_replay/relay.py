@@ -302,13 +302,15 @@ REFUSALS = (('stop retrying', 'retry_cap'), ('would exceed', 'over_limit'), ('wo
             ('times in the matched entry', 'ambiguous'), ('changed since it was staged', 'stale'), ('drift', 'drift'),
             ('could not be read', 'read_failed'), ('refusing to empty', 'would_empty'), ('is required', 'missing_field'),
             ('cannot be empty', 'missing_field'), ('unknown action', 'invalid_args'), ('no-op', 'invalid_args'),
-            ('target', 'invalid_args'), ('disabled', 'unavailable'), ('not available', 'unavailable'))
+            ('target', 'invalid_args'), ("'replace' is not available", 'replace_removed'), ('disabled', 'unavailable'),
+            ('not available', 'unavailable'))
 
 
 def outcome(text):
     """What a memory tool result says happened: applied, staged, or refused and why (a kind, never the text)."""
-    try: result = json.loads(text)
-    except (TypeError, ValueError): return 'other'
+    # Hermes may append a note after the JSON, such as a tool loop warning.
+    try: result = json.JSONDecoder().raw_decode(text.lstrip())[0]
+    except (AttributeError, ValueError): return 'other'
     if not isinstance(result, dict): return 'other'
     if result.get('success') is True: return 'staged' if result.get('staged') else 'applied'
     error = str(result.get('error') or '').lower()

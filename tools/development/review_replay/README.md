@@ -6,9 +6,11 @@ Answers whether Hermes memory-notes reviews (`memory_review`) behave differently
 Anthropic's Messages API than on its OpenAI-compatible chat API, which they used before
 prompt caching ([ADR-0199](../../../docs/adr/0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md)),
 and whether the thinking setting explains a difference. Live data suggests fewer
-reviews make a second model call on the Messages API.
+reviews make a second model call on the Messages API. It also answers whether reviews
+on full notes fail because the review's input budget stops them.
 
-The same stored review inputs run, with the same model and the same Hermes, in three arms:
+The same stored review inputs run, with the same model and the same Hermes, in up to four
+arms (`--arms`, default A, B and C):
 
 - **A**: the OpenAI-compatible chat route, as before prompt caching.
 - **B**: the Messages API, as live today. Hermes sends no `thinking` field, so the API's
@@ -18,15 +20,22 @@ The same stored review inputs run, with the same model and the same Hermes, in t
   (`agent/anthropic_adapter.py` `_thinking_kwargs`): no thinking before the first answer,
   but thinking between tool calls is still allowed. C is not "thinking off", and C minus A
   is not the effect of thinking as such.
+- **D**: as B, with the review's whole-prompt input budget at 48,000 tokens instead of
+  the 24,000 `services/hermes/native_memory.py` gives Hermes's review. The budget counts
+  every prompt token of every call of a review, cached or not; at about 10,000 tokens a
+  call, 24,000 leaves room for three calls.
 
 For each arm, and each arm and kind of source, it reports the share of runs with two or
 more model calls, mean calls, the share of runs that changed Hermes native notes
 (`MEMORY.md`, `USER.md`), adds, replaces and removes the model asked for, failures,
-cost, and the thinking settings each arm actually sent. Calls are Hermes's own count, the
-figure live reports. It compares B and C with A per source (each source averaged over
-its repeats) with 10,000 seeded paired bootstrap resamples, 90% and 95% intervals, and
-reports how often two A runs of one source agree on changing the notes, against B and A
-and C and A.
+cost, and the thinking settings each arm actually sent. Per arm it also lists the
+operations by name (`patch` and the removed `replace` apart), what Hermes answered the
+model's memory writes (applied, staged, or refused and the kind of refusal), failed runs
+by cause and whether their notes changed, and the mean prompt tokens per call. Calls are
+Hermes's own count, the figure live reports. It compares B and C with A, and D with B,
+per source (each source averaged over its repeats) with 10,000 seeded paired bootstrap
+resamples, 90% and 95% intervals, and reports how often two A runs of one source agree on
+changing the notes, against B and A, C and A, and D and B.
 
 </purpose>
 
@@ -34,7 +43,9 @@ and C and A.
 
 - The review fragments it sends are stored guarded copies: the fragment texts of
   finished reviews whose guard mode was `on`. Jobs in guard mode `off` are skipped.
-- Every run starts with empty notes (`MEMORY.md`, `USER.md`, step 5), and the owner's
+- Every run starts with empty notes (`MEMORY.md`, `USER.md`, step 5), unless the
+  operator uses step 5's full-notes variant: then every run starts from a copy of the
+  owner's current notes, which reach the provider as they do in a live review. The owner's
   own prompt texts are not sent: every run uses the default prompts (step 6), the same
   in every arm.
 - It writes nothing to the live stack. The databases are read once with read-only
@@ -60,7 +71,8 @@ reaches the relay exactly as it reaches Nocheh's security broker
 (`services/hermes/security_transport.py`).
 
 Each run is the live review subprocess, `python -m services.hermes.assistant_turn`
-(arm C through a one-line wrapper that patches `reasoning` and calls `main()`), with the
+(arms C and D through a one-line wrapper that patches `reasoning`, or wraps Hermes's
+`spawn_background_review_thread` to set the budget, and calls `main()`), with the
 body `review_worker._review` builds in isolated mode plus the `model_context_length` the
 security launcher adds, and the launcher's environment: `HERMES_HOME=/profile`,
 `HOME=/tmp/home` (not made in advance), `NOCHEH_ISOLATED_TURN=1`, `GUARD_URL` and
@@ -105,7 +117,9 @@ state, failure codes, `hermes_calls` (Hermes's own `api_calls`, one per loop ite
 however often a call was retried: the count behind "2+ calls", as live reports it),
 `calls` (completed calls the relay forwarded on the arm's route: 200, a stop reason, no
 error inside the stream; used only when Hermes reports no count), calls that did not
-complete, errors inside streams, each call's counts, memory operations, note entries
+complete, errors inside streams, each call's counts, memory operations, what Hermes
+answered them (as a kind, read from the tool results the next call carries, so the last
+call's results are not seen), note entries
 before and after, whether each notes file changed, staged (held) memory changes in
 `pending/memory/`, tokens, cost, whether the cost is not fully known, and seconds. The
 summary counts the runs where the relay's and Hermes's counts differ.
@@ -126,10 +140,9 @@ Differences from live, by design:
 - Every run uses the default prompt texts; live, a review uses any the owner replaced.
 - Every run starts with empty notes, as a profile does at the start of each guard epoch
   (Hermes native notes stay in the earlier epoch's profile, ADR-0163); live, notes grow
-  within an epoch. A full template would push every arm into batches that also replace or
-  remove entries, which Hermes stages for approval instead of applying (and which use up
-  the review's input budget), hiding the decision this replay measures: whether a review
-  saves anything.
+  within an epoch. Full notes push a review into batches that remove or patch entries to
+  make room, which take more calls and can use up the review's input budget; step 5's
+  full-notes variant measures that case.
 - Live, a turn container's `/profile` is temporary apart from its mounted folders, so
   removes Hermes stages for approval vanish when the turn ends. The replay counts them.
 - The review's chat and user are a synthetic owner ID; no request carries them.
@@ -248,6 +261,15 @@ On the development machine that holds the live installation and its image. Place
    [ -f <state>/hermes/nocheh-policy.yaml ] && cp <state>/hermes/nocheh-policy.yaml "$REPLAY/work/in/template/"
    ```
 
+   Full-notes variant: copy the profile's current notes instead of emptying them, and
+   print their sizes only. Hermes's limits are 2,200 characters for `MEMORY.md` and 1,375
+   for `USER.md` unless `config.yaml` sets others.
+
+   ```sh
+   cp "$PROFILE/memories/MEMORY.md" "$PROFILE/memories/USER.md" "$REPLAY/work/in/template/memories/"
+   wc -m "$REPLAY/work/in/template/memories/"*.md
+   ```
+
 6. Prompts: every run uses the defaults, `{}`, so no owner-written text leaves the
    machine without its secret check. The arms stay comparable, since all use the same
    texts. Count (never print) how many of the review's texts the owner replaced, so the
@@ -289,9 +311,9 @@ On the development machine that holds the live installation and its image. Place
     replay --out /out/smoke --smoke --budget-dollars 2
     ```
 
-    Expect three runs in state `done`, or `failed` with cause `pending_tool_result` when
+    Expect four runs in state `done`, or `failed` with cause `pending_tool_result` when
     the review's input budget stopped it right after a tool call (live records that as
-    `empty_answer`); arm A's calls on `chat`, B's and C's on `messages`, all with status
+    `empty_answer`); arm A's calls on `chat`, B's, C's and D's on `messages`, all with status
     200, a call naming `memory` when the model asked to write a note, `GET .../models
     403` lines, no `/v1/guard 403` line, and `C thinking sent: between_tools`. Anything
     else is a reason to stop and look. Note the `spent:` line.
@@ -310,6 +332,9 @@ On the development machine that holds the live installation and its image. Place
     it skips the recorded runs and counts their cost toward the same cap. Never start
     over in a new folder with the full amount. To print the summary and statistics
     again, with the same bootstrap seed: `replay --analyze /out/full/results.jsonl --seed 1`.
+
+    For full notes, one repeat of the old route, the live route and the wider budget:
+    `replay --out /out/full-notes --arms A,B,D --repeats 1 --seed 2 --budget-dollars <cap>`.
 
 11. Keep the printed summary, then delete everything: `rm -rf "$REPLAY"; unset REPLAY_PROVIDER_KEY`.
 
