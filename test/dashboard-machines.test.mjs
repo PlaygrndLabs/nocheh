@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync, readFileSync, rmSync, statSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
 const compiled = await build({
   entryPoints: ['dashboard/lib/machines.ts'],
@@ -27,6 +31,7 @@ const {
   machineErrorWords,
   machineProblems,
   machineStatus,
+  setupCommand,
   setupLine,
 } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
@@ -188,7 +193,7 @@ test('error codes become plain words and a next step', () => {
     /aren’t kept in backups\. Remove this machine and add it again\./,
   );
   assert.equal(machineErrorWords('machine_cleanup_failed'), 'Nocheh couldn’t end the job’s programs');
-  assert.match(commandAdvice('machine_cleanup_failed'), /end them yourself.*Install ps \(procps\)/);
+  assert.match(commandAdvice('machine_cleanup_failed'), /may still run on the machine, so end them yourself\. Most hold a file named by the job in ~\/\.nocheh\/jobs open, which lsof \+D ~\/\.nocheh\/jobs shows\.$/);
   assert.match(commandAdvice('machine_key_missing'), /Remove the machine in Settings › Machines and add it again\./);
   assert.equal(commandAdvice('machine_unreachable'), '');
   assert.equal(commandAdvice(null), '');
@@ -225,7 +230,38 @@ test('error codes become plain words and a next step', () => {
     );
   assert.match(machineAdvice('machine_auth_failed', 'builder'), /~builder\/\.ssh\/authorized_keys/);
   assert.match(machineAdvice('machine_unavailable', 'nocheh'), /\.\/bin\/nocheh up/);
-  assert.equal(setupLine('nocheh'), 'On the VM, add this line to ~nocheh/.ssh/authorized_keys, then press Test.');
+  assert.equal(
+    setupLine('nocheh'),
+    'On the machine, signed in as nocheh, paste the setup command into a terminal, or add the public key to ~nocheh/.ssh/authorized_keys yourself. Then press Test.',
+  );
+});
+
+test('the setup command adds the public key once, with the modes SSH asks for', () => {
+  const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDutBo6f45zuPJ6cSri5hzM1HbEERM2PrLAkkXefdFxZ nocheh build-vm';
+  const home = mkdtempSync(join(tmpdir(), 'machine-setup-'));
+  try {
+    for (const shell of ['sh', 'bash']) {
+      // Run twice: the line is added once. A key line already there for another machine stays.
+      execFileSync(shell, ['-c', 'mkdir -p ~/.ssh && echo "ssh-ed25519 AAAA other" > ~/.ssh/authorized_keys'], {env: {...process.env, HOME: home}});
+      for (let i = 0; i < 2; i++) execFileSync(shell, ['-c', setupCommand(key)], {env: {...process.env, HOME: home}});
+      assert.deepEqual(readFileSync(join(home, '.ssh/authorized_keys'), 'utf8'), 'ssh-ed25519 AAAA other\n' + key + '\n', shell);
+      assert.equal(statSync(join(home, '.ssh')).mode & 0o777, 0o700);
+      assert.equal(statSync(join(home, '.ssh/authorized_keys')).mode & 0o777, 0o600);
+    }
+    // After a last line with no newline, the key still gets a line of its own.
+    for (const shell of ['sh', 'bash']) {
+      execFileSync(shell, ['-c', 'printf "ssh-ed25519 AAAA other" > ~/.ssh/authorized_keys'], {env: {...process.env, HOME: home}});
+      execFileSync(shell, ['-c', setupCommand(key)], {env: {...process.env, HOME: home}});
+      assert.deepEqual(readFileSync(join(home, '.ssh/authorized_keys'), 'utf8'), 'ssh-ed25519 AAAA other\n' + key + '\n', shell);
+    }
+    // A quote in the line stays inside it.
+    rmSync(join(home, '.ssh'), {recursive: true});
+    execFileSync('sh', ['-c', setupCommand("ssh-ed25519 AAAA it's; touch ~/oops")], {env: {...process.env, HOME: home}});
+    assert.equal(readFileSync(join(home, '.ssh/authorized_keys'), 'utf8'), "ssh-ed25519 AAAA it's; touch ~/oops\n");
+    assert.throws(() => statSync(join(home, 'oops')));
+  } finally {
+    rmSync(home, {recursive: true, force: true});
+  }
 });
 
 test('a stopped machine job says while its programs are ended, and when the owner must end them', () => {

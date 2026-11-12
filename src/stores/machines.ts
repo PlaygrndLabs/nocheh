@@ -326,8 +326,7 @@ export class MachineRepository {
   }
   /** After the jobs' rows changed: their live runs end, and their cards say how they ended. A machine about to lose its key
    *  or address (`machine`) first has the programs ended of every job of it whose cleanup is pending, not only those halted
-   *  now, once their commands still running here have ended: one job after another, as each ends every program of the
-   *  login. The owner's request waits for that at most 75 seconds, so with the call that follows it stays within the
+   *  now, once their commands still running here have ended: each ends the programs its job started there. The owner's request waits for that at most 75 seconds, so with the call that follows it stays within the
    *  2 minutes the owner's API gives it. */
   private async stopped(jobs:{withdrawn:string[];halted:string[]},machine:string|null) {
     const until=Date.now()+75000;
@@ -420,7 +419,7 @@ export class MachineRepository {
       const again=await machineRun(this.control,owner,source,turn);
       if(!again.job){await this.close(log,'cancelled',{error_code:again.refusal});throw new HttpError(409,again.refusal);}
       let response:IncomingMessage;
-      try{response=await machinesStream('/exec',{...target(pin),script:body.script,stdin:body.stdin,timeout,login_shell:body.login},AbortSignal.any([controller.signal,late]));}
+      try{response=await machinesStream('/exec',{...target(pin),job:job.id,script:body.script,stdin:body.stdin,timeout,login_shell:body.login},AbortSignal.any([controller.signal,late]));}
       catch(error) {
         const code=error instanceof HttpError?error.code:'machine_unavailable';
         await this.close(log,ending?'cancelled':'failed',{error_code:ending?null:code});
@@ -478,7 +477,8 @@ export class MachineRepository {
       if(!(await this.control.query(`SELECT 1 FROM machine_commands WHERE job_id=$1 AND state='running' AND kind IN ('command','file','internal') AND id=ANY($2::bigint[])`,
         [id,[...live]])).rowCount)return;
   }
-  /** End what a stopped job left on its machine: every program of the machine's login there, through the pin. Tried 3 times.
+  /** End what a stopped job left on its machine: the programs its commands started there, which carry its id, through the
+   *  pin. Tried 3 times.
    *  A cleanup of the job already running here is waited for first, and tried again when it failed; none goes past `until`. */
   private async cleanJob(id:string,until=Date.now()+90000):Promise<void> {
     for(let running=cleaning.get(id);running;running=cleaning.get(id))if(!await settlesBy(running,until))return;
@@ -491,10 +491,10 @@ export class MachineRepository {
     try {
       const job=(await this.control.query("SELECT id,machine FROM background_jobs WHERE id=$1 AND machine_cleanup='pending'",[id])).rows[0];
       if(!job?.machine)return;
-      const pin=job.machine as MachinePin;log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,kind:'cleanup',command:'end all programs of '+pin.login});
+      const pin=job.machine as MachinePin;log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,kind:'cleanup',command:'end the programs this job started as '+pin.login});
       let code:string|null=null;
       try {
-        const answer=await machinesJson('/cleanup',target(pin),AbortSignal.timeout(ms));
+        const answer=await machinesJson('/cleanup',{...target(pin),job:id},AbortSignal.timeout(ms));
         if(answer.ok!==true)code=typeof answer.error==='string'&&machineErrors.has(answer.error)?answer.error:'machine_unreachable';
       }catch(error){code=error instanceof HttpError&&machineErrors.has(error.code)?error.code:'machine_unavailable';}
       await this.close(log,code?'failed':'done',{error_code:code});await this.keyMissing(pin.id,code);

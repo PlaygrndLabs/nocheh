@@ -375,17 +375,20 @@ approve can work on over SSH
 `host.docker.internal` for a VM on the computer that runs Nocheh), a port (22 by
 default) and a login. Nocheh connects from its own container, so the form flags
 `localhost`, `127.x.x.x` and `::1` and says to use `host.docker.internal` instead.
-Nocheh then makes the machine's key, keeps it, and shows its public key with **Copy
-public key**: on the machine, add that line to the login's `~/.ssh/authorized_keys`,
-then press **Test**. The first good test trusts the machine's host key. Use a
-separate login for Nocheh, with bash as its shell and `ps` (procps) installed,
-because Stop ends every program it runs.
+Nocheh then makes the machine's key, keeps it, and shows a setup command with **Copy
+setup command** and **Copy public key**: paste the command into a terminal on the
+machine, signed in as the login, and it adds the public key to
+`~/.ssh/authorized_keys` once, with the modes SSH asks for; or add the key there
+yourself. Then press **Test**. The first good test trusts the machine's host key. Nocheh may
+use the login you use yourself: Stop ends only the programs a job started there. The
+machine needs bash; bash 4 or later and coreutils' `timeout` (`gtimeout` from
+Homebrew on macOS) work best.
 
 Each machine shows its login, address and port, its state (Not tested, Ready, Test
 failed with the reason and what to do, or Off), its last good test and its host key
 fingerprint. Ready means its last Test passed; after a failed Test no new job can
 ask for it until a Test passes again. Its row has **Test**, an on/off switch,
-**Edit**, **Copy public key**, **Trust a new host key** (after you reinstalled the
+**Edit**, **Copy setup command**, **Trust a new host key** (after you reinstalled the
 machine, for example), **Log** and **Remove**. **Edit** uses the same fields and
 checks as Add machine. A new name saves at once. A new address, port or login asks
 first: Nocheh forgets the host key, jobs running on the machine stop, cards waiting
@@ -403,7 +406,9 @@ A machine job is asked for in your private chat or in an active project's group.
 Its one plan card, with Approve and Reject, always comes to your private chat.
 **System › Background work** shows the job's machine and the plan you approved.
 Stop, a time or cost limit, a failed run, or turning its machine or Machine
-control off ends every program of the job's login on the machine. Stop's confirm
+control off ends the programs the job started on the machine, with anything
+running inside them (such as in a tmux the job started), and none of the login's
+others. Stop's confirm
 says so for a job that has started; for a job still waiting or approved it says
 nothing has run there yet. While Nocheh ends the programs, the job says "Ending its
 programs on" the machine; when it couldn't, it says to end them yourself. A job that
@@ -419,8 +424,8 @@ session setup and its checks on commands left running. A row opens the command's
 details, including **Fingerprint of what ran** (for a job's command, the whole
 script the machine got) and **Fingerprint of what it printed**; while a command
 runs, what it printed is not known yet. Output itself is not kept. A cleanup that
-couldn't end the programs, because the machine has no `ps`, says to end them by hand
-and install procps. After a restore, a test, command or cleanup says Nocheh has no
+couldn't end the programs says to end them by hand; most of them hold a file named by
+the job in `~/.nocheh/jobs` open, which `lsof +D ~/.nocheh/jobs` shows. After a restore, a test, command or cleanup says Nocheh has no
 key for the machine, and the machine shows Test failed until you remove it and add
 it again.
 

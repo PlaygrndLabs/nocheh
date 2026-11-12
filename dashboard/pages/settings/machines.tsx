@@ -19,6 +19,7 @@ import {
   machineErrorWords,
   machineProblems,
   machineStatus,
+  setupCommand,
   setupLine,
   type Machine,
   type MachineDraft,
@@ -47,9 +48,9 @@ import {LinkButton} from '../../ui/link-button';
 import {Dialog, useFeedback} from '../../ui/overlay';
 
 const loginHint =
-  'Use a separate login for Nocheh, with bash as its shell, because Stop ends every program it runs. Install ps (procps) on the machine so Stop can do that.';
+  'Nocheh may use your own login: Stop ends only the programs a job started there, never yours. The machine needs bash; bash 4 or later and GNU timeout work best.';
 const offText =
-  'Cards waiting for your approval are withdrawn. Running machine jobs stop, and every program their login runs on the machine is ended.';
+  'Cards waiting for your approval are withdrawn. Running machine jobs stop, and the programs they started on the machine are ended.';
 const removeText = (machine: Machine) =>
   `Nocheh deletes its key for ${machine.name}. Cards waiting for your approval are withdrawn, and running jobs on it stop and their programs there end. The machine log keeps its commands. Remove the key line from ~${machine.login}/.ssh/authorized_keys on the machine too.`;
 const jobsText = (machine: Machine) =>
@@ -69,7 +70,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** A public key to select and copy by hand. */
+/** A public key or setup command to select and copy by hand. */
 function PublicKey({value, label}: {value: string; label: string}) {
   return (
     <Textarea
@@ -92,7 +93,7 @@ export function MachineSettings() {
   const feedback = useFeedback();
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  // The machine whose key the browser would not copy: its key is shown to copy by hand.
+  // The machine whose setup command the browser would not copy: it is shown to copy by hand.
   const [shownKey, setShownKey] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Machine | null>(null);
@@ -155,10 +156,10 @@ export function MachineSettings() {
       },
       machine,
     );
-  const copyKey = async (machine: Machine) => {
-    if (await copyText(machine.public_key)) {
+  const copyCommand = async (machine: Machine) => {
+    if (await copyText(setupCommand(machine.public_key))) {
       setShownKey(null);
-      feedback.toast(`The public key of ${machine.name} is copied.`);
+      feedback.toast(`The setup command for ${machine.name} is copied. Paste it into a terminal on the machine.`);
     } else setShownKey(machine.id);
   };
   const trust = async (machine: Machine) => {
@@ -271,7 +272,7 @@ export function MachineSettings() {
                   keyShown={shownKey === machine.id}
                   onEnable={next => void setMachine(machine, next)}
                   onTest={() => void test(machine)}
-                  onCopy={() => void copyKey(machine)}
+                  onCopy={() => void copyCommand(machine)}
                   onHideKey={() => setShownKey(null)}
                   onEdit={() => setEditing(machine)}
                   onTrust={() => void trust(machine)}
@@ -370,7 +371,7 @@ function MachineRow(props: {
           <Pencil aria-hidden /> Edit
         </Button>
         <Button size="sm" variant="ghost" onClick={props.onCopy}>
-          <Copy aria-hidden /> Copy public key
+          <Copy aria-hidden /> Copy setup command
         </Button>
         {machine.host_key && (
           <Button size="sm" variant="ghost" busy={busy === 'trust:' + machine.id} onClick={props.onTrust}>
@@ -387,11 +388,11 @@ function MachineRow(props: {
       {keyShown && (
         <div className="mt-3 space-y-2">
           <p className="text-[13px] text-muted">
-            This browser didn’t allow copying. Select the key and copy it. {setupLine(machine.login)}
+            This browser didn’t allow copying. Select the command and copy it. {setupLine(machine.login)}
           </p>
-          <PublicKey value={machine.public_key} label={'Public key of ' + machine.name} />
+          <PublicKey value={setupCommand(machine.public_key)} label={'Setup command for ' + machine.name} />
           <Button size="sm" variant="ghost" onClick={props.onHideKey}>
-            Hide the key
+            Hide the command
           </Button>
         </div>
       )}
@@ -539,11 +540,15 @@ function AddMachine({open, onClose, taken}: {open: boolean; onClose: () => void;
       await refreshResources().catch(() => {});
     }
   };
-  const copy = async () => {
+  const copy = async (what: 'command' | 'key') => {
     if (!added) return;
-    if (await copyText(added.public_key)) {
+    if (await copyText(what === 'command' ? setupCommand(added.public_key) : added.public_key)) {
       setCopyFailed(false);
-      feedback.toast('The public key is copied.');
+      feedback.toast(
+        what === 'command'
+          ? 'The setup command is copied. Paste it into a terminal on the machine.'
+          : 'The public key is copied.',
+      );
     } else setCopyFailed(true);
   };
   return (
@@ -577,13 +582,18 @@ function AddMachine({open, onClose, taken}: {open: boolean; onClose: () => void;
       {added ? (
         <div className="space-y-3">
           <p className="text-sm">{setupLine(added.login)}</p>
-          <PublicKey value={added.public_key} label={'Public key of ' + added.name} />
+          <PublicKey value={setupCommand(added.public_key)} label={'Setup command for ' + added.name} />
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => void copy()}>
+            <Button size="sm" onClick={() => void copy('command')}>
+              <Copy aria-hidden /> Copy setup command
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void copy('key')}>
               <Copy aria-hidden /> Copy public key
             </Button>
             {copyFailed && (
-              <span className="text-[13px] text-muted">This browser didn’t allow copying. Select the key above.</span>
+              <span className="text-[13px] text-muted">
+                This browser didn’t allow copying. Select the command above.
+              </span>
             )}
           </div>
           {tested?.ok && (

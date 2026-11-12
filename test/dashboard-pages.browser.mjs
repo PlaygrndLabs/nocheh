@@ -830,10 +830,12 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   await form.getByRole('textbox', {name: 'Login'}).fill('nocheh');
   await form.getByRole('button', {name: 'Add machine'}).click();
   const setup = page.getByRole('dialog', {name: 'Put the key on lab-vm'});
-  await setup.getByText('On the VM, add this line to ~nocheh/.ssh/authorized_keys, then press Test.').waitFor();
+  await setup
+    .getByText('On the machine, signed in as nocheh, paste the setup command into a terminal', {exact: false})
+    .waitFor();
   assert.match(
-    await setup.getByRole('textbox', {name: 'Public key of lab-vm'}).inputValue(),
-    /^ssh-ed25519 [A-Za-z0-9+/]+ nocheh lab-vm$/,
+    await setup.getByRole('textbox', {name: 'Setup command for lab-vm'}).inputValue(),
+    /^mkdir -p ~\/\.ssh .* 'ssh-ed25519 [A-Za-z0-9+/]+ nocheh lab-vm' >> ~\/\.ssh\/authorized_keys; }; }$/,
   );
   // A browser that refuses the clipboard, as on a plain http address, leaves the key to select by hand.
   await page.evaluate(() =>
@@ -842,7 +844,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
       value: {writeText: async () => Promise.reject(new Error('denied'))},
     }),
   );
-  await setup.getByRole('button', {name: 'Copy public key'}).click();
+  await setup.getByRole('button', {name: 'Copy setup command'}).click();
   await setup.getByText('This browser didn’t allow copying.', {exact: false}).waitFor();
   await page.evaluate(() =>
     Object.defineProperty(navigator, 'clipboard', {
@@ -850,9 +852,15 @@ test('a machine is added with its public key, tested, edited, turned off and rem
       value: {writeText: async text => void (window.copied = text)},
     }),
   );
+  await setup.getByRole('button', {name: 'Copy setup command'}).click();
+  await page.getByRole('status').filter({hasText: 'The setup command is copied.'}).waitFor();
+  assert.match(
+    await page.evaluate(() => window.copied),
+    /^mkdir -p ~\/\.ssh .* nocheh lab-vm' >> ~\/\.ssh\/authorized_keys; }; }$/,
+  );
   await setup.getByRole('button', {name: 'Copy public key'}).click();
   await page.getByRole('status').filter({hasText: 'The public key is copied.'}).waitFor();
-  assert.match(await page.evaluate(() => window.copied), / nocheh lab-vm$/);
+  assert.match(await page.evaluate(() => window.copied), /^ssh-ed25519 [A-Za-z0-9+/]+ nocheh lab-vm$/);
   await setup.getByRole('button', {name: 'Test'}).click();
   await setup.getByText('lab-vm is ready').waitFor();
   await setup.getByRole('button', {name: 'Done'}).click();
@@ -947,7 +955,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   await row('lab-vm-2').getByRole('button', {name: 'Remove'}).click();
   await page.getByRole('dialog', {name: 'Remove lab-vm-2?'}).getByRole('button', {name: 'Remove'}).click();
   await page.getByRole('status').filter({hasText: 'lab-vm-2 is removed.'}).waitFor();
-  assert.equal(await row('lab-vm-2').count(), 0);
+  await row('lab-vm-2').waitFor({state: 'detached'});
 
   // Each machine's commands open in the log, filtered to it; internal ones only on request.
   await row('build-vm').getByRole('link', {name: 'Log'}).click();
@@ -997,7 +1005,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   // Stop says that it ends the programs on the machine too; Cancel leaves the job running.
   await job.getByRole('button', {name: 'Stop'}).click();
   const stop = page.getByRole('dialog', {name: 'Stop this job?'});
-  await stop.getByText('Nocheh also ends every program its login runs on build-vm.', {exact: false}).waitFor();
+  await stop.getByText('Nocheh also ends the programs it started on build-vm.', {exact: false}).waitFor();
   await stop.getByRole('button', {name: 'Cancel'}).click();
   // A machine job still waiting has run nothing there, and Stop says so.
   const waiting = page
@@ -1008,7 +1016,7 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   await stop.getByText('The job is cancelled before it starts.', {exact: false}).waitFor();
   await stop.getByText('Nothing has run on build-vm yet.', {exact: false}).waitFor();
   assert.equal(await stop.getByText('The running job', {exact: false}).count(), 0);
-  assert.equal(await stop.getByText('ends every program', {exact: false}).count(), 0);
+  assert.equal(await stop.getByText('ends the programs it started', {exact: false}).count(), 0);
   await stop.getByRole('button', {name: 'Cancel'}).click();
   // Programs Nocheh couldn't end are the owner's to end.
   await page
