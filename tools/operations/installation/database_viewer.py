@@ -39,5 +39,5 @@ ALTER ROLE nocheh_viewer SET statement_timeout = '15s';
     result = subprocess.call(command + ['--profile', 'tools', 'up', '-d', '--wait',
         '--no-deps', 'pgweb-archive'], cwd=root, env=env)
     if result == 0:
-        print('Read-only archive browser: http://127.0.0.1:8782')
+        print('Read-only archive browser: http://127.0.0.1:' + env['NOCHEH_VIEWER_PORT'])
     return result

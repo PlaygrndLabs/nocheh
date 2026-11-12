@@ -200,6 +200,26 @@ class SendAndCheckTests(unittest.TestCase):
         self.assertEqual(status['last']['state'], 'sent'); self.assertEqual(len(status['sent']), 2)
         self.assertNotIn(PASSPHRASE, (self.state / offsite.RECORD).read_text())
 
+    def test_workspaces_sharing_a_bucket_keep_and_prune_only_their_own_copies(self):
+        # Each workspace sends to its own folder (ADR-0245), so one never prunes, lists or fetches another's copies.
+        acme_state = Path(self.folder.name) / 'acme'
+        acme = {**self.values, 'NOCHEH_WORKSPACE': 'acme'}
+        for number, job in enumerate(JOBS[:3], 1):
+            self.backup(job, number); offsite.send(self.state, self.values)
+        for number, job in enumerate(JOBS[3:], 4):
+            snapshot(acme_state / 'admin/backups' / job, f'2026-11-{number:02d}T04:00:00+00:00')
+            offsite.send(acme_state, {**acme, 'NOCHEH_OFFSITE_KEEP': '1'})
+        self.assertEqual(sorted(Bucket.objects), sorted([
+            offsite.object_key(JOBS[4], '2026-11-05T04:00:00', 'nocheh-backups/acme/'),
+            offsite.object_key(JOBS[1], '2026-11-02T04:00:00'), offsite.object_key(JOBS[2], '2026-11-03T04:00:00')]))
+        # personal keeps the bucket's top folder and never lists acme's copies below it.
+        self.assertEqual(offsite.object_key(JOBS[1], '2026-11-02T04:00:00').rsplit('/', 1)[0], 'nocheh-backups')
+        self.assertEqual([item['key'] for item in offsite.Storage(offsite.settings(self.values)).list()],
+                         [offsite.object_key(JOBS[1], '2026-11-02T04:00:00'), offsite.object_key(JOBS[2], '2026-11-03T04:00:00')])
+        self.assertEqual([item['key'] for item in offsite.Storage(offsite.settings(acme)).list()],
+                         [offsite.object_key(JOBS[4], '2026-11-05T04:00:00', 'nocheh-backups/acme/')])
+        self.assertEqual(offsite.check(acme_state, acme)['key'], offsite.object_key(JOBS[4], '2026-11-05T04:00:00', 'nocheh-backups/acme/'))
+
     def test_copies_the_storage_still_locks_are_kept_without_an_error(self):
         locked = {offsite.object_key(JOBS[0], '2026-11-01T04:00:00')}
         original = Bucket.do_DELETE

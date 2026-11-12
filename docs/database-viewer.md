@@ -25,7 +25,8 @@ a legacy combined installation. It is read-only; product records must be changed
 dashboard, API, or CLI commands so revision, authorization, invalidation, and
 provenance rules still apply.
 
-Run `./bin/nocheh db`, then open <http://127.0.0.1:8782>.
+Run `./bin/nocheh db`, then open the address it prints: <http://127.0.0.1:8782> for
+the `personal` workspace, two above its `NOCHEH_PORT` for another workspace.
 This starts the pinned pgweb image from the optional Compose `tools` profile.
 It opens the `nocheh` database, which holds the archive only on a legacy combined
 installation; browse the separate stores under **Databases**. It does not restart the assistant.

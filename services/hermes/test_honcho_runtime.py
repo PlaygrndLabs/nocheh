@@ -38,7 +38,7 @@ class HonchoRuntimeTests(unittest.TestCase):
                 call.assert_not_called()
             values['COMPOSE_PROJECT_NAME']='nocheh-synthetic-owned';write_env(env_path(state),values)
             with patch('tools.operations.memory.honcho_runtime.subprocess.call',return_value=0) as call,\
-                    patch('tools.operations.memory.honcho_runtime.ensure_single_project'):
+                    patch('tools.operations.memory.honcho_runtime.ensure_own_resources'):
                 self.assertEqual(operate(state,'up'),0)
                 self.assertEqual(call.call_args.kwargs['env']['COMPOSE_PROJECT_NAME'],'nocheh-synthetic-owned')
 
@@ -56,16 +56,28 @@ class HonchoRuntimeTests(unittest.TestCase):
             with patch('tools.operations.memory.honcho_runtime.operate',return_value=1):
                 self.assertEqual(refresh_honcho(state,values),'failed')
 
-    def test_other_project_writers_block_and_clean_setup_uses_managed_volumes(self):
+    def test_other_project_volumes_block_and_clean_setup_uses_managed_volumes(self):
+        # Several workspaces each run their own memory engine (ADR-0245); only another project's volume
+        # or network under this workspace's names stops it.
+        from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);values=initialize(state);memory=state/'honcho'
             (memory/'internal_token').write_text('synthetic-memory-token')
             values['NOCHEH_MEMORY_TOKEN']='synthetic-memory-token';write_env(env_path(state),values)
-            with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value='running-id\n'):
-                with self.assertRaisesRegex(ValueError,'other_project_running'):enable(state,memory)
-            with patch('tools.operations.memory.honcho_runtime.subprocess.check_output',return_value=''),patch('tools.operations.memory.honcho_runtime.subprocess.run') as run:
+            def held_by(project):
+                return lambda command,**_:SimpleNamespace(returncode=0,stdout='{"com.docker.compose.project":"%s"}'%project)
+            with patch('tools.operations.memory.honcho_runtime.subprocess.run',side_effect=held_by('nocheh-other')):
+                with self.assertRaisesRegex(ValueError,'other_project_resources'):enable(state,memory)
+            self.assertEqual(load(state)['NOCHEH_HONCHO_ENABLED'],values['NOCHEH_HONCHO_ENABLED'])
+            asked=[]
+            def missing(command,**_):
+                asked.append(command[1:3]+command[-1:]);return SimpleNamespace(returncode=1,stdout='')
+            with patch('tools.operations.memory.honcho_runtime.subprocess.run',side_effect=missing):
                 enable(state,memory)
-                run.assert_not_called()
+            self.assertEqual(asked,[['volume','inspect','nocheh_honcho_database'],['volume','inspect','nocheh_honcho_redis'],
+                                    ['network','inspect','nocheh-memory']])
+            with patch('tools.operations.memory.honcho_runtime.subprocess.run',side_effect=held_by('nocheh')):
+                enable(state,memory)
             saved=load(state)
             self.assertEqual(saved['NOCHEH_HONCHO_ENABLED'],'true')
             self.assertEqual(saved['NOCHEH_HONCHO_DATABASE_VOLUME'],'nocheh_honcho_database')

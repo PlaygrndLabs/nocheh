@@ -247,9 +247,18 @@ def validate_snapshot(snapshot):
 
 def restore(snapshot,state,project,port):
     if state.exists(): raise ValueError('Restore requires a new, nonexistent state directory')
-    if not re.fullmatch(r'nocheh-[a-z0-9-]{3,50}',project) or project=='nocheh': raise ValueError('Use a new nocheh-* Compose project name')
+    from tools.operations.installation import workspaces
+    if not re.fullmatch(r'nocheh-[a-z0-9-]{3,50}',project) or not workspaces.NAME.fullmatch(project[7:]): raise ValueError('Use a new nocheh-* Compose project name')
     if subprocess.run(['docker','volume','inspect',project+'_postgres_data'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
         raise ValueError('Restore project database volume already exists')
+    # A restore never takes a workspace's ports (ADR-0245): without --port it gets the first free ones.
+    listed=workspaces.listed()
+    # Its name, not only its project, stays clear of every workspace: the name decides the off-site folder.
+    if workspaces.name_of_project(project) in {workspaces.DEFAULT,*(name for name,_,_ in listed)}:raise ValueError('Restore project is a workspace; use a new nocheh-* Compose project name')
+    taken=set().union(set(),*(workspaces.claims(values,folder)['ports'] for _,folder,values in listed))
+    taken|=workspaces._published(workspaces.containers())
+    if port is None:port=workspaces.free_port(taken)
+    elif set(workspaces.ports({'NOCHEH_PORT':str(port)}).values())&taken:raise ValueError('Restore ports are used by a workspace; pass another --port')
     manifest=validate_snapshot(snapshot)
     state.mkdir(parents=True,mode=0o700)
     with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
@@ -269,7 +278,10 @@ def restore(snapshot,state,project,port):
                   NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
                   NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
                   NOCHEH_DASHBOARD_PORT=str(port+3 if port<=65532 else port-3),
-                  COMPOSE_PROJECT_NAME=project,NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
+                  COMPOSE_PROJECT_NAME=project,NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent',
+                  # Its own name, so it never lists or prunes the workspace's off-site copies, and this checkout's images.
+                  NOCHEH_WORKSPACE=workspaces.name_of_project(project),
+                  NOCHEH_IMAGES=workspaces.images(workspaces.checkout_settings(ROOT) or {}))
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
     (state/'hermes/scheduler-inactive').touch()
@@ -345,8 +357,8 @@ def main(command,state,rest):
         args=parser.parse_args(rest);result=backup(state,args.output.resolve(),args.leave_stopped)
     else:
         parser.add_argument('snapshot',type=Path);parser.add_argument('--state',type=Path,required=True)
-        parser.add_argument('--project',required=True);parser.add_argument('--port',type=int,default=8795)
+        parser.add_argument('--project',required=True);parser.add_argument('--port',type=int,help='Default: the first free ports')
         args=parser.parse_args(rest)
-        if not 1024<=args.port<=65535: parser.error('Port must be between 1024 and 65535')
+        if args.port is not None and not 1024<=args.port<=65535: parser.error('Port must be between 1024 and 65535')
         result=restore(args.snapshot.resolve(),args.state.resolve(),args.project,args.port)
     print(json.dumps(result,indent=2));return 0

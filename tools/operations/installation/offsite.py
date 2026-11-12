@@ -23,6 +23,9 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 RECORD = 'admin/offsite.json'
+# Each workspace other than personal keeps its copies in its own folder under PREFIX (ADR-0245); personal keeps
+# PREFIX itself. A listing reads one folder level only, so workspaces that share a bucket never list, prune or
+# fetch each other's copies.
 PREFIX = 'nocheh-backups/'
 # A storage lock (ADR-0236) refuses to delete or replace a young copy.
 LOCKED = 'offsite_storage_ObjectLockedByBucketPolicy'
@@ -43,8 +46,14 @@ class OffsiteError(ValueError):
 PROVIDERS = ('cloudflare', 'backblaze', 'other')
 
 
+def folder(values):
+    from tools.operations.installation.workspaces import DEFAULT, name_of
+    name = name_of(values)
+    return PREFIX if name == DEFAULT else PREFIX + name + '/'
+
+
 def settings(values):
-    return {'enabled': values.get('NOCHEH_OFFSITE', 'off') == 's3',
+    return {'enabled': values.get('NOCHEH_OFFSITE', 'off') == 's3', 'folder': folder(values),
             'provider': values.get('NOCHEH_OFFSITE_PROVIDER', '') or 'cloudflare',
             'endpoint': values.get('NOCHEH_OFFSITE_ENDPOINT', '').rstrip('/'),
             'bucket': values.get('NOCHEH_OFFSITE_BUCKET', ''),
@@ -309,14 +318,14 @@ class Storage:
         Path(path).chmod(0o600)
 
     def list(self):
-        """Every copy under the prefix, oldest first, as {key, size}."""
-        found, token = [], None
+        """Every copy in this workspace's folder, oldest first, as {key, size}."""
+        found, token, prefix = [], None, self.config.get('folder') or folder({})
         while True:
-            query = 'list-type=2&prefix=' + _quote(PREFIX) + ('&continuation-token=' + _quote(token) if token else '')
+            query = 'list-type=2&prefix=' + _quote(prefix) + ('&continuation-token=' + _quote(token) if token else '')
             root = ElementTree.fromstring(self.request('GET', query=query))
             for item in root.findall('{*}Contents'):
                 key = item.findtext('{*}Key') or ''
-                if key.startswith(PREFIX) and key.endswith(SUFFIX): found.append({'key': key, 'size': int(item.findtext('{*}Size') or 0)})
+                if key.startswith(prefix) and '/' not in key[len(prefix):] and key.endswith(SUFFIX): found.append({'key': key, 'size': int(item.findtext('{*}Size') or 0)})
             if root.findtext('{*}IsTruncated') != 'true': break
             token = root.findtext('{*}NextContinuationToken')
             if not token: break
@@ -365,9 +374,9 @@ def _size(path):
     return sum(file.stat().st_size for file in Path(path).rglob('*') if file.is_file() and not file.is_symlink())
 
 
-def object_key(backup, created_at):
+def object_key(backup, created_at, prefix=None):
     moment = re.sub(r'[^0-9]', '', created_at)[:14]
-    return f'{PREFIX}{moment}-{backup}{SUFFIX}'
+    return f'{prefix or folder({})}{moment}-{backup}{SUFFIX}'
 
 
 def due(state, values):
@@ -393,7 +402,7 @@ def send(state, values, opener=None):
     record = read_record(state); record['attempted'] = (record.get('attempted', []) + [backup])[-50:]
     record['last'] = {'state': 'running', 'at': _now().isoformat(), 'backup': backup}; write_record(state, record)
     work = Path(state) / 'admin/offsite-work'; work.mkdir(parents=True, exist_ok=True, mode=0o700)
-    copy = work / (backup + SUFFIX); key = object_key(backup, created_at)
+    copy = work / (backup + SUFFIX); key = object_key(backup, created_at, config['folder'])
     try:
         if copy.exists(): copy.unlink()
         size = encrypt_backup(path, copy, config['passphrase'])
@@ -477,9 +486,11 @@ def main(state, rest):
     import argparse, getpass, sys
     parser = argparse.ArgumentParser(prog='nocheh offsite', description=main.__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
-    sub.add_parser('list', help='List the copies in the bucket')
+    listing = sub.add_parser('list', help='List the copies in the bucket')
     fetch = sub.add_parser('fetch', help='Download a copy and turn it back into a backup folder')
     fetch.add_argument('--key', help='Which copy (default: the newest)'); fetch.add_argument('--output', type=Path, required=True)
+    for command in (listing, fetch):
+        command.add_argument('--workspace', help="Whose copies (default: this folder's workspace, or personal)")
     decrypt = sub.add_parser('decrypt', help='Turn a downloaded copy back into a backup folder')
     decrypt.add_argument('copy', type=Path); decrypt.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(rest)
@@ -492,6 +503,9 @@ def main(state, rest):
     saved = load(state) if env_path(state).exists() else {}
     values = {**saved, **{key: value for key, value in os.environ.items() if key.startswith('NOCHEH_OFFSITE')}}
     values['NOCHEH_OFFSITE'] = 's3'
+    if getattr(args, 'workspace', None):
+        from tools.operations.installation.workspaces import check_name
+        values['NOCHEH_WORKSPACE'] = check_name(args.workspace)
     passphrase = lambda: values.get('NOCHEH_OFFSITE_PASSPHRASE') or getpass.getpass('Off-site passphrase: ')
     try:
         if args.action == 'decrypt':

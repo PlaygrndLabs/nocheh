@@ -8,15 +8,17 @@ from contextlib import contextmanager
 from pathlib import Path
 from tools.operations.archive.archive import API,canonical,digest
 from tools.operations.installation.configuration import load
+from tools.operations.installation.workspaces import ports
 from tools.operations.archive.import_job import safe_name
 from tools.operations.security.tool_receipts import atomic
 
 
 @contextmanager
-def stopped_dashboard():
+def stopped_dashboard(state=None):
     # Reserving the owner's existing port (without listening) both proves it is
     # stopped and prevents a concurrent restart from rewriting import metadata.
-    port=int(os.environ.get('NOCHEH_DASHBOARD_PORT','8783'))
+    # The port is this workspace's own, never another workspace's (ADR-0245).
+    port=ports(load(state))['dashboard'] if state else int(os.environ.get('NOCHEH_DASHBOARD_PORT','8783'))
     with socket.socket() as reservation:
         try:reservation.bind(('127.0.0.1',port))
         except OSError:raise RuntimeError('stop_owner_dashboard_before_import_handoff') from None
@@ -72,7 +74,7 @@ def handoff(state,identity,api=None):
         if migration['family']=='tools':
             result={'receipts':flush_receipts(state,api)}
         else:
-            with stopped_dashboard():result=import_records(state,api,migration)
+            with stopped_dashboard(state):result=import_records(state,api,migration)
         api.call('/v1/workflows/migrations/'+identity+'/host-ready',{})
         return {'migration_id':identity,'family':migration['family'],**result,'state':'host_ready'}
     finally:

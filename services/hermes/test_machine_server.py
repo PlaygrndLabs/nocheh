@@ -658,7 +658,7 @@ class MachineWiringTests(unittest.TestCase):
         machines=services['nocheh-machines']
         self.assertEqual(machines['volumes'],['${NOCHEH_STATE_DIR:-./data/local}/machines:/machines'])
         self.assertEqual(environment(machines),{'NOCHEH_MACHINE_TOKEN'},'no service token, database password or other key')
-        self.assertEqual((machines['image'],machines['build']['target'],machines['command']),('nocheh-management:local','management',['machines']))
+        self.assertEqual((machines['image'],machines['build']['target'],machines['command']),('${NOCHEH_IMAGES:-nocheh}-management:local','management',['machines']))
         self.assertEqual(machines['build'],compose['x-management']['build'])
         self.assertEqual(compose['x-management']['build']['args'],{'LOCAL_UID':'${NOCHEH_UID:-1000}','LOCAL_GID':'${NOCHEH_GID:-1000}'})
         self.assertEqual((machines['user'],machines['read_only'],machines['tmpfs'],machines['cap_drop'],machines['security_opt'],machines['networks']),

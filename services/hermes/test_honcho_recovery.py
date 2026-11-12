@@ -28,7 +28,7 @@ class HonchoRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);metadata=self.snapshot(root);state=root/'state';(state/'honcho').mkdir(parents=True)
             (state/'honcho/database_password').write_text('synthetic')
-            env={'NOCHEH_HONCHO_DATABASE_VOLUME':'fixture-memory-db','NOCHEH_HONCHO_REDIS_VOLUME':'fixture-memory-cache'}
+            env={'COMPOSE_PROJECT_NAME':'nocheh-fixture','NOCHEH_HONCHO_DATABASE_VOLUME':'fixture-memory-db','NOCHEH_HONCHO_REDIS_VOLUME':'fixture-memory-cache'}
             with patch.object(recovery.subprocess,'run',return_value=subprocess.CompletedProcess([],0)) as run:
                 with self.assertRaisesRegex(ValueError,'volume_exists'):recovery.restore(['fixture'],env,root,state,metadata,sha)
                 self.assertEqual(run.call_count,1)
@@ -39,6 +39,8 @@ class HonchoRecoveryTests(unittest.TestCase):
             with patch.object(recovery.subprocess,'run',side_effect=run),patch.object(recovery,'fingerprints',return_value=metadata['tables']):
                 recovery.restore(['fixture'],env,root,state,metadata,sha)
             self.assertEqual(calls[-1][-2:],['stop','honcho-postgres'])
+            # Restored volumes belong to the restoring workspace's project, as if Compose made them.
+            self.assertIn(['docker','volume','create','--label','com.docker.compose.project=nocheh-fixture','--label','com.docker.compose.volume=honcho_database','fixture-memory-db'],calls)
             self.assertFalse(any('honcho-api' in c or 'honcho-deriver' in c or 'honcho-provider-gateway' in c for c in calls))
             self.assertTrue(any('pg_restore' in c for c in calls))
 
@@ -46,7 +48,7 @@ class HonchoRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);metadata=self.snapshot(root);state=root/'state';(state/'honcho').mkdir(parents=True)
             (state/'honcho/database_password').write_text('synthetic')
-            env={'NOCHEH_HONCHO_DATABASE_VOLUME':'fixture-memory-db','NOCHEH_HONCHO_REDIS_VOLUME':'fixture-memory-cache'}
+            env={'COMPOSE_PROJECT_NAME':'nocheh-fixture','NOCHEH_HONCHO_DATABASE_VOLUME':'fixture-memory-db','NOCHEH_HONCHO_REDIS_VOLUME':'fixture-memory-cache'}
             calls=[]
             def run(command,**kwargs):
                 calls.append(command)

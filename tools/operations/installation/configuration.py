@@ -9,13 +9,13 @@ from pathlib import Path
 from tools.operations.provider.embedding_config import DEFAULTS as EMBEDDING_DEFAULTS, embeddings
 from tools.operations.provider.transcription_config import DEFAULTS as TRANSCRIPTION_DEFAULTS
 from tools.operations.provider import routes as provider_routes
-from tools.operations.installation import mini_app
+from tools.operations.installation import mini_app, workspaces
 
 ROOT = REPO_ROOT
 INSTALLATION_ROOT = Path(os.environ.get('NOCHEH_INSTALLATION_ROOT', ROOT)).resolve()
 DEFAULT_STATE = INSTALLATION_ROOT / 'data/local'
 DEFAULTS = {
-    'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_PORT': '8780', 'NOCHEH_MODEL': 'claude-sonnet-5-5',
+    'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_WORKSPACE': workspaces.DEFAULT, 'NOCHEH_PORT': '8780', 'NOCHEH_MODEL': 'claude-sonnet-5-5',
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}', 'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true',
@@ -76,7 +76,9 @@ def running_development_source(state, project=None):
         try: result=subprocess.run(['docker',*arguments],capture_output=True,text=True,timeout=30)
         except (OSError,subprocess.TimeoutExpired): return None
         return result.stdout if result.returncode==0 else None
-    running=(docker('ps','-q','--filter','label=com.docker.compose.project=nocheh',
+    values=load(state)
+    own=values.get('COMPOSE_PROJECT_NAME') or workspaces.project(workspaces.name_of(values))
+    running=(docker('ps','-q','--filter','label=com.docker.compose.project='+own,
                     '--filter','label=com.docker.compose.project.working_dir='+str(INSTALLATION_ROOT),
                     '--filter','label=com.nocheh.runtime-mode=source-watched') or '').split()
     if not running: return None
@@ -213,6 +215,7 @@ def validate_backups(values):
 
 def validate(values):
     embeddings(values)
+    workspaces.check_name(workspaces.name_of(values))
     layout=values.get('NOCHEH_STORAGE_LAYOUT','original-only-v1')
     if layout != 'original-only-v1':raise ValueError('Invalid NOCHEH_STORAGE_LAYOUT')
     storage=[values.get('NOCHEH_'+name+'_PASSWORD','') for name in ('ARCHIVE','DERIVED','CONTROL')]
@@ -293,13 +296,29 @@ def machine_folder(state):
     (Path(state) / 'machines').mkdir(exist_ok=True, mode=0o700)
 
 
-def initialize(state):
+def initialize(state, workspace=None):
+    """`workspace` names a new workspace (ADR-0245). A folder keeps its name: one with settings and no name is `personal`."""
     state = Path(state).resolve()
+    path = env_path(state); existing = read_env(path)
+    if workspace is not None:
+        workspaces.check_new_name(workspace)
+        current = existing.get('NOCHEH_WORKSPACE') or (workspaces.DEFAULT if existing else None)
+        if current and current != workspace:
+            raise workspaces.WorkspaceError(f'This folder is already the workspace {current}, and a workspace keeps its name. '
+                                            f'Make another one with ./bin/nocheh workspace new {workspace}.')
     for name in ('files', 'spool', 'hermes', 'telegram', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
     github_folders(state); machine_folder(state)
-    path = env_path(state); existing = read_env(path)
     values = dict(DEFAULTS)
     values.update(existing)
+    if workspace: values['NOCHEH_WORKSPACE'] = workspace
+    elif not existing and state == DEFAULT_STATE and (checkout := workspaces.checkout_settings(INSTALLATION_ROOT)):
+        # A session worktree's first .env belongs to the workspace of the checkout it was made from.
+        values['NOCHEH_WORKSPACE'] = workspaces.name_of(checkout)
+    if workspaces.name_of(values) != workspaces.DEFAULT:
+        # Saved too, so a plain `docker compose` in this folder reaches this workspace, never `nocheh` (ADR-0245).
+        identity = workspaces.identity(values)
+        for key in ('COMPOSE_PROJECT_NAME', 'NOCHEH_IMAGES'):
+            if not values.get(key): values[key] = identity[key]
     values.pop('NOCHEH_WORKFLOWS_ENABLED',None)
     if 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
@@ -309,7 +328,7 @@ def initialize(state):
         # `make dev` reads Honcho's volumes from .env, so setup saves the ones Compose uses. Honcho's
         # folder stays unsaved and follows the checkout. A state without its own project gets no
         # names: it must never name the installation's volumes.
-        volumes=honcho_volumes(values.get('COMPOSE_PROJECT_NAME') or 'nocheh')
+        volumes=honcho_volumes(values.get('COMPOSE_PROJECT_NAME') or workspaces.project(workspaces.name_of(values)))
         values.update({key:name for key,name in volumes.items() if not values.get(key)})
     validate(values)
     (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -324,18 +343,37 @@ def initialize(state):
 
 
 def native_admin_port(state):
-    port = int(load(state).get('NOCHEH_PORT', '8780'))
-    return port + 5 if port <= 65530 else port - 5
+    return workspaces.ports(load(state))['admin']
 
 
 def compose_environment(state):
     # Explicit settings win over stale shell exports. Only Compose's selected
     # variables enter service containers; the full host environment is not passed.
-    result = dict(os.environ); result.update(load(state))
-    result['NOCHEH_NATIVE_ADMIN_PORT'] = str(native_admin_port(state))
+    values = load(state)
+    result = dict(os.environ); result.update(values)
+    # The workspace's names follow from its name (ADR-0245); a restore or a test names its own project and networks.
+    project = values.get('COMPOSE_PROJECT_NAME')
+    if not project and Path(state).resolve() != DEFAULT_STATE:
+        # A rehearsal state may still name its project in the shell, as before workspaces.
+        project = os.environ.get('COMPOSE_PROJECT_NAME')
+    project = project or workspaces.project(workspaces.name_of(values))
+    result['COMPOSE_PROJECT_NAME'] = project
+    result['NOCHEH_AGENT_NETWORK'] = values.get('NOCHEH_AGENT_NETWORK') or project + '-agent'
+    result['NOCHEH_MEMORY_NETWORK'] = values.get('NOCHEH_MEMORY_NETWORK') or project + '-memory'
+    own = Path(state).resolve() == DEFAULT_STATE
+    if own or values.get('NOCHEH_IMAGES'): source = values
+    else:
+        # A rehearsal state runs its checkout's workspace images, never personal's by default. The dashboard
+        # container can't see a session worktree's main checkout, so it keeps the images it was started with.
+        started = os.environ.get('NOCHEH_IMAGES') if os.environ.get('NOCHEH_CONTAINER') == '1' else None
+        source = workspaces.checkout_settings(INSTALLATION_ROOT) or ({'NOCHEH_IMAGES': started} if started else values)
+    result['NOCHEH_IMAGES'] = workspaces.images(source)
+    ports = workspaces.ports(values)
+    result['NOCHEH_NATIVE_ADMIN_PORT'] = str(ports['admin'])
+    result['NOCHEH_DASHBOARD_PORT'] = str(ports['dashboard'])
+    result['NOCHEH_VIEWER_PORT'] = str(ports['viewer'])
     result['NOCHEH_STATE_DIR'] = str(Path(state).resolve())
     result['NOCHEH_INSTALLATION_ROOT'] = str(INSTALLATION_ROOT)
-    result['NOCHEH_DASHBOARD_PORT'] = load(state).get('NOCHEH_DASHBOARD_PORT') or str(int(result['NOCHEH_PORT'])+3 if int(result['NOCHEH_PORT'])<=65532 else int(result['NOCHEH_PORT'])-3)
     # Profiles are explicit per installation; a stale shell cannot activate workflows.
     profiles=[v for v in result.get('COMPOSE_PROFILES','').split(',') if v and v not in ('workflows','honcho','honcho-tools','miniapp')]
     if result.get('NOCHEH_HONCHO_ENABLED')=='true' and not (Path(state)/'spool/.restore-inactive').exists():profiles.append('honcho')
@@ -349,5 +387,5 @@ def compose_environment(state):
     if source:
         # The dashboard container gets these from docker-compose.dev.yml itself.
         from tools.development.live_dev import overlay_environment
-        result.update(overlay_environment(source))
+        result.update(overlay_environment(source, project))
     return result

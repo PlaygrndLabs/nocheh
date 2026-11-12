@@ -9,7 +9,7 @@ x-logging: &logging
 
 x-service: &service
   logging: *logging
-  image: nocheh-services:local
+  image: ${NOCHEH_IMAGES:-nocheh}-services:local
   build:
     context: .
     target: runtime
@@ -70,7 +70,7 @@ x-honcho-runtime: &honcho-runtime
 
 x-management: &management
   logging: *logging
-  image: nocheh-management:local
+  image: ${NOCHEH_IMAGES:-nocheh}-management:local
   build: &management-build
     context: .
     target: management
@@ -92,8 +92,12 @@ x-management: &management
     NOCHEH_STATE_DIR: ${NOCHEH_STATE_DIR:-${PWD}/data/local}
     NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
     COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-nocheh}
+    # The images this stack runs, which a rehearsal's Apply keeps (ADR-0245).
+    NOCHEH_IMAGES: ${NOCHEH_IMAGES:-nocheh}
     # The GitHub fetcher runs the launcher's box image (ADR-0209).
-    NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
+    NOCHEH_BOX_IMAGE: ${NOCHEH_IMAGES:-nocheh}-box:local
+    # Approved shell commands and page reads run in this workspace's own tool image.
+    NOCHEH_TOOLS_IMAGE: ${NOCHEH_IMAGES:-nocheh}-tools:local
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${NOCHEH_INSTALLATION_ROOT:-${PWD}}:${NOCHEH_INSTALLATION_ROOT:-${PWD}}
@@ -104,7 +108,7 @@ x-management: &management
 services:
   nocheh-reset-setup:
     logging: *logging
-    image: nocheh-services:local
+    image: ${NOCHEH_IMAGES:-nocheh}-services:local
     build:
       context: .
       target: runtime
@@ -137,7 +141,7 @@ services:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-baseline:
     logging: *logging
-    image: nocheh-services:local
+    image: ${NOCHEH_IMAGES:-nocheh}-services:local
     build:
       context: .
       target: runtime
@@ -166,7 +170,7 @@ services:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-state:
     logging: *logging
-    image: nocheh-services:local
+    image: ${NOCHEH_IMAGES:-nocheh}-services:local
     build:
       context: .
       target: runtime
@@ -193,7 +197,7 @@ services:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-acceptance:
     logging: *logging
-    image: nocheh-services:local
+    image: ${NOCHEH_IMAGES:-nocheh}-services:local
     build:
       context: .
       target: runtime
@@ -245,7 +249,7 @@ services:
   # Without NOCHEH_MACHINE_TOKEN it refuses every request, and nothing waits for it, so Nocheh runs the same without it.
   nocheh-machines:
     logging: *logging
-    image: nocheh-management:local
+    image: ${NOCHEH_IMAGES:-nocheh}-management:local
     build: *management-build
     command: [machines]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -386,7 +390,7 @@ services:
 
   hermes-agent-sb:
     logging: *logging
-    image: nocheh-hermes:local
+    image: ${NOCHEH_IMAGES:-nocheh}-hermes:local
     command: [python, -m, services.hermes.security_launcher]
     user: "0:0"
     init: true
@@ -398,13 +402,15 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
-      NOCHEH_AGENT_NETWORK: ${NOCHEH_AGENT_NETWORK:-nocheh-agent}
+      NOCHEH_AGENT_NETWORK: ${NOCHEH_AGENT_NETWORK:-${COMPOSE_PROJECT_NAME:-nocheh}-agent}
       NOCHEH_PARALLEL_RUNS: ${NOCHEH_PARALLEL_RUNS:-4}
       NOCHEH_UID: ${NOCHEH_UID:-1000}
       NOCHEH_GID: ${NOCHEH_GID:-1000}
       NOCHEH_BOX_TOKEN: ${NOCHEH_BOX_TOKEN:-}
-      NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
+      NOCHEH_BOX_IMAGE: ${NOCHEH_IMAGES:-nocheh}-box:local
       NOCHEH_BOX_LIMIT: ${NOCHEH_BOX_LIMIT:-2}
+      # Isolated turns run this workspace's own Hermes image.
+      NOCHEH_TURN_IMAGE: ${NOCHEH_IMAGES:-nocheh}-hermes:local
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes/profiles:/profiles:ro
@@ -425,7 +431,7 @@ services:
     command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
     environment:
       PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@nocheh-db:5432/nocheh?sslmode=disable
-    ports: ["127.0.0.1:8782:8081"]
+    ports: ["127.0.0.1:${NOCHEH_VIEWER_PORT:-8782}:8081"]
     depends_on:
       nocheh-db: {condition: service_healthy}
     healthcheck:
@@ -436,7 +442,7 @@ services:
 
   nocheh-db:
     logging: *logging
-    image: nocheh-store-postgres:local
+    image: ${NOCHEH_IMAGES:-nocheh}-store-postgres:local
     build:
       context: .
       target: store-postgres
@@ -532,7 +538,7 @@ services:
   # dashboard after checking Telegram's signature on each request.
   nocheh-miniapp:
     logging: *logging
-    image: nocheh-miniapp:local
+    image: ${NOCHEH_IMAGES:-nocheh}-miniapp:local
     build:
       context: .
       target: mini-app
@@ -576,6 +582,11 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     networks: [miniapp]
+    # What another workspace's setup reads to refuse the same tunnel or address (ADR-0245).
+    labels:
+      # `unknown` when started without ./bin/nocheh, which works these out (ADR-0245).
+      com.nocheh.tunnel-id: ${NOCHEH_TUNNEL_ID-unknown}
+      com.nocheh.mini-app-host: ${NOCHEH_MINI_APP_HOST-unknown}
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
@@ -584,7 +595,7 @@ services:
   # The brain: answers turns for Nocheh and never talks to Telegram. It keeps the chat scopes, not the bot token.
   hermes:
     logging: *logging
-    image: nocheh-hermes:local
+    image: ${NOCHEH_IMAGES:-nocheh}-hermes:local
     build:
       context: .
       dockerfile: deploy/hermes.Dockerfile
@@ -658,7 +669,7 @@ services:
   # never stops polling.
   nocheh-telegram:
     logging: *logging
-    image: nocheh-hermes:local
+    image: ${NOCHEH_IMAGES:-nocheh}-hermes:local
     command: [python, -m, services.telegram.server]
     # The spool's files are 0600, so the bot runs as the same user as nocheh-app.
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -671,6 +682,10 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     networks: [default]
+    # The public ID of the bot it polls, empty while Telegram is off, so another workspace's setup refuses the
+    # same bot (ADR-0245); `unknown` when started without ./bin/nocheh, which works it out.
+    labels:
+      com.nocheh.bot-id: ${NOCHEH_POLLED_BOT_ID-unknown}
     environment:
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -704,9 +719,9 @@ services:
 
 volumes:
   honcho_database:
-    name: ${NOCHEH_HONCHO_DATABASE_VOLUME:-nocheh_honcho_database}
+    name: ${NOCHEH_HONCHO_DATABASE_VOLUME:-${COMPOSE_PROJECT_NAME:-nocheh}_honcho_database}
   honcho_redis:
-    name: ${NOCHEH_HONCHO_REDIS_VOLUME:-nocheh_honcho_redis}
+    name: ${NOCHEH_HONCHO_REDIS_VOLUME:-${COMPOSE_PROJECT_NAME:-nocheh}_honcho_redis}
   postgres_data:
 
 networks:
@@ -716,10 +731,10 @@ networks:
   workflows:
     internal: true
   agent:
-    name: ${NOCHEH_AGENT_NETWORK:-nocheh-agent}
+    name: ${NOCHEH_AGENT_NETWORK:-${COMPOSE_PROJECT_NAME:-nocheh}-agent}
     internal: true
   memory:
-    name: ${NOCHEH_MEMORY_NETWORK:-nocheh-memory}
+    name: ${NOCHEH_MEMORY_NETWORK:-${COMPOSE_PROJECT_NAME:-nocheh}-memory}
     internal: true
   # Shared only by the mini app and its tunnel, so the tunnel reaches nothing else.
   miniapp: {}

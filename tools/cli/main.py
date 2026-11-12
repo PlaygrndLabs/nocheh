@@ -12,30 +12,49 @@ import tempfile
 from pathlib import Path
 
 from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, machine_folder, DEFAULT_STATE, INSTALLATION_ROOT
+from tools.operations.installation.workspaces import WorkspaceError
 
 ROOT = REPO_ROOT
 STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
 
 
-def bootstrap():
-    initialize(STATE)
+def bootstrap(workspace=None):
+    initialize(STATE, workspace)
 
 
-def build_image(name, env=None):
+def build_image(name, env=None, images=None):
     # The disposable tool and sealed job box images; the launcher resolves the box image at each box it makes.
-    return subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/f'deploy/{name}.Dockerfile'),'-t',f'nocheh-{name}:local',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
+    # Each workspace builds and runs its own (ADR-0245).
+    images = images or (env or {}).get('NOCHEH_IMAGES') or 'nocheh'
+    return subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/f'deploy/{name}.Dockerfile'),'-t',f'{images}-{name}:local',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
 
 
 def development_box_token():
-    # make dev runs on the operating .env without initialize(), so one from before boxes or machines gets its tokens here.
+    """make dev runs on the operating .env without initialize(), so one from before boxes or machines gets its tokens
+    here. Returns the operating workspace's image prefix."""
     from tools.development.live_dev import operating_root, operating_config
-    root = operating_root(); operating_config(root); path = root / '.env'; saved = read_env(path)
+    from tools.operations.installation.workspaces import images
+    root = operating_root(); values = operating_config(root); path = root / '.env'; saved = read_env(path)
     missing = tuple(name for name in ('NOCHEH_BOX_TOKEN', 'NOCHEH_MACHINE_TOKEN') if not saved.get(name))
     if missing: write_env(path, generate(saved, missing))
     # The launcher's read-only bind of the GitHub copies, nocheh-machines' keys folder and nocheh-telegram's state folder:
     # made here at 0700, so Docker never makes them as root.
     (root / 'data/local').mkdir(parents=True, exist_ok=True, mode=0o700); github_folders(root / 'data/local'); machine_folder(root / 'data/local')
     (root / 'data/local/telegram').mkdir(exist_ok=True, mode=0o700)
+    return images(values)
+
+
+def test_environment(state, project):
+    """A test project's own networks and memory volumes, and this checkout's workspace images (ADR-0245):
+    a test run never reaches another workspace's stack, data or images, and its `down --volumes` only its own."""
+    from tools.operations.installation.workspaces import checkout_settings, images
+    # A session worktree has no .env: its images are those of the operating checkout it belongs to, as for make dev.
+    values = checkout_settings(INSTALLATION_ROOT)
+    env = compose_environment(state)
+    env.update(COMPOSE_PROJECT_NAME=project, NOCHEH_AGENT_NETWORK=project + '-agent', NOCHEH_MEMORY_NETWORK=project + '-memory',
+               NOCHEH_HONCHO_DATABASE_VOLUME=project + '_honcho_database', NOCHEH_HONCHO_REDIS_VOLUME=project + '_honcho_redis',
+               NOCHEH_IMAGES=images(values or {}))
+    return env
 
 
 def run_isolated_tests(rest):
@@ -49,10 +68,7 @@ def run_isolated_tests(rest):
         checkout('hermes-agent', LOCK['hermes'])
         project = state.name
         command = compose_command(state, project) + ['-f', str(INSTALLATION_ROOT / 'deploy/acceptance/test-compose.yml')]
-        env = compose_environment(state)
-        env['COMPOSE_PROJECT_NAME'] = project
-        env['NOCHEH_AGENT_NETWORK'] = project + '-agent'
-        env['NOCHEH_MEMORY_NETWORK'] = project + '-memory'
+        env = test_environment(state, project)
         try:
             result = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-db'], cwd=ROOT, env=env)
             if result == 0:
@@ -71,16 +87,74 @@ def run_isolated_tests(rest):
                     result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
                         '--tmpfs', '/tmp:rw,exec,nosuid,nodev,mode=1777', '--entrypoint', 'python',
                         '-e', 'HERMES_HOME=/tmp/nocheh-tests', '-e', 'SERVICE_TOKEN=test-service-token',
-                        'nocheh-hermes:local', '-m', 'unittest', 'discover', '-s', tests,
+                        env['NOCHEH_IMAGES'] + '-hermes:local', '-m', 'unittest', 'discover', '-s', tests,
                         '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
         finally:
             cleanup = subprocess.call(command + ['down', '--volumes', '--remove-orphans'], cwd=ROOT, env=env)
         return result or cleanup
 
 
+def claim_folder(fresh):
+    """Adds this folder to the machine's list of workspaces. A .env this run just wrote is taken back when that
+    fails, so the folder can still get its own name."""
+    from tools.operations.installation.workspaces import claim
+    try: return claim(INSTALLATION_ROOT, fresh)
+    except WorkspaceError as error:
+        if not fresh: raise
+        env_path(STATE).unlink(missing_ok=True)
+        raise WorkspaceError(f'{error}\nNothing was saved. Name this folder with ./bin/nocheh init --workspace NAME, '
+                             'or make a workspace with ./bin/nocheh workspace new NAME from an existing one.') from None
+
+
+def workspace_command(command, rest):
+    """Several workspaces on one machine (ADR-0245): list them, make a new one, update them."""
+    from tools.operations.installation import workspaces
+    sys.path.insert(0, str(ROOT))
+    parser = argparse.ArgumentParser(prog='nocheh ' + command)
+    if command == 'workspace':
+        actions = parser.add_subparsers(dest='action', required=True)
+        new = actions.add_parser('new', help='Copy this folder\'s code into a new folder and set it up as a new workspace.')
+        new.add_argument('name', help='Short name, such as acme: 1-50 lowercase letters, digits or dashes')
+        new.add_argument('--folder', help='Where the new workspace lives. Default: next to this folder, named nocheh-NAME')
+    elif command == 'update':
+        parser.add_argument('names', nargs='*', help='Workspaces to update. Default: this folder\'s workspace')
+        parser.add_argument('--all', action='store_true', help='Update every workspace on this machine')
+    selected = parser.parse_args(rest)
+    try:
+        if STATE != DEFAULT_STATE: raise WorkspaceError('Workspaces are folders: run this without NOCHEH_STATE_DIR.')
+        if env_path(STATE).exists():
+            # A workspace folder joins the machine's list first, so the others see it. A folder without a .env,
+            # such as a session worktree, is not a workspace and stays as it is.
+            initialize(STATE)
+            try: workspaces.claim(INSTALLATION_ROOT)
+            except WorkspaceError as error:
+                if command != 'workspaces': raise
+                print('This folder overlaps another workspace:\n' + str(error) + '\n', file=sys.stderr)
+        if command == 'workspaces':
+            print(workspaces.show(INSTALLATION_ROOT)); return 0
+        if command == 'workspace':
+            if not env_path(STATE).exists() and not selected.folder:
+                # Next to a session worktree, the new workspace would go when the worktree does.
+                raise WorkspaceError('This folder is not a workspace. Run this from a workspace folder, or pass --folder.')
+            folder = workspaces.create(selected.name, INSTALLATION_ROOT, selected.folder)
+            print(f'Workspace {selected.name} is ready in {folder}. Start it with:\n  cd {folder} && ./bin/nocheh up\n'
+                  'Then open its dashboard and set it up like a new Nocheh: its own password, models and Telegram bot.')
+            return 0
+        if selected.all and selected.names: parser.error('Use either --all or workspace names.')
+        if selected.all: names = [name for name, _, _ in workspaces.listed()]
+        elif selected.names: names = selected.names
+        elif env_path(STATE).exists(): names = [workspaces.name_of(load(STATE))]
+        else: raise WorkspaceError('This folder is not a workspace. Name the workspaces to update, or use --all.')
+        return workspaces.update(names, INSTALLATION_ROOT)
+    except WorkspaceError as error:
+        print('nocheh: ' + str(error), file=sys.stderr); return 1
+    except subprocess.CalledProcessError as error:
+        print(f'nocheh: {error.cmd[0]} failed (exit {error.returncode}).', file=sys.stderr); return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "offsite", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
+    parser.add_argument("command", choices=("init", "workspace", "workspaces", "update", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "offsite", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
     if args.command == 'admin':
         sys.path.insert(0, str(ROOT))
@@ -99,15 +173,17 @@ def main():
     if args.command == 'security-profiles':
         from tools.operations.security.security_profiles import main as security_profiles
         return security_profiles(rest)
+    if args.command in ('workspace', 'workspaces', 'update'):
+        return workspace_command(args.command, rest)
     if args.command in ('dev', 'dev-stop', 'dev-status'):
         sys.path.insert(0, str(ROOT))
         from tools.development.live_dev import main as live_dev
         if args.command == 'dev':
-            development_box_token()
+            images = development_box_token()
             # Development boxes run this checkout's box server and writer; approved shell
             # commands and page reads run in the tool image.
             for name in ('box','tools'):
-                if result := build_image(name): return result
+                if result := build_image(name, images=images): return result
         return live_dev(args.command, rest)
     if args.command == 'test':
         return run_isolated_tests(rest)
@@ -151,7 +227,20 @@ def main():
         sys.path.insert(0,str(ROOT))
         from tools.operations.installation.operations import main as operations
         return operations(args.command,STATE,rest)
-    bootstrap()
+    # A new .env written by this run gets the first free ports of the machine (ADR-0245).
+    fresh = not env_path(STATE).exists()
+    workspace = None
+    if args.command == 'init':
+        init_parser = argparse.ArgumentParser(prog='nocheh init', description='Prepare this folder\'s .env; --workspace names a new workspace.')
+        init_parser.add_argument('--workspace', help='Short name of this workspace, such as acme. Set once; personal when left out.')
+        workspace = init_parser.parse_args(rest).workspace
+    try:
+        bootstrap(workspace)
+        claimed = None
+        if args.command in ('init', 'up') and STATE == DEFAULT_STATE:
+            claimed = claim_folder(fresh)
+    except WorkspaceError as error:
+        print('nocheh: ' + str(error), file=sys.stderr); return 1
     if args.command == 'group-access':
         sys.path.insert(0, str(ROOT))
         from tools.operations.security.group_access import main as group_access
@@ -230,7 +319,9 @@ def main():
         else: parser.error('Use config show, config set KEY [VALUE] [--rebuild-memory], or config apply.')
         print(json.dumps(result, indent=2)); return 1 if result.get('status') == 'apply_failed' else 0
     if args.command == "init":
-        print("Local configuration ready. Edit " + str(env_path(STATE))); return 0
+        print("Local configuration ready. Edit " + str(env_path(STATE)))
+        if claimed: print(f"Workspace {claimed['workspace']}: start it with ./bin/nocheh up, then open {claimed['dashboard']}")
+        return 0
     if args.command=='configure-telegram':
         config_parser=argparse.ArgumentParser(description='Enable the owner DM and explicitly selected groups; token stays in .env.')
         config_parser.add_argument('--owner-id',required=True)

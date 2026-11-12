@@ -39,7 +39,7 @@ class ServiceCatalogTests(unittest.TestCase):
         # A brain restart must not stop polling, and the incident file outlives the bot's restart.
         self.assertEqual(bot['depends_on'],{'nocheh-app':{'condition':'service_healthy'}})
         self.assertEqual((bot['image'],bot['command'],bot['read_only'],bot['networks']),
-                         ('nocheh-hermes:local',['python','-m','services.telegram.server'],True,['default']))
+                         ('${NOCHEH_IMAGES:-nocheh}-hermes:local',['python','-m','services.telegram.server'],True,['default']))
         self.assertNotIn('build',bot);self.assertNotIn('ports',bot)
         self.assertEqual(bot['volumes'],['${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool',
                                          '${NOCHEH_STATE_DIR:-./data/local}/telegram:/telegram-state'])

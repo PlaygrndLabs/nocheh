@@ -19,7 +19,8 @@ SECRETS = {'TELEGRAM_BOT_TOKEN', 'CLOUDFLARE_TUNNEL_TOKEN', 'POSTGRES_PASSWORD',
 # Settings › Models; Apply also refreshes Honcho when its routes change.
 MODEL_SETTINGS = {'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_PROVIDER', 'NOCHEH_EMBEDDING_MODEL',
                   'NOCHEH_TRANSCRIPTION_PROVIDER', 'NOCHEH_TRANSCRIPTION_MODEL'} | set(provider_routes.DEFAULTS)
-EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - WORKFLOW_INTERNAL - STORE_INTERNAL
+# A workspace keeps the name it got at setup (ADR-0245): everything else on the machine follows from it.
+EDITABLE = set(DEFAULTS) - {'NOCHEH_CONFIG_VERSION', 'NOCHEH_WORKSPACE', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN','NOCHEH_STORAGE_LAYOUT'} - WORKFLOW_INTERNAL - STORE_INTERNAL
 
 
 # Read again by the dashboard at each check, so they work as soon as they are saved
@@ -149,6 +150,9 @@ def save(state, changes, expected, rebuild_memory=False):
         # keys of removed custom providers are dropped.
         updated['NOCHEH_PROVIDER_KEYS'] = provider_routes.merge_keys(current, changes)
         validate(updated)
+        # Another workspace on this machine never shares this one's bot, mini app address or tunnel.
+        from tools.operations.installation.workspaces import check_settings
+        check_settings(updated, current)
         locked = embedding_route(state)
         model = updated['NOCHEH_EMBEDDING_MODEL']
         marker = directory / 'memory-rebuild.json'

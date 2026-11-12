@@ -1,4 +1,4 @@
-"""Source-watched development for a single local installation."""
+"""Source-watched development for the workspace of the main checkout (ADR-0245: other workspaces may run beside it)."""
 
 from tools.paths import ROOT
 
@@ -10,11 +10,16 @@ import subprocess
 import time
 from pathlib import Path
 
-from tools.operations.installation import configuration, mini_app
+from tools.operations.installation import configuration, mini_app, workspaces
 from tools.operations.provider import routes as provider_routes
 
+# The personal workspace's names; another workspace's make dev uses its own, from its .env.
 PROJECT = 'nocheh'
 DEV_IMAGES = 'nocheh-dev'
+
+
+def dev_images(project):
+    return project + '-dev'
 SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor', 'nocheh-machines',
             'nocheh-security', 'hermes-agent-sb', 'inngest-redis', 'inngest-server',
             'hermes', 'nocheh-telegram', 'honcho-postgres', 'honcho-redis',
@@ -24,15 +29,11 @@ FIXTURE_PROJECT = re.compile(r'nocheh-installation-[0-9a-f]{12}')
 
 
 def port_available(port):
-    with socket.socket() as probe:
-        try:
-            probe.bind(('127.0.0.1', port))
-        except OSError:
-            return False
-    return True
+    # One meaning of a busy port for setup and make dev (ADR-0245).
+    return workspaces.port_free(port)
 
 
-def assert_ports(containers):
+def assert_ports(containers, ports=PORTS):
     owned = set()
     for container in containers:
         if not container['State']['Running']:
@@ -40,7 +41,7 @@ def assert_ports(containers):
         for bindings in (container['NetworkSettings'].get('Ports') or {}).values():
             for binding in bindings or []:
                 owned.add(int(binding['HostPort']))
-    for port in PORTS:
+    for port in ports:
         if port in owned:
             continue
         # A just-stopped stack's closing connections hold its ports for a moment.
@@ -64,6 +65,8 @@ def prepare_source_mounts():
 
 def prepare_runtime_images(env, root):
     """Reuse only revision-checked, credential-free pinned image contents."""
+    images = env.get('NOCHEH_IMAGES', 'nocheh') + '-hermes:local'
+    development = env.get('NOCHEH_DEV_PROJECT', DEV_IMAGES)
     locks = json.loads((ROOT / 'deploy/upstreams.lock.json').read_text())
     hermes_revision = locks['hermes']['revision']
     honcho_source = 'nocheh-honcho:' + json.loads((ROOT / 'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
@@ -80,26 +83,26 @@ def prepare_runtime_images(env, root):
 
     def hermes_libraries_ready():
         return all(subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'python',
-                                   'nocheh-hermes:local', '-c', check],
+                                   images, '-c', check],
                                   cwd=ROOT, env=env, capture_output=True).returncode == 0 for check in import_checks)
 
     def pinned_images_ready():
-        return (image_revision('nocheh-hermes:local') == hermes_revision and image_revision(honcho_source) is not None
+        return (image_revision(images) == hermes_revision and image_revision(honcho_source) is not None
                 and hermes_libraries_ready())
 
     if not pinned_images_ready():
         # A moved pin or library list needs the installation's own images first; this builds images only.
         print('Building the pinned Hermes and Honcho images', flush=True)
         subprocess.run([str(root / 'bin/nocheh'), 'build'], cwd=root, check=True)
-        if image_revision('nocheh-hermes:local') != hermes_revision:
-            raise ValueError('Pinned runtime image nocheh-hermes:local is unavailable or has the wrong revision after ./bin/nocheh build')
+        if image_revision(images) != hermes_revision:
+            raise ValueError(f'Pinned runtime image {images} is unavailable or has the wrong revision after ./bin/nocheh build')
         if not hermes_libraries_ready():
-            raise ValueError('Pinned runtime image nocheh-hermes:local lacks a required library after ./bin/nocheh build')
+            raise ValueError(f'Pinned runtime image {images} lacks a required library after ./bin/nocheh build')
         if image_revision(honcho_source) is None:
             raise ValueError(f'Pinned Honcho image {honcho_source} is unavailable after ./bin/nocheh build')
     # Development tags always follow the pinned images, so a moved pin replaces an older tag.
-    for source, destination in (('nocheh-hermes:local', DEV_IMAGES + ':hermes-base'),
-                                (honcho_source, DEV_IMAGES + ':honcho')):
+    for source, destination in ((images, development + ':hermes-base'),
+                                (honcho_source, development + ':honcho')):
         subprocess.run(['docker', 'tag', source, destination], cwd=ROOT, env=env,
                        check=True, capture_output=True)
 
@@ -137,11 +140,12 @@ def operating_config(root):
     return values
 
 
-def overlay_environment(source):
+def overlay_environment(source, project=PROJECT):
     """What docker-compose.dev.yml needs besides the installation's own settings."""
-    return dict(NOCHEH_DEV_PROJECT=DEV_IMAGES, NOCHEH_DEV_SOURCE_ROOT=str(source),
-                NOCHEH_DEV_HERMES_BASE=DEV_IMAGES + ':hermes-base',
-                NOCHEH_DEV_HONCHO_IMAGE=DEV_IMAGES + ':honcho')
+    development = dev_images(project)
+    return dict(NOCHEH_DEV_PROJECT=development, NOCHEH_DEV_SOURCE_ROOT=str(source),
+                NOCHEH_DEV_HERMES_BASE=development + ':hermes-base',
+                NOCHEH_DEV_HONCHO_IMAGE=development + ':honcho')
 
 
 def docker_env(root, values):
@@ -152,28 +156,35 @@ def docker_env(root, values):
     # Settings › Models: the resolved provider and model of replies and secret checks.
     env.update(provider_routes.environment(values))
     env.update(mini_app.environment(values))
-    env.update(overlay_environment(ROOT))
-    env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_INSTALLATION_ROOT=str(root),
+    names = workspaces.identity(values)
+    project = names['COMPOSE_PROJECT_NAME']
+    ports = workspaces.ports(values)
+    env.update(overlay_environment(ROOT, project))
+    env.update(COMPOSE_PROJECT_NAME=project, NOCHEH_INSTALLATION_ROOT=str(root),
                NOCHEH_STATE_DIR=str(root / 'data/local'),
-               NOCHEH_NATIVE_ADMIN_PORT=str(int(values['NOCHEH_PORT']) + 5),
+               NOCHEH_NATIVE_ADMIN_PORT=str(ports['admin']),
+               NOCHEH_DASHBOARD_PORT=str(ports['dashboard']),
+               NOCHEH_VIEWER_PORT=str(ports['viewer']),
+               NOCHEH_IMAGES=workspaces.images(values),
                COMPOSE_PROFILES='honcho,miniapp' if mini_app.enabled(values) else 'honcho',
                COMPOSE_PROGRESS='plain',
-               NOCHEH_AGENT_NETWORK=PROJECT + '-agent',
-               NOCHEH_MEMORY_NETWORK=PROJECT + '-memory')
+               NOCHEH_AGENT_NETWORK=names['NOCHEH_AGENT_NETWORK'],
+               NOCHEH_MEMORY_NETWORK=names['NOCHEH_MEMORY_NETWORK'])
     return env
 
 
-def command(root):
+def command(root, project=PROJECT):
     return ['docker', 'compose', '--env-file', str(root / '.env'),
             '--project-directory', str(root),
             '-f', str(ROOT / 'docker-compose.yml'),
-            '-f', str(ROOT / 'docker-compose.dev.yml'), '-p', PROJECT]
+            '-f', str(ROOT / 'docker-compose.dev.yml'), '-p', project]
 
 
 def assert_operating_volumes(env):
-    names = {'nocheh_postgres_data': ('nocheh', 'postgres_data'),
-             env['NOCHEH_HONCHO_DATABASE_VOLUME']: ('nocheh', 'honcho_database'),
-             env['NOCHEH_HONCHO_REDIS_VOLUME']: ('nocheh', 'honcho_redis')}
+    project = env.get('COMPOSE_PROJECT_NAME', PROJECT)
+    names = {project + '_postgres_data': (project, 'postgres_data'),
+             env['NOCHEH_HONCHO_DATABASE_VOLUME']: (project, 'honcho_database'),
+             env['NOCHEH_HONCHO_REDIS_VOLUME']: (project, 'honcho_redis')}
     for name, expected in names.items():
         result = subprocess.run(['docker', 'volume', 'inspect', name],
                                 cwd=ROOT, env=env, capture_output=True, text=True)
@@ -191,7 +202,7 @@ def assert_operating_volumes(env):
 
 def inspect_project(root, env):
     ids = subprocess.check_output(['docker', 'ps', '-aq', '--filter',
-                                   'label=com.docker.compose.project=' + PROJECT],
+                                   'label=com.docker.compose.project=' + env.get('COMPOSE_PROJECT_NAME', PROJECT)],
                                   cwd=root, env=env, text=True).split()
     if not ids:
         return []
@@ -208,7 +219,11 @@ def inspect_project(root, env):
     return containers
 
 
-def assert_only_development_running(containers, env):
+def assert_only_development_running(containers, env, bot=None):
+    """Other workspaces may run beside development (ADR-0245), but never a second poller of its bot: a running
+    Nocheh bot of another stack must show a different bot or none (Telegram off). One without the label, or
+    `unknown` (started without ./bin/nocheh), counts as the same."""
+    project = env.get('COMPOSE_PROJECT_NAME', PROJECT)
     ids = subprocess.check_output(['docker', 'ps', '-q', '--filter',
                                    'label=com.docker.compose.project'],
                                   cwd=ROOT, env=env, text=True).split()
@@ -217,9 +232,11 @@ def assert_only_development_running(containers, env):
                                                      cwd=ROOT, env=env, text=True))
         for container in running:
             labels = container['Config']['Labels'] or {}
-            if (labels.get('com.docker.compose.project') != PROJECT
-                    and labels.get('com.docker.compose.service') in SERVICES):
-                raise ValueError('Another Nocheh stack is running; stop it before make dev')
+            if (labels.get('com.docker.compose.project') != project
+                    and labels.get('com.docker.compose.service') == 'nocheh-telegram'
+                    and (not bot or labels.get('com.nocheh.bot-id', 'unknown') in ('unknown', bot))):
+                raise ValueError('Another Nocheh stack is running with this Telegram bot, or one Nocheh cannot tell; '
+                                 'stop it before make dev')
     active = [container for container in containers if container['State']['Running']]
     if active and not any(
         (container['Config']['Labels'] or {}).get('com.docker.compose.service') == 'nocheh-app'
@@ -233,9 +250,10 @@ def assert_compose_mounts(cmd, env):
     rendered = json.loads(subprocess.check_output(cmd + ['config', '--format', 'json'],
                                                   cwd=env['NOCHEH_INSTALLATION_ROOT'],
                                                   env=env, text=True))
-    if rendered['name'] != PROJECT:
+    project = env.get('COMPOSE_PROJECT_NAME', PROJECT)
+    if rendered['name'] != project:
         raise ValueError('Development must reuse the operating Compose project')
-    expected_volumes = {'postgres_data': 'nocheh_postgres_data',
+    expected_volumes = {'postgres_data': project + '_postgres_data',
                         'honcho_database': env['NOCHEH_HONCHO_DATABASE_VOLUME'],
                         'honcho_redis': env['NOCHEH_HONCHO_REDIS_VOLUME']}
     if any(rendered['volumes'][key].get('name') != name
@@ -288,7 +306,7 @@ def build_needed(env):
     if os.environ.get('NOCHEH_DEV_BUILD') == '1':
         return True
     for service in ('db', 'app', 'dashboard', 'executor', 'machines', 'security'):
-        result = subprocess.run(['docker', 'image', 'inspect', DEV_IMAGES + ':' + service],
+        result = subprocess.run(['docker', 'image', 'inspect', env.get('NOCHEH_DEV_PROJECT', DEV_IMAGES) + ':' + service],
                                 cwd=ROOT, env=env, capture_output=True)
         if result.returncode:
             return True
@@ -301,18 +319,22 @@ def main(action, rest):
     root = operating_root()
     values = operating_config(root)
     env = docker_env(root, values)
-    cmd = command(root)
+    cmd = command(root, env['COMPOSE_PROJECT_NAME'])
     containers = inspect_project(root, env)
+    bot = mini_app.bot_id(values.get('TELEGRAM_BOT_TOKEN', ''))
     if action == 'dev-stop':
-        assert_only_development_running(containers, env)
+        assert_only_development_running(containers, env, bot)
         if not any(container['State']['Running'] for container in containers):
             print('No development stack is running.')
             return 0
         return subprocess.call(cmd + ['down'], cwd=root, env=env)
     if action == 'dev-status':
         return subprocess.call(cmd + ['ps'], cwd=root, env=env)
-    assert_only_development_running(containers, env)
-    assert_ports(containers)
+    assert_only_development_running(containers, env, bot)
+    # The operating folder joins the machine's list of workspaces once nothing overlaps another one.
+    workspaces.claim(root)
+    ports = workspaces.ports(values)
+    assert_ports(containers, (ports['app'], ports['dashboard'], ports['admin']))
     assert_operating_volumes(env)
     assert_compose_mounts(cmd, env)
     prepare_source_mounts()
@@ -321,7 +343,7 @@ def main(action, rest):
     if released:
         print(f'Released {len(released)} networks of stopped rehearsal fixtures', flush=True)
     build_flag = '--build' if build_needed(env) else '--no-build'
-    print('Live development: http://127.0.0.1:8783/', flush=True)
+    print(f"Live development: http://127.0.0.1:{ports['dashboard']}/", flush=True)
     print(f'Source checkout: {ROOT}\nOperating state: {root / "data/local"}', flush=True)
     try:
         services = SERVICES + (mini_app.SERVICES if mini_app.enabled(values) else ())

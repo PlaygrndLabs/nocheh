@@ -155,6 +155,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 ### Installation and recovery
 
 - Local Docker Compose is the target, in one project named nocheh; exact-revision rollouts rebuild only nocheh-app ([0019](0019-local-compose-development-and-acceptance.md), [0036](0036-one-compose-project.md), [0067](0067-exact-revision-app-rollout.md)).
+- Several workspaces run on one machine, each its own installation in its own folder; its name decides its project, networks, volumes, images, ports, off-site folder and sign-in cookie, `personal` keeps the `nocheh` names, and setup refuses another workspace's name, ports, bot, mini app address or tunnel ([0245](0245-several-workspaces-on-one-machine.md)).
 - nocheh-app holds archive, capture and handlers; nocheh-security holds broker and guard; hermes, hermes-agent-sb and nocheh-db complete the core ([0046](0046-consolidated-inngest-installation.md), [0055](0055-concise-core-service-names.md)); nocheh-machines alone holds the owner's machine keys ([0231](0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md)).
 - The dashboard and executor are services with owner-approved Docker socket access; agents never get the socket ([0048](0048-containerized-management.md)).
 - nocheh-db creates the archive, derived, control and workflow databases before it reports healthy; root Compose owns its volumes ([0054](0054-postgres-owned-store-bootstrap.md), [0075](0075-clean-development-setup.md)).
@@ -165,7 +166,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 
 - AGENTS.md holds working rules, SPECS.md the product and TASK.md the status; work uses one worktree and locked integration, and merging to main is not a release or activation ([0039](0039-main-refactor-consolidation.md), [0040](0040-specifications-and-agent-workflow.md)).
 - Code is placed by role, `.agent/` is the only agent support root, and live acceptance output stays out of Git ([0069](0069-role-based-source-layout.md), [0070](0070-single-agent-support-root.md), [0071](0071-local-only-acceptance-evidence.md)).
-- `make dev` runs one source-watched stack against the operating installation, with the root dev Compose override ([0065](0065-single-stack-source-mounted-development.md), [0066](0066-fixed-name-standard-port-development.md), [0073](0073-live-data-source-watched-development.md), [0074](0074-root-development-compose-layout.md)).
+- `make dev` runs one source-watched stack against the operating installation, with the root dev Compose override; other workspaces may run beside it, but never a second poller of its bot ([0065](0065-single-stack-source-mounted-development.md), [0066](0066-fixed-name-standard-port-development.md), [0073](0073-live-data-source-watched-development.md), [0074](0074-root-development-compose-layout.md), [0245](0245-several-workspaces-on-one-machine.md)).
 
 ## Replaced decisions
 

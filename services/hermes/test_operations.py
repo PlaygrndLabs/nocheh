@@ -148,13 +148,19 @@ class SnapshotTests(unittest.TestCase):
                     self.assertEqual(restored['NOCHEH_HONCHO_STATE_DIR'],str(state/'honcho'))
                     self.assertEqual(restored['NOCHEH_HONCHO_DATABASE_VOLUME'],'nocheh-test-restore_honcho_database')
                     self.assertEqual(restored['NOCHEH_HONCHO_REDIS_VOLUME'],'nocheh-test-restore_honcho_redis')
+                    # Its own name, so its off-site copies never mix with a workspace's, and this checkout's images.
+                    self.assertEqual((restored['NOCHEH_WORKSPACE'],restored['NOCHEH_IMAGES']),('test-restore','nocheh'))
                 return SimpleNamespace(returncode=0)
             with patch('tools.operations.installation.operations.validate_snapshot',return_value=manifest),\
                  patch('tools.operations.installation.operations.initialize',return_value={'TELEGRAM_ENABLED':'true','NOCHEH_HONCHO_ENABLED':'true','NOCHEH_HONCHO_STATE_DIR':'/live/memory','NOCHEH_HONCHO_DATABASE_VOLUME':'live-db','NOCHEH_HONCHO_REDIS_VOLUME':'live-cache'}),\
                  patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
                  patch('tools.operations.installation.operations.environment',return_value={}),\
                  patch('tools.operations.installation.operations.fingerprints',return_value=manifest['tables']),\
+                 patch('tools.operations.installation.workspaces.listed',return_value=[]),\
+                 patch('tools.operations.installation.workspaces.checkout_settings',return_value=None),\
                  patch('tools.operations.installation.operations.subprocess.run',side_effect=run):
                 result=restore(snapshot,state,'nocheh-test-restore',18980)
+                # A restore never takes a workspace's name, so never its off-site folder either.
+                with self.assertRaisesRegex(ValueError,'is a workspace'):restore(snapshot,root/'state-personal','nocheh-personal',18990)
             self.assertEqual(len(starts),2);self.assertFalse(result['executors_active'])
             self.assertFalse(result['telegram_enabled']);self.assertFalse(result['hermes_login_activated'])

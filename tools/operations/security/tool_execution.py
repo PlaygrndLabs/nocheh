@@ -19,6 +19,13 @@ from urllib.parse import urlsplit
 
 # The disposable image approved shell commands and page reads run in; `nocheh up` and `make dev` build it.
 TOOLS_IMAGE='nocheh-tools:local'
+
+
+def tools_image():
+    """This workspace's own tool image (ADR-0245); Compose names it for the management containers."""
+    return os.environ.get('NOCHEH_TOOLS_IMAGE') or TOOLS_IMAGE
+
+
 # Why an approved tool failed, as a fixed code a receipt may keep: never remote, command or page content.
 FAILURES=frozenset({'public_https_required','private_destination_denied','remote_unreachable','remote_unauthorized',
     'remote_response_rejected','encoded_response_denied','remote_response_limit','browser_html_required',
@@ -41,7 +48,7 @@ def failure(error):
 
 def sandbox_ready(run=subprocess.run):
     """Whether Docker has the sandbox image; asked before anything is sent."""
-    try:return run(['docker','image','inspect','--format','{{.Id}}',TOOLS_IMAGE],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15).returncode==0
+    try:return run(['docker','image','inspect','--format','{{.Id}}',tools_image()],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15).returncode==0
     except (OSError,subprocess.SubprocessError):return False
 
 
@@ -149,7 +156,7 @@ def sandbox_command(state,action,name):
         '--user',str(os.getuid())+':'+str(os.getgid()),'--tmpfs','/tmp:rw,nosuid,nodev,size=256m,mode=1777',
         '--ulimit','fsize=10485760:10485760','--log-driver=none']
     if action['kind']=='shell':command+=['--mount','type=bind,src='+str(workspace(state,action['profile']))+',dst=/workspace']
-    return command+[TOOLS_IMAGE]
+    return command+[tools_image()]
 
 
 def execute(state,action,request=https_request,run=subprocess.run,container_name=None):
@@ -183,7 +190,7 @@ def execute(state,action,request=https_request,run=subprocess.run,container_name
 def bounded_execute(state,action):
     """An overall process deadline also bounds DNS and slow response streams."""
     name='nocheh-tool-'+uuid.uuid4().hex
-    env={key:os.environ[key] for key in ('PATH','HOME','LANG','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG') if key in os.environ}
+    env={key:os.environ[key] for key in ('PATH','HOME','LANG','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG','NOCHEH_TOOLS_IMAGE') if key in os.environ}
     process=subprocess.Popen([sys.executable,'-m','tools.operations.security.tool_execution'],cwd=REPO_ROOT,env=env,
         stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
     selector=selectors.DefaultSelector();output=bytearray();deadline=time.monotonic()+75

@@ -1038,7 +1038,7 @@ class BoxWiringTests(unittest.TestCase):
         # Unset, the broker and launcher refuse every box route; an older .env still starts.
         self.assertEqual({compose['services'][name]['environment']['NOCHEH_BOX_TOKEN'] for name in holders},{'${NOCHEH_BOX_TOKEN:-}'})
         launcher_env=compose['services']['hermes-agent-sb']['environment']
-        self.assertEqual((launcher_env['NOCHEH_BOX_IMAGE'],launcher_env['NOCHEH_BOX_LIMIT']),('${NOCHEH_BOX_IMAGE:-nocheh-box:local}','${NOCHEH_BOX_LIMIT:-2}'))
+        self.assertEqual((launcher_env['NOCHEH_BOX_IMAGE'],launcher_env['NOCHEH_BOX_LIMIT']),('${NOCHEH_IMAGES:-nocheh}-box:local','${NOCHEH_BOX_LIMIT:-2}'))
         self.assertEqual(compose['services']['nocheh-security']['environment']['SERVICE_TOKEN'],compose['x-service']['environment']['SERVICE_TOKEN'])
         # Settings lists DEFAULTS; the token is generated, never shown or edited there. Monitoring says only whether it is set.
         self.assertNotIn('NOCHEH_BOX_TOKEN',DEFAULTS);self.assertNotIn('NOCHEH_BOX_TOKEN',EDITABLE)
@@ -1068,7 +1068,7 @@ class BoxWiringTests(unittest.TestCase):
             self.assertFalse(keys&{'GH_TOKEN','GITHUB_TOKEN','COPILOT_GITHUB_TOKEN'},name)
         self.assertNotIn('github_'+'pat',text)
         # The fetcher runs the launcher's box image; management starts it.
-        self.assertEqual(compose['x-management']['environment']['NOCHEH_BOX_IMAGE'],'${NOCHEH_BOX_IMAGE:-nocheh-box:local}')
+        self.assertEqual(compose['x-management']['environment']['NOCHEH_BOX_IMAGE'],'${NOCHEH_IMAGES:-nocheh}-box:local')
         root='${NOCHEH_STATE_DIR:-${PWD}/data/local}:${NOCHEH_STATE_DIR:-${PWD}/data/local}'
         self.assertEqual({name for name,service in compose['services'].items() if root in volumes(service)},{'nocheh-dashboard','nocheh-executor'})
         self.assertIn(root,volumes(compose['x-management']))
@@ -1131,6 +1131,7 @@ class BoxWiringTests(unittest.TestCase):
         def run(command,failing=None):
             calls=[]
             with patch.object(sys,'argv',['nocheh',command]),patch.object(cli,'bootstrap'),patch.object(cli,'compose_environment',return_value={'NOCHEH_HONCHO_ENABLED':'false'}),\
+                    patch('tools.operations.installation.workspaces.claim',return_value=None),\
                     patch.object(cli,'compose_command',return_value=['docker','compose']),patch('tools.acceptance.subscription.setup.checkout'),\
                     patch('tools.development.live_dev.main',side_effect=lambda *args:calls.append(['live_dev',*args]) or 0),\
                     patch.object(cli,'development_box_token',side_effect=lambda:calls.append(['box_token'])),\

@@ -65,7 +65,7 @@ Hermes still does more than reason. It also reads files and voice notes, makes t
 
 You need Docker with Compose, Git, Node 26 and Python 3, a model provider key, and an OpenAI API key (or a gateway that offers the same models) for memory search and voice notes. To talk to Nocheh through Telegram, you also need a bot token from [BotFather](https://t.me/BotFather).
 
-1. Install and create your local settings. `init` writes an ignored `.env` with generated internal passwords:
+1. Install and create your local settings. `init` writes an ignored `.env` with generated internal passwords, and this folder becomes your `personal` workspace:
 
    ```bash
    npm ci
@@ -106,6 +106,19 @@ Full setup: [Telegram and the mini app](docs/telegram.md), [model providers](doc
 ./bin/nocheh down                    # stop everything; your data stays
 ./bin/nocheh up                      # start again in the background
 ```
+
+### Several workspaces
+
+Keep each company apart from your personal Nocheh. Each workspace is its own Nocheh in its own folder, with its own data, memory, password, Telegram bot, dashboard and backups. Workspaces never see each other's data.
+
+```bash
+./bin/nocheh workspace new acme      # copy this code to ../nocheh-acme and set it up as the workspace acme
+./bin/nocheh workspaces              # list the workspaces on this machine, their dashboards and whether they run
+./bin/nocheh update --all            # pull the newest code into every workspace and restart the ones that run
+./bin/nocheh update acme             # only acme; with no name, only this folder's workspace
+```
+
+Start a new workspace from its folder with `./bin/nocheh up`, then set it up like a new Nocheh. Each workspace gets the next free ports, so the second one's dashboard is at <http://127.0.0.1:8793/>. Setup refuses a name, port, Telegram bot or mini app address that another workspace already uses, so give each workspace its own bot. Running three or more workspaces on Docker Desktop needs [one Docker setting](docs/deploy.md#several-workspaces).
 
 Lost the machine? On a new one, `./bin/nocheh offsite fetch --output DIR` downloads the newest off-site copy with your storage settings and opens it with your passphrase. `./bin/nocheh restore` then starts it as a new, switched-off installation for you to check. See [backups and restore](docs/deploy.md).
 
@@ -176,7 +189,7 @@ make dev-stop            # stop it; your data stays
 make dev-build           # rebuild after dependency or Dockerfile changes
 ```
 
-`make dev` runs the code in your current checkout with the same settings and data as `up`. It starts only while Telegram is on and the background stack is stopped, so finish the Quick start, run `./bin/nocheh down`, then start `make dev`. See [Start and develop](docs/deploy.md#start-and-develop).
+`make dev` runs the code in your current checkout with the same settings and data as `up`. It starts only while Telegram is on and the background stack is stopped, so finish the Quick start, run `./bin/nocheh down`, then start `make dev`. Other workspaces may keep running beside it. See [Start and develop](docs/deploy.md#start-and-develop).
 
 The sockets live in `src/brain` (brains), `src/mcp` (data tools) and `src/memory` (memory engines). A new brain is one file that implements `Brain`, plus one line in `src/brain/brains.ts`. A new memory engine is one file that implements `MemoryEngine`, plus one line in `src/memory/engines.ts`.
 
