@@ -440,6 +440,14 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     assert.deepEqual((await s.tasks.chatList(member,{group,state:'all'})).tasks.map((item:any)=>item.id),[banner.id]);
     const own=await s.tasks.get(owner,porchTask.id);
     assert.deepEqual([own.group_id,own.created_by.name],[porch,'Alice'],'the owner still sees them');
+    // Nor does its history, when its group changes to or from that group.
+    const regrouped=await s.tasks.chatUpdate(member,porchTask.id,{expected_revision:own.revision,group});
+    assert.equal(regrouped.group_id,group);
+    await s.tasks.update(owner,porchTask.id,{operation_id:key+':porch-back',expected_revision:regrouped.revision,group:porch});
+    const regroupedSeen=await s.tasks.chatGet(member,porchTask.id),groups=(value:any)=>value.activity.filter((item:any)=>item.changes.group_id).map((item:any)=>item.changes.group_id);
+    assert.deepEqual(groups(regroupedSeen),[{from:group,to:null},{from:null,to:group}]);
+    assert.ok(!JSON.stringify(regroupedSeen).includes(porch),'the other group stays private in its history');
+    assert.deepEqual(groups(await s.tasks.get(owner,porchTask.id)),[{from:group,to:porch},{from:porch,to:group}],'the owner sees both');
 
     // A personal task moved under a project's task joins that list with everything under it, from then on.
     const top=await s.tasks.create(owner,{operation_id:key+':top',title:'Plan the launch',scope:launch});

@@ -264,6 +264,14 @@ const row=(value:any,view:View=null)=>{
  * where it came from, such as its earlier list, parent or title. */
 const arrived=(changes:Record<string,unknown>)=>Object.fromEntries(Object.entries(changes).map(([key,value])=>
   [key,value&&typeof value==='object'&&!Array.isArray(value)&&'to' in value?{to:(value as {to:unknown}).to}:value]));
+/** A history entry as a project's chat sees it: the change that brought the task in shows only where it went, and a
+ * group or topic that chat does not see shows as none (ADR-0243). */
+const boardChange=(changes:Record<string,unknown>,chats:string[])=>{
+  const shown='project_id' in changes?arrived(changes):changes,group=shown.group_id;
+  if(!group||typeof group!=='object')return shown;
+  const seen=(space:unknown)=>typeof space==='string'&&seenGroup(chats,space)?space:null;
+  return {...shown,group_id:Object.fromEntries(Object.entries(group).map(([side,space])=>[side,seen(space)]))};
+};
 /** A repeat in words, as a card shows it: "every 2 weeks on Mon, Thu, from when it is done". */
 const repeatWords=(repeat:{every:number;unit:string;weekdays?:number[];from:string})=>
   `every ${repeat.every} ${repeat.unit}${repeat.every===1?'':'s'}${repeat.weekdays?.length?' on '+repeat.weekdays.map(day=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).join(', '):''}`+
@@ -614,12 +622,12 @@ export class TaskRepository {
     const parent=task.parent_id?(await this.control.query('SELECT id,title,state FROM owner_tasks WHERE id=$1 AND ($2::text IS NULL OR project_id=$2)',[task.parent_id,within])).rows[0]??null:null;
     const subtasks=(await this.control.query(`SELECT ${fields} FROM owner_tasks WHERE parent_id=$1 AND deleted_at IS NULL AND ($2::text IS NULL OR project_id=$2)
       ORDER BY position,created_at,id`,[id,within])).rows.map(value=>row(value,view));
-    // A project's chat sees comments and history only from when the task joined its list, and the change that brought
-    // it in shows only where it went (ADR-0243).
+    // A project's chat sees comments and history only from when the task joined its list, the change that brought it
+    // in shows only where it went, and a group that chat does not see shows as none (ADR-0243).
     const since=`($2::boolean OR %s>=coalesce((SELECT project_since FROM owner_tasks WHERE id=$1),'infinity'::timestamptz))`;
     const comments=(await this.control.query(`SELECT id,body,author,origin,created_at FROM owner_task_comments WHERE task_id=$1 AND ${since.replace('%s','created_at')} ORDER BY created_at,id`,[id,!within])).rows;
     const activity=(await this.control.query(`SELECT id::text,at,actor,origin,changes FROM owner_task_activity WHERE task_id=$1 AND ${since.replace('%s','at')} ORDER BY id DESC LIMIT 100`,[id,!within])).rows
-      .map(item=>within&&'project_id' in item.changes?{...item,changes:arrived(item.changes)}:item);
+      .map(item=>view?{...item,changes:boardChange(item.changes,view.chats)}:item);
     // The owner learns how many tasks sit under it at every level, archived and in the trash too: a move takes them all.
     const descendants=within?{}:{descendants:Number((await this.control.query(`WITH RECURSIVE down AS (SELECT id FROM owner_tasks WHERE parent_id=$1
       UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id) SELECT count(*)::int AS count FROM down`,[id])).rows[0].count)};
