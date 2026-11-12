@@ -34,6 +34,7 @@ class TelegramSimulationRequest(BaseRequest):
         self.delivered = []
         self.updates = []
         self.respond = None
+        self.respond_presence = None  # Answers a chat action or reaction instead of Telegram's plain success.
 
     @property
     def read_timeout(self):
@@ -66,6 +67,12 @@ class TelegramSimulationRequest(BaseRequest):
             if 'message_thread_id' in data:
                 result['message_thread_id'] = data['message_thread_id']
         elif operation in ('sendChatAction', 'setMessageReaction'):
+            if self.respond_presence:
+                response = self.respond_presence(operation, data)
+                if response is not None:
+                    return response
+            result = True
+        elif operation == 'deleteWebhook':
             result = True
         else:
             raise AssertionError('Unmodeled Telegram method: ' + operation)
@@ -87,6 +94,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(policy_check.stop)
         self.policy = Policy(True, '123', ['-20'], {'-20': {'granted': ['456'], 'denied': []}})
         self.capture = Capture(self.root / 'spool', '123456')
+        # Send records still being written land before the spool is removed.
+        self.addAsyncCleanup(self.capture.sends.settle)
         self.request, self.polling = TelegramSimulationRequest(), TelegramSimulationRequest()
         instrument_request(self.request, self.capture)
         instrument_request(self.polling, self.capture, polling=True)
@@ -100,7 +109,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         """A freshly started service over the same spool, as after a restart."""
         gateway = TelegramService(self.policy, '123456:synthetic', self.root / 'spool', self.root / 'state')
         gateway.status, gateway.bot, gateway.capture = 'connected', self.bot, self.capture
-        gateway.sender = Sender(self.bot, pace=0)
+        gateway.sender = Sender(self.bot, pace=0, sends=self.capture.sends)
         gateway.action_lock = asyncio.Lock()
         gateway.typing_on = getattr(self, 'typing', False)
         gateway.reactions_on = getattr(self, 'reacting', False)
@@ -445,6 +454,93 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         allowed[0] = False
         with self.assertRaisesRegex(RuntimeError, 'authority_revoked'):
             check('setMessageReaction', {'chat_id': -20, 'message_id': 7})
+
+    async def sends(self):
+        await self.capture.sends.settle()
+        return [json.loads(path.read_bytes()) for path in (self.root / 'spool/sends').glob('*.json')]
+
+    async def test_a_delivered_reply_leaves_one_send_record_without_its_text(self):
+        self.assertEqual(await self.deliver(self.envelope()), {'state': 'done'})
+        [record] = await self.sends()
+        self.assertEqual({key: value for key, value in record.items() if key not in ('key', 'at', 'ms')},
+                         {'version': 1, 'channel': 'telegram', 'account': '123456', 'kind': 'reply', 'method': 'sendMessage', 'chat': '-20',
+                          'topic': 17, 'message_id': 1001, 'detail': None, 'state': 'sent', 'status': 200, 'error_code': None,
+                          'reference': 'telegram:123456:update:1'})
+        self.assertIsInstance(record['ms'], int)
+        raw = b''.join(path.read_bytes() for path in (self.root / 'spool/sends').glob('*'))
+        for content in (self.answer, self.answer.split()[0], '123456:synthetic', self.secret):
+            self.assertNotIn(content.encode(), raw)
+        journal = b''.join(path.read_bytes() for path in (self.root / 'spool/outbound').glob('*'))
+        self.assertNotIn(b'send:telegram:', journal, 'records are not journal entries')
+
+    async def test_working_reactions_leave_send_records_but_no_journal_entries(self):
+        self.gateway.reactions_on = True
+        self.assertEqual(await self.deliver(self.envelope(), work=0.05), {'state': 'done'})
+        reactions = sorted((r for r in await self.sends() if r['kind'] == 'reaction'), key=lambda r: r['at'])
+        self.assertEqual([(r['method'], r['chat'], r['message_id'], r['detail'], r['state'], r['reference']) for r in reactions],
+                         [('setMessageReaction', '-20', 1, '\U0001f440', 'sent', None), ('setMessageReaction', '-20', 1, '\U0001f44d', 'sent', None)])
+        journal = b''.join(path.read_bytes() for path in (self.root / 'spool/outbound').glob('*'))
+        self.assertNotIn(b'setMessageReaction', journal)
+
+    async def test_a_reaction_telegram_refuses_is_recorded_as_failed(self):
+        self.gateway.reactions_on = True
+        self.request.respond_presence = lambda operation, data: (400, canonical({'ok': False, 'error_code': 400, 'description': 'Bad Request: REACTION_INVALID'}))
+        self.assertEqual(await self.deliver(self.envelope(), work=0.01), {'state': 'done'}, 'a refused reaction never costs the reply')
+        records = await self.sends()
+        self.assertEqual(sorted((r['kind'], r['state'], r['status'], r['error_code'], r['detail']) for r in records if r['kind'] == 'reaction'),
+                         [('reaction', 'failed', 400, 'reaction_not_allowed', '\U0001f440'), ('reaction', 'failed', 400, 'reaction_not_allowed', '\U0001f44d')])
+        self.assertNotIn(b'REACTION_INVALID', b''.join(path.read_bytes() for path in (self.root / 'spool/sends').glob('*')))
+
+    async def test_typing_never_leaves_a_record_whether_it_works_or_fails(self):
+        self.gateway.typing_on = True
+        with patch('services.telegram.gateway.TYPING_INTERVAL', 0.02):
+            self.assertEqual(await self.deliver(self.envelope(), work=0.1), {'state': 'done'})
+            self.request.respond_presence = lambda operation, data: (400, canonical({'ok': False, 'error_code': 400, 'description': 'Bad Request: not enough rights'}))
+            self.assertEqual(await self.deliver(self.envelope(identifier=2), work=0.1), {'state': 'done'})
+        self.assertGreater(len(self.chat_actions()), 3)
+        self.assertEqual([(r['kind'], r['method']) for r in await self.sends()], [('reply', 'sendMessage'), ('reply', 'sendMessage')])
+
+    async def test_the_flood_window_records_each_reply_it_holds_back(self):
+        self.request.respond = lambda data: (429, canonical({'ok': False, 'error_code': 429, 'description': 'Too Many Requests: retry after 30',
+                                                             'parameters': {'retry_after': 30}}))
+        self.assertNotEqual((await self.deliver(self.envelope()))['state'], 'done')
+        self.assertNotEqual((await self.deliver(self.envelope(identifier=2)))['state'], 'done')
+        self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), 1, 'the second reply never leaves')
+        records = sorted(await self.sends(), key=lambda r: r['reference'])
+        self.assertEqual([(r['kind'], r['chat'], r['topic'], r['state'], r['status'], r['error_code'], r['reference']) for r in records],
+                         [('reply', '-20', 17, 'failed', 429, 'rate_limited', 'telegram:123456:update:1'),
+                          ('reply', '-20', 17, 'not_sent', 0, 'rate_limited', 'telegram:123456:update:2')])
+
+    async def test_each_try_of_a_reply_that_recovers_leaves_its_own_record(self):
+        """The sender's own retries are separate requests, so each leaves one record under the same reference;
+        storage then treats the refused try as recovered."""
+        def once(answer):
+            used = False
+            def respond(data):
+                nonlocal used
+                if not used:
+                    used = True
+                    return answer(data)
+            return respond
+        cases = {
+            'formatting_rejected': once(lambda data: (400, canonical({'ok': False, 'error_code': 400, 'description': "Bad Request: can't parse entities"}))),
+            'message_not_found': once(lambda data: (400, canonical({'ok': False, 'error_code': 400, 'description': 'Bad Request: message to be replied not found'}))),
+            'rate_limited': once(lambda data: (429, canonical({'ok': False, 'error_code': 429, 'description': 'Too Many Requests: retry after 1',
+                                                               'parameters': {'retry_after': 1}}))),
+        }
+        for number, (code, respond) in enumerate(cases.items(), 1):
+            self.request.respond = respond
+            self.assertEqual(await self.deliver(self.envelope(identifier=number)), {'state': 'done'}, code)
+        records = sorted(await self.sends(), key=lambda r: (r['reference'], r['at'], r['state'] == 'sent'))
+        self.assertEqual([(r['reference'], r['state'], r['error_code']) for r in records],
+                         [(f'telegram:123456:update:{number}', state, code if state == 'failed' else None)
+                          for number, code in enumerate(cases, 1) for state in ('failed', 'sent')])
+        self.assertEqual(len(records), len([c for c in self.request.calls if c[0] == 'sendMessage']), 'one record per request that left')
+
+    async def test_a_setup_call_is_recorded_as_setup(self):
+        self.assertTrue(await self.bot.delete_webhook(drop_pending_updates=False))
+        [record] = await self.sends()
+        self.assertEqual((record['kind'], record['method'], record['chat'], record['reference'], record['state']), ('setup', 'deleteWebhook', None, None, 'sent'))
 
     def test_reaction_setting_defaults_on_and_rejects_malformed_values(self):
         with patch.dict(os.environ, {}, clear=True):

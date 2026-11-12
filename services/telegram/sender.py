@@ -60,8 +60,9 @@ def transient(error):
 
 
 class Sender:
-    def __init__(self, bot, limit=MESSAGE_LIMIT, pace=CHAT_PACE):
-        self.bot, self.limit, self.pace = bot, limit, pace
+    def __init__(self, bot, limit=MESSAGE_LIMIT, pace=CHAT_PACE, sends=None):
+        # sends: the capture's send recorder, told of each reply the flood window holds back.
+        self.bot, self.limit, self.pace, self.sends = bot, limit, pace, sends
         self.locks, self.slots, self.floods, self.typing_pause = {}, {}, {}, {}
 
     @contextlib.asynccontextmanager
@@ -97,6 +98,7 @@ class Sender:
             return True
         async with self.chat(chat_id):
             if self._remaining(self.floods, chat_id):
+                if self.sends: self.sends.flooded(chat_id, topic, DISPATCH_KEY.get())
                 return False
             wait = self._remaining(self.slots, chat_id)
             if wait: await asyncio.sleep(wait)

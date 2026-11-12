@@ -61,6 +61,7 @@ import {KnowledgeManagementRepository} from './knowledge-management.js';
 import {OwnerSupervisionRepository} from './owner-supervision.js';
 import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
+import {ChatSendRepository} from './chat-sends.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -141,6 +142,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
+    chatSends:new ChatSendRepository(stores.control,stores.archive),
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env)),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),

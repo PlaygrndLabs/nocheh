@@ -212,6 +212,33 @@ const machineCommands:any[]=[];
  for(let i=0;i<28;i++)machineCommands.unshift(machineCommand(vm,{...job,command:`sed -n '${i*40+1},${i*40+40}p' ~/projects/garden-site/src/app.js`,kind:i%4?'file':'command',output_bytes:900+i*13,
   started_at:minutesAgo(6-i*0.2),finished_at:minutesAgo(6-i*0.2-0.05)}));
  machineCommands.unshift(machineCommand(vm,{...job,command:'npm test 2>&1 | tail -n 40',state:'running',exit_code:null,output_sha256:null,output_bytes:0,started_at:minutesAgo(0.3),finished_at:null}));}
+// Sent to apps: content-free send records, newest first, a few of them problems (synthetic, in memory).
+const chatTitles:Record<string,string>={'42':'Owner','73':'Mira Chen',[conversation]:'Aurora planning'},harmlessSends=['message_not_modified','button_answer_expired','reaction_not_allowed'];
+const chatSends:any[]=[];
+{const send=(minutes:number,kind:string,method:string,chat:string|null,row:any={})=>chatSends.unshift({id:String(901+chatSends.length),at:minutesAgo(minutes),channel:'telegram',kind,method,chat,
+  chat_title:chat?chatTitles[chat]??null:null,topic:null,message_id:chat?300+chatSends.length:null,detail:null,state:'sent',status:200,error_code:null,reference:null,ms:180,...row});
+ send(2000,'setup','deleteWebhook',null,{message_id:null});
+ for(let i=0;i<24;i++)send(1400-i*50,'reply','sendMessage',i%3?'42':conversation);
+ send(240,'notice','sendMessage','42');
+ send(200,'approval_card','sendMessage','73',{state:'failed',status:403,error_code:'bot_blocked',message_id:null});
+ send(150,'card_update','editMessageText','42',{state:'failed',status:400,error_code:'message_not_modified'});
+ send(120,'button_answer','answerCallbackQuery',null,{state:'failed',status:400,error_code:'button_answer_expired'});
+ send(95,'reply','sendMessage','73',{state:'uncertain',status:0,error_code:'timed_out',message_id:null,ms:30000});
+ send(80,'approved_send','sendMessage',conversation,{state:'not_sent',status:0,error_code:'audience_changed',message_id:null,ms:null});
+ send(61,'reply','sendMessage',conversation,{topic:7,state:'failed',status:400,error_code:'formatting_rejected',message_id:null,reference:'telegram:1:update:60',recovered:true});
+ send(60,'reply','sendMessage',conversation,{topic:7,reference:'telegram:1:update:60'});
+ send(40,'reply','sendMessage','42',{state:'not_sent',status:0,error_code:'rate_limited',message_id:null,ms:null});
+ send(25,'reaction','setMessageReaction',conversation,{detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed'});
+ send(12,'reaction','setMessageReaction','42',{detail:'👀'});
+ send(11,'reply','sendMessage','42');
+ send(10,'reaction','setMessageReaction','42',{detail:'clear'});}
+const sendProblem=(row:any)=>['failed','uncertain'].includes(row.state)&&!harmlessSends.includes(row.error_code)&&!row.recovered;
+for(const row of chatSends)Object.assign(row,{problem:sendProblem(row),recovered:row.recovered===true});
+/** Storage's /v1/status chat_sends: the last day's outcomes; the newest problem is any age. */
+function chatSendSummary(){const since=Date.now()-864e5,day=chatSends.filter(row=>Date.parse(row.at)>since),problems=day.filter(sendProblem),n=(state:string)=>day.filter(row=>row.state===state).length;
+ return {window_hours:24,sent:n('sent'),failed:n('failed'),uncertain:n('uncertain'),not_sent:n('not_sent'),problems:problems.length,
+  problem_kinds:Object.fromEntries([...new Set(problems.map(row=>row.kind))].sort().map(kind=>[kind,problems.filter(row=>row.kind===kind).length])),
+  last_problem_at:chatSends.find(sendProblem)?.at??null,latest_problems:problems.slice(0,10)};}
 const machineList=(mode:string)=>({available:mode!=='unavailable',...machineControl,machines});
 const machineAt=(id:string)=>{const machine=machines.find(row=>row.id===id);if(!machine)throw new HttpError(404,'machine_not_found');return machine;};
 const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',sharing_enabled:false,sharing_mode:'filtered',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',sharing_enabled:false,sharing_mode:'filtered',revision:2}];
@@ -442,7 +469,7 @@ const server=createServer((req,res)=>{void(async()=>{
       row(0,'guard','Secret check','Nocheh','openai','OpenAI','gpt-5.6-sol',12,6000,240,0.01),row(0,'memory','Memory','Honcho','custom-1','Example gateway','claude-sonnet-5-5',9,30000,4000,null),
       row(0,'embedding','Memory search','Honcho','openai','OpenAI','text-embedding-3-small',20,8000,0,0.0002)].filter(r=>r.day>=day(days-1));
     return json(res,200,{since:day(days-1),today:day(0),days,rows,parts:[['reply','Telegram replies','Hermes'],['browser','Browser chat','Hermes'],['schedule','Scheduled runs','Hermes'],['memory_review','Memory notes','Hermes'],['guard','Secret check','Nocheh'],['memory','Memory','Honcho'],['embedding','Memory search','Honcho']].map(([id,label,service])=>({id,label,service})),sources:{hermes:'ok',honcho:'ok',pricing:'ok'}});}
-  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,keys:[{name:'SERVICE_TOKEN',service:'Nocheh services',usage:'Lets Nocheh’s own services and the dashboard call each other',present:true},{name:'NOCHEH_MEMORY_TOKEN',service:'Long-term memory (Honcho)',usage:'Lets Honcho’s model calls pass Nocheh’s secret check',present:false},{name:'NOCHEH_MACHINE_TOKEN',service:'Machine control',usage:'Lets Nocheh ask its machine service to run approved jobs on your machines',present:true}],runtime:{status:{telegram:'disabled'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on'},routes:modelRoutes(),model_problems:[{day:new Date().toISOString().slice(0,10),part:'guard',label:'Secret check',provider:'openai',model:'gpt-5.6-sol',calls:12,failed:3,refused:2,hidden:1,reasons:{refused:2,timed_out:1},why:'2 refused by the model, 1 took too long'}],application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
+  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,keys:[{name:'SERVICE_TOKEN',service:'Nocheh services',usage:'Lets Nocheh’s own services and the dashboard call each other',present:true},{name:'NOCHEH_MEMORY_TOKEN',service:'Long-term memory (Honcho)',usage:'Lets Honcho’s model calls pass Nocheh’s secret check',present:false},{name:'NOCHEH_MACHINE_TOKEN',service:'Machine control',usage:'Lets Nocheh ask its machine service to run approved jobs on your machines',present:true}],runtime:{status:{telegram:'disabled'}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on',chat_sends:chatSendSummary()},routes:modelRoutes(),model_problems:[{day:new Date().toISOString().slice(0,10),part:'guard',label:'Secret check',provider:'openai',model:'gpt-5.6-sol',calls:12,failed:3,refused:2,hidden:1,reasons:{refused:2,timed_out:1},why:'2 refused by the model, 1 took too long'}],application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
   if(route==='/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
   if(route==='/workflows/health')return json(res,200,await workflowHealth(pool));
@@ -558,6 +585,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs});
   if(route==='/background-jobs/settings')return json(res,200,jobLimits);
   if(route==='/machines')return json(res,200,machineList(mode));
+  if(route==='/chat-sends'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
+   const rows=chatSends.filter(row=>(q.get('filter')!=='problems'||sendProblem(row))&&(!q.get('kind')||row.kind===q.get('kind'))&&(!before||Number(row.id)<before));
+   return json(res,200,{records:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}
   if(route==='/machines/commands'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
    const rows=machineCommands.filter(row=>(!q.get('machine')||row.machine_id===q.get('machine'))&&(!q.get('job')||row.job_id===q.get('job'))&&(q.get('kind')==='all'||row.kind!=='internal')&&(!before||row.id<before));
    return json(res,200,{commands:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}

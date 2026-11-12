@@ -515,6 +515,8 @@ services:
       NOCHEH_MACHINE_TOKEN: ${NOCHEH_MACHINE_TOKEN:-}
       NOCHEH_MACHINES_URL: http://nocheh-machines:8789
       NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS: ${NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS:-0}
+      # The same owner setting as Hermes's: it expires the records of what was sent to chat apps.
+      NOCHEH_HERMES_JOURNAL_RETENTION_DAYS: ${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY:-}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY:-}
       # The app decides which group messages address the bot, then asks nocheh-telegram to answer.

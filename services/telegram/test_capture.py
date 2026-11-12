@@ -28,6 +28,7 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         self.capture = Capture(self.root, 'testbot')
 
     async def asyncTearDown(self):
+        await self.capture.sends.settle()
         self.directory.cleanup()
 
     async def test_capture_before_return_and_duplicate_batches_preserve_originals(self):

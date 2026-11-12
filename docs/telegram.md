@@ -109,10 +109,44 @@ reactions: 👀 while it works, then 👍 once the reply is
 sent or 👎 when the turn failed. A turn that ends in silence, is cancelled, or
 whose delivery is uncertain clears the 👀; a retried turn sets it again. The reactions follow the same rules
 as "typing…": only for a turn that will write an answer, only on that exact
-message, under the space's current permission, and not recorded as a delivery.
+message, under the space's current permission, and not recorded as a delivery
+(each still leaves a [send record](#send-records)).
 Telegram sends no update for a bot's own reactions, and a group that limits its
 reactions may refuse them, which only costs the reaction. **React while
 working** in Settings › Telegram turns them off.
+
+## Send records
+
+Every request `nocheh-telegram` sends to Telegram leaves one record: each reply
+chunk and retry, approved sends, approval cards and their edits, button answers,
+refusals, notices and their edits, working reactions, and the bot's own setup
+calls. A request Nocheh's own checks refused, or a reply or approved send held
+back whole because Telegram asked the bot to wait, is recorded as not sent.
+"typing…" is never recorded, not even when it fails. Reads (`get…` calls and
+file downloads) are not recorded, and neither is a request the outbound journal
+answers without sending.
+
+A record holds the kind of send, the Bot API method, the chat and topic, the
+message ID, a reaction's emoji, the outcome (sent, failed, uncertain or not
+sent), the HTTP status, a reason code such as `bot_blocked` or
+`reaction_not_allowed`, the dispatch key it ran under and how long it took. It
+never holds text, buttons, links, the token or Telegram's own error wording.
+Records go to `spool/sends`, and `nocheh-app` moves them into the control
+database's `chat_sends` table. They are not journal entries, archive messages
+or delivery receipts, and nothing reads them to decide a send.
+
+**System › Sent to apps** lists them, newest first, with a Problems filter.
+Failed and uncertain sends of the last day show on Health and in the owner's
+problem notices. The notices leave out every send of the notice kind (problem
+notices, task reminders, import and inbox messages), so a notice that cannot be
+sent never asks for another. A failed or uncertain try followed within 15
+minutes by a sent one with the same chat, method and dispatch key, such as a
+plain-text resend or a retry after a rate limit, shows as sent on a retry. It,
+an unchanged edit, an expired button answer and a reaction the chat does not
+allow are listed but never counted as problems. **Keep
+delivery logs** in Settings › Privacy & data removes old records too. The
+dashboard's own mini app menu button call does not pass the bot yet, so it has
+no record ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)).
 
 ## Mini app
 

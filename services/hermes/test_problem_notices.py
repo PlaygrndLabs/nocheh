@@ -22,6 +22,12 @@ def monitoring(failed=11, uncertain=0, services=(), work=True, retryable=0):
             'workflows': {'counts': counts, 'workers': []} if work else {'unavailable': True}}
 
 
+def sending(**kinds):
+    """Storage's last-day summary of failed sends to chat apps, by kind."""
+    return {**monitoring(), 'archive': {'archive': {'spool_failures': []},
+                                        'chat_sends': {'window_hours': 24, 'problems': sum(kinds.values()), 'problem_kinds': kinds}}}
+
+
 def refusals(failed, refused, hidden=0):
     return [{'day': TODAY, 'part': 'guard', 'label': 'Secret check', 'provider': 'anthropic', 'model': 'synthetic-model',
              'failed': failed, 'refused': refused, 'hidden': hidden}]
@@ -305,6 +311,45 @@ class ProblemNoticeTests(unittest.TestCase):
         connected = {'connected': True, 'reconnect': False}
         self.assertEqual([p for p in problems.problems({**monitoring(), 'github': connected}, [], TODAY) if p['kind'] == 'github'], [],
                          'a connected app gives no notice: its key never expires')
+
+    def test_failed_sends_to_chat_apps_repeat_at_most_once_an_hour_only_when_worse_and_clear_at_zero(self):
+        self.check(NOW, sending(reaction=1))
+        self.assertEqual(self.sent[-1]['problems'], ['1 send to a chat app failed in the last day.'])
+        self.check(NOW + 600, sending(reaction=1, reply=2))
+        self.check(NOW + 3700, sending(reaction=1))
+        self.assertEqual(len(self.sent), 1, 'worse only within the quiet hour, then no worse than the last check')
+        self.check(NOW + 3820, sending(reaction=1, reply=2))
+        self.assertEqual(self.sent[-1]['problems'], ['3 sends to chat apps failed in the last day.'])
+        self.check(NOW + 3940, sending())
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Fixed at 13:05 UTC']))
+
+    def test_failed_sends_aging_out_of_the_day_are_not_news_when_they_come_back(self):
+        self.check(NOW, sending(reaction=5))
+        self.check(NOW + 1800, sending(reaction=4))
+        self.check(NOW + 3720, sending(reaction=5))
+        self.check(NOW + 7400, sending(reaction=1))
+        self.check(NOW + 11100, sending(reaction=2))
+        self.assertEqual(len(self.sent), 1, 'a count that fell as old sends left the day and rose again told nothing new')
+        self.check(NOW + 14800, sending(reaction=6))
+        self.assertEqual(self.sent[-1]['problems'], ['6 sends to chat apps failed in the last day.'])
+
+    def test_failed_notices_do_not_count_as_failed_sends(self):
+        self.check(NOW, sending(notice=2, notice_update=3))
+        self.assertEqual(self.sent, [], 'a notice that cannot be sent must not ask for another')
+        self.check(NOW + 120, sending(notice=2, notice_update=3, approval_card=1))
+        self.assertEqual(self.sent[-1]['problems'], ['1 send to a chat app failed in the last day.'])
+
+    def test_failed_sends_that_could_not_be_read_are_not_zero(self):
+        self.check(NOW, sending(reply=2))
+        unread = {**monitoring(), 'archive': {'archive': {'spool_failures': []}}}
+        self.assertNotIn('sends', problems.readable(unread))
+        self.assertNotIn('sends', problems.readable({**monitoring(), 'archive': {'chat_sends': {'problems': 2}}}),
+                         'without the kinds, the notices’ own failures cannot be left out')
+        self.check(NOW + 120, unread)
+        self.check(NOW + 3700, {**monitoring(), 'archive': {'unavailable': True}})
+        self.assertEqual(self.edits, [], 'a summary that could not be read clears nothing')
+        self.check(NOW + 3820, sending(reply=2))
+        self.assertEqual(len(self.sent), 1, 'the same failed sends, after checks that could not read them')
 
 
 if __name__ == '__main__':

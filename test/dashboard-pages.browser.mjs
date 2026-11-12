@@ -36,7 +36,7 @@ const routes = [
   ['chats?chat=42', 'Chats'],
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm'].map(view => ['memory?view=' + view, 'Memory']),
-  ...['work', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
+  ...['work', 'sends', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
   ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'machines', 'advanced'].map(
     view => ['settings?view=' + view, 'Settings'],
   ),
@@ -1174,6 +1174,53 @@ test('usage shows calls, tokens and cost, and never prices an unknown cost as fr
   await page.getByRole('table', {name: 'Usage by part'}).getByText('67% cached').waitFor();
   await page.getByRole('radiogroup', {name: 'Period'}).getByText('Today').click();
   assert.equal(new URL(page.url()).hash, '#usage?days=1');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('sent to apps lists each send with its outcome, and Health opens the ones that failed', async () => {
+  const {page, problems} = await open('system');
+  // Health counts the last day's problems, leaving out expected no-ops and attempts a retry delivered, and opens them filtered.
+  const issue = page.getByRole('listitem').filter({hasText: '2 sends to chat apps failed in the last day'});
+  await issue.getByText('Approval card: 1 · Reply: 1').waitFor();
+  await issue.getByRole('link', {name: 'Review'}).click();
+  await page.getByRole('tab', {name: 'Sent to apps 2', selected: true}).waitFor();
+  assert.equal(new URL(page.url()).hash, '#system?view=sends&filter=problems');
+  await page.getByText(/^Last day: \d+ sent, 5 failed, 1 uncertain, 2 not sent$/).waitFor();
+  const table = page.getByRole('table', {name: 'Sent to apps'});
+  await table.getByRole('cell', {name: 'No answer in time'}).waitFor();
+  // App, chat, what, result and reason, as a wide screen shows them.
+  assert.deepEqual(
+    await table
+      .locator('tbody tr')
+      .evaluateAll(rows => rows.map(row => [...row.cells].slice(1).map(cell => cell.innerText.trim()))),
+    [
+      ['Telegram', 'Mira Chen', 'Reply', 'Uncertain', 'No answer in time'],
+      ['Telegram', 'Mira Chen', 'Approval card', 'Failed', 'The person blocked the bot'],
+    ],
+  );
+  // All keeps no-ops and what Nocheh held back, in plain words, and pages back to older sends.
+  await page.getByRole('radiogroup', {name: 'Show'}).getByRole('radio', {name: 'All'}).click();
+  assert.equal(new URL(page.url()).hash, '#system?view=sends');
+  await table.getByText('Reaction cleared').waitFor();
+  for (const name of [
+    'Already up to date',
+    'Button press expired',
+    'Reactions not allowed in this chat',
+    'Formatting rejected; sent on a retry',
+    'Blocked: wrong chat',
+    'Held back: too many at once',
+  ])
+    await table.getByRole('cell', {name}).waitFor();
+  assert.equal(
+    await table.getByRole('link', {name: 'Aurora planning · topic 7'}).first().getAttribute('href'),
+    '#chats?chat=-10042%2Ftopic%2F7',
+  );
+  assert.equal(await table.getByText('Bot setup').count(), 0);
+  await page.getByRole('button', {name: 'Older'}).click();
+  await table.getByText('Bot setup').waitFor();
+  await page.getByRole('button', {name: 'Newer'}).click();
+  await table.getByText('Reaction cleared').waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });

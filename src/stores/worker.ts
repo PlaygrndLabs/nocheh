@@ -11,10 +11,16 @@ import {restoredInactive,storageHeartbeat} from './lifecycle.js';
 import type {StorageServices} from './services.js';
 
 export function startStorageCapture(s:StorageServices,config:Settings,interval=1000) {
-  const status:Record<string,string>={capture:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting',imports:'starting',voices:'starting',machines:'starting'};
-  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,started=new Date(),timingsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0,machinesChecked=0;
+  const status:Record<string,string>={capture:'starting',sends:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting',imports:'starting',voices:'starting',machines:'starting'};
+  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,started=new Date(),timingsExpired=0,sendsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0,machinesChecked=0;
   const jobs:Record<string,()=>Promise<unknown>>={
     capture:()=>drainSourceSpool(s.capture,config.dataDir),
+    // The front doors' send records, in their own stage so an outage here never holds up source capture.
+    // The owner's "Keep delivery logs" days expire them, checked hourly.
+    sends:async()=>{
+      await s.chatSends.drain(config.dataDir);
+      if(Date.now()-sendsExpired<3600000)return;sendsExpired=Date.now();await s.chatSends.expire();
+    },
     reconciliation:()=>s.capture.reconcile(),
     guards:async()=>{
       await s.guards.reconcile();await s.selections.reconcile();await s.learned.reconcile();

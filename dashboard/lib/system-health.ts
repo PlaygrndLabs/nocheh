@@ -1,7 +1,7 @@
 /** Pure reading of `GET /monitoring`: work counts and the list of things that need a look. */
 import type {Tone} from '../ui/core';
 import {href} from './routes';
-import {routeName, serviceName, telegramReason, telegramStates} from './system-format';
+import {count, routeName, sendKinds, serviceName, telegramReason, telegramStates} from './system-format';
 
 export type WorkCounts = {
   available: boolean;
@@ -39,6 +39,68 @@ export function workers(health: any): {connected: number; total: number} {
 }
 
 export type Issue = {tone: Tone; text: string; detail?: string; link?: string; action?: string};
+
+/** One send as storage lists it: codes and ids only, never what was said. */
+export type ChatSend = {
+  id: string;
+  at: string;
+  channel: string;
+  kind: string;
+  method: string;
+  chat: string | null;
+  chat_title: string | null;
+  topic: number | null;
+  message_id: number | null;
+  detail: string | null;
+  state: string;
+  status: number;
+  error_code: string | null;
+  reference: string | null;
+  ms: number | null;
+  /** Counts for Health: refused or unanswered, not an expected no-op, and no later try delivered it. */
+  problem?: boolean;
+  /** A later try of the same send went through. */
+  recovered?: boolean;
+};
+export type ChatSends = {
+  window_hours: number;
+  sent: number;
+  failed: number;
+  uncertain: number;
+  not_sent: number;
+  problems: number;
+  problem_kinds: Record<string, number>;
+  last_problem_at: string | null;
+  latest_problems: ChatSend[];
+};
+
+/** The last day's sends to chat apps, from storage status; null when storage didn't answer. */
+export function chatSends(m: any): ChatSends | null {
+  const sends = m?.archive?.chat_sends;
+  return sends && typeof sends.problems === 'number' ? sends : null;
+}
+
+export const sendSummary = (s: ChatSends): string =>
+  `Last day: ${count(s.sent)} sent, ${count(s.failed)} failed, ${count(s.uncertain)} uncertain, ${count(s.not_sent)} not sent`;
+
+/** Sends a chat app refused or never answered in the last day; expected no-ops don't count. */
+export function sendIssue(m: any): (Issue & {link: string; action: string}) | null {
+  const s = chatSends(m);
+  if (!s?.problems) return null;
+  const latest = Array.isArray(s.latest_problems) ? s.latest_problems : [];
+  // Only uncertain ones may still have arrived, so they warn; a refusal is a failure.
+  const failed = latest.length ? latest.some(row => row.state === 'failed') : s.failed > 0;
+  return {
+    tone: failed ? 'bad' : 'warn',
+    text: `${s.problems} ${s.problems === 1 ? 'send' : 'sends'} to chat apps failed in the last day`,
+    detail:
+      Object.entries(s.problem_kinds ?? {})
+        .map(([kind, n]) => `${sendKinds[kind] ?? kind}: ${n}`)
+        .join(' · ') || undefined,
+    link: href('system', {view: 'sends', filter: 'problems'}),
+    action: 'Review',
+  };
+}
 
 export function issues(m: any): Issue[] {
   if (!m) return [];
@@ -134,5 +196,7 @@ export function issues(m: any): Issue[] {
       text: `${spool.length} incoming messages couldn’t be saved`,
       detail: 'Run a service check in Backups.',
     });
+  const sends = sendIssue(m);
+  if (sends) list.push(sends);
   return list;
 }
