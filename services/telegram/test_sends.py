@@ -11,7 +11,7 @@ from telegram.error import NetworkError, TimedOut
 
 from services.durable import canonical, digest
 from .capture import Capture, DISPATCH_KEY, Held, OUTBOUND_CHECK, instrument_request
-from .sends import TYPING_QUIET, Sends, exception_code, kind_of, not_sent_code, outcome
+from .sends import Sends, exception_code, kind_of, not_sent_code, outcome
 
 URL = 'https://api.telegram.org/bot123456:synthetic-token/'
 FIELDS = {'version', 'key', 'channel', 'account', 'at', 'kind', 'method', 'chat', 'topic', 'message_id', 'detail',
@@ -38,7 +38,7 @@ class Request:
 class HelperTests(unittest.TestCase):
     def test_the_dispatch_key_names_the_kind_of_send(self):
         for method, dispatch, kind in (
-                ('setMessageReaction', None, 'reaction'), ('sendChatAction', 'telegram:1:update:2', 'typing'),
+                ('setMessageReaction', None, 'reaction'),
                 ('deleteWebhook', None, 'setup'), ('deleteMyCommands', 'control:' + 'a' * 32, 'setup'),
                 ('sendMessage', 'telegram:1:update:2', 'reply'), ('sendMessage', 'telegram:1:update:2:retry:1', 'reply'),
                 ('sendMessage', 'action:' + 'a' * 64, 'approved_send'), ('sendMessage', 'approval:' + 'a' * 64, 'approval_card'),
@@ -83,7 +83,7 @@ class HelperTests(unittest.TestCase):
         self.assertEqual([not_sent_code(code) for code in ('telegram_delivery_audience_changed', 'telegram_delivery_cancelled',
                                                             'telegram_delivery_authority_revoked', 'telegram_reaction_unbound',
                                                             'telegram_chat_action_unbound', 'outbound_delivery_ambiguous', None)],
-                         ['audience_changed', 'cancelled', 'authority_revoked', 'reaction_unbound', 'chat_action_unbound', 'refused', 'refused'])
+                         ['audience_changed', 'cancelled', 'authority_revoked', 'reaction_unbound', 'refused', 'refused', 'refused'])
 
     def test_a_record_names_its_chat_topic_message_and_reaction_only(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -112,21 +112,16 @@ class HelperTests(unittest.TestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn(b'synthetic', path.read_bytes())
 
-    def test_typing_is_recorded_only_when_it_fails_once_per_chat_and_code_in_ten_minutes(self):
+    def test_typing_is_never_recorded_not_even_when_it_fails(self):
         with tempfile.TemporaryDirectory() as folder:
-            now = [1000.0]
-            sends = Sends(Path(folder), '123456', clock=lambda: now[0])
+            sends = Sends(Path(folder), '123456')
             typing = {'chat_id': -20, 'action': 'typing', 'message_thread_id': 17}
-            self.assertIsNone(sends.answered('sendChatAction', typing, None, (200, b'{"ok":true,"result":true}')), 'success is never recorded')
-            self.assertIsNone(sends.refused('sendChatAction', typing, None, 'telegram_delivery_cancelled'), 'a finished turn stopping its typing is no problem')
-            self.assertEqual(sends.answered('sendChatAction', typing, None, refusal(403, 'Forbidden: bot was kicked'))['error_code'], 'bot_removed')
-            now[0] += TYPING_QUIET - 1
+            self.assertIsNone(sends.answered('sendChatAction', typing, None, (200, b'{"ok":true,"result":true}')))
             self.assertIsNone(sends.answered('sendChatAction', typing, None, refusal(403, 'Forbidden: bot was kicked')))
-            self.assertIsNotNone(sends.failed('sendChatAction', typing, None, TimedOut()), 'another code is its own problem')
-            self.assertIsNotNone(sends.answered('sendChatAction', {**typing, 'chat_id': -21}, None, refusal(403, 'Forbidden: bot was kicked')), 'and so is another chat')
-            now[0] += 1
-            self.assertIsNotNone(sends.answered('sendChatAction', typing, None, refusal(403, 'Forbidden: bot was kicked')))
-            self.assertEqual(len(list((Path(folder) / 'sends').glob('*.json'))), 4)
+            self.assertIsNone(sends.failed('sendChatAction', typing, None, TimedOut()))
+            self.assertIsNone(sends.refused('sendChatAction', typing, None, 'telegram_chat_action_unbound'))
+            self.assertIsNone(sends.restarted('sendChatAction', typing, None))
+            self.assertFalse((Path(folder) / 'sends').exists())
 
 
 class BoundaryTests(unittest.IsolatedAsyncioTestCase):
@@ -186,19 +181,18 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                          [('reaction', 'not_sent', 'reaction_unbound', '-20', None, 4, EYES, None),
                           ('reply', 'not_sent', 'authority_revoked', '-20', 17, None, None, 'telegram:123456:update:4')])
 
-    async def test_typing_leaves_a_record_only_when_it_fails(self):
+    async def test_typing_leaves_no_record_whether_it_works_fails_or_is_held(self):
         typing = {'chat_id': -20, 'action': 'typing', 'message_thread_id': 17}
         def stopped(method, parameters): raise Held('telegram_delivery_cancelled')
         await self.send(instrument_request(Request((200, b'{"ok":true,"result":true}')), self.capture), 'sendChatAction', typing, check=self.allow)
         with self.assertRaises(Held):
             await self.send(instrument_request(Request((200, b'{"ok":true,"result":true}')), self.capture), 'sendChatAction', typing, check=stopped)
+        with self.assertRaisesRegex(Held, 'chat_action_unbound'):
+            await self.send(instrument_request(Request((200, b'{"ok":true,"result":true}')), self.capture), 'sendChatAction', typing)
+        await self.send(instrument_request(Request(refusal(400, 'Bad Request: not enough rights to send messages')), self.capture), 'sendChatAction', typing, check=self.allow)
+        with self.assertRaises(TimedOut):
+            await self.send(instrument_request(Request(TimedOut()), self.capture), 'sendChatAction', typing, check=self.allow)
         self.assertEqual(await self.records(), [])
-        refused = instrument_request(Request(refusal(400, 'Bad Request: not enough rights to send messages')), self.capture)
-        for _ in range(3):
-            await self.send(refused, 'sendChatAction', typing, check=self.allow)
-        [record] = await self.records()
-        self.assertEqual((record['kind'], record['method'], record['state'], record['status'], record['error_code'], record['reference']),
-                         ('typing', 'sendChatAction', 'failed', 400, 'no_permission', None))
         self.assertFalse((self.root / 'outbound').exists(), 'typing is never journaled')
 
     async def test_setup_calls_are_recorded_as_setup_and_reads_never(self):

@@ -429,7 +429,6 @@ export const sendKinds: Record<string, string> = {
   notice: 'Notice',
   notice_update: 'Notice update',
   reaction: 'Reaction',
-  typing: 'Typing',
   setup: 'Bot setup',
   other: 'Other',
 };
@@ -481,7 +480,6 @@ const sendReasons: Record<string, string> = {
   authority_revoked: 'No longer allowed',
   audience_changed: 'Blocked: wrong chat',
   reaction_unbound: 'Not tied to a current message',
-  chat_action_unbound: 'Not tied to a current message',
   refused: 'Stopped by Nocheh’s own check',
 };
 /** Why a send didn't go through, in short plain words; an unknown code shows as it is. */

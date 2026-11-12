@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS chat_sends_at ON chat_sends(at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS chat_sends_problems ON chat_sends(at DESC, id DESC) WHERE state IN ('failed','uncertain');
 `;
 
-export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','reaction','typing','setup','other'] as const;
+export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','reaction','setup','other'] as const;
 export const sendStates=['sent','failed','uncertain','not_sent'] as const;
 /** Expected no-ops, and a chat's own choice not to take reactions: listed, never counted as problems. */
 export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed'] as const;

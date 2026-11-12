@@ -30,7 +30,7 @@ test('a send record has a closed, content-free shape',()=>{
     'a key of another account':{...valid,key:'send:telegram:999:'+'a'.repeat(32)},'a key with text':{...valid,key:'send:telegram:4242:hello'},
     'a key of another channel':{...valid,key:'send:slack:4242:'+'a'.repeat(32)},'an upper-case channel':{...valid,channel:'Telegram'},
     'a time without milliseconds':{...valid,at:'2026-11-11T18:45:35Z'},'an impossible time':{...valid,at:'2026-02-30T18:45:35.000Z'},
-    'a local time':{...valid,at:'2026-11-11T18:45:35.123+01:00'},'an unknown kind':{...valid,kind:'message'},'an unknown state':{...valid,state:'done'},
+    'a local time':{...valid,at:'2026-11-11T18:45:35.123+01:00'},'an unknown kind':{...valid,kind:'message'},'typing, which is never recorded':{...valid,kind:'typing',method:'sendChatAction',reference:null},'an unknown state':{...valid,state:'done'},
     'a method with spaces':{...valid,method:'send message'},'a chat name':{...valid,chat:'Team chat'},'a numeric chat':{...valid,chat:-1001234},
     'a fractional message id':{...valid,message_id:1.5},'a string topic':{...valid,topic:'7'},'detail on a reply':{...valid,detail:'👀'},
     'a reaction with words':{...reaction,detail:'looks good'},'a long reaction':{...reaction,detail:'👀'.repeat(17)},
@@ -88,7 +88,7 @@ test('send records drain once from the spool, list newest first with chat names,
       record({at:ago(20),kind:'button_answer',method:'answerCallbackQuery',state:'failed',status:400,error_code:'button_answer_expired',chat:null,message_id:null}),
       record({at:ago(15),state:'not_sent',status:0,error_code:'rate_limited',chat:other}),
       record({at:ago(10),state:'uncertain',status:0,error_code:'timed_out',chat:other,message_id:null}),
-      record({at:ago(5),kind:'typing',method:'sendChatAction',state:'uncertain',status:502,error_code:'server_error',chat:'123',message_id:null,reference:null}),
+      record({at:ago(5),kind:'setup',method:'deleteWebhook',state:'uncertain',status:502,error_code:'server_error',chat:null,message_id:null,reference:null}),
     ];
     for(const value of rows)await write(value);
     assert.deepEqual(await sends.drain(root,4),{recorded:4,rejected:0},'one pass takes at most its limit');
@@ -101,9 +101,9 @@ test('send records drain once from the spool, list newest first with chat names,
     await new ArchiveRepository(stores.archive).capture(event);
     const summary=await sends.summary(new Date(now));
     assert.deepEqual({...summary,latest_problems:undefined},{window_hours:24,sent:2,failed:3,uncertain:2,not_sent:1,problems:2,
-      problem_kinds:{reply:1,typing:1},last_problem_at:ago(5),latest_problems:undefined});
+      problem_kinds:{reply:1,setup:1},last_problem_at:ago(5),latest_problems:undefined});
     assert.deepEqual(summary.latest_problems.map(row=>[row.kind,row.error_code,row.chat_title]),
-      [['typing','server_error',null],['reply','timed_out','Other group']]);
+      [['setup','server_error',null],['reply','timed_out','Other group']]);
     const reply=summary.latest_problems[1]!;
     assert.deepEqual(Object.keys(reply),['id','at','channel','kind','method','chat','chat_title','topic','message_id','detail','state','status','error_code','reference','ms','problem','recovered']);
     assert.equal(typeof reply.id,'string');assert.equal(reply.problem,true);assert.equal(reply.recovered,false);assert.equal(reply.at,ago(10));

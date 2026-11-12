@@ -1,4 +1,4 @@
-"""Send records: one content-free file per Bot API request that left, or that Nocheh held back.
+"""Send records: one content-free file per Bot API request that left, or that Nocheh held back; "typing…" never leaves one.
 
 Each record says what kind of send it was, to which chat, when, and whether Telegram took it, as codes only:
 never text, buttons, callback data, URLs, the token or Telegram's own wording. Storage drains spool/sends
@@ -11,7 +11,6 @@ import asyncio
 import functools
 import json
 import re
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,9 +32,7 @@ REJECTIONS = ((('bot was blocked',), 'bot_blocked'), (('user is deactivated',), 
               (('message is too long',), 'message_too_long'),
               (('button_data_invalid', 'button_url_invalid', 'wrong http url', 'web app'), 'button_rejected'))
 STATUSES = {429: 'rate_limited', 401: 'unauthorized', 403: 'forbidden', 409: 'conflict'}
-HELD = frozenset({'audience_changed', 'cancelled', 'authority_revoked', 'reaction_unbound', 'chat_action_unbound'})
-# "typing…" fires every few seconds, so only a failure is recorded, once per chat and code in this window.
-TYPING_QUIET = 600.0
+HELD = frozenset({'audience_changed', 'cancelled', 'authority_revoked', 'reaction_unbound'})
 METHOD = re.compile(r'[A-Za-z][A-Za-z0-9_.]{0,63}')
 CHAT = re.compile(r'-?[0-9]{1,20}')
 BIGINT = 2 ** 63
@@ -43,7 +40,6 @@ BIGINT = 2 ** 63
 
 def kind_of(method, dispatch):
     if method == 'setMessageReaction': return 'reaction'
-    if method == 'sendChatAction': return 'typing'
     if dispatch is None or dispatch.startswith('control:'): return 'setup'
     return next((kind for prefix, kind in KINDS if dispatch.startswith(prefix)), 'other')
 
@@ -112,10 +108,10 @@ def quiet(function):
 class Sends:
     """Records a front door's sends under <spool>/sends; every call returns the record written, or None."""
 
-    def __init__(self, root, account, channel='telegram', clock=time.monotonic):
-        self.directory, self.channel, self.clock = Path(root) / 'sends', channel, clock
+    def __init__(self, root, account, channel='telegram'):
+        self.directory, self.channel = Path(root) / 'sends', channel
         self.account = str(account) if account and len(str(account)) <= 64 else None
-        self.typing, self.pending = {}, set()
+        self.pending = set()
 
     @quiet
     def answered(self, method, parameters, dispatch, response, ms=None):
@@ -151,11 +147,11 @@ class Sends:
         return record
 
     def build(self, method, parameters, dispatch, state, status=0, code=None, message=None, ms=None):
-        """The record, or None when there is nothing to record: typing that worked or was already recorded."""
-        if not isinstance(method, str) or not METHOD.fullmatch(method): return None
+        """The record, or None when there is nothing to record."""
+        # "typing…" fires every few seconds and is never recorded, not even when it fails (owner, 2026-11-12).
+        if not isinstance(method, str) or not METHOD.fullmatch(method) or method == 'sendChatAction': return None
         kind, chat = kind_of(method, dispatch), str(parameters.get('chat_id'))
         chat = chat if CHAT.fullmatch(chat) else None
-        if kind == 'typing' and not self._typing_failure(chat, state, code): return None
         return {'version': 1, 'key': f'send:{self.channel}:{self.account or ""}:{uuid.uuid4().hex}', 'channel': self.channel,
                 'account': self.account, 'at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                 'kind': kind, 'method': method, 'chat': chat, 'topic': _number(parameters.get('message_thread_id')),
@@ -163,16 +159,8 @@ class Sends:
                 'message_id': _number(parameters.get('message_id')) or message, 'detail': detail_of(method, parameters),
                 'state': state, 'status': status if type(status) is int and 0 <= status < 1000 else 0,
                 'error_code': None if state == 'sent' else code,
-                'reference': dispatch if kind not in ('setup', 'reaction', 'typing') and isinstance(dispatch, str) and len(dispatch) <= 300 else None,
+                'reference': dispatch if kind not in ('setup', 'reaction') and isinstance(dispatch, str) and len(dispatch) <= 300 else None,
                 'ms': min(86400000, max(0, ms)) if type(ms) is int else None}
-
-    def _typing_failure(self, chat, state, code):
-        if state == 'sent' or state == 'not_sent' and code == 'cancelled': return False
-        now, mark = self.clock(), (chat, code)
-        if now < self.typing.get(mark, now): return False
-        if len(self.typing) > 256: self.typing = {key: until for key, until in self.typing.items() if until > now}
-        self.typing[mark] = now + TYPING_QUIET
-        return True
 
     def _submit(self, record):
         try:

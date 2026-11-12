@@ -507,10 +507,8 @@ problem notices gain the kind `sends`
 [bot](services/telegram/test_sends.py), [store](test/store-chat-sends.test.ts)).
 Built on one branch (bot, store, notices, dashboard, docs), not yet on main. A try that a
 later one recovered within 15 minutes, an unchanged edit, an expired button answer and a
-reaction the chat does not allow are listed but not problems. Awaiting the owner's answer:
-the code records a failed "typing…" (once per chat and reason in ten minutes), while the
-owner's rule in SPECS.md is that typing is not recorded; if they say never, drop it from
-`services/telegram/capture.py`. Pending: the owner's merge, then a
+reaction the chat does not allow are listed but not problems. "typing…" is never recorded,
+not even when it fails (owner, 2026-11-12: "Never record typing"). Pending: the owner's merge, then a
 live check on a running installation that a real 👀 reaction and a reply appear in
 System › Sent to apps as sent, and that the next failed send shows on Health and in a notice.
 Follow-ups: the dashboard's own `setChatMenuButton` (mini app menu button) is a send with

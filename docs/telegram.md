@@ -122,9 +122,9 @@ chunk and retry, approved sends, approval cards and their edits, button answers,
 refusals, notices and their edits, working reactions, and the bot's own setup
 calls. A request Nocheh's own checks refused, or a reply or approved send held
 back whole because Telegram asked the bot to wait, is recorded as not sent.
-"typing…" is recorded only when it fails, at most once per chat and reason every
-ten minutes. Reads (`get…` calls and file downloads) are not recorded, and
-neither is a request the outbound journal answers without sending.
+"typing…" is never recorded, not even when it fails. Reads (`get…` calls and
+file downloads) are not recorded, and neither is a request the outbound journal
+answers without sending.
 
 A record holds the kind of send, the Bot API method, the chat and topic, the
 message ID, a reaction's emoji, the outcome (sent, failed, uncertain or not

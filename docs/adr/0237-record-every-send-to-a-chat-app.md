@@ -6,12 +6,13 @@ agent that send to apps like telegram, slack, etc" and answered "yes" to the
 plan: record everything Nocheh sends to any chat app, including messages,
 edits, cards and reactions; show what was sent, to which chat, when, and
 whether it worked; the dashboard shows the failed ones; skip "typing…", which
-fires constantly. Recording a "typing…" that fails, at most once per chat and
-reason in ten minutes, was proposed to the owner and awaits their answer; until
-then SPECS.md states only the owner's rule.
+fires constantly. Asked whether a "typing…" that fails should still be
+recorded, the owner chose "Never record typing" on 2026-11-12.
 Builds on [ADR-0235](0235-nocheh-owns-the-telegram-bot.md). Amends the "no
-stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
-[ADR-0211](0211-hermes-working-reactions-on-the-answered-message.md).
+stored record" of
+[ADR-0211](0211-hermes-working-reactions-on-the-answered-message.md);
+[ADR-0188](0188-typing-status-while-a-turn-works.md)'s "typing…" still leaves
+none.
 </status>
 
 <context>
@@ -51,14 +52,13 @@ stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
   from the answer, or the message an edit or reaction targets), `detail` (only
   a reaction's emoji, or `clear`), `state`, `status` (HTTP, 0 when none),
   `error_code`, `reference` (the content-free dispatch key it ran under; none
-  for setup, reactions and typing) and `ms`. A record never holds message or
+  for setup and reactions) and `ms`. A record never holds message or
   button text, callback data, URLs, the token, exception text or the
   platform's error description: only codes and IDs.
 - Kinds (closed): `reply`, `approved_send`, `approval_card`, `card_update`,
-  `button_answer`, `refusal`, `notice`, `notice_update`, `reaction`, `typing`,
-  `setup`, `other`. Telegram takes `reaction` and `typing` from the method
-  (`setMessageReaction`, `sendChatAction`) and the rest from the dispatch key's
-  prefix; a request with no key or a `control:` key (`deleteWebhook`,
+  `button_answer`, `refusal`, `notice`, `notice_update`, `reaction`, `setup`,
+  `other`. Telegram takes `reaction` from the method (`setMessageReaction`) and
+  the rest from the dispatch key's prefix; a request with no key or a `control:` key (`deleteWebhook`,
   `deleteMyCommands`) is `setup`.
 - States (closed): `sent` (the app took it: 2xx and `ok`); `failed` (the app
   definitely refused it: 4xx, or 2xx without `ok`); `uncertain` (no answer, a
@@ -72,7 +72,7 @@ stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
   (`rate_limited`, `unauthorized`, `forbidden`, `conflict`, else `rejected`).
   An uncertain one is `timed_out`, `network_error`, `server_error` or
   `restart`. A not-sent one carries the check's own code (`audience_changed`,
-  `cancelled`, `authority_revoked`, `reaction_unbound`, `chat_action_unbound`),
+  `cancelled`, `authority_revoked`, `reaction_unbound`),
   `rate_limited` for the flood window, or `refused`.
 - What Telegram records: every request of the service bot that is not a read
   (`get…` methods and file downloads never are) and that left, with its
@@ -80,9 +80,9 @@ stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
   one `sendMessage` record for each reply or approved send the sender's flood
   window (armed after Telegram asked it to wait) held back whole. A journal
   replay sends nothing and a hold after an uncertain attempt follows that
-  attempt's record, so neither adds one. "typing…" is recorded only when it
-  failed, was uncertain or was held for a reason other than cancellation, at
-  most once per chat and code in ten minutes, counted in memory.
+  attempt's record, so neither adds one. "typing…" (`sendChatAction`) is
+  never recorded, whether it was sent, failed or held: it fires every few
+  seconds, and the owner chose not to record it even when it fails.
 - A record is a log for the owner, never evidence or authority. It is not
   journaled, not an archive event, not a delivery receipt and not a capture
   receipt, and nothing reads it to decide whether to send or send again.
@@ -128,10 +128,10 @@ stored record" of [ADR-0188](0188-typing-status-while-a-turn-works.md) and
 </decision>
 
 <consequences>
-- ADR-0188 and ADR-0211 no longer cost "no stored record": each working
-  reaction leaves one send record, and "typing…" one only when it fails. Both
-  stay outside the journal, are not deliveries and never enter the archive; a
-  retried turn still sets its 👀 again. ADR-0211's "logged by the native hook"
+- ADR-0211 no longer costs "no stored record": each working reaction leaves
+  one send record. It stays outside the journal, is not a delivery and never
+  enters the archive; a retried turn still sets its 👀 again. "typing…"
+  (ADR-0188) still leaves no record. ADR-0211's "logged by the native hook"
   is replaced by the record: a refused reaction shows as `failed` with
   `reaction_not_allowed` or another code.
 - A reply split into chunks, sent again as plain text or retried after a rate

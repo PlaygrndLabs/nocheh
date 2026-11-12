@@ -1,5 +1,5 @@
 """Fsync before PTB sees updates; journal writes before any outbound request but a chat action or working reaction.
-Every request that leaves, or that a check holds back, reactions included, also leaves a content-free send record (sends.py)."""
+Every request that leaves, or that a check holds back, reactions included, also leaves a content-free send record (sends.py); a chat action ("typing…") never does."""
 from __future__ import annotations
 
 import asyncio
@@ -247,7 +247,7 @@ def instrument_request(request, capture: Capture, polling=False):
                 # sent only inside a bound presence and is not journaled, so a long
                 # turn adds no archive records. It never runs under a dispatch key,
                 # so a journal entry could not answer a retried turn's 👀 anyway.
-                # It leaves only its send record ("typing…" only when it fails).
+                # A reaction leaves only its send record; "typing…" leaves none.
                 try:
                     if check is None:
                         raise Held('telegram_chat_action_unbound' if method == 'sendChatAction' else 'telegram_reaction_unbound')

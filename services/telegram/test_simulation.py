@@ -491,16 +491,14 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
                          [('reaction', 'failed', 400, 'reaction_not_allowed', '\U0001f440'), ('reaction', 'failed', 400, 'reaction_not_allowed', '\U0001f44d')])
         self.assertNotIn(b'REACTION_INVALID', b''.join(path.read_bytes() for path in (self.root / 'spool/sends').glob('*')))
 
-    async def test_failed_typing_is_recorded_once_and_working_typing_never(self):
+    async def test_typing_never_leaves_a_record_whether_it_works_or_fails(self):
         self.gateway.typing_on = True
         with patch('services.telegram.gateway.TYPING_INTERVAL', 0.02):
             self.assertEqual(await self.deliver(self.envelope(), work=0.1), {'state': 'done'})
-            self.assertEqual([r['kind'] for r in await self.sends()], ['reply'])
             self.request.respond_presence = lambda operation, data: (400, canonical({'ok': False, 'error_code': 400, 'description': 'Bad Request: not enough rights'}))
             self.assertEqual(await self.deliver(self.envelope(identifier=2), work=0.1), {'state': 'done'})
         self.assertGreater(len(self.chat_actions()), 3)
-        typing = [r for r in await self.sends() if r['kind'] == 'typing']
-        self.assertEqual([(r['method'], r['chat'], r['topic'], r['state'], r['error_code']) for r in typing], [('sendChatAction', '-20', 17, 'failed', 'no_permission')])
+        self.assertEqual([(r['kind'], r['method']) for r in await self.sends()], [('reply', 'sendMessage'), ('reply', 'sendMessage')])
 
     async def test_the_flood_window_records_each_reply_it_holds_back(self):
         self.request.respond = lambda data: (429, canonical({'ok': False, 'error_code': 429, 'description': 'Too Many Requests: retry after 30',
