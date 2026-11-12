@@ -503,7 +503,7 @@ leaves or that its own check holds back, in `spool/sends`; `nocheh-app`
 drains them into `control.chat_sends`, `/v1/status` carries the last day's problems, the
 owner reads the list at `/v1/chat-sends`, the "Keep delivery logs" days expire them, and
 problem notices gain the kind `sends`
-([decision](docs/adr/0237-record-every-send-to-a-chat-app.md),
+([decision](docs/adr/0238-record-every-send-to-a-chat-app.md),
 [bot](services/telegram/test_sends.py), [store](test/store-chat-sends.test.ts)).
 Built on one branch (bot, store, notices, dashboard, docs), not yet on main. A try that a
 later one recovered within 15 minutes, an unchanged edit, an expired button answer and a

@@ -1,4 +1,4 @@
-# ADR-0237: Record every send to a chat app
+# ADR-0238: Record every send to a chat app
 
 <status>
 Accepted on 2026-11-11, after the owner said "I think we should record every

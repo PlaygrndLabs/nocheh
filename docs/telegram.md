@@ -146,7 +146,7 @@ an unchanged edit, an expired button answer and a reaction the chat does not
 allow are listed but never counted as problems. **Keep
 delivery logs** in Settings › Privacy & data removes old records too. The
 dashboard's own mini app menu button call does not pass the bot yet, so it has
-no record ([ADR-0237](adr/0237-record-every-send-to-a-chat-app.md)).
+no record ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)).
 
 ## Mini app
 
