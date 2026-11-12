@@ -261,11 +261,14 @@ export class KnowledgeManagementRepository {
   const task_projects=await this.taskProjects(moves,this.stores.control),undo_task_projects=await this.taskProjects(undoMoves,this.stores.control);
   // A card that shares or rewords a fact names where it came from and who can read it (ADR-0242).
   const fact=proposal.kind==='fact_grant'?proposal.payload.fact_id:proposal.kind==='entity_correct'?proposal.target_id:null;
-  const fact_audience=fact?await this.s.entities.audience(principal,fact).catch(()=>null):null;
+  // A failure to work that out is shown as one, never as a card with no source, so the owner cannot approve it unseen.
+  let fact_audience:unknown=null,fact_audience_error:string|null=null;
+  if(fact)try{fact_audience=await this.s.entities.audience(principal,fact);}
+   catch(error){fact_audience_error=error instanceof HttpError&&error.status===404?error.code:'audience_unavailable';}
   // A proposal saved before private chats were refused still opens, marked, so the owner can cancel it; it never applies.
   const private_chats=proposalPrivateChats(proposal);
   return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,task_projects,undo_task_projects,
-   ...(fact?{fact_audience}:{}),...(private_chats.length?{private_chats}:{}),decision_history};}
+   ...(fact?{fact_audience,...(fact_audience_error?{fact_audience_error}:{})}:{}),...(private_chats.length?{private_chats}:{}),decision_history};}
  async proposals(principal:Reader,after=''){admin(principal);if(after)id(after);const rows=(await this.stores.control.query(`SELECT id FROM knowledge_proposals WHERE $1='' OR
   (created_at,id)<(SELECT created_at,id FROM knowledge_proposals WHERE id=$1) ORDER BY created_at DESC,id DESC LIMIT 101`,[after])).rows;
   return {proposals:await Promise.all(rows.slice(0,100).map(row=>this.proposal(principal,row.id))),next:rows.length>100?rows[99].id:null};}

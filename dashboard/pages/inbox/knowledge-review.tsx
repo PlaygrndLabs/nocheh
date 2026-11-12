@@ -36,6 +36,8 @@ export type Proposal = {
     confirm_required: boolean;
     readers: {space: string; group: string | null} | null;
   } | null;
+  /** Why `fact_audience` could not be worked out; such a card cannot be approved until it can (ADR-0242). */
+  fact_audience_error?: string;
   /** Private chats a proposal saved before they were refused still names; it never applies (ADR-0242). */
   private_chats?: string[];
 };
@@ -109,11 +111,14 @@ export function KnowledgeReview({
   // Every member of a group can read all of its topics, so a share into a topic is seen by the whole group.
   const seers = destination ? (parentOf(destination) ?? destination) : null;
   const privateChats = proposal.private_chats ?? [];
+  // A fact share or correction is approved only after seeing where the fact came from and who will read it.
+  const unseen = ['fact_grant', 'entity_correct'].includes(kind) && !audience;
   const controls = knowledgeDecisionControls(proposal.state, {
     unavailable: review.unavailable,
     changed: review.changed,
     busy: !!command.busy,
     stale: review.stale,
+    unseen,
   });
   const [label, tone] = stateLabel(proposal.state);
   const path = '/knowledge/proposals/' + encodeURIComponent(proposal.id);
@@ -350,6 +355,13 @@ export function KnowledgeReview({
             </Fact>
           )}
         </Facts>
+      )}
+      {unseen && proposal.state === 'review' && (
+        <Notice tone="warn" title="Can’t be approved right now">
+          {proposal.fact_audience_error === 'entity_claim_not_found'
+            ? 'This fact no longer exists. You can still reject it.'
+            : 'Nocheh couldn’t work out where this fact came from and who would read it. Reopen it shortly, or reject it.'}
+        </Notice>
       )}
       {kind === 'fact_grant' && audience?.confirm_required && (
         <Notice tone="warn" title="This fact comes from a private chat">

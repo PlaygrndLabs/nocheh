@@ -270,7 +270,11 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    const grantCard=await knowledge.persist(grantId,{kind:'fact_grant',reason:'Synthetic: the group asked about the checkpoint',
     payload:{fact_id:fact.id,fact_revision:fact.revision,destination:group,wording:'The checkpoint is complete.'}},
     {origin:'turn',source:privateSource,space:'123',profile:'hermes',job:null,binding:grantBinding,dependencies:await knowledge.snapshot(owner,[privateSource.id],grantBinding)});
-   const card=await s.knowledge.proposal(owner,grantId);
+   // When where it came from cannot be worked out, as in a passing outage, the card says so instead of showing no source.
+   (s.entities as any).audience=async()=>{throw new Error('synthetic outage');};
+   try{const blind=await s.knowledge.proposal(owner,grantId);assert.deepEqual([blind.fact_audience,blind.fact_audience_error],[null,'audience_unavailable']);}
+   finally{delete (s.entities as any).audience;}
+   const card=await s.knowledge.proposal(owner,grantId);assert.equal(card.fact_audience_error,undefined);
    assert.deepEqual([card.fact_audience.private_sources,card.fact_audience.owner_private,card.fact_audience.readers],[['123'],true,null],'the card says it came from your private chat');
    await assert.rejects(s.memoryAccess.grant(owner,{fact_id:fact.id,fact_revision:fact.revision,destination:group,operation_id:key+':unconfirmed'}),{code:'memory_grant_private_sources'});
    await s.knowledge.decide(owner,grantId,{decision:'approve',expected_revision:grantCard.revision,operation_id:key+':approve-private-grant'});
