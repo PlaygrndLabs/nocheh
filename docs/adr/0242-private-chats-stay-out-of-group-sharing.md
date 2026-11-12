@@ -47,13 +47,25 @@ follow-up).
   - an organization delegation over a private chat: 400
     `organization_private_chat`;
   - agent proposals use the same codes. Learned organization drops a private
-    chat's assignment, and a batch left empty is no proposal.
+    chat's assignment, and a batch left empty is no proposal;
+  - an owner rule or organization delegation saved earlier that names a
+    private chat can still be saved turned off with the private chats it
+    already names, so the owner can stop it. It never gains one and is never
+    turned on again while it names one. The dashboard's rule and delegation
+    editors leave such chats out.
 - Reading fails closed for rows saved earlier:
   - `covers()` starts with `if(!groupSpace(space))return false`;
   - `forDestination()` ignores a private destination;
-  - `effective()` gives a private chat no project;
+  - `effective()` gives a private chat no project, but still returns its own
+    older row as `own_assignment`, so the chat's page says "An older setting
+    puts this chat in a project" with a "Remove it" button;
+  - an older delegation never acts on its private chats;
   - the rule list returns `private_sources`, and the dashboard flags such a rule
-    with "Reads a private chat. Nocheh skips it."
+    with "Reads a private chat. Nocheh skips it.";
+  - a saved agent proposal is read as it was saved, so the proposal list and
+    its card still open, with `private_chats` naming the private chats; the
+    owner rejects or dismisses it, and applying it checks it as a new proposal,
+    so it is refused.
 - Reset:
   - the setup restore refuses a private source, a private destination or a
     private `assigned` row;
@@ -66,6 +78,8 @@ follow-up).
   - skip a fact when any piece of its evidence comes from a private or unknown
     conversation;
   - record `evidence_spaces` in the proposal.
+  A source counts as unknown only when Nocheh cannot place it. A store failure
+  while placing it is an error, so a passing outage never cancels a request.
   An older request into a private chat, or one whose fact rests on private
   evidence, is cancelled when decided, with 409
   `memory_access_private_destination` or `memory_access_private_evidence`.
@@ -77,8 +91,9 @@ follow-up).
     `post` is left out, when the chat's follow-up is on;
   - `post` joins the command's identity only when given, so older commands keep
     theirs;
-  - a replay repairs a missing follow-up only when the replayed command posted
-    (one-time, or `post: true`), never because of the current setting.
+  - a replay repairs a missing follow-up only when the replayed command posted,
+    that is, when it prepared that exact follow-up before it committed. A
+    replay never posts because of the decision's kind or the current setting.
 - Grants:
   - go only to a group or topic (400 `memory_grant_private_destination`);
   - a fact with any private or unknown evidence needs
@@ -86,7 +101,13 @@ follow-up).
     `memory_grant_private_sources`;
   - the agent cannot set that flag (it is not a proposal field). Applying a
     `fact_grant` card the owner approved sets it, because that card names the
-    sources.
+    sources;
+  - the confirm is recorded on the wording's provenance. A grant on a fact
+    with private or unplaced evidence that lacks it, as one made before this
+    change, is suspended with `private_evidence_unconfirmed` when a turn would
+    read it, when grants are listed, or when a staged follow-up would post it.
+    The dashboard shows it as paused because it came from a private chat, and
+    the owner shares it again through the confirm.
 - Every card and editor that shares or rewords a fact names where it came from
   and who will see it:
   - owner `GET /v1/entities/claims/<id>/audience` returns `sources`,
@@ -99,7 +120,12 @@ follow-up).
     `fact_audience`;
   - the People share form lists only groups and topics, and asks first, naming
     the private chat, before sharing a fact that came from one;
-  - the correction editor says who can read the new wording.
+  - "Who will see it" names the whole group, also for a topic, because every
+    member of a group can read all of its topics. Where Nocheh may reuse a
+    lasting share is named apart: the group and all its topics, or that topic
+    only when topic memory is separate;
+  - the correction editor says who can read the new wording, and that chats it
+    was shared with pause until the owner approves the new wording.
 - Dashboard: the chat pickers for sharing rules, projects and organization offer
   only groups and topics. A private chat's page says "Your private chat never
   joins a project." in place of the project card.
@@ -109,12 +135,13 @@ follow-up).
 - What is kept from before:
   - an owner rule or assignment saved earlier that names a private chat stays
     saved, but sharing skips its private parts;
-  - a grant made earlier on a fact with owner-private evidence stays active
-    until the owner revokes it;
+  - a grant made earlier on a fact with private evidence pauses until the
+    owner shares it again through the confirm;
   - on an existing install the saved `*` setting keeps `auto_followup` true
     until the owner turns it off.
 - A reset stops before erasure while a rule or project still names a private
-  chat, so the owner removes it and runs the reset again.
+  chat, so the owner removes it and runs the reset again: "Remove it" on the
+  chat's page, or editing the rule, which leaves private chats out.
 - Every chat with a positive ID counts as private, a member's too. A later step
   can give a member's private chat its own rules.
 - Checks:

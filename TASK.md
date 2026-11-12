@@ -204,8 +204,11 @@ ask, else start build.", approving the Members design):
   [audience](test/store-entity-owner-corrections.test.ts),
   [reset](services/hermes/test_reset_configuration.py)). An existing install keeps its saved
   `auto_followup=true` until the owner turns "Answer right after I approve" off. Grants
-  already made on owner-private facts stay until revoked. A reset stops before erasure while
-  a rule or project still names a private chat. Pending: a check on the owner's live install.
+  already made on private-source facts pause until the owner shares them again with the
+  confirm. Older rules and organizing that name a private chat can still be turned off, and
+  older proposals still open to be rejected. A reset stops before erasure while a rule or
+  project still names a private chat ("Remove it" on the chat's page, or edit the rule).
+  Pending: a check on the owner's live install.
 
 Project sharing (owner, 2026-11-09: "isnt better to have check box to share entities
 in create/edit project to do it?", then "yes" to the checkbox and five safety fixes):
