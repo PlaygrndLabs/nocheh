@@ -797,7 +797,7 @@ export class BackgroundJobRepository {
     const parts=reportParts(String(JSON.parse(result.content.toString()).text??''));
     if(!parts.length)return this.finish(row,'failed','job_report_empty');
     const owner=this.access.policy().owner_id!,away=!!row.machine&&row.scope!==owner;
-    const targets=parts.map(text=>({to:row.machine?owner:row.space_id as string,text}));
+    const targets=parts.map(text=>({to:away?owner:row.space_id as string,text}));
     if(away)targets.push({to:row.space_id,text:labeledLines(backgroundTexts,(await ownerPrompts(this.control))['background.texts'])[row.ended?'limited_private':'report_private']!});
     const sent=(await this.control.query(`SELECT b.part,a.state FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
       WHERE b.job_id=$1 ORDER BY b.part`,[row.id])).rows;
