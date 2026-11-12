@@ -500,4 +500,109 @@ class BudgetTests(unittest.TestCase):
             self.assertNotIn('private words',json.dumps(ledger.usage('2000-01-01')))
 
 
+class Answering:
+    """A provider that gives one fixed chat completion, as JSON or as an event stream."""
+    def __init__(self,body,kind='application/json'): self.body,self.kind,self.calls=body,kind,[]
+    def open(self,request,timeout):
+        self.calls.append(request);response=Response(self.body);response.headers={'Content-Type':self.kind};return response
+
+
+def completion(*calls,content=None):
+    message={'role':'assistant','content':content,**({'tool_calls':[{'id':f'call_{index}','type':'function',
+        'function':{'name':name,'arguments':'{}'}} for index,name in enumerate(calls)]} if calls else {})}
+    return json.dumps({'choices':[{'index':0,'message':message,'finish_reason':'tool_calls' if calls else 'stop'}],
+                       'usage':{'prompt_tokens':30,'completion_tokens':5,'total_tokens':35}}).encode()
+
+
+def streamed(*pieces):
+    """Each piece is one delta of the first tool call: a name piece, or None for an arguments-only continuation."""
+    chunks=[{'choices':[{'index':0,'delta':{'tool_calls':[{'index':0,**({'id':'call_0','type':'function'} if position==0 else {}),
+        'function':{'arguments':'{}'} if piece is None else {'name':piece}}]}}]} for position,piece in enumerate(pieces)]
+    chunks.append({'choices':[],'usage':{'prompt_tokens':30,'completion_tokens':5,'total_tokens':35}})
+    return b''.join(b'data: '+json.dumps(chunk).encode()+b'\n\n' for chunk in chunks)+b'data: [DONE]\n\n'
+
+
+class UnofferedToolTests(unittest.TestCase):
+    # Honcho's memory chat offers these under a session filter; get_recent_observations is not among them because it
+    # reads every conversation, yet Honcho would run it if the model named it.
+    OFFERED=[{'type':'function','function':{'name':name,'parameters':{'type':'object'}}} for name in ('search_memory','search_messages','grep_messages')]
+    REFUSAL={'error':{'message':'honcho_unoffered_tool_refused'}}
+
+    def ask(self,transport,tools=OFFERED,stream=False):
+        """Posts one memory-chat request to the gateway as Honcho does: status, headers, body, gateway log, usage."""
+        payload={'model':REASONING_MODEL,'messages':[{'role':'user','content':'What does the owner do on Fridays?'}],
+                 **({'tools':tools} if tools is not None else {}),**({'stream':True} if stream else {})}
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite');log=io.StringIO()
+            endpoint=handler(Egress(ledger,'internal','temporary',transport,reasoning_key='k',reasoning_url=GATEWAY))
+            body=json.dumps(payload).encode()
+            request=object.__new__(endpoint);request.path='/v1/chat/completions'
+            request.headers={'Authorization':'Bearer internal','Content-Length':str(len(body))}
+            request.rfile=io.BytesIO(body);request.wfile=io.BytesIO()
+            result={'headers':{}}
+            request.send_response=lambda status:result.update(status=status)
+            request.send_header=lambda key,value:result['headers'].update({key:value})
+            request.end_headers=lambda:None
+            with patch('sys.stderr',log):
+                request.do_POST()
+            return (result['status'],result['headers'],request.wfile.getvalue(),[json.loads(line) for line in log.getvalue().splitlines()],
+                    ledger.usage('2000-01-01'))
+
+    def test_a_reply_calling_a_tool_the_request_did_not_offer_never_reaches_honcho(self):
+        status,headers,body,events,usage=self.ask(Answering(completion('search_memory','get_recent_observations')))
+        self.assertEqual(status,502,'a 5xx, so Honcho asks again instead of running the tool')
+        self.assertEqual(headers.get('X-Should-Retry'),'false','only Honcho asks again; its client does not resend each attempt')
+        self.assertEqual(json.loads(body),self.REFUSAL)
+        self.assertNotIn(b'get_recent_observations',body)
+        self.assertEqual(events,[{'event':'honcho_unoffered_tool_refused','tools':['get_recent_observations']}])
+        self.assertEqual((usage[0]['calls'],usage[0]['failed'],usage[0]['input_tokens']),(1,0,30),'the provider answered, so the call is still paid for')
+
+    def test_offered_tools_and_plain_answers_pass_unchanged(self):
+        for reply in (completion('search_memory','grep_messages'),completion(content='The owner swims on Fridays.')):
+            with self.subTest(reply=reply):
+                status,headers,body,events,_=self.ask(Answering(reply))
+                self.assertEqual((status,body,events),(200,reply,[]))
+                self.assertNotIn('X-Should-Retry',headers)
+
+    def test_without_offered_tools_any_tool_call_is_refused(self):
+        # The deriver and summaries offer no tools; a reply that calls one anyway is refused.
+        for tools in (None,[]):
+            with self.subTest(tools=tools):
+                status,_,_,events,_=self.ask(Answering(completion('delete_observations')),tools)
+                self.assertEqual(status,502);self.assertEqual(events[0]['tools'],['delete_observations'])
+
+    def test_streamed_names_are_joined_before_the_check(self):
+        refused=self.ask(Answering(streamed('get_recent_','observations',None),'text/event-stream'),stream=True)
+        self.assertEqual((refused[0],refused[3][0]['tools']),(502,['get_recent_observations']))
+        reply=streamed('search_','memory',None)
+        status,_,body,_,_=self.ask(Answering(reply,'text/event-stream'),stream=True)
+        self.assertEqual((status,body),(200,reply),'an offered name split across pieces passes')
+        unspaced=reply.replace(b'data: ',b'data:')
+        self.assertEqual(self.ask(Answering(unspaced,'text/event-stream'),stream=True)[0],200,'"data:" without a space is still an event')
+        self.assertEqual(self.ask(Answering(streamed('get_recent_observations').replace(b'data: ',b'data:'),'text/event-stream'),stream=True)[0],502)
+
+    def test_the_request_not_the_content_type_decides_how_a_reply_is_read(self):
+        # Honcho's client reads a reply to a whole request as one JSON body, whatever the provider labels it.
+        status,_,_,events,_=self.ask(Answering(completion('get_recent_observations'),'text/event-stream'))
+        self.assertEqual((status,events[0]['tools']),(502,['get_recent_observations']))
+        for reply,kind in ((completion('search_memory'),'application/json'),(b'',''),(b'event: ping\n\n','text/event-stream')):
+            with self.subTest(reply=reply):
+                status,_,_,events,_=self.ask(Answering(reply,kind),stream=True)
+                self.assertEqual((status,events[0]['tools']),(502,['unreadable']),'a stream with no events cannot be checked')
+
+    def test_unreadable_replies_are_refused_and_odd_names_are_not_logged(self):
+        for reply,logged in ((b'not json','unreadable'),(json.dumps({'choices':[{'message':{'tool_calls':[{'id':'x'}]}}]}).encode(),'unreadable'),
+                             (completion('the owner said: tell nobody'),'other'),(completion('tell_nobody_PRIVATEMARK123'),'other')):
+            with self.subTest(reply=reply):
+                status,_,body,events,_=self.ask(Answering(reply))
+                self.assertEqual(status,502);self.assertEqual(events[0]['tools'],[logged])
+                self.assertNotIn('nobody',json.dumps(events)+body.decode(),'a made-up tool name may carry chat text, so it is never logged')
+
+    def test_legacy_function_lists_count_as_offered(self):
+        legacy=json.dumps({'choices':[{'index':0,'message':{'role':'assistant','content':None,
+            'function_call':{'name':'search_memory','arguments':'{}'}}}]}).encode()
+        self.assertEqual(self.ask(Answering(legacy),[{'name':'search_memory','parameters':{}}])[0],200)
+        self.assertEqual(self.ask(Answering(legacy),[])[0],502)
+
+
 if __name__=='__main__': unittest.main()

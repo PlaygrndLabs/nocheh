@@ -40,6 +40,10 @@ class CoolingDown(Rejected):
         super().__init__('embedding_route_cooling_down')
 
 
+class UnofferedTool(Exception):
+    """The provider answered, and is paid for, but the answer calls a tool its request did not offer (ADR-0241)."""
+
+
 class PreparationUnavailable(Rejected):
     """The archive could not prepare this request now; the same request can succeed later."""
     seconds=15
@@ -382,6 +386,65 @@ def validate(route, payload, embedding=None):
     return payload
 
 
+# The pinned Honcho's own tool names (src/utils/agent_tools.py). A name a model makes up may carry chat text, so the
+# refusal log names only these and calls any other 'other'.
+HONCHO_TOOLS = frozenset({'create_observations_deductive', 'create_observations_inductive', 'delete_observations',
+                          'get_messages_by_date_range', 'get_observation_context', 'get_peer_card', 'get_reasoning_chain',
+                          'get_recent_observations', 'grep_messages', 'search_memory', 'search_messages',
+                          'search_messages_temporal', 'update_notes', 'update_peer_card'})
+
+
+def unoffered_tools(payload, content):
+    """Tools a chat completion calls that its request did not offer; None when every call was offered.
+
+    Honcho's memory chat runs any of its tools the model names, offered or not, and one it never offers under a
+    session filter (get_recent_observations) reads every conversation, the owner's private chat included. So a
+    reply may call only tools its request offered. An unreadable reply cannot be checked and counts as unoffered.
+    The request's stream flag picks how to read the reply, as Honcho's OpenAI client does, whatever the provider's
+    Content-Type says."""
+    offered = set()
+    for item in [*(payload.get('tools') or []), *(payload.get('functions') or [])]:
+        function = item.get('function', item) if isinstance(item, dict) else None
+        if isinstance(function, dict) and isinstance(function.get('name'), str):
+            offered.add(function['name'])
+    streamed = payload.get('stream') is True
+    try:
+        if streamed:
+            data = [line[5:].removeprefix(b' ') for line in content.splitlines() if line.startswith(b'data:')]
+            chunks = [json.loads(line) for line in data if line.strip() != b'[DONE]']
+            if not chunks:
+                raise ValueError()
+            parts = [(choice.get('index', 0), choice.get('delta')) for chunk in chunks for choice in chunk.get('choices') or []]
+        else:
+            parts = [(choice.get('index', 0), choice.get('message')) for choice in json.loads(content).get('choices') or []]
+        # A streamed call's name may arrive in pieces, joined per choice and call as the SDK does; a whole reply lists each call.
+        names, joined = [], {}
+        for index, part in parts:
+            if not isinstance(part, dict):
+                continue
+            calls = [(call.get('index', position), call.get('function')) for position, call in enumerate(part.get('tool_calls') or [])]
+            if part.get('function_call') is not None:
+                calls.append(('function_call', part['function_call']))
+            for position, function in calls:
+                if function is None and streamed:
+                    continue
+                if not isinstance(function, dict):
+                    raise TypeError()
+                name = function.get('name')
+                if name is None:
+                    continue  # a streamed continuation carries only arguments
+                if not isinstance(name, str):
+                    raise TypeError()
+                if streamed:
+                    joined[(index, position)] = joined.get((index, position), '') + name
+                else:
+                    names.append(name)
+    except (ValueError, AttributeError, TypeError):
+        return ['unreadable']
+    called = {name if name in HONCHO_TOOLS else 'other' for name in [*names, *joined.values()] if name not in offered}
+    return sorted(called) or None
+
+
 def reason(route, status, error):
     """Log why the provider refused a request: its error type and message, never the request."""
     try: detail=json.loads(error.read(16*1024)).get('error') or {}
@@ -450,7 +513,15 @@ class Egress:
                             if candidate: usage=candidate
                 else: usage=json.loads(content).get('usage')
             except (ValueError,AttributeError): pass
+            if not paid and outcome=='response':
+                # The provider answered and is paid for, but Honcho never sees a call to a tool it did not offer.
+                refused=unoffered_tools(payload,content)
+                if refused:
+                    print(json.dumps({'event':'honcho_unoffered_tool_refused','tools':refused}),file=sys.stderr,flush=True)
+                    raise UnofferedTool()
             return status,kind,content
+        except UnofferedTool:
+            raise
         except urllib.error.HTTPError as error:
             status=error.code;outcome='http_error'
             reason(route,status,error)
@@ -467,9 +538,10 @@ class Egress:
 def handler(egress):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args): pass
-        def respond(self,status,kind,body,retry_after=None):
+        def respond(self,status,kind,body,retry_after=None,retry=True):
             self.send_response(status);self.send_header('Content-Type',kind)
             if retry_after is not None:self.send_header('Retry-After',str(retry_after))
+            if not retry:self.send_header('X-Should-Retry','false')
             self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
         def do_GET(self):
             if self.path=='/health': return self.respond(200,'application/json',b'{"ok":true}')
@@ -483,6 +555,10 @@ def handler(egress):
                 if not 0 < length <= 1024*1024 or self.headers.get('Transfer-Encoding'): raise Rejected('request_bound_exceeded')
                 status,kind,body=egress.send(self.path,json.loads(self.rfile.read(length)),self.headers.get('X-Nocheh-Workspace'),
                                              self.headers.get('X-Nocheh-Priority')=='background')
+            except UnofferedTool:
+                # A 5xx, so Honcho's own retry asks again (three attempts in all). The header stops its client from
+                # also resending each attempt, which would pay for the same refused answer again.
+                return self.respond(502,'application/json',b'{"error":{"message":"honcho_unoffered_tool_refused"}}',retry=False)
             except (CoolingDown,PreparationUnavailable) as error:
                 return self.respond(503,'application/json',json.dumps({'error':{'message':str(error)}}).encode(),error.seconds)
             except (Rejected,ValueError) as error:

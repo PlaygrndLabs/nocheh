@@ -168,6 +168,16 @@ full tester scenario `tool_card_reads_in_words`). Pending: the owner's yes on th
 mock, and a real Notion card with a summary on the owner's live install after the
 machine pull.
 
+Private chat and group memory (2026-11-12, from the members design review: check whether
+Honcho can bring what the owner says privately into a group, fix a real leak, and add a
+canary test): Honcho v3.6.0 keeps each conclusion in the session it was learned from, and
+group reads stay in the group's sessions; the one gap, Honcho's memory chat running a tool
+it did not offer (`get_recent_observations` reads every session), is closed in Nocheh's
+Honcho gateway ([ADR-0241](docs/adr/0241-honcho-runs-only-the-tools-it-offered.md),
+[gateway](services/honcho/test_meter.py), [canary](tools/acceptance/product_scenarios.py)
+`private_chat_stays_out_of_groups`). Pending: the owner's merge, then a pull on the operating
+install (the gateway reloads with the dev stack's Honcho code).
+
 Member safety (owner, 2026-11-09: asked whether a coworker they let use Nocheh can use
 their Notion or reach other groups, then "yes" to five safety fixes): a Notion read whose
 input names an address outside the owner's Notion asks like a change, in the private chat

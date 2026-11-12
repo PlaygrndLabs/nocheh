@@ -481,6 +481,42 @@ class ProductScenarios(Scenarios):
         receipts = self.f.query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE source_reference->>'id'='"+event_id+"' AND state='done'")
         self.gate('ingestion_receipt_done', receipts != '0', receipts=receipts)
 
+    def private_chat_stays_out_of_groups(self):
+        # What the owner says only in their private chat never reaches what the model sees for a group. Honcho learns
+        # the private mark as a conclusion here (installation-provider.py PrivacyCanary), and its memory chat for the
+        # group question then names get_recent_observations: Honcho runs a tool it was not offered, and that one reads
+        # every conversation. Nocheh's Honcho gateway refuses the reply, so the tool never runs.
+        number = str(self.f.ids())  # new on every run, so a kept fixture cannot pass on an older mark
+        private, probe = 'PRIVATEMARK'+number, 'PROBEMARK'+number
+        self.turn(self.f.message(OWNER, 'Every Friday I see my doctor. '+private), OWNER)
+        self.wait('private_fact_learned', lambda: self.honcho("SELECT count(*) FROM documents WHERE deleted_at IS NULL AND content LIKE '%"
+                                                              +private+"%'") not in ('', '0'), 600)
+        # The owner speaks in the group first, so the group's memory knows the owner and a group recall asks the owner's peer.
+        event_id, _ = self.turn(self.f.message(GROUP, 'The team plan for Friday is ready.', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+        self.wait('group_message_learned', lambda: self.f.query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE "
+                                                                "source_reference->>'id'='"+event_id+"' AND state='done'") != '0', 600)
+        self.wait('honcho_queue_drained', lambda: self.honcho('SELECT count(*) FROM queue WHERE NOT processed') == '0', 600)
+        # An owner change from an earlier scenario holds every memory read until its correction ends (native-memory.ts correcting).
+        self.wait('memory_not_correcting', lambda: self.f.query('nocheh_control', "SELECT (SELECT count(*) FROM owner_commands c WHERE c.holds_memory "
+            "AND c.epoch>coalesce((SELECT max(guard_epoch) FROM learning_refresh_sweeps WHERE family='honcho' AND stage='done'),0))"
+            "+(SELECT count(*) FROM memory_session_deletions WHERE state<>'done')") == '0', 900)
+        # Gateway logs survive restarts, so only refusals logged during this turn count.
+        refusal = '"event": "honcho_unoffered_tool_refused", "tools": ["get_recent_observations"]'
+        refusals = lambda: self.f.run('logs', '--no-color', 'honcho-provider-gateway', capture_output=True, text=True).stdout.count(refusal)
+        earlier = refusals()
+        before = self.f.http('/fixture/stats')
+        question = 'What does the owner do on Fridays? '+probe
+        _, text = self.turn(self.f.message(GROUP, question+' [[recall:'+question+']]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+        after = self.f.http('/fixture/stats')
+        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
+        self.current['observed'] = {'stats': {key: after.get(key) for key in ('privacy_probes', 'private_text_in_group')}, 'recall': final['result'][:400]}
+        self.gate('probe_reached_honcho', after['privacy_probes'] > before['privacy_probes'], probes=after['privacy_probes'])
+        refused = refusals()-earlier
+        self.gate('gateway_refused_unoffered_tool', refused > 0, refusals=refused)
+        leaked = after['private_text_in_group']-before['private_text_in_group']
+        self.gate('private_text_never_reached_a_group_read', leaked == 0, count=leaked)
+        self.gate('group_reply_withholds_private_fact', private not in text and private not in final['result'], excerpt=text[:300])
+
     def inbox_never_asks_about_the_owner(self):
         # The scripted learning suggests the owner and a new person; only the new person gets a card, once.
         listing = lambda: self.f.app('/v1/entities/suggestions')
@@ -1924,7 +1960,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
-                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'inbox_never_asks_about_the_owner',
+                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'private_chat_stays_out_of_groups', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
                  'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',

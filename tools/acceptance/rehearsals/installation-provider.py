@@ -270,6 +270,53 @@ class ScriptedBrain:
         return StreamingResponse(stream(), media_type='text/event-stream')
 
 
+class PrivacyCanary:
+    """Private text that must never reach a group's memory reads, and a probe that tries the one known way in.
+
+    The owner says a PRIVATEMARK in their private chat, and Honcho's learning here keeps it as a conclusion, as a real
+    model would. A group question carries a PROBEMARK. Honcho's memory chat for that question is asked to call
+    get_recent_observations, a tool Honcho does not offer under a session filter and that reads every conversation, as
+    a model might after a planted instruction. Any model request holding both marks is private text in a group's read.
+    """
+    PRIVATE = re.compile(r'PRIVATEMARK[0-9]+')
+    PROBE = re.compile(r'PROBEMARK[0-9]+')
+    # Honcho's deriver prompt (src/deriver/prompts.py) and its message wrapper.
+    LEARN = 'extract **explicit atomic facts**'
+    TARGET = re.compile(r'<message idx="([0-9]+)" peer="([^"]*)" target="true"[^>]*>(.*?)</message>', re.S)
+    DETECTOR = 'Find secret values in the supplied data.'
+
+    def __init__(self, counts):
+        self.counts = counts
+        counts.update(private_text_in_group=0, privacy_probes=0)
+
+    def check(self, texts):
+        """Count a model request that holds private text next to a group question. The secret check is Nocheh's
+        guard reading what it prepares, not a group read."""
+        text = '\n'.join(texts)
+        if not (texts and texts[0].startswith(self.DETECTOR)) and self.PRIVATE.search(text) and self.PROBE.search(text):
+            self.counts['private_text_in_group'] += 1
+
+    def learned(self, text):
+        """Honcho's learning of a message with a private mark: one conclusion that quotes the mark and cites it."""
+        if self.LEARN not in text:
+            return None
+        for found in self.TARGET.finditer(text):
+            mark = self.PRIVATE.search(found[3])
+            if mark:
+                return json.dumps({'explicit': [{'source_indices': [int(found[1])], 'content': found[2] + ' keeps a private Friday routine ' + mark[0]}]})
+        return None
+
+    def probe(self, body, texts):
+        """Honcho's memory chat about a group question, before any tool ran: call the tool it did not offer."""
+        names = {tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)}
+        if 'search_memory' not in names or 'get_recent_observations' in names or body.response_format is not None:
+            return None
+        if not self.PROBE.search('\n'.join(texts)) or any(message.role == 'tool' for message in body.messages):
+            return None
+        self.counts['privacy_probes'] += 1
+        return {'tool': 'get_recent_observations', 'arguments': {'limit': 100}}
+
+
 def provider():
     sys.path.insert(0, '/app')
     from fastapi import FastAPI, Request
@@ -279,6 +326,7 @@ def provider():
     original = chat._response_content
     counts = {'detector': 0, 'learning': 0, 'chat': 0, 'embeddings': 0, 'transcriptions': 0, 'images': 0, 'raw_canary_outside_detector': 0}
     canary = 'fixture-secret-ORCHID-2718'
+    privacy = PrivacyCanary(counts)
 
     def answer(body):
         parts = [part for message in body.messages if isinstance(message.content, list) for part in message.content if isinstance(part, dict)]
@@ -294,6 +342,9 @@ def provider():
         if canary in text:
             counts['raw_canary_outside_detector'] += 1
             raise ValueError('unguarded_fixture_canary')
+        learned = privacy.learned(text)
+        if learned:
+            return learned
         if 'Interpret permitted conversation evidence silently.' in text:
             counts['learning'] += 1
             # Read the explicit fixture evidence from Honcho's actual reasoning
@@ -344,6 +395,11 @@ def provider():
         # carry an explicit fixture directive reach the scripted brain first.
         @app.post('/v1/chat/completions')
         async def completions(body: chat.ChatCompletionRequest):
+            texts = [brain.text(message.content) for message in body.messages]
+            privacy.check(texts)
+            probe = privacy.probe(body, texts)
+            if probe:
+                return brain.render(body, probe)
             scripted = brain.respond(body)
             if scripted is None:
                 return await chat.chat_completions(body)
