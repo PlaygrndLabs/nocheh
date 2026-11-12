@@ -6,7 +6,7 @@ security launcher adds), on a fresh copy of a profile template, against the rela
 The arms use the same model, inputs and Hermes and differ only in the route:
 A Anthropic's OpenAI-compatible chat API (the route before prompt caching), B its Messages API as
 live, C as B with assistant_turn.reasoning returning {'enabled': False}, D as B with the review's whole-prompt budget at
-WIDE_BUDGET tokens instead of services/hermes/native_memory.py's 24,000. For claude-sonnet-5-5 Hermes
+WIDE_BUDGET tokens, whatever services/hermes/native_memory.py gives it. For claude-sonnet-5-5 Hermes
 then sends thinking {type: between_tools} (agent/anthropic_adapter.py _thinking_kwargs): no thinking
 up front, but notes between tool calls still allowed, where B sends no thinking field and gets the
 API's default adaptive thinking. C is not "thinking off". Every run sees the live paths, HERMES_HOME

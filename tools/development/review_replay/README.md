@@ -20,10 +20,12 @@ arms (`--arms`, default A, B and C):
   (`agent/anthropic_adapter.py` `_thinking_kwargs`): no thinking before the first answer,
   but thinking between tool calls is still allowed. C is not "thinking off", and C minus A
   is not the effect of thinking as such.
-- **D**: as B, with the review's whole-prompt input budget at 48,000 tokens instead of
-  the 24,000 `services/hermes/native_memory.py` gives Hermes's review. The budget counts
-  every prompt token of every call of a review, cached or not; at about 10,000 tokens a
-  call, 24,000 leaves room for three calls.
+- **D**: as B, with the review's whole-prompt input budget at 48,000 tokens, whatever
+  `services/hermes/native_memory.py` gives Hermes's review. The budget counts every
+  prompt token of every call of a review, cached or not. D tested raising it from 24,000,
+  which left room for three calls at about 10,000 tokens a call
+  ([ADR-0240](../../../docs/adr/0240-notes-reviews-get-room-to-retry-on-full-notes.md));
+  with 48,000 live, D and B are the same.
 
 For each arm, and each arm and kind of source, it reports the share of runs with two or
 more model calls, mean calls, the share of runs that changed Hermes native notes
