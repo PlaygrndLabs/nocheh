@@ -29,7 +29,9 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   whole project; a subtask has its parent's group. The owner's card, the dashboard and the
   mini app name exactly who will see a task before a move or a group change. A group's tasks
   move with it to another project, through the owner's assignment, an approved organization
-  and its undo; leaving every project leaves them on the old list for the owner only
+  and its undo; leaving every project leaves them on the old list for the owner only. A
+  group's own move, archive or trash takes only the tasks under it that the group sees;
+  another group's task under them stays where it is, no longer under it
   ([store](test/store-tasks.test.ts), [moves](test/store-knowledge-management.test.ts),
   [card lines](test/prompts.test.ts), [audience route](test/mini-app.test.ts),
   [dashboard](test/dashboard-pages.browser.mjs)). Tasks that groups added before this keep
@@ -40,7 +42,8 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   closes it. It reads by search, page and plain long-term memory search only, plus the
   frozen groups' tasks and their project's, gets what the owner's rules and grants let into
   the asking group, reaches read routes and read tools only, opens no group's original file,
-  runs in its own profile and is delivered only into the asker's private chat. Stale rows
+  runs in its own profile, removed once unused for two hours, and is delivered only into the
+  asker's private chat. Stale rows
   expire hourly, and the owner lists the record at `GET /v1/private-answers`
   ([record](test/store-private-answers.test.ts), [routes and tools](test/private-answers.test.ts),
   [memory](test/store-provenance.test.ts), [profile](services/hermes/test_scopes.py)).
@@ -68,11 +71,18 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   - before merging, a read-only check on the owner's install for any project with the share
     box on (`SELECT count(*) FROM projects WHERE sharing_enabled`);
   - a fake-Telegram end-to-end test of the button (`services/telegram/test_simulation.py`),
-    not written.
+    not written;
+  - owner answers to three review questions: whether removing a group from a project, or
+    choosing "No project", asks first and says its tasks stay on the old list for you only;
+    what an automatic-organizing permission does with "May create new projects" off (it
+    applies nothing); and whether a topic's tasks left on another project's list at the
+    upgrade should move to its group's project.
   Owner steps: a project that had the box on stops sharing at the next start, and its project
   rules, their previews and texts not yet said are deleted. Every move of a group into or out
   of a project now waits for your review, and a topic that had its own project follows its
-  group, also onto that group's task board.
+  group, also onto that group's task board; its tasks on another project's list stay there,
+  where only you see them. An owner export from before this change restores without the
+  share box: its project rules are left out and a topic's own project becomes its group's.
 
 Members step 1: keep the owner's private side out of groups (owner, 2026-11-12: "I just
 review the tables and seems what I want if there is a important point or need my answer ask,
