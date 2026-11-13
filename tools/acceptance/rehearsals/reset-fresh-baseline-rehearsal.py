@@ -208,7 +208,7 @@ def main():
             assert setup['snapshot']['layout'] == 'original-only-v1'
             assert setup['snapshot']['configuration']['sharing_rules'] == [{
                 'id': 'c' * 64, 'name': 'Fixture share', 'sources': ['-11'], 'destination': '-10',
-                'enabled': True, 'mode': 'filtered', 'instructions': 'Only fixture facts.', 'project_id': None}]
+                'enabled': True, 'mode': 'filtered', 'instructions': 'Only fixture facts.'}]
             assert setup['snapshot']['configuration']['runtime_profiles'] == [
                 {'id': CUSTOM_PROFILE, 'name': 'research', 'owner_id': '42'}]
             baseline = reset_baseline.verify(journal, preflight, environment=environment, command=command)

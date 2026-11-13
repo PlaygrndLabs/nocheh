@@ -9,7 +9,7 @@ import type {SourceReference} from '../src/stores/archive.js';
 import type {Interpretation} from '../src/interpretations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
-test('delegated organization is exact, atomic, reversible, and independent from every access authority',
+test('delegated organization only creates projects; every move asks the owner, names the project\'s groups, and stays reversible',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,port:Number(process.env.PGPORT??5432),user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const admin=new pg.Pool(config);try{assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
@@ -60,122 +60,128 @@ test('delegated organization is exact, atomic, reversible, and independent from 
   };
   try {
    await s.guards.reconcile();await s.guards.setMode('on');
-   const historical=await capture(),initial=proposal(historical,'historical');
+   // Organizing by itself only ever creates projects: every move of a group or topic into or out of a project waits for
+   // the owner's review (ADR-0246). A delegation's create-only authority keeps its exact checks.
+   const createOnly=(source:SourceReference,name:string):OrganizationProposal=>({...proposal(source,name),assignments:[]});
+   const historical=await capture(),initial=createOnly(historical,'historical');
    assert.equal(await match(initial,historical),null,'existing installations have no inferred organization authority');
    await save({enabled:false},'disabled');assert.equal(await match(initial,historical),null);
    await save({},'enable');assert.equal(await match(initial,historical),null,'old capture sequences cannot acquire automatic authority');
-   const imported=await capture(group,'import');assert.equal(await match(proposal(imported,'import'),imported),null);
-   const source=await capture(),automatic=proposal(source,'automatic');assert.equal((await match(automatic,source)).id,delegation.id);
-   const noPurpose={...automatic,assignments:automatic.assignments.map(change=>({...change,purpose_evidence:false}))};assert.equal(await match(noPurpose,source),null,'mention evidence is not assignment evidence');
-   const outside={...automatic,assignments:automatic.assignments.map(change=>({...change,space_id:other}))};assert.equal(await match(outside,source),null);
-   assert.equal(await match(automatic,source,group,'learning',{id:delegation.id,revision:delegation.revision+1}),null);
-   const beforeAuthority=await permissions(),pending=await persist('automatic',automatic,source);assert.equal(pending.state,'queued');
+   const imported=await capture(group,'import');assert.equal(await match(createOnly(imported,'import'),imported),null);
+   const source=await capture(),discovered=createOnly(source,'automatic');assert.equal((await match(discovered,source)).id,delegation.id);
+   const outside=await capture(other);assert.equal(await match(createOnly(outside,'outside'),outside,other),null,'only in the chats it may organize');
+   assert.equal(await match(discovered,source,group,'learning',{id:delegation.id,revision:delegation.revision+1}),null);
+   const automatic=proposal(source,'moving');
+   assert.equal(await match(automatic,source),null,'organizing never puts a group in a project by itself, even one it creates');
+   const beforeAuthority=await permissions(),moving=await persist('moving',automatic,source);assert.equal(moving.state,'review');
+   const pending=await persist('automatic',discovered,source);assert.equal(pending.state,'queued');
    const before=await s.guards.state();
    await stores.control.query("INSERT INTO dispatches(event_id,source_reference,binding,state) VALUES($1,$2,$3,'running')",[historical.id,historical,before]);
    const waiting=await s.knowledge.process('proposal:'+pending.id);assert.equal(waiting.state,'waiting');assert.equal(waiting.reason,'foreground_reply_active');
    assert.deepEqual(await s.guards.state(),before,'waiting for a foreground reply does not invalidate it');
    await stores.control.query("UPDATE dispatches SET state='done' WHERE event_id=$1",[historical.id]);
+   assert.equal((await s.knowledge.process('proposal:'+moving.id)).state,'review','a move stays with the owner');
+   assert.deepEqual(await s.guards.state(),before,'a move waiting for review changes nothing');
    const applied=await s.knowledge.process('proposal:'+pending.id);assert.equal(applied.state,'applied');
-   const after=await s.guards.state();assert.equal(after.epoch,before.epoch+1,'create and assignment produce one invalidation');
+   const after=await s.guards.state();assert.equal(after.epoch,before.epoch+1,'a create produces one invalidation');
    const receipt=await s.knowledge.proposal(owner,pending.id),created=receipt.result.created[0];
-   assert.equal(receipt.result.assignments.length,1);assert.equal(receipt.result.authorization.delegation_id,delegation.id);
+   assert.deepEqual(receipt.result.assignments,[]);assert.equal(receipt.result.authorization.delegation_id,delegation.id);
    assert.deepEqual(receipt.result.evidence,[source]);assert.deepEqual(await permissions(),beforeAuthority);
-   assert.equal((await s.projects.effective(group)).project?.id,created.id);
+   assert.equal((await s.projects.effective(group)).project,null,'a delegated create puts no chat in the project');
    const replay=await s.knowledge.process('proposal:'+pending.id);assert.equal(replay.state,'applied');assert.deepEqual(await s.guards.state(),after);
-   const unchanged:OrganizationProposal={kind:'organization',reason:'Same assignment observed again',creates:[],assignments:[{space_id:group,project_id:created.id,expected_revision:1,evidence_ids:[source.id],reason:'Still the same project',purpose_evidence:true}]};
-   const noOp=await persist('noop',unchanged,source);
-   await stores.control.query("UPDATE knowledge_proposals SET origin='turn',source_job_id=NULL WHERE id=$1",[noOp.id]);
+   // An owner-turn proposal waits for its reply to be confirmed before it applies.
+   const turnCreate=await persist('turn-create',createOnly(source,'turn-create'),source);assert.equal(turnCreate.state,'queued');
+   await stores.control.query("UPDATE knowledge_proposals SET origin='turn',source_job_id=NULL WHERE id=$1",[turnCreate.id]);
    await stores.control.query("INSERT INTO dispatches(event_id,source_reference,binding,state) VALUES($1,$2,$3,'running')",[source.id,source,await s.guards.state()]);
    knowledge.completed=completed;
-   assert.equal((await s.knowledge.process('proposal:'+noOp.id)).state,'waiting','owner-turn proposals wait for confirmed reply completion');
+   assert.equal((await s.knowledge.process('proposal:'+turnCreate.id)).state,'waiting','owner-turn proposals wait for confirmed reply completion');
    await stores.control.query("UPDATE dispatches SET state='suppressed',error_code='unsupported_message' WHERE event_id=$1",[source.id]);
    assert.equal(await completed({origin:'turn',source_reference:source}),'cancelled','ordinary suppression is not a successful turn');
    await stores.control.query("UPDATE dispatches SET error_code='intentional_silence' WHERE event_id=$1",[source.id]);
    assert.equal(await completed({origin:'turn',source_reference:source}),'ready','intentional conversational silence is a confirmed completed turn');
    await stores.control.query("UPDATE dispatches SET state='done',error_code=NULL WHERE event_id=$1",[source.id]);
-   assert.equal((await s.knowledge.process('proposal:'+noOp.id)).state,'applied');
+   assert.equal((await s.knowledge.process('proposal:'+turnCreate.id)).state,'applied');
    knowledge.completed=async()=> 'ready';
-   assert.equal((await s.knowledge.proposal(owner,noOp.id)).result.changed,false);assert.deepEqual(await s.guards.state(),after);
-   await s.projects.assign(owner,{space_id:group,project_id:null,mode:'none',expected_revision:1,operation_id:key+':owner-correction'});
-   unchanged.assignments[0]!.expected_revision=2;assert.equal(await match(unchanged,source),null,'owner correction suspends automatic reassignment');
-   assert.equal(await match({...proposal(source,'suspended-discovery'),assignments:[]},source),null,'suspension also prevents automatic create-only organization');
+   // An owner change to a chat suspends automatic organizing there until the owner resumes it.
+   await s.projects.assign(owner,{space_id:group,project_id:null,mode:'none',expected_revision:0,operation_id:key+':owner-correction'});
+   const corrected=await capture();assert.equal(await match(createOnly(corrected,'suspended-discovery'),corrected),null,'suspension prevents automatic create-only organization');
    assert.ok((await s.knowledge.delegations(owner)).delegations.find(d=>d.id===delegation.id)!.suspended_scopes.includes(group));
-   await save({name:'Renamed permission'},'rename');assert.equal(delegation.baselines[group],1,'ordinary permission edits do not resume a suspended scope');
-   await save({resume_scopes:[group]},'resume');assert.equal(delegation.baselines[group],2);
-   const recent=await capture();unchanged.assignments[0]!.evidence_ids=[recent.id];assert.equal((await match(unchanged,recent)).id,delegation.id);
-   await assert.rejects(s.knowledge.undo(owner,pending.id,{expected_revision:receipt.revision,operation_id:key+':undo-conflict'}),{code:'knowledge_undo_conflict'});
-   assert.equal((await s.knowledge.proposal(owner,pending.id)).state,'applied','conflicting undo preserves original receipt');
-   await capture(group,'live',{message_thread_id:99,is_topic_message:true});assert.equal(await match(unchanged,recent),null,'newly discovered inheriting topics do not silently gain scope');
-   await s.projects.assign(owner,{space_id:topic,project_id:null,mode:'none',expected_revision:0,operation_id:key+':topic-exclusion'});
-   assert.equal((await match(unchanged,recent)).id,delegation.id,'an explicitly excluded topic is not affected by a parent assignment');
-   await stores.control.query("UPDATE organization_delegations SET expires_at=now()-interval '1 second' WHERE id=$1",[delegation.id]);assert.equal(await match(unchanged,recent),null,'expired authority is not used');
-   await save({enabled:false},'revoke');assert.equal(await match(unchanged,recent),null);
+   await save({name:'Renamed permission'},'rename');assert.equal(delegation.baselines[group],0,'ordinary permission edits do not resume a suspended scope');
+   await save({resume_scopes:[group]},'resume');assert.equal(delegation.baselines[group],1);
+   const recent=await capture(),resumed=createOnly(recent,'resumed');assert.equal((await match(resumed,recent)).id,delegation.id);
+   // A topic always follows its group's project, so not even the owner gives it one of its own.
+   await assert.rejects(s.projects.assign(owner,{space_id:topic,project_id:null,mode:'none',expected_revision:0,operation_id:key+':topic-exclusion'}),{code:'project_topic_follows_group'});
+   await stores.control.query("UPDATE organization_delegations SET expires_at=now()-interval '1 second' WHERE id=$1",[delegation.id]);assert.equal(await match(resumed,recent),null,'expired authority is not used');
+   await save({enabled:false},'revoke');assert.equal(await match(resumed,recent),null);
 
    // A reviewed inconsistent batch rolls back its project creation when an assignment conflicts.
    const broken=proposal(recent,'must-rollback',group,999),draft=await persist('broken',broken,recent);assert.equal(draft.state,'review');
    await s.knowledge.decide(owner,draft.id,{decision:'approve',expected_revision:draft.revision,operation_id:key+':approve-broken'});
    const failed=await s.knowledge.process('proposal:'+draft.id);assert.equal(failed.state,'stale');
    assert.equal((await stores.control.query('SELECT 1 FROM projects WHERE name=$1',[broken.creates[0]!.name])).rowCount,0);
-   assert.equal((await s.projects.effective(group)).own_assignment?.revision,2);
+   assert.equal((await s.projects.effective(group)).own_assignment?.revision,1);
 
-   // An owner change to a parent also suspends a delegated topic that inherits it.
+   // An owner change to a group also suspends a delegated topic that follows it.
    const inheritedTopic=group+'/topic/100';delegation=null;
    await save({scopes:[inheritedTopic],project_ids:[created.id]},'inherited-topic');
    const topicSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});
-   const inheritedAssignment:OrganizationProposal={kind:'organization',reason:'Explicit topic purpose',creates:[],assignments:[{space_id:inheritedTopic,project_id:created.id,expected_revision:0,
-    evidence_ids:[topicSource.id],reason:'This topic serves the project',purpose_evidence:true}]};
-   assert.equal((await match(inheritedAssignment,topicSource,inheritedTopic)).id,delegation.id);
-   await s.projects.assign(owner,{space_id:group,project_id:created.id,mode:'assigned',expected_revision:2,operation_id:key+':parent-owner-edit'});
-   assert.equal((await s.projects.effective(inheritedTopic)).own_assignment,null);
-   assert.equal(await match(inheritedAssignment,topicSource,inheritedTopic),null,'an unchanged own revision does not hide an owner edit to inherited organization');
+   assert.equal((await match(createOnly(topicSource,'topic-discovery'),topicSource,inheritedTopic)).id,delegation.id);
+   await s.projects.assign(owner,{space_id:group,project_id:created.id,mode:'assigned',expected_revision:1,operation_id:key+':parent-owner-edit'});
+   assert.equal((await s.projects.effective(inheritedTopic)).project?.id,created.id,'the topic follows its group into the project');
+   assert.equal(await match(createOnly(topicSource,'topic-discovery'),topicSource,inheritedTopic),null,'an owner edit to the group suspends a topic that follows it');
    assert.ok((await s.knowledge.delegations(owner)).delegations.find(d=>d.id===delegation.id)!.suspended_scopes.includes(inheritedTopic));
    await save({scopes:[inheritedTopic],project_ids:[created.id],resume_scopes:[inheritedTopic]},'resume-inherited');
-   const resumedTopicSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});inheritedAssignment.assignments[0]!.evidence_ids=[resumedTopicSource.id];
-   assert.equal((await match(inheritedAssignment,resumedTopicSource,inheritedTopic)).id,delegation.id);
+   const resumedTopicSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});
+   assert.equal((await match(createOnly(resumedTopicSource,'topic-resumed'),resumedTopicSource,inheritedTopic)).id,delegation.id);
 
-   // A project whose chats share what they know is joined or left only with the owner's review.
+   // Every move asks the owner, whatever the project: one without tasks or groups, or one with groups in it. The review
+   // names the groups already in the project, for a move in and a move out (ADR-0246).
    const plain=await s.projects.save(owner,{name:key+':plain',description:'',state:'active',expected_revision:0,operation_id:key+':plain-project'});
-   const sharing=await s.projects.save(owner,{name:key+':sharing',description:'',state:'active',sharing_enabled:true,expected_revision:0,operation_id:key+':sharing-project'});
-   await save({scopes:[inheritedTopic],project_ids:[created.id,plain.id,sharing.id]},'sharing-projects');
-   const sharingSource=await capture(group,'live',{message_thread_id:100,is_topic_message:true});
-   const moveTo=(project:string):OrganizationProposal=>({...inheritedAssignment,assignments:[{...inheritedAssignment.assignments[0]!,project_id:project,evidence_ids:[sharingSource.id]}]});
-   assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
-   assert.equal(await match(moveTo(sharing.id),sharingSource,inheritedTopic),null,'automatic organization never moves a chat into a project that shares');
-   const current=(await stores.control.query('SELECT * FROM projects WHERE id=$1',[created.id])).rows[0],projectFields={id:created.id,name:current.name,description:current.description,state:'active'};
-   const shared=await s.projects.save(owner,{...projectFields,sharing_enabled:true,expected_revision:current.revision,operation_id:key+':created-shares'});
-   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'nor out of one, a topic that follows its group included');
-   // The owner's review and undo say so, also for a topic set to follow its group into a project that shares.
-   const follow=await persist('follow',{kind:'project_assignment',reason:'Synthetic: the topic belongs with its group',payload:{space_id:topic,mode:'inherit',expected_revision:1}} as any,sharingSource);
-   assert.equal(follow.state,'review');
-   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).sharing_projects,[{id:created.id,name:current.name}]);
-   assert.deepEqual((await s.knowledge.proposal(owner,pending.id)).undo_sharing_projects.map((p:any)=>p.id),[created.id],'undoing takes the group out of it');
-   await s.projects.save(owner,{...projectFields,sharing_enabled:false,expected_revision:shared.revision,operation_id:key+':created-stops'});
-   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).sharing_projects,[]);
-   assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
-
-   // A project with tasks is joined only with the owner's review too: a chat there sees every task on its list (ADR-0243).
-   const onList=await s.tasks.create(owner,{operation_id:key+':listed-task',title:'Synthetic listed task',notes:'Synthetic private note',scope:plain.id});
-   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'automatic organization never moves a chat into a project with tasks');
-   const join=await persist('join-tasks',{kind:'project_assignment',reason:'Synthetic: the topic serves the plain project',
-    payload:{space_id:inheritedTopic,mode:'assigned',project_id:plain.id,expected_revision:0}} as any,sharingSource);
-   assert.equal(join.state,'review');
+   await save({scopes:[inheritedTopic,other],project_ids:[created.id,plain.id]},'moves');
+   const moveSource=await capture(other);
+   const moveTo=(project:string):OrganizationProposal=>({kind:'organization',reason:'Synthetic move',creates:[],
+    assignments:[{space_id:other,project_id:project,expected_revision:0,evidence_ids:[moveSource.id],reason:'Explicit purpose evidence',purpose_evidence:true}]});
+   assert.equal(await match(moveTo(plain.id),moveSource,other),null,'not into a project without tasks or groups');
+   assert.equal(await match(moveTo(created.id),moveSource,other),null,'nor into one with groups');
+   const join=await persist('join',moveTo(created.id),moveSource,other);assert.equal(join.state,'review');
    const joinView=await s.knowledge.proposal(owner,join.id);
-   assert.deepEqual(joinView.task_projects,[{id:plain.id,name:key+':plain'}]);assert.deepEqual(joinView.sharing_projects,[]);
-   const trashed=await s.tasks.update(owner,onList.id,{operation_id:key+':listed-trash',expected_revision:onList.revision,trashed:true});
-   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'a task in the trash still shows on the list');
-   // Leaving a project with tasks needs no review, and a topic that would follow its group into one says so.
-   const kept=await s.tasks.create(owner,{operation_id:key+':kept-task',title:'Synthetic task on the group\'s list',scope:created.id});
-   await s.tasks.remove(owner,trashed.id);
-   assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
-   assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[]);
-   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).task_projects,[{id:created.id,name:current.name}]);
-   const gone=await s.tasks.update(owner,kept.id,{operation_id:key+':kept-trash',expected_revision:kept.revision,trashed:true});await s.tasks.remove(owner,gone.id);
-   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).task_projects,[]);
+   assert.deepEqual(joinView.project_groups,[{id:created.id,name:created.name,groups:[group]}],'the review names the groups already in the project');
+   assert.deepEqual(joinView.task_projects,[]);assert.equal(joinView.sharing_projects,undefined);
+   const leave=await persist('leave',{kind:'project_assignment',reason:'Synthetic: the group left the project',payload:{space_id:group,mode:'none',expected_revision:2}} as any,moveSource,other);
+   assert.equal(leave.state,'review');
+   assert.deepEqual((await s.knowledge.proposal(owner,leave.id)).project_groups,[{id:created.id,name:created.name,groups:[]}],'leaving names the project too');
+   assert.deepEqual((await s.knowledge.proposal(owner,leave.id)).task_projects,[]);
+   // A group joining a project sees the tasks set on the whole project, never another group's own (ADR-0247).
+   const groupTask=await s.tasks.create(owner,{operation_id:key+':group-task',title:'Synthetic group task',scope:created.id});
+   await stores.control.query('UPDATE owner_tasks SET group_id=$2 WHERE id=$1',[groupTask.id,group]);
+   assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[],'another group\'s own task is not on the joining group\'s board');
+   const projectTask=await s.tasks.create(owner,{operation_id:key+':project-task',title:'Synthetic project task',scope:created.id});
+   assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[{id:created.id,name:created.name}]);
+   for(const task of [groupTask,projectTask]){const gone=await s.tasks.update(owner,task.id,{operation_id:key+':trash:'+task.id,expected_revision:task.revision,trashed:true});await s.tasks.remove(owner,gone.id);}
+   // The owner approves the move: it applies under the owner's review, and undoing it names the project's groups too.
+   await s.knowledge.decide(owner,join.id,{decision:'approve',expected_revision:joinView.revision,operation_id:key+':approve-join'});
+   assert.equal((await s.knowledge.process('proposal:'+join.id)).state,'applied');
+   const joinReceipt=await s.knowledge.proposal(owner,join.id);assert.deepEqual(joinReceipt.result.authorization,{owner_review:true});
+   assert.equal((await s.projects.effective(other)).project?.id,created.id);
+   assert.deepEqual(joinReceipt.undo_project_groups,[{id:created.id,name:created.name,groups:[group]}]);
+   const moved=(await s.projects.effective(other)).own_assignment!;
+   await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision,operation_id:key+':owner-moves-on'});
+   await assert.rejects(s.knowledge.undo(owner,join.id,{expected_revision:joinReceipt.revision,operation_id:key+':undo-conflict'}),{code:'knowledge_undo_conflict'});
+   assert.equal((await s.knowledge.proposal(owner,join.id)).state,'applied','conflicting undo preserves original receipt');
+   await s.projects.assign(owner,{space_id:other,mode:'inherit',expected_revision:moved.revision+1,operation_id:key+':owner-moves-back'});
 
-   // Clean undo restores the prior assignment and archives, rather than erases, the created project.
-   delegation=null;await save({scopes:[other]},'other');const otherSource=await capture(other),otherDraft=await persist('other',proposal(otherSource,'other',other),otherSource,other);
+   // An owner-approved organization applies, and a clean undo restores the prior assignment and archives, rather than
+   // erases, the created project.
+   await save({enabled:false},'moves-revoked');delegation=null;await save({scopes:[other]},'other');
+   const otherSource=await capture(other),otherExpected=(await s.projects.effective(other)).own_assignment?.revision??0;
+   const otherDraft=await persist('other',proposal(otherSource,'other',other,otherExpected),otherSource,other);
+   assert.equal(otherDraft.state,'review','a delegation never moves a group, even into a project it would create');
+   assert.equal((await s.knowledge.process('proposal:'+otherDraft.id)).state,'review');
+   const otherReview=await s.knowledge.proposal(owner,otherDraft.id);
+   await s.knowledge.decide(owner,otherDraft.id,{decision:'approve',expected_revision:otherReview.revision,operation_id:key+':approve-other'});
    assert.equal((await s.knowledge.process('proposal:'+otherDraft.id)).state,'applied');
    const otherReceipt=await s.knowledge.proposal(owner,otherDraft.id);
+   assert.equal((await s.projects.effective(other)).project?.id,otherReceipt.result.created[0].id);
    assert.equal((await s.knowledge.undo(owner,otherDraft.id,{expected_revision:otherReceipt.revision,operation_id:key+':undo'})).state,'undone');
    assert.equal((await s.projects.effective(other)).project,null);
    assert.equal((await stores.control.query('SELECT state FROM projects WHERE id=$1',[otherReceipt.result.created[0].id])).rows[0].state,'archived');

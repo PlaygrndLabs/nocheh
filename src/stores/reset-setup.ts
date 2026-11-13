@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {groupAccess,type GroupAccess} from '../assistant-policy.js';
 import {validatePolicy} from '../security/contract.js';
-import {groupSpace,validateSpace} from '../spaces.js';
+import {groupSpace,parentSpace,validateSpace} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository} from './archive.js';
 import {GuardRepository} from './guards.js';
@@ -13,9 +13,9 @@ type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids:string[];gr
 type SetupSnapshot={format:'nocheh-reset-configuration-v1';layout:'original-only-v1';configuration:{
   security_policy:{document:unknown}[];installation_generation:{generation:string}[];
   guard_mode:{mode:'on'|'off'}[];runtime_configuration:{name:'assistant';document:AssistantPolicy}[];
-  projects:{id:string;name:string;description:string;state:'active'|'archived';sharing_enabled:boolean;sharing_mode:'approved'|'filtered'}[];
-  project_assignments:{space_id:string;project_id:string|null;mode:'assigned'|'none'|'inherit';share_into:boolean}[];
-  sharing_rules:{id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;project_id:string|null}[];
+  projects:{id:string;name:string;description:string;state:'active'|'archived'}[];
+  project_assignments:{space_id:string;project_id:string|null;mode:'assigned'|'none'|'inherit'}[];
+  sharing_rules:{id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string}[];
   memory_access_settings:{destination:string;suggestions:'related'|'off'|null;notify_owner:boolean|null;auto_followup:boolean|null;request_ttl_seconds:number|null;default_grant_mode:'one_time'|'persistent'|null}[];
   chat_tool_settings:{space_id:string;shell:boolean|null;browser:boolean|null;mcp:boolean|null}[];
   runtime_profiles:{id:string;name:string;owner_id:string}[];
@@ -64,20 +64,17 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
   const runtime=exact((c.runtime_configuration as unknown[])[0],['name','document']);if(runtime.name!=='assistant')throw Error('reset_setup_snapshot_invalid');
   const assistant=policy(runtime.document);const owner=assistant.owner_id;if(!owner)throw Error('reset_setup_owner_required');
   const projects=new Set<string>();
-  for(const item of c.projects as unknown[]) {const row=exact(item,['id','name','description','state','sharing_enabled','sharing_mode']),id=identifier(row.id,ID);
+  for(const item of c.projects as unknown[]) {const row=exact(item,['id','name','description','state']),id=identifier(row.id,ID);
     text(row.name,200);if(typeof row.description!=='string'||Buffer.byteLength(row.description)>4000||!['active','archived'].includes(String(row.state))||
-      typeof row.sharing_enabled!=='boolean'||!['approved','filtered'].includes(String(row.sharing_mode))||projects.has(id))throw Error('reset_setup_snapshot_invalid');projects.add(id);}
+      projects.has(id))throw Error('reset_setup_snapshot_invalid');projects.add(id);}
   const assignments=new Set<string>();
-  for(const item of c.project_assignments as unknown[]) {const row=exact(item,['space_id','project_id','mode','share_into']),space=validateSpace(row.space_id),mode=String(row.mode);
-    // A private chat never joins a project (ADR-0242).
-    if(assignments.has(space)||!['assigned','none','inherit'].includes(mode)||typeof row.share_into!=='boolean'||
+  for(const item of c.project_assignments as unknown[]) {const row=exact(item,['space_id','project_id','mode']),space=validateSpace(row.space_id),mode=String(row.mode);
+    // A private chat never joins a project (ADR-0242), and a topic always follows its group's (ADR-0246).
+    if(assignments.has(space)||!['assigned','none','inherit'].includes(mode)||parentSpace(space)&&mode!=='inherit'||
       (mode==='assigned'?(typeof row.project_id!=='string'||!projects.has(row.project_id)||!groupSpace(space)):row.project_id!==null))
       throw Error('reset_setup_snapshot_invalid');assignments.add(space);}
   const rules=new Set<string>();
-  for(const item of c.sharing_rules as unknown[]) {const row=exact(item,['id','name','sources','destination','enabled','mode','instructions','project_id']),id=identifier(row.id,ID);
-    // A project's own rule belongs to a saved project under the ID that project uses for its chat (ADR-0226).
-    if(row.project_id!==null&&(typeof row.project_id!=='string'||!projects.has(row.project_id)||id!==digest('project-sharing:'+row.project_id+':'+String(row.destination))))
-      throw Error('reset_setup_snapshot_invalid');
+  for(const item of c.sharing_rules as unknown[]) {const row=exact(item,['id','name','sources','destination','enabled','mode','instructions']),id=identifier(row.id,ID);
     if(rules.has(id)||typeof row.name!=='string'||Buffer.byteLength(row.name)>200||typeof row.instructions!=='string'||Buffer.byteLength(row.instructions)>4000||
       typeof row.enabled!=='boolean'||!['approved','filtered'].includes(String(row.mode))||!Array.isArray(row.sources)||row.sources.length>100)throw Error('reset_setup_snapshot_invalid');
     // A rule never reads from or shares into a private chat (ADR-0242).
@@ -110,9 +107,9 @@ function profileCommands(input:unknown,snapshot:SetupSnapshot):ProfileCommand[] 
 }
 
 export async function setupRows(control:pg.Pool|pg.PoolClient) {
-  const queries={projects:'SELECT id,name,description,state,sharing_enabled,sharing_mode FROM projects ORDER BY id',
-    project_assignments:'SELECT space_id,project_id,mode,share_into FROM project_assignments ORDER BY space_id',
-    sharing_rules:'SELECT id,name,sources,destination,enabled,mode,instructions,project_id FROM sharing_rules ORDER BY id',
+  const queries={projects:'SELECT id,name,description,state FROM projects ORDER BY id',
+    project_assignments:'SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id',
+    sharing_rules:'SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules ORDER BY id',
     memory_access_settings:'SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination',
     chat_tool_settings:'SELECT space_id,shell,browser,mcp FROM chat_tool_settings ORDER BY space_id'};
   const result:Record<string,unknown[]>={};for(const [key,sql] of Object.entries(queries))result[key]=(await control.query(sql)).rows;return result;
@@ -153,13 +150,13 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     const defaultAccess=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time'}];
     if(!same(current.memory_access_settings,defaultAccess)&&!same(current.memory_access_settings,configuration.memory_access_settings))throw Error('reset_setup_target_changed');
     for(const [name,rows] of Object.entries(current))if(name!=='memory_access_settings'&&(rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
-    // Project rules come back as saved; no preview or release is restored, so revision 1 is safe.
-    for(const row of configuration.projects)await db.query('INSERT INTO projects(id,name,description,state,sharing_enabled,sharing_mode,revision) VALUES($1,$2,$3,$4,$5,$6,1) ON CONFLICT DO NOTHING',
-      [row.id,row.name,row.description,row.state,row.sharing_enabled,row.sharing_mode]);
-    for(const row of configuration.project_assignments)await db.query('INSERT INTO project_assignments(space_id,project_id,mode,share_into,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',
-      [row.space_id,row.project_id,row.mode,row.share_into]);
-    for(const row of configuration.sharing_rules)await db.query('INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision,project_id) VALUES($1,$2,$3,$4,$5,$6,$7,1,$8) ON CONFLICT DO NOTHING',
-      [row.id,row.name,JSON.stringify(row.sources),row.destination,row.enabled,row.mode,row.instructions,row.project_id]);
+    // No preview or release of a rule is restored, so revision 1 is safe.
+    for(const row of configuration.projects)await db.query('INSERT INTO projects(id,name,description,state,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',
+      [row.id,row.name,row.description,row.state]);
+    for(const row of configuration.project_assignments)await db.query('INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,1) ON CONFLICT DO NOTHING',
+      [row.space_id,row.project_id,row.mode]);
+    for(const row of configuration.sharing_rules)await db.query('INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,$2,$3,$4,$5,$6,$7,1) ON CONFLICT DO NOTHING',
+      [row.id,row.name,JSON.stringify(row.sources),row.destination,row.enabled,row.mode,row.instructions]);
     for(const row of configuration.memory_access_settings)await db.query(`INSERT INTO memory_access_settings(destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode,revision)
       VALUES($1,$2,$3,$4,$5,$6,1) ON CONFLICT(destination) DO UPDATE SET suggestions=$2,notify_owner=$3,auto_followup=$4,request_ttl_seconds=$5,default_grant_mode=$6,revision=1,updated_at=now()`,
       [row.destination,row.suggestions,row.notify_owner,row.auto_followup,row.request_ttl_seconds,row.default_grant_mode]);

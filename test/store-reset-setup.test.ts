@@ -27,16 +27,14 @@ test('reset setup restores only current configuration under a new generation and
     } finally {await db.end();}
   }
   const stores=connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords),profile='profile-'+'c'.repeat(48);
-  const projectRule=digest('project-sharing:'+'a'.repeat(64)+':-1002');
   const snapshot={format:'nocheh-reset-configuration-v1',layout:'original-only-v1',configuration:{
     security_policy:[{document:{version:1,rules:[{id:'fixture-deny-shell',kind:'shell',outcome:'deny'}]}}],
     installation_generation:[{generation:'11111111-1111-4111-8111-111111111111'}],guard_mode:[{mode:'off'}],
     runtime_configuration:[{name:'assistant',document:{enabled:true,owner_id:'123',group_ids:['-1001','-1002']}}],
-    projects:[{id:'a'.repeat(64),name:'Saved project',description:'Configuration only',state:'archived',sharing_enabled:true,sharing_mode:'filtered'}],
-    project_assignments:[{space_id:'-1001',project_id:'a'.repeat(64),mode:'assigned',share_into:true},{space_id:'-1002',project_id:'a'.repeat(64),mode:'assigned',share_into:false}],
-    sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:'-1002',enabled:true,mode:'approved',instructions:'Share only approved text',project_id:null},
-      // The project is archived, so its own rule is off.
-      {id:projectRule,name:'Saved project',sources:['-1001'],destination:'-1002',enabled:false,mode:'filtered',instructions:'',project_id:'a'.repeat(64)}].sort((a,b)=>a.id<b.id?-1:1),
+    projects:[{id:'a'.repeat(64),name:'Saved project',description:'Configuration only',state:'archived'}],
+    // A topic follows its group's project, so its only row says so (ADR-0246).
+    project_assignments:[{space_id:'-1001',project_id:'a'.repeat(64),mode:'assigned'},{space_id:'-1001/topic/3',project_id:null,mode:'inherit'},{space_id:'-1002',project_id:'a'.repeat(64),mode:'assigned'}],
+    sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:'-1002',enabled:true,mode:'approved',instructions:'Share only approved text'}],
     // A fresh install starts with automatic follow-up off; the owner's saved choice comes back over it.
     memory_access_settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}],
     chat_tool_settings:[{space_id:'*',shell:false,browser:null,mcp:null},{space_id:'-1001/topic/3',shell:null,browser:null,mcp:false}],
@@ -45,14 +43,19 @@ test('reset setup restores only current configuration under a new generation and
     profile_commands:[{id:profile,name:'research',state:'active',expected_revision:0,operation_id:'restore-preferences:'+profile}]};
   try {
     assert.deepEqual(resetSetupSnapshot(snapshot),snapshot);
-    const owned=snapshot.configuration.sharing_rules.find(rule=>rule.project_id)!;
-    for(const forged of [{...owned,project_id:'d'.repeat(64)},{...owned,destination:'-1003'}])
-      assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a project rule belongs to a saved project and its chat');
+    // A project never shares between its groups: a snapshot that still carries the share box is refused (ADR-0246).
+    const [project]=snapshot.configuration.projects,[assigned]=snapshot.configuration.project_assignments,[ownerRule]=snapshot.configuration.sharing_rules;
+    for(const configuration of [{projects:[{...project,sharing_enabled:false}]},{projects:[{...project,sharing_mode:'filtered'}]},
+      {project_assignments:[{...assigned,share_into:true}]},{sharing_rules:[{...ownerRule,project_id:null}]}])
+      assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,...configuration}}),/snapshot_invalid/,JSON.stringify(configuration));
+    // A topic always follows its group's project.
+    for(const row of [{space_id:'-1001/topic/3',project_id:'a'.repeat(64),mode:'assigned'},{space_id:'-1001/topic/3',project_id:null,mode:'none'}])
+      assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,project_assignments:[assigned,row]}}),/snapshot_invalid/,row.mode);
     // A private chat, the owner's included, never joins a project or a sharing rule (ADR-0242).
-    const saved=snapshot.configuration.sharing_rules.find(rule=>!rule.project_id)!;
+    const saved=snapshot.configuration.sharing_rules[0];
     for(const forged of [{...saved,sources:['-1001','123']},{...saved,sources:['123/topic/5']},{...saved,destination:'123'},{...saved,sources:['desktop:personal_chat:9']}])
       assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a rule never names a private chat');
-    const assignment={space_id:'123',project_id:'a'.repeat(64),mode:'assigned',share_into:true};
+    const assignment={space_id:'123',project_id:'a'.repeat(64),mode:'assigned'};
     assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,project_assignments:[assignment]}}),/snapshot_invalid/,'a private chat never joins a project');
     const keptOut={...snapshot,configuration:{...snapshot.configuration,project_assignments:[{...assignment,project_id:null,mode:'none'}]}};
     assert.deepEqual(resetSetupSnapshot(keptOut),keptOut,'a private chat may be kept out of every project');

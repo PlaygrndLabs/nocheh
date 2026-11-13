@@ -37,11 +37,9 @@ export class MemoryMapRepository {
         label:row.predicate,authoritative:false,detail:{claim_id:row.id,content:row.content,relationship_kind:row.relationship_kind,attribution:row.attribution,uncertainty:row.uncertainty,retired:row.retired,evidence:row.evidence,revision:row.revision,history:`/v1/entities/claims/${row.id}/history`}});
       if(row.object_entity_id)edges.push({id:`relationship:${row.id}`,kind:'relationship',source:`fact:${row.id}`,target:`${entities.find(entity=>entity.id===row.object_entity_id)?.kind??'person'}:${row.object_entity_id}`,
         label:row.relationship_kind??row.predicate,authoritative:false,detail:{claim_id:row.id,content:row.content,relationship_kind:row.relationship_kind,attribution:row.attribution,uncertainty:row.uncertainty,retired:row.retired,evidence:row.evidence,revision:row.revision,history:`/v1/entities/claims/${row.id}/history`}});}
-    // An assignment grants access while one of its project's rules is on and reads from or into that chat (ADR-0226).
-    const projectRules=(await this.stores.control.query('SELECT project_id,destination,sources FROM sharing_rules WHERE project_id IS NOT NULL AND enabled')).rows;
+    // An assignment never grants access: a project shares nothing between its groups (ADR-0246).
     for(const row of assignments.filter(item=>item.mode==='assigned')){const entity=entities.find(item=>item.project_id===row.project_id);
-      const shares=projectRules.some(rule=>rule.project_id===row.project_id&&(rule.destination===row.space_id||rule.sources.includes(row.space_id)));
-      if(entity)edges.push({id:`project_assignment:${row.space_id}`,kind:'project_assignment',source:`project:${entity.id}`,target:`${classify(row.space_id)}:${row.space_id}`,label:shares?'contains · shares':'contains',authoritative:shares,detail:{destination:row.space_id,project_id:row.project_id,mode:row.mode,revision:row.revision,shares,share_into:row.share_into}});}
+      if(entity)edges.push({id:`project_assignment:${row.space_id}`,kind:'project_assignment',source:`project:${entity.id}`,target:`${classify(row.space_id)}:${row.space_id}`,label:'contains',authoritative:false,detail:{destination:row.space_id,project_id:row.project_id,mode:row.mode,revision:row.revision}});}
     const grants=(await this.stores.control.query('SELECT * FROM memory_fact_grants ORDER BY id LIMIT 5000')).rows;
     const requests=(await this.stores.control.query('SELECT * FROM memory_access_requests ORDER BY id LIMIT 5000')).rows;
     const artifactIds=[...new Set([...grants.map(row=>row.representation_reference.id),...requests.map(row=>row.proposal_reference.id)])],artifacts=artifactIds.length?

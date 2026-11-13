@@ -9,7 +9,7 @@ import type {TelegramTopicRepository} from './telegram-topics.js';
 import type {StorePools} from './connections.js';
 import {carriesForward} from './guards.js';
 import {foldedNames} from './entities.js';
-import {listedRule,type ProjectRepository} from './projects.js';
+import type {ProjectRepository} from './projects.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {NativeMemoryRepository} from './native-memory.js';
@@ -245,7 +245,7 @@ export class OwnerSupervisionRepository {
     admin(principal);const space=validateSpace(spaceValue),parent=parentSpace(space)??space;
     const [directory,configuration,effective,rules,grants,releases,permissions,security,delegations,memory]=await Promise.all([
       this.directory(),this.assistantConfiguration(),this.services.projects.effective(space),
-      this.stores.control.query(`SELECT * FROM sharing_rules s WHERE (s.destination=$1 OR s.destination=$2 OR starts_with(s.destination,$2||'/topic/')) AND ${listedRule('s')} ORDER BY s.id`,[space,parent]),
+      this.stores.control.query(`SELECT * FROM sharing_rules s WHERE s.destination=$1 OR s.destination=$2 OR starts_with(s.destination,$2||'/topic/') ORDER BY s.id`,[space,parent]),
       this.stores.control.query('SELECT id,fact_id,fact_revision,mode,state,revision,binding,expires_at,suspended_reason FROM memory_fact_grants WHERE destination=$1 ORDER BY id',[space]),
       this.stores.control.query(`SELECT r.id,r.preview_id,r.rule_id,r.rule_revision,r.state,r.revision,r.generation,r.guard_mode,r.guard_revision,r.text_hash,r.expires_at,p.revision AS current_rule_revision,p.enabled AS rule_enabled
         FROM sharing_releases r JOIN sharing_rules p ON p.id=r.rule_id WHERE p.destination=$1 ORDER BY r.id`,[space]),
@@ -283,12 +283,12 @@ export class OwnerSupervisionRepository {
       knowledge_access:{source_scope:space,owner_access:owner,sharing_rules:sharingRules,
         fact_grants:grants.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&factRevisions.get(row.fact_id)===row.fact_revision&&row.state==='active'&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
         sharing_releases:sharingReleases,
-        note:'Only the sources of a sharing rule and valid published sharing or fact grants can be used. A project grants access only through its own rules, set while its chats share what they know, which also read the topics that follow its groups; stored grants are rechecked on use.'},
+        note:'Only the sources of a sharing rule and valid published sharing or fact grants can be used; a project grants no access in a group; stored grants are rechecked on use.'},
       // A permission is used with its action's own binding, which carries across quiet epochs (ADR-0200).
       external_actions:{policy:security.rows[0]??null,permissions:await Promise.all(permissions.rows.map(async({binding,...row})=>({...row,
         current:await carriesForward(this.stores.control,binding,guard)&&!row.revoked_at&&row.remaining>0&&new Date(row.expires_at).getTime()>Date.now()}))),
         note:'External actions require exact approval or a matching unexpired permission, and remain subject to the security policy. Authorization is not evidence of execution.'},
-      organization:{effective,delegations:delegations.rows,note:'Organization affects project context, and knowledge access only in a project whose chats share what they know. It grants no participant permission or external-action authority.'},
+      organization:{effective,delegations:delegations.rows,note:'A project decides its role and skills, its task board and what an Answer privately answer may add; it grants no knowledge access in a group, and no participant permission or external-action authority. Organizing never moves a group or topic into or out of a project by itself.'},
       memory:{connection:{attached:connection?.attached??false,verified:connection?.verified??false,revision:connection?.revision??null},
         availability:ready?'available':attached?'limited':'unavailable',syncing,workspace,sessions,note:'Stored readiness is not a live retrieval test. Current context and permitted archive search remain separate.'}};
   }

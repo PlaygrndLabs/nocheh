@@ -89,7 +89,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     await operations.verify(reference);return reference;
   },options.detectorVersion);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
-  const projects=new ProjectRepository(stores.control),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
+  const projects=new ProjectRepository(stores.control,()=>options.policy().group_ids??[]),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;

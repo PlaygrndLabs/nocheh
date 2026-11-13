@@ -26,9 +26,10 @@ test('owner project inheritance, explicit sharing and revocation are separate, v
     await projects.assign(owner,{space_id:second,mode:'assigned',project_id:project.id,expected_revision:0,operation_id:key+':assign-two'});
     const inherited=await projects.effective(topic);assert.equal(inherited.project?.id,project.id);assert.equal(inherited.inherited,true);
     assert.deepEqual(await sharing.forDestination(second),[],'same project never creates a sharing policy');
-    await projects.assign(owner,{space_id:topic,mode:'none',expected_revision:0,operation_id:key+':exclude'});
-    assert.equal((await projects.effective(topic)).project,null);
-    await projects.assign(owner,{space_id:topic,mode:'inherit',expected_revision:1,operation_id:key+':inherit'});
+    // A topic always follows its group's project; its only choice is to follow it (ADR-0246).
+    await assert.rejects(projects.assign(owner,{space_id:topic,mode:'none',expected_revision:0,operation_id:key+':exclude'}),{code:'project_topic_follows_group'});
+    assert.equal((await projects.effective(topic)).project?.id,project.id);
+    await projects.assign(owner,{space_id:topic,mode:'inherit',expected_revision:0,operation_id:key+':inherit'});
     assert.equal((await projects.effective(topic)).project?.id,project.id);
     await assert.rejects(projects.assign(owner,{space_id:group,mode:'none',expected_revision:0,operation_id:key+':stale'}),{code:'assignment_revision_conflict'});
     const rule=await sharing.save(owner,{name:'Approved synthetic source',sources:[group],destination:second,enabled:true,mode:'approved',expected_revision:0,operation_id:key+':share'});
@@ -76,6 +77,7 @@ test('an owner rule never reads from or shares into a private chat, and an older
     assert.equal(await sharing.covers(stored!,privateChat),false,'a private source is never read');
     assert.equal(await sharing.covers({...stored!,sources:[privateChat+'/topic/5']},privateChat+'/topic/5'),false);
     assert.equal(await sharing.covers(stored!,group),true);
+    assert.equal(await sharing.covers(stored!,group+'/topic/5'),false,'an owner rule reads only its exact chats, never a topic of one');
     assert.deepEqual(await sharing.forDestination(privateChat),[],'nothing is shared into a private chat');
     const listed=new Map<string,any>();let after='';
     for(;;){const page=await sharing.list(owner,after);for(const row of page.rules)listed.set(row.id,row);if(!page.next)break;after=page.next;}
@@ -104,110 +106,64 @@ test('an owner rule never reads from or shares into a private chat, and an older
   } finally {await stores.close();}
 });
 
-test('a project shares between its group chats only when the owner turns it on, and never into a chat left out',
+test('a project never shares between its groups, lists only its served groups, and a topic always follows its group',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
-  const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
-  const key='project-sharing:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),topic=group+'/topic/17',privateChat=String(Date.now());let n=0;
+  const key='project-groups:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),third=String(Number(group)-2),unserved=String(Number(group)-3);
+  const topic=group+'/topic/17',privateChat=String(Date.now());let n=0;
   const op=(label:string)=>key+':'+label+':'+(++n);
-  const fields:Record<string,unknown>={name:'Synthetic shared project',description:'',state:'active'};
+  const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control,()=>[group,second,third,privateChat,topic]),sharing=new SharingPolicyRepository(stores.control);
+  const assign=async(space:string,mode:'assigned'|'none'|'inherit',project:string|null=null)=>projects.assign(owner,{space_id:space,mode,
+    ...(mode==='assigned'?{project_id:project}:{}),expected_revision:(await projects.effective(space)).own_assignment?.revision??0,operation_id:op('assign')});
+  const listed=async(id:string)=>{let after='';for(;;){const page=await projects.list(owner,after);const row=page.projects.find(p=>p.id===id);if(row)return row;if(!page.next)return null;after=page.next;}};
+  const rules=async()=>(await stores.control.query('SELECT count(*)::int AS n FROM sharing_rules')).rows[0].n;
   try {
-    let project=await projects.save(owner,{...fields,expected_revision:0,operation_id:op('new')});
-    assert.equal(project.sharing_enabled,false);assert.equal(project.sharing_mode,'filtered');
-    const save=async(changes:Record<string,unknown>)=>{Object.assign(fields,changes);
-      project=await projects.save(owner,{id:project.id,...fields,expected_revision:project.revision,operation_id:op('save')});};
-    const assign=async(space:string,mode:'assigned'|'none'|'inherit',extra:Record<string,unknown>={})=>projects.assign(owner,{space_id:space,mode,
-      ...(mode==='assigned'?{project_id:project.id}:{}),expected_revision:(await projects.effective(space)).own_assignment?.revision??0,operation_id:op('assign'),...extra});
-    const rows=async()=>(await stores.control.query('SELECT * FROM sharing_rules WHERE project_id=$1 ORDER BY destination',[project.id])).rows;
-    const into=(space:string)=>digest('project-sharing:'+project.id+':'+space);
-    const rule=async(space:string)=>(await rows()).find(row=>row.destination===space);
-    for(const space of [group,second])await assign(space,'assigned');
-    await assert.rejects(assign(privateChat,'assigned'),{code:'project_private_chat'},'a private chat never joins a project');
-    // A row written before that refusal is never read as a source or a destination either.
+    // The share box is gone: its fields are refused, never stored or ignored (ADR-0246).
+    const fields={name:'P1',description:'',state:'active',expected_revision:0};
+    for(const extra of [{sharing_enabled:true},{sharing_enabled:false},{sharing_mode:'filtered'}])
+      await assert.rejects(projects.save(owner,{...fields,...extra,operation_id:op('box')}),{code:'unknown_policy_field'},JSON.stringify(extra));
+    const before=await rules(),project=await projects.save(owner,{...fields,operation_id:op('new')});
+    assert.deepEqual(Object.keys(project).sort(),['description','id','name','revision','state']);
+    const other=await projects.save(owner,{...fields,name:'P2',operation_id:op('other')});
+    for(const space of [group,second,unserved])await assign(space,'assigned',project.id);
+    await assert.rejects(projects.assign(owner,{space_id:third,mode:'assigned',project_id:project.id,share_into:true,expected_revision:0,operation_id:op('share')}),
+      {code:'unknown_policy_field'});
+    // Nothing is shared between the project's groups: no rule is written, and no group gets one from the others.
+    assert.equal(await rules(),before,'project saves and assignments write no sharing rule');
+    for(const space of [group,second])assert.deepEqual(await sharing.forDestination(space,space),[],space);
+    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema=current_schema() AND "+
+      "(table_name,column_name) IN (('projects','sharing_enabled'),('projects','sharing_mode'),('project_assignments','share_into'),('sharing_rules','project_id'))")).rows[0].n,0);
+
+    // A topic always follows its group's project: a choice of its own is refused, following it is allowed.
+    for(const mode of ['none','assigned'] as const)
+      await assert.rejects(projects.assign(owner,{space_id:topic,mode,...(mode==='assigned'?{project_id:other.id}:{}),expected_revision:0,operation_id:op('topic')}),
+        {code:'project_topic_follows_group'},mode);
+    await assign(topic,'inherit');
+    let followed=await projects.effective(topic);assert.equal(followed.project?.id,project.id);assert.equal(followed.inherited,true);
+    // A topic's own row saved before that rule is shown, so the owner sees it, and never used.
+    await stores.control.query("UPDATE project_assignments SET mode='assigned',project_id=$2 WHERE space_id=$1",[topic,other.id]);
+    followed=await projects.effective(topic);
+    assert.deepEqual([followed.project?.id,followed.own_assignment?.project_id,followed.inherited],[project.id,other.id,true]);
+    await stores.control.query("UPDATE project_assignments SET mode='inherit',project_id=NULL WHERE space_id=$1",[topic]);
+
+    // A project lists its groups: the served groups assigned to it, never a topic, a private chat or a group not served.
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[privateChat,project.id]);
-    assert.deepEqual(await rows(),[],'a project that does not share writes no rule');
-    assert.deepEqual(await sharing.forDestination(second),[]);
+    assert.deepEqual((await listed(project.id))?.groups,[group,second].sort());
+    assert.deepEqual((await listed(other.id))?.groups,[]);
+    await assign(second,'assigned',other.id);
+    assert.deepEqual([(await listed(project.id))?.groups,(await listed(other.id))?.groups],[[group],[second]],'a group belongs to one project at a time');
+    await assign(second,'none');
+    assert.deepEqual((await listed(other.id))?.groups,[],'"none" is an answer, and leaves the project');
+    assert.equal((await projects.effective(second)).own_assignment?.mode,'none');
+    assert.deepEqual((await new ProjectRepository(stores.control).list(owner)).projects.find(p=>p.id===project.id)?.groups,[],'nothing served, no group listed');
 
-    await save({sharing_enabled:true});
-    let [intoSecond]=await sharing.forDestination(second),[intoGroup]=await sharing.forDestination(group);
-    assert.equal(intoSecond!.id,into(second));assert.equal(intoSecond!.project_id,project.id);assert.equal(intoSecond!.mode,'filtered');
-    assert.deepEqual(intoSecond!.sources,[group]);assert.deepEqual(intoGroup!.sources,[second],'a private chat is never a source');
-    assert.equal(await rule(privateChat),undefined,'nor a destination');
-
-    assert.equal(await sharing.covers(intoSecond!,topic),true,'a topic that follows its group into the project is a source');
-    await assign(topic,'none');assert.equal(await sharing.covers(intoSecond!,topic),false);
-    assert.equal((await rule(second)).revision,2,'a topic that stops following its group narrows the rules that read the group');
-    assert.equal((await rule(group)).revision,1);
-    await assign(topic,'inherit');assert.equal(await sharing.covers(intoSecond!,topic),true);
-    assert.equal((await rule(second)).revision,2,'coming back widens it again and revives no earlier text');
-    assert.equal(await sharing.covers({...intoSecond!,project_id:null},topic),false,'an owner rule reads only its exact chats');
-
-    const ownerRule={name:'Taken over',sources:[group],destination:second,enabled:false,mode:'approved',instructions:''};
-    await assert.rejects(sharing.save(owner,{...ownerRule,id:intoSecond!.id,expected_revision:intoSecond!.revision,operation_id:op('take')}),{code:'sharing_rule_project_managed'});
-    await assert.rejects(sharing.save(owner,{...ownerRule,id:into(second+'/topic/3'),destination:second+'/topic/3',expected_revision:0,operation_id:op('squat')}),
-      {code:'sharing_rule_project_managed'},'an owner rule never takes an ID a project would use');
-
-    await assign(topic,'assigned');
-    assert.equal(await rule(topic),undefined,'a topic whose group is in the project reads the group\'s rule');
-    [intoSecond]=await sharing.forDestination(second);assert.deepEqual(intoSecond!.sources,[group,topic]);
-    assert.equal(intoSecond!.revision,2,'a wider rule keeps texts approved earlier');
-    await assert.rejects(projects.assign(owner,{space_id:second,mode:'none',share_into:false,expected_revision:1,operation_id:op('invalid')}),{code:'invalid_project_assignment'});
-    await assign(topic,'assigned',{share_into:false});
-    assert.deepEqual(await sharing.forDestination(topic,group),[],'leaving out a topic leaves out its group while topics share memory');
-    [intoSecond]=await sharing.forDestination(second);assert.deepEqual(intoSecond!.sources,[group,topic],'a chat left out still shares out');
-    await assign(topic,'assigned',{share_into:true});
-    [intoGroup]=await sharing.forDestination(group);assert.equal(intoGroup!.revision,2,'turned off and on again, earlier texts stay invalid');
-    await assign(second,'assigned',{share_into:false});
-    assert.deepEqual(await sharing.forDestination(second),[]);assert.deepEqual((await sharing.forDestination(group))[0]!.sources,[second]);
-    await assign(second,'assigned',{share_into:true});
-
-    const before=(await rows()).map(row=>row.revision);
-    project=await projects.save(owner,{id:project.id,name:'Renamed shared project',description:'',state:'active',expected_revision:project.revision,operation_id:op('rename')});
-    fields.name=project.name;assert.equal(project.sharing_enabled,true,'a save that leaves out sharing keeps it');assert.equal(project.sharing_mode,'filtered');
-    assert.ok((await rows()).every(row=>row.name==='Renamed shared project'));assert.deepEqual((await rows()).map(row=>row.revision),before,'a rename keeps texts valid');
-    await save({state:'archived'});
-    assert.ok((await rows()).every(row=>!row.enabled));assert.deepEqual((await rows()).map(row=>row.revision),before.map(r=>r+1),'an archived project shares nothing');
-    await save({state:'active'});
-    assert.ok((await rows()).every(row=>row.enabled));assert.deepEqual((await rows()).map(row=>row.revision),before.map(r=>r+1));
-    await save({sharing_mode:'approved'});
-    assert.ok((await rows()).every(row=>row.mode==='approved'));assert.deepEqual((await rows()).map(row=>row.revision),before.map(r=>r+2));
-
-    // Ten automatic filters at most reach a group, its General chat and its topics together.
-    const fillers=Array.from({length:10},(_,i)=>digest(key+':filler:'+i));
-    for(const [i,id] of fillers.entries())await stores.control.query(`INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision)
-      VALUES($1,'Synthetic filler','["-1"]',$2,true,'filtered','',1)`,[id,i%2?group:group+'/topic/'+(30+i)]);
-    const saved=project,stored=await rows();
-    await assert.rejects(save({sharing_mode:'filtered'}),{code:'sharing_rule_limit'});project=saved;
-    assert.equal((await stores.control.query('SELECT revision FROM projects WHERE id=$1',[project.id])).rows[0].revision,saved.revision);assert.deepEqual(await rows(),stored);
-    await assert.rejects(sharing.save(owner,{...ownerRule,name:'One too many',destination:group+'/topic/99',enabled:true,mode:'filtered',expected_revision:0,operation_id:op('eleventh')}),
-      {code:'sharing_rule_limit'});
-    await stores.control.query('UPDATE sharing_rules SET enabled=false WHERE id=ANY($1::text[])',[fillers]);
-    await save({sharing_mode:'filtered'});assert.ok((await rows()).every(row=>row.enabled&&row.mode==='filtered'));
-
-    // A rule reads at most 100 chats.
-    const crowd=Array.from({length:100},(_,i)=>String(Number(group)-1000-i));
-    await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) SELECT unnest($1::text[]),$2,'assigned',1",[crowd,project.id]);
-    const full=project;await assert.rejects(save({description:'Too many chats'}),{code:'sharing_rule_limit'});project=full;fields.description='';
-    await stores.control.query('DELETE FROM project_assignments WHERE space_id=ANY($1::text[])',[crowd]);
-
-    // An owner rule that already holds the ID a project would use for a chat keeps it; that chat can't join while it does.
-    const third=String(Number(group)-2),squat=await sharing.save(owner,{...ownerRule,id:into(third),expected_revision:0,operation_id:op('squat-first')});
-    await assert.rejects(assign(third,'assigned'),{code:'sharing_rule_project_managed'});
-    const kept=(await stores.control.query('SELECT * FROM sharing_rules WHERE id=$1',[into(third)])).rows[0];
-    assert.deepEqual({project_id:kept.project_id,sources:kept.sources,destination:kept.destination,revision:kept.revision},
-      {project_id:null,sources:[group],destination:second,revision:squat.revision},'the project never takes over an owner rule');
-    assert.equal((await projects.effective(third)).own_assignment,null,'and the refused assignment is not written');
-
-    // Read through the Sharing page's own list, every page of it.
-    const listed=async()=>{const found:string[]=[];let after='';
-      for(;;){const page=await sharing.list(owner,after);found.push(...page.rules.filter(row=>row.project_id===project.id).map(row=>row.destination));if(!page.next)return found.sort();after=page.next;}};
-    assert.deepEqual(await listed(),[group,second]);
-    await assign(second,'inherit');
-    assert.equal((await rows()).length,2,'rules are kept for their previews and releases');assert.ok((await rows()).every(row=>!row.enabled));
-    assert.deepEqual(await listed(),[group],'the rule of a chat that left the project is not listed');
-    assert.deepEqual(await sharing.forDestination(second),[]);
+    // The owner's own rule still works, for its exact chats only, whatever project they are in.
+    const rule=await sharing.save(owner,{name:'Owner rule',sources:[group],destination:third,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:op('rule')});
+    assert.deepEqual(Object.keys(rule).includes('project_id'),false);
+    assert.equal(await sharing.covers(rule,group),true);assert.equal(await sharing.covers(rule,topic),false,'a topic that follows its group into a project is not added');
+    assert.deepEqual((await sharing.forDestination(third)).map(row=>row.id),[rule.id]);
   } finally {await stores.close();}
 });
