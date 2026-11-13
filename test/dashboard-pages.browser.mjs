@@ -1116,6 +1116,12 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await dialog.locator('#task-panel-people').selectOption({label: 'Devon'});
   await dialog.getByRole('button', {name: 'Remove tag Urgent'}).click();
   await dialog.getByRole('button', {name: 'Save'}).click();
+  // A group's task is seen only in that group, and the group isn't in this project yet: the owner is told first.
+  const ask = page.getByRole('dialog', {name: 'Move to Aurora planning?'});
+  await ask
+    .getByText(/Aurora planning isn’t in this project, so only you see this task until you add that group to it\./)
+    .waitFor();
+  await ask.getByRole('button', {name: 'Move'}).click();
   await page.getByRole('status').filter({hasText: 'Task saved.'}).waitFor();
   await dialog.getByRole('button', {name: 'Close'}).click();
   await dialog.waitFor({state: 'detached'});
@@ -1140,6 +1146,46 @@ test('personal tasks and each project keep separate lists, with tags, a group an
     .getByRole('radio', {name: 'Cards', checked: true})
     .waitFor();
   await page.evaluate(() => localStorage.removeItem('nocheh.tasks-layout'));
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a group’s task in a project names only that group, and a subtask follows its parent’s group', async () => {
+  const {page, problems} = await open('tasks');
+  await page
+    .getByRole('radiogroup', {name: 'List'})
+    .getByRole('radio', {name: /Studio launch/})
+    .click();
+  const title = 'Bring the extension cords ' + Date.now();
+  await page.getByLabel('New task').fill(title);
+  await page.getByRole('button', {name: 'Add'}).click();
+  const added = page.getByRole('listitem').filter({hasText: title});
+  await added.getByRole('button', {name: `Edit “${title}”`}).click();
+  const dialog = page.getByRole('dialog').filter({has: page.locator('#task-panel-list')});
+  await dialog.getByText('Every group in the project sees it. Choose a group to keep it to that group.').waitFor();
+  await dialog.getByRole('option', {name: /Aurora planning\s*Group/}).click();
+  await dialog.getByText('Only Aurora planning sees it in this project.').waitFor();
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  // Changing the group asks first, and names only that group.
+  const ask = page.getByRole('dialog', {name: 'Move to Aurora planning?'});
+  await ask
+    .getByText(
+      /^People in Aurora planning will see this task from now on\. Other groups in this project don’t see it\. Earlier comments/,
+    )
+    .waitFor();
+  await ask.getByRole('button', {name: 'Cancel'}).click();
+  await ask.waitFor({state: 'detached'});
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await ask.getByRole('button', {name: 'Move'}).click();
+  await page.getByRole('status').filter({hasText: 'Task saved.'}).waitFor();
+  // A subtask belongs to its parent's group: its own group can't be chosen.
+  await dialog.getByLabel('New subtask').fill('Count the plugs');
+  await dialog.getByLabel('New subtask').press('Enter');
+  await dialog.getByRole('list', {name: 'Subtasks'}).getByRole('button', {name: 'Count the plugs'}).click();
+  const sub = page.getByRole('dialog').filter({has: page.locator('#task-panel-list')});
+  await sub.getByText('Follows its parent task.').waitFor();
+  assert.equal(await sub.getByPlaceholder('Search chats by name or ID').isDisabled(), true);
+  assert.equal(await sub.getByRole('button', {name: 'Remove Aurora planning'}).isDisabled(), true);
   assert.deepEqual(problems, []);
   await page.close();
 });

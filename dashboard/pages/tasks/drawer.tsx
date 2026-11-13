@@ -19,6 +19,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import {apiGet} from '../../lib/api';
 import {Markdown} from '../../lib/markdown';
 import {useResource} from '../../lib/resource';
 import {cn} from '../../lib/utils';
@@ -37,7 +38,7 @@ import {
 } from '../../ui/core';
 import {Drawer, useFeedback} from '../../ui/overlay';
 import {ChatPicker} from '../chats/chat-picker';
-import {useCommand, when} from '../memory/shared';
+import {errorWords, useCommand, when} from '../memory/shared';
 import {ListField, PeopleField, TagsField, withPending} from './fields';
 import {
   actorName,
@@ -117,12 +118,26 @@ const ids = (items: {id: string}[]) => items.map(item => item.id).sort();
 const listed = (names: string[]) =>
   names.length < 2 ? (names[0] ?? '') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
 
-/** Who sees a task moved into a project's list from now on, chats added to the project later included, and what stays
- * private. `under` counts every task under it, archived and in the trash too, as they all move with it. */
-export function joinNotice(scope: Scope, groupName: (space: string) => string, under: number): string {
-  const chats = (scope.chats ?? []).map(groupName);
+/** Who would see a task after a move, as the server works it out for the task card too: every chat of the project for
+ * a task set on the project itself, or only its group for a group's task (ADR-0247). */
+export type Audience = {
+  project: string | null;
+  group: string | null;
+  audience: 'project' | 'group' | null;
+  chats: string[];
+};
+
+/** Who sees a task moved into a project's list or to a group in it from now on, chats added to the project later
+ * included for a task set on the project itself, and what stays private. `under` counts every task under it, archived
+ * and in the trash too, as they all move with it. */
+export function joinNotice(audience: Audience, groupName: (space: string) => string, under: number): string {
+  const chats = audience.chats.map(groupName);
   const what = under ? `this task and the ${under} ${under === 1 ? 'task' : 'tasks'} under it` : 'this task';
   const kept = 'Earlier comments and history, attached messages and the columns you haven’t shared stay private.';
+  if (audience.audience === 'group')
+    return chats.length
+      ? `People in ${listed(chats)} will see ${what} from now on. Other groups in this project don’t see it. ${kept}`
+      : `${groupName(audience.group ?? '')} isn’t in this project, so only you see ${what} until you add that group to it. ${kept}`;
   return chats.length
     ? `People in ${listed(chats)} will see ${what} from now on, and so will chats you add to this project later. ${kept}`
     : `No chat is in this project yet. Chats you add to it later will see ${what}. ${kept}`;
@@ -207,21 +222,38 @@ export function TaskDrawer({
     command.clear();
   };
   const save = async () => {
-    if (!task || !dirty) return;
-    // A task that joins a project's list is seen by that project's chats from now on: name them first.
-    const joining =
-      typeof edited.scope === 'string' && edited.scope !== 'personal'
-        ? scopes.find(row => row.id === edited.scope)
-        : undefined;
-    if (
-      joining &&
-      !(await feedback.confirm({
-        title: `Move to ${scopeName(joining)}?`,
-        body: joinNotice(joining, groupName, task.descendants ?? task.subtasks.length),
-        confirm: 'Move',
-      }))
-    )
-      return;
+    if (!task || !dirty || !draft) return;
+    // A task that joins a project's list, or another group in it, is seen by the chats there from now on: name them
+    // first, as the server works them out.
+    const target = typeof edited.scope === 'string' ? edited.scope : draft.scope;
+    const moved =
+      typeof edited.scope === 'string' ? edited.scope !== 'personal' : 'group' in edited && target !== 'personal';
+    if (moved) {
+      let audience: Audience;
+      try {
+        audience = await apiGet<Audience>(
+          `/tasks/${task.id}/audience?scope=${encodeURIComponent(target)}&group=${encodeURIComponent(draft.group ?? '')}`,
+        );
+      } catch (failure) {
+        feedback.toast(errorWords(failure), 'bad');
+        return;
+      }
+      const list = scopes.find(row => row.id === target);
+      const title =
+        typeof edited.scope === 'string'
+          ? `Move to ${scopeName(list)}?`
+          : audience.group
+            ? `Move to ${groupName(audience.group)}?`
+            : `Move to all of ${scopeName(list)}?`;
+      if (
+        !(await feedback.confirm({
+          title,
+          body: joinNotice(audience, groupName, task.descendants ?? task.subtasks.length),
+          confirm: 'Move',
+        }))
+      )
+        return;
+    }
     const saved = await command.run('/tasks/' + task.id, {expected_revision: revision, ...edited});
     if (saved) {
       const fresh = draftOf({...task, ...saved});
@@ -507,10 +539,17 @@ function TaskForm({
         value={draft.group ? [draft.group] : []}
         onChange={value => set('group', value.at(-1) ?? null)}
         groupsOnly
+        disabled={!!task.parent_id}
         hint={
-          draft.group
-            ? 'Points to ' + groupName(draft.group) + '.'
-            : 'The group, or a topic in it, this task belongs to.'
+          task.parent_id
+            ? 'Follows its parent task.'
+            : draft.scope === 'personal'
+              ? draft.group
+                ? 'Points to ' + groupName(draft.group) + '.'
+                : 'The group, or a topic in it, this task belongs to.'
+              : draft.group
+                ? 'Only ' + groupName(draft.group) + ' sees it in this project.'
+                : 'Every group in the project sees it. Choose a group to keep it to that group.'
         }
       />
       <div className="grid gap-4 sm:grid-cols-2">

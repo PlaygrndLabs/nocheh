@@ -20,6 +20,7 @@
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/comments", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/delete", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/audience", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/prompts", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/chat-sends", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/telegram/chats/refresh", "owner_storage": true, "allowed_path": true},

@@ -2,6 +2,7 @@ import {OwnerAutonomyRepository} from './owner-autonomy.js';
 import {NotionRepository} from './notion.js';
 import {ChatToolSettingsRepository} from './chat-tools.js';
 import {TaskRepository,type TaskActor} from './tasks.js';
+import {readSetOf,recallScope} from '../spaces.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
@@ -112,7 +113,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
-  // The owner's private chat reaches every list; a project's chat only that project's own list.
+  // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
   // Who wrote the message a group turn answers: the owner, or a person allowed there, by their Telegram name.
   const sender=async(event:string):Promise<TaskActor>=>{
     const row=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
@@ -121,12 +122,23 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const name=[from?.first_name,from?.last_name].filter(part=>typeof part==='string').join(' ').replace(/\s+/g,' ').trim().slice(0,100);
     return name?{kind:'member',name}:{kind:'member'};
   };
+  // A group or topic reaches its own group's tasks, with its topics' when they share what they know, and the tasks set
+  // on its project itself; a task added there belongs to that group or topic (ADR-0247).
+  const topicMemory=()=>options.policy().topic_memory??'group';
   const tasks=new TaskRepository(stores.control,async principal=>{
     if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null,actor:{kind:'owner'}};
-    const {turn,source}=await knowledge.liveGroupTurn(principal),project=(await projects.effective(turn.scope)).project;
+    const {source}=await knowledge.liveGroupTurn(principal);
+    // An "Answer privately" answer reads only the tasks of the groups frozen in its record and of their project
+    // itself, as the server bound them for this request, and changes nothing (ADR-0247, ADR-0248).
+    if(principal.answer!==undefined){
+      const reads=principal.reads,project=reads?.project?(await stores.control.query('SELECT state FROM projects WHERE id=$1',[reads.project])).rows[0]:null;
+      if(!reads?.project||project?.state!=='active')throw new HttpError(403,'task_project_required');
+      return {source,project:reads.project,group:null,reach:reads,readOnly:true,actor:await sender(source.reference.id)};
+    }
+    const space=principal.space!,project=(await projects.effective(space)).project;
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
-    return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
-  },{call:options.runtime,owner:()=>options.policy().owner_id});
+    return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),actor:await sender(source.reference.id)};
+  },{call:options.runtime,owner:()=>options.policy().owner_id},topicMemory);
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);

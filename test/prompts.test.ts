@@ -51,7 +51,15 @@ test('approval card templates leave out a line whose value is missing and keep d
   assert.equal(fillTemplate(approvalTask,{change:'Add a task to the list of “P1”',chats:'“Group A”',private:null,fields:'Title: Book the room'}),
     '📋 Add a task to the list of “P1”\n👥 Seen in “Group A”\n\nTitle: Book the room','a card with nothing private leaves that line out');
   assert.match(approvalLines('').task_changed,/changed after it was asked/);
-  assert.equal(approvalLines('').task_later,'Chats you add to this project later will see it too.','every task card says chats added later see the list');
+  assert.equal(approvalLines('').task_later,'Chats you add to this project later will see it too.','a card for a task set on the project says chats added later see it');
+  // A group's task is that group's alone: its card says so instead, and a move to a group names the group (ADR-0247).
+  assert.equal(approvalLines('').task_group_only,'Other groups in this project don\'t see it.');
+  assert.equal(fillTemplate(approvalLines('').task_group_later,{group:'“Group A”'}),'“Group A” will see it once you add that group to this project.');
+  assert.equal(fillTemplate(approvalLines('').task_move_group,{group:'“Group A”',project:'“P1”'}),'Move a task to “Group A” in the list of “P1”');
+  assert.equal(fillTemplate(approvalLines('').task_move_group_family,{group:'“Group A”',project:'“P1”',count:'2'}),'Move a task, with 2 under it, to “Group A” in the list of “P1”');
+  // A group's task set on its project itself says that every group of the project gets it.
+  assert.equal(fillTemplate(approvalLines('').task_move_project,{project:'“P1”'}),'Set a task on “P1” itself, for every group in it');
+  assert.equal(fillTemplate(approvalLines('').task_move_project_family,{project:'“P1”',count:'2'}),'Set a task, with 2 under it, on “P1” itself, for every group in it');
 });
 
 test('the GitHub copy has its own instruction text, card line and card answers, and the card keeps its other lines',()=>{

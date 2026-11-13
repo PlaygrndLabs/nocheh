@@ -287,9 +287,10 @@ export class ActionCommandRepository {
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
   /**
-   * A task card: what changes in which project's list, every group and topic that sees that list by name, and that chats
-   * added later see it too, what stays private, then exactly what those chats will see, with each task that moves in
-   * under it. Null when it does not fit one Telegram card (ADR-0243).
+   * A task card: what changes in which project's list, every group and topic that will see the task by name, and,
+   * for a task set on the project itself, that chats added later see it too, or, for a group's task, that the
+   * project's other groups don't; what stays private, then exactly what those chats will see, with each task that
+   * moves in under it. Null when it does not fit one Telegram card (ADR-0243, ADR-0247).
    */
   private async taskCard(id:string) {
     const texts=await this.texts(),urls:string[]=[],owner={admin:true,scope:null};
@@ -301,8 +302,11 @@ export class ActionCommandRepository {
     const request=await this.tasks!.request(owner,id,space);
     const chats=[];for(const chat of request.chats){const [group,topic]=chat.split('/topic/');chats.push(await this.where(group!,line,mark,{topic,showTopic:true}));}
     const project=`“${(request.project??'').replace(controls,'')}”`,slot='\u0001\u0003';
-    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project,count:String(request.subtasks)}),chats:(chats.length?chats.join(', '):line.task_no_chats)+'. '+line.task_later,
-      private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
+    const group=request.group?`“${(await space(request.group)).replace(controls,'')}”`:'';
+    // Chats added to the project later see only the tasks set on the project itself; a group's task stays its own.
+    const after=request.audience==='project'?line.task_later:chats.length?line.task_group_only:fillTemplate(line.task_group_later,{group});
+    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project,group,count:String(request.subtasks)}),
+      chats:(chats.length?chats.join(', '):line.task_no_chats)+'. '+after,private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
     const card=linked(filled.replaceAll(slot,()=>fields(request.fields)),urls);
     if(card.text.length>cardLimit-outcomeRoom||card.links.length>entityLimit)return null;
     return {...card,line,state:request.state,fingerprint:request.fingerprint,source:request.source_reference};

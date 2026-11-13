@@ -36,11 +36,13 @@ test('the mini app reaches only home, Inbox decisions, tasks with their chats an
   const id='a'.repeat(64);
   for(const [method,route] of [['GET','/status'],['GET','/tasks'],['POST','/tasks'],['POST','/tasks/'+id],['GET','/entities'],['GET','/decisions'],['GET','/decisions/telegram_action/'+id],
     ['POST','/tools/telegram-decision'],['POST','/tools/resolve'],['POST','/tools/telegram-resolve'],['POST','/memory-access/requests/'+id+'/decide'],['POST','/knowledge/proposals/'+id+'/undo'],
-    ['GET','/monitoring'],['POST','/workflows/retry-failed'],['GET','/entities/suggestions'],['POST','/entities/'+id+'/fold'],['POST','/entities/'+id+'/split']])
+    ['GET','/monitoring'],['POST','/workflows/retry-failed'],['GET','/entities/suggestions'],['POST','/entities/'+id+'/fold'],['POST','/entities/'+id+'/split'],
+    // A task's move names who will see it first (ADR-0247).
+    ['GET','/tasks/'+id+'/audience']])
     assert.equal(miniAppRoute(method!,route!),true,method+' '+route);
   for(const [method,route] of [['POST','/settings'],['POST','/settings/apply'],['GET','/database-browser'],['POST','/shutdown'],['POST','/tools/revoke'],
     ['GET','/storage'],['POST','/memory/longterm/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/ws-ticket'],['POST','/entities/'+id+'/merge'],
-    ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring']])
+    ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring'],['POST','/tasks/'+id+'/audience']])
     assert.equal(miniAppRoute(method!,route!),false,method+' '+route);
 });
 
