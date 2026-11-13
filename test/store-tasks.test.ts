@@ -836,7 +836,11 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     await assert.rejects(s.tasks.chatCreate(both,{title:'Sneak'}),{code:'task_read_only'});
     await assert.rejects(s.tasks.chatUpdate(both,second.id,{expected_revision:second.revision,state:'done'}),{code:'task_read_only'});
     await assert.rejects(s.tasks.chatComment(both,second.id,{text:'Sneak'}),{code:'task_read_only'});
-    await assert.rejects(s.tasks.chatList(await actor(start.id,'123','123',{answer:'a'.repeat(32)})),{code:'task_project_required'},'an answer with no bound groups reads nothing');
+    // With no bound read set an answer cannot even read its own /start (ADR-0248); with groups but no project it
+    // reaches no project's tasks.
+    await assert.rejects(s.tasks.chatList(await actor(start.id,'123','123',{answer:'a'.repeat(32)})),{code:'turn_source_denied'},'an answer with no bound groups reads nothing');
+    await assert.rejects(s.tasks.chatList(await actor(start.id,'123','123',{answer:'a'.repeat(32),reads:readSet({home:g2,whole:[g1,g2]})})),{code:'task_project_required'},
+      'an answer with no bound project reads no project\'s tasks');
 
     // Topics: when a group's topics share what they know, a task asked in a topic belongs to that topic and the whole
     // group sees it; when each topic keeps its own, only that topic does.
