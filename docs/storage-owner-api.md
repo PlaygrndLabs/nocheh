@@ -101,12 +101,14 @@ the removed `sharing_enabled`, `sharing_mode` or `share_into`, is refused with
 
 A project shares nothing between its groups: a group answer uses only that group
 ([ADR-0246](adr/0246-projects-replace-the-share-box.md)). Every sharing rule is
-the owner's own. A change that would give a rule more than 100 sources, or a
-group more than ten enabled filtered rules, is refused with 409
-`sharing_rule_limit`. A knowledge proposal read by the owner lists in
+the owner's own. A rule with more than 100 sources is refused with 400
+`invalid_sharing_sources`, and a change that would give a group more than ten
+enabled filtered rules, counted over its General chat and topics, is refused
+with 409 `sharing_rule_limit`. A knowledge proposal read by the owner lists in
 `project_groups` each project its change moves a group into or out of, with the
-other served groups there, and an applied organization lists in
-`undo_project_groups` those its undo touches.
+other served groups there; a project the proposal creates and puts a group in
+is listed with the id `new:<key>` and no groups. An applied organization lists
+in `undo_project_groups` the projects its undo touches.
 </cli>
 
 </owner_operations>

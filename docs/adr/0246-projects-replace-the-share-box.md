@@ -50,12 +50,17 @@ chose ("Keep them, yours only").
   its previews and releases, then drops the column and its index; the rules are
   deleted, never turned into the owner's, or they would come back as owner rules.
   Texts already said in groups stay in their history and memory. The owner's
-  rules and their releases stay.
+  rules and their releases stay. A reset that reads a store not yet started at
+  this version selects only rules with no `project_id`, by a test that holds
+  with or without that column, so a project rule never comes back as the
+  owner's after the reset.
 - **The owner's exception.** The owner's sharing rules and fact grants stay,
   made and used only by the owner. They are the one written exception to "a
   group answer uses only that group". The rule dialog says who will see the
-  result: "Everyone allowed in <destination>, its topics included, will see
-  what this rule lets in." `covers` matches a rule's exact sources only, as it
+  result: "Everyone allowed in <destination group>, its topics included, will
+  see what this rule lets in." A rule into a topic names the topic's group:
+  every member reads every topic, and while topics share the group's memory
+  the rule is used in the General chat and every topic. `covers` matches a rule's exact sources only, as it
   always did for the owner's rules; the topic cover of project rules is gone.
 - **Topics follow their group.** A topic's project is always its group's.
   `writeAssignment` takes only `inherit` for a topic and refuses anything else
@@ -72,7 +77,8 @@ chose ("Keep them, yours only").
 - **Joining asks first.** A proposal's owner view carries `project_groups`
   (and `undo_project_groups`): each project a move puts a group into or takes
   it out of, with the other groups Nocheh serves there, using the step's
-  `projectGroups` helper. `/v1/projects` lists each project's served `groups`.
+  `projectGroups` helper. A project the proposal itself creates and puts a
+  group in is listed too, as `new:<key>` with no groups yet. `/v1/projects` lists each project's served `groups`.
   Wherever a group joins a project, from the project, from the group's page,
   from the Inbox or when the owner turns Nocheh on in it, the dashboard names
   the project's other groups first, then says "People in two of these groups
@@ -81,10 +87,15 @@ chose ("Keep them, yours only").
   ADR-0243. `task_projects` counts only tasks set on the whole project
   (`group_id IS NULL`), the ones a joining group would see.
 - **Which project a group joins.** Turning Nocheh on in a group with no
-  assignment asks "Which project does this group join?", with the projects and
+  answer asks "Which project does this group join?", with the projects and
   "None", before it turns on; Cancel leaves it off. A served group with no
-  assignment asks the same on its page. "None" is saved as a real answer
-  (`mode: 'none'`). Neither asks while no active project exists.
+  answer asks the same on its page. "None" is saved as a real answer
+  (`mode: 'none'`). A group with no row has no answer, and neither has one
+  whose row only follows no project (`inherit`, left by an older removal or
+  an undo); the answer is saved over that row's revision. Neither asks while
+  no active project exists. Turning Nocheh on in a group already in a project
+  first names that project's other groups, the private-answer note and its
+  task list, since the group then joins them; Cancel leaves it off.
 - **Notes and map.** The agent-visible `knowledge_access` and `organization`
   notes say a project grants no access in a group and that organizing never
   moves a chat. The memory map's project edge is always "contains" and never
