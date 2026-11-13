@@ -8,6 +8,8 @@ declare global {
     __NOCHEH_LOGIN__?: 'create' | 'sign_in';
     /** The mini app's password sign-in for this phone. */
     __NOCHEH_MINI_SESSION__?: string;
+    /** The workspace's name when it is not the personal one; the browser tab shows it. */
+    __NOCHEH_WORKSPACE__?: string;
   }
 }
 

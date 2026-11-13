@@ -1,7 +1,7 @@
 # Synthetic integration tests use generated credentials and a temporary project.
 services:
   nocheh-app:
-    image: nocheh-services:dev
+    image: ${NOCHEH_IMAGES:-nocheh}-services:dev
     build: {target: development}
     environment:
       PGUSER: nocheh

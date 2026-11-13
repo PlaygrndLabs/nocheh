@@ -59,10 +59,10 @@ The base file directly defines the archive, derived, control, and workflow store
 Compose creates owned volumes on a clean installation; normal restarts retain
 them. `./bin/nocheh init`, which `up` also runs, saves the Honcho volume names in
 `.env`, and `make dev` refuses to start without them. Development uses the configured Telegram bot, model providers, and settings
-in the single `nocheh` project on normal localhost ports. Stop unattended services
+in the checkout's own workspace project (`nocheh` for `personal`) on that workspace's localhost ports. Stop unattended services
 first and verify exclusive Telegram polling.
-The launcher refuses another running Nocheh project or
-an active unattended stack. It starts PostgreSQL, app, dashboard, executor,
+The launcher refuses an active unattended stack of the same workspace and another
+running Nocheh project that polls the same bot; other workspaces may keep running. It starts PostgreSQL, app, dashboard, executor,
 machines, security, Hermes, workflow services, Honcho, and the mini app with its tunnel when set up.
 The existing app container mounts source from the session checkout read-only
 and compiles changed TypeScript, React, CSS, and plugin assets into separate
@@ -102,6 +102,96 @@ parent source alone does not establish the child runtime's revision.
 
 </activation_verification>
 
+## Several workspaces
+
+A workspace is one Nocheh installation in its own folder, a Git clone with its
+own `.env`, data, memory, Telegram bot and Compose stack. The owner keeps a
+`personal` workspace and one per company; workspaces share nothing but the
+machine's Docker engine and the code they were cloned from
+([ADR-0245](adr/0245-several-workspaces-on-one-machine.md)).
+
+```bash
+./bin/nocheh workspace new acme [--folder DIR]   # clone this folder's main into ../nocheh-acme and run init there
+./bin/nocheh workspace rename dev                # rename this stopped workspace; its data is copied to the new name
+./bin/nocheh workspaces                          # every workspace: folder, dashboard, state and code revision
+./bin/nocheh update [NAME ...] [--all]           # pull main and restart the running ones; default: this folder's
+```
+
+`NOCHEH_WORKSPACE` in `.env` holds the name, set by `init` or `workspace new`;
+a folder whose `.env` has none is `personal`. `workspace rename NEW` renames a
+stopped workspace: it copies its database and memory volumes to the new name's
+and keeps the old ones until you remove them with the `docker volume rm` it
+prints. Until they are gone, a new workspace with the old name is refused, because it
+would take over that data. Its dashboard asks for the password again, and its new off-site copies
+go to the new name's folder.
+A name has 1-50 lowercase letters, digits or dashes; names that tests,
+fixtures and restores use for themselves, such as `test`, `restored` or
+`restore-…`, are refused. Everything else follows from the name:
+
+| What | `personal` | `acme` |
+| --- | --- | --- |
+| Compose project | `nocheh` | `nocheh-acme` |
+| Internal networks | `nocheh-agent`, `nocheh-memory` | `nocheh-acme-agent`, `nocheh-acme-memory` |
+| Memory engine volumes | `nocheh_honcho_database`, `nocheh_honcho_redis` | `nocheh-acme_honcho_database`, `nocheh-acme_honcho_redis` |
+| Images | `nocheh-services:local`, `nocheh-box:local`, … | `nocheh-acme-services:local`, `nocheh-acme-box:local`, … |
+| Ports (app, viewer, dashboard, assistant admin) | 8780, 8782, 8783, 8785 | the next free ten, such as 8790, 8792, 8793, 8795 |
+| Off-site copies | `nocheh-backups/` | `nocheh-backups/acme/` |
+| Dashboard sign-in cookie | `nocheh_session` | `nocheh_acme_session` |
+
+Compose, `make dev`, tests and restores derive these at every run, and `.env`
+values win over shell exports. A workspace other than `personal` also saves its
+project and image prefix in `.env`, so a plain `docker compose ps`, `logs` or
+`exec` in its folder reaches its own stack; start and stop it with `./bin/nocheh`,
+which also sets its ports. A `.env` that names another workspace's project,
+networks, volumes or images was copied, and setup refuses it. The pinned Honcho
+images stay shared because nothing rebuilds them.
+
+The machine's list of workspaces is `~/.nocheh/workspaces.json` (mode 0600),
+which holds only names and folders; a moved or deleted folder drops out, and
+`./bin/nocheh up` in a moved folder replaces the containers its old place left.
+`init`, `up`, `make dev` and the workspace commands add the folder to it, under
+a lock, after checking the other listed workspaces and Docker. Setup refuses
+another workspace's name, published ports, Telegram bot, mini app address,
+Cloudflare tunnel or memory engine folder, ports another program holds, and
+networks or volumes labelled with another project. A fresh `.env` moves to the
+first free ten ports instead; when the folder still cannot join, setup removes
+that new `.env` so the folder can get its own name with `init --workspace NAME`.
+
+Running stacks show what they hold in labels: `com.nocheh.bot-id` on
+`nocheh-telegram` (the bot it polls, empty while Telegram is off),
+`com.nocheh.tunnel-id` and `com.nocheh.mini-app-host` on `nocheh-tunnel`. A
+stack started without `./bin/nocheh`, or before these labels, shows none or
+`unknown`, and counts as possibly holding the same bot or tunnel until it is
+restarted with `./bin/nocheh up`. On Save, **Settings** checks a changed bot
+token, mini app address or tunnel, and turning Telegram on, against those labels,
+and on the host also against the listed workspaces.
+
+`update` skips a folder that is not on `main` or has uncommitted changes. It
+pulls `main` fast-forward only, then runs that folder's own `./bin/nocheh up`
+when its stack runs, which rebuilds and restarts only what changed. A stopped
+workspace stays stopped, and a `make dev` stack reloads by itself.
+
+<docker_address_pools>
+
+Each stack makes about seven internal Docker networks. Docker Desktop's default
+address pools run out after two or three stacks, and `up` then fails with
+"all predefined address pools have been fully subnetted". Add this to Docker
+Desktop › Settings › Docker Engine (or `/etc/docker/daemon.json` on Linux),
+then apply and restart Docker:
+
+```json
+{
+  "default-address-pools": [
+    {"base": "10.200.0.0/16", "size": 24}
+  ]
+}
+```
+
+That gives 256 networks of 254 addresses each. Pick a `base` that your home
+or office network does not use.
+
+</docker_address_pools>
+
 ## Configuration and credentials
 
 Run `./bin/nocheh init`, edit the root `.env`, then run `./bin/nocheh up`.
@@ -125,8 +215,8 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 `TELEGRAM_OWNER_ID` and comma-separated negative `TELEGRAM_GROUP_IDS` before enabling.
 `NOCHEH_GUARD_MODE` is `on` (default) or `off`; legacy `auto` values convert to
 `on`. See [guarded-copy operations](guard.md).
-`NOCHEH_BOX_IMAGE`, `NOCHEH_BOX_LIMIT` and the generated `NOCHEH_BOX_TOKEN` set up
-the sealed job box; see [the security service](security-service.md).
+`NOCHEH_BOX_LIMIT` and the generated `NOCHEH_BOX_TOKEN` set up the sealed job box,
+whose image each workspace builds as `<prefix>-box:local`; see [the security service](security-service.md).
 The generated `NOCHEH_MACHINE_TOKEN` lets `nocheh-app` ask `nocheh-machines` to run
 jobs on the owner's machines; only those two services get it. It has at least 32
 characters and differs from `SERVICE_TOKEN` and `NOCHEH_BOX_TOKEN`. `init`, `up` and
@@ -175,14 +265,17 @@ apply; until then replies and memory work wait with `provider_not_configured`.
 ```
 
 `down` retains all persistent state. Do not add `--volumes` unless intentionally
-resetting the database. Direct Compose reads the root `.env` too; prefer the wrapper for validation and isolated state:
+resetting the database. Direct Compose reads the root `.env` too, and a workspace other
+than `personal` saves its project there, so it reaches that workspace's stack; prefer the
+wrapper for validation, ports and isolated state:
 
 ```bash
 docker compose ps
 ```
 
 For an isolated rehearsal, set `NOCHEH_STATE_DIR` to a separate absolute directory
-and `COMPOSE_PROJECT_NAME` to a separate project name. A fresh environment requires
+and `COMPOSE_PROJECT_NAME` to a separate project name, in the shell or in that state's
+`.env`, and give that `.env` a free `NOCHEH_PORT`: ports come from `.env` only. A fresh environment requires
 its own `.env` in that state directory and its own login; do not duplicate a refresh token between concurrently running stacks.
 
 ## Backup and restore
@@ -190,8 +283,13 @@ its own `.env` in that state directory and its own login; do not duplicate a ref
 ```sh
 ./bin/nocheh backup --output data/backups/my-snapshot
 ./bin/nocheh restore data/backups/my-snapshot \
-  --state data/restored --project nocheh-restored --port 8795
+  --state data/restored --project nocheh-restored
 ```
+
+A restore's project is `nocheh-` plus a name that is neither `personal` nor a listed
+workspace's. Without
+`--port` it takes the first ten free ports no workspace or stack holds, and a
+`--port` whose block overlaps one is refused. It runs this checkout's images.
 
 Backup stops Telegram ingress first, then archive writers. It takes a PostgreSQL
 custom-format dump and copies the file store, durable spool, native Hermes state and
@@ -282,7 +380,11 @@ part of the address after `s3.`, such as `us-west-004`.
 
 `offsite list` shows the copies in the bucket, `offsite fetch` takes the newest one
 unless `--key` names another, and `offsite decrypt COPY --output DIR` opens a copy you
-downloaded yourself. See [ADR-0229](adr/0229-encrypted-off-site-backup-copies.md).
+downloaded yourself. `personal` keeps its copies in `nocheh-backups/`, and each other
+workspace in its own folder, `nocheh-backups/<workspace>/`; each lists and prunes only
+its own; `list` and `fetch`
+read this folder's workspace (`personal` on a new machine) unless
+`--workspace NAME` names another. See [ADR-0229](adr/0229-encrypted-off-site-backup-copies.md).
 
 For a planned cutover, use `backup --leave-stopped` to keep the source writers
 stopped after its final snapshot. First reconcile pending work against deliveries

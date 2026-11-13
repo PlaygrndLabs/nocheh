@@ -48,7 +48,10 @@ def restore(command,env,directory,state,metadata,sha):
     volumes=[env['NOCHEH_HONCHO_DATABASE_VOLUME'],env['NOCHEH_HONCHO_REDIS_VOLUME']]
     for volume in volumes:
         if subprocess.run(['docker','volume','inspect',volume],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:raise ValueError('honcho_restore_volume_exists')
-    for volume in volumes:subprocess.run(['docker','volume','create',volume],check=True,stdout=subprocess.DEVNULL)
+    # Labelled as Compose would, so the workspace that restores them owns them (ADR-0245).
+    for volume,key in zip(volumes,('honcho_database','honcho_redis')):
+        subprocess.run(['docker','volume','create','--label','com.docker.compose.project='+env['COMPOSE_PROJECT_NAME'],
+            '--label','com.docker.compose.volume='+key,volume],check=True,stdout=subprocess.DEVNULL)
     memory=Path(state)/'honcho'
     if not (memory/'database_password').is_file():raise ValueError('honcho_restore_credentials_missing')
     ledger=Path(state)/'memory-ledger/budget.sqlite'

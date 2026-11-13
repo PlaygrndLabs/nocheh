@@ -156,7 +156,8 @@ PostgreSQL derivation queue stay with their respective tools.
 
 <dashboards>
 
-- Owner dashboard: <http://localhost:8783/>. Start with `./bin/nocheh dashboard`.
+- Owner dashboard: <http://localhost:8783/> for the `personal` workspace; another workspace
+  uses its own ports ([several workspaces](deploy.md#several-workspaces)). Start with `./bin/nocheh dashboard`.
   It is independent of application and Inngest availability; it requires Docker.
 - Hermes: <http://localhost:8783/hermes/nocheh>, through the owner session and the
   existing managed administration server. No separate frontend container or stock

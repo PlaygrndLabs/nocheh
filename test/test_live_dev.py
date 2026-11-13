@@ -99,13 +99,24 @@ class LiveDevTests(unittest.TestCase):
         with patch.object(live_dev.subprocess, 'check_output', side_effect=['one\n', json.dumps([database])]):
             live_dev.assert_only_development_running([database, app], {'PATH': '/usr/bin'})
 
-    def test_second_nocheh_project_is_rejected(self):
-        isolated = {'State': {'Running': True},
-                    'Config': {'Labels': {'com.docker.compose.project': 'nocheh-dev',
-                                          'com.docker.compose.service': 'nocheh-app'}}}
-        with patch.object(live_dev.subprocess, 'check_output', side_effect=['one\n', json.dumps([isolated])]):
+    def test_another_workspace_may_run_but_never_a_second_poller_of_the_bot(self):
+        def bot(labels):
+            return {'State': {'Running': True},
+                    'Config': {'Labels': {'com.docker.compose.project': 'nocheh-acme',
+                                          'com.docker.compose.service': 'nocheh-telegram', **labels}}}
+        def check(other):
+            with patch.object(live_dev.subprocess, 'check_output', side_effect=['one\n', json.dumps([other])]):
+                live_dev.assert_only_development_running([], {'PATH': '/usr/bin'}, '1000001')
+        # Another workspace with its own bot runs beside development (ADR-0245).
+        check(bot({'com.nocheh.bot-id': '1000002'}))
+        # A workspace with Telegram off, or with no bot yet, polls nothing.
+        check(bot({'com.nocheh.bot-id': ''}))
+        app = bot({}); app['Config']['Labels']['com.docker.compose.service'] = 'nocheh-app'
+        check(app)
+        # The same bot, or a bot started before the label, would be a second poller.
+        for labels in ({'com.nocheh.bot-id': '1000001'}, {}, {'com.nocheh.bot-id': 'unknown'}):
             with self.assertRaisesRegex(ValueError, 'Another Nocheh stack'):
-                live_dev.assert_only_development_running([], {'PATH': '/usr/bin'})
+                check(bot(labels))
 
     def test_only_idle_fixture_networks_are_released_before_dev(self):
         def network(name, project, containers):

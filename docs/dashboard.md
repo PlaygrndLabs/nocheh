@@ -12,7 +12,8 @@ then run:
 ./bin/nocheh dashboard --stop
 ```
 
-Nocheh opens at <http://127.0.0.1:8783/>. It owns the application and owner API.
+Nocheh opens at <http://127.0.0.1:8783/> for the `personal` workspace; `./bin/nocheh workspaces`
+shows each other workspace's address. It owns the application and owner API.
 Open Assistant console from the sidebar for Hermes's native dashboard at `/hermes/nocheh`;
 its return link brings you back to Nocheh. Chat, second in the sidebar, opens its chat
 at `/hermes/chat` directly; the profile picker there chooses your private chat or a

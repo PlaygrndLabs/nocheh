@@ -188,6 +188,8 @@ class MiniAppSettingsTests(unittest.TestCase):
             environment = compose_environment(state)
             self.assertIn('miniapp', environment['COMPOSE_PROFILES'].split(','))
             self.assertEqual(environment['TELEGRAM_BOT_ID'], '5550001')
+            # The bot label names only a bot this workspace polls (ADR-0245).
+            self.assertEqual(environment['NOCHEH_POLLED_BOT_ID'], '5550001' if environment.get('TELEGRAM_ENABLED') == 'true' else '')
 
     def test_apply_starts_the_mini_app_and_puts_it_on_the_owners_menu_button(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -4,6 +4,13 @@ import {HttpError} from './http.js';
 import {tokenId,type OwnerLock,type SessionKind,type SessionState} from './owner-lock.js';
 
 type Session={id:string;csrf:string;expires:number};
+/**
+ * Cookie names carry the workspace's Compose project (ADR-0245): browsers share cookies across ports, so each
+ * workspace's dashboard on 127.0.0.1 keeps its own sign-in. `personal` (project `nocheh`) keeps `nocheh_session`.
+ */
+export const cookieName=(kind:'session'|'download',project=process.env.COMPOSE_PROJECT_NAME||'nocheh')=>project.replace(/[^A-Za-z0-9]/g,'_')+'_'+kind;
+export const SESSION_COOKIE=cookieName('session'),DOWNLOAD_COOKIE=cookieName('download');
+const sessionCookies=(req:Pick<IncomingMessage,'headers'>)=>(req.headers.cookie??'').split(';').map(c=>c.trim()).filter(c=>c.startsWith(SESSION_COOKIE+'=')).map(c=>c.slice(SESSION_COOKIE.length+1));
 const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&timingSafeEqual(x,y);};
 /** Open in-memory sessions for the synthetic dashboard previews, which have no owner password. */
 export class DashboardSessions {
@@ -11,9 +18,9 @@ export class DashboardSessions {
   private tickets=new Map<string,{session:string;expires:number}>();
   constructor(private now=Date.now) {}
   session(req: Pick<IncomingMessage,'headers'>):Session|undefined {
-    const cookies=(req.headers.cookie??'').split(';').map(c=>c.trim()).filter(c=>c.startsWith('nocheh_session='));
+    const cookies=sessionCookies(req);
     if(cookies.length!==1)return;
-    const session=this.sessions.get(cookies[0]!.slice('nocheh_session='.length));
+    const session=this.sessions.get(cookies[0]!);
     return session&&session.expires>this.now()?session:undefined;
   }
   page(req:Pick<IncomingMessage,'headers'>):Session {
@@ -59,10 +66,10 @@ export class OwnerSessions {
   private known=new Map<string,{kind:SessionKind;until:number}>();
   private tickets=new Map<string,{session:string;expires:number}>();
   constructor(readonly lock:OwnerLock,private now=Date.now) {}
-  /** The single `nocheh_session` cookie's token, if any. */
+  /** The single session cookie's token, if any. */
   token(req:Pick<IncomingMessage,'headers'>):string|undefined {
-    const cookies=(req.headers.cookie??'').split(';').map(c=>c.trim()).filter(c=>c.startsWith('nocheh_session='));
-    return cookies.length===1?cookies[0]!.slice('nocheh_session='.length):undefined;
+    const cookies=sessionCookies(req);
+    return cookies.length===1?cookies[0]:undefined;
   }
   async state(token:string|undefined,kind:SessionKind):Promise<SessionState> {
     if(!token)return (await this.lock.status()).password_set?'signed_out':'no_password';

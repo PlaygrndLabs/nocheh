@@ -77,6 +77,17 @@ carries the owner's tasks, sharing rules, settings and Hermes scheduled jobs
 [check](test/store-owner-portability.test.ts)); pending: a full export and import between
 two running installations.
 
+Several workspaces on one machine (owner, 2026-11-12: "start build", step 0 of the
+members design): each workspace, `personal` and one per company, is its own installation
+in its own folder with its own data, bot, dashboard and backups. Its name, set at setup
+or changed with `workspace rename` (owner, 2026-11-13: "my current will be name test/dev"), decides its Compose project, networks, volumes, images, ports, off-site folder and
+dashboard sign-in; `personal` keeps the old `nocheh` names. Setup refuses another
+workspace's name, ports, bot, mini app address or tunnel. `workspace new`, `workspaces`
+and `update [NAME|--all]` manage them, and the setup guide shows Docker's address-pool fix
+([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md),
+[tests](services/hermes/test_workspaces.py)). Pending: two workspaces running side by
+side on one machine, each with its own bot, and an `update --all` across them.
+
 Problem notices (owner, 2026-10-28: "I want notice about each failed and issue to
 can fix it in MVP"): the dashboard checks every two minutes and sends the owner's
 private Telegram chat new or worse problems, including model refusals and texts

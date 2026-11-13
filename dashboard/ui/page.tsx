@@ -22,7 +22,8 @@ export function Page({
   className?: string;
 }) {
   React.useEffect(() => {
-    if (typeof title === 'string') document.title = title + ' · Nocheh';
+    if (typeof title === 'string')
+      document.title = [title, window.__NOCHEH_WORKSPACE__, 'Nocheh'].filter(Boolean).join(' · ');
   }, [title]);
   const save = useSaveState();
   // Pages with settings keep the header pinned all the time so nothing moves when an edit starts.

@@ -28,7 +28,7 @@ class Dashboard:
         # The first sign-in on a fresh fixture creates the password; later ones use it.
         login = urllib.request.urlopen(urllib.request.Request(self.origin+'/api/nocheh/login', method='POST',
             data=json.dumps({'password': FIXTURE_PASSWORD}).encode(), headers={'content-type': 'application/json'}), timeout=60)
-        cookies = [value.split(';')[0] for value in login.headers.get_all('Set-Cookie') or [] if value.startswith('nocheh_session=')]
+        cookies = [value.split(';')[0] for value in login.headers.get_all('Set-Cookie') or [] if re.match(r'[A-Za-z0-9_]+_session=', value)]
         page = urllib.request.urlopen(urllib.request.Request(self.origin+'/', headers={'cookie': cookies[0]} if cookies else {}), timeout=60)
         csrf = re.search(r'window\.__NOCHEH_CSRF__=("[A-Za-z0-9_-]+")', page.read().decode())
         if not cookies or not csrf:

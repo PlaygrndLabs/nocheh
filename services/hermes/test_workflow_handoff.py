@@ -19,6 +19,14 @@ class WorkflowHandoffTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,'stop_owner_dashboard'):
                     with stopped_dashboard():self.fail('running dashboard was not fenced')
 
+    def test_import_handoff_checks_its_own_workspace_dashboard_port(self):
+        with tempfile.TemporaryDirectory() as directory,socket.socket() as server:
+            server.bind(('127.0.0.1',0));server.listen();port=server.getsockname()[1]
+            Path(directory,'.env').write_text("NOCHEH_CONFIG_VERSION='1'\nNOCHEH_DASHBOARD_PORT='%d'\n"%port)
+            with patch.dict(os.environ,{'NOCHEH_DASHBOARD_PORT':'1'}):
+                with self.assertRaisesRegex(RuntimeError,'stop_owner_dashboard'):
+                    with stopped_dashboard(directory):self.fail('running dashboard was not fenced')
+
     def test_import_handoff_preserves_mapping_consent_checkpoint_and_closed_jobs(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);jobs=root/'admin/jobs';jobs.mkdir(parents=True)

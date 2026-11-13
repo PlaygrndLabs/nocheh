@@ -6,7 +6,7 @@ import { resolve, join, dirname } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { HttpError, json, object, readJson, string } from './http.js';
-import {OwnerSessions,SESSION_COOKIE_AGE,csrfFor} from './dashboard-auth.js';
+import {DOWNLOAD_COOKIE,OwnerSessions,SESSION_COOKIE,SESSION_COOKIE_AGE,csrfFor} from './dashboard-auth.js';
 import type {Duplex} from 'node:stream';
 import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 import {importConfiguration} from './workflows/imports.js';
@@ -24,6 +24,8 @@ const JOBS = join(STATE, 'admin/jobs');
 const PORT = Number(process.env.NOCHEH_DASHBOARD_PORT ?? 8783);
 const CONTAINER=process.env.NOCHEH_CONTAINER==='1';
 const PREFIX = '/api/plugins/nocheh';
+/** The workspace's name for the browser tab, so the owner tells dashboards apart (ADR-0245); `personal` shows none. */
+const WORKSPACE=(process.env.COMPOSE_PROJECT_NAME??'nocheh').replace(/^nocheh-?/,'');
 const PRIMARY = '/api/nocheh';
 type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
   files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
@@ -194,7 +196,7 @@ export async function startManagement() {
   }
   /** Who is calling: the installation token, a signed-in browser, or a signed-in phone through the mini app. */
   async function authorized(req: IncomingMessage, route: string, download=false):Promise<'token'|'browser'|'phone'> {
-    const cookie = download ? req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('nocheh_download='))?.slice('nocheh_download='.length) : undefined;
+    const cookie = download ? req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith(DOWNLOAD_COOKIE+'='))?.slice(DOWNLOAD_COOKIE.length+1) : undefined;
     const actual = Buffer.from(String(req.headers['x-nocheh-session-token'] ?? req.headers['x-hermes-session-token'] ?? cookie ?? ''));
     const expected = Buffer.from(token);
     if (actual.length === expected.length && timingSafeEqual(actual, expected))return 'token';
@@ -210,7 +212,7 @@ export async function startManagement() {
     await sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
     return 'browser';
   }
-  const sessionCookie=(value:string,age=SESSION_COOKIE_AGE)=>`nocheh_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}`;
+  const sessionCookie=(value:string,age=SESSION_COOKIE_AGE)=>`${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}`;
   /** Answers a password check with its refusal details: tries left before a pause, or when the pause ends. */
   async function passwordAnswer(res:ServerResponse,work:()=>Promise<unknown>) {
     try {return json(res,200,await work());}
@@ -285,7 +287,7 @@ export async function startManagement() {
       const caller=await authorized(req,route,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
       const legacy=caller==='token';
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
-      if(legacy)res.setHeader('set-cookie',`nocheh_download=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
+      if(legacy)res.setHeader('set-cookie',`${DOWNLOAD_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
       if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
       if(req.method==='GET'&&route==='/maintenance')return json(res,200,maintenance.state??{ready:false});
       if(maintenance.active&&req.method==='GET'&&(route==='/jobs'||route==='/jobs/'+maintenance.state?.job)){
@@ -492,8 +494,8 @@ export async function startManagement() {
     if(req.method==='GET'&&path==='/') {
       // Without a signed-in session the same page opens on its sign-in screen, with no CSRF value.
       const session=await sessions.session(req);
-      const bootstrap=session?`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`
-        :`window.__NOCHEH_LOGIN__=${JSON.stringify((await lock.status()).password_set?'sign_in':'create')};`;
+      const bootstrap=(WORKSPACE?`window.__NOCHEH_WORKSPACE__=${JSON.stringify(WORKSPACE)};`:'')+(session?`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`
+        :`window.__NOCHEH_LOGIN__=${JSON.stringify((await lock.status()).password_set?'sign_in':'create')};`);
       const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision){if(window.__nochehUnsaved)return;location.reload()}nochehRevision=next}catch{}},1000)</script>` : '';
       const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',bootstrap).replace('</head>',reload+'</head>');
       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
