@@ -26,7 +26,8 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
   // What the next brain turn returns, when not an ordinary done reply; a running turn is observed done later.
   let next:Record<string,unknown>|null=null;
   const runtime:FakeCall=async(operation,input)=>{
-    if(operation==='guard.detect')return {literals:[]};
+    // A group's name can hold a secret; the guarded copy hides it.
+    if(operation==='guard.detect')return {literals:String(input.text).includes('fixture-secret')?['fixture-secret']:[]};
     if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}
     if(operation==='telegram.notice'){notices.push(input);return {state:'done'};}
     if(operation==='run.resume')return {state:'done'};
@@ -46,7 +47,7 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),groupReplies:{mode:'addressed',names:['Nocheh']},
     telegram});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
-  const titles:Record<string,string>={[GP1]:'GP1 team',[GP2]:'GP2 team',[GP4]:'GP4 team'};
+  const titles:Record<string,string>={[GP1]:'GP1 team',[GP2]:'GP2 team',[GP3]:'GP3 fixture-secret',[GP4]:'GP4 team'};
   const envelope=(chat:string,payload:Record<string,unknown>):Envelope=>{
     const update=Number(payload.update_id);
     return {version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:chat,source_id:String(update),revision:'1',
@@ -74,8 +75,9 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
   try {
     await seedGroups(stores.control);
     await services.guards.reconcile();await services.guards.setMode('on');
-    // GP2 has spoken before, so the answer can name it; GP3 has not.
-    await services.capture.capture(envelope(GP2,message(GP2,'GP2 kickoff notes',9)));
+    // GP2 and GP3 have spoken before, so the answer can name them from their guarded copies; GP3's name holds a secret.
+    for(const [chat,text] of [[GP2,'GP2 kickoff notes'],[GP3,'GP3 hello']] as const)
+      await services.guards.prepare((await services.capture.capture(envelope(chat,message(chat,text,9)))).source.reference,'fixture',services.detect);
 
     // Alice says something unaddressed; the owner then asks in GP1, a group of P1 with two other served groups.
     await say(GP1,'Lunch is at noon',9);
@@ -120,8 +122,9 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     assert.match(turn.speaker,/^\[Group message from Bob, sent [^\]]+\] \[the owner\]$/);
     assert.deepEqual(turn.recent_group.map((item:any)=>item.text),['Lunch is at noon'],'with what the asking group said just before it');
     assert.equal(turn.private_answer.question_event,asked);
-    assert.match(turn.private_answer.frame,/^\[Private answer\] .*asked in “GP1 team”.*: “GP1 team”, “GP2 team”, a Telegram group\./s);
+    assert.match(turn.private_answer.frame,/^\[Private answer\] .*asked in “GP1 team”.*: “GP1 team”, “GP2 team”, “GP3 [^”]+”\./s);
     assert.ok(!JSON.stringify(turn).includes(GP2)&&!JSON.stringify(turn).includes(GP3),'no group ID reaches the turn');
+    assert.ok(!JSON.stringify(turn).includes('fixture-secret'),'a name comes from its guarded copy, never the original');
     assert.equal(replyTo(start).chat_id,OWNER);assert.equal(replyTo(start).button,undefined,'a private answer carries no button');
     const answered=await row(id);
     assert.equal(answered.state,'answered');assert.equal(answered.start_event,start);assert.equal(answered.reply_chat_id,OWNER);

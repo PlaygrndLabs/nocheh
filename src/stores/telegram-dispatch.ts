@@ -20,7 +20,7 @@ import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
 import {fillTemplate,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
-import {parentSpace,readSetGroups,type ReadSet} from '../spaces.js';
+import {parentSpace,readSetGroups} from '../spaces.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
 import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply,type ReplyButton} from './telegram-reply.js';
@@ -431,22 +431,41 @@ export class TelegramDispatchRepository {
     const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null;
     return {transcripts,files,parents,tooLarge,text};
   }
-  /** A group's name from its latest archived messages, else a fixed name; never its numeric ID. */
-  private async groupName(chat:string):Promise<string> {
-    const rows=(await this.archive.pool.query(`SELECT payload FROM events WHERE scope=$1 AND channel='telegram'
-      AND kind IN ('telegram_update','telegram_delivered_message') ORDER BY received_at DESC LIMIT 20`,[chat])).rows;
+  /** An archived Telegram message as a model may see it: the guarded copy while the secret guard is on, else the
+   * captured original, as the archive's own reads give it (ADR-0222). Null when it has none yet. */
+  private async representation(id:string,binding:GuardBinding):Promise<any> {
+    let payload:any;
+    if(binding.mode==='on')payload=((await this.guards.read('events:'+id,binding)).value as {payload?:unknown})?.payload;
+    else payload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString());
+    return payload?.message??payload?.edited_message??payload??null;
+  }
+  /** A group's name, from the guarded copy of its latest archived message that the answer may read, else a fixed name;
+   * never its numeric ID or a name its secret check would hide. */
+  private async groupName(chat:string,principal:Reader,binding:GuardBinding):Promise<string> {
+    const rows=(await this.archive.pool.query(`SELECT id FROM events WHERE scope=$1 AND channel='telegram'
+      AND kind IN ('telegram_update','telegram_delivered_message') ORDER BY received_at DESC,id DESC LIMIT 20`,[chat])).rows;
     for(const row of rows) {
-      let message:any;try{const payload=JSON.parse(row.payload.toString());message=payload.message??payload.edited_message??payload;}catch{continue;}
-      if(String(message?.chat?.id)===chat&&placeName(message.chat.title))return '“'+placeName(message.chat.title)+'”';
+      try {
+        if(!await this.access.canRead(principal,(await this.archive.captured(row.id)).reference,binding))continue;
+        const message=await this.representation(row.id,binding);
+        if(String(message?.chat?.id)===chat&&placeName(message.chat.title))return '“'+placeName(message.chat.title)+'”';
+      }catch(error){if(error instanceof HttpError)continue;throw error;}
     }
     return 'a Telegram group';
   }
-  /** A private answer's first line: where the question was asked and every group it may read, the asking one first. */
-  private async answerFrame(row:PrivateAnswer,reads:ReadSet,question:any):Promise<string> {
-    const home=parentSpace(row.from_chat_id)??row.from_chat_id,topic=row.from_chat_id===home?null:
-      placeName(question?.message?.reply_to_message?.forum_topic_created?.name)||'a topic';
+  /** A private answer's first line: where the question was asked and every group it may read, the asking one first.
+   * Group and topic names come from guarded copies, as in the speaker line. */
+  private async answerFrame(row:PrivateAnswer,principal:Reader,binding:GuardBinding):Promise<string> {
+    const home=parentSpace(row.from_chat_id)??row.from_chat_id;
+    let topic:string|null=null;
+    if(row.from_chat_id!==home) {
+      let name='';
+      try{name=placeName((await this.representation(row.question_event,binding))?.reply_to_message?.forum_topic_created?.name);}
+      catch(error){if(!(error instanceof HttpError))throw error;}
+      topic=name||'a topic';
+    }
     const names=new Map<string,string>();
-    for(const group of [home,...readSetGroups(reads).filter(group=>group!==home)])names.set(group,await this.groupName(group));
+    for(const group of [home,...readSetGroups(principal.reads!).filter(group=>group!==home)])names.set(group,await this.groupName(group,principal,binding));
     const template=(await ownerPrompts(this.control))['telegram.private_answer']??privateAnswerFrame;
     return fillTemplate(template,{group:names.get(home)!+(topic?' › '+topic:''),groups:[...names.values()].join(', ')}).slice(0,4000);
   }
@@ -488,7 +507,7 @@ export class TelegramDispatchRepository {
     const {transcripts,files,parents,tooLarge,text}=await this.contents(album,binding,false);
     const questionPayload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[row.question_event])).rows[0].payload.toString());
     const speaker=speakerLine(questionPayload,question.event.payload,this.access.policy().owner_id),recent=await this.recentGroup(asked,row.from_chat_id,principal);
-    const privateAnswer={frame:await this.answerFrame(row,principal.reads!,questionPayload),question_event:row.question_event};
+    const privateAnswer={frame:await this.answerFrame(row,principal,binding),question_event:row.question_event};
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:null,guard_mode:binding.mode,
       private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{})};
