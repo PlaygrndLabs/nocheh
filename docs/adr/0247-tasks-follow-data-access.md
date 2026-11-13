@@ -30,8 +30,9 @@ chats added later will see it. Both stay as they were accepted.
   ([`readSetOf`](../../src/spaces.ts)) already says which groups and topics it
   reads.
 - An "Answer privately" reply (ADR-0248) answers in the asker's private chat
-  from what the group it was asked in reads. It is not a turn in that group,
-  and nothing in it should change the group's tasks.
+  from the group it was asked in and the project's other groups the asker is
+  in, frozen when the button is tapped. It is not a turn in any of those
+  groups, and nothing in it should change their tasks.
 </context>
 
 <decision>
@@ -65,12 +66,12 @@ chats added later will see it. Both stay as they were accepted.
   bound record in an active project it reads no list
   (`task_project_required`).
 - The chats that see a task are worked out per task. A task set on the
-  project itself is seen by every group and topic assigned to the project and
-  by chats added to it later. A group's task is seen only by the chats of
-  that group in the project: when topics share what they know, the group's
-  chat (with the topics that follow it) and each of its topics assigned to
-  the project on its own; else only the task's own chat or topic, while it is
-  in the project.
+  project itself is seen by every group assigned to the project and by chats
+  added to it later. A group's task is seen only while its group is in the
+  project, as a topic always follows its group's project
+  ([ADR-0246](0246-projects-replace-the-share-box.md)): when topics share
+  what they know, by the group's chat and all its topics, named as the group;
+  else only by the task's own chat or topic.
 - The owner's card (ADR-0243) names those chats. Only a task set on the
   project itself says that chats added later will see it (`task_later`); a
   group's task says that other groups of the project don't see it
@@ -95,7 +96,10 @@ chats added later will see it. Both stay as they were accepted.
   from another group joins their group and gets a new one. Each gets a
   history entry. A move to no project, or from none, moves nothing: the
   group's tasks stay on the old list, where only the owner sees them. The
-  project's own tasks always stay on its list.
+  project's own tasks always stay on its list. The project assignment write
+  (`writeAssignment` in [`src/stores/projects.ts`](../../src/stores/projects.ts))
+  calls it in its transaction when a group changes from one project to
+  another.
 - The chat task tool and the group prompt say that a group or topic reaches
   only its own tasks and the project's, and that a task added there belongs to
   it.
@@ -109,12 +113,9 @@ chats added later will see it. Both stay as they were accepted.
 - A group that takes a task set on the project itself, or the project that
   gets a group's task, loses sight of its earlier comments and history.
 - The chats named for a task set on the project itself are still the
-  project's assigned groups and topics, as in ADR-0243.
+  project's assigned groups, as in ADR-0243.
 - A task under a task of another group, written before this decision, keeps
   its group until its family's group or list changes.
-- The project assignment write calls `moveGroupTasks` once projects hold their
-  groups (Members step 2); until then a group that moves to another project
-  leaves its tasks on the old list.
 - Checks: who reaches which task in groups and topics under both topic
   memories, counts, tags, links and parents, the group of a new task and a
   subtask, read-only private answers, the audience of a task, a group change
