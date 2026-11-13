@@ -435,6 +435,24 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
       'an archived project gives no role');}
     finally{await stores.control.query("UPDATE projects SET state='active' WHERE id=$1",[P1]);}
 
+    // A private answer opens no group's original file, the asking group's included, even with the guard off: the only files
+    // its turn opens are its own /start's. A group still opens its own.
+    const fileIn=async(space:string,name:string)=>{
+      const source=await captured(space,'launch sheet',{text:undefined,caption:'launch sheet',document:{file_id:key+':'+name,file_unique_id:key+':'+name,file_name:name+'.txt'}});
+      const artifact=source.artifact_ids[0]!;await s.attachments.commit(artifact,Buffer.from('sheet '+name));
+      await s.guards.prepare(source.reference,'fixture',s.detect);return artifact;
+    };
+    const files=[[GP1,await fileIn(GP1,'gp1')],[GP3,await fileIn(GP3,'gp3')]] as const;
+    await s.guards.setMode('off');
+    try {
+      const off=await s.guards.state(),offAnswer=await s.access.bindReads({...pass,generation:off.generation,guard_epoch:off.epoch});
+      for(const [space,artifact] of files) {
+        assert.equal((await s.sources.bytes({admin:false,scope:space,space,generation:off.generation,guard_epoch:off.epoch},artifact)).toString(),
+          'sheet '+(space===GP1?'gp1':'gp3'),space);
+        await assert.rejects(s.sources.bytes(offAnswer,artifact),{code:'original_file_requires_owner'},space);
+      }
+    } finally {await s.guards.setMode('on');}
+
     // Once its time is up the record binds nothing more.
     await stores.control.query("UPDATE private_answers SET expires_at=now()-interval '1 second' WHERE id=$1",[id]);
     await assert.rejects(s.access.bindReads(pass),{code:'private_answer_closed'});

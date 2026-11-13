@@ -21,6 +21,7 @@ import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {BOX_PAGE_BUDGET,PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
 import {parentSpace,readSetGroups} from '../spaces.js';
+import {albumMembers} from './albums.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
 // One chat's records in time order. Telegram gives a message's own time; an assistant reply has only the time it was saved.
@@ -327,6 +328,10 @@ export class SourceRepository {
     const binding=principal.admin?null:await this.audience.assert(principal);
     if(binding?.mode==='on')throw new HttpError(403,'original_file_requires_owner');
     const file=await this.attachments.file(id);await this.permitted(principal,file.event.id,binding);
+    // A private answer reads text, transcripts and extracted text; the only original files it opens are its own turn's
+    // (its /start and that message's album), the way the turn's files reach it (ADR-0248).
+    if(principal.answer!==undefined&&![principal.turnEvent,...(principal.turnEvent?(await albumMembers(this.stores.archive,principal.turnEvent)).map(member=>member.id):[])]
+      .includes(file.event.id))throw new HttpError(403,'original_file_requires_owner');
     const bytes=await this.attachments.bytes(file);if(binding)await this.audience.assert(principal);return bytes;
   }
 

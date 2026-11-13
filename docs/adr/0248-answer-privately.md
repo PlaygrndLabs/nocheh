@@ -75,10 +75,12 @@ section.
   only for a Telegram send to the asker's private chat.
 - **Read-only, in three places.** One route list serves the storage service
   and the broker, so neither lets more through than the other: archive search,
-  page and message, a message's file, the pending imports of the set's groups,
-  memory search, the turn's memory and shared context, the delivery check, the
-  task list and a task, context preparation, the turn's binding and files, and
-  model calls. Every other route, every write and post among them, is
+  page and message, the pending imports of the set's groups, memory search, the
+  turn's memory and shared context, the delivery check, the task list and a
+  task, context preparation, the turn's binding, the turn's own files, and
+  model calls. The file route opens only the files of the answer's own
+  `/start` and its album; any other message's original file, in the set's
+  groups too, is `original_file_requires_owner`. Every other route, every write and post among them, is
   `private_answer_read_only`. The MCP endpoint offers an answer only
   `archive_search`, `archive_read`, `archive_page`, `memory_search` and `tasks`,
   and `tasks` only lists and reads. Telegram actions, controlled actions and
