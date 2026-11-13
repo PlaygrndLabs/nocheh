@@ -83,8 +83,12 @@ export const groupChatId=(id:string)=>groupChatPattern.test(id);
 export const groupSpace=(space:string|null|undefined):space is string=>!!space&&groupSpacePattern.test(space);
 /** SQL test that `column` names a group or one of its topics, exactly as groupSpace decides it. */
 export const groupSpaceSql=(column:string)=>`${column} ~ '^${groupChat}(${groupTopic})?$'`;
+/** SQL test that `column` names a group itself, not one of its topics, exactly as groupChatId decides it. */
+export const groupChatSql=(column:string)=>`${column} ~ '^${groupChat}$'`;
 /** The conversations a group or topic turn recalls: its own, or, when the group's topics share
- * memory, the group's base conversation and every one of its topics. Owner turns read everything. */
+ * memory, the group's base conversation and every one of its topics. Owner turns read everything.
+ * The single-conversation form that ReadSet generalizes; inRecall and recallCondition keep their
+ * meaning for the callers that still use them. */
 export interface RecallScope {space:string;group:string|null}
 export function recallScope(space:string,topicMemory:'group'|'topic'='group'):RecallScope {
   const chat=parentSpace(space)??space;
@@ -94,6 +98,53 @@ export const inRecall=(scope:RecallScope,space:string)=>space===scope.space||sco
 /** SQL test that `column` names a conversation of the recall scope bound as `space` and `group`. */
 export const recallCondition=(column:string,space:string,group:string)=>
   `(${column}=${space} OR (${group}::text IS NOT NULL AND (${column}=${group} OR starts_with(${column},${group}||'/topic/'))))`;
+
+/**
+ * The conversations a scoped reader may read (ADR-0248). A group or topic turn reads its own recall scope; an
+ * "Answer privately" answer reads the groups frozen when the button was tapped.
+ * - `home`: the conversation the reads are for (the asking group or topic). It names the reader; it grants nothing.
+ * - `exact`: groups or topics read as themselves only (a topic, or a group's General chat, when topics keep their
+ *   own memory).
+ * - `whole`: groups read with every one of their topics.
+ * - `project`: the project the reads belong to, or null.
+ * A read set never holds anything but a group or one of its topics: the owner's private chat and its topics, any
+ * other private chat, `desktop:*` imports, `system` and an unknown conversation are left out wherever a set is made,
+ * and inReadSet and readSetSql never match one even in a set built by hand (ADR-0242, fail closed).
+ */
+export interface ReadSet {readonly home:string;readonly exact:readonly string[];readonly whole:readonly string[];readonly project:string|null}
+/** The one way to make a read set: drops every conversation groupSpace refuses, every `whole` entry that is not a
+ * group itself, and every `exact` entry a `whole` group already covers; sorted and without repeats. */
+export function readSet(input:{home:string;exact?:Iterable<string>;whole?:Iterable<string>;project?:string|null}):ReadSet {
+  const project=input.project??null;
+  if(project!==null&&!/^[a-f0-9]{64}$/.test(project))throw new HttpError(400,'invalid_project_id');
+  const whole=[...new Set(input.whole??[])].filter(groupChatId).sort();
+  const exact=[...new Set(input.exact??[])].filter(space=>groupSpace(space)&&!whole.includes(parentSpace(space)??space)).sort();
+  return Object.freeze({home:validateSpace(input.home),exact:Object.freeze(exact),whole:Object.freeze(whole),project});
+}
+/** A group or topic turn's recall scope as a read set: the whole group when its topics share memory, else just its
+ * own conversation. A private chat's scope reads nothing here. */
+export function readSetOf(scope:RecallScope,project:string|null=null):ReadSet {
+  return scope.group!==null?readSet({home:scope.space,whole:[scope.group],project}):readSet({home:scope.space,exact:[scope.space],project});
+}
+/** Whether a read set reads `space`: one of its `exact` conversations, or a `whole` group or one of its topics. */
+export const inReadSet=(set:ReadSet,space:string|null|undefined):boolean=>
+  groupSpace(space)&&(set.exact.includes(space)||set.whole.includes(parentSpace(space)??space));
+/**
+ * A read set as one SQL `text[]` parameter for readSetSql: each `exact` conversation as itself, and each `whole`
+ * group as the group followed by `/*`. Only groups and topics are written, whatever the set holds.
+ */
+export const readSetParam=(set:ReadSet):string[]=>[...set.exact.filter(groupSpace),...set.whole.filter(groupChatId).map(group=>group+'/*')];
+/**
+ * SQL test that `column` names a conversation of a read set bound as ONE `text[]` parameter holding readSetParam(set):
+ * `param` is its position (2 for `$2`) or its literal placeholder. The column matches an exact entry, or its group
+ * (the part before `/topic/`) followed by `/*` matches a whole entry. A column that is not a group or topic never
+ * matches, so no parameter can open a private chat; an empty parameter matches nothing.
+ */
+export const readSetSql=(column:string,param:number|string)=>{
+  if(typeof param==='number'?!Number.isSafeInteger(param)||param<1:!param.trim())throw Error('invalid_read_set_parameter');
+  const value=`${typeof param==='number'?'$'+param:param}::text[]`;
+  return `(${groupSpaceSql(column)} AND (${column}=ANY(${value}) OR split_part(${column},'/topic/',1)||'/*'=ANY(${value})))`;
+};
 export function validateOverrides(input:unknown):Partial<SpacePreferences> {
   const body=object(input), result:Partial<SpacePreferences>={};
   for(const key of Object.keys(body)) if(!['mode','sources','privacy_instructions'].includes(key))throw new HttpError(400,'unknown_space_preference');
