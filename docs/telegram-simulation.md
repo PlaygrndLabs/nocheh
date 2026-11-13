@@ -236,8 +236,10 @@ learning reaching Honcho, Inbox person cards (one per new name, none for the
 owner), a Telegram Desktop export with a topic, a file and learning, tasks
 from chat with a reminder, status and board, tasks staying out of unrelated
 groups, two groups of one project staying apart while **Answer privately**
-refuses a member's tap and answers the owner's `/start` from both groups but
-not the third, defaults (history kept forever, Notion off), and a Settings save whose
+sits only under the owner's own answer, refuses a member's tap and answers the
+owner's `/start` from both groups but not the third (its probe mark rides an
+unaddressed message just before the question, so no search hit or private
+answer holds it), defaults (history kept forever, Notion off), and a Settings save whose
 apply a reload sees running and that ends with a result. Dashboard calls sign
 in through the preview relay like the browser
 ([client](../tools/acceptance/owner_dashboard.py)). The

@@ -642,9 +642,11 @@ class ProductScenarios(Scenarios):
         # shared search word. A group answer reads only its own group: the owner's question in GP1 finds GP1's mark and
         # its task, never GP2's mark, task, count or tag. Under the owner's answer there sits Answer privately; a member's
         # tap gets the only-asker popup and runs nothing; the owner's tap opens the private chat with /start <id>, and
-        # that answer reads GP1 and GP2, never GP4 or the owner's private chat. Every send it took is recorded. The
-        # question carries a PROBEMARK, so a model request holding it next to a private mark counts as a leak, and the
-        # private mark is saved for private_canaries_never_left_the_owner.
+        # that answer reads GP1 and GP2, never GP4 or the owner's private chat. Every send it took is recorded. A
+        # PROBEMARK sits in an unaddressed message just before the question, which both answers get with the group's recent
+        # messages, so a model request holding it next to a private mark counts as a leak. It stays out of the question:
+        # the question holds the search word, so search results, and the private answer the owner's chat keeps beside its
+        # private mark, would hold it too. The private mark is saved for private_canaries_never_left_the_owner.
         number = str(self.f.ids())
         word, probe = 'CRATEWORD'+number, 'PROBEMARK'+number
         gp1, gp2, gp4 = 'GPONEMARK'+number, 'GPTWOMARK'+number, 'GPFOURMARK'+number
@@ -675,8 +677,9 @@ class ProductScenarios(Scenarios):
             # 1. The owner asks in GP1: the answer reads GP1 alone and carries Answer privately.
             tools = ('[[tool:mcp__nocheh__archive_search {"mode":"text","query":"'+word+'","limit":10}]] '
                      '[[tool:mcp__nocheh__tasks {"action":"list","state":"all"}]]')
+            self.turn(self.f.message(OTHER_GROUP, 'Before I ask about it: '+probe, mention=False), OTHER_GROUP, expect_reply=False)
             before = len(self.f.sent())
-            asked, text = self.turn(self.f.message(OTHER_GROUP, 'What do we have on crates? '+probe+' '+tools), OTHER_GROUP)
+            asked, text = self.turn(self.f.message(OTHER_GROUP, 'What do we have on crates? '+tools), OTHER_GROUP)
             search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
             listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
             reply = [row for row in self.replies(before, OTHER_GROUP) if row['message'].get('text') == text][-1]
@@ -697,6 +700,15 @@ class ProductScenarios(Scenarios):
             record = buttons[0]['callback_data'][2:]
             state = lambda: self.f.query('nocheh_control', "SELECT state||' '||coalesce(array_to_string(read_chats,','),'') FROM private_answers WHERE id='"+record+"'")
             self.gate('answer_offered', state() == 'offered ', state=state())
+            # Only the owner's own answer carries it: not a member's answer in GP1, nor the owner's in GP4, in no project.
+            before = len(self.f.sent())
+            _, member_text = self.turn(self.f.message(OTHER_GROUP, 'Anything for me on the hall?', sender=MEMBER), OTHER_GROUP)
+            member_reply = [row for row in self.replies(before, OTHER_GROUP) if row['message'].get('text') == member_text][-1]
+            before = len(self.f.sent())
+            _, lone_text = self.turn(self.f.message(GROUP, 'Anything new on the venue?', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+            lone_reply = [row for row in self.replies(before, GROUP, TEAM_TOPIC) if row['message'].get('text') == lone_text][-1]
+            self.gate('button_only_under_owner_question', not self.buttons(member_reply) and not self.buttons(lone_reply),
+                      member=self.buttons(member_reply), lone=self.buttons(lone_reply))
 
             # 4. A member's tap: the only-asker popup, no link, and nothing runs.
             events, sent = self.f.brain()[-1:], len(self.f.sent())
