@@ -1313,7 +1313,57 @@ test('a project shares nothing between its groups, and a group joins one only af
     'other groups come first',
   );
   await ask.getByRole('button', {name: 'Cancel'}).click();
+  await ask.waitFor({state: 'detached'});
+  // Removing a group asks first and says its tasks stay on this project's list, where only the owner sees them.
+  const removed = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/nocheh/projects/assignments'))
+      removed.push(request);
+  });
+  const member = drawer
+    .getByRole('listitem')
+    .filter({hasText: 'Aurora planning'})
+    .getByRole('button', {name: 'Remove', exact: true});
+  await member.click();
+  const removing = page.getByRole('dialog', {name: 'Remove Aurora planning from Aurora field guide?'});
+  await removing
+    .getByText('Its tasks, and its topics’ tasks, stay on Aurora field guide’s list, where only you see them.', {
+      exact: false,
+    })
+    .waitFor();
+  await removing.getByRole('button', {name: 'Cancel'}).click();
+  await removing.waitFor({state: 'detached'});
+  assert.equal(await member.count(), 1, 'cancelled, it stays in the project');
+  assert.equal(removed.length, 0, 'nothing is saved before the confirm');
   await page.close();
+
+  // Adding a group that is in another project moves it, and says its tasks move with it.
+  const moving = await browser.newPage({viewport: {width: 1440, height: 900}});
+  await moving.route(/\/api\/nocheh\/projects\/assignments\?after=$/, route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        assignments: [
+          {space_id: '-10042', project_id: 'ab'.repeat(32), mode: 'assigned', revision: 1},
+          {space_id: '-10073', project_id: 'cd'.repeat(32), mode: 'assigned', revision: 2},
+        ],
+        next: null,
+      }),
+    }),
+  );
+  await moving.goto(origin + '/#memory?view=projects&project=' + 'ab'.repeat(32));
+  const movingDrawer = moving.getByRole('dialog', {name: 'Aurora field guide'});
+  await movingDrawer.getByPlaceholder('Search chats by name or ID').fill('-10073');
+  await movingDrawer.getByRole('button', {name: /Use the ID/}).click();
+  await movingDrawer.getByRole('button', {name: 'Add', exact: true}).click();
+  const moveHere = moving.getByRole('dialog', {name: /^Move .+\?$/});
+  await moveHere.getByText('It is in Garden redesign now.', {exact: false}).waitFor();
+  await moveHere
+    .getByText('Its tasks, and its topics’ tasks, move with it from Garden redesign to Aurora field guide.')
+    .waitFor();
+  await moveHere.getByRole('button', {name: 'Cancel'}).click();
+  await moving.close();
 
   // A group's card says it shares only the project's own tasks, and moving it asks first, naming the groups in the
   // other project.
@@ -1329,8 +1379,37 @@ test('a project shares nothing between its groups, and a group joins one only af
   await chat.locator('#chat-project').selectOption({label: 'Garden redesign'});
   const move = chat.getByRole('dialog', {name: 'Move Aurora planning to Garden redesign?'});
   await move.getByText('No other group is in Garden redesign yet.').waitFor();
+  await move
+    .getByText('Its tasks, and its topics’ tasks, move with it from Aurora field guide to Garden redesign.')
+    .waitFor();
   await move.getByRole('button', {name: 'Cancel'}).click();
   assert.equal(await chat.locator('#chat-project').inputValue(), 'ab'.repeat(32));
+  // "No project" asks first too, and says the group's tasks stay on the old list, where only the owner sees them.
+  const leftPosted = [];
+  await chat.route(/\/api\/nocheh\/projects\/assignments$/, route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    leftPosted.push(body);
+    return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({...body, revision: 9})});
+  });
+  await chat.locator('#chat-project').selectOption({label: 'No project'});
+  const leave = chat.getByRole('dialog', {name: 'Remove Aurora planning from Aurora field guide?'});
+  await leave
+    .getByText('Its tasks, and its topics’ tasks, stay on Aurora field guide’s list, where only you see them.', {
+      exact: false,
+    })
+    .waitFor();
+  await leave.getByRole('button', {name: 'Cancel'}).click();
+  await leave.waitFor({state: 'detached'});
+  assert.equal(await chat.locator('#chat-project').inputValue(), 'ab'.repeat(32));
+  assert.equal(leftPosted.length, 0, 'nothing is saved before the confirm');
+  await chat.locator('#chat-project').selectOption({label: 'No project'});
+  await leave.getByRole('button', {name: 'Remove'}).click();
+  await chat.getByRole('status').filter({hasText: 'Removed from its project.'}).waitFor();
+  assert.deepEqual(
+    leftPosted.map(({space_id, mode, project_id}) => ({space_id, mode, project_id})),
+    [{space_id: '-10042', mode: 'none', project_id: null}],
+  );
   await chat.close();
 
   // A topic's card only says which project it follows.

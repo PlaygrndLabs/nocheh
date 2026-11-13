@@ -119,7 +119,12 @@ chats added later will see it. Both stay as they were accepted.
   old list, where only the owner sees them. The project's own tasks always
   stay on its list. The project assignment write (`writeAssignment` in
   [`src/stores/projects.ts`](../../src/stores/projects.ts)) calls it in its
-  transaction when a group changes from one project to another.
+  transaction when a group changes from one project to another. The dashboard
+  says so first: moving a group from one project to another, from the project
+  or from the group's page, says that its tasks, and its topics' tasks, move
+  with it; removing a group from its project, or choosing "No project", asks
+  first and says that they stay on that project's list, where only the owner
+  sees them.
 - The chat task tool and the group prompt say that a group or topic reaches
   only its own tasks and the project's, and that a task added there belongs to
   it.

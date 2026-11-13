@@ -49,6 +49,17 @@ export const projectTasksWarning = (chat: string, projects: string[]) =>
   (projects.length < 2 ? (projects[0] ?? '') : projects.slice(0, -1).join(', ') + ' and ' + projects.at(-1)) +
   ', never another group’s own tasks.';
 
+/**
+ * Shown before a group leaves its project for none: its tasks, its topics' too, stay on that project's list, where
+ * only the owner sees them (ADR-0247).
+ */
+export const leaveTasksText = (project: string) =>
+  `Its tasks, and its topics’ tasks, stay on ${project}’s list, where only you see them.`;
+
+/** Shown before a group moves from one project to another: its tasks, its topics' too, move with it (ADR-0247). */
+export const moveTasksText = (from: string, to: string) =>
+  `Its tasks, and its topics’ tasks, move with it from ${from} to ${to}.`;
+
 export const modeText: Record<Rule['mode'], {label: string; hint: string}> = {
   approved: {label: 'I approve each text', hint: 'You write or check the exact text before the chat can use it.'},
   filtered: {

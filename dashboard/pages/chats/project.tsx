@@ -8,7 +8,14 @@ import {href} from '../../lib/routes';
 import {parentOf, type Chat} from '../../lib/chats-model';
 import {Button, Card, CardBody, CardHeader, Notice, Select, Spinner} from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
-import {otherGroupsText, projectGroupsNote, projectTasksWarning, relatedGroupsHint} from './rule-dialog';
+import {
+  leaveTasksText,
+  moveTasksText,
+  otherGroupsText,
+  projectGroupsNote,
+  projectTasksWarning,
+  relatedGroupsHint,
+} from './rule-dialog';
 import {ActionError, chatHref, useAction, useChatNames} from './shared';
 
 export type Project = {
@@ -247,14 +254,31 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
   };
   const change = async (next: string) => {
     if (next === value) return;
-    const target = choices.find(project => project.id === next);
-    // Joining a project is confirmed first, naming the groups already there.
+    const target = choices.find(project => project.id === next),
+      current = data?.project ?? null;
+    // Joining a project is confirmed first, naming the groups already there; a move says its tasks go with it.
     if (
       target &&
       !(await feedback.confirm({
-        title: (data?.project ? `Move ${name} to ` : `Put ${name} in `) + target.name + '?',
-        body: <JoinNotes space={space} name={name} project={target} names={names} />,
-        confirm: data?.project ? 'Move here' : 'Put it here',
+        title: (current ? `Move ${name} to ` : `Put ${name} in `) + target.name + '?',
+        body: (
+          <div className="space-y-3">
+            <JoinNotes space={space} name={name} project={target} names={names} />
+            {current && <p>{moveTasksText(current.name, target.name)}</p>}
+          </div>
+        ),
+        confirm: current ? 'Move here' : 'Put it here',
+      }))
+    )
+      return;
+    // Leaving a project for none asks too: its tasks stay on that project's list, where only the owner sees them.
+    if (
+      !target &&
+      current &&
+      !(await feedback.confirm({
+        title: `Remove ${name} from ${current.name}?`,
+        body: <p>It then joins no project. {leaveTasksText(current.name)}</p>,
+        confirm: 'Remove',
       }))
     )
       return;

@@ -29,7 +29,7 @@ import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 import {groupSpace} from '../../lib/chats-model';
 import {ChatPicker} from '../chats/chat-picker';
 import {JoinNotes} from '../chats/project';
-import {relatedGroupsHint} from '../chats/rule-dialog';
+import {leaveTasksText, moveTasksText, relatedGroupsHint} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
 import {PrivateAnswers} from './private-answers';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
@@ -403,6 +403,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
           <div className="space-y-3">
             {other && <p>It is in {other} now. A group belongs to one project at a time.</p>}
             <JoinNotes space={adding} name={name} project={listed} names={chats.name} />
+            {other && <p>{moveTasksText(other, project.name)}</p>}
           </div>
         ),
         confirm: other ? 'Move here' : 'Add',
@@ -421,8 +422,18 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
     }
   };
 
-  // A group taken out of a project joins none, which answers "Which project does this group join?" too.
+  // A group taken out of a project joins none, which answers "Which project does this group join?" too. It asks first:
+  // the group's tasks stay on this project's list, where only the owner sees them (ADR-0247).
   const remove = async (chat: ContextChat) => {
+    const name = chats.name(chat.space_id);
+    if (
+      !(await feedback.confirm({
+        title: `Remove ${name} from ${project.name}?`,
+        body: <p>It then joins no project. {leaveTasksText(project.name)}</p>,
+        confirm: 'Remove',
+      }))
+    )
+      return;
     const result = await command.run('/projects/assignments', {
       space_id: chat.space_id,
       mode: 'none',
