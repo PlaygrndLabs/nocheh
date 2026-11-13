@@ -63,13 +63,17 @@ export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel
   return /^-?\d+$/.test(source.scope)&&source.scope!==policy.owner_id&&!policy.group_ids.includes(source.scope);
 }
 
-/** Final Telegram send authorization uses the captured original, never a prepared representation. */
-export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null},source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
+/** Final Telegram send authorization uses the captured original, never a prepared representation. An answer reader's
+ * pass (ADR-0248) delivers only into the owner's own private chat, from the owner's own update there, and only with
+ * its read set bound from its open record; never into a group. */
+export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null;answer?:string;reads?:unknown},source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
   if(!source)return false;
+  if(principal.answer!==undefined&&(source.channel!=='telegram'||!principal.reads))return false;
   if(source.channel!=='telegram')return true;
   if(source.origin!=='live'||source.kind!=='telegram_update')return false;
   try {
     const selected=conversationScope(policy,JSON.parse(source.payload.toString()),source.scope);
+    if(principal.answer!==undefined)return !!selected&&selected.owner&&selected.chat_id===principal.scope;
     return !!selected&&(selected.owner?null:selected.chat_id)===principal.scope;
   }catch{return false;}
 }

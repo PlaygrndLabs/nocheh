@@ -80,6 +80,7 @@ export class ControlledActionRepository {
   async propose(principal:Reader,value:unknown) {return afterEpoch(jobRun(principal),()=>this.proposeOnce(principal,value));}
   private async proposeOnce(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
+    if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
     const body=exact(value,['kind','arguments','summary']),raw=actionArguments(body.kind,body.arguments),note=summaryOf(body.summary);
     const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=this.access.policy().owner_id??null;
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.

@@ -131,9 +131,11 @@ export async function preparedImports(pool:Pick<pg.Pool,'query'>,limit=5):Promis
     ORDER BY updated_at,id LIMIT $1`,[limit])).rows;
 }
 /** Imports into `scope` (every scope when null) that are not ready yet, and how far along each is. */
-export async function pendingImports(pool:Pick<pg.Pool,'query'>,scope:string|null) {
+export async function pendingImports(pool:Pick<pg.Pool,'query'>,scope:string|readonly string[]|null) {
+  // Several chats, for a reader of several groups: an import of any of them counts once.
+  const scopes=scope===null?null:typeof scope==='string'?[scope]:[...scope];
   const rows=(await pool.query(`SELECT id,label,total FROM workflow_imports WHERE ready_at IS NULL AND state IN ('queued','running','completed')
-    AND ($1::text IS NULL OR $1=ANY(scopes)) ORDER BY updated_at DESC,id LIMIT 3`,[scope])).rows;
+    AND ($1::text[] IS NULL OR scopes && $1::text[]) ORDER BY updated_at DESC,id LIMIT 3`,[scopes])).rows;
   const pending=[];
   for(const row of rows){
     const progress=await importProgress(pool,row.id);

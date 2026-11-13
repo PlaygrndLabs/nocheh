@@ -3,6 +3,7 @@ import {request,type IncomingMessage,type ServerResponse} from 'node:http';
 import {HttpError,readJson} from '../http.js';
 import type {Reader} from '../access.js';
 import {mcpTools,type ToolContext,type Loopback} from './tools.js';
+import {privateAnswerTaskActions,privateAnswerTools} from '../stores/private-answers.js';
 
 /** MCP revisions this server speaks: Streamable HTTP without sessions or server-to-client requests (ADR-0233). */
 export const protocolVersions=['2025-11-25','2025-06-18','2025-03-26'];
@@ -87,11 +88,15 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
       capabilities:{tools:{listChanged:false}},serverInfo}});
   }
   if(method==='ping')return rpc(res,200,{jsonrpc:'2.0',id,result:{}});
-  if(method==='tools/list')return rpc(res,200,{jsonrpc:'2.0',id,result:{tools:mcpTools.map(({name,description,inputSchema})=>({name,description,inputSchema}))}});
+  // An answer reader is offered and runs only the read tools, and tasks only to list and read (ADR-0248).
+  const answering=options.principal.answer!==undefined,tools=answering?mcpTools.filter(item=>privateAnswerTools.has(item.name)):mcpTools;
+  if(method==='tools/list')return rpc(res,200,{jsonrpc:'2.0',id,result:{tools:tools.map(({name,description,inputSchema})=>({name,description,inputSchema}))}});
   if(method==='tools/call') {
-    const tool=mcpTools.find(item=>item.name===input.name);
+    const tool=tools.find(item=>item.name===input.name);
     const args=input.arguments===undefined?{}:input.arguments;
     if(!tool||!args||typeof args!=='object'||Array.isArray(args))return rpc(res,200,failure(id,-32602,tool?'Invalid arguments':'Unknown tool'));
+    if(answering&&tool.name==='tasks'&&!privateAnswerTaskActions.has(String((args as Record<string,unknown>).action)))
+      return rpc(res,200,{jsonrpc:'2.0',id,result:{content:[{type:'text',text:JSON.stringify({error:'tool_unavailable'})}],isError:false}});
     const context:ToolContext={call:options.call,principal:options.principal,isolated:options.isolated,deadline:turnDeadline(req)};
     // A long call, such as a memory recall, would leave the connection silent past a client's read limit. A client that takes an
     // event stream gets one after the first interval: a comment line each interval, then the answer as one message.
