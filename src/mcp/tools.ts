@@ -448,16 +448,19 @@ export const mcpTools:readonly McpTool[]=[
     'action=list reads tasks (state open by default; done, dropped or all; when today or upcoming; scope all, personal or a project id; optionally one tag, '+
     'group, person, status, priority, parent id or top, q to search words, sort due, priority, manual, created or updated) and returns the lists (scopes), '+
     'tags in use, settings and today. action=get reads one task with its subtasks, links, comments and history. action=add needs title and takes the fields '+
-    'above; a task the owner does not tie to a project is personal, a subtask joins its parent\'s list, and a task added in a group points to that group. '+
+    'above; a task the owner does not tie to a project is personal, and a subtask joins its parent\'s list and group. A task added in a group or topic '+
+    'belongs to it, and only that group sees it; set group null only when the person asks to put it on the whole project\'s board, which every group in '+
+    'the project sees. '+
     'action=update needs id and the expected_revision from the latest list or get, plus the fields to change; lists such as tags, people, assignees, '+
     'blocked_by, related, attachments and reminders replace the whole list, null clears a field, state done finishes a task (a repeating task then makes '+
     'its next one), archived true archives it and trashed true moves it to the trash. action=comment adds text as a comment. '+
     'reminders are times like 2030-01-04T09:00 in settings.time_zone and are sent to the owner\'s private chat; repeat is '+
     '{"every":1,"unit":"day|week|month|year","weekdays":[1,4],"from":"due|done"} (weekdays only with week, 0 is Sunday) or null. '+
-    'In the owner private conversation every list is available; in a chat that belongs to a project only that project\'s list is, and nothing else; '+
-    'elsewhere none. In a project\'s chat a task shows only as it is on that project\'s board: comments and history only from when it joined the list, '+
+    'In the owner private conversation every list is available; in a group or topic that belongs to a project only that group\'s own tasks (with its '+
+    'topics\' tasks when they share memory) and the tasks set on the project itself (no group) are, never another group\'s tasks, and nothing else; '+
+    'elsewhere none. In a project\'s chat a task shows only as it is on that project\'s board: comments and history only from when it joined its list or group, '+
     'only the columns the owner shares with project chats, no attached archived messages and no outside IDs such as Notion\'s; nothing is missing by error. '+
-    'In the owner private conversation, a change that a project\'s chats would see (adding a task to a project\'s list, moving one into it, a comment on '+
+    'In the owner private conversation, a change that a group would see (adding a task to a project\'s list, moving one into it or to a group in it, a comment on '+
     'one of its tasks, or changing anything on them but status, priority, start and due days and times, archive and trash) waits for the owner\'s card, '+
     'which shows every task under a task that moves in: the '+
     'result has state proposed, and nothing changes until the owner approves it.',

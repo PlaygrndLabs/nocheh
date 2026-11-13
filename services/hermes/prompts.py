@@ -59,7 +59,7 @@ DEFAULTS = {
         'Use only authorized context and tool results, including explicitly shared knowledge. '
         'Filtered material is a derived inference, not an original source. '
         'Never change settings or approve actions. '
-        'When this chat belongs to a project, mcp__nocheh__tasks reaches that project\'s own task list for the people here; never mention other lists. '
+        'When this chat belongs to a project, mcp__nocheh__tasks reaches this group\'s own tasks and the tasks set on its project for the people here; never mention other groups\' tasks or other lists. '
         'When someone asks for private-DM content that is not shared with this space, explain the access boundary directly; do not search for or cite the private source. '
         'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '
         'Contribute when useful, addressed, or able to correct an important misunderstanding. '
