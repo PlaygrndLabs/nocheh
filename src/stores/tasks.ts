@@ -973,6 +973,10 @@ export class TaskRepository {
       // An edit that changes nothing leaves the task and its revision as they were.
       if(assignments.length||Object.keys(sides).length)
         await db.query(`UPDATE owner_tasks SET ${[...assignments,'revision=revision+1','updated_at=now()'].join(',')} WHERE id=$1`,values);
+      // A project's chat moves, archives or trashes only the tasks under it that it sees; another group's task under
+      // them first leaves the family, so the sweeps below never reach it (ADR-0247).
+      const reader=this.reader(context);
+      if(reader&&(moving||changes.archived||changes.trashed))await this.release(db,id,reader,context.origin);
       const family=moving?await this.descendants(db,id,'project_id=$2,group_id=$3,project_since=$4::timestamptz',[project,grouped,since]):null;
       // An approved move takes exactly the tasks under it that its card showed, as the card showed them.
       if(context.approved&&context.approved.family!==family)throw new HttpError(409,'task_request_changed');
@@ -1146,6 +1150,22 @@ export class TaskRepository {
     if(self&&(await db.query(`WITH RECURSIVE up AS (SELECT id,parent_id FROM owner_tasks WHERE id=$1 UNION SELECT t.id,t.parent_id FROM owner_tasks t JOIN up ON t.id=up.parent_id)
       SELECT 1 FROM up WHERE id=$2`,[parent,self])).rows.length)throw new HttpError(400,'task_parent_cycle');
     return found as {id:string;project_id:string|null;group_id:string|null};
+  }
+  /**
+   * Before a project's chat moves, archives or trashes a task, each task under that task's family as the chat sees it
+   * that the chat does not see, such as another group's written before subtasks followed their parent's group, leaves
+   * the family with everything under it: it keeps its list, group and state, sits at the top of its list, where its own
+   * group sees it as before, and its history says only that it no longer sits under a task, never which or whose chat
+   * asked. So the chat neither changes nor learns of it, as when a group moves (moveGroupTasks, ADR-0247).
+   */
+  private async release(db:pg.PoolClient,id:string,reader:{project:string;reach:ReadSet|null},origin:Origin):Promise<void> {
+    const seen=(alias:string)=>`coalesce(${seesSql(alias,'$2','$3')},false)`;
+    const left=(await db.query(`WITH RECURSIVE down AS (SELECT $1::text AS id UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id WHERE ${seen('t.')})
+      SELECT o.id FROM owner_tasks o WHERE o.parent_id IN (SELECT id FROM down) AND NOT ${seen('o.')} ORDER BY o.id FOR UPDATE OF o`,
+      [id,reader.project,reachParam(reader.reach)])).rows.map(task=>task.id as string);
+    if(!left.length)return;
+    await db.query('UPDATE owner_tasks SET parent_id=NULL,revision=revision+1,updated_at=now() WHERE id=ANY($1::text[])',[left]);
+    for(const task of left)await this.record(db,task,{kind:'nocheh'},origin,{parent_id:{to:null}});
   }
   /** Change every task under a task; returns a digest of which they are and their revisions after the change. */
   private async descendants(db:pg.PoolClient,id:string,assignment:string,values:unknown[]):Promise<string> {

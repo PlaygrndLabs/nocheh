@@ -58,7 +58,14 @@ chats added later will see it. Both stay as they were accepted.
   refused with `task_group_denied`.
 - A subtask has its parent's list and group. Naming another group for it is
   refused with `task_parent_other_group`, and a change to a task's list or
-  group moves every task under it with it.
+  group moves every task under it with it. From a group or topic turn, a
+  move, archive or trash takes only the tasks under it that the turn sees: a
+  task of another group under them, written before subtasks followed their
+  parent's group, first leaves the family with every task under it, as when a
+  group moves (below). It keeps its list, group, state and joining time, and
+  its history says only that it no longer sits under a task, by Nocheh, so
+  the turn neither changes nor learns of it. The owner sees every task, so
+  the owner's own move still takes the whole family, as the card shows.
 - `owner_tasks.project_since` records when a task joined the chats that now
   see it: it is set when the task joins a list and again when its group
   changes, for the task and every task under it, under the same lock and
@@ -128,8 +135,9 @@ chats added later will see it. Both stay as they were accepted.
 - The chats named for a task set on the project itself are still the
   project's assigned groups, as in ADR-0243.
 - A task under a task of another group, written before this decision, keeps
-  its group until its family's group or list changes. Its own group sees it
-  with no parent; when its parent's group moves to another project it stays
+  its group until the owner changes its family's group or list. Its own group
+  sees it with no parent; when its parent's group moves to another project, or
+  a group's turn moves, archives or trashes its parent's family, it stays
   behind, no longer under that task.
 - Checks: who reaches which task in groups and topics under both topic
   memories, counts, tags, links, parents and manual positions, a parent
@@ -137,8 +145,9 @@ chats added later will see it. Both stay as they were accepted.
   empty parent or group, and of a subtask, read-only private answers, the
   audience of a task, a group change as an arrival and its race with a
   comment, the card for a group's task, for a group change and for setting
-  it on its project itself, and a group's tasks moving with it, without
-  another group's task under them
+  it on its project itself, a group's tasks moving with it, without
+  another group's task under them, and a group's move, archive and trash
+  leaving another group's task under them where it is
   ([check](../../test/store-tasks.test.ts)); the card lines
   ([check](../../test/prompts.test.ts)); the audience route
   ([check](../../test/mini-app.test.ts),

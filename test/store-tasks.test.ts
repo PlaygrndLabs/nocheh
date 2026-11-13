@@ -926,3 +926,87 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     await assert.rejects(s.tasks.chatGet(after,cross),{status:404});
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('a group\'s move, archive or trash takes only the tasks under it that it sees; another group\'s stays where it is (ADR-0247)',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-family:'+Date.now(),stamp=String(Date.now()).slice(-9);
+  const g1='-1001'+stamp,g2='-1002'+stamp;
+  const owner:Reader={admin:true,scope:null};
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[g1,g2],topic_memory:'group'}),
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  let serial=0;
+  const ask=async(chat:string,text:string,name:string):Promise<Reader>=>{
+    const label=String(++serial),value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,source_id:label,revision:'1',occurred_at:null,text,
+      payload:{message:{message_id:serial,date:1700000000,chat:{id:Number(chat),type:'supergroup'},from:{id:456,first_name:name},text}}};
+    const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);
+    const binding=await s.guards.state();return {admin:false,scope:chat,space:chat,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+  };
+  const stored=async(id:string)=>(await stores.control.query(`SELECT project_id,group_id,parent_id,revision,archived_at IS NOT NULL AS archived,deleted_at IS NOT NULL AS trashed,
+    project_since::text FROM owner_tasks WHERE id=$1`,[id])).rows[0];
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    const mark=String(Date.now()),p1=digest(key+':p1');
+    await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'P1','active',1)",[p1]);
+    for(const chat of [g1,g2])await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[chat,p1]);
+    // A task of the second group, with one of its own under it, under a task of the first group, as written before
+    // subtasks followed their parent's group.
+    const legacy=async(name:string,parent:string)=>{
+      const id=digest(key+':'+name),below=digest(key+':'+name+':below');
+      await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
+        VALUES($1,'canary-'||$2||'-'||$3,'todo','open',$4,$5,$6,'dashboard',now()-interval '1 hour')`,[id,name,mark,p1,g2,parent]);
+      await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
+        VALUES($1,'canary-'||$2||'-below-'||$3,'todo','open',$4,$5,$6,'dashboard',now()-interval '1 hour')`,[below,name,mark,p1,g2,id]);
+      await stores.control.query("INSERT INTO owner_task_comments(id,task_id,body,author,origin) VALUES($1,$2,'canary-'||$3||'-note','{\"kind\":\"owner\"}','dashboard')",[digest(key+':'+name+':note'),id,name]);
+      return {id,below,before:await stored(id),under:await stored(below)};
+    };
+    const alice=await ask(g1,'Put the hall on the whole project','Alice'),bob=await ask(g2,'What is ours?','Bob');
+    // Its own task under the moving task goes with it; the second group's stays, no longer under it, where that group
+    // sees it as before, with everything under it.
+    const hall=await s.tasks.create(owner,{operation_id:key+':hall',title:'Book the hall',scope:p1,group:g1});
+    const keys=await s.tasks.create(owner,{operation_id:key+':keys',title:'Get the keys',parent:hall.id});
+    const band=await legacy('band',hall.id);
+    const moved=await s.tasks.chatUpdate(alice,hall.id,{expected_revision:hall.revision,group:null});
+    assert.equal(moved.group_id,null);
+    assert.deepEqual([(await stored(keys.id)).group_id,(await stored(keys.id)).parent_id],[null,hall.id],'its own task under it moves with it');
+    const left=await stored(band.id);
+    assert.deepEqual([left.project_id,left.group_id,left.parent_id,left.project_since,left.revision],[p1,g2,null,band.before.project_since,band.before.revision+1],
+      'the other group\'s task keeps its list, group and joining time, and no longer sits under it');
+    assert.deepEqual(await stored(band.below),band.under,'and what is under that task is not touched');
+    await assert.rejects(s.tasks.chatGet(alice,band.id),{status:404},'the moving group never sees it');
+    assert.ok(!JSON.stringify(await s.tasks.chatList(alice,{state:'all'})).includes('canary-band'),'nor learns of it');
+    const theirs=await s.tasks.chatGet(bob,band.id);
+    assert.deepEqual([theirs.group_id,theirs.parent_id,theirs.comments.map((item:any)=>item.body)],[g2,null,['canary-band-note']],'its own group still sees it, with its comments');
+    assert.deepEqual(theirs.activity[0].changes,{parent_id:{to:null}},'its history says only that it no longer sits under a task');
+    assert.deepEqual(theirs.activity[0].actor,{kind:'nocheh'},'never whose chat asked');
+    assert.ok(!JSON.stringify(theirs).includes(hall.id)&&!JSON.stringify(theirs).includes(g1));
+    assert.deepEqual((await s.tasks.chatGet(bob,band.below)).parent_id,band.id);
+
+    // Archiving and trashing from the first group take only its own tasks under it too.
+    for(const [name,change,flag] of [['archive',{archived:true},'archived'],['trash',{trashed:true},'trashed']] as const){
+      const top=await s.tasks.create(owner,{operation_id:key+':'+name,title:'Clean the '+name,scope:p1,group:g1});
+      const mine=await s.tasks.create(owner,{operation_id:key+':'+name+':mine',title:'Sweep the '+name,parent:top.id});
+      const other=await legacy(name,top.id);
+      const turn=await ask(g1,'Done with the '+name,'Alice');
+      await s.tasks.chatUpdate(turn,top.id,{expected_revision:top.revision,...change});
+      assert.equal((await stored(mine.id))[flag],true,name+': its own task under it goes with it');
+      const kept=await stored(other.id);
+      assert.deepEqual([kept[flag],kept.group_id,kept.parent_id],[false,g2,null],name+': the other group\'s task is left as it was, no longer under it');
+      assert.deepEqual(await stored(other.below),other.under,name+': with everything under it');
+      assert.ok((await s.tasks.chatList(bob)).tasks.some((item:any)=>item.id===other.id),name+': its group still lists it');
+      if(name==='trash'){
+        await s.tasks.remove(owner,top.id);
+        assert.ok(await stored(other.id),'deleting the trashed task for good never takes the other group\'s task with it');
+        assert.equal(await stored(mine.id),undefined);
+      }
+    }
+
+    // The owner sees every task, so the owner's own move still takes the whole family, as its card and the dashboard show.
+    const stage=await s.tasks.create(owner,{operation_id:key+':stage',title:'Build the stage',scope:p1,group:g1});
+    const lights=await legacy('lights',stage.id);
+    await s.tasks.update(owner,stage.id,{operation_id:key+':stage-move',expected_revision:stage.revision,group:null});
+    assert.deepEqual([(await stored(lights.id)).group_id,(await stored(lights.id)).parent_id],[null,stage.id]);
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
