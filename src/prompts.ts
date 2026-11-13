@@ -30,6 +30,7 @@ export const learningPrompt=(
   "Interpret permitted conversation evidence silently. "+
   "Return only JSON with interpretations (at most 12), entity_suggestions (at most 12), entity_claims (at most 20), and optional organization. "+
   "Organization is only a proposal, never authorization: use {creates:[{key,name,description,evidence_ids}],assignments:[{space_id,project_id OR project_key,expected_revision,reason,purpose_evidence:true,evidence_ids}]} with at most 8 creates and 20 assignments; use the current conversation exact space and recorded assignment revision below. "+
+  "When organization_context.assignment has follows_group, the conversation is a topic, which always follows its group's project: propose no assignment for it. "+
   "Creates require evidence of an actual project; assignment requires explicit evidence that the conversation serves that project, not merely mentions it. "+
   "Existing project IDs must come from the supplied context; use project_key only for a create in the same proposal. "+
   "Cite original observation IDs, including the trigger. "+

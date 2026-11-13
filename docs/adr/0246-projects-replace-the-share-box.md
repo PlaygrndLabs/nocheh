@@ -70,6 +70,8 @@ chose ("Keep them, yours only").
   group even when an older own row says otherwise. Learning drops topic
   assignments, a proposal that gives a topic a project or none is refused, and
   a reset refuses a topic row other than `inherit` (TypeScript and Python).
+  A topic's learning context names the group it follows (`follows_group`),
+  and the learning instruction proposes no assignment for such a topic.
 - **Organizing never moves a chat.** Delegated organization may only create
   projects: a proposal with any assignment never matches a delegation and waits
   for the owner's review. `inspect` lists `create_project` as the only automatic

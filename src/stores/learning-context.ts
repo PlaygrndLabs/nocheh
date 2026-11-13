@@ -1,5 +1,6 @@
 import {canonical,digest} from '../archive.js';
 import {HttpError} from '../http.js';
+import {parentSpace} from '../spaces.js';
 import {applicableInterpretations,type InterpretationVersion,type LearningEvidence} from '../interpretations.js';
 import type {SourceReference} from './archive.js';
 import {SourceAccessRepository} from './access.js';
@@ -18,7 +19,8 @@ export interface PreparedLearningContext {
   // Older persisted contexts predate rule_inputs; fresh preparation always supplies it.
   rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];rule_inputs?:LearningRuleInput[];projects:{id:string;name:string}[];
   entities:EntityContext&KnownPeople&WaitingCards;
-  organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean};projects:{id:string;name:string;revision:number}[]};
+  /** A topic's assignment names the group whose project it always follows (`follows_group`); only that group moves (ADR-0246). */
+  organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean;follows_group?:string};projects:{id:string;name:string;revision:number}[]};
   limitations:string[];
 }
 export class LearningContextRepository {
@@ -121,7 +123,8 @@ export class LearningContextRepository {
     }
     await this.guards.assertCurrent(binding);
     return {source,source_object:observed.object_id,space,binding,evidence,dependencies,observations,
-      organization_context:{assignment:{space_id:space,project_id:project?.id??null,revision:effective.own_assignment?.revision??0,inherited:effective.inherited},projects:projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))},
+      organization_context:{assignment:{space_id:space,project_id:project?.id??null,revision:effective.own_assignment?.revision??0,inherited:effective.inherited,
+        ...(parentSpace(space)?{follows_group:parentSpace(space)!}:{})},projects:projects.map(p=>({id:p.id,name:p.name,revision:p.revision}))},
       rules:applicableInterpretations(versions),rule_ids:versions.map(v=>v.id),rule_inputs:[...ruleInputs.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([,v])=>v),projects,entities,limitations:[...new Set(limitations)]};
   }
 }
