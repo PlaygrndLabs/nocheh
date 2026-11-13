@@ -53,7 +53,9 @@ chose ("Keep them, yours only").
   rules and their releases stay. A reset that reads a store not yet started at
   this version selects only rules with no `project_id`, by a test that holds
   with or without that column, so a project rule never comes back as the
-  owner's after the reset.
+  owner's after the reset. An owner export made before this decision comes
+  back the same way: a project-owned rule is not restored, the share box's
+  fields are dropped, and a topic's own choice becomes `inherit`.
 - **The owner's exception.** The owner's sharing rules and fact grants stay,
   made and used only by the owner. They are the one written exception to "a
   group answer uses only that group". The rule dialog says who will see the
@@ -134,6 +136,7 @@ chose ("Keep them, yours only").
   [map](../../test/store-memory-access.test.ts),
   [owner API](../../test/store-owner-api.test.ts),
   [reset](../../test/store-reset-setup.test.ts),
+  [owner export](../../test/store-owner-portability.test.ts),
   [reset tool](../../services/hermes/test_reset_configuration.py) and the
   [dashboard](../../test/dashboard-pages.browser.mjs), and the full tester's
   `project_groups_stay_apart` gate `group_answer_uses_only_that_group`.
