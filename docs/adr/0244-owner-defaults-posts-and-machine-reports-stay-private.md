@@ -13,8 +13,9 @@ owner's private chat and one for groups), and the report destination of
 [ADR-0207](0207-a-background-job-is-one-hermes-run.md) for machine jobs. Keeps
 [ADR-0062](0062-owner-managed-telegram-group-participants.md) and
 [ADR-0212](0212-approved-operations-answer-in-the-chat-that-asked.md). Adds a
-guard on the owner's Telegram user ID. The canary gate that checks these rules
-end to end comes in a follow-up.
+guard on the owner's Telegram user ID, and a canary gate in the full tester that
+checks the step's rule end to end. Builds on the privacy canary of
+[ADR-0241](0241-honcho-runs-only-the-tools-it-offered.md).
 </status>
 
 <context>
@@ -81,6 +82,37 @@ end to end comes in a follow-up.
   to a group waits for one card in the private chat that names the group, and
   nothing reaches the group before Approve; a message to the owner's own chat
   still goes without a card.
+- **Canary gate.** ADR-0241's `private_chat_stays_out_of_groups` and its
+  `PrivacyCanary` grow rather than gain a parallel scenario. The owner plants a
+  new `PRIVATEMARK<n>` in their private chat in a plain message, a native note,
+  a personal task, a private job left on its card, and their own default role,
+  and the scenario finds each one there first (search, notes, task list, job
+  status, the role in the turn's context). `OTHER_GROUP` joins a new active
+  project with a task on its board, and a personal task's move onto that board
+  waits for its card. Every question asked then in `GROUP`'s topic and in
+  `OTHER_GROUP` carries a `PROBEMARK` and searches, recalls, lists tasks or
+  reads job status; `private_text_in_group`, which counts any model request
+  holding both marks, must not rise, and no group answer or tool result holds a
+  private mark. The owner's notes review reads group messages into the owner's
+  own notes, in the owner's profile and with the owner's role, so it is counted
+  apart (`group_text_in_owner_review`). The cards are rejected, the role
+  restored and the assignment removed at the end, also when a gate failed. The
+  marks are saved to the fixture's `canaries.json`. The run's last scenario,
+  `private_canaries_never_left_the_owner`, reads everything the fake Telegram
+  holds and fails on any planted mark outside the owner's private chat: a
+  message's text, entities, buttons or edits, the answer to a press by someone
+  other than the owner, or a call Telegram refused; without saved marks it
+  fails too. The sweep (`tools/acceptance/canaries.py` `leaks`) is a pure
+  function of that state. What the fake has no stand-in for is unit-checked:
+  a group turn's Notion result names no Notion page, and a mini app launch by
+  a person listed in group access gets `owner_required` before anything is
+  read or forwarded.
+- **Project chats reach their list.** The canary's first run found that the
+  security broker let only the owner's private turn reach `/v1/owner/tasks`,
+  so a project's chat never had the list ADR-0164 and ADR-0243 give it. The
+  broker now passes the task routes for a live turn, the owner's private one
+  or a group's, and still refuses a job, a review and every other owner view;
+  storage decides which list and shows a project's chat only its board view.
 </decision>
 
 <alternatives>
@@ -102,9 +134,10 @@ end to end comes in a follow-up.
   defaults changed.
 - A later owner ID change does not move or clear the private chat's Hermes
   profile or its memory. That is left to a later step of the Members design.
-- The canary gate, which plants private marks in the owner's chat and checks
-  that none reaches a group, is not part of this change and comes in a
-  follow-up.
+- The canary covers chat, notes, tasks, jobs, the role and what Telegram is
+  sent; Notion and the mini app only through unit checks, since the full
+  tester has no fake for them. A mark planted in a Notion page or on a
+  machine is not checked end to end.
 - Checks: group posts under freedom
   ([check](../../test/store-owner-autonomy.test.ts),
   [cards](../../test/store-approval-buttons.test.ts)); defaults per audience
@@ -114,6 +147,10 @@ end to end comes in a follow-up.
   [cards](../../test/store-machines.test.ts)); the owner ID guard
   ([check](../../services/hermes/test_configuration.py),
   [services](../../test/assistant.test.ts),
-  [bot](../../services/telegram/test_service.py)); and the full-tester
-  scenario in [telegram_scenarios.py](../../tools/acceptance/telegram_scenarios.py).
+  [bot](../../services/telegram/test_service.py)); the full-tester
+  scenario in [telegram_scenarios.py](../../tools/acceptance/telegram_scenarios.py);
+  and the canary gate ([scenarios](../../tools/acceptance/product_scenarios.py),
+  [sweep](../../test/test_canary_sweep.py), [canary](../../test/test_scripted_brain.py),
+  [Notion](../../test/store-notion.test.ts), [mini app](../../test/mini-app.test.ts),
+  [task routes](../../test/knowledge-broker.test.ts)).
 </consequences>

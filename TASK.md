@@ -48,10 +48,12 @@ else start build.", approving the Members design). One pull request in three par
   and the group that asked gets one line ([check](test/store-machine-group-report.test.ts));
   the owner ID is never a person in a group and, once saved, changes only with
   `config set` ([check](services/hermes/test_configuration.py)). Unit, store, dashboard
-  and browser checks pass. Pending: a full-tester run with the renamed scenario
-  `owner_freedom_keeps_group_cards`, and the canary gate in a follow-up. Owner step:
-  groups lose the role and skills of the old shared default until you fill in "Role and
-  skills in groups" in Settings › Assistant.
+  and browser checks pass, and so do the step's full-tester scenarios
+  (`owner_freedom_keeps_group_cards` included) and its canary gate, which finds no private
+  mark in a group's model requests, answers or Telegram messages and fails on a build that
+  lets a group read the owner's jobs. Pending: the whole full tester as a release run.
+  Owner step: groups lose the role and skills of the old shared default until you fill in
+  "Role and skills in groups" in Settings › Assistant.
 
 Production move (owner, 2026-10-28): Nocheh moves to an always-on server as a
 clean install once the MVP checks pass (stuck notes-review fix, full tester on
