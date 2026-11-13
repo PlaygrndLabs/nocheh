@@ -5,7 +5,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {CheckCircle2, KeyRound, Loader2, Pencil, Plus, Server, Trash2, XCircle} from 'lucide-react';
 import {apiPost} from '../../lib/api';
-import {useSettings, type ProviderRow} from '../../lib/settings';
+import {useSettings, type ProviderPart, type ProviderRow} from '../../lib/settings';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardBody, CardHeader, Empty, Field, Input, Notice, Select} from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
@@ -665,7 +665,7 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
         <div className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
           <div>
             <p className="text-sm font-medium">Main model</p>
-            <p className="text-[13px] text-muted">Used for every part below unless you change it there.</p>
+            <p className="text-[13px] text-muted">Used for every part below that says “Same as main”.</p>
           </div>
           <Field label="Provider" htmlFor="main-provider">
             <Select
@@ -808,7 +808,7 @@ function PartRow({
   name,
   providerOptions,
 }: {
-  part: {id: string; label: string; provider_setting: string; model_setting: string};
+  part: ProviderPart;
   providers: Provider[];
   name: (id: string) => string;
   providerOptions: (blank: string) => React.ReactNode;
@@ -822,6 +822,7 @@ function PartRow({
   const listing = useProviderModels(providers.find(p => p.id === effective));
   const text = PART_TEXT[part.id] ?? {title: part.label, hint: ''};
   const mainModel = settings.value('NOCHEH_MODEL');
+  const own = part.defaults?.[effective];
   return (
     <div className="grid gap-3 border-t border-line px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
       <div>
@@ -844,7 +845,7 @@ function PartRow({
           value={model}
           listing={listing}
           disabled={busy}
-          inherit={mainModel ? `Same as main (${mainModel})` : 'Same as main'}
+          inherit={own ? `Default (${own})` : mainModel ? `Same as main (${mainModel})` : 'Same as main'}
           onChange={value => settings.set(part.model_setting, value)}
         />
         {chosen && <ListingStatus listing={listing} className="mt-1.5" />}

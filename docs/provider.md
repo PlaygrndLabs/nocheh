@@ -30,7 +30,10 @@ memory and embedding keys.
 
 One default provider and model (`NOCHEH_PROVIDER`, `NOCHEH_MODEL`) serve
 replies (Hermes), memory (Honcho reasoning), the secret check and images unless a part
-names its own provider or model. Apply recreates the services whose routes
+names its own provider or model. One exception: a secret check on Anthropic that
+names no model (`NOCHEH_GUARD_MODEL` empty) uses `claude-haiku-5-5`, shown as
+"Default (claude-haiku-5-5)"; on other providers it follows the default model
+([ADR-0246](adr/0246-the-secret-check-on-anthropic-defaults-to-haiku-5-5.md)). Apply recreates the services whose routes
 changed: Hermes and the security broker for replies and the secret check,
 Honcho and its egress meter for memory and embeddings.
 

@@ -38,6 +38,9 @@ DEFAULTS = {
     'NOCHEH_IMAGE_PROVIDER': '', 'NOCHEH_IMAGE_MODEL': '',
     'NOCHEH_PROVIDERS': '[]', 'NOCHEH_PROVIDER_KEYS': '{}', 'ANTHROPIC_API_KEY': '',
 }
+# A part that names no model uses its default on that provider, else the main model. The secret
+# check on Anthropic uses a small, fast model; Anthropic holds it to a strict answer schema (ADR-0246).
+PART_DEFAULTS = {'guard': {'anthropic': 'claude-haiku-5-5'}}
 KEY_SETTINGS = {'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'NOCHEH_PROVIDER_KEYS'}
 MAX_CUSTOM = 10
 # A hosted gateway that sleeps when idle answers its first request only once it has
@@ -147,7 +150,8 @@ def route(values, part):
         raise ValueError('unknown_model_part')
     _, provider_setting, model_setting = PARTS[part]
     provider = (values.get(provider_setting) or '').strip() or (values.get('NOCHEH_PROVIDER') or '').strip()
-    model = (values.get(model_setting) or '').strip() or (values.get('NOCHEH_MODEL') or '').strip()
+    model = ((values.get(model_setting) or '').strip() or PART_DEFAULTS.get(part, {}).get(provider)
+             or (values.get('NOCHEH_MODEL') or '').strip())
     if not provider:
         return Route(part, '', '', model)
     known = providers(values)

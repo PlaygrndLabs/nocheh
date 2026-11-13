@@ -16,7 +16,14 @@ export type SettingField = {
   editable: boolean;
 };
 export type ProviderRow = {id: string; name: string; kind: string; url: string | null; has_key: boolean};
-export type ProviderPart = {id: string; label: string; provider_setting: string; model_setting: string};
+export type ProviderPart = {
+  id: string;
+  label: string;
+  provider_setting: string;
+  model_setting: string;
+  /** The part's own model on a provider, used when it names none; other providers use the main model. */
+  defaults?: Record<string, string>;
+};
 export type SettingsView = {
   revision: string;
   applied_revision: string | null;
