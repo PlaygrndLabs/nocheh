@@ -144,5 +144,11 @@ chats added later will see it. Both stay as they were accepted.
   ([check](../../test/mini-app.test.ts),
   [check](../../test/fixtures/owner-storage-paths.json)); the dashboard's
   move and group confirms and the subtask's group
-  ([check](../../test/dashboard-pages.browser.mjs)).
+  ([check](../../test/dashboard-pages.browser.mjs)); a group's tasks moving
+  with it through the owner's assignment, an applied organization and its
+  undo, and staying behind when it leaves every project
+  ([check](../../test/store-knowledge-management.test.ts)); and the full
+  tester's `project_groups_stay_apart` gates
+  `group_task_view_shows_its_own_task` and
+  `group_task_view_never_shows_another_groups_task`.
 </consequences>

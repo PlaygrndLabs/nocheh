@@ -135,6 +135,6 @@ chose ("Keep them, yours only").
   [owner API](../../test/store-owner-api.test.ts),
   [reset](../../test/store-reset-setup.test.ts),
   [reset tool](../../services/hermes/test_reset_configuration.py) and the
-  [dashboard](../../test/dashboard-pages.browser.mjs). The full-tester gate
-  `group_answer_uses_only_that_group` belongs to the step's scenario work.
+  [dashboard](../../test/dashboard-pages.browser.mjs), and the full tester's
+  `project_groups_stay_apart` gate `group_answer_uses_only_that_group`.
 </consequences>
