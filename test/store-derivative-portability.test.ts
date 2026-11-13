@@ -66,10 +66,10 @@ test('complete derivative transfer retains edits and lineage while imported auth
       uncertainty:'supported',evidence:[original.reference],conflicts:[]},null,key+':learned',[{source_id:'events:'+original.reference.id,revision:guard.revision,value_hash:digest(canonical(guard.value))}],binding,'fixture',async()=>[]);
     await source.learned.correct(owner,entry,{expected_revision:1,operation_id:key+':correction',text:'Owner interpretation',retired:false},async()=>[]);
     const project=await source.projects.save(owner,{name:'Portable project',description:'Entity portability fixture',state:'active',expected_revision:0,operation_id:key+':project'});
-    const assignmentRevision=(await stores.control.query('SELECT revision FROM project_assignments WHERE space_id=$1',['123'])).rows[0]?.revision??0;
-    await source.projects.assign(owner,{space_id:'123',project_id:project.id,mode:'assigned',expected_revision:assignmentRevision,operation_id:key+':assign'});
-    const entityContext=await source.entities.context(original.reference,[]),entityBinding=await source.guards.state();
-    const entityClaim=await source.entities.publishClaim({subject_id:entityContext.project!.id,predicate:'commitment',content:'The owner reported a portable commitment.',
+    // The owner's private chat never joins a project (ADR-0242), so the project's entity comes from the project itself.
+    const entityContext=await source.entities.context(original.reference,[]),projectEntity=await source.entities.ensureProject(project),entityBinding=await source.guards.state();
+    assert.equal(entityContext.project,null);
+    const entityClaim=await source.entities.publishClaim({subject_id:projectEntity.id,predicate:'commitment',content:'The owner reported a portable commitment.',
       attribution:'reported',speaker_entity_id:entityContext.speaker!.id,uncertainty:'supported',evidence:[original.reference]},entityBinding,key+':entity-claim');
     const operation=await source.operations.record({key:key+':runtime',kind:'scheduled_trigger',scope:'123',input_hash:digest('trigger')});
     const generated=await source.derived.record({operation_id:key+':generated',source:operation,kind:'runtime_context',content:Buffer.from('Runtime content'),producer:'fixture',producer_version:'1',configuration:{}});
@@ -94,13 +94,13 @@ test('complete derivative transfer retains edits and lineage while imported auth
     await target.control.query('UPDATE installation SET generation=$1',[current.generation]);await target.control.query('UPDATE guard_state SET epoch=$1,mode=$2',[current.epoch,'off']);
     await restored.sourcePortability.import(owner,await source.sourcePortability.record(owner,original.reference.id));
     await restored.attachments.commit(file.id,bytes);
-    const records:PortableRecord[]=[],keys=new Set<string>([entry,cacheId,operation.id,'*',destination,requestId,grantId,decisionId]),entityKeys=new Set([project.id,entityContext.project!.id,entityContext.speaker!.id,entityClaim.id]);
+    const records:PortableRecord[]=[],keys=new Set<string>([entry,cacheId,operation.id,'*',destination,requestId,grantId,decisionId]),entityKeys=new Set([project.id,projectEntity.id,entityContext.speaker!.id,entityClaim.id]);
     for(const type of portableDerivativeTypes) {
       let after='';do {
         const page=await source.derivativePortability.page(owner,type,after,100);
         for(const record of page.records) {
-          const v=record.value,entityRelated=entityKeys.has(record.key)||v.entity_id===entityContext.project!.id||v.entity_id===entityContext.speaker!.id||
-            v.subject_entity_id===entityContext.project!.id||v.claim_id===entityClaim.id||v.project_id===project.id;
+          const v=record.value,entityRelated=entityKeys.has(record.key)||v.entity_id===projectEntity.id||v.entity_id===entityContext.speaker!.id||
+            v.subject_entity_id===projectEntity.id||v.claim_id===entityClaim.id||v.project_id===project.id;
           const related=v.event_id===original.reference.id||v.source_id==='events:'+original.reference.id||entityRelated||
             (v.provenance as any)?.source?.id===operation.id||keys.has(record.key)||[v.source_id,v.selection_id,v.entry_id,v.operation_id].some(x=>typeof x==='string'&&keys.has(x));
           if(related){records.push(record);keys.add(record.key);if(typeof v.operation_id==='string')keys.add(v.operation_id);}

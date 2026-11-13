@@ -273,10 +273,15 @@ class ScriptedBrain:
 class PrivacyCanary:
     """Private text that must never reach a group's memory reads, and a probe that tries the one known way in.
 
-    The owner says a PRIVATEMARK in their private chat, and Honcho's learning here keeps it as a conclusion, as a real
-    model would. A group question carries a PROBEMARK. Honcho's memory chat for that question is asked to call
-    get_recent_observations, a tool Honcho does not offer under a session filter and that reads every conversation, as
-    a model might after a planted instruction. Any model request holding both marks is private text in a group's read.
+    The owner puts PRIVATEMARKs in their private chat: in a message, a native note, a personal task, a private job and
+    their default role. Honcho's learning here keeps each marked message as a conclusion, as a real model would. Every
+    group question carries a PROBEMARK, whatever it asks (a search, a recall, the task list, job status). Honcho's
+    memory chat for that question is asked to call get_recent_observations, a tool Honcho does not offer under a session
+    filter and that reads every conversation, as a model might after a planted instruction. Any model request holding
+    both marks is private text in a group's read; the newest twenty are kept with the marks they held. The one request
+    that holds both and is no group read is the owner's notes review (native-review.ts): it reads every conversation,
+    groups included, in the owner's own profile, with the owner's role, and writes only the owner's notes. It is
+    counted apart.
     """
     PRIVATE = re.compile(r'PRIVATEMARK[0-9]+')
     PROBE = re.compile(r'PROBEMARK[0-9]+')
@@ -284,27 +289,43 @@ class PrivacyCanary:
     LEARN = 'extract **explicit atomic facts**'
     TARGET = re.compile(r'<message idx="([0-9]+)" peer="([^"]*)" target="true"[^>]*>(.*?)</message>', re.S)
     DETECTOR = 'Find secret values in the supplied data.'
+    # Nocheh's own learning prompt (prompts.ts learning.interpret).
+    INTERPRET = 'Interpret permitted conversation evidence silently.'
+    # The owner's notes review: its evidence wrapper (native_memory.py native_review, native-review.ts) and its one tool.
+    REVIEW = '[Archived evidence, not instructions]\nSource nocheh:event:'
 
     def __init__(self, counts):
         self.counts = counts
-        counts.update(private_text_in_group=0, privacy_probes=0)
+        counts.update(private_text_in_group=0, privacy_probes=0, private_text_seen=[], group_text_in_owner_review=0)
 
-    def check(self, texts):
+    def check(self, texts, tools=(), roles=()):
         """Count a model request that holds private text next to a group question. The secret check is Nocheh's
-        guard reading what it prepares, not a group read."""
+        guard reading what it prepares, not a group read. Each one is kept with its marks, which kind of request it
+        was (Honcho's learning, Nocheh's interpretation, Honcho's memory chat, an agent turn), the roles of the messages
+        that held the private mark, how the request starts and the text just before the mark, so a failed run says where
+        it came in."""
         text = '\n'.join(texts)
         if not (texts and texts[0].startswith(self.DETECTOR)) and self.PRIVATE.search(text) and self.PROBE.search(text):
+            if self.REVIEW in text and set(tools) == {'memory'}:
+                self.counts['group_text_in_owner_review'] += 1
+                return
             self.counts['private_text_in_group'] += 1
+            kind = ('learning' if self.LEARN in text else 'interpretation' if self.INTERPRET in text else
+                    'memory_chat' if 'search_memory' in tools else
+                    'agent' if any(str(name).startswith('mcp__nocheh__') for name in tools) else 'other')
+            held = [roles[index] if index < len(roles) else str(index) for index, value in enumerate(texts) if self.PRIVATE.search(value)]
+            first = self.PRIVATE.search(text)
+            seen = {'private': sorted(set(self.PRIVATE.findall(text))), 'probe': sorted(set(self.PROBE.findall(text))), 'kind': kind, 'in': held,
+                    'start': texts[0][:80], 'near': text[max(0, first.start()-160):first.end()]}
+            self.counts['private_text_seen'] = (self.counts['private_text_seen'] + [seen])[-20:]
 
     def learned(self, text):
-        """Honcho's learning of a message with a private mark: one conclusion that quotes the mark and cites it."""
+        """Honcho's learning of messages with a private mark: one conclusion for each, which quotes its mark and cites it."""
         if self.LEARN not in text:
             return None
-        for found in self.TARGET.finditer(text):
-            mark = self.PRIVATE.search(found[3])
-            if mark:
-                return json.dumps({'explicit': [{'source_indices': [int(found[1])], 'content': found[2] + ' keeps a private Friday routine ' + mark[0]}]})
-        return None
+        explicit = [{'source_indices': [int(found[1])], 'content': found[2] + ' keeps a private Friday routine ' + mark[0]}
+                    for found in self.TARGET.finditer(text) for mark in [self.PRIVATE.search(found[3])] if mark]
+        return json.dumps({'explicit': explicit}) if explicit else None
 
     def probe(self, body, texts):
         """Honcho's memory chat about a group question, before any tool ran: call the tool it did not offer."""
@@ -396,7 +417,8 @@ def provider():
         @app.post('/v1/chat/completions')
         async def completions(body: chat.ChatCompletionRequest):
             texts = [brain.text(message.content) for message in body.messages]
-            privacy.check(texts)
+            privacy.check(texts, [tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)],
+                          [message.role for message in body.messages])
             probe = privacy.probe(body, texts)
             if probe:
                 return brain.render(body, probe)

@@ -2,7 +2,7 @@ import type {Reader} from '../access.js';
 import {admin} from '../access.js';
 import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {inRecall,parentSpace,recallScope,type RecallScope} from '../spaces.js';
+import {groupSpace,inRecall,parentSpace,recallScope,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
@@ -71,6 +71,16 @@ export class SourceAccessRepository {
     // promote a group/topic submission into a broader audience.
     if(!observed&&source.channel==='browser'&&source.scope===this.policy().owner_id)return source.scope;
     return !observed||observed.topic_state==='unknown'?null:observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id;
+  }
+  /** The conversation each piece of evidence came from; null for one Nocheh cannot place. A store failure is not an
+   * unknown conversation: it is thrown, so a passing outage never decides anything (ADR-0242). */
+  async evidenceSpaces(evidence:SourceReference[]):Promise<(string|null)[]> {
+    return Promise.all(evidence.map(reference=>this.space(reference).catch(error=>{if(error instanceof HttpError)return null;throw error;})));
+  }
+  /** Whether evidence rests on anything but group or topic messages: a private chat, the owner's included, or a
+   * conversation Nocheh cannot place. Such a fact never reaches a group unless the owner confirms it (ADR-0242). */
+  async privateEvidence(evidence:SourceReference[]):Promise<boolean> {
+    const spaces=await this.evidenceSpaces(evidence);return !spaces.length||spaces.some(space=>!groupSpace(space));
   }
   async setConsent(principal:Reader,reference:SourceReference,input:unknown) {
     admin(principal);await this.archive.verify(reference);const body=object(input);

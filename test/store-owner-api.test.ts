@@ -108,14 +108,20 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal(inherited.project.id,project.id);assert.equal(inherited.own_assignment,null);
     assert.equal((await request('/v1/projects/effective?space='+encodeURIComponent(space))).own_assignment.revision,1);
     await request('/v1/projects/assignments',{...assignment,operation_id:key+':staleassignment'},409);
-    const sharing=await request('/v1/sharing/rules',{name:key,sources:[space],destination:'123',enabled:true,mode:'approved',instructions:'Only the selected facts',expected_revision:0,operation_id:key+':share'});
+    await request('/v1/sharing/rules',{name:key+':private',sources:[space],destination:'123',enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':private-share'},400);
+    assert.deepEqual(await request('/v1/sharing/rules',{name:key+':private-source',sources:['123'],destination:space,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':private-source'},400),
+      {error:'sharing_private_chat'},'a private chat never shares or is shared with');
+    const sharing=await request('/v1/sharing/rules',{name:key,sources:[space],destination:space+'2',enabled:true,mode:'approved',instructions:'Only the selected facts',expected_revision:0,operation_id:key+':share'});
     assert.equal(sharing.mode,'approved');assert.ok((await request('/v1/sharing/rules')).rules.some((r:any)=>r.id===sharing.id));
     const archived=await request('/v1/projects',{id:project.id,name:key,description:'Synthetic',state:'archived',expected_revision:project.revision,operation_id:key+':archive'});
     assert.equal(archived.state,'archived');assert.equal(archived.sharing_enabled,false);
 
     await services.guards.prepare(file.event,'fixture',services.detect);
-    const shareRule=await request('/v1/sharing/rules',{name:key+':source-share',sources:['123'],destination:space,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':source-share'});
-    const sharePreview=await request('/v1/sharing/preview',{rule_id:shareRule.id,expected_revision:1,source_ids:[file.event.id],content:'Approved voice summary',operation_id:key+':share-preview'});
+    const origin=space+'1',groupEvent=(await services.capture.capture({...event,key:key+':group-source',scope:origin,source_id:'89',
+      payload:{message:{message_id:89,chat:{id:Number(origin),type:'group'},text:'A convention'}}})).source.reference;
+    await services.guards.prepare(groupEvent,'fixture',services.detect);
+    const shareRule=await request('/v1/sharing/rules',{name:key+':source-share',sources:[origin],destination:space,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':source-share'});
+    const sharePreview=await request('/v1/sharing/preview',{rule_id:shareRule.id,expected_revision:1,source_ids:[groupEvent.id],content:'Approved voice summary',operation_id:key+':share-preview'});
     assert.equal((await request('/v1/sharing/previews/'+sharePreview.id)).text,'Approved voice summary');
     assert.ok((await request('/v1/sharing/previews')).previews.some((p:any)=>p.id===sharePreview.id));
     const shareApproval={expected_revision:1,guard_revision:sharePreview.guard_revision,text_hash:sharePreview.text_hash,operation_id:key+':share-approval'};

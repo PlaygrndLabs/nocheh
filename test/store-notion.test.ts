@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {fixtureServices} from './fixture-brain.js';
 import {notionAddress,notionJobFetch,notionOwnInput,notionReads,notionRunRefusal} from '../src/stores/notion.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 
 test('a Notion read stays in the owner\'s Notion only when every address in its input is the owner\'s',()=>{
   const id='0123456789abcdef0123456789abcdef',uuid='01234567-89ab-cdef-0123-456789abcdef';
@@ -130,5 +131,59 @@ test('Notion runs only from the owner\'s private chat while on, and the owner\'s
 
     await s.notion.save(owner,{enabled:false,expected_revision:open.revision});
     await assert.rejects(ask('Search when off',{...search,input:{query:'off'}}),{code:'notion_not_enabled'});
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a group turn\'s Notion tool result never carries a Notion page id or title, the owner\'s own turn there included',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-notion-group-')),key='notion-group:'+Date.now(),group='-'+Date.now();
+  const owner:Reader={admin:true,scope:null};
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  const a=s.controlledActions,x=s.controlledExecution;
+  let serial=0;
+  const turn=async(scope:string,from:number,text:string):Promise<Reader>=>{
+    const label=String(++serial),value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:label,revision:'1',occurred_at:null,text,
+      payload:{message:{message_id:serial,date:1700000000,chat:{id:Number(scope),type:scope==='123'?'private':'supergroup',is_forum:false},from:{id:from},text}}};
+    const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);
+    const binding=await s.guards.state();
+    return {admin:false,scope:scope==='123'?null:scope,space:scope,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+  };
+  const page='0123456789abcdef0123456789abcde7',title='Made-up Garden Plan',address='https://www.notion.so/Made-up-Garden-Plan-'+page;
+  const fetch={kind:'mcp',arguments:{connection:'notion',tool:'notion-fetch',input:{id:address}}};
+  const holds=(value:unknown)=>{const text=JSON.stringify(value)??'';return [page,title,'Garden-Plan'].filter(part=>text.includes(part));};
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    await s.notion.save(owner,{enabled:true,expected_revision:(await s.notion.get(owner)).revision});
+    // The owner's own read in their private chat runs, and its result names the page (the positive control).
+    const mine=await turn('123',123,'Open my garden plan'),read=await a.propose(mine,fetch);
+    assert.equal(read.state,'approved');
+    const row=(await stores.control.query("SELECT * FROM workflow_registry WHERE family='tools' AND job_id=$1",[read.id])).rows[0];
+    const lease=await claimHostWorkflow(stores.control,{workflow_id:row.id,dispatch:row.dispatch,family:'tools',run_id:'fixture-'+row.id});assert.equal(lease.claimed,true);
+    const b={id:read.id,actor:'wf-'+row.id,workflow_id:row.id,workflow_token:lease.token};
+    assert.equal((await x.claim(b)).claimed,true);assert.deepEqual(await x.start(b),{started:true});
+    await x.finish({id:read.id,actor:b.actor,state:'done',result:{content:[{type:'text',text:'# '+title+'\nPage '+page}]}});
+    assert.deepEqual(holds(await a.inspect(mine,read.id)),[page,title,'Garden-Plan'],'the owner\'s private chat reads its own result');
+    assert.equal((await a.recent(mine)).some(item=>item.id===read.id),true);
+
+    // In the group, a member and the owner alike: the call is refused with a fixed code, the owner's read is not found,
+    // and the chat's recent operations do not list it. Nothing they return names the page.
+    for(const [from,who] of [[9,'a member'],[123,'the owner in the group']] as [number,string][]) {
+      const asker=await turn(group,from,'What is in the garden plan?');
+      const refused=await a.propose(asker,fetch).catch(error=>error);
+      assert.deepEqual([refused.status,refused.code],[403,'notion_owner_private_only'],who);
+      assert.deepEqual(holds({message:refused.message,code:refused.code,body:refused.body}),[],who);
+      const missing=await a.inspect(asker,read.id).catch(error=>error);
+      assert.deepEqual([missing.status,missing.code],[404,'action_not_found'],who);
+      assert.deepEqual(holds({message:missing.message,code:missing.code}),[],who);
+      const recent=await a.recent(asker);
+      assert.equal(recent.some(item=>item.id===read.id),false,who);assert.deepEqual(holds(recent),[],who);
+      assert.deepEqual(holds(await s.telegramActions.recent(asker)),[],who);
+    }
+    assert.equal((await stores.control.query("SELECT count(*)::int FROM controlled_actions WHERE kind='mcp' AND space_id=$1",[group])).rows[0].count,0,
+      'a group never records a Notion call');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

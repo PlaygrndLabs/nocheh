@@ -2,6 +2,7 @@
 import {useCallback, useRef, useState} from 'react';
 import {Globe, Plug, Send, Terminal, type LucideIcon} from 'lucide-react';
 import {apiPost} from '../../lib/api';
+import {privateChatErrors} from '../../lib/chats-model';
 import {refreshResources, useResource} from '../../lib/resource';
 import type {DecisionKind} from '../../lib/supervision';
 import type {Tone} from '../../ui/core';
@@ -182,6 +183,7 @@ export const actionStateLabel = (action: Pick<Action, 'kind' | 'state' | 'resolu
 /** Plain words for an error code from the API. */
 export function problemText(error: unknown): string {
   const code = error instanceof Error ? error.message : String(error ?? '');
+  if (privateChatErrors[code]) return privateChatErrors[code]!;
   if (/expired/.test(code)) return 'This request expired. Nocheh will ask again if it is still needed.';
   if (code === 'memory_fact_changed')
     return 'The fact changed after this was suggested, so it can’t be shared in this form.';

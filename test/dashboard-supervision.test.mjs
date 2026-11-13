@@ -47,6 +47,11 @@ test('stale or failed proposals can be dismissed without authorizing their stale
  assert.equal(staleReview.approve,false);assert.equal(staleReview.reject,true);
  for(const state of ['queued','waiting'])assert.equal(knowledgeDecisionControls(state,{stale:true}).cancel,true);
 });
+test('a fact share whose source could not be shown cannot be approved, only rejected (ADR-0242)',()=>{
+ const unseen=knowledgeDecisionControls('review',{unseen:true});
+ assert.equal(unseen.approve,false);assert.equal(unseen.reject,true);
+ assert.equal(knowledgeDecisionControls('review',{unseen:false}).approve,true);
+});
 test('dismissal requires the saved revision and an available observation and cannot repeat a closed outcome',()=>{
  for(const state of ['review','queued','waiting','stale','failed','applied']){
   for(const blocker of ['unavailable','changed','busy']){

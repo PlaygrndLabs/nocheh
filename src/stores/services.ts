@@ -125,13 +125,13 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
   },{call:options.runtime,owner:()=>options.policy().owner_id});
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
-  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs),machines=new MachineRepository(access,jobs);
+  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
   jobs.stopped=async id=>{await controlledActions.stopJob(id);};
   controlledExecution.settled=id=>actionCommands.settle('controlled',id).then(()=>{},()=>{});
-  const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics});
+  const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics,memoryAccess});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
   return {brain:options.brain,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,

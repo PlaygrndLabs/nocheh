@@ -1,14 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
-import {conversationScope,telegramDeliveryAllowed} from '../src/assistant-policy.js';
+import {assistantPolicy,conversationScope,telegramDeliveryAllowed} from '../src/assistant-policy.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {dispatchCommitted,storedTranscripts} from '../src/assistant.js';
 import {fixtureBrain} from './fixture-brain.js';
@@ -34,6 +34,19 @@ test('group participants need an explicit grant and a deny overrides it',()=>{
   const denied={...policy,group_access:{'-20':{granted:['456'],denied:['456']}}};
   assert.equal(conversationScope(denied,update(-20,456),'-20'),null);
   assert.equal(conversationScope(denied,update(-20,123),'-20')?.owner,false);
+});
+
+test('the owner listed as a person allowed or denied in a group stops the services from starting',async()=>{
+  const folder=await mkdtemp(join(tmpdir(),'nocheh-policy-'));
+  try {
+    const file=join(folder,'policy.json');
+    for(const access of [{'-20':{granted:['123'],denied:[]}},{'-20':{granted:[],denied:['123']}}]) {
+      await writeFile(file,JSON.stringify({...policy,group_access:access}));
+      assert.throws(()=>assistantPolicy(file),/Invalid TELEGRAM_GROUP_ACCESS/,JSON.stringify(access));
+    }
+    await writeFile(file,JSON.stringify({...policy,group_access:{'-20':{granted:['456'],denied:[]}}}));
+    assert.deepEqual(assistantPolicy(file).group_access,{'-20':{granted:['456'],denied:[]}});
+  }finally{await rm(folder,{recursive:true,force:true});}
 });
 
 test('final Telegram delivery checks the original sender after grant revocation',()=>{

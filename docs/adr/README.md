@@ -37,6 +37,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 ### Telegram and other doors
 
 - In a selected group, only the owner starts turns unless a member is granted; a deny wins, and delivery re-checks access ([0062](0062-owner-managed-telegram-group-participants.md)).
+- The owner's Telegram user ID is never a person allowed or denied in a group; the owner sets it once in Settings › Telegram, and later it changes only from the command line ([0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md)).
 - By default a group message starts a turn only when it addresses Nocheh: it replies to or mentions the bot, or opens with its display name or a name in `TELEGRAM_BOT_NAMES`; `TELEGRAM_GROUP_REPLIES=all` answers every message ([0133](0133-group-replies-when-addressed.md), [0134](0134-editable-bot-names.md)).
 - Chats Nocheh does not serve are archived but never prepared or shown to a model; a private stranger gets one fixed reply a day ([0182](0182-strangers-cost-nothing-and-reach-no-model.md)).
 - Every physical send is re-checked against its approved chat, topic and current policy; a rate-limited send gets at most three journaled attempts, and an uncertain send never resends ([0089](0089-physical-telegram-delivery-boundary.md), [0090](0090-durable-telegram-rate-limit-retries.md)).
@@ -46,6 +47,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 ### Replies and turns
 
 - Nocheh's own bot polls and sends for Telegram ([0235](0235-nocheh-owns-the-telegram-bot.md)); each chat has its own Hermes profile with a fixed tool set and its own role (SOUL.md) and skills; a role or skill change reaches continuing sessions through Hermes' own prompt refresh ([0021](0021-scoped-native-assistant-processes.md), [0151](0151-chat-role-and-skills-in-hermes-profiles.md), [0228](0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md)).
+- The owner's private chat and groups each have their own default role and skills; only the owner's private chat takes its default, and every other turn takes the default for groups, which starts empty ([0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md)).
 - Each turn runs in its own sealed container; browser TUI turns use the same isolation, and abandoned leases are reclaimed under the profile lock ([0028](0028-isolated-native-browser-turns.md), [0098](0098-isolated-native-lease-recovery.md)).
 - Turns start in Telegram update order per chat or topic; chats and topics run in parallel up to owner limits (3 replies, 4 agent runs) ([0104](0104-telegram-update-order-and-untransmitted-sends.md), [0125](0125-per-chat-telegram-dispatch-lanes.md), [0136](0136-per-topic-dispatch-lanes.md), [0126](0126-owner-set-parallel-replies-and-runs.md)).
 - The owner's instruction texts ride on each runtime call; defaults stay in code ([0152](0152-owner-editable-built-in-instructions.md)).
@@ -83,6 +85,8 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Owner recall spans every chat Nocheh serves; each group has its own memory audience, and its topics share it unless `TELEGRAM_TOPIC_MEMORY=topic` ([0030](0030-configurable-space-memory.md), [0135](0135-group-topics-share-memory.md)).
 - Relationships never grant access; the owner approves one-time or lasting fact grants per group or topic ([0057](0057-memory-relationship-access-map.md)); a project grants access only while its chats share what they know ([0226](0226-a-project-can-share-what-its-chats-know.md)).
 - A grant, its follow-up message and its workflow request commit together; delivery re-checks the exact grant; replays are serialized and keep expiry; an unstarted handoff resumes on an exact owner replay ([0093](0093-atomic-memory-approval-followups.md), [0094](0094-current-memory-authority-at-delivery.md), [0095](0095-recover-unstarted-memory-handoffs.md), [0096](0096-serialize-memory-decision-replays.md)).
+- Only groups and their topics share, are shared with or join a project; every other chat, the owner's included, counts as private and fails closed. Suggestions skip facts with private evidence, one-time access posts once now, lasting access posts only when chosen, and every share names where the fact came from and who will see it ([0242](0242-private-chats-stay-out-of-group-sharing.md)).
+- The full tester plants private marks in the owner's private chat (a message, a note, a personal task, a private job, the owner's role), checks that no group's or project chat's model request or answer holds one, and sweeps everything the fake Telegram sent outside the owner's chat; Notion and the mini app are unit-checked ([0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md)).
 
 ### Actions and approvals
 
@@ -92,6 +96,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Topic destinations stay exact, a chat follows its own requests across turns, and waiting approvals carry across quiet epochs ([0092](0092-exact-topic-action-destinations.md), [0166](0166-a-chat-follows-its-own-message-requests.md), [0200](0200-waiting-approvals-survive-reaction-epochs.md)).
 - When an approved operation ends, the agent continues in the chat that asked and answers there as a reply to the request, at most three times per request; such a follow-up never acts under the owner's freedom setting ([0212](0212-approved-operations-answer-in-the-chat-that-asked.md)).
 - An operation a rule or the owner freedom setting already allows is waited for in the turn, up to a minute, and answers in that reply; no follow-up repeats it ([0215](0215-an-allowed-operation-answers-in-the-same-turn.md)).
+- The owner freedom setting covers tools and messages to the owner's own chat only: a message the owner asks for in their private chat for any group or topic always waits for its card, which names that chat ([0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md)).
 - A web read's card can allow its site in that chat or topic for 12 hours or 30 days, and a command's card that exact command for 30 days; rules survive epochs, deny rules still win, and connected tools and messages are decided one by one ([0214](0214-allow-a-site-or-command-in-one-chat.md)); the card names the topic and says the rule covers everyone allowed there ([0225](0225-member-safety-rules.md)).
 - An operation or message whose outcome is unclear waits in the Inbox until the owner says it ran, says it did not, or dismisses it; an unclear web page read closes by itself. The receipt stays as observed and nothing runs again ([0218](0218-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md)).
 - The brain sits behind a brain socket: Nocheh starts, observes and cancels turns and reaches the brain's own settings and notes only through it, the brain never sends to a platform, and Hermes is the only brain plugged in today ([0234](0234-brain-socket.md)).
@@ -108,6 +113,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Owner-approved private-chat jobs read Notion as the owner allows; changes always ask, and group or member jobs never reach Notion ([0203](0203-owner-approved-jobs-read-notion.md)); a job keeps the Notion access it was approved with ([0225](0225-member-safety-rules.md)).
 - A job's changes come on list cards after its report ([0204](0204-a-jobs-changes-come-on-list-cards.md)).
 - The owner's own request in their private chat or an active project's group can ask for a job on one of the owner's machines with a short plan; one plan card always goes to the private chat, and the job's Hermes terminal and file tools then run on the machine over SSH. The `nocheh-machines` service holds the keys, every command is logged, Stop, limits and the off switches end only the programs the job started there, so the login may be the owner's own ([0237](0237-stop-ends-only-the-programs-a-machine-job-started.md)), and there are no snapshots; every job card must fit Telegram ([0231](0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md)).
+- A machine job's report and limit note go to the owner's private chat, also when asked in a group; that group gets one fixed line, and there Nocheh lists no machines and shows no machine, plan or to-do list ([0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md)).
 
 ### Workflows and schedules
 
@@ -124,7 +130,8 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - The owner's tasks live in the control store as personal or project lists, with links, tags and Notion-like fields ([0160](0160-owner-task-list.md), [0164](0164-task-lists-links-and-tags.md), [0167](0167-tasks-like-a-notion-table.md)).
 - The agent proposes knowledge changes; delegated project creation and chat assignment apply later, with receipts and inbox review ([0091](0091-bounded-agent-knowledge-organization.md)).
 - A project has its own role and skills; a chat's role wins, and skills stack ([0196](0196-projects-have-their-own-role-and-skills.md)).
-- A project's chats share what they know only when the owner ticks it on the project, through rules the project keeps; a chat can be left out, private chats never take part, and automatic organization never moves a chat into or out of such a project ([0226](0226-a-project-can-share-what-its-chats-know.md)).
+- A project's chats share what they know only when the owner ticks it on the project, through rules the project keeps; a chat can be left out, private chats never take part, and automatic organization never moves a chat into or out of such a project ([0226](0226-a-project-can-share-what-its-chats-know.md)); a private chat never joins any project ([0242](0242-private-chats-stay-out-of-group-sharing.md)).
+- A project's chat sees a task only as it is on that project's board, from when it joined, with the columns the owner shares; from the owner's private chat, a change those chats would see waits for a card that names them, and only the owner moves a chat into a project with tasks ([0243](0243-project-boards-get-the-private-side-only-through-a-card.md)).
 
 ### Imports
 

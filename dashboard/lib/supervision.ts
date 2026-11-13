@@ -75,11 +75,13 @@ export function knowledgeDecisionControls(
     changed = false,
     busy = false,
     stale = false,
-  }: {unavailable?: boolean; changed?: boolean; busy?: boolean; stale?: boolean} = {},
+    unseen = false,
+  }: {unavailable?: boolean; changed?: boolean; busy?: boolean; stale?: boolean; unseen?: boolean} = {},
 ) {
   const locked = unavailable || changed || busy;
   return {
-    approve: state === 'review' && !locked && !stale,
+    // `unseen`: the card could not show what approving needs the owner to see first, such as where a fact came from.
+    approve: state === 'review' && !locked && !stale && !unseen,
     reject: state === 'review' && !locked,
     cancel: ['queued', 'waiting', 'stale', 'failed'].includes(state) && !locked,
     undo: state === 'applied' && !locked && !stale,

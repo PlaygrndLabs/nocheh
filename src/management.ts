@@ -407,7 +407,7 @@ export async function startManagement() {
         const body=object(await readJson(req));
         return json(res,200,await python({operation:'brain.manage',request:{action:'preferences',scope:body.scope,changes:body.changes,revision:body.revision}}));
       });
-      // Role (SOUL.md) and skills of one chat's native profile, or `default` for every chat.
+      // Role (SOUL.md) and skills of one chat's native profile, `default` for the owner's private chat, or `default:groups` for every group.
       if (req.method === 'GET' && route === '/memory/persona')
         return json(res,200,await python({operation:'brain.manage',request:{action:'persona',scope:url.searchParams.get('scope')}}));
       if (req.method === 'POST' && route === '/memory/persona') return exclusive('writer-start',async()=>{

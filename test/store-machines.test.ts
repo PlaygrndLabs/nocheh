@@ -234,18 +234,18 @@ test('only the owner\'s own request in their private chat or an active project\'
     await s.jobs.stop(owner,{id:first.id});
     // Asked by the owner in the project's group: the card goes to the private chat, and the group is told where it is.
     const grouped=await ask(project,123);
-    assert.deepEqual([grouped.approver,grouped.machine],['owner',{name:'build-vm'}]);
+    assert.deepEqual([grouped.approver,grouped.machine,grouped.steps],['owner',undefined,undefined],'the group sees no machine or plan');
     approvals.length=0;
     const groupOffer=await s.actionCommands.offer('background',grouped);
     assert.deepEqual([approvals[0].chat_id,approvals[0].reply_to],['123',undefined]);
-    assert.match(String(groupOffer.message),/was sent to them in their private chat with you\. In this chat answer them as "you"/);
-    assert.equal((await job(grouped.id)).space_id,project,'its report goes to the group');
+    assert.match(String(groupOffer.message),/was sent to them in their private chat with you\. In this chat answer them as "you"[^]*the report goes there too/);
+    assert.equal((await job(grouped.id)).space_id,project,'it was asked in the group');
 
-    // The live turn of the owner's own message sees the machines a job may work on; a member's does not.
+    // The live turn of the owner's own message in their private chat sees the machines a job may work on; no group turn does.
     const listed=await s.jobs.list(await said('123',123,'What can you work on?'));
     assert.deepEqual(listed.machines,[{name:'build-vm',ready:true},{name:'spare-vm',ready:false}]);
     const mine=listed.jobs.find((row:any)=>row.id===asked.id)!;assert.deepEqual([mine.machine,mine.steps],[{name:'build-vm'},steps]);
-    assert.deepEqual((await s.jobs.list(await said(project,123,'And here?'))).machines?.map(row=>row.name),['build-vm','spare-vm']);
+    assert.equal((await s.jobs.list(await said(project,123,'And here?'))).machines,undefined,'not even the owner\'s own message in a group');
     assert.equal((await s.jobs.list(await said(project,9,'And for me?'))).machines,undefined);
     assert.equal((await s.jobs.list(await said(other,123,'And there?'))).machines,undefined);
 
@@ -388,8 +388,8 @@ test('only the owner\'s own request in their private chat or an active project\'
 
     // The project group's run works on the machine too, though it is no owner turn.
     const g=await start(grouped);
-    // Its card is in the private chat, so it does not say the report comes there.
-    await s.actionCommands.settle('background',grouped.id);await settledWith(grouped.id,'⏳ Approved. It runs now and reports in the chat where it was asked.');
+    // Its card is in the private chat, where its report goes too.
+    await s.actionCommands.settle('background',grouped.id);await settledWith(grouped.id,'⏳ Approved. It runs now and reports here when done.');
     assert.equal(g.context.background.machine,true);assert.deepEqual(await binding(g.credential),{job:grouped.id,machine:'build-vm'});
     assert.equal((await exec(brokerBase,g.credential,execBody())).status,200);
 

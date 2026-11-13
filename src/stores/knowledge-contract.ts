@@ -1,5 +1,5 @@
 import {HttpError,object,string} from '../http.js';
-import {validateSpace} from '../spaces.js';
+import {groupSpace,validateSpace} from '../spaces.js';
 import {withoutNulls} from '../interpretations.js';
 
 export const knowledgeId=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_knowledge_identity');return id;};
@@ -21,14 +21,33 @@ const payloadKeys:Record<ReviewKind,string[]>={
  sharing_rule:['id','name','sources','destination','enabled','mode','instructions','expected_revision'],
  fact_grant:['fact_id','fact_revision','destination','wording','expires_at'],fact_revoke:['expected_revision']
 };
-/** The organization part of a learning answer. Honcho answers an absent field as null: a null list is empty, and an
- * item's null field, such as the unused one of project_id and project_key, is left out. */
-export function learnedOrganization(organization:Record<string,unknown>):OrganizationProposal {
+/** The organization part of a learning answer, or null when only private-chat assignments were proposed. Honcho answers an absent field
+ * as null: a null list is empty, and an item's null field, such as the unused one of project_id and project_key, is left
+ * out. A private chat never joins a project, so an assignment of one is dropped, not the whole answer (ADR-0242). */
+export function learnedOrganization(organization:Record<string,unknown>):OrganizationProposal|null {
  const items=(value:unknown)=>Array.isArray(value)?value.map(withoutNulls):value??[];
- return parseKnowledgeProposal({...organization,creates:items(organization.creates),assignments:items(organization.assignments),kind:'organization',
+ const assignments=items(organization.assignments);
+ const privateChat=(item:unknown)=>{if(!item||typeof item!=='object')return false;try{return !groupSpace(validateSpace((item as Record<string,unknown>).space_id));}catch{return false;}};
+ const kept=Array.isArray(assignments)?assignments.filter(item=>!privateChat(item)):assignments;
+ const creates=items(organization.creates);
+ // An answer that only assigned private chats proposes nothing; an answer that proposed nothing is still malformed.
+ if(Array.isArray(assignments)&&Array.isArray(kept)&&kept.length<assignments.length&&!kept.length&&Array.isArray(creates)&&!creates.length)return null;
+ return parseKnowledgeProposal({...organization,creates,assignments:kept,kind:'organization',
   reason:organization.reason??'Organize the permitted conversation evidence.'}) as OrganizationProposal;
 }
-export function parseKnowledgeProposal(input:unknown):KnowledgeProposal {
+/** The private chats a proposal would share from or into, or put in a project; only a group or topic may be (ADR-0242). */
+export function proposalPrivateChats(value:KnowledgeProposal):string[] {
+ const named=value.kind==='organization'?value.assignments.map(a=>a.space_id):value.kind==='project_assignment'?(value.payload.mode==='assigned'?[value.payload.space_id]:[]):
+  value.kind==='sharing_rule'?[...value.payload.sources,value.payload.destination]:value.kind==='fact_grant'?[value.payload.destination]:[];
+ return [...new Set(named.filter((space:string)=>!groupSpace(space)))].sort();
+}
+/**
+ * A proposal the agent makes, or one already saved. A new one never names a private chat where it would share from or
+ * into, or put in a project (ADR-0242). A saved one (`stored`) is read as it was saved, so a proposal from before that
+ * rule still lists and opens, and the owner can cancel it; applying it parses it as new and so is refused.
+ */
+export function parseKnowledgeProposal(input:unknown,options:{stored?:boolean}={}):KnowledgeProposal {
+ const shareable=(value:unknown,code:string):string=>{const space=validateSpace(value);if(!options.stored&&!groupSpace(space))throw new HttpError(400,code);return space;};
  const head=object(input);
  if(head.kind==='organization') {
   const row=knowledgeObject(input,['kind','reason','creates','assignments']);
@@ -41,26 +60,26 @@ export function parseKnowledgeProposal(input:unknown):KnowledgeProposal {
    if((a.project_id!==undefined)===(a.project_key!==undefined)||typeof a.purpose_evidence!=='boolean')throw new HttpError(400,'invalid_organization_assignment');
    const project_key=a.project_key===undefined?undefined:words(a.project_key,80);
    if(project_key&&!creates.some(c=>c.key===project_key))throw new HttpError(400,'unknown_project_key');
-   return {space_id:validateSpace(a.space_id),...(project_key?{project_key}:{project_id:knowledgeId(a.project_id)}),expected_revision:knowledgeRevision(a.expected_revision),evidence_ids:evidence(a.evidence_ids),reason:words(a.reason,2000),purpose_evidence:a.purpose_evidence};});
+   return {space_id:shareable(a.space_id,'project_private_chat'),...(project_key?{project_key}:{project_id:knowledgeId(a.project_id)}),expected_revision:knowledgeRevision(a.expected_revision),evidence_ids:evidence(a.evidence_ids),reason:words(a.reason,2000),purpose_evidence:a.purpose_evidence};});
   if(new Set(assignments.map(a=>a.space_id)).size!==assignments.length)throw new HttpError(400,'duplicate_organization_assignment');
   return {kind:'organization',reason:words(row.reason,4000),creates,assignments};
  }
  const row=knowledgeObject(input,['kind','reason','target_id','payload']),kind=row.kind as ReviewKind;
  if(!reviewKinds.includes(kind))throw new HttpError(400,'unsupported_knowledge_operation');
  const payload=knowledgeObject(row.payload,payloadKeys[kind]);
- if(kind!=='fact_grant')knowledgeRevision(payload.expected_revision);else {knowledgeId(payload.fact_id);knowledgeRevision(payload.fact_revision);validateSpace(payload.destination);words(payload.wording,12000);}
+ if(kind!=='fact_grant')knowledgeRevision(payload.expected_revision);else {knowledgeId(payload.fact_id);knowledgeRevision(payload.fact_revision);shareable(payload.destination,'memory_grant_private_destination');words(payload.wording,12000);}
  const targeted=kind.startsWith('entity_')||kind==='fact_revoke';
  if(targeted!==(row.target_id!==undefined))throw new HttpError(400,'knowledge_target_required');
  if(payload.id!==undefined)knowledgeId(payload.id);
  if(kind==='project_save'){words(payload.name,200);string(payload.description??'',4000);if(!['active','archived'].includes(payload.state))throw new HttpError(400,'invalid_project');}
- if(kind==='project_assignment'){validateSpace(payload.space_id);if(!['assigned','none','inherit'].includes(payload.mode))throw new HttpError(400,'invalid_project_assignment');if(payload.mode==='assigned')knowledgeId(payload.project_id);}
+ if(kind==='project_assignment'){validateSpace(payload.space_id);if(!['assigned','none','inherit'].includes(payload.mode))throw new HttpError(400,'invalid_project_assignment');if(payload.mode==='assigned'){knowledgeId(payload.project_id);shareable(payload.space_id,'project_private_chat');}}
  if(kind==='entity_rename')words(payload.name,200);
  if(kind==='entity_merge')knowledgeId(payload.target_id);
  if(kind==='entity_correct'){string(payload.content,8000);if(!['direct','reported','inferred'].includes(payload.attribution)||!['uncertain','supported','explicit'].includes(payload.uncertainty)||typeof payload.retired!=='boolean')throw new HttpError(400,'invalid_entity_correction');}
  if(kind==='sharing_rule'){
-  words(payload.name,200);validateSpace(payload.destination);string(payload.instructions??'',4000);
+  words(payload.name,200);shareable(payload.destination,'sharing_private_chat');string(payload.instructions??'',4000);
   if(!Array.isArray(payload.sources)||payload.sources.length>100||typeof payload.enabled!=='boolean'||!['approved','filtered'].includes(payload.mode))throw new HttpError(400,'invalid_sharing_rule');
-  payload.sources=payload.sources.map(validateSpace);if(payload.sources.includes(payload.destination)||payload.enabled&&!payload.sources.length)throw new HttpError(400,'invalid_sharing_rule');
+  payload.sources=payload.sources.map(source=>shareable(source,'sharing_private_chat'));if(payload.sources.includes(payload.destination)||payload.enabled&&!payload.sources.length)throw new HttpError(400,'invalid_sharing_rule');
  }
  return {kind,reason:words(row.reason,4000),...(targeted?{target_id:knowledgeId(row.target_id)}:{}),payload};
 }

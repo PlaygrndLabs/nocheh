@@ -51,7 +51,8 @@ def dispatch(root, model, policy, body):
     if action == 'persona':
         from . import persona
         scope = body.get('scope')
-        path = (persona.default_path(root) if scope == 'default' else
+        # `default` is the owner's private chat's default, `default:groups` the one every group and topic reads.
+        path = (persona.default_path(root, 'owner') if scope == 'default' else persona.default_path(root, 'group') if scope == 'default:groups' else
                 persona.project_path(root, scope.removeprefix('project:')) if isinstance(scope, str) and scope.startswith('project:') else
                 profile_path(root, scope, policy))
         if 'role' in body or 'skills' in body:

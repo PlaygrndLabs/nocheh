@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS memory_access_settings (
  CHECK(destination<>'*' OR (suggestions IS NOT NULL AND notify_owner IS NOT NULL AND auto_followup IS NOT NULL AND request_ttl_seconds IS NOT NULL AND default_grant_mode IS NOT NULL))
 );
 INSERT INTO memory_access_settings(destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode)
- VALUES('*','related',true,true,86400,'one_time') ON CONFLICT(destination) DO NOTHING;
+ VALUES('*','related',true,false,86400,'one_time') ON CONFLICT(destination) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS memory_access_requests (
  id text PRIMARY KEY,request_hash text UNIQUE NOT NULL,source_reference jsonb NOT NULL,destination text NOT NULL,source_scope text NOT NULL,logical_profile text NOT NULL,

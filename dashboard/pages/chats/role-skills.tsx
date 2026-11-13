@@ -1,8 +1,10 @@
 /**
  * "Role and skills": who Nocheh is in a chat and the skills it may use there.
  * They live in the chat's own Hermes profile (its SOUL.md and skills folder);
- * `project:<id>` holds the ones every chat in a project adds, and `default` the
- * ones every chat starts from. Only the owner sets them.
+ * `project:<id>` holds the ones every chat in a project adds. `default` holds the
+ * ones the owner's private chat starts from and `default:groups` the ones every
+ * group and topic starts from; the private chat's never load in a group. Only the
+ * owner sets them.
  */
 import {useState} from 'react';
 import {Plus, Trash2} from 'lucide-react';
@@ -41,8 +43,23 @@ export function personaProblems(role: string, skills: Skill[]): Record<string, s
 
 const same = (a: Skill[], b: Skill[]) => JSON.stringify(a) === JSON.stringify(b);
 
-export function RoleAndSkills({scope, where, description}: {scope: string; where: string; description: string}) {
+export function RoleAndSkills({
+  scope,
+  where,
+  description,
+  title = 'Role and skills',
+  audience,
+}: {
+  scope: string;
+  where: string;
+  description: string;
+  title?: string;
+  /** Whose default a chat starts from: the owner's private chat's, or the one for groups. */
+  audience?: 'owner' | 'group';
+}) {
   const project = scope.startsWith('project:');
+  const fallback = scope === 'default' || scope === 'default:groups';
+  const own = (audience ?? (scope === 'default' ? 'owner' : 'group')) === 'owner';
   const persona = useResource<Persona>('/memory/persona?scope=' + encodeURIComponent(scope));
   const data = persona.data && persona.data.scope === scope ? persona.data : null;
   const [role, setRole] = useState<string | null>(null);
@@ -98,7 +115,7 @@ export function RoleAndSkills({scope, where, description}: {scope: string; where
 
   return (
     <Card>
-      <CardHeader title="Role and skills" description={description} />
+      <CardHeader title={title} description={description} />
       <div className="px-5 pt-3 pb-5">
         {persona.error && !data ? (
           <LoadError what="the role and skills" error={persona.error} />
@@ -118,11 +135,13 @@ export function RoleAndSkills({scope, where, description}: {scope: string; where
                 rows={4}
                 value={currentRole}
                 placeholder={
-                  scope === 'default'
+                  fallback
                     ? 'No role set. Nocheh uses its built-in one.'
                     : project
-                      ? 'Uses the role for every chat.'
-                      : 'Uses its project’s role, or the role for every chat.'
+                      ? 'Uses the default role for groups.'
+                      : own
+                        ? 'Uses the default role for your private chat.'
+                        : 'Uses its project’s role, or the default role for groups.'
                 }
                 onChange={event => {
                   start();
@@ -134,11 +153,15 @@ export function RoleAndSkills({scope, where, description}: {scope: string; where
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h3 className="text-[13px] font-medium">Skills</h3>
                 <p className="text-xs text-muted">
-                  {scope === 'default'
-                    ? 'Every chat can use these.'
+                  {fallback
+                    ? own
+                      ? 'Your private chat can use these.'
+                      : 'Every group and topic can use these.'
                     : project
-                      ? 'Every chat in this project can use these too. A skill with the same name replaces that one here.'
-                      : 'Added to the skills for every chat and its project. A skill with the same name replaces that one here.'}
+                      ? 'Every chat in this project can use these too, with the default skills for groups. A skill with the same name replaces that one here.'
+                      : own
+                        ? 'Added to the default skills for your private chat. A skill with the same name replaces that one here.'
+                        : 'Added to the default skills for groups and its project’s. A skill with the same name replaces that one here.'}
                 </p>
               </div>
               {checked && problems.skills && (
