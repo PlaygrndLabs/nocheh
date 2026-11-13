@@ -106,11 +106,17 @@ section.
     send `/start`; tapping again in that time changes nothing.
   - `/start`: only the asker, only in their own private chat, once. The same
     `/start` claims the same row again, so a retried turn reads the same
-    groups; any other is `used`. The project is checked again: the frozen
+    groups. Any other is `used` while the claimed answer is on its way or once
+    it was answered; a closed row says why instead (`changed`, or `expired`
+    when its time ran out or its answer never went out). The project is checked again: the frozen
     groups are narrowed to those still in it, never widened, and with no other
     frozen group left beside the asking group the `/start` is refused for good
     (`changed`). The answer then has an hour to be delivered, recorded once per
     send.
+  - Not delivered: a claimed answer that ends without its reply closes for
+    its own `/start`, expired once its hour is up, else refused (`changed` when
+    its record closed, `not_delivered` otherwise). An untapped row whose group
+    reply did not go out is refused `not_delivered`.
   - Expiry: the storage worker marks stale rows expired every hour (an unused
     button after a day, a tap without `/start` after ten minutes, an
     unanswered claim after an hour), and each step checks the time itself.
@@ -138,7 +144,8 @@ skills or the owner's default).
   reply, Nocheh offers the record (Offer, above) and the reply carries one
   inline button, `🔒 Answer privately`, under its last part. Its data is `np`
   and the record id (34 bytes, within Telegram's 64). No button goes under a
-  fixed reply, an empty or silent answer, a private answer, a member's
+  fixed reply, an empty or silent answer or one that is only archive citations
+  (the bot sends nothing for it), a private answer, a member's
   question, a reply in a private chat, or a reply in a group whose project is
   archived or has no other served group; when the record cannot be offered,
   the reply goes without it. A follow-up after approved operations, a job's
@@ -176,8 +183,10 @@ skills or the owner's default).
   asking group's recent unaddressed messages before it. Before them comes one
   first line from the owner's template: where it was asked (`{group}`, with
   its topic) and every group it may read (`{groups}`, the asking one first),
-  named from their archived titles, never by ID. A question retired since, or
-  no longer readable, gets the `changed` reply. The question is a source of the
+  named from the guarded copies of their messages that the answer may read, as
+  the speaker line is, never by ID. A question retired since, or no longer
+  readable, gets the `changed` reply and closes the record; a guard or binding
+  change meanwhile builds the turn again. The question is a source of the
   answer too, so retiring it withholds the answer's history.
 - **The brain's side.** Hermes takes the `answer` claim only for the owner's
   private chat with that chat as its scope, and only together with the
@@ -191,8 +200,13 @@ skills or the owner's default).
 - **Delivery.** The answer is a reply to the `/start` message in the owner's
   private chat, with no button, sent under the answer's pass, which the
   delivery check passes only there. When it went out, the record is answered
-  once with the send's key; a record closed while the answer was being
-  written withdraws it (`private_answer_closed`). Every send it took is
+  once with the send's key. A record closed while the answer was being written
+  (its hour passed, or the project's groups changed) withdraws it
+  (`private_answer_closed`), and the private chat gets the `expired` or
+  `changed` text instead, once, as a notice keyed by the record. An answer that
+  ends in silence or is withdrawn for any other reason closes the record with no
+  notice. A group reply the bot did not send takes its untapped button's record
+  with it. Every send it took is
   recorded content-free ([ADR-0238](0238-record-every-send-to-a-chat-app.md)):
   the group reply, the popups (`button_answer`, without the link) and the
   private answer.
