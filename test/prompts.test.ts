@@ -57,6 +57,9 @@ test('approval card templates leave out a line whose value is missing and keep d
   assert.equal(fillTemplate(approvalLines('').task_group_later,{group:'“Group A”'}),'“Group A” will see it once you add that group to this project.');
   assert.equal(fillTemplate(approvalLines('').task_move_group,{group:'“Group A”',project:'“P1”'}),'Move a task to “Group A” in the list of “P1”');
   assert.equal(fillTemplate(approvalLines('').task_move_group_family,{group:'“Group A”',project:'“P1”',count:'2'}),'Move a task, with 2 under it, to “Group A” in the list of “P1”');
+  // A group's task set on its project itself says that every group of the project gets it.
+  assert.equal(fillTemplate(approvalLines('').task_move_project,{project:'“P1”'}),'Set a task on “P1” itself, for every group in it');
+  assert.equal(fillTemplate(approvalLines('').task_move_project_family,{project:'“P1”',count:'2'}),'Set a task, with 2 under it, on “P1” itself, for every group in it');
 });
 
 test('the GitHub copy has its own instruction text, card line and card answers, and the card keeps its other lines',()=>{

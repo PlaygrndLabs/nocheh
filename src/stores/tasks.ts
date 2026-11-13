@@ -601,10 +601,13 @@ export class TaskRepository {
     const hidden=(Array.isArray(body.attachments)&&body.attachments.some((item:any)=>item?.kind==='message'))||
       (body.properties&&typeof body.properties==='object'&&Object.keys(body.properties as object).some(key=>!shared.some(item=>item.id===key||item.name.toLocaleLowerCase()===key.trim().toLocaleLowerCase())));
     const moving=row.action==='update'&&row.joining,grouped=row.group_id!==null&&row.group_id!==undefined;
-    // A move to a group says which group it goes to.
-    const moved=moving?(grouped?(family.length?'move_group_family':'move_group'):(family.length?'move_family':'move')):null;
+    // A move to a group says which group it goes to; a group's task set on its own project itself says that every
+    // group of the project gets it.
+    const kind=grouped?'move_group':preview.within_list===true?'move_project':'move';
+    const moved=moving?(family.length?`${kind}_family` as const:kind):null;
     return {id:row.id,state:row.state as string,fingerprint:row.fingerprint as string,source_reference:row.source_reference,chats:row.chats as string[],
-      change:(row.action==='add'?'add':row.action==='comment'?'comment':moved??'change') as 'add'|'move'|'move_family'|'move_group'|'move_group_family'|'change'|'comment',
+      change:(row.action==='add'?'add':row.action==='comment'?'comment':moved??'change') as
+        'add'|'move'|'move_family'|'move_group'|'move_group_family'|'move_project'|'move_project_family'|'change'|'comment',
       project:row.project_name as string|null,group:grouped?row.group_id as string:null,audience:(grouped?'group':'project') as 'group'|'project',subtasks:family.length,
       private:moving?(family.length?'family' as const:'move' as const):hidden?'parts' as const:null,fields};
   }
@@ -979,7 +982,8 @@ export class TaskRepository {
       if(Object.keys(changes).length)await this.record(db,id,context.actor,context.origin,changes,since);
       if(status&&next==='done'&&opened&&!current.repeated_to&&('repeat' in set?set.repeat:current.repeat))await this.repeat(db,id,settings);
       await db.query('INSERT INTO owner_task_operations(operation_id,task_id,request_hash) VALUES($1,$2,$3)',[operation,id,hash]);
-      if(gate){const preview={...await this.preview(db,id,gate,joining),task_title:current.title};await db.query('ROLLBACK');
+      // The card says when a task only changes group in the list it is already in.
+      if(gate){const preview={...await this.preview(db,id,gate,joining),task_title:current.title,within_list:current.project_id===project};await db.query('ROLLBACK');
         return {held:{...gate,joining,preview,family,revision:null}} satisfies Held;}
       const updated=await this.one(db,id,context);
       await db.query('COMMIT');return updated;

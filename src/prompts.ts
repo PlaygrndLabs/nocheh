@@ -107,6 +107,7 @@ export const approvalTexts=[
   'task_move_family: Move a task, with {count} under it, into the list of {project}','task_change: Change a task in the list of {project}',
   'task_comment: Comment on a task in the list of {project}','task_no_chats: no chat yet','task_later: Chats you add to this project later will see it too.',
   'task_move_group: Move a task to {group} in the list of {project}','task_move_group_family: Move a task, with {count} under it, to {group} in the list of {project}',
+  'task_move_project: Set a task on {project} itself, for every group in it','task_move_project_family: Set a task, with {count} under it, on {project} itself, for every group in it',
   'task_group_only: Other groups in this project don\'t see it.','task_group_later: {group} will see it once you add that group to this project.',
   'task_private_move: Its earlier comments and history, the archived messages attached to it, its IDs in outside tools such as Notion and the columns you have not shared stay private.',
   'task_private_family: Their earlier comments and history, the archived messages attached to them, their IDs in outside tools such as Notion and the columns you have not shared stay private.',
@@ -122,7 +123,7 @@ export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_alw
   'failed_action'|'unsure'|'not_run'|'read_closed'|'marked_ran'|'marked_not_run'|'marked_sent'|'marked_not_sent'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
   'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
   'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed'|
-  'task_move_group'|'task_move_group_family'|'task_group_only'|'task_group_later';
+  'task_move_group'|'task_move_group_family'|'task_move_project'|'task_move_project_family'|'task_group_only'|'task_group_later';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
   return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;

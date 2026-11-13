@@ -702,6 +702,12 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     assert.equal((await s.tasks.get(owner,made.id)).group_id,null,'nothing moves before the owner approves');
     await s.actionCommands.callback(await press(last('card').buttons[0][1]));
     assert.equal((await s.tasks.get(owner,made.id)).group_id,group);
+    // Setting a group's task on its project itself says every group of the project gets it.
+    const grouped=await s.tasks.get(owner,made.id);
+    await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:grouped.revision,group:null}));
+    assert.ok(last('card').text.startsWith(`📋 Set a task on “Launch” itself, for every group in it\n${seenIn}\n🔒 Its earlier comments`),last('card').text);
+    await s.actionCommands.callback(await press(last('card').buttons[1][1]));
+    assert.equal((await s.tasks.get(owner,made.id)).group_id,group);
     // A group's task in a project that group is not in is seen by no chat until the owner adds that group.
     await s.actionCommands.offer('task',await s.tasks.chatCreate(chat,{title:'Fix the fence',scope:house,group}));
     assert.equal(last('card').text,'📋 Add a task to the list of “House”\n👥 Seen in no chat yet. “Launch team” will see it once you add that group to this project.\n\nTitle: Fix the fence\nStatus: To do\nGroup: Launch team');
