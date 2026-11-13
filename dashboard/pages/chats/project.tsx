@@ -1,132 +1,253 @@
-/** "Project": which project this chat belongs to. Topics follow their group unless set. */
+/**
+ * "Project": which project a group belongs to. A topic always follows its group's project, and a project grants no
+ * access in a group: a group answer uses only that group (ADR-0246).
+ */
+import {useState} from 'react';
 import {useResource} from '../../lib/resource';
 import {href} from '../../lib/routes';
 import {parentOf, type Chat} from '../../lib/chats-model';
-import {Button, Card, CardBody, CardHeader, Notice, Select, Spinner, Switch} from '../../ui/core';
-import {useFeedback} from '../../ui/overlay';
-import {modeText, projectSharingWarning, projectTasksWarning} from './rule-dialog';
-import {ActionError, useAction} from './shared';
+import {Button, Card, CardBody, CardHeader, Notice, Select, Spinner} from '../../ui/core';
+import {Dialog, useFeedback} from '../../ui/overlay';
+import {otherGroupsText, projectGroupsNote, projectTasksWarning, relatedGroupsHint} from './rule-dialog';
+import {ActionError, chatHref, useAction, useChatNames} from './shared';
 
-type Project = {
+export type Project = {
   id: string;
   name: string;
   state: string;
-  sharing_enabled?: boolean;
-  sharing_mode?: 'approved' | 'filtered';
+  /** The groups Nocheh serves that are in this project, as the server lists them. */
+  groups?: string[];
   revision?: number;
 };
 type Assignment = {
   space_id: string;
   project_id: string | null;
   mode: 'assigned' | 'none' | 'inherit';
-  share_into?: boolean;
   revision: number;
 };
 type Effective = {project: Project | null; inherited: boolean; own_assignment: Assignment | null};
 
-const INHERIT = '__inherit';
 const NONE = '__none';
-const sharing = (project: Project | null | undefined): project is Project =>
-  project?.state === 'active' && !!project.sharing_enabled;
-/** A project's name in the list, marked when its chats share what they know. */
-const named = (project: Project) => project.name + (sharing(project) ? ' · shares' : '');
+const UNANSWERED = '';
 
-export function ProjectCard({chat}: {chat: Chat}) {
+/**
+ * What joining a project means, shown before a group joins one: the project's other groups first, that people in two
+ * of them can get private answers that combine them, then its task list.
+ */
+export function JoinNotes({
+  space,
+  name,
+  project,
+  names,
+}: {
+  space: string;
+  name: string;
+  project: Project;
+  names: (space: string) => string;
+}) {
+  const others = (project.groups ?? []).filter(group => group !== space).map(names);
+  return (
+    <div className="space-y-3">
+      <p>{otherGroupsText(project.name, others)}</p>
+      <Notice tone="warn">{others.length ? `${projectGroupsNote} ${relatedGroupsHint}` : relatedGroupsHint}</Notice>
+      <p>{projectTasksWarning(name, [project.name])}</p>
+    </div>
+  );
+}
+
+/** The projects a group can join: active ones, plus the one it is in now. */
+function useProjectChoices(current?: Project | null) {
+  const projects = useResource<{projects: Project[]; next: string | null}>('/projects?after=');
+  const choices = (projects.data?.projects ?? []).filter(project => project.state !== 'archived');
+  if (current && !choices.some(project => project.id === current.id)) choices.push(current);
+  return {projects, choices};
+}
+
+/**
+ * Asks which project a group joins, or none, when the owner turns Nocheh on in it and it has no answer yet. Nothing
+ * is turned on until the owner answers; Cancel leaves the group off.
+ */
+export function JoinProjectDialog({
+  group,
+  name,
+  open,
+  onDone,
+}: {
+  group: string;
+  name: string;
+  open: boolean;
+  onDone: (answered: boolean) => void;
+}) {
+  const {choices} = useProjectChoices();
+  const names = useChatNames();
+  const action = useAction();
+  const [choice, setChoice] = useState(UNANSWERED);
+  const project = choices.find(item => item.id === choice);
+  const save = async () => {
+    const result = await action.run(
+      'join',
+      '/projects/assignments',
+      {
+        space_id: group,
+        ...(project ? {mode: 'assigned', project_id: project.id} : {mode: 'none', project_id: null}),
+        expected_revision: 0,
+      },
+      {success: project ? `${name} joins ${project.name}.` : `${name} joins no project.`},
+    );
+    if (result) onDone(true);
+  };
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={next => !next && onDone(false)}
+      title="Which project does this group join?"
+      description={`Choose before Nocheh answers in ${name}. A family group belongs in none.`}
+      footer={
+        <>
+          <Button onClick={() => onDone(false)}>Cancel</Button>
+          <Button
+            variant="primary"
+            busy={action.busy === 'join'}
+            disabled={choice === UNANSWERED}
+            onClick={() => void save()}
+          >
+            Turn on
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4 text-sm">
+        <label htmlFor="join-project" className="sr-only">
+          Project for this group
+        </label>
+        <Select id="join-project" className="w-full" value={choice} onChange={event => setChoice(event.target.value)}>
+          <option value={UNANSWERED} disabled>
+            Choose a project…
+          </option>
+          <option value={NONE}>None</option>
+          {choices.map(item => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </Select>
+        {project ? (
+          <JoinNotes space={group} name={name} project={project} names={names} />
+        ) : (
+          <p className="text-[13px] text-muted">{relatedGroupsHint}</p>
+        )}
+        <ActionError text={action.error} />
+      </div>
+    </Dialog>
+  );
+}
+
+/**
+ * Whether turning Nocheh on in a group first asks which project it joins: the group has no answer yet and projects
+ * exist. `settled` turns true once that is known, or once loading failed, when the group's card asks instead.
+ */
+export function useJoinQuestion(group: string) {
+  const effective = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(group));
+  const {projects, choices} = useProjectChoices();
+  return {
+    settled: (!!effective.data && !!projects.data) || !!effective.error || !!projects.error,
+    ask: !!effective.data && !!projects.data && !effective.data.own_assignment && choices.length > 0,
+  };
+}
+
+export function ProjectCard({chat, served}: {chat: Chat; served: boolean}) {
+  if (chat.kind === 'topic') return <TopicProject chat={chat} />;
+  return <GroupProject chat={chat} served={served} />;
+}
+
+/** A topic always follows its group's project: its card only says which (ADR-0246). */
+function TopicProject({chat}: {chat: Chat}) {
+  const parent = chat.parent_space ?? parentOf(chat.space_id) ?? '';
+  const group = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(parent));
+  const names = useChatNames();
+  const project = group.data?.project ?? null;
+  return (
+    <Card>
+      <CardHeader title="Project" description="A topic always follows its group’s project." />
+      <CardBody className="pt-3 text-[13px]">
+        {group.error && !group.data ? (
+          <p className="text-warn">Projects couldn’t be loaded. Try again shortly.</p>
+        ) : !group.data ? (
+          <p className="text-muted">Loading…</p>
+        ) : (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>
+              Follows{' '}
+              <a href={chatHref(parent)} className="font-medium text-accent-text hover:underline" dir="auto">
+                {names(parent)}
+              </a>
+              ’s project: <strong dir="auto">{project ? project.name : 'none'}</strong>.
+            </span>
+            {project && (
+              <a
+                href={href('memory', {view: 'projects', project: project.id})}
+                className="font-medium text-accent-text hover:underline"
+              >
+                Open project
+              </a>
+            )}
+          </p>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
   const space = chat.space_id;
   const effective = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(space));
-  const projects = useResource<{projects: Project[]; next: string | null}>('/projects?after=');
+  const data = effective.data;
+  const {projects, choices} = useProjectChoices(data?.project);
+  const names = useChatNames();
   const action = useAction();
   const feedback = useFeedback();
-  const topic = chat.kind === 'topic';
-  const parent = topic ? parentOf(space) : null;
-  // The group's project, which "Same as the group" follows, also while this topic is set otherwise.
-  const group = useResource<Effective>(parent ? '/projects/effective?space=' + encodeURIComponent(parent) : null);
-  const data = effective.data;
   const own = data?.own_assignment ?? null;
+  const name = names(space);
+  // A served group with no answer yet asks which project it joins; "None" is an answer too.
+  const unanswered = served && !!data && !own && choices.length > 0;
+  const value = unanswered ? UNANSWERED : own?.mode === 'assigned' ? (own.project_id ?? NONE) : NONE;
 
-  const value =
-    !own || own.mode === 'inherit' ? (topic ? INHERIT : NONE) : own.mode === 'none' ? NONE : (own.project_id ?? NONE);
-  const choices = (projects.data?.projects ?? []).filter(project => project.state !== 'archived');
-  if (data?.project && !choices.some(project => project.id === data.project!.id)) choices.push(data.project);
-  const groupProject = topic ? (data?.inherited ? data.project : (group.data?.project ?? null)) : null;
-  const shares = sharing(data?.project);
-  const out = own?.mode === 'assigned' && own.share_into === false;
-
-  const change = async (next: string) => {
-    if (next === value) return;
-    const body =
-      next === INHERIT
-        ? {mode: 'inherit', project_id: null}
-        : next === NONE
-          ? {mode: 'none', project_id: null}
-          : {mode: 'assigned', project_id: next};
-    const name = choices.find(project => project.id === next)?.name;
-    // Joining a project is confirmed first: the chat sees the project's task list, and, when the project's chats
-    // share what they know, what they know, as ticking that on the project warns.
-    const target = next === INHERIT ? groupProject : choices.find(project => project.id === next);
-    if (
-      chat.kind !== 'private' &&
-      target &&
-      target.id !== data?.project?.id &&
-      !(await feedback.confirm({
-        title: (sharing(target) ? 'Share with the chats in ' : 'Move to ') + target.name + '?',
-        body: (
-          <div className="space-y-3">
-            <p>{projectTasksWarning('this chat', [target.name])}</p>
-            {sharing(target) && <Notice tone="warn">{projectSharingWarning}</Notice>}
-          </div>
-        ),
-        confirm: next === INHERIT ? 'Follow the group' : 'Move here',
-      }))
-    )
-      return;
+  const save = (next: string) => {
+    const target = choices.find(project => project.id === next);
     void action.run(
       'save',
       '/projects/assignments',
-      {space_id: space, ...body, expected_revision: own?.revision ?? 0},
-      {
-        success: name
-          ? `Moved to ${name}.`
-          : next === INHERIT
-            ? 'Follows the group’s project now.'
-            : 'Removed from its project.',
-      },
-    );
-  };
-
-  const leaveOut = (leave: boolean) => {
-    if (!own?.project_id) return;
-    void action.run(
-      'share',
-      '/projects/assignments',
       {
         space_id: space,
-        mode: 'assigned',
-        project_id: own.project_id,
-        share_into: !leave,
-        expected_revision: own.revision,
+        ...(target ? {mode: 'assigned', project_id: target.id} : {mode: 'none', project_id: null}),
+        expected_revision: own?.revision ?? 0,
       },
-      {
-        success: leave
-          ? 'Nothing from the project goes into this chat now.'
-          : 'This chat gets what the others know again.',
-      },
+      {success: target ? `Moved to ${target.name}.` : unanswered ? 'Joins no project.' : 'Removed from its project.'},
     );
   };
+  const change = async (next: string) => {
+    if (next === value) return;
+    const target = choices.find(project => project.id === next);
+    // Joining a project is confirmed first, naming the groups already there.
+    if (
+      target &&
+      !(await feedback.confirm({
+        title: (data?.project ? `Move ${name} to ` : `Put ${name} in `) + target.name + '?',
+        body: <JoinNotes space={space} name={name} project={target} names={names} />,
+        confirm: data?.project ? 'Move here' : 'Put it here',
+      }))
+    )
+      return;
+    save(next);
+  };
 
-  // A topic's choices wait for its group's project too, so following it into one that shares always asks first.
-  const loading = !data || !projects.data || (!!parent && !group.data);
-  const failed =
-    (effective.error && !data) || (projects.error && !projects.data) || (!!parent && group.error && !group.data);
+  const loading = !data || !projects.data;
+  const failed = (effective.error && !data) || (projects.error && !projects.data);
   return (
     <Card>
       <CardHeader
         title="Project"
-        description={
-          shares
-            ? `Chats in ${data!.project!.name} share what they know (${modeText[data!.project!.sharing_mode ?? 'filtered'].label}).`
-            : 'Projects organize chats. Their chats share what they know only when you turn that on in the project.'
-        }
+        description="A project gives its groups a role, skills and a task list. It shares nothing between them: a group answer uses only that group."
       />
       <CardBody className="pt-3">
         {failed ? (
@@ -135,9 +256,22 @@ export function ProjectCard({chat}: {chat: Chat}) {
           <p className="text-[13px] text-muted">Loading…</p>
         ) : (
           <div className="space-y-3">
+            {unanswered && (
+              <Notice
+                tone="warn"
+                title="Which project does this group join?"
+                action={
+                  <Button size="sm" busy={action.busy === 'save'} onClick={() => save(NONE)}>
+                    None
+                  </Button>
+                }
+              >
+                Choose its project below, or None. {relatedGroupsHint}
+              </Notice>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <label htmlFor="chat-project" className="sr-only">
-                Project for this chat
+                Project for this group
               </label>
               <Select
                 id="chat-project"
@@ -146,15 +280,15 @@ export function ProjectCard({chat}: {chat: Chat}) {
                 disabled={!!action.busy}
                 onChange={event => void change(event.target.value)}
               >
-                {topic && (
-                  <option value={INHERIT}>
-                    {`Same as the group (${groupProject ? named(groupProject) : 'no project'})`}
+                {unanswered && (
+                  <option value={UNANSWERED} disabled>
+                    Choose a project…
                   </option>
                 )}
                 <option value={NONE}>No project</option>
                 {choices.map(project => (
                   <option key={project.id} value={project.id}>
-                    {named(project)}
+                    {project.name}
                   </option>
                 ))}
               </Select>
@@ -168,32 +302,17 @@ export function ProjectCard({chat}: {chat: Chat}) {
                 </a>
               )}
             </div>
-            {chat.kind === 'private'
-              ? shares && <p className="text-[13px] text-muted">Private chats are never shared.</p>
-              : (shares || out) && (
-                  <>
-                    {own?.mode === 'assigned' ? (
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-sm font-medium">Don’t share into this chat</p>
-                          <p className="mt-0.5 text-[13px] text-muted">
-                            Leaves its whole group, topics included, out of this project’s sharing. It still shares what
-                            it knows, and still uses the project’s role, skills and tasks.
-                          </p>
-                        </div>
-                        <Switch
-                          label="Don’t share into this chat"
-                          checked={out}
-                          disabled={!!action.busy}
-                          onChange={leaveOut}
-                        />
-                      </div>
-                    ) : (
-                      <p className="text-[13px] text-muted">This topic follows its group.</p>
-                    )}
-                    {shares && <Notice tone="warn">{projectSharingWarning}</Notice>}
-                  </>
-                )}
+            {data.project && (
+              <p className="text-[13px] text-muted">
+                {otherGroupsText(
+                  data.project.name,
+                  (choices.find(project => project.id === data.project!.id)?.groups ?? [])
+                    .filter(group => group !== space)
+                    .map(names),
+                )}{' '}
+                {projectGroupsNote}
+              </p>
+            )}
           </div>
         )}
         {!loading && !failed && !choices.length && (
@@ -213,7 +332,8 @@ export function ProjectCard({chat}: {chat: Chat}) {
 
 /**
  * A private chat never joins a project (ADR-0242). A setting saved before that rule may still name one: Nocheh
- * ignores it, and the owner removes it here, as a reset asks before it runs.
+ * ignores it, and the owner removes it here, as a reset asks before it runs. A topic's row can only go back to
+ * following its chat (ADR-0246).
  */
 export function PrivateChatProject({chat, yours}: {chat: Chat; yours: boolean}) {
   const effective = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(chat.space_id));
@@ -223,6 +343,7 @@ export function PrivateChatProject({chat, yours}: {chat: Chat; yours: boolean}) 
   const never = yours ? 'Your private chat never joins a project.' : 'A private chat never joins a project.';
   if (own?.mode !== 'assigned') return <p className="px-1 text-[13px] text-muted">{never}</p>;
   const name = projects.data?.projects.find(project => project.id === own.project_id)?.name;
+  const topic = chat.space_id.includes('/topic/');
   return (
     <div>
       <Notice
@@ -236,7 +357,12 @@ export function PrivateChatProject({chat, yours}: {chat: Chat; yours: boolean}) 
               void action.run(
                 'remove',
                 '/projects/assignments',
-                {space_id: chat.space_id, mode: 'none', project_id: null, expected_revision: own.revision},
+                {
+                  space_id: chat.space_id,
+                  mode: topic ? 'inherit' : 'none',
+                  project_id: null,
+                  expected_revision: own.revision,
+                },
                 {success: 'Removed from its project.'},
               )
             }

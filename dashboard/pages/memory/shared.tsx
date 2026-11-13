@@ -25,8 +25,8 @@ export function errorWords(error: unknown): string {
     invalid_memory_scope: 'Choose at least one chat, or every chat.',
     active_project_required: 'Choose a project that isn’t archived.',
     sharing_rule_limit:
-      'That goes past a sharing limit: at most ten automatic rules and projects can share into one group, and at most 100 chats into one chat. Turn one off first.',
-    sharing_rule_project_managed: 'This rule is set by its project. Change it on the project.',
+      'That goes past a sharing limit: at most ten automatic rules can share into one group, and at most 100 chats into one chat. Turn one off first.',
+    project_topic_follows_group: 'A topic always follows its group’s project. Change the group’s project instead.',
     memory_fact_not_found: 'This fact was retired or removed.',
     entity_rename_invalid: 'Only active people can be renamed.',
     memory_correction_required: 'Type the corrected wording first.',
