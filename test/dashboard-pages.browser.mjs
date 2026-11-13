@@ -1281,6 +1281,27 @@ test('a project’s chats share what they know only once it is ticked, and its r
   await rules.close();
 });
 
+test('a project lists its Answer privately buttons: where, what the answer could read and what became of it', async () => {
+  const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
+  const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
+  const section = drawer.locator('section', {has: page.getByRole('heading', {name: 'Private answers'})});
+  const rows = section.getByRole('listitem');
+  await rows.first().waitFor();
+  assert.equal(await rows.count(), 2);
+  const answered = rows.filter({hasText: 'Answered'});
+  await answered.getByText('Aurora planning › Iceland planning').waitFor();
+  await answered.getByText('Could read: Aurora planning, Chat -10077').waitFor();
+  assert.equal(
+    await answered.getByRole('link', {name: 'The question'}).getAttribute('href'),
+    '#messages?source=' + '1'.repeat(64),
+  );
+  const refused = rows.filter({hasText: 'Refused'});
+  await refused.getByText('(the project’s groups or the question changed)').waitFor();
+  assert.equal(await refused.getByText(/^Could read/).count(), 0, 'nothing was frozen without a tap');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('the owner’s private chat stays out of sharing rules and projects', async () => {
   // A rule picks only groups and topics; an older rule that names a private chat is flagged.
   const {page: rules, problems} = await open('chats?view=rules');

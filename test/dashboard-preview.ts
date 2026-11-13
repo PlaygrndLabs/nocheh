@@ -114,7 +114,7 @@ const personas:Record<string,{role:string;skills:{name:string;description:string
 const persona=(scope:string)=>({scope,...(personas[scope]??={role:'',skills:[],revision:'persona-1'})});
 const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpret':['{trigger_id}','{citable_ids}']},texts:{} as Record<string,string>,
   defaults:{'reply.common':'You are Nocheh. Use authorized sources as evidence.','reply.owner':'This is the owner private conversation.',
-    'reply.group':'This is a shared space. For routine chatter return exactly [NO_REPLY].','memory.limited':'Long-term memory is limited.',
+    'reply.group':'This is a shared space. For routine chatter return exactly [NO_REPLY].','reply.private':'This is a private answer, in the private chat of the person who asked.','memory.limited':'Long-term memory is limited.',
     'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
     'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.','images.read':'Write out the text in this image, then describe it.',
     'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.'} as Record<string,string>};
@@ -174,6 +174,12 @@ const groupSpace=(space:string)=>/^-[1-9]\d{0,18}(\/topic\/[1-9]\d{0,15})?$/.tes
 const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
 const sharingReleases:any[]=[];
 const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
+// Answer privately buttons offered under the owner's answers in the project's group (ADR-0248).
+const privateAnswers:any[]=[
+ {id:'a'.repeat(32),question_event:'1'.repeat(64),from_chat_id:topic,project_id:projectId,member_id:null,asker_account_id:'42',read_chats:[conversation,'-10077'],reply_chat_id:'42',
+  state:'answered',refusal_code:null,offered_at:new Date(Date.now()-7200000).toISOString(),pressed_at:new Date(Date.now()-7100000).toISOString(),answered_at:new Date(Date.now()-7000000).toISOString()},
+ {id:'b'.repeat(32),question_event:'2'.repeat(64),from_chat_id:conversation,project_id:projectId,member_id:null,asker_account_id:'42',read_chats:null,reply_chat_id:null,
+  state:'refused',refusal_code:'changed',offered_at:new Date(Date.now()-3600000).toISOString(),pressed_at:null,answered_at:null}];
 const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',share_into:true,revision:1},
  // Saved before private chats were refused: it puts the owner's chat in no project, and the owner can clear it.
  {space_id:'42',project_id:projectId,mode:'assigned',share_into:true,revision:1}];
@@ -623,6 +629,8 @@ const server=createServer((req,res)=>{void(async()=>{
     ...claims.filter(c=>!c.retired&&(entityIds.includes(c.subject_entity_id)||entityIds.includes(c.object_entity_id))).map(c=>({type:'claim',id:c.id,subject:c.predicate,kind:'fact',revision:c.revision,author:c.author,retired:false,content:c.content,attribution:c.attribution,uncertainty:c.uncertainty,evidence:c.evidence}))];
    const decisions=project.id===projectId&&knowledgeProposal.state==='review'?[{kind:'knowledge',id:knowledgeProposal.id,title:'Organizing suggestion for Iceland planning',state:'review',created_at:knowledgeProposal.created_at}]:[];
    return json(res,200,{project,conversations:chats,observed_at:new Date().toISOString(),state:'current',knowledge:{items,total:items.length,next_cursor:null},decisions:{items:decisions,total:decisions.length,next_cursor:null}});}
+  if(route==='/private-answers'){const project=url.searchParams.get('project');
+   return json(res,200,{answers:privateAnswers.filter(row=>!project||row.project_id===project),next:null});}
   if(route==='/organization/delegations')return json(res,200,{delegations:delegations.map(delegationView),next:null});
   if(route==='/knowledge/proposals')return json(res,200,{proposals:[knowledgeProposal,...pastProposals],next:null});
   if(route==='/honcho/budget')return json(res,200,honchoBudget);
