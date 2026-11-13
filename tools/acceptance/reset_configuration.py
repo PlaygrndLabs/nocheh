@@ -34,7 +34,11 @@ ORIGINAL = {
                  ('id', 'name', 'description', 'state')),
     'project_assignments': ('SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id',
                             ('space_id', 'project_id', 'mode')),
-    'sharing_rules': ('SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules ORDER BY id',
+    # Only the owner's rules. A store the stores have not started at this version still holds the rules a project's
+    # share box kept; they are deleted at that start, never kept as the owner's (ADR-0246), so they are left out here.
+    # The test reads the row as JSON, so it holds whether or not the old project_id column is still there.
+    'sharing_rules': ("SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules r "
+                      "WHERE to_jsonb(r)->>'project_id' IS NULL ORDER BY id",
                       ('id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions')),
     'memory_access_settings': ('SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination',
                                ('destination', 'suggestions', 'notify_owner', 'auto_followup', 'request_ttl_seconds', 'default_grant_mode')),

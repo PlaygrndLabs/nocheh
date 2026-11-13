@@ -139,6 +139,17 @@ class ResetConfigurationTests(unittest.TestCase):
             with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, 'topic_follows_group'):
                 configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
 
+    def test_a_project_rule_in_a_store_not_yet_started_is_left_out_never_kept_as_the_owners(self):
+        # Starting the stores at this version deletes the rules a project's share box kept (ADR-0246). A reset that reads
+        # an older store selects only the owner's rules, by a test that holds with or without the old column, so a
+        # project rule never comes back as an owner rule after the reset.
+        query = Mock(return_value=json.dumps(self.values))
+        configuration.snapshot(query, 'original-only-v1')
+        sql = query.call_args.args[1]
+        self.assertIn("FROM sharing_rules r WHERE to_jsonb(r)->>'project_id' IS NULL ORDER BY id", sql)
+        self.assertNotIn('project_id FROM sharing_rules', sql)
+        self.assertEqual(sql.count('FROM sharing_rules'), 1)
+
     def test_unknown_fields_and_missing_critical_configuration_fail_closed(self):
         for change in ('content', 'columns', 'security', 'generation', 'guard', 'runtime'):
             values = copy.deepcopy(self.values)
