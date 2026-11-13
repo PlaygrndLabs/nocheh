@@ -20,6 +20,11 @@ DATA_TOOLS={'mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__noch
             'mcp__nocheh__shell','mcp__nocheh__browser','mcp__nocheh__mcp','mcp__nocheh__owner_read','mcp__nocheh__tasks','mcp__nocheh__notion',
             'mcp__nocheh__action_status','mcp__nocheh__knowledge_inspect','mcp__nocheh__knowledge_propose','mcp__nocheh__knowledge_status'}
 ALLOWED_TOOLS={'memory','session_search','skills_list','skill_view'}|DATA_TOOLS
+# A private answer only reads (ADR-0248): Nocheh offers it these data tools alone, and tasks only lists and reads.
+# Native memory is left out too, so it writes no notes.
+ANSWER_DATA_TOOLS={'mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__nocheh__archive_page','mcp__nocheh__memory_search','mcp__nocheh__tasks'}
+ANSWER_TOOLS={'session_search','skills_list','skill_view'}|ANSWER_DATA_TOOLS
+ANSWER_TOOLSETS=['session_search','mcp-nocheh','skills']
 # The owner sets skills; a turn may read them but never create or change one.
 OWNER_SET_TOOLS={'skill_manage'}
 TURN_TOOLSETS=['memory','session_search','mcp-nocheh','skills']
@@ -56,8 +61,9 @@ def bind_profile_home(profile):
     from hermes_constants import set_hermes_home_override
     set_hermes_home_override(profile)
 
-def turn_tools(background,box,machine=False):
+def turn_tools(background,box,machine=False,answer=False):
     """The tools a turn drops from its profile's toolsets, and the exact set it then runs with."""
+    if answer:return OWNER_SET_TOOLS|(ALLOWED_TOOLS-ANSWER_TOOLS),ANSWER_TOOLS
     removed=OWNER_SET_TOOLS|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box or machine else set())
     return removed,BOX_TOOLS if box else MACHINE_TOOLS if machine else BACKGROUND_TOOLS if background else ALLOWED_TOOLS
 
@@ -82,10 +88,11 @@ def data_tools_server(credential,deadline):
             'supports_parallel_tool_calls':False,'tools':{'resources':False,'prompts':False}}
 
 
-def connect_data_tools(credential,deadline):
-    """Connect Nocheh's data tools for this turn; a turn without all of them does not run."""
+def connect_data_tools(credential,deadline,required=DATA_TOOLS):
+    """Connect Nocheh's data tools for this turn; a turn without all of them does not run. A private answer needs
+    only its read tools, the only ones Nocheh offers it."""
     from tools.mcp_tool_discovery import register_mcp_servers
-    if not DATA_TOOLS<=set(register_mcp_servers({'nocheh':data_tools_server(credential,deadline)})):
+    if not required<=set(register_mcp_servers({'nocheh':data_tools_server(credential,deadline)})):
         raise RuntimeError('data_tools_unavailable')
 
 
@@ -268,6 +275,9 @@ def run(body, emit=None, relay=None):
     install();native_gate();restrict_session_search();untitled_telegram()
     review = body.get('review') is True
     background = body.get('channel')=='background' and not review
+    # A private answer (ADR-0248): never the owner, only in a Telegram turn, never a review or a job.
+    answer = body.get('private_answer') is True
+    if answer and (body['owner'] or review or body.get('channel','telegram')!='telegram'):raise ValueError('invalid_private_answer')
     iterations = background_limits(body) if background else None
     bind_process_credential(body['archive_credential'])
     if body.get('review') is not True:bind_process_deadline(body['turn_deadline_epoch'],background=background)
@@ -311,19 +321,19 @@ def run(body, emit=None, relay=None):
         job_progress.bind(relay or (lambda event:None),body['background'])
     try:
         # Nocheh's data tools, from its MCP endpoint with this turn's credential; a review only keeps native notes.
-        if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'])
+        if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'],ANSWER_DATA_TOOLS if answer else DATA_TOOLS)
         agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
             api_key=credentials.access_token,base_url=credentials.base_url,
-            enabled_toolsets=['memory'] if review else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,
+            enabled_toolsets=['memory'] if review else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,
             fallback_model=None,
             session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
-            user_id=body['user_id'],chat_type='dm' if body['owner'] else 'group',
+            user_id=body['user_id'],chat_type='dm' if body['owner'] or answer else 'group',
             skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
             quiet_mode=True,save_trajectories=False,max_iterations=iterations or prefs['agent.max_iterations'],
             # A job run's budget ends at the job's soft deadline; Hermes's own notice at 80% of it asks for the report.
             run_budget_seconds=run_budget(body) if background else prefs['agent.run_budget_seconds'],
             reasoning_config=reasoning(credentials,prefs),ephemeral_system_prompt=(
-                reply(body.get('prompts'),body['owner'])+long_term))
+                reply(body.get('prompts'),body['owner'],answer)+long_term))
     except BaseException:
         disconnect_data_tools();raise
     # The turn's tools are set below; Hermes's refresh at the start of a turn would bring back a tool the turn dropped.
@@ -337,7 +347,7 @@ def run(body, emit=None, relay=None):
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
-        removed,allowed=turn_tools(background,box,machine)
+        removed,allowed=turn_tools(background,box,machine,answer)
         agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in removed]
         agent.valid_tool_names=set(agent.valid_tool_names)-removed
         verify_profile_tools(agent.valid_tool_names,allowed)

@@ -71,7 +71,7 @@ def main():
         NOCHEH_HONCHO_STATE_DIR=str(state / 'honcho'), NOCHEH_MEMORY_TOKEN=token,
         NOCHEH_HONCHO_DATABASE_VOLUME=project + '_honcho_database', NOCHEH_HONCHO_REDIS_VOLUME=project + '_honcho_redis',
         COMPOSE_PROJECT_NAME=project, NOCHEH_AGENT_NETWORK=project + '-agent', NOCHEH_MEMORY_NETWORK=project + '-memory',
-        TELEGRAM_OWNER_ID='123', TELEGRAM_GROUP_IDS='-10042,-10043', TELEGRAM_ENABLED='false', NOCHEH_PORT='18990',
+        TELEGRAM_OWNER_ID='123', TELEGRAM_GROUP_IDS='-10042,-10043,-10044', TELEGRAM_ENABLED='false', NOCHEH_PORT='18990',
         NOCHEH_PROVIDER=FIXTURE_PROVIDER, NOCHEH_PROVIDER_KEYS=json.dumps({FIXTURE_PROVIDER: 'synthetic-fixture-model-key'}),
         NOCHEH_PROVIDERS=json.dumps([{'id': FIXTURE_PROVIDER, 'name': 'Model fixture', 'url': FIXTURE_MODEL_URL}]),
         NOCHEH_TRANSCRIPTION_PROVIDER=FIXTURE_PROVIDER)

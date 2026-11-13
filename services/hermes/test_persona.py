@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -191,6 +192,34 @@ class PersonaTurnTests(unittest.TestCase):
             for scope, extra, role in cases:
                 profile = prepare_profile(root, Scopes.apply_revision(scope, {**claims, **extra}), 'fixture-model')
                 self.assertEqual(persona.read(profile)['role'], role, (scope.space, extra))
+
+    def test_a_private_answer_never_loads_the_owners_private_role_and_reads_its_projects(self):
+        from dataclasses import replace
+        from .scopes import Scope
+        from .assistant_gateway import prepare_profile
+        claims = {'generation': '11111111-1111-1111-1111-111111111111', 'guard_epoch': 5, 'revision': 5, 'answer': 'a' * 32}
+        diary = {'name': 'diary', 'description': 'When the owner writes about their day.', 'body': 'PRIVATEMARK2 diary body.'}
+        project = 'b' * 64
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            owner, groups = persona.default_path(root, 'owner'), persona.default_path(root, 'group')
+            persona.save(owner, 'Private role PRIVATEMARK2', [diary], persona.view(owner)['revision'])
+            chat = persona.chat_path(root, '123')
+            persona.save(chat, 'Private chat role PRIVATEMARK2', [diary], persona.view(chat)['revision'])
+            persona.save(groups, 'Group role', [COOKING], persona.view(groups)['revision'])
+            # The answer runs in the owner's private chat as that chat, never as the owner (ADR-0248).
+            asker = Scope('123', '123', False, Scopes.profile('123'), '123')
+            profile = prepare_profile(root, Scopes.apply_revision(asker, claims), 'fixture-model')
+            self.assertEqual(persona.read(profile), {'role': 'Group role', 'skills': [COOKING]}, 'without a project role it reads the groups default')
+            shared = persona.project_path(root, project)
+            persona.save(shared, 'Project role', [], persona.view(shared)['revision'])
+            profile = prepare_profile(root, Scopes.apply_revision(asker, {**claims, 'project': project}), 'fixture-model')
+            self.assertEqual(persona.read(profile)['role'], 'Project role')
+            text = ''.join(item.read_text(errors='replace') for item in profile.rglob('*') if item.is_file() and not item.is_symlink())
+            self.assertNotIn('PRIVATEMARK2', text, "neither the owner's private default nor the private chat's own role lands in the answer")
+            self.assertEqual(json.loads((profile / 'space.json').read_text())['answer'], 'a' * 32)
+            self.assertEqual(persona.read(prepare_profile(root, Scopes.apply_revision(replace(asker, owner=True), {key: value for key, value in claims.items() if key != 'answer'}),
+                                                          'fixture-model'))['role'], 'Private chat role PRIVATEMARK2', 'the owner\'s own turn still reads it')
 
     def test_turn_prompt_uses_the_chats_role_and_lists_its_skills_without_skill_writing(self):
         from contextvars import copy_context

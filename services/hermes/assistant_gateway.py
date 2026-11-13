@@ -58,10 +58,13 @@ def prepare_profile(root,scope,model):
         if (source/'config.yaml').exists():atomic_yaml(profile/'config.yaml',read(source/'config.yaml'))
     configure_profile(profile, model)
     from .persona import audience, materialize
-    materialize(root, profile, scope.chat_id, scope.project, audience(scope))
+    # A private answer runs in the owner's private chat but never loads that chat's own role or skills: it gets the
+    # project's, else the groups default (ADR-0248).
+    materialize(root, profile, None if scope.answer else scope.chat_id, scope.project, audience(scope))
     from .native_memory import save_receipt
     save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'revision':scope.revision,'owner':scope.owner,
-        'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose,'logical_profile':scope.logical_profile}))
+        'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose,'logical_profile':scope.logical_profile,
+        **({'answer':scope.answer} if scope.answer else {})}))
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
@@ -69,7 +72,8 @@ def prepare_profile(root,scope,model):
         # A new guard epoch starts a new profile; the chat keeps its conversation
         # and the superseded profiles are removed once idle.
         from .profile_history import carry, prune
-        if scope.purpose!='filter':carry(profile)
+        # A private answer starts empty: no earlier answer's conversation, from any group, is carried into it (ADR-0248).
+        if scope.purpose!='filter' and not scope.answer:carry(profile)
         prune(profile)
     return profile
 
@@ -93,13 +97,15 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
             try:os.fsync(directory)
             finally:os.close(directory)
         await asyncio.to_thread(save_cursor)
-        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner)
+        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner,bool(scope.answer))
         except Exception:pass # A missing title is cosmetic; the next turn tries again.
     return result
 
 
-def session_title(message,owner):
-    """The chat a Telegram session belongs to, as the dashboard's session list shows it."""
+def session_title(message,owner,answer=False):
+    """The chat a Telegram session belongs to, as the dashboard's session list shows it. A private answer's own
+    session is named as one, so the owner's private chat keeps its own name (ADR-0248)."""
+    if answer:return 'Private answer'
     chat=message.get('chat') if isinstance(message.get('chat'),dict) else {}
     title=chat.get('title') if isinstance(chat.get('title'),str) else ''
     name='Private chat' if owner else title.strip() or 'Telegram group'
@@ -114,12 +120,12 @@ def session_title(message,owner):
     return name[:90]
 
 
-def title_session(profile,session_id,message,owner):
+def title_session(profile,session_id,message,owner,answer=False):
     """Name a Telegram session after its chat. It is Hermes's top automatic title: it replaces a first-message
     title and stays once set, and Hermes keeps a title set by hand over it."""
     from hermes_state import SessionDB
     from .isolated_profile import database_path
-    title=session_title(message,owner)
+    title=session_title(message,owner,answer)
     db=SessionDB(database_path(profile))
     try:
         if not db.get_session(session_id) or db.get_session_title_source(session_id) in (SessionDB.TITLE_SOURCE_LLM,SessionDB.TITLE_SOURCE_USER):return

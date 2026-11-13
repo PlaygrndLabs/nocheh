@@ -10,15 +10,15 @@ import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.
  * learning text it sends to long-term memory. Only replacements are stored, so a text the
  * owner never changed follows the code's default.
  */
-export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
+export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_task','telegram.approval_texts','telegram.action_continued','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
+  'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}'],'background.machine':['{steps}']};
 
 /** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
@@ -213,9 +213,28 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'steps: Plan:','machine_off: 🚫 Withdrawn: its machine was turned off or changed. Nothing runs.',
   'report_private: ✅ Done: the job you asked for here finished. Its report is in your private chat.',
   'limited_private: ⏱ The job you asked for here stopped at its limit. A short note is in your private chat.'].join('\n');
+/** The first line of a private answer, before the question (ADR-0248): {group} is the group or topic where it was asked,
+ * {groups} every group the answer may read, the asking one included. Group and topic names lose their brackets and
+ * control characters, so no one can write a line that looks like it. */
+export const privateAnswerFrame='[Private answer] The question below was asked in {group}, and the person who asked tapped Answer privately. '+
+  'Answer it here, in their private chat, from what you can read in these groups of its project: {groups}. '+
+  'This answer only reads: it cannot send anything to a group, change a task, start a job or ask for an action.';
+/** The "Answer privately" button under the owner's own answer in a group, and the short answers to a tap on it or to a
+ * /start in the private chat that cannot be answered. One "name: text" line each; no model writes them (ADR-0248). */
+export const privateAnswerTexts=['button: 🔒 Answer privately','open: 🔒 Opening your private chat. Tap Start there if Telegram asks.',
+  'only_asker: Only the person who asked can use this button.','expired: This button has expired. Ask again in the group for a new one.',
+  'used: This question was already answered privately. Ask again in the group for a new answer.',
+  'changed: This project’s groups or the question changed, so it can’t be answered privately. Ask again in the group.',
+  'not_yours: This private answer was meant for someone else.'].join('\n');
+export type PrivateAnswerText='button'|'open'|'only_asker'|'expired'|'used'|'changed'|'not_yours';
+/** The private answer's labeled lines, with any line the owner removed or left empty taken from the default. */
+export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerText,string> {
+  return labeledLines(privateAnswerTexts,text) as Record<PrivateAnswerText,string>;
+}
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,
+  'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine};
 

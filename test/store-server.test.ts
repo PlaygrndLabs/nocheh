@@ -33,7 +33,7 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='status')return {ok:true};
     if(operation==='telegram.status')return {ok:true,telegram:'connected',telegram_details:{state:'connected'}};
     if(operation==='guard.detect')return {literals:[]};
-    if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','memory.limited':'Limited',
+    if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','reply.private':'Private answer','memory.limited':'Limited',
       'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images'}};
     if(operation.startsWith('persona.')||operation==='config.read')return {operation,input};
     if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:[]};}

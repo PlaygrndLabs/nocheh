@@ -31,6 +31,7 @@ import {ChatPicker} from '../chats/chat-picker';
 import {JoinNotes} from '../chats/project';
 import {relatedGroupsHint} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
+import {PrivateAnswers} from './private-answers';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
 
 type Project = {
@@ -348,6 +349,7 @@ function ProjectDetail({
             description="Only you set these. Every chat in this project uses them, on top of the default for groups, with the chat’s own on top. Defaults are in Settings › Assistant."
           />
           <ProjectKnowledge project={project} context={context} />
+          <PrivateAnswers project={project.id} />
           {context.decisions.total > 0 && (
             <section>
               <h3 className="mb-2 text-sm font-semibold">Waiting for you</h3>

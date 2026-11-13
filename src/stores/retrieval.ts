@@ -20,7 +20,8 @@ import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {BOX_PAGE_BUDGET,PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
-import {parentSpace} from '../spaces.js';
+import {parentSpace,readSetGroups} from '../spaces.js';
+import {albumMembers} from './albums.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
 // One chat's records in time order. Telegram gives a message's own time; an assistant reply has only the time it was saved.
@@ -46,6 +47,8 @@ export class SourceRepository {
   private get stores(){return this.access.stores;}
   /** Relations are shown within the conversations the principal recalls. */
   private relationAudience(principal:Reader):RelationshipAudience {
+    // An answer reader sees relations within the groups frozen in its record (ADR-0248).
+    if(principal.answer!==undefined)return {kind:'reads',set:this.access.reads(principal)!};
     const scope=this.access.recall(principal);
     return scope?{kind:'conversation',chat_id:principal.scope!,topic_id:scope.space.includes('/topic/')?scope.space.split('/topic/')[1]!:null,group:scope.group!==null}:{kind:'owner'};
   }
@@ -241,11 +244,18 @@ export class SourceRepository {
   }
   /** A conversation in time order, one page at a time, with only what the reader may read.
    * The owner may name any chat; anyone else reads the chat they are in. */
-  /** The chat a page or a size reads: the owner names any chat, anyone else only their own. */
+  /** The chat a page or a size reads: the owner names any chat, an answer reader any group of its record, anyone else
+   * only their own. */
   private async conversation(principal:Reader,input:{chat:string;from:string;to:string}) {
     string(input.chat,256);
     const from=pageDate(input.from),to=pageDate(input.to,true);
     const binding=principal.admin?null:await this.audience.assert(principal),owner=principal.admin||principal.scope===null;
+    // An answer reader reads any group of its record, by default the asking one, and never its own private chat (ADR-0248).
+    if(principal.answer!==undefined) {
+      const reads=this.access.reads(principal)!,chat=input.chat||(parentSpace(reads.home)??reads.home);
+      if(!readSetGroups(reads).includes(chat))throw new HttpError(403,'conversation_not_permitted');
+      return {chat,from,to,binding};
+    }
     if(!owner&&input.chat&&input.chat!==principal.scope)throw new HttpError(403,'conversation_not_permitted');
     // A topic is read with the rest of its group, as a group reader reads it.
     const space=principal.space?parentSpace(principal.space)??principal.space:null;
@@ -318,6 +328,10 @@ export class SourceRepository {
     const binding=principal.admin?null:await this.audience.assert(principal);
     if(binding?.mode==='on')throw new HttpError(403,'original_file_requires_owner');
     const file=await this.attachments.file(id);await this.permitted(principal,file.event.id,binding);
+    // A private answer reads text, transcripts and extracted text; the only original files it opens are its own turn's
+    // (its /start and that message's album), the way the turn's files reach it (ADR-0248).
+    if(principal.answer!==undefined&&![principal.turnEvent,...(principal.turnEvent?(await albumMembers(this.stores.archive,principal.turnEvent)).map(member=>member.id):[])]
+      .includes(file.event.id))throw new HttpError(403,'original_file_requires_owner');
     const bytes=await this.attachments.bytes(file);if(binding)await this.audience.assert(principal);return bytes;
   }
 

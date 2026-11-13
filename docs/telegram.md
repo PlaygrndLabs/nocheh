@@ -217,6 +217,51 @@ and transcripts cannot approve or alter settings. Controlled shell, browser and 
 exact proposals and bounded revocable permissions; see ADR-0029. Uncertain
 delivery remains ambiguous; it is not automatically resent.
 
+## Answer privately
+
+A group answer uses only that group. When Nocheh answers the owner's own
+question in a group or topic whose project has at least one other served group,
+the answer's last part carries one button, **🔒 Answer privately**. It never
+appears under a member's question, a fixed reply, a silent answer, a reply in a
+private chat, a job's report or a follow-up, or in a group whose project is
+archived or has no other served group.
+
+Only the person who asked can use it. Anyone else's tap gets a short popup and
+nothing runs. The owner's tap freezes the groups the answer may read, the
+asking group and the project's other served groups, and opens the owner's
+private chat with the bot through `https://t.me/<bot username>?start=<id>`.
+Telegram then sends `/start <id>`, or shows **Start** for the owner to press.
+Only that exact text in the owner's private chat opens the answer; a plain
+`/start` is an ordinary message.
+
+The private answer replies to `/start` there, from the question's text, voice
+transcripts and extracted file text and the groups frozen at the tap. It only
+reads: it searches, reads and pages the archive, searches long-term memory by
+plain search and lists or reads tasks, and cannot post, change a task, start or
+check a job or ask for an action. It
+uses the project's role and skills, else the groups default, never the private
+chat's, and gets only the sharing and grants that reach the asking group. Each
+private answer is its own conversation, titled `Private answer`.
+
+A button lasts a day, a tap waits ten minutes for `/start`, and an answer has
+an hour to arrive. Too late, already answered, someone else's, or a project or
+question that changed since: the tap or `/start` gets a short fixed text and
+no model runs. When the hour passes or the project's groups change while the
+answer is being written, the answer is not sent and the private chat gets that
+short text instead, once. An answer that ends in silence closes the same way,
+without a notice, so a later tap or `/start` is told it expired, never that it
+was already answered. A group reply that the bot does not send takes its button's
+record with it. The button's label, its popups and those texts are one
+**Answer privately button and notices** setting in Settings › Assistant, beside
+**Private answers** (its reply rules) and **Private answer’s first line**.
+
+Every send it takes is recorded like any other
+([send records](#send-records)): the group reply, each tap's popup as a button
+answer without its link, and the private answer. A project's page in
+Memory › Projects lists its buttons with where each was asked, the groups its
+answer could read and what became of it
+([ADR-0248](adr/0248-answer-privately.md)).
+
 ## Validation
 
 `./bin/nocheh test` exercises scope, native memory/session isolation, attachment

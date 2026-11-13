@@ -28,7 +28,11 @@ def verify_capability(credential,secret,scope,event_id):
         prefix,body,signature=credential.split('.')
         expected=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
-        if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
+        # A private answer's pass names its record and reads as the owner's private chat, never as the owner: only in that
+        # chat, with the chat itself as its scope (ADR-0248).
+        answer=claims.get('answer')
+        if answer is not None and (not scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):raise ValueError()
+        if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
             raise ValueError()
         if claims.get('space') is not None:
             if claims['space'] != scope.space or type(claims.get('revision')) is not int or claims['revision'] < 1:raise ValueError()
@@ -58,6 +62,7 @@ class Scope:
     purpose: str = 'assistant'
     logical_profile: str = ''
     project: str = ''
+    answer: str = ''
 
 
 class Scopes:
@@ -100,6 +105,10 @@ class Scopes:
         logical=claims.get('logical_profile')
         if 'logical_profile' in claims and (generation is None or not isinstance(logical,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',logical)):
             raise ValueError('invalid_logical_profile')
+        # A private answer is its own conversation: its record is part of its profile, which is never the owner's (ADR-0248).
+        answer=claims.get('answer')
+        if 'answer' in claims and (generation is None or scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):
+            raise ValueError('invalid_private_answer')
         if generation is not None:
             if not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}',str(generation)) or type(epoch) is not int or epoch<1:
                 raise ValueError('invalid_installation_generation')
@@ -110,7 +119,9 @@ class Scopes:
             identity=[generation,scope.space or scope.chat_id,'owner' if scope.owner else 'scoped',epoch,'filter' if purpose=='filter' else 'assistant']
             default=Scopes.profile(scope.space or scope.chat_id)
             if logical and logical!=default:identity.append(logical)
-            scope=replace(scope,profile=Scopes.profile(json.dumps(identity,separators=(',',':'),ensure_ascii=False)),generation=generation,purpose=purpose,logical_profile=logical or '')
+            if answer is not None:identity.append('answer:'+answer)
+            scope=replace(scope,profile=Scopes.profile(json.dumps(identity,separators=(',',':'),ensure_ascii=False)),generation=generation,purpose=purpose,
+                          logical_profile=logical or '',answer=answer or '')
         # The chat's project brings its role and skills; it never changes which profile or history the turn uses.
         project=claims.get('project')
         if project is not None:

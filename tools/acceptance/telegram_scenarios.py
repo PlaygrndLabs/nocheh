@@ -22,6 +22,8 @@ from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_deli
                                                  wait_telegram_connected)
 
 OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, -10099, 777
+# A third served group, so two groups can share a project while GROUP stays in none (project_groups_stay_apart).
+THIRD_GROUP = -10044
 MENTION = '@synthetic_fixture_bot'
 # The fixed, editable reply for people the owner has not allowed (src/prompts.ts).
 NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this group.'
@@ -211,9 +213,11 @@ class Scenarios:
 
     @staticmethod
     def is_card(row):
-        """An approval card: sent with Approve and Reject buttons (settling it later removes them)."""
+        """An approval card: sent with Approve and Reject buttons (settling it later removes them). A reply whose one
+        button is Answer privately (ADR-0248) is a reply, not a card."""
         markup = row['parameters'].get('reply_markup') or '{}'
-        return bool((json.loads(markup) if isinstance(markup, str) else markup).get('inline_keyboard'))
+        rows = (json.loads(markup) if isinstance(markup, str) else markup).get('inline_keyboard') or []
+        return any(not str(button.get('callback_data') or '').startswith('np') for line in rows for button in line)
 
     def cards_since(self, before, chat):
         return [row for row in self.f.sent()[before:] if self.is_card(row) and row['message']['chat']['id'] == chat]

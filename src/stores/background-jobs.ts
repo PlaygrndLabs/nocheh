@@ -356,6 +356,8 @@ export class BackgroundJobRepository {
   /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
    * Nothing runs until whoever approves it presses Approve. */
   async start(principal:Reader,input:unknown) {
+    // A private answer only reads and talks (ADR-0248).
+    if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
     const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box','repo','machine','steps'].includes(key))||
       body.box!==undefined&&typeof body.box!=='boolean'||body.repo!==undefined&&(typeof body.repo!=='string'||!body.repo||body.repo.length>140)||
       body.machine!==undefined&&(typeof body.machine!=='string'||!body.machine.trim()||body.machine.length>40)||(body.machine===undefined)!==(body.steps===undefined))

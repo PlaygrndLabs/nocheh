@@ -25,7 +25,8 @@ from datetime import datetime, timedelta, timezone
 from tools.acceptance import canaries
 from tools.acceptance.github_mock import key_line
 from tools.acceptance.telegram_rehearsal import wait_telegram_connected
-from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Failed, Scenarios, isolated_turns, synthetic_pdf
+from tools.acceptance.telegram_scenarios import (GROUP, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP, UNSELECTED_GROUP, Failed, Scenarios, isolated_turns,
+                                                synthetic_pdf)
 from tools.paths import ROOT
 
 # 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
@@ -62,8 +63,9 @@ class ProductScenarios(Scenarios):
                     and item['message']['message_id'] == row['message']['message_id'])
 
     def press(self, row, choice, presser=OWNER):
-        """A tap on Approve, Reject, Allow here, Always allow or a job's Stop, delivered like Telegram's callback_query."""
-        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns', 'here': 'nc', 'always': 'nw'}[choice]
+        """A tap on Approve, Reject, Allow here, Always allow, a job's Stop or Answer privately, delivered like Telegram's
+        callback_query."""
+        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns', 'here': 'nc', 'always': 'nw', 'private': 'np'}[choice]
         data = next(button['callback_data'] for button in self.buttons(row) if button['callback_data'].startswith(prefix))
         number = self.f.ids()
         query = {'id': 'cb'+str(number), 'from': {'id': presser, 'is_bot': False, 'first_name': 'Synthetic '+str(presser)},
@@ -633,6 +635,146 @@ class ProductScenarios(Scenarios):
         _, reply = self.turn(self.f.message(chat, text, topic=topic), chat, topic)
         result = [event for event in self.f.brain() if event.get('tool') == tool and event['phase'] == 'final'][-1]['result']
         return result, canaries.found(reply+'\n'+result, marks)
+
+    def project_groups_stay_apart(self):
+        # Two groups of one project (ADR-0246, ADR-0247, ADR-0248): OTHER_GROUP (GP1) and THIRD_GROUP (GP2) join a new
+        # project; GROUP (GP4) stays in none. Each group, and the owner's private chat, holds its own mark next to one
+        # shared search word. A group answer reads only its own group: the owner's question in GP1 finds GP1's mark and
+        # its task, never GP2's mark, task, count or tag. Under the owner's answer there sits Answer privately; a member's
+        # tap gets the only-asker popup and runs nothing; the owner's tap opens the private chat with /start <id>, and
+        # that answer reads GP1 and GP2, never GP4 or the owner's private chat. Every send it took is recorded. A
+        # PROBEMARK sits in an unaddressed message just before the question, which both answers get with the group's recent
+        # messages, so a model request holding it next to a private mark counts as a leak. It stays out of the question:
+        # the question holds the search word, so search results, and the private answer the owner's chat keeps beside its
+        # private mark, would hold it too. The private mark is saved for private_canaries_never_left_the_owner.
+        number = str(self.f.ids())
+        word, probe = 'CRATEWORD'+number, 'PROBEMARK'+number
+        gp1, gp2, gp4 = 'GPONEMARK'+number, 'GPTWOMARK'+number, 'GPFOURMARK'+number
+        gp1_task, gp2_task, gp1_tag, gp2_tag = 'GPONETASK'+number, 'GPTWOTASK'+number, 'GPONETAG'+number, 'GPTWOTAG'+number
+        private = 'PRIVATEMARK'+str(self.f.ids())
+        canaries.save(self.f.directory, {private: 'private chat message (project groups)'}, OWNER)
+        assignments, failed = {}, None
+        try:
+            # The marks, before the project exists: a group's own message stays that group's.
+            self.turn(self.f.message(OWNER, 'Spare crates are in my garage '+word+' '+private), OWNER)
+            self.turn(self.f.message(GROUP, 'Crates for the venue '+word+' '+gp4, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+            project = self.f.app('/v1/projects', {'name': 'Project groups P1', 'description': '', 'state': 'active', 'expected_revision': 0,
+                                                  'operation_id': 'scenario-project-groups-'+number})
+            for chat in (OTHER_GROUP, THIRD_GROUP):
+                own = self.f.app('/v1/projects/effective?space='+str(chat))['own_assignment']
+                assignments[chat] = self.f.app('/v1/projects/assignments', {'space_id': str(chat), 'project_id': project['id'], 'mode': 'assigned',
+                                                                            'expected_revision': own['revision'] if own else 0,
+                                                                            'operation_id': 'scenario-project-groups-'+str(chat)+'-'+number})
+            self.memory_settled()
+            self.turn(self.f.message(OTHER_GROUP, 'Plan for the crates '+word+' '+gp1), OTHER_GROUP)
+            self.turn(self.f.message(THIRD_GROUP, 'Supplier for the crates '+word+' '+gp2), THIRD_GROUP)
+            added = self.task_tool({'action': 'add', 'title': 'Book the hall '+gp1_task, 'tags': [gp1_tag]}, chat=OTHER_GROUP)
+            self.gate('gp1_task_added', bool(added.get('task', added).get('id')), result=str(added)[:300])
+            added = self.task_tool({'action': 'add', 'title': 'Order the crates '+gp2_task, 'tags': [gp2_tag]}, chat=THIRD_GROUP)
+            self.gate('gp2_task_added', bool(added.get('task', added).get('id')), result=str(added)[:300])
+            stats = self.f.http('/fixture/stats')
+
+            # 1. The owner asks in GP1: the answer reads GP1 alone and carries Answer privately.
+            tools = ('[[tool:mcp__nocheh__archive_search {"mode":"text","query":"'+word+'","limit":10}]] '
+                     '[[tool:mcp__nocheh__tasks {"action":"list","state":"all"}]]')
+            self.turn(self.f.message(OTHER_GROUP, 'Before I ask about it: '+probe, mention=False), OTHER_GROUP, expect_reply=False)
+            before = len(self.f.sent())
+            asked, text = self.turn(self.f.message(OTHER_GROUP, 'What do we have on crates? '+tools), OTHER_GROUP)
+            search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
+            listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
+            reply = [row for row in self.replies(before, OTHER_GROUP) if row['message'].get('text') == text][-1]
+            self.gate('group_search_finds_its_own_mark', gp1 in search, result=search[:300])
+            self.gate('group_answer_uses_only_that_group', not canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}),
+                      found=canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}))
+            # 2. GP1's task view: its own task, never GP2's title, count or tag (ADR-0247).
+            try:
+                tasks = json.loads(listed)
+            except ValueError:
+                tasks = {}
+            self.gate('group_task_view_shows_its_own_task', gp1_task in listed, result=listed[:300])
+            self.gate('group_task_view_never_shows_another_groups_task', gp2_task not in listed and gp2_tag not in listed
+                      and (tasks.get('counts') or {}).get('open') == 1, counts=tasks.get('counts'), result=listed[:300])
+            buttons = self.buttons(reply)
+            self.gate('answer_privately_under_the_owners_answer', len(buttons) == 1 and re.fullmatch(r'np[a-f0-9]{32}', buttons[0]['callback_data'] or '')
+                      and buttons[0]['text'] == '\U0001f512 Answer privately', buttons=buttons)
+            record = buttons[0]['callback_data'][2:]
+            state = lambda: self.f.query('nocheh_control', "SELECT state||' '||coalesce(array_to_string(read_chats,','),'') FROM private_answers WHERE id='"+record+"'")
+            self.gate('answer_offered', state() == 'offered ', state=state())
+            # Only the owner's own answer carries it: not a member's answer in GP1, nor the owner's in GP4, in no project.
+            before = len(self.f.sent())
+            _, member_text = self.turn(self.f.message(OTHER_GROUP, 'Anything for me on the hall?', sender=MEMBER), OTHER_GROUP)
+            member_reply = [row for row in self.replies(before, OTHER_GROUP) if row['message'].get('text') == member_text][-1]
+            before = len(self.f.sent())
+            _, lone_text = self.turn(self.f.message(GROUP, 'Anything new on the venue?', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+            lone_reply = [row for row in self.replies(before, GROUP, TEAM_TOPIC) if row['message'].get('text') == lone_text][-1]
+            self.gate('button_only_under_owner_question', not self.buttons(member_reply) and not self.buttons(lone_reply),
+                      member=self.buttons(member_reply), lone=self.buttons(lone_reply))
+
+            # 4. A member's tap: the only-asker popup, no link, and nothing runs.
+            events, sent = self.f.brain()[-1:], len(self.f.sent())
+            member = self.press(reply, 'private', MEMBER)
+            time.sleep(5)
+            self.gate('member_tap_gets_only_asker', member.get('text') == 'Only the person who asked can use this button.' and 'url' not in member,
+                      answer=member)
+            self.gate('member_tap_runs_nothing', state() == 'offered ' and len(self.f.sent()) == sent and self.f.brain()[-1:] == events, state=state())
+
+            # 3. The owner's tap freezes the project's groups and opens the private chat; /start answers there from GP1 and GP2.
+            owner = self.press(reply, 'private')
+            self.gate('owner_tap_opens_the_private_chat', owner.get('url') == 'https://t.me/synthetic_fixture_bot?start='+record, answer=owner)
+            frozen = state().split(' ')
+            self.gate('tap_freezes_the_projects_groups', frozen[0] == 'pressed' and set(frozen[1].split(',')) == {str(OTHER_GROUP), str(THIRD_GROUP)},
+                      state=' '.join(frozen))
+            before = len(self.f.sent())
+            _, answer = self.turn(self.f.message(OWNER, '/start '+record), OWNER)
+            private_reply = [row for row in self.replies(before, OWNER) if row['message'].get('text') == answer][-1]
+            search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
+            listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
+            seen = answer+'\n'+search+'\n'+listed
+            self.gate('private_answer_reads_the_projects_groups', gp2 in search and gp1 in search and gp2_task in listed and gp1_task in listed,
+                      search=search[:300], tasks=listed[:300])
+            self.gate('private_answer_never_reads_other_groups_or_the_private_chat', not canaries.found(seen, {gp4: 'GP4', private: 'private'}),
+                      found=canaries.found(seen, {gp4: 'GP4', private: 'private'}))
+            self.gate('private_answer_carries_no_button', not self.buttons(private_reply))
+            self.wait('private_answer_recorded', lambda: state().startswith('answered '), 60)
+            after = self.f.http('/fixture/stats')
+            self.gate('no_private_text_next_to_the_question', after['private_text_in_group'] == stats['private_text_in_group'],
+                      seen=after.get('private_text_seen', [])[-3:])
+            again = len(self.f.sent())
+            _, used = self.turn(self.f.message(OWNER, '/start '+record), OWNER)
+            self.gate('second_start_gets_the_used_reply', used.startswith('This question was already answered privately.'), reply=used)
+            self.gate('second_start_sends_one_reply', len(self.f.sent()) == again+1)
+
+            # 5. Every send was recorded, content-free: both replies and both popups.
+            def recorded():
+                replies = self.f.app('/v1/chat-sends?kind=reply&limit=100')['records']
+                answers = self.f.app('/v1/chat-sends?kind=button_answer&limit=100')['records']
+                found = [any(item['chat'] == str(row['message']['chat']['id']) and item['message_id'] == row['message']['message_id']
+                             and item['state'] == 'sent' for item in replies) for row in (reply, private_reply)]
+                found += [any(item['reference'] == 'approval-answer:'+tap['callback_query_id'] and item['state'] == 'sent' for item in answers)
+                          for tap in (member, owner)]
+                return all(found)
+            self.wait('every_send_recorded', recorded, 180)
+        except Exception as error:
+            failed = error
+            raise
+        finally:
+            # Leave both groups in no project, as later scenarios expect.
+            problems = []
+            for chat, assignment in assignments.items():
+                try:
+                    self.f.app('/v1/projects/assignments', {'space_id': str(chat), 'mode': 'none', 'expected_revision': assignment['revision'],
+                                                            'operation_id': 'scenario-project-groups-unassign-'+str(chat)+'-'+number})
+                except Exception as error:
+                    problems.append(type(error).__name__+':'+str(error)[:200])
+            if assignments:
+                try:
+                    self.memory_settled()
+                except Exception as error:
+                    problems.append(type(error).__name__+':'+str(error)[:200])
+            if problems:
+                self.current['cleanup_problems'] = problems
+                if failed is None:
+                    raise Failed('cleanup_failed')
 
     def private_canaries_never_left_the_owner(self):
         # The last check of a run: no private mark planted by private_chat_stays_out_of_groups is in anything the fake
@@ -2093,7 +2235,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
-                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'private_chat_stays_out_of_groups', 'inbox_never_asks_about_the_owner',
+                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
                  'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',

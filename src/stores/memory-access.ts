@@ -131,7 +131,8 @@ export class MemoryAccessRepository {
       // A fact that rests on a private chat, the owner's included, or on an unknown conversation is never suggested (ADR-0242).
       const spaces=await this.access.evidenceSpaces(fact.evidence);
       if(!spaces.length||!spaces.every(groupSpace))continue;
-      if((await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE ${recallCondition('destination','$1','$3')} AND fact_id=$2 AND state='active' AND (expires_at IS NULL OR expires_at>now()) LIMIT 1`,[principal.space,fact.id,this.access.recall(principal)?.group??null])).rowCount)continue;
+      const home=this.access.recall(principal)!;
+      if((await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE ${recallCondition('destination','$1','$3')} AND fact_id=$2 AND state='active' AND (expires_at IS NULL OR expires_at>now()) LIMIT 1`,[home.space,fact.id,home.group])).rowCount)continue;
       const readable=(await Promise.all(fact.evidence.map(ref=>this.access.canRead(principal,ref,binding)))).every(Boolean);if(readable)continue;
       selected=fact;evidenceSpaces=[...new Set(spaces as string[])].sort();path=pathByEntity.get(fact.subject_entity_id)??pathByEntity.get(fact.object_entity_id??'')??[];break;
     }
@@ -338,10 +339,12 @@ export class MemoryAccessRepository {
   private async suspendRequest(id:string,expected:number){await this.stores.control.query("UPDATE memory_access_requests SET state='suspended',revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2 AND state='pending'",[id,expected]);}
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);await this.reconcile();
-    // Persistent grants to any conversation the principal recalls apply, so a group's topics share them.
+    // Persistent grants to any conversation the principal recalls apply, so a group's topics share them. An answer reader
+    // gets the asking group's grants, never grants into its own private chat (ADR-0248).
+    const home=this.access.recall(principal)!;
     const binding=await this.prepared.audience.assert(principal),rows=(await this.stores.control.query(`SELECT * FROM memory_fact_grants
       WHERE ${recallCondition('destination','$1','$2')} AND mode='persistent' AND state='active' AND (expires_at IS NULL OR expires_at>now()) ORDER BY id LIMIT 100`,
-      [principal.space,this.access.recall(principal)?.group??null])).rows,sources=[];
+      [home.space,home.group])).rows,sources=[];
     for(const row of rows){const text=await this.validateGrant(row,binding);if(text&&(!query.trim()||relevant(query,text)))sources.push({id:row.id,source:'nocheh:grant:'+row.id,kind:'owner_approved' as const,text,limitations:[]});if(sources.length>=10)break;}
     await this.prepared.audience.assert(principal);return {sources};
   }

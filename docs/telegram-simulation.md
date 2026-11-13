@@ -223,7 +223,9 @@ live state, credentials or volumes and never stops the live stack.
 
 The fake Telegram plays every person. It stores inline keyboards, edits cards
 with `editMessageText`, and answers `answerCallbackQuery` only for button
-presses the tester injected, so approval cards are pressed like a phone would.
+presses the tester injected, so approval cards are pressed like a phone would;
+it keeps the link an answer opens, as for **Answer privately**. The fixture
+serves three groups, so two can share a project while the third stays in none.
 Product scenarios cover allowed members, addressing by name, unaddressed
 messages shown once to the next reply, the fixed reply for people not allowed,
 approval cards with Approve and Reject in private chat, same-group posts,
@@ -233,7 +235,11 @@ hide and unhide carrying the conversation, reactions keeping the group name,
 learning reaching Honcho, Inbox person cards (one per new name, none for the
 owner), a Telegram Desktop export with a topic, a file and learning, tasks
 from chat with a reminder, status and board, tasks staying out of unrelated
-groups, defaults (history kept forever, Notion off), and a Settings save whose
+groups, two groups of one project staying apart while **Answer privately**
+sits only under the owner's own answer, refuses a member's tap and answers the
+owner's `/start` from both groups but not the third (its probe mark rides an
+unaddressed message just before the question, so no search hit or private
+answer holds it), defaults (history kept forever, Notion off), and a Settings save whose
 apply a reload sees running and that ends with a result. Dashboard calls sign
 in through the preview relay like the browser
 ([client](../tools/acceptance/owner_dashboard.py)). The

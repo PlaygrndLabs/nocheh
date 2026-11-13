@@ -462,6 +462,29 @@ test('a built-in instruction is replaced, checked and reset to the built-in text
   await page.close();
 });
 
+test('the private answer’s rules, first line, button and notices are built-in instructions the owner can edit', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  for (const title of ['Private answers', 'Private answer’s first line', 'Answer privately button and notices']) {
+    await card.getByText(title, {exact: true}).click();
+    assert.equal(await card.getByRole('textbox', {name: title}).isEditable(), true, title);
+  }
+  assert.equal(
+    await card.getByRole('textbox', {name: 'Private answers'}).inputValue(),
+    'This is a private answer, in the private chat of the person who asked.',
+  );
+  assert.match(
+    await card.getByRole('textbox', {name: 'Private answer’s first line'}).inputValue(),
+    /\{group\}.*\{groups\}/,
+  );
+  assert.match(
+    await card.getByRole('textbox', {name: 'Answer privately button and notices'}).inputValue(),
+    /^button: 🔒 Answer privately$/m,
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('long-term memory is re-run or replaced only after the owner sees what it would send', async () => {
   const {page, problems} = await open('memory?view=longterm');
   const status = page.locator('section').filter({has: page.getByRole('heading', {name: 'Long-term memory'})});
@@ -1470,6 +1493,27 @@ test('a project shares nothing between its groups, and a group joins one only af
     [],
   );
   await rules.close();
+});
+
+test('a project lists its Answer privately buttons: where, what the answer could read and what became of it', async () => {
+  const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
+  const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
+  const section = drawer.locator('section', {has: page.getByRole('heading', {name: 'Private answers'})});
+  const rows = section.getByRole('listitem');
+  await rows.first().waitFor();
+  assert.equal(await rows.count(), 2);
+  const answered = rows.filter({hasText: 'Answered'});
+  await answered.getByText('Aurora planning › Iceland planning').waitFor();
+  await answered.getByText('Could read: Aurora planning, Chat -10077').waitFor();
+  assert.equal(
+    await answered.getByRole('link', {name: 'The question'}).getAttribute('href'),
+    '#messages?source=' + '1'.repeat(64),
+  );
+  const refused = rows.filter({hasText: 'Refused'});
+  await refused.getByText('(the project’s groups or the question changed)').waitFor();
+  assert.equal(await refused.getByText(/^Could read/).count(), 0, 'nothing was frozen without a tap');
+  assert.deepEqual(problems, []);
+  await page.close();
 });
 
 test('the owner’s private chat stays out of sharing rules and projects', async () => {
