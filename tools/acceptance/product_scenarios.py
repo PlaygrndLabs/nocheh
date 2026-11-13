@@ -698,8 +698,10 @@ class ProductScenarios(Scenarios):
             self.gate('answer_privately_under_the_owners_answer', len(buttons) == 1 and re.fullmatch(r'np[a-f0-9]{32}', buttons[0]['callback_data'] or '')
                       and buttons[0]['text'] == '\U0001f512 Answer privately', buttons=buttons)
             record = buttons[0]['callback_data'][2:]
-            state = lambda: self.f.query('nocheh_control', "SELECT state||' '||coalesce(array_to_string(read_chats,','),'') FROM private_answers WHERE id='"+record+"'")
-            self.gate('answer_offered', state() == 'offered ', state=state())
+            # The record's state and the groups frozen in it, as 'state|groups': the fixture's query strips the output, so
+            # nothing may end in a space.
+            state = lambda: self.f.query('nocheh_control', "SELECT state||'|'||coalesce(array_to_string(read_chats,','),'') FROM private_answers WHERE id='"+record+"'")
+            self.gate('answer_offered', state() == 'offered|', state=state())
             # Only the owner's own answer carries it: not a member's answer in GP1, nor the owner's in GP4, in no project.
             before = len(self.f.sent())
             _, member_text = self.turn(self.f.message(OTHER_GROUP, 'Anything for me on the hall?', sender=MEMBER), OTHER_GROUP)
@@ -716,14 +718,14 @@ class ProductScenarios(Scenarios):
             time.sleep(5)
             self.gate('member_tap_gets_only_asker', member.get('text') == 'Only the person who asked can use this button.' and 'url' not in member,
                       answer=member)
-            self.gate('member_tap_runs_nothing', state() == 'offered ' and len(self.f.sent()) == sent and self.f.brain()[-1:] == events, state=state())
+            self.gate('member_tap_runs_nothing', state() == 'offered|' and len(self.f.sent()) == sent and self.f.brain()[-1:] == events, state=state())
 
             # 3. The owner's tap freezes the project's groups and opens the private chat; /start answers there from GP1 and GP2.
             owner = self.press(reply, 'private')
             self.gate('owner_tap_opens_the_private_chat', owner.get('url') == 'https://t.me/synthetic_fixture_bot?start='+record, answer=owner)
-            frozen = state().split(' ')
+            frozen = state().split('|')
             self.gate('tap_freezes_the_projects_groups', frozen[0] == 'pressed' and set(frozen[1].split(',')) == {str(OTHER_GROUP), str(THIRD_GROUP)},
-                      state=' '.join(frozen))
+                      state='|'.join(frozen))
             before = len(self.f.sent())
             _, answer = self.turn(self.f.message(OWNER, '/start '+record), OWNER)
             private_reply = [row for row in self.replies(before, OWNER) if row['message'].get('text') == answer][-1]
@@ -735,7 +737,7 @@ class ProductScenarios(Scenarios):
             self.gate('private_answer_never_reads_other_groups_or_the_private_chat', not canaries.found(seen, {gp4: 'GP4', private: 'private'}),
                       found=canaries.found(seen, {gp4: 'GP4', private: 'private'}))
             self.gate('private_answer_carries_no_button', not self.buttons(private_reply))
-            self.wait('private_answer_recorded', lambda: state().startswith('answered '), 60)
+            self.wait('private_answer_recorded', lambda: state().startswith('answered|'), 60)
             after = self.f.http('/fixture/stats')
             self.gate('no_private_text_next_to_the_question', after['private_text_in_group'] == stats['private_text_in_group'],
                       seen=after.get('private_text_seen', [])[-3:])
