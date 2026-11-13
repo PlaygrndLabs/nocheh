@@ -9,10 +9,12 @@ type Database=Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>;
  * id and `served` the placeholder of a `text[]` parameter holding the served group IDs (the policy's group_ids).
  * Anything that is not a group's own chat ID is left out, the owner's private chat included (ADR-0242). Sorted by
  * code point, the order JavaScript's sort gives, whatever the database collation. The project's state is not
- * checked: callers that need an active project check it.
+ * checked: callers that need an active project check it. Its own rows are named `project_group`, an alias no caller
+ * uses, so `project` never silently binds to the subquery's own row instead of the caller's.
  */
-export const projectGroupsSql=(project:string,served:string)=>`(SELECT coalesce(array_agg(a.space_id ORDER BY a.space_id COLLATE "C"),'{}'::text[])
-  FROM project_assignments a WHERE a.project_id=${project} AND a.mode='assigned' AND ${groupChatSql('a.space_id')} AND a.space_id=ANY(${served}::text[]))`;
+export const projectGroupsSql=(project:string,served:string)=>`(SELECT coalesce(array_agg(project_group.space_id ORDER BY project_group.space_id COLLATE "C"),'{}'::text[])
+  FROM project_assignments project_group WHERE project_group.project_id=${project} AND project_group.mode='assigned'
+  AND ${groupChatSql('project_group.space_id')} AND project_group.space_id=ANY(${served}::text[]))`;
 
 /**
  * A project's groups: the served groups assigned to it, as projectGroupsSql decides (ADR-0246, ADR-0248). The one

@@ -86,7 +86,7 @@ export async function bindAnswerReads(db:Database,policy:AssistantPolicy,princip
   if(principal.answer===undefined)return principal;
   if(!answerId.test(principal.answer)||principal.admin||principal.scope===null||principal.space!==principal.scope||!principal.turnEvent||!event.test(principal.turnEvent))throw closed();
   if(!policy.enabled||!policy.owner_id)throw closed();
-  // The record is `answer`: projectGroupsSql names its own assignments `a`.
+  // The record is `answer`: projectGroupsSql names its own assignments `project_group`.
   const row=(await db.query<PrivateAnswer&{project_groups:string[]}>(`SELECT answer.*,${projectGroupsSql('answer.project_id','$4')} AS project_groups
     FROM private_answers answer JOIN projects p ON p.id=answer.project_id AND p.state='active'
     WHERE answer.id=$1 AND answer.start_event=$2 AND answer.reply_chat_id=$3 AND answer.state IN ('pressed','answered') AND answer.expires_at>now()`,
