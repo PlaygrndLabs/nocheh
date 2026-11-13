@@ -1288,11 +1288,88 @@ test('a project shares nothing between its groups, and a group joins one only af
   await question.waitFor();
   await question.getByRole('button', {name: 'None'}).click();
   await unanswered.getByRole('status').filter({hasText: 'Joins no project.'}).waitFor();
-  assert.deepEqual(
-    posted.map(({space_id, mode, project_id, expected_revision}) => ({space_id, mode, project_id, expected_revision})),
-    [{space_id: '-10042', mode: 'none', project_id: null, expected_revision: 0}],
-  );
+  const sent = list =>
+    list.map(({space_id, mode, project_id, expected_revision}) => ({space_id, mode, project_id, expected_revision}));
+  assert.deepEqual(sent(posted), [{space_id: '-10042', mode: 'none', project_id: null, expected_revision: 0}]);
   await unanswered.close();
+
+  // A group that only follows no project (an older removal or an undo) has not answered either.
+  const following = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const followingPosted = [];
+  const inheritRow = space => ({space_id: space, project_id: null, mode: 'inherit', revision: 3});
+  for (const space of ['-10042', '-10073'])
+    await following.route(new RegExp('/api/nocheh/projects/effective\\?space=' + space + '$'), route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          space,
+          own_assignment: inheritRow(space),
+          assignment: null,
+          project: null,
+          inherited: false,
+        }),
+      }),
+    );
+  await following.route(/\/api\/nocheh\/projects\/assignments$/, route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    followingPosted.push(body);
+    return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({...body, revision: 4})});
+  });
+  await following.goto(origin + '/#chats?chat=-10042');
+  const asked = following.getByRole('status').filter({hasText: 'Which project does this group join?'});
+  await asked.getByRole('button', {name: 'None'}).click();
+  await following.getByRole('status').filter({hasText: 'Joins no project.'}).waitFor();
+  // Turning Nocheh on there asks first too, and saves over that row.
+  await following.goto(origin + '/#chats?chat=-10073');
+  const followingSwitch = following.getByRole('switch', {name: 'Nocheh in this group'});
+  await followingSwitch.click();
+  const followingJoin = following.getByRole('dialog', {name: 'Which project does this group join?'});
+  await followingJoin.locator('#join-project').selectOption({label: 'None'});
+  await followingJoin.getByRole('button', {name: 'Turn on'}).click();
+  await following.getByRole('status').filter({hasText: 'Weekend notes joins no project.'}).waitFor();
+  assert.equal(await followingSwitch.isChecked(), true);
+  assert.deepEqual(sent(followingPosted), [
+    {space_id: '-10042', mode: 'none', project_id: null, expected_revision: 3},
+    {space_id: '-10073', mode: 'none', project_id: null, expected_revision: 3},
+  ]);
+  await following.close();
+
+  // A group already in a project names that project's other groups and its task list before Nocheh turns on there,
+  // since it then joins them.
+  const placed = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const placedRow = {space_id: '-10073', project_id: 'ab'.repeat(32), mode: 'assigned', revision: 4};
+  await placed.route(/\/api\/nocheh\/projects\/effective\?space=-10073$/, route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        space: '-10073',
+        own_assignment: placedRow,
+        assignment: placedRow,
+        project: {id: 'ab'.repeat(32), name: 'Aurora field guide', description: '', state: 'active', revision: 1},
+        inherited: false,
+      }),
+    }),
+  );
+  await placed.goto(origin + '/#chats?chat=-10073');
+  const placedSwitch = placed.getByRole('switch', {name: 'Nocheh in this group'});
+  await placedSwitch.click();
+  const turnOn = placed.getByRole('dialog', {name: 'Turn Nocheh on in Weekend notes?'});
+  await turnOn.getByText('Already in Aurora field guide: Aurora planning.').waitFor();
+  await turnOn
+    .getByText('People in two of these groups can get private answers that combine them.', {exact: false})
+    .waitFor();
+  await turnOn.getByText('will see and change every task on the list of Aurora field guide.', {exact: false}).waitFor();
+  await turnOn.getByRole('button', {name: 'Cancel'}).click();
+  await turnOn.waitFor({state: 'detached'});
+  assert.equal(await placedSwitch.isChecked(), false, 'Cancel leaves it off');
+  await placedSwitch.click();
+  await turnOn.getByRole('button', {name: 'Turn on'}).click();
+  await placed.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
+  assert.equal(await placed.getByRole('dialog', {name: 'Which project does this group join?'}).count(), 0);
+  await placed.close();
 
   // Turning Nocheh on in a group asks which project it joins first; Cancel leaves it off.
   const {page: off, problems: offProblems} = await open('chats?chat=-10073');
@@ -1334,13 +1411,14 @@ test('a project shares nothing between its groups, and a group joins one only af
   await rule
     .getByText('Everyone allowed in the chat you share into, its topics included, will see what this rule lets in.')
     .waitFor();
-  await rule
-    .getByRole('listbox', {name: 'Into this chat'})
-    .getByRole('option', {name: /^Aurora planning/})
-    .click();
-  await rule
-    .getByText('Everyone allowed in Aurora planning, its topics included, will see what this rule lets in.')
-    .waitFor();
+  // A rule into a topic names its group: everyone there reads every topic, and the group's memory is shared.
+  const into = rule.getByRole('listbox', {name: 'Into this chat'});
+  const audience = 'Everyone allowed in Aurora planning, its topics included, will see what this rule lets in.';
+  await into.getByRole('option', {name: /^Iceland planning/}).click();
+  await rule.getByText(audience).waitFor();
+  assert.equal(await rule.getByText(/Everyone allowed in Iceland planning/).count(), 0);
+  await into.getByRole('option', {name: /^Aurora planning/}).click();
+  await rule.getByText(audience).waitFor();
   assert.deepEqual(
     [...problems, ...chatProblems, ...topicProblems, ...offProblems, ...reviewProblems, ...ruleProblems],
     [],

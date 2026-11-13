@@ -2,7 +2,7 @@
 import {useState} from 'react';
 import {Button, Field, Input, Segmented, Switch, Textarea} from '../../ui/core';
 import {Dialog} from '../../ui/overlay';
-import {chatName, groupSpace} from '../../lib/chats-model';
+import {chatName, groupSpace, parentOf} from '../../lib/chats-model';
 import {ChatPicker} from './chat-picker';
 import {ActionError, useAction, useChat} from './shared';
 
@@ -32,11 +32,13 @@ export const otherGroupsText = (project: string, groups: string[]) =>
     ? `Already in ${project}: ${groups.length < 2 ? groups[0] : groups.slice(0, -1).join(', ') + ' and ' + groups.at(-1)}.`
     : `No other group is in ${project} yet.`;
 
-/** Who sees what one of the owner's rules lets into a chat: the one exception to "a group answer uses only that group". */
-export const ruleAudienceText = (destination: string | null, topic: boolean) =>
-  destination
-    ? `Everyone allowed in ${destination}${topic ? '' : ', its topics included,'} will see what this rule lets in.`
-    : 'Everyone allowed in the chat you share into, its topics included, will see what this rule lets in.';
+/**
+ * Who sees what one of the owner's rules lets into a chat: the one exception to "a group answer uses only that group".
+ * Always the whole destination group, its topics included: every member reads every topic, and while topics share the
+ * group's memory a rule into one topic is used in the General chat and every other topic too.
+ */
+export const ruleAudienceText = (group: string | null) =>
+  `Everyone allowed in ${group ?? 'the chat you share into'}, its topics included, will see what this rule lets in.`;
 
 /** Shown wherever a chat joins a project: everyone allowed there sees and changes the project's task list (ADR-0243). */
 export const projectTasksWarning = (chat: string, projects: string[]) =>
@@ -90,7 +92,8 @@ export function RuleDialog({
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const action = useAction();
   const ready = name.trim() && sources.length && destination;
-  const target = useChat(destination);
+  // A rule into a topic is named by its group, which is who sees it.
+  const target = useChat(parentOf(destination) ?? destination);
 
   const save = async () => {
     const result = await action.run(
@@ -107,10 +110,7 @@ export function RuleDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={rule ? 'Edit sharing rule' : 'New sharing rule'}
-      description={ruleAudienceText(
-        destination && groupSpace(destination) ? chatName(target) : null,
-        destination.includes('/topic/'),
-      )}
+      description={ruleAudienceText(destination && groupSpace(destination) ? chatName(target) : null)}
       className="max-w-xl"
       footer={
         <>

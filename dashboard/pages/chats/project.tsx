@@ -31,6 +31,12 @@ const NONE = '__none';
 const UNANSWERED = '';
 
 /**
+ * Whether a group has answered which project it joins: a project, or "None". A group with no row, or one that only
+ * follows no project ('inherit', left by an older removal or an undo), has not.
+ */
+const answered = (own: Assignment | null | undefined) => !!own && own.mode !== 'inherit';
+
+/**
  * What joining a project means, shown before a group joins one: the project's other groups first, that people in two
  * of them can get private answers that combine them, then its task list.
  */
@@ -70,11 +76,14 @@ function useProjectChoices(current?: Project | null) {
 export function JoinProjectDialog({
   group,
   name,
+  revision,
   open,
   onDone,
 }: {
   group: string;
   name: string;
+  /** The revision of the group's unanswered row, 0 when it has none. */
+  revision: number;
   open: boolean;
   onDone: (answered: boolean) => void;
 }) {
@@ -90,7 +99,7 @@ export function JoinProjectDialog({
       {
         space_id: group,
         ...(project ? {mode: 'assigned', project_id: project.id} : {mode: 'none', project_id: null}),
-        expected_revision: 0,
+        expected_revision: revision,
       },
       {success: project ? `${name} joins ${project.name}.` : `${name} joins no project.`},
     );
@@ -143,15 +152,26 @@ export function JoinProjectDialog({
 }
 
 /**
- * Whether turning Nocheh on in a group first asks which project it joins: the group has no answer yet and projects
- * exist. `settled` turns true once that is known, or once loading failed, when the group's card asks instead.
+ * What turning Nocheh on in a group first shows. `ask`: which project it joins, when the group has no answer yet and
+ * projects exist. `project`: the project it is already in, whose other groups and task list are named before it turns
+ * on, since it then joins them. `settled` turns true once that is known, or once loading failed, when the group's card
+ * asks instead.
  */
 export function useJoinQuestion(group: string) {
   const effective = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(group));
   const {projects, choices} = useProjectChoices();
+  const own = effective.data?.own_assignment ?? null;
+  const placed =
+    own?.mode === 'assigned'
+      ? ((projects.data?.projects ?? []).find(project => project.id === own.project_id) ??
+        effective.data?.project ??
+        null)
+      : null;
   return {
     settled: (!!effective.data && !!projects.data) || !!effective.error || !!projects.error,
-    ask: !!effective.data && !!projects.data && !effective.data.own_assignment && choices.length > 0,
+    ask: !!effective.data && !!projects.data && !answered(own) && choices.length > 0,
+    revision: own?.revision ?? 0,
+    project: effective.data && projects.data ? placed : null,
   };
 }
 
@@ -209,7 +229,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
   const own = data?.own_assignment ?? null;
   const name = names(space);
   // A served group with no answer yet asks which project it joins; "None" is an answer too.
-  const unanswered = served && !!data && !own && choices.length > 0;
+  const unanswered = served && !!data && !answered(own) && choices.length > 0;
   const value = unanswered ? UNANSWERED : own?.mode === 'assigned' ? (own.project_id ?? NONE) : NONE;
 
   const save = (next: string) => {

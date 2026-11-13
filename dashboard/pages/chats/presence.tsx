@@ -3,8 +3,8 @@ import {useState} from 'react';
 import {useFeedback} from '../../ui/overlay';
 import {Card, CardBody, CardHeader, Notice, Switch} from '../../ui/core';
 import {chatName, type Chat} from '../../lib/chats-model';
-import {JoinProjectDialog, useJoinQuestion} from './project';
-import {chatHref, telegramSettingsHref, Unsaved, type Telegram} from './shared';
+import {JoinNotes, JoinProjectDialog, useJoinQuestion} from './project';
+import {chatHref, telegramSettingsHref, Unsaved, useChatNames, type Telegram} from './shared';
 
 function telegramProblem(chat: Chat): string | null {
   const state = chat.telegram?.state;
@@ -72,9 +72,13 @@ export function NochehHere({chat, parent, telegram}: {chat: Chat; parent: Chat |
   return <GroupPresence chat={chat} problem={problem} telegram={telegram} />;
 }
 
-/** A group's switch. Turning Nocheh on in a group with no project answer first asks which project it joins, or none. */
+/**
+ * A group's switch. Turning Nocheh on in a group with no project answer first asks which project it joins, or none;
+ * in a group already in a project, it first names that project's other groups and its task list.
+ */
 function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string | null; telegram: Telegram}) {
   const {confirm} = useFeedback();
+  const names = useChatNames();
   const group = chat.space_id;
   const on = telegram.isOn(group);
   const join = useJoinQuestion(group);
@@ -84,6 +88,16 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
       setAsking(true);
       return;
     }
+    if (
+      next &&
+      join.project &&
+      !(await confirm({
+        title: `Turn Nocheh on in ${chatName(chat)}?`,
+        body: <JoinNotes space={group} name={chatName(chat)} project={join.project} names={names} />,
+        confirm: 'Turn on',
+      }))
+    )
+      return;
     const rule = telegram.rule(group);
     if (!next && (rule.granted.length || rule.denied.length)) {
       const ok = await confirm({
@@ -127,6 +141,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
         <JoinProjectDialog
           group={group}
           name={chatName(chat)}
+          revision={join.revision}
           open
           onDone={answered => {
             setAsking(false);
