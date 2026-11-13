@@ -123,10 +123,89 @@ section.
 </decision>
 
 <button_delivery_and_brain>
-**Button, delivery and brain.** Placeholder, filled by the button's change in
-the same step: the button under the owner's group answer, the link that opens
-the private chat, the private answer's Hermes profile, role and prompt, its
-editable texts, the sends it records and the brain's read-only tool list.
+**Button, delivery and brain.** This half amends
+[ADR-0235](0235-nocheh-owns-the-telegram-bot.md) (a turn's reply may carry
+one button, and a press's answer may open a link),
+[ADR-0227](0227-hermes-lists-chats-by-their-names.md) (a private answer's
+session is named `Private answer`, not after the chat),
+[ADR-0238](0238-record-every-send-to-a-chat-app.md) (a press's answer that
+opens a link is recorded like any other, without the link) and
+[ADR-0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md) (a
+private answer in the owner's private chat never loads that chat's role and
+skills or the owner's default).
+
+- **The button.** When the owner's own question in a group or topic gets a
+  reply, Nocheh offers the record (Offer, above) and the reply carries one
+  inline button, `🔒 Answer privately`, under its last part. Its data is `np`
+  and the record id (34 bytes, within Telegram's 64). No button goes under a
+  fixed reply, an empty or silent answer, a private answer, a member's
+  question, a reply in a private chat, or a reply in a group whose project is
+  archived or has no other served group; when the record cannot be offered,
+  the reply goes without it. A follow-up after approved operations, a job's
+  report and a scheduled run are not answers to a question and never carry
+  one. A retried reply carries the same button, as the record is the same.
+- **The bot checks it.** The Telegram service accepts a reply's button only
+  as exactly `{text, data}`, never in the owner's private chat, with a label
+  of 1 to 40 characters and data equal to `np` and the HMAC it computes itself
+  from this turn's question with the service token; anything else refuses
+  the whole reply (`invalid_reply`). The outbound check binds every send to
+  the one keyboard it was given: a send that carries another keyboard, or one
+  when none was given, is held. Approval cards and notices are bound to their
+  own keyboards the same way.
+- **The tap.** A press with `np` data goes to the record (Tap, above), never
+  to the approval buttons. The tapper gets a short popup, never model text:
+  only the asker (`only_asker`), already answered (`used`), too late
+  (`expired`) or changed (`changed`). The asker's tap answers with `open` and
+  a link, `https://t.me/<bot username>?start=<record id>`, which Telegram opens
+  as the asker's private chat with the bot. The bot builds the link from the
+  username Telegram gave it and refuses a `start` that is not 32 hex
+  characters; without its username there is no link, and the tap gets the
+  `changed` popup instead.
+- **`/start <id>`.** Only the exact text `/start` and 32 hex characters, in
+  the owner's private chat, opens a private answer; a plain `/start`, or
+  anything else after it, is an ordinary message. It is checked before the
+  owner's own pass is built: the record is claimed (`/start`, above) and the
+  whole turn is built under the answer's pass, never as the owner. A `/start`
+  that cannot be answered gets the fixed reply for its code in the owner's
+  own turn and runs no model. Anyone else's private `/start` gets today's
+  stranger reply ([ADR-0182](0182-strangers-cost-nothing-and-reach-no-model.md)).
+- **What the brain gets.** The question's own text, voice transcripts and
+  extracted file text, read under the answer's pass (an original image is
+  never sent as an image), with the question's speaker line
+  ([ADR-0222](0222-a-group-turn-knows-when-the-owner-speaks.md)) and the
+  asking group's recent unaddressed messages before it. Before them comes one
+  first line from the owner's template: where it was asked (`{group}`, with
+  its topic) and every group it may read (`{groups}`, the asking one first),
+  named from their archived titles, never by ID. A question retired since, or
+  no longer readable, gets the `changed` reply. The question is a source of the
+  answer too, so retiring it withholds the answer's history.
+- **The brain's side.** Hermes takes the `answer` claim only for the owner's
+  private chat with that chat as its scope, and only together with the
+  framed question; either one alone does not run. The turn runs as that chat,
+  never as the owner (`owner` false), in its own profile (above), with
+  `chat_type` `dm`. It loads the project's role and skills, else the groups
+  default, and never the private chat's own or the owner's default. Its tools
+  are `session_search`, `skills_list`, `skill_view` and the five read tools;
+  native memory is left out, so it writes no notes. Its reply rules are the
+  common rules and `reply.private`.
+- **Delivery.** The answer is a reply to the `/start` message in the owner's
+  private chat, with no button, sent under the answer's pass, which the
+  delivery check passes only there. When it went out, the record is answered
+  once with the send's key; a record closed while the answer was being
+  written withdraws it (`private_answer_closed`). Every send it took is
+  recorded content-free ([ADR-0238](0238-record-every-send-to-a-chat-app.md)):
+  the group reply, the popups (`button_answer`, without the link) and the
+  private answer.
+- **Editable texts.** Settings › Assistant holds `reply.private` (the
+  private answer's reply rules), `telegram.private_answer` (its first line;
+  `{group}` and `{groups}` must stay) and `telegram.private_answer_texts`
+  (one `name: text` line each for the button and the `open`, `only_asker`,
+  `expired`, `used`, `changed` and `not_yours` popups; a removed line keeps
+  its default).
+- **Where the owner sees it.** A project's page lists its buttons, newest
+  first: where each question was asked, the groups its answer could read, its
+  state and reason, and a link to the question. Each private answer's profile
+  shows in Memory › Notes as `Private answer` and the end of its name.
 </button_delivery_and_brain>
 
 <alternatives>
@@ -165,5 +244,17 @@ editable texts, the sends it records and the brain's read-only tool list.
   ([memory](../../test/store-native-memory.test.ts)) and its sessions and
   receipts in Postgres ([provenance](../../test/store-provenance.test.ts)); the
   answer's own profile in Hermes
-  ([scopes](../../services/hermes/test_scopes.py)).
+  ([scopes](../../services/hermes/test_scopes.py)). The button, the tap and
+  `/start` end to end in storage
+  ([button](../../test/store-private-button.test.ts)); the button, the link
+  and the bound keyboard in the bot
+  ([service](../../services/telegram/test_service.py),
+  [cards](../../services/telegram/test_approval_cards.py),
+  [sends](../../services/telegram/test_sends.py)); the pass, the role, the
+  tools, the first line and the title in Hermes
+  ([turns](../../services/hermes/test_brain_turns.py),
+  [persona](../../services/hermes/test_persona.py),
+  [turn process](../../services/hermes/test_turn_process.py)); the texts
+  ([prompts](../../test/prompts.test.ts)); and the full tester's
+  `project_groups_stay_apart`.
 </consequences>
