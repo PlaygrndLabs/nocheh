@@ -20,7 +20,7 @@ from time import perf_counter
 from services.durable import canonical, digest, immutable_file
 from . import settings
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK
-from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, approval_links, check_action_policy, check_delivery_policy, delivery_failure,
+from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, delivery_failure,
                      no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, space_of, verify_turn_credential)
 
 # Telegram shows "typing…" for about five seconds per chat action, so presence renews it a little sooner.
@@ -276,9 +276,11 @@ class TelegramService:
         if (not isinstance(text, str) or len(text) > 100000 or not isinstance(session, str) or not 0 < len(session) <= 200
                 or not isinstance(body.get('notify', False), bool) or not isinstance(body.get('presence', False), bool)):
             raise ValueError('invalid_reply')
+        # Answer privately, the one button a reply may carry: only in a group and only this turn's own (ADR-0248).
+        markup = answer_button(body.get('button'), chat, body['event_id'], self.policy.owner)
         if self.loop is None:
             return dict(NOT_TRANSMITTED)
-        future = asyncio.run_coroutine_threadsafe(self._reply(key, body, chat, topic, message, credential), self.loop)
+        future = asyncio.run_coroutine_threadsafe(self._reply(key, body, chat, topic, message, credential, markup), self.loop)
         try: return future.result(timeout=REPLY_WAIT)
         except concurrent.futures.TimeoutError: return {'state': 'running'}
 
@@ -289,7 +291,7 @@ class TelegramService:
         if task is not None and not task.done(): return {'state': 'running'}
         return {'state': 'ambiguous'} if intent.exists() else {'state': 'not_found'}
 
-    async def _reply(self, key, body, chat, topic, message, credential):
+    async def _reply(self, key, body, chat, topic, message, credential, markup=None):
         name = 'reply-' + key
         receipt = self.receipts / (name + '.result')
         if receipt.exists(): return json.loads(receipt.read_bytes())
@@ -306,16 +308,16 @@ class TelegramService:
                 if body.get('presence'): await self._finish(body['id'], chat, message, credential, 'clear')
                 return {'state': 'suppressed', 'error_code': 'intentional_silence'}
             self.cancels[key] = asyncio.Event()
-            task = self.replies[key] = asyncio.ensure_future(self._deliver(key, body, chat, topic, message, credential, text))
+            task = self.replies[key] = asyncio.ensure_future(self._deliver(key, body, chat, topic, message, credential, text, markup))
             task.add_done_callback(lambda _: (self.replies.pop(key, None), self.cancels.pop(key, None)))
         return await asyncio.shield(task)
 
-    async def _deliver(self, key, body, chat, topic, message, credential, text):
+    async def _deliver(self, key, body, chat, topic, message, credential, text, markup=None):
         name = 'reply-' + key
         await asyncio.to_thread(immutable_file, self.receipts, name + '.intent', canonical({'event_id': body['event_id'], 'attempt': body['attempt']}))
         requests, cancelled = [], self.cancels[key]
         dispatch = DISPATCH_KEY.set(body['dispatch_key'])
-        check = OUTBOUND_CHECK.set(outbound_check(chat, space_of(chat, topic), lambda: check_delivery_policy(credential), cancelled, requests))
+        check = OUTBOUND_CHECK.set(outbound_check(chat, space_of(chat, topic), lambda: check_delivery_policy(credential), cancelled, requests, markup))
         started, sending = int(time.time() * 1000), perf_counter()
         try:
             # The archive keeps the reply as the brain gave it, whatever Telegram later does with it.
@@ -324,7 +326,7 @@ class TelegramService:
             # Stop typing before the reply: a status sent after it would show again.
             await self._stop_typing(body['id'])
             # A follow-up arrives when nobody watches the typing, so it alerts; an ordinary reply is silent.
-            if await self.sender.send(chat, text, reply_to=int(message), topic=topic, notify=body.get('notify', False)):
+            if await self.sender.send(chat, text, reply_to=int(message), topic=topic, notify=body.get('notify', False), markup=markup):
                 result = {'state': 'done'}
             elif (failure := delivery_failure(requests)) is not None:
                 result = {'state': 'cancelled'} if failure['state'] == 'failed' and cancelled.is_set() else failure
@@ -426,6 +428,7 @@ class TelegramService:
             buttons=[InlineKeyboardButton(label,callback_data=data) for label,data in pairs]
             # Approve and Reject share a row; longer allow buttons get one row each, so every label shows in full.
             rows=[buttons] if len(buttons)==2 else [[button] for button in buttons]
+            keyboard=InlineKeyboardMarkup(rows)
             name='approval-'+body['id']
             async with self.action_lock:
                 receipt=self.receipts/(name+'.result')
@@ -433,11 +436,11 @@ class TelegramService:
                 if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
                 await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id'],'chat_id':chat}))
                 token=DISPATCH_KEY.set('approval:'+body['id'])
-                check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
+                check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True,markup=keyboard))
                 try:
                     # In the chat where it was asked, the card is the reply to the request.
                     # Links are entities over plain text, so no default formatting applies.
-                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=InlineKeyboardMarkup(rows),
+                    sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=keyboard,
                                                 entities=entities,parse_mode=None,reply_to_message_id=int(reply) if reply else None,allow_sending_without_reply=True,
                                                 link_preview_options=no_preview())
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
@@ -479,11 +482,19 @@ class TelegramService:
             except Exception:return {'state':'done','edited':False}
             finally:DISPATCH_KEY.reset(token)
         if body.get('kind')=='answer':
-            query=body.get('callback_query_id')
-            if not isinstance(query,str) or not 0<len(query)<=64 or len(text)>200:raise ValueError('invalid_approval')
+            query,start=body.get('callback_query_id'),body.get('start')
+            if (not isinstance(query,str) or not 0<len(query)<=64 or len(text)>200 or
+                    start is not None and (not isinstance(start,str) or not re.fullmatch(r'[a-f0-9]{32}',start))):raise ValueError('invalid_approval')
+            # A tap on Answer privately opens the asker's private chat with the bot, with the record's id as its /start
+            # parameter (ADR-0248). The link names the bot as Telegram itself named it; without that name there is no link.
+            link={}
+            if start is not None:
+                username=(self.identity or {}).get('username')
+                if not isinstance(username,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{3,31}',username):raise ValueError('approval_link_unavailable')
+                link={'url':'https://t.me/'+username+'?start='+start}
             token=DISPATCH_KEY.set('approval-answer:'+query)
             # Stops the button's spinner; an expired or repeated answer is refused and changes nothing.
-            try:return {'state':'done','answered':bool(await bot.answer_callback_query(query,text=text))}
+            try:return {'state':'done','answered':bool(await bot.answer_callback_query(query,text=text,**link))}
             except Exception:return {'state':'done','answered':False}
             finally:DISPATCH_KEY.reset(token)
         raise ValueError('invalid_approval')
@@ -549,7 +560,7 @@ class TelegramService:
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'notice_id':body['id']}))
             token=DISPATCH_KEY.set('notice:'+body['id'])
-            check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True))
+            check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True,markup=markup))
             sent=None
             try:
                 from telegram.error import BadRequest

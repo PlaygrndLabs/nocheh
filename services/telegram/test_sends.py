@@ -181,6 +181,29 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                          [('reaction', 'not_sent', 'reaction_unbound', '-20', None, 4, EYES, None),
                           ('reply', 'not_sent', 'authority_revoked', '-20', 17, None, None, 'telegram:123456:update:4')])
 
+    async def test_a_reply_carries_only_its_own_keyboard_and_a_tap_answer_leaves_its_link_unrecorded(self):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from .checks import outbound_check
+        button = InlineKeyboardMarkup([[InlineKeyboardButton('Answer privately', callback_data='np' + 'a' * 32)]])
+        other = InlineKeyboardMarkup([[InlineKeyboardButton('Answer privately', callback_data='np' + 'b' * 32)]])
+        request = instrument_request(Request((200, b'{"ok":true,"result":{"message_id":8,"text":"synthetic"}}')), self.capture)
+        reply = {'chat_id': -20, 'text': 'synthetic'}
+        plain, keyed = outbound_check(-20, '-20', lambda: True), outbound_check(-20, '-20', lambda: True, markup=button)
+        for check, markup in ((plain, button), (keyed, other), (keyed, {'inline_keyboard': [[{'text': 'x', 'url': 'https://example.com'}]]})):
+            with self.subTest(markup=markup), self.assertRaisesRegex(Held, 'audience_changed'):
+                await self.send(request, 'sendMessage', {**reply, 'reply_markup': getattr(markup, 'to_dict', lambda: markup)()},
+                                'telegram:123456:update:5', check)
+        self.assertEqual(request.calls, [], 'a keyboard the turn was not given never leaves')
+        await self.send(request, 'sendMessage', {**reply, 'reply_markup': button.to_dict()}, 'telegram:123456:update:5', keyed)
+        await self.send(request, 'sendMessage', reply, 'telegram:123456:update:6', keyed)
+        self.assertEqual(request.calls, ['sendMessage', 'sendMessage'], 'its own keyboard, or none, is sent')
+        answer = instrument_request(Request((200, b'{"ok":true,"result":true}')), self.capture)
+        await self.send(answer, 'answerCallbackQuery', {'callback_query_id': '9', 'text': 'Opening', 'url': 'https://t.me/synthetic_fixture_bot?start=' + 'a' * 32},
+                        'approval-answer:9')
+        [record] = [r for r in await self.records() if r['kind'] == 'button_answer']
+        self.assertEqual((record['state'], record['reference']), ('sent', 'approval-answer:9'))
+        self.assertNotIn('a' * 32, json.dumps(record), 'the record never holds the link or its start parameter')
+
     async def test_typing_leaves_no_record_whether_it_works_fails_or_is_held(self):
         typing = {'chat_id': -20, 'action': 'typing', 'message_thread_id': 17}
         def stopped(method, parameters): raise Held('telegram_delivery_cancelled')
