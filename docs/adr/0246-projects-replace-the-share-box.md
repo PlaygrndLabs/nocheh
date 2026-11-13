@@ -131,7 +131,9 @@ chose ("Keep them, yours only").
   rules and texts not yet said are gone. A read-only check on the owner's
   install before merging tells whether any project had it on.
 - A topic that sat in its own project now follows its group, also into that
-  group's task board.
+  group's task board. Its tasks already on another project's list stay there,
+  where only the owner sees them (fails closed); nothing moves them to its
+  group's project.
 - Every move of a group into or out of a project, also one the agent proposes
   under a delegation, waits in the Inbox.
 - The Telegram side does not announce a new group; the dashboard asks.

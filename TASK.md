@@ -59,6 +59,20 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   carries the step's gates: the group answer uses only its group, a group's task view never
   shows another group's task, and the button, the tap and the private answer
   ([scenario](tools/acceptance/product_scenarios.py)).
+- Review follow-ups, decided by the owner's standing rule to take the recommended answer on
+  small product polish: removing a group from a project, or choosing "No project", asks
+  first and says its tasks, its topics' too, stay on that project's list, where only you see
+  them, and moving a group to another project says they move with it
+  ([dashboard](test/dashboard-pages.browser.mjs)); turning automatic organizing on is what
+  lets it create projects, and the "May create new projects" switch, which did nothing when
+  off, is gone (its column dropped at start, a delegation saved with it kept, an older export
+  still restores) ([organizing](test/store-knowledge-management.test.ts),
+  [exports](test/knowledge-portability.test.ts)); Memory › Notes names a private answer's
+  profile by where it was asked, as its first line names it, and the day it ran
+  ([button](test/store-private-button.test.ts), [listing](services/hermes/test_management.py),
+  [receipt](services/hermes/test_turn_process.py)). Recorded decision: a topic's tasks left
+  on another project's list at the upgrade stay there, where only you see them (fails
+  closed).
 
   Build, unit, store, dashboard, browser and Python checks pass, apart from failures that also
   fail on main. Pending:
@@ -71,18 +85,15 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   - before merging, a read-only check on the owner's install for any project with the share
     box on (`SELECT count(*) FROM projects WHERE sharing_enabled`);
   - a fake-Telegram end-to-end test of the button (`services/telegram/test_simulation.py`),
-    not written;
-  - owner answers to three review questions: whether removing a group from a project, or
-    choosing "No project", asks first and says its tasks stay on the old list for you only;
-    what an automatic-organizing permission does with "May create new projects" off (it
-    applies nothing); and whether a topic's tasks left on another project's list at the
-    upgrade should move to its group's project.
+    not written.
   Owner steps: a project that had the box on stops sharing at the next start, and its project
   rules, their previews and texts not yet said are deleted. Every move of a group into or out
   of a project now waits for your review, and a topic that had its own project follows its
   group, also onto that group's task board; its tasks on another project's list stay there,
   where only you see them. An owner export from before this change restores without the
   share box: its project rules are left out and a topic's own project becomes its group's.
+  An automatic-organizing permission that is on may now create projects even if its old "May
+  create new projects" switch was off; turn it off in Memory › Projects if that is not wanted.
 
 Members step 1: keep the owner's private side out of groups (owner, 2026-11-12: "I just
 review the tables and seems what I want if there is a important point or need my answer ask,
