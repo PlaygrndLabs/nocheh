@@ -256,10 +256,24 @@ test('a new installation is guided on Home and finds its Telegram ID without a t
   } finally {
     rmSync('/tmp/nocheh-ui-scenario', {force: true});
   }
-  // Without a saved bot token there is nothing to look in yet.
+  // A saved ID changes only from the command line: the field is read-only and says how.
   const {page} = await open('settings?view=telegram');
-  assert.equal(await page.getByRole('button', {name: 'Find my ID'}).isDisabled(), true);
+  const owner = page.locator('#telegram-owner');
+  assert.equal(await owner.inputValue(), '42');
+  assert.equal(await owner.getAttribute('readonly'), '');
+  await page.getByText('./bin/nocheh config set TELEGRAM_OWNER_ID <id>').waitFor();
+  assert.equal(await page.getByRole('button', {name: 'Find my ID'}).count(), 0);
   await page.close();
+  writeFileSync('/tmp/nocheh-ui-scenario', 'no-owner');
+  try {
+    // Without a saved bot token there is nothing to look in yet.
+    const {page: empty} = await open('settings?view=telegram');
+    assert.equal(await empty.getByRole('button', {name: 'Find my ID'}).isDisabled(), true);
+    assert.equal(await empty.locator('#telegram-owner').getAttribute('readonly'), null);
+    await empty.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
 });
 
 test('a settings edit survives switching tabs and Save at the top of the page saves and applies it', async () => {
@@ -363,6 +377,39 @@ test('a group’s role and skills are edited on its chat page and saved from the
   await topic.getByText('This topic uses its group’s role and skills.').waitFor();
   assert.equal(await topic.getByRole('heading', {name: 'Role and skills'}).count(), 0);
   await topic.close();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the private chat and groups each start from their own default role and skills', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const mine = page.locator('section', {
+    has: page.getByRole('heading', {name: 'Role and skills in your private chat'}),
+  });
+  const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills in groups'})});
+  await mine.getByText('Your private chat can use these.').waitFor();
+  await groups.getByText('Every group and topic can use these.').waitFor();
+  assert.equal(await mine.getByRole('textbox', {name: 'Name'}).inputValue(), 'weekly-menu');
+  assert.equal(
+    await groups.getByRole('textbox', {name: 'Name'}).count(),
+    0,
+    'groups never start from the private chat’s skills',
+  );
+  const saved = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/memory/persona'))
+      saved.push(request.postDataJSON().scope);
+  });
+  await groups.getByRole('textbox', {name: 'Role'}).fill('You help each group plan its week.');
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByText('1 unsaved change').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.deepEqual(saved, ['default:groups']);
+  await page.reload();
+  await groups.getByRole('textbox', {name: 'Role'}).waitFor();
+  assert.equal(await groups.getByRole('textbox', {name: 'Role'}).inputValue(), 'You help each group plan its week.');
+  assert.equal(await mine.getByRole('textbox', {name: 'Role'}).inputValue(), '');
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -1097,6 +1144,73 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await page.close();
 });
 
+test('moving a task into a project’s list names the chats that will see it first', async () => {
+  const {page, problems} = await open('tasks');
+  const title = 'Ask for the studio keys ' + Date.now();
+  await page.getByLabel('New task').fill(title);
+  await page.getByRole('button', {name: 'Add'}).click();
+  const added = page.getByRole('listitem').filter({hasText: title});
+  await added.getByRole('button', {name: `Edit “${title}”`}).click();
+  const panel = page.getByRole('dialog').filter({has: page.locator('#task-panel-list')});
+  await panel.locator('#task-panel-list').selectOption({label: 'Studio launch'});
+  await panel.getByRole('button', {name: 'Save'}).click();
+  const ask = page.getByRole('dialog', {name: 'Move to Studio launch?'});
+  await ask
+    .getByText(
+      /People in Aurora planning will see this task from now on, and so will chats you add to this project later\. Earlier comments and history/,
+    )
+    .waitFor();
+  // Cancel keeps the task where it was.
+  await ask.getByRole('button', {name: 'Cancel'}).click();
+  await ask.waitFor({state: 'detached'});
+  assert.equal(await panel.locator('#task-panel-list').inputValue(), '8'.repeat(64), 'the choice stays unsaved');
+  await panel.getByRole('button', {name: 'Save'}).click();
+  await ask.getByRole('button', {name: 'Move'}).click();
+  await page.getByRole('status').filter({hasText: 'Task saved.'}).waitFor();
+  // A column stays private to the owner until it is shared with project chats.
+  await page.goto(origin + '/#settings?view=tasks');
+  await page.getByRole('button', {name: 'Add column'}).click();
+  const columns = page.getByRole('list', {name: 'Your columns'});
+  const shared = columns
+    .getByRole('listitem')
+    .last()
+    .getByRole('checkbox', {name: 'Project chats can see this column'});
+  assert.equal(await shared.isChecked(), false);
+  const effort = 'Effort ' + String(Date.now()).slice(-4);
+  await columns.getByRole('listitem').last().getByRole('textbox').first().fill(effort);
+  // Sharing it names every project's chats first, and says the values already in it show there too.
+  const share = page.getByRole('dialog', {name: `Let project chats see “${effort}”?`});
+  await shared.click();
+  await share
+    .getByText(
+      `People in each project’s chats will see “${effort}” on that project’s tasks, with every value already in it, also what was written before a task joined a project’s list: Studio launch (Aurora planning).`,
+      {exact: false},
+    )
+    .waitFor();
+  await share.getByRole('button', {name: 'Cancel'}).click();
+  await share.waitFor({state: 'detached'});
+  assert.equal(await shared.isChecked(), false, 'cancelled, it stays private');
+  await shared.click();
+  await share.getByRole('button', {name: 'Let them see it'}).click();
+  await share.waitFor({state: 'detached'});
+  assert.equal(await shared.isChecked(), true);
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  await page.reload();
+  assert.equal(
+    await page
+      .getByRole('list', {name: 'Your columns'})
+      .getByRole('listitem')
+      .last()
+      .getByRole('checkbox', {name: 'Project chats can see this column'})
+      .isChecked(),
+    true,
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a project’s chats share what they know only once it is ticked, and its rules change on the project', async () => {
   const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
   const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
@@ -1137,6 +1251,10 @@ test('a project’s chats share what they know only once it is ticked, and its r
   await choice.selectOption({label: 'Same as the group (Aurora field guide · shares)'});
   const ask = topic.getByRole('dialog', {name: 'Share with the chats in Aurora field guide?'});
   await ask.getByText('Everyone allowed in any of these chats will see what the others know.').waitFor();
+  // Joining a project shows the chat its task list, so the question says so too (ADR-0243).
+  await ask
+    .getByText('Everyone allowed in this chat will see and change every task on the list of Aurora field guide.')
+    .waitFor();
   await ask.getByRole('button', {name: 'Cancel'}).click();
   assert.equal(await choice.inputValue(), '__none');
   await choice.selectOption({label: 'Same as the group (Aurora field guide · shares)'});
@@ -1161,6 +1279,95 @@ test('a project’s chats share what they know only once it is ticked, and its r
   assert.equal(await details.getByRole('button', {name: 'Edit'}).count(), 0);
   assert.deepEqual([...problems, ...chatProblems, ...topicProblems, ...reviewProblems, ...ruleProblems], []);
   await rules.close();
+});
+
+test('the owner’s private chat stays out of sharing rules and projects', async () => {
+  // A rule picks only groups and topics; an older rule that names a private chat is flagged.
+  const {page: rules, problems} = await open('chats?view=rules');
+  const legacy = rules.getByRole('listitem').filter({hasText: 'Notes from my chat'});
+  await legacy.getByText('Reads a private chat. Nocheh skips it.').waitFor();
+  // That older rule can still be turned off as it is.
+  await legacy.getByRole('switch', {name: 'Turn off Notes from my chat'}).click();
+  await rules.getByRole('status').filter({hasText: 'Rule turned off.'}).waitFor();
+  await rules.getByRole('button', {name: 'New rule'}).click();
+  const dialog = rules.getByRole('dialog', {name: 'New sharing rule'});
+  const from = dialog.getByRole('listbox', {name: 'Share facts from'});
+  await from
+    .getByRole('option', {name: /Aurora planning/})
+    .first()
+    .waitFor();
+  assert.equal(await from.getByRole('option', {name: /You|Mira Chen/}).count(), 0);
+  const search = dialog.getByPlaceholder('Search chats by name or ID').first();
+  await search.fill('42');
+  await from
+    .getByRole('option', {name: /Aurora planning/})
+    .first()
+    .waitFor();
+  assert.equal(await from.getByRole('option', {name: /You/}).count(), 0);
+  assert.equal(await from.getByRole('button', {name: /Use the ID/}).count(), 0);
+  await search.fill('73');
+  await from.getByText('Only groups and topics can be chosen here, never a private chat.').waitFor();
+  assert.equal(await from.getByRole('button', {name: /Use the ID/}).count(), 0);
+  await rules.close();
+
+  // The owner's chat page offers no project, and clears one an older setting still names.
+  const {page: own, problems: ownProblems} = await open('chats?chat=42');
+  const older = own.getByRole('status').filter({hasText: 'An older setting puts this chat in a project'});
+  await older.getByText('Nocheh ignores the setting that puts it in Aurora field guide.', {exact: false}).waitFor();
+  assert.equal(await own.locator('#chat-project').count(), 0);
+  await own.getByRole('button', {name: 'Remove it'}).click();
+  await own.getByRole('status').filter({hasText: 'Removed from its project.'}).waitFor();
+  await own.getByText('Your private chat never joins a project.', {exact: true}).waitFor();
+  assert.equal(await own.getByRole('button', {name: 'Remove it'}).count(), 0);
+  assert.deepEqual([...problems, ...ownProblems], []);
+  await own.close();
+});
+
+test('a share from the private side names where it came from and who will see it', async () => {
+  // Sharing a fact from the private chat lists groups only, names where it came from and who sees it, and asks first.
+  const {page: people, problems: peopleProblems} = await open('memory?view=people&person=' + '1'.repeat(64));
+  const card = people.getByRole('listitem').filter({hasText: 'Mira prefers quiet aurora viewpoints'}).first();
+  await card.getByRole('button', {name: 'Let a chat use it'}).click();
+  await card.getByText('Came from: your private chat').waitFor();
+  const choice = card.getByLabel('Chat', {exact: true});
+  assert.deepEqual(
+    (await choice.locator('option').allTextContents()).filter(text => /Owner|Mira Chen|Private/.test(text)),
+    [],
+  );
+  await choice.selectOption({label: 'Aurora planning'});
+  await card.getByText('Who will see it: everyone in Aurora planning.').waitFor();
+  await card.getByRole('button', {name: 'Share', exact: true}).click();
+  const ask = people.getByRole('dialog', {name: 'Share something from a private chat?'});
+  await ask
+    .getByText('This fact comes from your private chat. Everyone in Aurora planning will see the wording below.')
+    .waitFor();
+  await ask.getByRole('button', {name: 'Share it'}).click();
+  await people.getByRole('status').filter({hasText: 'Aurora planning may now use this.'}).waitFor();
+  // The correction editor says who can read the new wording.
+  await card.getByRole('button', {name: 'Correct'}).click();
+  await card
+    .getByText(
+      'Who can read the new wording: only you. Chats you shared it with pause until you approve the new wording.',
+    )
+    .waitFor();
+  await people.close();
+
+  // A suggestion names its source and its readers, posts once by default, and posts a lasting share only when ticked.
+  const {page: inbox, problems: inboxProblems} = await open('inbox?kind=memory_access&decision=' + '4'.repeat(64));
+  const drawer = inbox.getByRole('dialog');
+  await drawer.getByText('Came from', {exact: true}).waitFor();
+  await drawer.getByText('Everyone in Aurora planning').waitFor();
+  await drawer.getByRole('button', {name: 'Post it once in Aurora planning'}).waitFor();
+  await drawer.getByText('Nocheh posts this exact wording there now.').waitFor();
+  await drawer.getByRole('radio', {name: 'Until I revoke it'}).click();
+  await drawer
+    .getByText(
+      'Nocheh may use it when it answers in Aurora planning and all its topics, until you revoke it under Chats.',
+    )
+    .waitFor();
+  assert.equal(await drawer.getByRole('checkbox', {name: 'Also post it in Aurora planning now'}).isChecked(), false);
+  assert.deepEqual([...peopleProblems, ...inboxProblems], []);
+  await inbox.close();
 });
 
 test('usage shows calls, tokens and cost, and never prices an unknown cost as free', async () => {

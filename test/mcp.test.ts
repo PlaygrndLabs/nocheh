@@ -322,17 +322,18 @@ test('a machine and its plan are forwarded only with start and only from the iso
     assert.equal(answer.error,code);delete answer.error;
     // A machine that is missing or not ready: the owner must add it and pass Test first.
     if(code==='job_machine_not_found') {
-      for(const words of ['Settings › Machines','press Test','until the test passes','action=status'])assert.ok(answer.note.includes(words),words);
+      for(const words of ['Settings › Machines','press Test','until the test passes','action=status','a group never lists them'])assert.ok(answer.note.includes(words),words);
       delete answer.note;
     }
     assert.deepEqual(answer,{},code);
   }
   const schema=tool('background_job'),properties=(schema.inputSchema as any).properties;
   assert.deepEqual([properties.machine.type,properties.machine.maxLength],['string',40]);
-  assert.ok(properties.machine.description.startsWith('For work on one of the owner\'s machines (see action=status machines): the machine\'s name and a short plan '+
+  assert.ok(properties.machine.description.startsWith('For work on one of the owner\'s machines (listed by action=status in the owner\'s private chat; in a group, the name the owner gives): the machine\'s name and a short plan '+
     'of 1-12 steps the owner approves on one card. Only for the owner\'s own request in their private chat or a project group.'));
   assert.deepEqual([properties.steps.type,properties.steps.minItems,properties.steps.maxItems,properties.steps.items],['array',1,12,{type:'string',maxLength:200}]);
   assert.match(schema.description,/box or machine with steps/);assert.match(schema.description,/lists the owner's machines/);
+  assert.match(schema.description,/A job on the owner's machine reports to the owner's private chat; in a group its status shows no machine, plan or to-do list\./);
   for(const name of ['machine','steps'])assert.ok(!(schema.inputSchema as any).required.includes(name));
 });
 

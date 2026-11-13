@@ -42,6 +42,23 @@ class ManagementTests(unittest.TestCase):
             for bad in ('project:../profiles','project:'+'D'*64):
                 with self.assertRaises(ValueError):call(action='persona',scope=bad)
 
+    def test_the_private_chats_and_the_groups_defaults_are_kept_apart(self):
+        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);call=lambda **body:dispatch(root,'test-model',policy,body)
+            private,groups=call(action='persona',scope='default'),call(action='persona',scope='default:groups')
+            self.assertEqual((groups['scope'],groups['role'],groups['skills']),('default:groups','',[]))
+            saved=call(action='persona',scope='default:groups',role='Group role',skills=[],revision=groups['revision'])
+            self.assertEqual((root/'nocheh-default-groups'/'SOUL.md').read_text(),'Group role\n')
+            self.assertEqual(call(action='persona',scope='default'),private,'a groups save never changes the private chat\'s default')
+            call(action='persona',scope='default',role='Private role',skills=[],revision=private['revision'])
+            self.assertEqual(call(action='persona',scope='default:groups'),saved,'and the other way round')
+            self.assertEqual((root/'nocheh-default'/'SOUL.md').read_text(),'Private role\n')
+            with self.assertRaisesRegex(ValueError,'configuration_conflict'):
+                call(action='persona',scope='default:groups',role='Stale',skills=[],revision=groups['revision'])
+            for bad in ('default:members','default:'):
+                with self.assertRaises(ValueError):call(action='persona',scope=bad)
+
     def test_owner_inspects_retired_topic_notes_by_registered_profile(self):
         policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
         with tempfile.TemporaryDirectory() as folder:
@@ -85,5 +102,8 @@ class SettingsErrorRelayTests(unittest.TestCase):
 
         self.assertEqual(run('settings.save', ValueError('Memory (Honcho) needs a model name')), 'Memory (Honcho) needs a model name')
         self.assertEqual(run('settings.save', ValueError('configuration_conflict')), 'configuration_conflict')
+        from tools.operations.installation.configuration import OWNER_CONFLICT
+        from tools.operations.installation.settings import OWNER_FROM_CLI
+        for message in (OWNER_CONFLICT, OWNER_FROM_CLI):self.assertEqual(run('settings.save', ValueError(message)), message)
         self.assertEqual(run('archive.view', ValueError('upstream said secret-value here')), 'ValueError')
         self.assertEqual(run('settings.save', RuntimeError('provider body')), 'RuntimeError')

@@ -8,9 +8,18 @@ import {ArrowDown, ArrowUp, Plus, Trash2, X} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
 import {refreshResources, useResource} from '../../lib/resource';
+import {chatName, type Directory} from '../../lib/chats-model';
 import {Button, Card, CardHeader, Dot, Input, LoadError, LoadingRows, Select, type Tone} from '../../ui/core';
+import {useFeedback} from '../../ui/overlay';
 import {errorWords} from '../memory/shared';
-import type {PropertyType, StatusCategory, TaskSettings} from '../tasks/model';
+import {
+  scopeName,
+  type PropertyType,
+  type Scope,
+  type StatusCategory,
+  type TaskPage,
+  type TaskSettings,
+} from '../tasks/model';
 
 type Saved = TaskSettings & {revision: string};
 const colors: {value: Tone; label: string}[] = [
@@ -52,6 +61,17 @@ function newId(name: string, taken: string[]): string {
   return id;
 }
 
+/** Who sees a column once the owner shares it: each project's list with the chats that see it. Every value already
+ * in the column shows there, including what was written before a task joined that list. */
+export function shareNotice(name: string, scopes: Scope[], groupName: (space: string) => string): string {
+  const seen = scopes.filter(scope => scope.id !== 'personal' && scope.chats?.length);
+  const where = seen.map(scope => `${scopeName(scope)} (${(scope.chats ?? []).map(groupName).join(', ')})`).join('; ');
+  const values = 'with every value already in it, also what was written before a task joined a project’s list';
+  return seen.length
+    ? `People in each project’s chats will see ${name} on that project’s tasks, ${values}: ${where}. Chats added to a project later will see it too. It applies when you save.`
+    : `No chat sees a project’s list yet. Chats added to a project later will see ${name} on its tasks, ${values}. It applies when you save.`;
+}
+
 function zones(): string[] {
   try {
     return (Intl as any).supportedValuesOf('timeZone') as string[];
@@ -62,6 +82,15 @@ function zones(): string[] {
 
 export function TaskSettingsPanel() {
   const saved = useResource<Saved>('/tasks/settings');
+  // The lists and chats a shared column would reach, named before the owner shares it.
+  const lists = useResource<TaskPage>('/tasks?limit=1');
+  const chats = useResource<Directory>('/conversations?limit=100', 60000);
+  const feedback = useFeedback();
+  const groupName = (space: string) => {
+    const chat = chats.data?.items.find(row => row.space_id === space);
+    if (!chat) return space.includes('/topic/') ? 'a topic' : 'a group';
+    return chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
+  };
   const [draft, setDraft] = useState<TaskSettings | null>(null);
   const [revision, setRevision] = useState<string | null>(null);
   const data = saved.data;
@@ -310,7 +339,7 @@ export function TaskSettingsPanel() {
       <Card>
         <CardHeader
           title="Your columns"
-          description="Extra fields every task can have, like a column in a Notion table: text, a number, choices, a date, a checkbox, a link or people. Removing a column, or one of its choices, clears it from tasks."
+          description="Extra fields every task can have, like a column in a Notion table: text, a number, choices, a date, a checkbox, a link or people. Removing a column, or one of its choices, clears it from tasks. A column stays private to you unless you let project chats see it."
         />
         {!!value.properties.length && (
           <ul className="mt-3 divide-y divide-line border-t border-line" aria-label="Your columns">
@@ -357,6 +386,28 @@ export function TaskSettingsPanel() {
                       <Trash2 aria-hidden />
                     </Button>
                   </div>
+                  <label className="flex items-center gap-2 text-[13px]">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-[var(--accent)]"
+                      checked={!!property.shared}
+                      onChange={async event => {
+                        const shared = event.target.checked;
+                        const name = property.name.trim() ? `“${property.name.trim()}”` : 'this column';
+                        if (
+                          shared &&
+                          !(await feedback.confirm({
+                            title: `Let project chats see ${name}?`,
+                            body: shareNotice(name, lists.data?.scopes ?? [], groupName),
+                            confirm: 'Let them see it',
+                          }))
+                        )
+                          return;
+                        change({shared});
+                      }}
+                    />
+                    Project chats can see this column
+                  </label>
                   {choices && (
                     <div
                       className="flex flex-wrap items-center gap-1.5"
@@ -437,6 +488,7 @@ export function TaskSettingsPanel() {
                     name: '',
                     type: 'text',
                     options: [],
+                    shared: false,
                   },
                 ],
               })

@@ -161,7 +161,7 @@ function SuggestionForm({
             value={values.default_grant_mode}
             disabled={off}
             options={[
-              {value: 'one_time', label: 'For one reply'},
+              {value: 'one_time', label: 'Post it once'},
               {value: 'persistent', label: 'Until revoked'},
             ]}
             onChange={value => set('default_grant_mode', value)}
@@ -205,7 +205,9 @@ function SuggestionForm({
             <label htmlFor={id + '-followup'} className="text-sm font-medium">
               Answer right after I approve
             </label>
-            <p className="text-[13px] text-muted">Nocheh posts its follow-up in the chat on its own.</p>
+            <p className="text-[13px] text-muted">
+              After you approve “Until I revoke it”, also post it in the chat. “Post it once” always posts.
+            </p>
           </div>
           <Switch
             id={id + '-followup'}

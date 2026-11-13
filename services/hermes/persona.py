@@ -2,9 +2,12 @@
 
 A chat's canonical profile holds its role as Hermes `SOUL.md` and its skills as
 Hermes `skills/<name>/SKILL.md`. `projects/<id>/` holds the same files for every
-chat in a project, and `nocheh-default/` for every chat. Before each turn the
-effective files are copied into the turn's profile, where the turn reads them and
-cannot change them. Topics use their group's.
+chat in a project. Each audience has its own default: `nocheh-default/` for the
+owner's private chat and `nocheh-default-groups/` for every group and topic. Any
+turn that is not the owner's own private chat reads the groups default, so the
+owner's private default never loads anywhere else. Before each turn the effective
+files are copied into the turn's profile, where the turn reads them and cannot
+change them. Topics use their group's.
 """
 import fcntl
 import hashlib
@@ -20,7 +23,9 @@ import yaml
 from .isolated_profile import database_path
 from .scopes import Scopes
 
-DEFAULT = 'nocheh-default'
+# One default folder per audience. A later member-chat step adds its own key; until then every turn that is not the
+# owner's private chat falls back to the groups default (ADR-0244).
+DEFAULTS = {'owner': 'nocheh-default', 'group': 'nocheh-default-groups'}
 ROLE_LIMIT = 20000
 SKILL_LIMIT = 30
 DESCRIPTION_LIMIT = 1024
@@ -30,8 +35,14 @@ PROJECT = re.compile(r'[a-f0-9]{64}')
 FRONTMATTER = re.compile(r'^---\n(.*?)\n---\n?(.*)$', re.S)
 
 
-def default_path(root):
-    return Path(root) / DEFAULT
+def default_path(root, audience):
+    if audience not in DEFAULTS: raise ValueError('invalid_audience')
+    return Path(root) / DEFAULTS[audience]
+
+
+def audience(scope):
+    """The owner's private chat and its topics read the owner's default; every other turn reads the groups default."""
+    return 'owner' if scope.owner is True else 'group'
 
 
 def chat_path(root, chat):
@@ -164,10 +175,11 @@ def save(path, role, skills, expected):
     return view(path)
 
 
-def effective(root, chat, project=''):
-    """The chat's own role, else its project's, else the default role. Skills add up from the
-    default to the project's to the chat's, and a later one wins by name."""
-    layers = [read(default_path(root)), read(project_path(root, project)) if project else {'role': '', 'skills': []},
+def effective(root, chat, project='', audience='group'):
+    """The chat's own role, else its project's, else its audience's default role. Skills add up from that
+    default to the project's to the chat's, and a later one wins by name. Without an audience a turn reads
+    the groups default, so a forgotten argument never loads the owner's private default."""
+    layers = [read(default_path(root, audience)), read(project_path(root, project)) if project else {'role': '', 'skills': []},
               read(chat_path(root, chat))]
     skills = {}
     for layer in layers: skills.update({skill['name']: skill for skill in layer['skills']})
@@ -175,7 +187,7 @@ def effective(root, chat, project=''):
             'skills': [skills[name] for name in sorted(skills)]}
 
 
-def materialize(root, profile, chat, project=''):
+def materialize(root, profile, chat, project='', audience='group'):
     """Give a turn profile its effective role and skills; the owner's own source folder is never rewritten."""
     profile = Path(profile)
     if profile.resolve() == chat_path(root, chat).resolve():
@@ -183,7 +195,7 @@ def materialize(root, profile, chat, project=''):
         (profile / 'skills').mkdir(exist_ok=True, mode=0o700)
         if not (profile / 'SOUL.md').exists(): _write(profile / 'SOUL.md', '')
         return
-    value = effective(root, chat, project)
+    value = effective(root, chat, project, audience)
     with (profile / '.persona.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if (profile / 'SOUL.md').is_file() and (profile / 'skills').is_dir() and read(profile) == value: return

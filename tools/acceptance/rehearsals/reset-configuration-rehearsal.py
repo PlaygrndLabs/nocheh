@@ -24,7 +24,7 @@ const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixtu
 await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords);
 await stores.control.query("INSERT INTO projects(id,name,description,state,revision) VALUES($1,'Saved project','Saved fixture configuration','archived',1)",['a'.repeat(64)]);
 await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES('-42',$1,'assigned',1)",['a'.repeat(64)]);
-await stores.control.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Saved share',$2,'-42',false,'approved','Saved fixture sharing policy',1)",['b'.repeat(64),JSON.stringify(['123'])]);
+await stores.control.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Saved share',$2,'-42',false,'approved','Saved fixture sharing policy',1)",['b'.repeat(64),JSON.stringify(['-43'])]);
 await stores.control.query("INSERT INTO runtime_profiles(id,name,owner_id,state,revision) VALUES($1,'research','123','active',1)",['profile-'+'c'.repeat(48)]);
 await stores.control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify({enabled:true,owner_id:'123',group_ids:['-42']}),digest('configuration')]);
 await stores.control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");

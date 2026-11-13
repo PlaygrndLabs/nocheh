@@ -74,6 +74,9 @@ export function SharingView({telegram}: {telegram: Telegram}) {
                         {name(rule.destination)}
                       </span>
                     </span>
+                    {!!rule.private_sources?.length && (
+                      <span className="mt-0.5 block text-xs text-warn">Reads a private chat. Nocheh skips it.</span>
+                    )}
                   </button>
                   <Badge>{modeText[rule.mode].label}</Badge>
                   {rule.project_id ? (

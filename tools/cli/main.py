@@ -315,7 +315,7 @@ def main():
                 from getpass import getpass
                 value = getpass(key + ': ')
             else: value = sys.stdin.read(65536).rstrip('\r\n')
-            result = save(STATE, {key: value}, view(STATE)['revision'], rebuild)
+            result = save(STATE, {key: value}, view(STATE)['revision'], rebuild, owner_change=True)
         else: parser.error('Use config show, config set KEY [VALUE] [--rebuild-memory], or config apply.')
         print(json.dumps(result, indent=2)); return 1 if result.get('status') == 'apply_failed' else 0
     if args.command == "init":
@@ -331,6 +331,9 @@ def main():
         values=load(STATE)
         if not values['TELEGRAM_BOT_TOKEN']:config_parser.error('Set TELEGRAM_BOT_TOKEN in .env first.')
         values.update(TELEGRAM_ENABLED='true',TELEGRAM_OWNER_ID=selected.owner_id,TELEGRAM_GROUP_IDS=','.join(dict.fromkeys(selected.group_id)))
+        from tools.operations.installation.configuration import validate
+        try:validate(values)
+        except ValueError as error:config_parser.error(str(error))
         write_env(env_path(STATE),values)
         print('Telegram policy saved. Run ./bin/nocheh up to apply it.');return 0
     env = compose_environment(STATE)

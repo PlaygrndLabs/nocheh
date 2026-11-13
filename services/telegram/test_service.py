@@ -232,6 +232,14 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(json.loads((receipts / ('reply-' + 'c' * 64 + '.result')).read_text())['state'], 'ambiguous')
 
 
+class PolicyTests(unittest.TestCase):
+    def test_the_owner_is_never_a_person_allowed_or_denied_in_a_group(self):
+        for side in ('granted', 'denied'):
+            access = {GROUP: {'granted': [], 'denied': [], side: [OWNER]}}
+            with self.assertRaisesRegex(ValueError, 'invalid_group_access'): Policy(True, OWNER, [GROUP], access)
+        self.assertEqual(Policy(True, OWNER, [GROUP], {GROUP: {'granted': ['456'], 'denied': []}}).group_access[GROUP]['granted'], ['456'])
+
+
 class DisabledTests(unittest.TestCase):
     def test_disabled_service_polls_and_sends_nothing(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'SERVICE_TOKEN': SECRET}):

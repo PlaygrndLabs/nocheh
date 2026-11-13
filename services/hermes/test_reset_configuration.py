@@ -51,10 +51,12 @@ class ResetConfigurationTests(unittest.TestCase):
     def test_legacy_setup_converts_to_original_only_without_widening_access(self):
         source = {'format': configuration.FORMAT, 'layout': 'legacy', 'configuration': {
             'security_policy': self.values['security_policy'], 'memory_spaces': [
-                {'id': '-10', 'overrides': {'mode': 'filtered', 'sources': ['42'],
+                {'id': '-10', 'overrides': {'mode': 'filtered', 'sources': ['-40', '42'],
                                             'privacy_instructions': 'Only fixture facts.'}},
-                {'id': '-20', 'overrides': {'mode': 'approved', 'sources': ['42']}},
-                {'id': '-30', 'overrides': {'mode': 'isolated', 'sources': ['42']}}]}}
+                {'id': '-20', 'overrides': {'mode': 'approved', 'sources': ['-40']}},
+                {'id': '-30', 'overrides': {'mode': 'isolated', 'sources': ['-40']}},
+                {'id': '-50', 'overrides': {'mode': 'filtered', 'sources': ['42']}},
+                {'id': '42', 'overrides': {'mode': 'filtered', 'sources': ['-40']}}]}}
         custom = 'profile-' + 'a' * 48
         preferences = {'owner': '42', 'groups': ['-10', '-20', '-30'], 'profiles': [
             {'id': custom, 'space': '42', 'name': 'research', 'overrides': {}}]}
@@ -69,6 +71,11 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertEqual(converted['guard_mode'], [{'mode': 'off'}])
         self.assertEqual(converted['runtime_profiles'], [{'id': custom, 'name': 'research', 'owner_id': '42'}])
         rules = {row['destination']: row for row in converted['sharing_rules']}
+        # A private chat never shares or is shared with: its source is dropped and its own policy is not carried over.
+        self.assertEqual(sorted(rules), ['-10', '-20', '-30', '-50'])
+        self.assertEqual(rules['-10']['sources'], ['-40']); self.assertEqual(rules['-50']['sources'], [])
+        self.assertFalse(rules['-50']['enabled'])
+        self.assertEqual(converted['memory_access_settings'][0]['auto_followup'], False)
         self.assertTrue(rules['-10']['enabled']); self.assertEqual(rules['-10']['mode'], 'filtered')
         self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
         self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')
@@ -91,6 +98,27 @@ class ResetConfigurationTests(unittest.TestCase):
         safe = copy.deepcopy(base); safe['configuration']['memory_spaces'] = []
         with self.assertRaisesRegex(ValueError, 'legacy_configuration_invalid'):
             configuration.original_only(safe, values, {**preferences, 'owner': '99'}, str(uuid.uuid4()))
+
+    def test_a_private_chat_in_a_rule_or_project_stops_the_reset_before_erasure(self):
+        rule = {'id': 'b' * 64, 'name': 'Saved share', 'sources': ['-1001'], 'destination': '-1002', 'enabled': True,
+                'mode': 'approved', 'instructions': '', 'project_id': None}
+        assigned = {'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned', 'share_into': True}
+        values = copy.deepcopy(self.values); values['sharing_rules'] = [rule]; values['project_assignments'] = [assigned]
+        self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values)
+        for change in ('source', 'topic', 'destination', 'desktop', 'assignment', 'padded'):
+            values = copy.deepcopy(self.values); values['sharing_rules'] = [dict(rule)]; values['project_assignments'] = [dict(assigned)]
+            if change == 'source': values['sharing_rules'][0]['sources'] = ['-1001', '123']
+            # An ID Telegram never gives a group counts as private, as the server's groupSpace decides.
+            if change == 'padded': values['sharing_rules'][0]['sources'] = ['-01001']
+            if change == 'topic': values['sharing_rules'][0]['sources'] = ['123/topic/5']
+            if change == 'destination': values['sharing_rules'][0]['destination'] = '123'
+            if change == 'desktop': values['sharing_rules'][0]['sources'] = ['desktop:personal_chat:9']
+            if change == 'assignment': values['project_assignments'][0]['space_id'] = '123'
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'private_chat_requires_review'):
+                configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
+        values = copy.deepcopy(self.values); values['project_assignments'] = [{**assigned, 'space_id': '123', 'mode': 'none', 'project_id': None}]
+        self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values,
+                         'a private chat may be kept out of every project')
 
     def test_unknown_fields_and_missing_critical_configuration_fail_closed(self):
         for change in ('content', 'columns', 'security', 'generation', 'guard', 'runtime'):

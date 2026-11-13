@@ -57,8 +57,8 @@ await services.entities.publishDiscoveries({source:originals[4]!.reference,sourc
  {entity_suggestions:[{kind:'person',name:'Alex',reason:'The mention is not bound to a platform identity.',evidence_ids:[originals[4]!.reference.id]}],
   entity_claims:[{subject_id:entityContext.mentioned_projects[0]!.id,predicate:'blocker',content:'Alex is checking the telescope, according to the participant.',
    attribution:'reported',speaker_entity_id:entityContext.speaker!.id,uncertainty:'supported',evidence_ids:[originals[4]!.reference.id]}]},'ui-entity-learning');
-await services.sharing.save(owner,{name:'Observatory updates',sources:['123'],destination:'-10042',enabled:true,mode:'approved',instructions:'Share only the selected project status.',expected_revision:0,operation_id:'ui-approved-rule'});
-await services.sharing.save(owner,{name:'Filtered field notes',sources:['123'],destination:'-10043',enabled:true,mode:'filtered',instructions:'Only general instrument facts; omit private details.',expected_revision:0,operation_id:'ui-filter-rule'});
+await services.sharing.save(owner,{name:'Observatory updates',sources:['-10043'],destination:'-10042',enabled:true,mode:'approved',instructions:'Share only the selected project status.',expected_revision:0,operation_id:'ui-approved-rule'});
+await services.sharing.save(owner,{name:'Filtered field notes',sources:['-10042'],destination:'-10043',enabled:true,mode:'filtered',instructions:'Only general instrument facts; omit private details.',expected_revision:0,operation_id:'ui-filter-rule'});
 for(const [index,subject,text,uncertainty,conflict] of [
  [1,'Eyes reaction','👀 means under review in the observatory conversation.','explicit',false],
  [2,'Northern telescope','The inspection appears complete; the final log still needs verification.','supported',true],

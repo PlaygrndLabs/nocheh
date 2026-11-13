@@ -48,8 +48,9 @@ def view(state):
     active = json.loads(applied.read_text()).get('revision') if applied.exists() else None
     fields = [{'key': key, 'value': None if key in SECRETS else values[key],
                'configured': bool(values[key]), 'secret': key in SECRETS,
-               'editable': key in EDITABLE, 'source': '.env',
-               'takes_effect': 'right away' if key in LIVE else 'apply / service restart'}
+               'editable': key in EDITABLE and not (key == 'TELEGRAM_OWNER_ID' and values[key]), 'source': '.env',
+               'takes_effect': 'right away' if key in LIVE else 'apply / service restart',
+               **({'changes_from': 'cli'} if key == 'TELEGRAM_OWNER_ID' and values[key] else {})}
               for key in DEFAULTS]
     from tools.operations.provider.embedding_config import MODELS
     from tools.operations.provider.transcription_config import MODELS as VOICE_MODELS
@@ -137,7 +138,12 @@ def rebuild_memory(state, values, honcho):
     return 'started'
 
 
-def save(state, changes, expected, rebuild_memory=False):
+OWNER_FROM_CLI = 'Your Telegram user ID changes only from the command line: ./bin/nocheh config set TELEGRAM_OWNER_ID <id>'
+
+
+def save(state, changes, expected, rebuild_memory=False, owner_change=False):
+    """Save settings. The owner's Telegram user ID is set here the first time; a saved one changes only with
+    `owner_change`, which only the command line passes (ADR-0244)."""
     directory = Path(state) / 'admin'; directory.mkdir(exist_ok=True, mode=0o700)
     with (directory / 'settings.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -145,6 +151,8 @@ def save(state, changes, expected, rebuild_memory=False):
         if expected != revision(current): raise ValueError('configuration_conflict')
         if not isinstance(changes, dict) or set(changes) - EDITABLE: raise ValueError('unsupported_setting')
         if any(not isinstance(v, str) for v in changes.values()): raise ValueError('settings_must_be_strings')
+        if not owner_change and current.get('TELEGRAM_OWNER_ID') and changes.get('TELEGRAM_OWNER_ID', current['TELEGRAM_OWNER_ID']) != current['TELEGRAM_OWNER_ID']:
+            raise ValueError(OWNER_FROM_CLI)
         updated = {**current, **changes}
         # The browser sends only newly typed provider keys; stored keys stay, and
         # keys of removed custom providers are dropped.

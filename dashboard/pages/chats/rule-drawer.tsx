@@ -105,6 +105,12 @@ export function RuleDrawer({
       ) : (
         <div className="space-y-6">
           <ActionError text={action.error} />
+          {!!rule.private_sources?.length && (
+            <Notice tone="warn" title="Reads a private chat. Nocheh skips it.">
+              Private chats never share or get shared with, so Nocheh leaves out{' '}
+              {rule.private_sources.map(name).join(', ')}. Edit the rule to remove them.
+            </Notice>
+          )}
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
             <dt className="text-muted">State</dt>
             <dd>

@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {groupAccess,type GroupAccess} from '../assistant-policy.js';
 import {validatePolicy} from '../security/contract.js';
-import {validateSpace} from '../spaces.js';
+import {groupSpace,validateSpace} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository} from './archive.js';
 import {GuardRepository} from './guards.js';
@@ -69,8 +69,9 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
       typeof row.sharing_enabled!=='boolean'||!['approved','filtered'].includes(String(row.sharing_mode))||projects.has(id))throw Error('reset_setup_snapshot_invalid');projects.add(id);}
   const assignments=new Set<string>();
   for(const item of c.project_assignments as unknown[]) {const row=exact(item,['space_id','project_id','mode','share_into']),space=validateSpace(row.space_id),mode=String(row.mode);
+    // A private chat never joins a project (ADR-0242).
     if(assignments.has(space)||!['assigned','none','inherit'].includes(mode)||typeof row.share_into!=='boolean'||
-      (mode==='assigned'?(typeof row.project_id!=='string'||!projects.has(row.project_id)):row.project_id!==null))
+      (mode==='assigned'?(typeof row.project_id!=='string'||!projects.has(row.project_id)||!groupSpace(space)):row.project_id!==null))
       throw Error('reset_setup_snapshot_invalid');assignments.add(space);}
   const rules=new Set<string>();
   for(const item of c.sharing_rules as unknown[]) {const row=exact(item,['id','name','sources','destination','enabled','mode','instructions','project_id']),id=identifier(row.id,ID);
@@ -79,7 +80,10 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
       throw Error('reset_setup_snapshot_invalid');
     if(rules.has(id)||typeof row.name!=='string'||Buffer.byteLength(row.name)>200||typeof row.instructions!=='string'||Buffer.byteLength(row.instructions)>4000||
       typeof row.enabled!=='boolean'||!['approved','filtered'].includes(String(row.mode))||!Array.isArray(row.sources)||row.sources.length>100)throw Error('reset_setup_snapshot_invalid');
-    const sources=row.sources.map(validateSpace);if(sources.join('\0')!==[...new Set(sources)].sort().join('\0')||sources.includes(validateSpace(row.destination))||row.enabled&&!sources.length)throw Error('reset_setup_snapshot_invalid');rules.add(id);}
+    // A rule never reads from or shares into a private chat (ADR-0242).
+    const sources=row.sources.map(validateSpace),destination=validateSpace(row.destination);
+    if(sources.join('\0')!==[...new Set(sources)].sort().join('\0')||sources.includes(destination)||row.enabled&&!sources.length||![...sources,destination].every(groupSpace))
+      throw Error('reset_setup_snapshot_invalid');rules.add(id);}
   const destinations=new Set<string>();for(const item of c.memory_access_settings as unknown[]) {const row=exact(item,['destination','suggestions','notify_owner','auto_followup','request_ttl_seconds','default_grant_mode']);
     const destination=row.destination==='*'?'*':validateSpace(row.destination);if(destinations.has(destination)||row.suggestions!==null&&!['related','off'].includes(String(row.suggestions))||
       row.notify_owner!==null&&typeof row.notify_owner!=='boolean'||row.auto_followup!==null&&typeof row.auto_followup!=='boolean'||
@@ -145,7 +149,8 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     if(!same(savedPolicy.document,desired)) {if(Number(savedPolicy.revision)!==1)throw Error('reset_setup_target_changed');
       const revision=(await db.query("INSERT INTO security_policy_versions(document,actor) VALUES($1,'reset') RETURNING revision",[JSON.stringify(desired)])).rows[0].revision;
       await db.query('UPDATE security_policy SET revision=$1',[revision]);}
-    const defaultAccess=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}];
+    // The schema's seeded row: a fresh install starts with automatic follow-up off (ADR-0242).
+    const defaultAccess=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time'}];
     if(!same(current.memory_access_settings,defaultAccess)&&!same(current.memory_access_settings,configuration.memory_access_settings))throw Error('reset_setup_target_changed');
     for(const [name,rows] of Object.entries(current))if(name!=='memory_access_settings'&&(rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
     // Project rules come back as saved; no preview or release is restored, so revision 1 is safe.

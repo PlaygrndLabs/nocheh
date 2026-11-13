@@ -22,9 +22,10 @@ import urllib.parse
 import zipfile
 from datetime import datetime, timedelta, timezone
 
+from tools.acceptance import canaries
 from tools.acceptance.github_mock import key_line
 from tools.acceptance.telegram_rehearsal import wait_telegram_connected
-from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Scenarios, isolated_turns, synthetic_pdf
+from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, PARTICIPANT, UNSELECTED_GROUP, Failed, Scenarios, isolated_turns, synthetic_pdf
 from tools.paths import ROOT
 
 # 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
@@ -482,40 +483,172 @@ class ProductScenarios(Scenarios):
         self.gate('ingestion_receipt_done', receipts != '0', receipts=receipts)
 
     def private_chat_stays_out_of_groups(self):
-        # What the owner says only in their private chat never reaches what the model sees for a group. Honcho learns
-        # the private mark as a conclusion here (installation-provider.py PrivacyCanary), and its memory chat for the
-        # group question then names get_recent_observations: Honcho runs a tool it was not offered, and that one reads
-        # every conversation. Nocheh's Honcho gateway refuses the reply, so the tool never runs.
+        # What the owner keeps on their private side never reaches what the model sees for a group, and no group reply
+        # shows it. The owner puts private marks in their private chat: messages, a native note, a personal task, a
+        # private job and their own default role, and sees each again there (the positive controls). Honcho learns the
+        # marked messages as conclusions (installation-provider.py PrivacyCanary), and its memory chat for a group
+        # question then names get_recent_observations: Honcho runs a tool it was not offered, and that one reads every
+        # conversation. Nocheh's Honcho gateway refuses the reply, so the tool never runs. OTHER_GROUP joins a project
+        # for the probes, so a project's chat is asked too, and leaves it at the end. Every group question carries a
+        # PROBEMARK (search, recall, task list, job status): a model request that holds both marks is private text in a
+        # group's read. The owner's notes review, which reads group messages into the owner's own notes, is counted
+        # apart. The marks are saved for private_canaries_never_left_the_owner, which sweeps what was sent.
         number = str(self.f.ids())  # new on every run, so a kept fixture cannot pass on an older mark
-        private, probe = 'PRIVATEMARK'+number, 'PROBEMARK'+number
-        self.turn(self.f.message(OWNER, 'Every Friday I see my doctor. '+private), OWNER)
-        self.wait('private_fact_learned', lambda: self.honcho("SELECT count(*) FROM documents WHERE deleted_at IS NULL AND content LIKE '%"
-                                                              +private+"%'") not in ('', '0'), 600)
-        # The owner speaks in the group first, so the group's memory knows the owner and a group recall asks the owner's peer.
-        event_id, _ = self.turn(self.f.message(GROUP, 'The team plan for Friday is ready.', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
-        self.wait('group_message_learned', lambda: self.f.query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE "
-                                                                "source_reference->>'id'='"+event_id+"' AND state='done'") != '0', 600)
-        self.wait('honcho_queue_drained', lambda: self.honcho('SELECT count(*) FROM queue WHERE NOT processed') == '0', 600)
-        # An owner change from an earlier scenario holds every memory read until its correction ends (native-memory.ts correcting).
+        private, probe, word, board = 'PRIVATEMARK'+number, 'PROBEMARK'+number, 'LOCKERWORD'+number, 'BOARDMARK'+number
+        marks = {}
+
+        def plant(kind, mark=None):
+            mark = mark or 'PRIVATEMARK'+str(self.f.ids())
+            marks[mark] = kind
+            canaries.save(self.f.directory, {mark: kind}, OWNER)
+            return mark
+
+        job_card = move_card = dashboard = persona = role = assignment = failed = None
+        try:
+            plant('private chat message', private)
+            self.turn(self.f.message(OWNER, 'Every Friday I see my doctor. '+private), OWNER)
+            # A plain message, found again by a word in it that is not a mark, so a group can search for it.
+            said = plant('private chat message')
+            self.turn(self.f.message(OWNER, 'My spare key is under the blue pot '+word+'. '+said), OWNER)
+            _, text = self.turn(self.f.message(OWNER, 'Where is it? [[search:'+word+']]'), OWNER)
+            self.gate('owner_search_finds_private_message', said in text, excerpt=text[:300])
+            # A native note (the shape native_notes_reach_later_turns saves).
+            note = plant('native note')
+            self.turn(self.f.message(OWNER, 'Note this [[tool:memory {"target":"memory","operations":[{"action":"add","content":"'+note
+                                     +': the owner keeps a private note."}]}]]'), OWNER)
+            _, text = self.turn(self.f.message(OWNER, 'Do you see your notes? [[notes:'+note+']]'), OWNER)
+            self.gate('owner_notes_hold_private_note', 'present' in text, answer=text)
+            # A personal task.
+            task_mark = plant('personal task')
+            added = self.task_tool({'action': 'add', 'title': 'Renew my passport '+task_mark})
+            task = added.get('task', added)
+            self.gate('personal_task_added', bool(task.get('id')), result=str(added)[:300])
+            listed = self.task_tool({'action': 'list', 'scope': 'personal'})
+            self.gate('owner_list_holds_personal_task', task_mark in json.dumps(listed, ensure_ascii=False))
+            # A private job, left waiting on its card.
+            job_mark = plant('private job')
+            _, before = self.silent_turn(self.job_request('Look over my errands', {'title': 'Private errands '+job_mark,
+                                                                                   'instruction': 'Look over my errands.'}), OWNER)
+            job_card = self.wait('private_job_card_posted', lambda: self.cards(before, OWNER), 120)[0]
+            status = self.tool_call('mcp__nocheh__background_job', {'action': 'status'}, OWNER)
+            self.gate('owner_status_lists_private_job', job_mark in json.dumps(status, ensure_ascii=False), result=str(status)[:300])
+            # The owner's own default role (Settings › Assistant).
+            role_mark = plant('owner default role')
+            dashboard = self.dashboard()
+            persona = dashboard.get('/memory/persona?scope=default')
+            role = dashboard.post('/memory/persona', {'scope': 'default', 'role': 'You help the owner with private errands. '+role_mark,
+                                                      'skills': persona['skills'], 'revision': persona['revision']})
+            _, text = self.turn(self.f.message(OWNER, 'Who are you here? [[context:'+role_mark+']]'), OWNER)
+            self.gate('owner_role_reaches_private_chat', 'present' in text, answer=text)
+            # A project with one chat, OTHER_GROUP, and a task on its board that the chat should see.
+            project = self.f.app('/v1/projects', {'name': 'Canary project P1', 'description': '', 'state': 'active', 'expected_revision': 0,
+                                                  'operation_id': 'scenario-canary-project-'+number})
+            own = self.f.app('/v1/projects/effective?space='+str(OTHER_GROUP))['own_assignment']
+            assignment = self.f.app('/v1/projects/assignments', {'space_id': str(OTHER_GROUP), 'project_id': project['id'], 'mode': 'assigned',
+                                                                 'expected_revision': own['revision'] if own else 0,
+                                                                 'operation_id': 'scenario-canary-assign-'+number})
+            self.task_tool({'action': 'add', 'title': 'Team checklist '+board}, chat=OTHER_GROUP)
+            # Moving the personal task onto that board waits for the owner's card (ADR-0243); this one is never approved.
+            detail = self.f.app('/v1/tasks/'+task['id'])
+            detail = detail.get('task', detail)
+            before = len(self.f.sent())
+            moved = self.task_tool({'action': 'update', 'id': task['id'], 'expected_revision': detail['revision'], 'scope': project['id']})
+            self.gate('move_onto_board_waits_for_card', moved.get('state') == 'proposed', result=str(moved)[:300])
+            move_card = self.wait('move_card_in_private_chat', lambda: self.cards(before, OWNER), 120)[0]
+            self.wait('private_fact_learned', lambda: all(self.honcho("SELECT count(*) FROM documents WHERE deleted_at IS NULL AND content LIKE '%"
+                                                                      +mark+"%'") not in ('', '0') for mark in (private, said)), 600)
+            # The owner speaks in the group first, so the group's memory knows the owner and a group recall asks the owner's peer.
+            event_id, _ = self.turn(self.f.message(GROUP, 'The team plan for Friday is ready.', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+            self.wait('group_message_learned', lambda: self.f.query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE "
+                                                                    "source_reference->>'id'='"+event_id+"' AND state='done'") != '0', 600)
+            self.wait('honcho_queue_drained', lambda: self.honcho('SELECT count(*) FROM queue WHERE NOT processed') == '0', 600)
+            self.memory_settled()
+            # Gateway logs survive restarts, so only refusals logged during this turn count.
+            refusal = '"event": "honcho_unoffered_tool_refused", "tools": ["get_recent_observations"]'
+            refusals = lambda: self.f.run('logs', '--no-color', 'honcho-provider-gateway', capture_output=True, text=True).stdout.count(refusal)
+            earlier = refusals()
+            before = self.f.http('/fixture/stats')
+            question = 'What does the owner do on Fridays? '+probe
+            _, text = self.turn(self.f.message(GROUP, question+' [[recall:'+question+']]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+            final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
+            recall = final['result']
+            refused = refusals()-earlier
+            # The same questions in the group's topic and in the project's chat, each with the probe mark.
+            spare = 'Where does the owner keep the spare key? '+probe
+            # Every probe runs before any gate, so a failure shows all that reached the groups at once.
+            held, board_seen = [], None
+            for chat, topic in ((GROUP, TEAM_TOPIC), (OTHER_GROUP, None)):
+                for question, tool in (('Where is the spare key? '+probe+' [[search:'+word+']]', 'mcp__nocheh__archive_search'),
+                                       (spare+' [[recall:'+spare+']]', 'mcp__nocheh__memory_recall'),
+                                       ('What is on our list? '+probe+' [[tool:mcp__nocheh__tasks {"action":"list","state":"all"}]]', 'mcp__nocheh__tasks'),
+                                       ('What jobs are there? '+probe+' [[tool:mcp__nocheh__background_job {"action":"status"}]]', 'mcp__nocheh__background_job')):
+                    result, found = self.probe_group(chat, topic, question, tool, marks)
+                    held += [{'chat': chat, 'tool': tool, 'held': marks[mark]} for mark in found]
+                    if chat == OTHER_GROUP and tool == 'mcp__nocheh__tasks':
+                        board_seen = result
+            after = self.f.http('/fixture/stats')
+            leaked = after['private_text_in_group']-before['private_text_in_group']
+            self.current['observed'] = {'stats': {key: after.get(key) for key in ('privacy_probes', 'private_text_in_group', 'group_text_in_owner_review')}, 'recall': recall[:400],
+                                        'marks': marks, 'held': held}
+            self.gate('private_text_never_reached_a_group_read', leaked == 0, count=leaked, seen=after.get('private_text_seen', [])[-leaked:] if leaked else [])
+            self.gate('group_answers_withhold_private_marks', not held, held=held)
+            self.gate('group_reply_withholds_private_fact', private not in text and private not in recall, excerpt=text[:300])
+            self.gate('project_chat_sees_its_board', board in (board_seen or ''), result=(board_seen or '')[:300])
+            self.gate('probe_reached_honcho', after['privacy_probes'] > before['privacy_probes'], probes=after['privacy_probes'])
+            self.gate('gateway_refused_unoffered_tool', refused > 0, refusals=refused)
+        except Exception as error:
+            failed = error
+            raise
+        finally:
+            # Leave everything as later scenarios expect: the cards decided, the role back, OTHER_GROUP in no project.
+            # A step that fails here is recorded; it fails the scenario only when nothing failed before it.
+            problems = []
+            steps = [lambda card=card: self.press(card, 'reject') for card in (move_card, job_card) if card]
+            if persona:
+                steps.append(lambda: dashboard.post('/memory/persona', {'scope': 'default', 'role': persona['role'], 'skills': persona['skills'],
+                                                                         'revision': (role or persona)['revision']}))
+            if assignment:
+                steps.append(lambda: self.f.app('/v1/projects/assignments', {'space_id': str(OTHER_GROUP), 'mode': 'none',
+                                                                              'expected_revision': assignment['revision'],
+                                                                              'operation_id': 'scenario-canary-unassign-'+number}))
+                steps.append(self.memory_settled)
+            for undo in steps:
+                try:
+                    undo()
+                except Exception as error:
+                    problems.append(type(error).__name__+':'+str(error)[:200])
+            if problems:
+                self.current['cleanup_problems'] = problems
+                if failed is None:
+                    raise Failed('cleanup_failed')
+
+    def memory_settled(self):
+        # An owner change holds every memory read until its correction ends (native-memory.ts correcting).
         self.wait('memory_not_correcting', lambda: self.f.query('nocheh_control', "SELECT (SELECT count(*) FROM owner_commands c WHERE c.holds_memory "
             "AND c.epoch>coalesce((SELECT max(guard_epoch) FROM learning_refresh_sweeps WHERE family='honcho' AND stage='done'),0))"
             "+(SELECT count(*) FROM memory_session_deletions WHERE state<>'done')") == '0', 900)
-        # Gateway logs survive restarts, so only refusals logged during this turn count.
-        refusal = '"event": "honcho_unoffered_tool_refused", "tools": ["get_recent_observations"]'
-        refusals = lambda: self.f.run('logs', '--no-color', 'honcho-provider-gateway', capture_output=True, text=True).stdout.count(refusal)
-        earlier = refusals()
-        before = self.f.http('/fixture/stats')
-        question = 'What does the owner do on Fridays? '+probe
-        _, text = self.turn(self.f.message(GROUP, question+' [[recall:'+question+']]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
-        after = self.f.http('/fixture/stats')
-        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
-        self.current['observed'] = {'stats': {key: after.get(key) for key in ('privacy_probes', 'private_text_in_group')}, 'recall': final['result'][:400]}
-        self.gate('probe_reached_honcho', after['privacy_probes'] > before['privacy_probes'], probes=after['privacy_probes'])
-        refused = refusals()-earlier
-        self.gate('gateway_refused_unoffered_tool', refused > 0, refusals=refused)
-        leaked = after['private_text_in_group']-before['private_text_in_group']
-        self.gate('private_text_never_reached_a_group_read', leaked == 0, count=leaked)
-        self.gate('group_reply_withholds_private_fact', private not in text and private not in final['result'], excerpt=text[:300])
+
+    def probe_group(self, chat, topic, text, tool, marks):
+        """One question in a group with the probe mark: what its tool returned, and the private marks in it or the reply."""
+        _, reply = self.turn(self.f.message(chat, text, topic=topic), chat, topic)
+        result = [event for event in self.f.brain() if event.get('tool') == tool and event['phase'] == 'final'][-1]['result']
+        return result, canaries.found(reply+'\n'+result, marks)
+
+    def private_canaries_never_left_the_owner(self):
+        # The last check of a run: no private mark planted by private_chat_stays_out_of_groups is in anything the fake
+        # Telegram sent outside the owner's private chat: a message, an edit, a button, or the answer to someone else's
+        # press. The marks never get a card, so any one found is a leak. Without saved marks the sweep fails.
+        path = self.f.directory/canaries.FILE
+        self.gate('canaries_saved', path.exists(), file=path.name)
+        planted = canaries.load(self.f.directory)
+        state = self.f.telegram()
+        # The sweep reads the same state that shows the marks where they belong.
+        seen = [hit for hit in canaries.leaks(state, planted['marks'], None) if hit['chat'] == planted['owner']]
+        self.gate('marks_seen_in_the_owner_chat', bool(seen), marks=len(planted['marks']), seen=len(seen))
+        found = canaries.leaks(state, planted['marks'], planted['owner'])
+        self.current['observed'] = {'marks': len(planted['marks']), 'messages': len(state.get('sent', [])), 'leaks': found[:20]}
+        self.gate('no_private_mark_outside_the_owner_chat', not found,
+                  leaks=[{**hit, 'held': planted['marks'].get(hit['mark'])} for hit in found[:10]])
 
     def inbox_never_asks_about_the_owner(self):
         # The scripted learning suggests the owner and a new person; only the new person gets a card, once.
@@ -1967,4 +2100,4 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit', 'machine_job_runs_after_one_approval', 'machine_job_refused_for_members_and_stopped',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
-                 'memory_search_model_change_rebuilds_memory']
+                 'memory_search_model_change_rebuilds_memory', 'private_canaries_never_left_the_owner']

@@ -153,6 +153,25 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).sharing_projects,[]);
    assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
 
+   // A project with tasks is joined only with the owner's review too: a chat there sees every task on its list (ADR-0243).
+   const onList=await s.tasks.create(owner,{operation_id:key+':listed-task',title:'Synthetic listed task',notes:'Synthetic private note',scope:plain.id});
+   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'automatic organization never moves a chat into a project with tasks');
+   const join=await persist('join-tasks',{kind:'project_assignment',reason:'Synthetic: the topic serves the plain project',
+    payload:{space_id:inheritedTopic,mode:'assigned',project_id:plain.id,expected_revision:0}} as any,sharingSource);
+   assert.equal(join.state,'review');
+   const joinView=await s.knowledge.proposal(owner,join.id);
+   assert.deepEqual(joinView.task_projects,[{id:plain.id,name:key+':plain'}]);assert.deepEqual(joinView.sharing_projects,[]);
+   const trashed=await s.tasks.update(owner,onList.id,{operation_id:key+':listed-trash',expected_revision:onList.revision,trashed:true});
+   assert.equal(await match(moveTo(plain.id),sharingSource,inheritedTopic),null,'a task in the trash still shows on the list');
+   // Leaving a project with tasks needs no review, and a topic that would follow its group into one says so.
+   const kept=await s.tasks.create(owner,{operation_id:key+':kept-task',title:'Synthetic task on the group\'s list',scope:created.id});
+   await s.tasks.remove(owner,trashed.id);
+   assert.equal((await match(moveTo(plain.id),sharingSource,inheritedTopic)).id,delegation.id);
+   assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[]);
+   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).task_projects,[{id:created.id,name:current.name}]);
+   const gone=await s.tasks.update(owner,kept.id,{operation_id:key+':kept-trash',expected_revision:kept.revision,trashed:true});await s.tasks.remove(owner,gone.id);
+   assert.deepEqual((await s.knowledge.proposal(owner,follow.id)).task_projects,[]);
+
    // Clean undo restores the prior assignment and archives, rather than erases, the created project.
    delegation=null;await save({scopes:[other]},'other');const otherSource=await capture(other),otherDraft=await persist('other',proposal(otherSource,'other',other),otherSource,other);
    assert.equal((await s.knowledge.process('proposal:'+otherDraft.id)).state,'applied');
@@ -224,5 +243,59 @@ test('delegated organization is exact, atomic, reversible, and independent from 
    const recovered=await s.knowledge.proposal(owner,recoveryId);assert.equal(recovered.result.receipt.id,commandReceipt.id);assert.equal(recovered.result.receipt.revision,1);
    assert.equal((await stores.control.query('SELECT revision FROM projects WHERE id=$1',[commandReceipt.id])).rows[0].revision,1,'recovery never repeats an already committed owner command');
    assert.deepEqual(await permissions(),beforeAuthority);
+
+   // Organizing puts chats in projects, so a private chat, the owner's included, is never one it may organize.
+   for(const scope of ['123','123/topic/5','desktop:personal_chat:9'])
+    await assert.rejects(s.knowledge.saveDelegation(owner,{name:'Private organization',enabled:true,scopes:[group,scope],project_ids:[],allow_create:true,
+     expires_at:null,expected_revision:0,operation_id:key+':private-delegation:'+scope}),{code:'organization_private_chat'},scope);
+   // One saved earlier over a private chat never acts on it, and can be turned off as it is, but not turned on again.
+   const olderDelegation=await s.knowledge.saveDelegation(owner,{name:'Older organization',enabled:true,scopes:[other],project_ids:[],allow_create:true,
+    expires_at:null,expected_revision:0,operation_id:key+':older-delegation'});
+   await stores.control.query(`UPDATE organization_delegations SET scopes=jsonb_build_array('123',$2::text),baselines=baselines||'{"123":0}'::jsonb WHERE id=$1`,[olderDelegation.id,other]);
+   const privateOrganization=await capture('123');
+   assert.equal(await match({kind:'organization',reason:'Synthetic',creates:[{key:'p',name:key+':private-project',description:'',evidence_ids:[privateOrganization.id]}],assignments:[]},
+    privateOrganization,'123'),null,'an older delegation never organizes from a private chat');
+   const olderBody={id:olderDelegation.id,name:'Older organization',scopes:['123',other],project_ids:[],allow_create:true,expires_at:null,expected_revision:olderDelegation.revision};
+   assert.equal((await s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,operation_id:key+':older-delegation-off'})).enabled,false);
+   await assert.rejects(s.knowledge.saveDelegation(owner,{...olderBody,enabled:true,expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-on'}),{code:'organization_private_chat'});
+   await assert.rejects(s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,scopes:['123','124',other],expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-more'}),{code:'organization_private_chat'});
+   await s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,scopes:[other],expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-fixed'});
+
+   // A card that shares a fact from the owner's private chat names that chat, and applies once the owner approves it.
+   knowledge.completed=async()=> 'ready';
+   const privateSource=await capture('123'),factProject=await s.projects.save(owner,{name:key+':fact-project',description:'',state:'active',expected_revision:0,operation_id:key+':fact-project'});
+   const entity=await s.entities.ensureProject(factProject),factBinding=await s.guards.state();
+   const fact=await s.entities.publishClaim({subject_id:entity.id,predicate:'checkpoint',content:'Synthetic checkpoint is complete.',attribution:'reported',uncertainty:'supported',evidence:[privateSource]},factBinding,key+':private-fact');
+   const grantBinding=await s.guards.state(),grantId=digest(key+':private-grant');
+   const grantCard=await knowledge.persist(grantId,{kind:'fact_grant',reason:'Synthetic: the group asked about the checkpoint',
+    payload:{fact_id:fact.id,fact_revision:fact.revision,destination:group,wording:'The checkpoint is complete.'}},
+    {origin:'turn',source:privateSource,space:'123',profile:'hermes',job:null,binding:grantBinding,dependencies:await knowledge.snapshot(owner,[privateSource.id],grantBinding)});
+   // When where it came from cannot be worked out, as in a passing outage, the card says so instead of showing no source.
+   (s.entities as any).audience=async()=>{throw new Error('synthetic outage');};
+   try{const blind=await s.knowledge.proposal(owner,grantId);assert.deepEqual([blind.fact_audience,blind.fact_audience_error],[null,'audience_unavailable']);}
+   finally{delete (s.entities as any).audience;}
+   const card=await s.knowledge.proposal(owner,grantId);assert.equal(card.fact_audience_error,undefined);
+   assert.deepEqual([card.fact_audience.private_sources,card.fact_audience.owner_private,card.fact_audience.readers],[['123'],true,null],'the card says it came from your private chat');
+   await assert.rejects(s.memoryAccess.grant(owner,{fact_id:fact.id,fact_revision:fact.revision,destination:group,operation_id:key+':unconfirmed'}),{code:'memory_grant_private_sources'});
+   await s.knowledge.decide(owner,grantId,{decision:'approve',expected_revision:grantCard.revision,operation_id:key+':approve-private-grant'});
+   assert.equal((await s.knowledge.process('proposal:'+grantId)).state,'applied');
+   assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM memory_fact_grants WHERE fact_id=$1 AND destination=$2 AND state='active'",[fact.id,group])).rows[0].n,1);
+
+   // A proposal saved before private chats were refused still lists and opens, marked, and the owner can cancel it; it never applies.
+   const older=async(label:string,value:any)=>{const binding=await s.guards.state(),id=digest(key+':older:'+label);
+    await knowledge.persist(id,value,{origin:'turn',source:privateSource,space:'123',profile:'hermes',job:null,binding,dependencies:await knowledge.snapshot(owner,[privateSource.id],binding)});return id;};
+   const assignOwner=await older('assign',{kind:'project_assignment',reason:'Synthetic: put my chat in the project',payload:{space_id:'123',project_id:factProject.id,mode:'assigned',expected_revision:0}});
+   const shareOwner=await older('rule',{kind:'sharing_rule',reason:'Synthetic: share my chat',payload:{name:'Synthetic older rule',sources:['123',other],destination:group,enabled:true,mode:'approved',instructions:'',expected_revision:0}});
+   const listed=(await s.knowledge.proposals(owner)).proposals.filter((row:any)=>[assignOwner,shareOwner].includes(row.id));
+   assert.deepEqual(listed.map((row:any)=>row.private_chats).sort(),[['123'],['123']],'one older proposal never breaks the whole list');
+   assert.deepEqual((await s.knowledge.proposal(owner,assignOwner)).private_chats,['123']);
+   assert.deepEqual(((await s.supervision.decision(owner,'knowledge',assignOwner)).detail as any).private_chats,['123'],'its card still opens');
+   const assignCard=await s.knowledge.proposal(owner,assignOwner);
+   await assert.rejects(s.knowledge.decide(owner,assignOwner,{decision:'approve',expected_revision:assignCard.revision,operation_id:key+':approve-older'}),{code:'project_private_chat'});
+   assert.equal((await s.knowledge.decide(owner,assignOwner,{decision:'reject',expected_revision:assignCard.revision,operation_id:key+':reject-older'})).state,'cancelled');
+   await stores.control.query('UPDATE knowledge_proposals SET approved=true,state=$2 WHERE id=$1',[shareOwner,'queued']);
+   assert.deepEqual(await s.knowledge.process('proposal:'+shareOwner),{state:'failed',revision:2,reason:'sharing_private_chat'},'applying re-checks it as new');
+   assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM sharing_rules WHERE name=$1',['Synthetic older rule'])).rows[0].n,0);
+   knowledge.completed=completed;
   } finally {knowledge.completed=completed;await stores.close();}
  });

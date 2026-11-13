@@ -1,8 +1,8 @@
-/** Choose one or more chats by name, or type an exact chat or topic ID; optionally groups and topics only. */
+/** Choose one or more chats by name, or type an exact chat or topic ID; optionally groups and their topics only. */
 import {useDeferredValue, useId, useState} from 'react';
 import {Check, X} from 'lucide-react';
 import {useResource} from '../../lib/resource';
-import {chatFromId, chatName, inferKind, isSpaceId, kindLabel, type Chat, type Directory} from '../../lib/chats-model';
+import {chatFromId, chatName, groupSpace, isSpaceId, kindLabel, type Chat, type Directory} from '../../lib/chats-model';
 import {cn} from '../../lib/utils';
 import {Input} from '../../ui/core';
 
@@ -35,7 +35,7 @@ export function ChatPicker({
   );
   const all = useResource<Directory>('/conversations?limit=100');
   const rows = (resource.data?.items ?? []).filter(
-    row => !exclude.includes(row.space_id) && (!groupsOnly || row.kind !== 'private'),
+    row => !exclude.includes(row.space_id) && (!groupsOnly || groupSpace(row.space_id)),
   );
   const find = (space: string): Chat =>
     rows.find(row => row.space_id === space) ??
@@ -49,7 +49,7 @@ export function ChatPicker({
   };
   const exact =
     isSpaceId(deferred) &&
-    (!groupsOnly || inferKind(deferred) !== 'private') &&
+    (!groupsOnly || groupSpace(deferred)) &&
     !rows.some(row => row.space_id === deferred) &&
     !value.includes(deferred);
 
@@ -133,7 +133,11 @@ export function ChatPicker({
               );
             })}
             {!rows.length && !exact && (
-              <li className="px-3 py-2 text-[13px] text-muted">No chats match. Type an exact ID to use it.</li>
+              <li className="px-3 py-2 text-[13px] text-muted">
+                {groupsOnly && isSpaceId(deferred) && !groupSpace(deferred)
+                  ? 'Only groups and topics can be chosen here, never a private chat.'
+                  : 'No chats match. Type an exact ID to use it.'}
+              </li>
             )}
           </ul>
         )}

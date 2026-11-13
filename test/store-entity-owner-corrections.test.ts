@@ -9,6 +9,7 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {ProjectRepository} from '../src/stores/projects.js';
 import {EntityRepository} from '../src/stores/entities.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 
 test('owner entity decisions survive automatic identity and claim refresh',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async t=>{
@@ -16,7 +17,7 @@ test('owner entity decisions survive automatic identity and claim refresh',
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive);
   const guards=new GuardRepository(stores,archive),stamp=Date.now(),group='-'+stamp,owner:Reader={admin:true,scope:null};let sequence=0;
-  const access=new SourceAccessRepository(stores,archive,guards,()=>({enabled:true,owner_id:'42',group_ids:[group]}));
+  const policy:AssistantPolicy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
   const entities=new EntityRepository(stores,access,new ProjectRepository(stores.control));
   const capture=async(actor:number,name:string)=>{
     const index=++sequence,event:Envelope={version:1,key:`owner-entity:${stamp}:${index}`,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:group,
@@ -60,6 +61,30 @@ test('owner entity decisions survive automatic identity and claim refresh',
     await t.test('automatic claims without owner correction still update and deduplicate',async()=>{
       const first=await publish('automatic_milestone','The milestone is October.'),next=await publish('automatic_milestone','The milestone is November.',true);
       assert.equal(next.revision,first.revision+1);assert.deepEqual(await publish('automatic_milestone','The milestone is November.',true),next);
+    });
+    await t.test('a fact\'s audience names where it came from and who can read its wording',async()=>{
+      const other=String(Number(group)-1);
+      const message=async(scope:string,extra:Record<string,unknown>={})=>{const index=++sequence,mine=scope==='42',event:Envelope={version:1,key:`owner-entity:${stamp}:${index}`,origin:'live',
+        kind:'telegram_update',bot_id:'fixture',scope,source_id:String(index),revision:'1',occurred_at:null,text:'Synthetic audience observation',payload:{message:{message_id:index,date:1,
+          chat:{id:Number(scope),type:mine?'private':'supergroup',...(extra.message_thread_id?{is_forum:true}:{})},from:{id:mine?42:stamp+6,first_name:'Bob'},text:'Synthetic audience observation',...extra}}};
+        return (await archive.capture(event)).source.reference;};
+      const fact=async(label:string,evidence:Awaited<ReturnType<typeof message>>[])=>entities.publishClaim({subject_id:factSource.entity.id,predicate:'audience_'+label,
+        content:'Synthetic audience fact '+label,attribution:'reported',uncertainty:'supported',evidence},await guards.state(),`${stamp}:audience:${label}`);
+      const inGroup=await fact('group',[await message(group)]),inTopic=await fact('topic',[await message(group,{message_thread_id:7,is_topic_message:true})]);
+      const twoGroups=await fact('two',[await message(group),await message(other)]),mine=await fact('mine',[await message('42')]);
+      assert.deepEqual(await entities.audience(owner,inGroup.id),{claim_id:inGroup.id,revision:inGroup.revision,sources:[group],private_sources:[],owner_private:false,
+        confirm_required:false,readers:{space:group,group}},'the whole group while its topics share memory');
+      assert.deepEqual((await entities.audience(owner,inTopic.id)).readers,{space:group,group},'a topic\'s fact is read across its group');
+      policy.topic_memory='topic';
+      try {
+        assert.deepEqual((await entities.audience(owner,inTopic.id)).readers,{space:group+'/topic/7',group:null},'only that topic while topics keep their own memory');
+        assert.deepEqual((await entities.audience(owner,inGroup.id)).readers,{space:group,group:null});
+      } finally {delete policy.topic_memory;}
+      const both=await entities.audience(owner,twoGroups.id);
+      assert.deepEqual([both.readers,both.confirm_required],[null,false],'evidence from two groups is the owner\'s alone');
+      const own=await entities.audience(owner,mine.id);
+      assert.deepEqual([own.owner_private,own.private_sources,own.readers,own.confirm_required],[true,['42'],null,true],'the owner\'s private chat: only you, and sharing asks first');
+      await assert.rejects(entities.audience({admin:false,scope:group,space:group},mine.id),{code:'owner_required'});
     });
   } finally {await stores.close();}
 });

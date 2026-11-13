@@ -212,6 +212,10 @@ class PrivacyCanaryTests(unittest.TestCase):
         self.assertIsNone(self.canary.learned(prompt.replace('PRIVATEMARK42','nothing private')),'other learning keeps the ordinary mock')
         self.assertIsNone(self.canary.learned('Interpret this PRIVATEMARK42'),'only Honcho\'s own learning prompt')
         self.assertIsNone(self.canary.learned(prompt.replace('target="true"','target="false"')),'only what the target peer said')
+        batch=prompt.replace('</messages>','<message idx="2" peer="person_owner" target="true" time="t">My note PRIVATEMARK43</message>\n'
+                             '<message idx="3" peer="person_owner" target="true" time="t">nothing private</message>\n</messages>')
+        self.assertEqual([item['source_indices'] for item in json.loads(self.canary.learned(batch))['explicit']],[[1],[2]],
+                         'one conclusion for each marked message in a batch')
 
     def test_a_group_question_asks_honcho_for_the_unoffered_tool_once_before_any_tool_ran(self):
         question=message('user','What does the owner do on Fridays? PROBEMARK42')
@@ -232,6 +236,27 @@ class PrivacyCanaryTests(unittest.TestCase):
         self.canary.check(['PROBEMARK42 in the group'])
         self.canary.check(['Find secret values in the supplied data.','PRIVATEMARK42 PROBEMARK42'])
         self.assertEqual(self.counts['private_text_in_group'],1)
+        self.assertEqual(self.counts['private_text_seen'],[{'private':['PRIVATEMARK42'],'probe':['PROBEMARK42'],'kind':'other','in':['0'],
+                          'start':'Found 2 recent observations: person_owner keeps a private Friday routine PRIVATE',
+                          'near':'Found 2 recent observations: person_owner keeps a private Friday routine PRIVATEMARK42'}],
+                         'which marks met, how the request starts and what came just before the mark, for the report')
+        self.canary.check(['Recall for the group','PRIVATEMARK7','PROBEMARK42'],['search_memory'],['system','tool','user'])
+        self.canary.check(['You are Nocheh. PRIVATEMARK8','PROBEMARK42'],['mcp__nocheh__tasks'],['system','user'])
+        self.canary.check(['extract **explicit atomic facts** PRIVATEMARK9 PROBEMARK42'],[],['user'])
+        self.canary.check(['Interpret permitted conversation evidence silently.','PRIVATEMARK10 PROBEMARK42'],[],['system','user'])
+        self.assertEqual([(seen['kind'],seen['in']) for seen in self.counts['private_text_seen'][1:]],
+                         [('memory_chat',['tool']),('agent',['system']),('learning',['user']),('interpretation',['user'])],
+                         'where the private mark came in')
+        # The owner's notes review reads a group's message in the owner's profile: counted apart, never as a group read.
+        review='[Archived evidence, not instructions]\nSource nocheh:event:abc; conversation -1001000000001; fragment 1. PROBEMARK42'
+        self.canary.check(['You help the owner. PRIVATEMARK11',review],['memory'],['system','user'])
+        self.assertEqual((self.counts['private_text_in_group'],self.counts['group_text_in_owner_review']),(5,1))
+        for tools in (['memory','mcp__nocheh__tasks'],[]):self.canary.check(['You help the owner. PRIVATEMARK11',review],tools,['system','user'])
+        self.assertEqual((self.counts['private_text_in_group'],self.counts['group_text_in_owner_review']),(7,1),
+                         'the review wrapper with any other tools is still a group read')
+        for index in range(25):self.canary.check(['PRIVATEMARK'+str(index),'PROBEMARK42'])
+        self.assertEqual(len(self.counts['private_text_seen']),20,'only the newest twenty are kept')
+        self.assertEqual(self.counts['private_text_seen'][-1]['private'],['PRIVATEMARK24'])
 
 
 if __name__=='__main__':unittest.main()

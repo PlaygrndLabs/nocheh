@@ -2,6 +2,61 @@
 
 <current>
 
+Members step 1: keep the owner's private side out of groups (owner, 2026-11-12: "I just
+review the tables and seems what I want if there is a important point or need my answer ask,
+else start build.", approving the Members design). One pull request in three parts:
+- Private chats stay out of group sharing: only groups and their topics share, are shared
+  with or join a project. Owner rules, project assignments, organization, agent proposals
+  and reset snapshots refuse a private chat, and sharing skips one that an older row still
+  names (the Sharing page says "Reads a private chat. Nocheh skips it."). Suggestions never
+  come from or go into a private chat. One-time approval posts the wording once, now;
+  automatic follow-up starts off, and a lasting share posts only when the owner ticks it.
+  Grants go only to groups and topics, and a fact from the owner's chat is shared only after
+  a confirm that names that chat. Every card and editor says where a fact came from and who
+  will see it ([ADR-0242](docs/adr/0242-private-chats-stay-out-of-group-sharing.md),
+  [projects](test/store-projects.test.ts), [memory access](test/store-memory-access.test.ts),
+  [follow-ups](test/store-memory-followup.test.ts),
+  [audience](test/store-entity-owner-corrections.test.ts),
+  [reset](services/hermes/test_reset_configuration.py)). An existing install keeps its saved
+  `auto_followup=true` until the owner turns "Answer right after I approve" off. Grants
+  already made on private-source facts pause until the owner shares them again with the
+  confirm. Older rules and organizing that name a private chat can still be turned off, and
+  older proposals still open to be rejected. A reset stops before erasure while a rule or
+  project still names a private chat ("Remove it" on the chat's page, or edit the rule).
+  Pending: a check on the owner's live install.
+- Project task boards (items 8 and 4b; owner: "task access and edit should behave like data
+  access for project and groups"): a project's chat sees a task only as it is on that
+  project's board, from when it joined, with only the columns the owner shares, and its edits
+  keep what it cannot see; from the owner's private chat, a change those chats would see waits
+  for a card that names them, and a move into a list from the dashboard or mini app names them
+  first. Only the owner moves a chat into a project with tasks: automatic organization waits
+  for review, and the review, "Add a chat" and a chat's project choice say the chat will see
+  and change the list ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
+  [store](test/store-tasks.test.ts), [organization](test/store-knowledge-management.test.ts),
+  [columns](test/task-settings.test.ts), [dashboard](test/dashboard-pages.browser.mjs)). As the owner confirmed on 2026-11-13
+  ("Yes, small changes skip it"), a private-chat change to a listed task that only sets status,
+  priority, start and due days and times, archive or trash, or takes it off every list,
+  applies without a card; repeat and reminders wait for the card (fail closed), and the chat
+  tool sets no order. Pending: live acceptance with a real project group, and task cards in
+  the dashboard Inbox (decided in Telegram only). The item 11 full-tester canary builds on
+  this.
+- Owner defaults, group posts and machine reports stay private
+  ([ADR-0244](docs/adr/0244-owner-defaults-posts-and-machine-reports-stay-private.md)):
+  with "Do what I ask", a post the owner asks for in the private chat for any group or
+  topic still waits for its card there ([check](test/store-owner-autonomy.test.ts),
+  [cards](test/store-approval-buttons.test.ts)); the private chat and groups have their
+  own default role and skills, and the one for groups starts empty
+  ([check](services/hermes/test_persona.py)); a machine job reports to the private chat
+  and the group that asked gets one line ([check](test/store-machine-group-report.test.ts));
+  the owner ID is never a person in a group and, once saved, changes only with
+  `config set` ([check](services/hermes/test_configuration.py)). Unit, store, dashboard
+  and browser checks pass, and so do the step's full-tester scenarios
+  (`owner_freedom_keeps_group_cards` included) and its canary gate, which finds no private
+  mark in a group's model requests, answers or Telegram messages and fails on a build that
+  lets a group read the owner's jobs. Pending: the whole full tester as a release run.
+  Owner step: groups lose the role and skills of the old shared default until you fill in
+  "Role and skills in groups" in Settings › Assistant.
+
 Production move (owner, 2026-10-28): Nocheh moves to an always-on server as a
 clean install once the MVP checks pass (stuck notes-review fix, full tester on
 main, one clean day of use); dev-mode rules end at the move. Daily automatic

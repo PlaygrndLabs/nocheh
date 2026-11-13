@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {parentSpace,recallCondition,validateSpace} from '../spaces.js';
+import {groupChatId,groupSpace,parentSpace,recallCondition,validateSpace} from '../spaces.js';
 import {OwnerCommands} from './owner-commands.js';
 
 const id=(value:unknown):string=>{const v=string(value,64);if(!/^[a-f0-9]{64}$/.test(v))throw new HttpError(400,'invalid_project_id');return v;};
@@ -15,8 +15,6 @@ export interface Assignment {space_id:string;project_id:string|null;mode:'assign
 export interface SharingRule {id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;revision:number;project_id?:string|null}
 
 const chatOf=(space:string)=>parentSpace(space)??space;
-/** Only groups and their topics share through a project; a private chat, the owner's included, never does (ADR-0226). */
-const groupChat=(space:string)=>/^-\d+$/.test(chatOf(space));
 const projectRuleId=(project:string,destination:string)=>digest('project-sharing:'+project+':'+destination);
 /** A rule ID a project of this installation uses, or would use for this destination. */
 const projectRuleTaken=`SELECT 1 FROM projects p CROSS JOIN (SELECT space_id FROM project_assignments UNION SELECT $2::text) d(space_id)
@@ -29,7 +27,7 @@ export const listedRule=(rule:string)=>`(${rule}.project_id IS NULL OR ${rule}.e
 /** A turn runs at most ten automatic filters (`sharing_rule_limit` in sharing.ts); a write past that is refused (ADR-0226).
  * Counted for the whole group, its General chat and every topic, whichever topic memory is set. */
 async function filteredLimit(db:Pick<pg.PoolClient,'query'>,destination:string):Promise<void> {
-  const chat=chatOf(destination),group=/^-\d+$/.test(chat)?chat:null;
+  const chat=chatOf(destination),group=groupChatId(chat)?chat:null;
   const {rows}=await db.query(`SELECT count(*)::int AS n FROM sharing_rules WHERE enabled AND mode='filtered' AND ${recallCondition('destination','$1','$2')}`,[destination,group]);
   if(rows[0].n>10)throw new HttpError(409,'sharing_rule_limit');
 }
@@ -43,7 +41,7 @@ async function filteredLimit(db:Pick<pg.PoolClient,'query'>,destination:string):
 export async function syncProjectSharing(db:pg.PoolClient,projectId:string):Promise<void> {
   const project=(await db.query('SELECT name,state,sharing_enabled,sharing_mode FROM projects WHERE id=$1',[projectId])).rows[0];
   const assigned=((await db.query("SELECT space_id,share_into FROM project_assignments WHERE project_id=$1 AND mode='assigned'",[projectId])).rows as
-    {space_id:string;share_into:boolean}[]).filter(row=>groupChat(row.space_id));
+    {space_id:string;share_into:boolean}[]).filter(row=>groupSpace(row.space_id));
   const members=assigned.map(row=>row.space_id).sort(),own=new Set(members.filter(space=>!members.includes(parentSpace(space)??'')));
   // A group's topics read its rules when they share memory, so leaving out one of its chats leaves out the whole group.
   const closed=new Set(assigned.filter(row=>!row.share_into).map(row=>chatOf(row.space_id)));
@@ -84,8 +82,11 @@ export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revisio
   return result;
 }
 
-/** "Don't share into this chat" (`share_into`) a caller leaves out keeps its saved value, and stays when a chat moves. */
+/** "Don't share into this chat" (`share_into`) a caller leaves out keeps its saved value, and stays when a chat moves.
+ * Only a group or topic joins a project; a private chat, the owner's included, never does (ADR-0242). This one check
+ * covers the owner's assignment, an applied organization proposal and its undo. */
 export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'revision'|'share_into'>&{share_into?:boolean;expected_revision:number}):Promise<Assignment> {
+  if(change.mode==='assigned'&&!groupSpace(change.space_id))throw new HttpError(400,'project_private_chat');
   const previous=(await db.query('SELECT revision,project_id,mode,share_into FROM project_assignments WHERE space_id=$1 FOR UPDATE',[change.space_id])).rows[0];
   if((previous?.revision??0)!==change.expected_revision)throw new HttpError(409,'assignment_revision_conflict');
   if(change.project_id&&!(await db.query("SELECT id FROM projects WHERE id=$1 AND state='active'",[change.project_id])).rowCount)throw new HttpError(409,'active_project_required');
@@ -133,8 +134,11 @@ export class ProjectRepository {
     const {rows}=await this.control.query(`SELECT a.*,row_to_json(p) AS project FROM project_assignments a
       LEFT JOIN projects p ON p.id=a.project_id WHERE a.space_id=$1 OR a.space_id=$2`,[space,parent]);
     const own=rows.find(r=>r.space_id===space),inherited=!own||own.mode==='inherit';
-    const chosen=inherited?rows.find(r=>r.space_id===parent):own;
     const assignment=(row:any):Assignment=>({space_id:row.space_id,project_id:row.project_id,mode:row.mode,share_into:row.share_into,revision:row.revision});
+    // A private chat is in no project, even through a row written before private chats were refused. That row is
+    // still returned as its own, so the owner sees it and can clear it (ADR-0242).
+    if(!groupSpace(space))return {space,own_assignment:own?assignment(own):null,assignment:null,project:null,inherited:false};
+    const chosen=inherited?rows.find(r=>r.space_id===parent):own;
     return {space,own_assignment:own?assignment(own):null,assignment:chosen?assignment(chosen):null,project:chosen?.project??null,inherited:!!chosen&&inherited};
   }
   async list(principal:Reader,after='') {
@@ -155,12 +159,19 @@ export class SharingPolicyRepository {
     const operationId=string(body.operation_id,200),ruleId=body.id===undefined?digest('sharing:'+operationId):id(body.id);
     if(!Array.isArray(body.sources)||body.sources.length>100)throw new HttpError(400,'invalid_sharing_sources');
     const sources=[...new Set(body.sources.map(validateSpace))].sort(),destination=validateSpace(body.destination),expected=revision(body.expected_revision);
+    const privateSources=sources.filter(space=>!groupSpace(space)),privateDestination=!groupSpace(destination);
+    // A rule never reads from or shares into a private chat, the owner's included (ADR-0242).
+    if((privateSources.length||privateDestination)&&body.enabled!==false)throw new HttpError(400,'sharing_private_chat');
     if(sources.includes(destination)||typeof body.enabled!=='boolean'||!['approved','filtered'].includes(String(body.mode))||body.enabled&&!sources.length)
       throw new HttpError(400,'invalid_sharing_rule');
     const rule:SharingRule={id:ruleId,name:string(body.name,200),sources,destination,enabled:body.enabled,mode:body.mode as SharingRule['mode'],
       instructions:string(body.instructions??'',4000),revision:expected+1};
     return this.commands.run(principal,operationId,{kind:'sharing_rule',...rule,expected_revision:expected},async db=>{
-      const prior=(await db.query('SELECT revision,project_id FROM sharing_rules WHERE id=$1 FOR UPDATE',[ruleId])).rows[0];
+      const prior=(await db.query('SELECT revision,project_id,sources,destination FROM sharing_rules WHERE id=$1 FOR UPDATE',[ruleId])).rows[0];
+      // A rule saved earlier that still names a private chat can be turned off and kept off as it is, so the owner can
+      // stop it; it never gains a private chat, and turning it on needs them removed first.
+      if((privateSources.length||privateDestination)&&(!prior||privateSources.some(space=>!prior.sources.includes(space))||privateDestination&&prior.destination!==destination))
+        throw new HttpError(400,'sharing_private_chat');
       // A project's own rules change only from the project, and no owner rule takes an ID a project uses (ADR-0226).
       if(prior?.project_id||!prior&&(await db.query(projectRuleTaken,[ruleId,destination])).rowCount)throw new HttpError(409,'sharing_rule_project_managed');
       if((prior?.revision??0)!==expected)throw new HttpError(409,'sharing_revision_conflict');
@@ -171,17 +182,23 @@ export class SharingPolicyRepository {
       return rule;
     });
   }
+  /** Each rule names the private chats it would read or share into, which Nocheh skips (ADR-0242). */
   async list(principal:Reader,after='') {
     admin(principal);const {rows}=await this.control.query(`SELECT * FROM sharing_rules s WHERE s.id>$1 AND ${listedRule('s')} ORDER BY s.id LIMIT 101`,[after]);
-    return {rules:rows.slice(0,100),next:rows.length>100?rows[99].id:null};
+    return {rules:rows.slice(0,100).map(row=>({...row,private_sources:[...row.sources,row.destination].filter((space:string)=>!groupSpace(space))})),
+      next:rows.length>100?rows[99].id:null};
   }
   /** Configuration for preparing a separate permitted projection; never authorizes raw source reads.
    * With `group`, rules for that group's base conversation and every one of its topics apply too. */
   async forDestination(destination:string,group:string|null=null):Promise<SharingRule[]> {
-    return (await this.control.query(`SELECT * FROM sharing_rules WHERE ${recallCondition('destination','$1','$2')} AND enabled ORDER BY id`,[validateSpace(destination),group])).rows;
+    // A private chat gets nothing, even from a rule written before private chats were refused (ADR-0242).
+    return (await this.control.query(`SELECT * FROM sharing_rules WHERE ${recallCondition('destination','$1','$2')} AND enabled ORDER BY id`,[validateSpace(destination),group])).rows
+      .filter(rule=>groupSpace(rule.destination));
   }
-  /** Whether a rule reads a conversation. A project's rule also reads each topic that follows one of its groups (ADR-0226). */
+  /** Whether a rule reads a conversation. A project's rule also reads each topic that follows one of its groups (ADR-0226).
+   * It never reads a private chat, whatever an older or imported rule says (ADR-0242). */
   async covers(rule:SharingRule,space:string):Promise<boolean> {
+    if(!groupSpace(space))return false;
     if(rule.sources.includes(space))return true;
     const parent=parentSpace(space);
     if(!rule.project_id||!parent||!rule.sources.includes(parent))return false;

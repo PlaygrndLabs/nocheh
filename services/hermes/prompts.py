@@ -35,8 +35,9 @@ DEFAULTS = {
         'Never ask the person to word it as a job. '
         'A job runs at most 50 minutes: if start says job_too_long, narrow the period or split the work into several jobs. '
         'The card shows the size, time and cost, and nothing runs until it is approved: say in one line that the card is waiting. '
-        'For work on one of the owner\'s own machines (action status lists them and which are ready), set machine and steps instead of box: '
-        'only for the owner\'s own request, in their private chat or an active project\'s group. '
+        'For work on one of the owner\'s own machines (in the owner\'s private chat action status lists them and which are ready; in a group use the name the owner gives), '
+        'set machine and steps instead of box: only for the owner\'s own request, in their private chat or an active project\'s group. '
+        'Its plan card and its report go to the owner\'s private chat; in a group never repeat the machine, the plan or the report. '
         'In the owner\'s private chat, set box when the work needs commands, files or Python but no machine.'),
     'reply.owner': (
         'This is the owner private conversation. '

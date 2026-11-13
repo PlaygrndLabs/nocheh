@@ -37,6 +37,7 @@ test('reset setup restores only current configuration under a new generation and
     sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:'-1002',enabled:true,mode:'approved',instructions:'Share only approved text',project_id:null},
       // The project is archived, so its own rule is off.
       {id:projectRule,name:'Saved project',sources:['-1001'],destination:'-1002',enabled:false,mode:'filtered',instructions:'',project_id:'a'.repeat(64)}].sort((a,b)=>a.id<b.id?-1:1),
+    // A fresh install starts with automatic follow-up off; the owner's saved choice comes back over it.
     memory_access_settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:true,request_ttl_seconds:86400,default_grant_mode:'one_time'}],
     chat_tool_settings:[{space_id:'*',shell:false,browser:null,mcp:null},{space_id:'-1001/topic/3',shell:null,browser:null,mcp:false}],
     runtime_profiles:[{id:profile,name:'research',owner_id:'123'}]}} as const;
@@ -47,12 +48,23 @@ test('reset setup restores only current configuration under a new generation and
     const owned=snapshot.configuration.sharing_rules.find(rule=>rule.project_id)!;
     for(const forged of [{...owned,project_id:'d'.repeat(64)},{...owned,destination:'-1003'}])
       assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a project rule belongs to a saved project and its chat');
+    // A private chat, the owner's included, never joins a project or a sharing rule (ADR-0242).
+    const saved=snapshot.configuration.sharing_rules.find(rule=>!rule.project_id)!;
+    for(const forged of [{...saved,sources:['-1001','123']},{...saved,sources:['123/topic/5']},{...saved,destination:'123'},{...saved,sources:['desktop:personal_chat:9']}])
+      assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,sharing_rules:[forged]}}),/snapshot_invalid/,'a rule never names a private chat');
+    const assignment={space_id:'123',project_id:'a'.repeat(64),mode:'assigned',share_into:true};
+    assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,project_assignments:[assignment]}}),/snapshot_invalid/,'a private chat never joins a project');
+    const keptOut={...snapshot,configuration:{...snapshot.configuration,project_assignments:[{...assignment,project_id:null,mode:'none'}]}};
+    assert.deepEqual(resetSetupSnapshot(keptOut),keptOut,'a private chat may be kept out of every project');
     for(const forged of [{space_id:'every',shell:false,browser:null,mcp:null},{space_id:'-1001',shell:'off',browser:null,mcp:null},{space_id:'-1001',shell:null,browser:null}])
       assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,chat_tool_settings:[forged]}}),/snapshot_invalid/,'a tool switch row is exact');
     await assert.rejects(restoreResetSetup(stores,{...input,unexpected:true} as any),/snapshot_invalid/);
     await assert.rejects(restoreResetSetup(stores,{...input,generation:snapshot.configuration.installation_generation[0].generation}),/generation_reused/);
     await assert.rejects(restoreResetSetup(stores,{...input,profile_commands:[{...input.profile_commands[0],operation_id:'forged'}]}),/profiles_invalid/);
+    assert.deepEqual((await stores.control.query('SELECT destination,auto_followup FROM memory_access_settings')).rows,[{destination:'*',auto_followup:false}],
+      'a fresh install starts with automatic follow-up off');
     const first=await restoreResetSetup(stores,input),again=await restoreResetSetup(stores,input);
+    assert.equal((await stores.control.query("SELECT auto_followup FROM memory_access_settings WHERE destination='*'")).rows[0].auto_followup,true);
     assert.deepEqual(again,first);assert.equal(first.generation,input.generation);assert.equal(first.binding.generation,input.generation);
     assert.equal(first.binding.mode,'off');assert.equal(first.binding.epoch,2);assert.equal(first.configuration_records,13);
     assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events')).rows[0].count,0);

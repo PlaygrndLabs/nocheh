@@ -176,6 +176,23 @@ def load(state):
     return values
 
 
+OWNER_CONFLICT = 'Your Telegram user ID is also set as a person in a group. Remove them there first.'
+
+
+def owner_conflict(values, others=()):
+    """The owner's Telegram user ID is never a person allowed or denied in a group (ADR-0244): the owner's private chat reads
+    everything, so the same ID listed as someone else would mix the two. `others` takes more IDs that must not be the owner's."""
+    owner = values.get('TELEGRAM_OWNER_ID', '')
+    if not owner: return
+    try: access = json.loads(values.get('TELEGRAM_GROUP_ACCESS', '{}'))
+    except (TypeError, ValueError): return  # group_access() refuses a value it cannot read.
+    listed = {str(user) for user in others}
+    for entry in (access.values() if isinstance(access, dict) else ()):
+        for users in (entry.values() if isinstance(entry, dict) else ()):
+            if isinstance(users, list): listed.update(user for user in users if isinstance(user, str))
+    if owner in listed: raise ValueError(OWNER_CONFLICT)
+
+
 def group_access(values):
     try:
         access = json.loads(values.get('TELEGRAM_GROUP_ACCESS', '{}'))
@@ -245,7 +262,7 @@ def validate(values):
     owner = values['TELEGRAM_OWNER_ID']; groups = values['TELEGRAM_GROUP_IDS']
     if owner and not re.fullmatch(r'[1-9]\d{0,18}', owner): raise ValueError('TELEGRAM_OWNER_ID must be a numeric user ID')
     if groups and any(not re.fullmatch(r'-[1-9]\d{0,18}', g.strip()) for g in groups.split(',')): raise ValueError('TELEGRAM_GROUP_IDS must contain negative numeric IDs separated by commas')
-    group_access(values)
+    owner_conflict(values); group_access(values)
     if values.get('TELEGRAM_GROUP_REPLIES','addressed') not in ('addressed','all'):raise ValueError('TELEGRAM_GROUP_REPLIES must be addressed or all')
     if values.get('TELEGRAM_TOPIC_MEMORY','group') not in ('group','topic'):raise ValueError('TELEGRAM_TOPIC_MEMORY must be group or topic')
     if values.get('TELEGRAM_TYPING','true') not in ('true','false'):raise ValueError('TELEGRAM_TYPING must be true or false')

@@ -20,16 +20,16 @@ test('sharing publishes exact prepared text with private provenance, revocation 
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-sharing-'));
-  const key='sharing:'+Date.now(),group='-'+Date.now(),other=group+'7',token='synthetic-sharing-token-not-a-real-credential',owner:Reader={admin:true,scope:null};
+  const key='sharing:'+Date.now(),group='-'+Date.now(),other=group+'7',origin=group+'9',token='synthetic-sharing-token-not-a-real-credential',owner:Reader={admin:true,scope:null};
   let calls=0,mode:'safe'|'citation'|'outside'|'instruction'='safe',duringFilter:(()=>Promise<void>)|null=null;
   const filterInputs:string[]=[];
-  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other,origin]};
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};
       assert.equal(operation,'memory.filter');calls++;
       const actor=reader({headers:{authorization:'Bearer '+input.archive_credential}} as IncomingMessage,token);
-      assert.equal(actor.purpose,'filter');assert.equal(actor.scope,null);assert.equal((await services.turns.binding(actor)).scope,'123');
+      assert.equal(actor.purpose,'filter');assert.equal(actor.scope,null);assert.equal((await services.turns.binding(actor)).scope,origin);
       const candidates=input.candidates as {id:string;text:string}[];
       filterInputs.push(candidates.map(c=>c.text).join('\n'));
       assert.ok(candidates.length);assert.ok(candidates.every(c=>!c.text.includes('saffronpass')));
@@ -50,8 +50,8 @@ test('sharing publishes exact prepared text with private provenance, revocation 
   };
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
-    const original=await source('123',1),destination=await source(group,2),unrelated=await source(other,3),unknown=await source(other,4,true);
-    const rule=await request('/v1/sharing/rules',{name:key,sources:['123'],destination:group,enabled:true,mode:'approved',instructions:'Only selected facts',expected_revision:0,operation_id:key+':rule'});
+    const original=await source(origin,1),destination=await source(group,2),unrelated=await source(other,3),unknown=await source(other,4,true);
+    const rule=await request('/v1/sharing/rules',{name:key,sources:[origin],destination:group,enabled:true,mode:'approved',instructions:'Only selected facts',expected_revision:0,operation_id:key+':rule'});
     const initial={rule_id:rule.id,expected_revision:rule.revision,source_ids:[original.id],content:'copperbridge Approved plan saffronpass',operation_id:key+':preview'};
     const preview=await request('/v1/sharing/preview',initial);assert.equal(preview.current,true);assert.ok(!preview.text.includes('saffronpass'));
     assert.equal((await request('/v1/sharing/preview',initial)).id,preview.id);
@@ -90,7 +90,7 @@ test('sharing publishes exact prepared text with private provenance, revocation 
     await assert.rejects(services.shared.read(await principal(group,destination.id),third.id),{code:'memory_refresh_required'});
     assert.equal((await request('/v1/sharing/previews/'+thirdPreview.id)).current,false);
 
-    const filteredRule=await request('/v1/sharing/rules',{name:key+':filter',sources:['123'],destination:group,enabled:true,mode:'filtered',instructions:'Share only project knowledge',expected_revision:0,operation_id:key+':filter-rule'});
+    const filteredRule=await request('/v1/sharing/rules',{name:key+':filter',sources:[origin],destination:group,enabled:true,mode:'filtered',instructions:'Share only project knowledge',expected_revision:0,operation_id:key+':filter-rule'});
     actor=await principal(group,destination.id);
     const filtered=await services.shared.context(actor,'copperbridge');assert.equal(filtered.filter_status,'passed');assert.equal(calls,1);
     const item=filtered.sources.find(s=>s.kind==='privacy_filtered_inference')!;assert.ok(item);assert.ok(!JSON.stringify(item).includes(original.id));
@@ -131,7 +131,7 @@ test('sharing publishes exact prepared text with private provenance, revocation 
     const saved=(await stores.derived.query('SELECT content,provenance FROM derived_artifacts WHERE id=$1',[recovered.output_reference!.id])).rows[0];
     assert.equal(saved.provenance.sources[0].id,original.id);assert.equal(saved.provenance.parents.length,2);
 
-    const voice=await source('123',5,false,true),manifest=(await stores.archive.query('SELECT id FROM artifacts WHERE event_id=$1',[voice.id])).rows[0];
+    const voice=await source(origin,5,false,true),manifest=(await stores.archive.query('SELECT id FROM artifacts WHERE event_id=$1',[voice.id])).rows[0];
     const file=await services.attachments.commit(manifest.id,Buffer.from('Original voice bytes'));
     const versions=[];
     for(const version of ['1','2']) {
@@ -149,6 +149,21 @@ test('sharing publishes exact prepared text with private provenance, revocation 
     await services.selections.activate(versions[1]!,1,key+':select-2');
     await assert.rejects(services.shared.read(await principal(group,destination.id),voiceRelease.id),{code:'memory_refresh_required'});
     await assert.rejects(services.shared.read(await principal(group,destination.id),transcriptShare.sources[0]!.id),{code:'memory_refresh_required'});
+
+    // The owner's private chat is never a source: no rule takes it, and an older rule that names it never reads it again.
+    const mine=await source('123',6);
+    await assert.rejects(request('/v1/sharing/rules',{name:key+':mine',sources:['123'],destination:group,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:key+':mine-rule'}),{code:'sharing_private_chat'});
+    const olderRule=digest(key+':older-private-rule');
+    await stores.control.query(`INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Older private rule','["123"]',$2,true,'approved','',1)`,[olderRule,group]);
+    const olderAsk={rule_id:olderRule,expected_revision:1,source_ids:[mine.id],content:'copperbridge Private plan',operation_id:key+':older-preview'};
+    await assert.rejects(services.shared.preview(owner,olderAsk),{code:'sharing_source_not_selected'});
+    // A text approved while such a rule could still read the private chat is not served any more.
+    const covers=services.sharing.covers;services.sharing.covers=async()=>true;let olderRelease:{id:string};
+    try {const older=await services.shared.preview(owner,{...olderAsk,operation_id:key+':older-before'});
+      olderRelease=await services.shared.approve(owner,older.id,{expected_revision:1,guard_revision:older.guard_revision,text_hash:older.text_hash,operation_id:key+':older-approve'});
+    } finally {services.sharing.covers=covers;}
+    await assert.rejects(services.shared.read(await principal(group,destination.id),olderRelease.id),{code:'sharing_source_not_selected'});
+    assert.ok(!(await services.shared.context(await principal(group,destination.id),'')).sources.some(item=>item.id===olderRelease.id));
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

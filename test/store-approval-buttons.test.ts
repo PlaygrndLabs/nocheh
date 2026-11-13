@@ -18,7 +18,7 @@ test('allowed members post freely in their own group; everything else waits for 
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-approval-buttons-')),key='approval-buttons:'+Date.now(),group='-'+Date.now();
-  const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],refusals:Record<string,any>[]=[];let updates=0;
+  const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],refusals:Record<string,any>[]=[],executed:Record<string,any>[]=[];let updates=0;
   const other=group+'1',closed=group+'2',forum='-100'+Date.now();
   let topicMemory:'group'|'topic'='group';
   // When set, the next card edit waits for it, after calling reached.
@@ -28,7 +28,7 @@ test('allowed members post freely in their own group; everything else waits for 
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
-      if(operation==='action.execute')return {state:'done'};
+      if(operation==='action.execute'){executed.push(input);return {state:'done'};}
       if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}
       assert.equal(operation,'telegram.approval');
       if(input.kind==='settle'&&hold){const wait=hold;hold=null;reached();await wait;}
@@ -128,6 +128,30 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.deepEqual([last('card').text,last('card').links.at(-1)],['📨 Send to “Plans team” in a topic\n\nHello unknown',{offset:27,length:7,url:`https://t.me/c/${internal}/9`}],
       'the owner\'s wording; a topic with no known name is still linked');
     await stores.control.query("UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton");
+    // Under the freedom setting the owner's private request for a group or topic still shows its card first, as the
+    // reply, naming the group and topic with the exact text; only the owner's own chat goes without one (ADR-0244).
+    const freedom=await s.ownerAutonomy.get(owner);
+    const freed=await s.ownerAutonomy.save(owner,{mode:'owner_requests_execute',expected_revision:freedom.revision,operation_id:key+':freedom'});
+    const freeAsk=await capture('owner-free',{message:{message_id:14,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Post the plan in Launch'}},'123');
+    const shown=()=>cards.filter(card=>card.kind==='card').length,shownBefore=shown();
+    const free=await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(freeAsk.id,'123'),scope:null},{destination:forum+'/topic/7',text:'Free plan'}));
+    assert.equal(free.state,'proposed','freedom never posts to a group without its card');assert.equal(shown(),shownBefore+1,'one card');
+    assert.deepEqual([last('card').id,last('card').chat_id,last('card').reply_to,last('card').text],[free.id,'123','14','📨 Send to “Plans team” › Launch\n\nFree plan']);
+    assert.match(free.message,/return \[NO_REPLY\]/);
+    const freeGeneral=await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(freeAsk.id,'123'),scope:null},{destination:forum,text:'Free general'}));
+    assert.equal(freeGeneral.state,'proposed');assert.equal(shown(),shownBefore+2);
+    const ownerPress=(label:string,data:string)=>capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:123},chat_instance:'1',data,
+      message:{message_id:40,date:1700000000,chat:{id:123,type:'private'},reply_markup:{inline_keyboard:[[{text:'Approve',callback_data:data}]]}}}},'123');
+    assert.equal(await s.actionCommands.callback(await ownerPress('free-reject','nd'+freeGeneral.id.slice(0,40)+freeGeneral.fingerprint.slice(0,16))),true);
+    assert.equal((await s.telegramActions.inspect(owner,freeGeneral.id)).state,'rejected','Reject sends nothing');
+    assert.equal(executed.filter(item=>item.id===free.id||item.id===freeGeneral.id).length,0,'nothing reaches the group before Approve');
+    assert.equal(await s.actionCommands.callback(await ownerPress('free-approve','na'+free.id.slice(0,40)+free.fingerprint.slice(0,16))),true);
+    assert.equal((await s.telegramActions.inspect(owner,free.id)).state,'approved');
+    assert.equal((await storageWorkflowOperations(s,async()=>({})).actions!(free.id,await epoch('actions'))).state,'completed');
+    assert.deepEqual(executed.filter(item=>item.id===free.id).map(item=>[item.destination,item.text]),[[forum+'/topic/7','Free plan']],'Approve sends it once');
+    const toSelf=await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(freeAsk.id,'123'),scope:null},{destination:'123',text:'Free note'}));
+    assert.equal(toSelf.state,'approved','a message to the owner\'s own chat needs no card');assert.equal(shown(),shownBefore+2);
+    await s.ownerAutonomy.save(owner,{mode:'approval_required',expected_revision:freed.revision,operation_id:key+':freedom-off'});
     const approve='na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16);
     assert.equal(await s.actionCommands.callback(await press('stranger',approve,9)),true);
     assert.equal(last('answer').text,'Only the owner can approve or reject this.');
