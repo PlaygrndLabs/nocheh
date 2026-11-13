@@ -1315,11 +1315,14 @@ test('a project shares nothing between its groups, and a group joins one only af
   await ask.getByRole('button', {name: 'Cancel'}).click();
   await page.close();
 
-  // A group's card says it shares nothing, and moving it asks first, naming the groups in the other project.
+  // A group's card says it shares only the project's own tasks, and moving it asks first, naming the groups in the
+  // other project.
   const {page: chat, problems: chatProblems} = await open('chats?chat=-10042');
   const card = chat.locator('section', {has: chat.getByRole('heading', {name: 'Project', exact: true})});
   await card
-    .getByText('It shares nothing between them: a group answer uses only that group.', {exact: false})
+    .getByText('They share only the tasks set on the whole project: a group answer uses only that group.', {
+      exact: false,
+    })
     .waitFor();
   assert.equal(await chat.getByRole('switch', {name: /Don’t share into/}).count(), 0);
   assert.equal(await chat.locator('#chat-project option', {hasText: '· shares'}).count(), 0);

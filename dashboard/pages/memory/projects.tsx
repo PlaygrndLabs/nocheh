@@ -1,7 +1,7 @@
 /**
  * Memory › Projects: put related groups in one project for a shared role, skills and task list, and optionally let
- * Nocheh create projects itself. A project shares nothing between its groups: a group answer uses only that group,
- * and a topic always follows its group's project (ADR-0246).
+ * Nocheh create projects itself. A project's groups share only the tasks set on the whole project: a group answer uses
+ * only that group, and a topic always follows its group's project (ADR-0246, ADR-0247).
  */
 import {useState} from 'react';
 import {ChevronRight, FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
@@ -459,7 +459,8 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
       )}
       {members.length > 1 && (
         <p className="mt-2 text-xs text-muted">
-          These groups share nothing with each other. People in two of them can get private answers that combine them.
+          These groups share only the tasks set on the whole project. People in two of them can get private answers that
+          combine them.
         </p>
       )}
       {project.state === 'active' && (

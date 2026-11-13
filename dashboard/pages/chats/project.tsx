@@ -267,7 +267,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
     <Card>
       <CardHeader
         title="Project"
-        description="A project gives its groups a role, skills and a task list. It shares nothing between them: a group answer uses only that group."
+        description="A project gives its groups a role, skills and a task list. They share only the tasks set on the whole project: a group answer uses only that group."
       />
       <CardBody className="pt-3">
         {failed ? (

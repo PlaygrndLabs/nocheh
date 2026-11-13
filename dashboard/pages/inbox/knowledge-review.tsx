@@ -44,8 +44,8 @@ export type Proposal = {
   affected_topics?: Record<string, string[]>;
   /**
    * Projects this change, or undoing it, moves a group into or out of, each with the other groups Nocheh serves there;
-   * worked out by the server. A project shares nothing between its groups, but people in two of them can get private
-   * answers that combine them (ADR-0246).
+   * worked out by the server. A project's groups share only the tasks set on the whole project, but people in two of
+   * them can get private answers that combine them (ADR-0246, ADR-0247).
    */
   project_groups?: ProjectGroups[];
   undo_project_groups?: ProjectGroups[];
