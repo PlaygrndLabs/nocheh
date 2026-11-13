@@ -45,11 +45,17 @@ chats added later will see it. Both stay as they were accepted.
   get, change, comment or parent, is left out of lists, counts, open counts,
   tags, filters, links, blockers and subtask counts, and is never named. A
   group or topic shown on a task or in its history shows only when the turn
-  reaches it, else as none. A chat that is not clearly a group or topic
-  reaches nothing ([ADR-0242](0242-private-chats-stay-out-of-group-sharing.md)).
+  reaches it, else as none. A task's parent shows only when the turn sees
+  that parent; otherwise the task shows with none, at the top of the list,
+  and no list by that parent finds it. A turn is never given a task's manual
+  position, which counts the tasks of every group of the list. A chat that is
+  not clearly a group or topic reaches nothing
+  ([ADR-0242](0242-private-chats-stay-out-of-group-sharing.md)).
 - A task added in a group or topic belongs to that chat. It is set on the
-  project itself only when the request says so (`group: null`); naming a
-  group or topic the turn does not reach is refused with `task_group_denied`.
+  project itself only when the request says so (`group: null`); a parent
+  given as null or empty, or an empty group, names nothing and leaves the
+  task the chat's own. Naming a group or topic the turn does not reach is
+  refused with `task_group_denied`.
 - A subtask has its parent's list and group. Naming another group for it is
   refused with `task_parent_other_group`, and a change to a task's list or
   group moves every task under it with it.
@@ -78,9 +84,12 @@ chats added later will see it. Both stay as they were accepted.
   (`task_group_only`) or, when its group is not in the project, that the
   group will see it once it is added (`task_group_later`). A group change on a
   listed task is a move with its own card lines (`task_move_group`,
-  `task_move_group_family`). `owner_task_requests` keeps the group, the
-  request fingerprint covers it, and approving changes nothing unless the
-  list, the group and the chats that see the task are as the card showed.
+  `task_move_group_family`), and setting a group's task on the project it is
+  already in says that every group of the project gets it
+  (`task_move_project`, `task_move_project_family`). `owner_task_requests`
+  keeps the group, the request fingerprint covers it, and approving changes
+  nothing unless the list, the group and the chats that see the task are as
+  the card showed.
 - `GET /v1/tasks/<id>/audience?scope=&group=` (and the mini app's
   `/tasks/<id>/audience`) returns the project, group, kind (`project` or
   `group`) and chats that would see a task after a move, as the card works
@@ -93,13 +102,17 @@ chats added later will see it. Both stay as they were accepted.
   transaction, every task of the group and its topics on the `from` list that
   is not under another task, with every task under it, to the `to` list. They
   keep `project_since`, as the same chats keep seeing them; a task under them
-  from another group joins their group and gets a new one. Each gets a
-  history entry. A move to no project, or from none, moves nothing: the
-  group's tasks stay on the old list, where only the owner sees them. The
-  project's own tasks always stay on its list. The project assignment write
-  (`writeAssignment` in [`src/stores/projects.ts`](../../src/stores/projects.ts))
-  calls it in its transaction when a group changes from one project to
-  another.
+  set on the project itself joins their group and gets a new one. A task of
+  another group under them, written before subtasks followed their parent's
+  group, stays on the `from` list at the top, with every task under it, so
+  only its own group keeps seeing it; its history says only that it no longer
+  sits under a task. A task of the group under a task of another group or of
+  the project itself stays with its parent. Each gets a history entry. A move
+  to no project, or from none, moves nothing: the group's tasks stay on the
+  old list, where only the owner sees them. The project's own tasks always
+  stay on its list. The project assignment write (`writeAssignment` in
+  [`src/stores/projects.ts`](../../src/stores/projects.ts)) calls it in its
+  transaction when a group changes from one project to another.
 - The chat task tool and the group prompt say that a group or topic reaches
   only its own tasks and the project's, and that a task added there belongs to
   it.
@@ -115,17 +128,21 @@ chats added later will see it. Both stay as they were accepted.
 - The chats named for a task set on the project itself are still the
   project's assigned groups, as in ADR-0243.
 - A task under a task of another group, written before this decision, keeps
-  its group until its family's group or list changes.
+  its group until its family's group or list changes. Its own group sees it
+  with no parent; when its parent's group moves to another project it stays
+  behind, no longer under that task.
 - Checks: who reaches which task in groups and topics under both topic
-  memories, counts, tags, links and parents, the group of a new task and a
-  subtask, read-only private answers, the audience of a task, a group change
-  as an arrival and its race with a comment, the card for a group's task and
-  for a group change, and a group's tasks moving with it
+  memories, counts, tags, links, parents and manual positions, a parent
+  another group's task sits under, the group of a new task, also with an
+  empty parent or group, and of a subtask, read-only private answers, the
+  audience of a task, a group change as an arrival and its race with a
+  comment, the card for a group's task, for a group change and for setting
+  it on its project itself, and a group's tasks moving with it, without
+  another group's task under them
   ([check](../../test/store-tasks.test.ts)); the card lines
   ([check](../../test/prompts.test.ts)); the audience route
   ([check](../../test/mini-app.test.ts),
   [check](../../test/fixtures/owner-storage-paths.json)); the dashboard's
   move and group confirms and the subtask's group
-  ([check](../../test/dashboard-pages.browser.mjs)). The full tester gate
-  `sibling_task_stays_in_its_group` is part of the Members step 2 scenario.
+  ([check](../../test/dashboard-pages.browser.mjs)).
 </consequences>
