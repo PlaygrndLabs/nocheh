@@ -150,6 +150,16 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertNotIn('project_id FROM sharing_rules', sql)
         self.assertEqual(sql.count('FROM sharing_rules'), 1)
 
+    def test_a_topic_choice_in_a_store_not_yet_started_is_read_as_following_its_group(self):
+        # Starting the stores at this version turns a topic's own project choice into "follows its group" (ADR-0246). A
+        # reset that reads an older store reads every topic row that way, so such a store does not stop the reset.
+        query = Mock(return_value=json.dumps(self.values))
+        configuration.snapshot(query, 'original-only-v1')
+        sql = query.call_args.args[1]
+        self.assertIn("SELECT space_id,CASE WHEN space_id LIKE '%/topic/%' THEN NULL ELSE project_id END AS project_id,"
+                      "CASE WHEN space_id LIKE '%/topic/%' THEN 'inherit' ELSE mode END AS mode FROM project_assignments", sql)
+        self.assertEqual(sql.count('FROM project_assignments'), 1)
+
     def test_unknown_fields_and_missing_critical_configuration_fail_closed(self):
         for change in ('content', 'columns', 'security', 'generation', 'guard', 'runtime'):
             values = copy.deepcopy(self.values)

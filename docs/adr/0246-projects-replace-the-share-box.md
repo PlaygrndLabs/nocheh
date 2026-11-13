@@ -71,7 +71,9 @@ chose ("Keep them, yours only").
   and raises its revision, and `effective()` reads a topic's project from its
   group even when an older own row says otherwise. Learning drops topic
   assignments, a proposal that gives a topic a project or none is refused, and
-  a reset refuses a topic row other than `inherit` (TypeScript and Python).
+  a reset refuses a topic row other than `inherit` (TypeScript and Python); a
+  reset that reads a store not yet started at this version reads every topic
+  row as `inherit`.
   A topic's learning context names the group it follows (`follows_group`),
   and the learning instruction proposes no assignment for such a topic.
 - **Organizing never moves a chat.** Delegated organization may only create

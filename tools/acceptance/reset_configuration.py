@@ -32,7 +32,12 @@ ORIGINAL = {
                               'JOIN runtime_configuration_versions v USING(name,revision) ORDER BY c.name', ('name', 'document')),
     'projects': ('SELECT id,name,description,state FROM projects ORDER BY id',
                  ('id', 'name', 'description', 'state')),
-    'project_assignments': ('SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id',
+    # A topic always follows its group's project (ADR-0246). A store the stores have not started at this version can
+    # still hold a topic's own choice; starting them turns it into "follows its group", so it is read that way here.
+    'project_assignments': ("SELECT space_id,"
+                            "CASE WHEN space_id LIKE '%/topic/%' THEN NULL ELSE project_id END AS project_id,"
+                            "CASE WHEN space_id LIKE '%/topic/%' THEN 'inherit' ELSE mode END AS mode "
+                            "FROM project_assignments ORDER BY space_id",
                             ('space_id', 'project_id', 'mode')),
     # Only the owner's rules. A store the stores have not started at this version still holds the rules a project's
     # share box kept; they are deleted at that start, never kept as the owner's (ADR-0246), so they are left out here.
@@ -98,7 +103,8 @@ def validate(snapshot):
         if (any(row['mode'] == 'assigned' and not group_space(row['space_id']) for row in values['project_assignments']) or
                 any(not all(group_space(space) for space in [*row['sources'], row['destination']]) for row in values['sharing_rules'])):
             raise ValueError('reset_configuration_private_chat_requires_review')
-        # A topic always follows its group's project (ADR-0246); the restore refuses a topic's own choice the same way.
+        # A topic always follows its group's project (ADR-0246). The snapshot reads every topic row that way, so only a
+        # hand-edited snapshot can hold another choice; the restore refuses it the same way.
         if any(isinstance(row['space_id'], str) and '/topic/' in row['space_id'] and row['mode'] != 'inherit'
                for row in values['project_assignments']):
             raise ValueError('reset_configuration_topic_follows_group')
