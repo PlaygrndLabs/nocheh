@@ -147,6 +147,11 @@ test('delegated organization only creates projects; every move asks the owner, n
    const joinView=await s.knowledge.proposal(owner,join.id);
    assert.deepEqual(joinView.project_groups,[{id:created.id,name:created.name,groups:[group]}],'the review names the groups already in the project');
    assert.deepEqual(joinView.task_projects,[]);assert.equal(joinView.sharing_projects,undefined);
+   // A project the proposal creates and puts a group in is named too, with no group in it yet.
+   const together=await persist('create-together',proposal(moveSource,'together',other),moveSource,other);assert.equal(together.state,'review');
+   assert.deepEqual((await s.knowledge.proposal(owner,together.id)).project_groups,[{id:'new:project',name:key+':together',groups:[]}],'a project the proposal creates is named');
+   assert.deepEqual((await s.knowledge.proposal(owner,(await persist('create-only',createOnly(moveSource,'alone'),moveSource,other)).id)).project_groups,[],
+    'one it only creates moves no group');
    const leave=await persist('leave',{kind:'project_assignment',reason:'Synthetic: the group left the project',payload:{space_id:group,mode:'none',expected_revision:2}} as any,moveSource,other);
    assert.equal(leave.state,'review');
    assert.deepEqual((await s.knowledge.proposal(owner,leave.id)).project_groups,[{id:created.id,name:created.name,groups:[]}],'leaving names the project too');

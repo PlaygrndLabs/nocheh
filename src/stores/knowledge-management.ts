@@ -257,7 +257,10 @@ export class KnowledgeManagementRepository {
    mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})):[];
   // The owner's review and undo name each project a group moves into or out of, with the groups already in it, since
   // people in two of them can get private answers that combine them (ADR-0246).
-  const project_groups=await this.projectGroups(moves,this.stores.control),undo_project_groups=await this.projectGroups(undoMoves,this.stores.control);
+  // A project the proposal itself creates is named too, with no group in it yet, whenever the proposal puts a group in it.
+  const created=proposal.kind==='organization'?proposal.creates.filter(c=>proposal.assignments.some(a=>a.project_key===c.key))
+   .map(c=>({id:'new:'+c.key,name:c.name,groups:[] as string[]})):[];
+  const project_groups=[...await this.projectGroups(moves,this.stores.control),...created],undo_project_groups=await this.projectGroups(undoMoves,this.stores.control);
   // They also say when a group joins a project with tasks set on the whole project, which it then sees (ADR-0243).
   const task_projects=await this.taskProjects(moves,this.stores.control),undo_task_projects=await this.taskProjects(undoMoves,this.stores.control);
   // A card that shares or rewords a fact names where it came from and who can read it (ADR-0242).
