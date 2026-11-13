@@ -421,8 +421,9 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
     // The turn runs as the asker's private chat, never as the owner, with the record's project.
     const turn=await s.turns.binding(answer);
     assert.equal(turn.owner,false);assert.equal(turn.event_id,started.id);assert.equal(turn.scope,OWNER);
-    assert.equal(turn.profile,runtimeProfile({admin:false,scope:OWNER,space:OWNER},binding));
+    assert.equal(turn.profile,runtimeProfile({admin:false,scope:OWNER,space:OWNER,answer:id},binding));
     assert.notEqual(turn.profile,runtimeProfile({admin:false,scope:null,space:OWNER},binding),'not the owner\'s profile');
+    assert.notEqual(turn.profile,runtimeProfile({admin:false,scope:OWNER,space:OWNER},binding),'its own profile, named after its record');
     await assert.rejects(s.turns.binding(pass),{code:'turn_source_denied'});
     const audience=new AudienceRepository(s.guards),token=await audience.turn(secret,answer,started.id,Date.now()+60000);
     const claims=JSON.parse(Buffer.from(token.split('.')[1]!,'base64url').toString());

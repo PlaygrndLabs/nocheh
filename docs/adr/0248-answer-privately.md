@@ -50,9 +50,9 @@ section.
 - **The answer's pass.** A turn's pass may name a private answer in a signed
   `answer` claim (32 hex characters), only with a non-null `scope` that is a
   Telegram user ID and a `space` equal to it: the asker's own private chat. It
-  is never an owner pass, so every gate on `scope` null stays closed, and its
-  runtime profile is the scoped one. A pass that carries the groups itself
-  (`reads`) is refused.
+  is never an owner pass, so every gate on `scope` null stays closed, and it
+  runs in a scoped runtime profile of its own, named after its record. A pass
+  that carries the groups itself (`reads`) is refused.
 - **Resolved on the server, every request.** The storage service, the security
   broker (through storage) and the Telegram turn check resolve the read set
   from the record on each request, never from the pass: the row the claim
@@ -152,8 +152,11 @@ editable texts, the sends it records and the brain's read-only tool list.
   original file: a turn's files are those of its own `/start`.
 - Tasks open to an answer only as far as the task list gives that reader;
   until tasks follow data access, a private answer's task list fails closed.
-- In step 2 every private answer in the owner's private chat runs in one
-  scoped runtime profile.
+- Each private answer runs in its own scoped runtime profile: the record's id
+  is part of the profile's name, the same in storage (`runtimeProfile`) and in
+  Hermes (`Scopes.apply_revision`), and an answer's profile carries no earlier
+  conversation into a new guard epoch. One answer never sees another answer's
+  text, which may come from groups outside its own set.
 - Checks: read sets ([spaces](../../test/spaces.test.ts)); the record, the
   read set from it, what an answer reads, its grants, its turn and its pass
   ([store](../../test/store-private-answers.test.ts)); the route list, the

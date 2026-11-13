@@ -69,7 +69,8 @@ def prepare_profile(root,scope,model):
         # A new guard epoch starts a new profile; the chat keeps its conversation
         # and the superseded profiles are removed once idle.
         from .profile_history import carry, prune
-        if scope.purpose!='filter':carry(profile)
+        # A private answer starts empty: no earlier answer's conversation, from any group, is carried into it (ADR-0248).
+        if scope.purpose!='filter' and not scope.answer:carry(profile)
         prune(profile)
     return profile
 

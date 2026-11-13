@@ -13,6 +13,7 @@ import {serveMcp} from '../src/mcp/server.js';
 import {mcpTools} from '../src/mcp/tools.js';
 import {assertPrivateAnswerRoute,privateAnswerRoute,privateAnswerTools} from '../src/stores/private-answers.js';
 import {storageServer} from '../src/stores/server.js';
+import {runtimeProfile} from '../src/stores/runtime-profile.js';
 import {readSet,readSetGroups} from '../src/spaces.js';
 import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,groupsPolicy} from './fixture-groups.js';
 
@@ -162,4 +163,15 @@ test('a private answer is delivered only into the owner\'s own private chat, fro
   assert.equal(telegramDeliveryAllowed(policy,{scope:null},ownerChat),true);
   assert.equal(telegramDeliveryAllowed(policy,{scope:OWNER},ownerChat),false,'a scoped pass without an answer is never the owner');
   assert.equal(telegramDeliveryAllowed(policy,{scope:GP1},groupChat),true);
+});
+
+test('each private answer runs in its own runtime profile, the one Hermes derives from the same claims',()=>{
+  const binding={generation:'11111111-1111-1111-1111-111111111111',epoch:5} as Parameters<typeof runtimeProfile>[1];
+  const scoped=(fields:Partial<Reader>={}):Reader=>({admin:false,scope:OWNER,space:OWNER,...fields});
+  // services/hermes/test_scopes.py pins the same name for the same claims.
+  assert.equal(runtimeProfile(scoped({answer}),binding),'nocheh-b550c3bb0a154a446943f8f8');
+  const profiles=[runtimeProfile(scoped({answer}),binding),runtimeProfile(scoped({answer:'b'.repeat(32)}),binding),runtimeProfile(scoped(),binding),
+    runtimeProfile({admin:false,scope:null,space:OWNER},binding)];
+  assert.equal(new Set(profiles).size,4,'never another answer\'s, a plain scoped one or the owner\'s');
+  assert.equal(runtimeProfile(scoped({answer,reads}),binding),profiles[0],'the groups it reads do not name it: its record does');
 });

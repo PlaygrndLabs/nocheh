@@ -123,6 +123,29 @@ class ScopeTests(unittest.TestCase):
         owner=self.scopes.resolve(self.update(123,123,'private'),'123')
         self.assertEqual(Scopes.apply_revision(owner,{'revision':1}).profile,Scopes.apply_revision(owner,{'revision':2}).profile)
 
+    def test_each_private_answer_has_its_own_profile_and_carries_no_earlier_conversation(self):
+        from dataclasses import replace
+        claims={'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1}
+        # The answer runs as the asker's private chat, never as the owner (ADR-0248).
+        asker=replace(self.scopes.resolve(self.update(123,123,'private'),'123'),owner=False,space='123')
+        answer=Scopes.apply_revision(asker,{**claims,'answer':'a'*32})
+        # test/private-answers.test.ts pins the same name for runtimeProfile with the same claims.
+        self.assertEqual(answer.profile,'nocheh-b550c3bb0a154a446943f8f8')
+        self.assertEqual(answer.answer,'a'*32)
+        profiles={answer.profile,Scopes.apply_revision(asker,{**claims,'answer':'b'*32}).profile,Scopes.apply_revision(asker,claims).profile,
+                  Scopes.apply_revision(replace(asker,owner=True),claims).profile}
+        self.assertEqual(len(profiles),4,"never another answer's, a plain scoped one or the owner's")
+        self.assertEqual(Scopes.apply_revision(asker,claims).answer,'')
+        for invalid in ({**claims,'answer':'A'*32},{**claims,'answer':'a'*31},{**claims,'answer':None},{'revision':1,'answer':'a'*32}):
+            with self.assertRaisesRegex(ValueError,'invalid_private_answer'):Scopes.apply_revision(asker,invalid)
+        with self.assertRaisesRegex(ValueError,'invalid_private_answer'):Scopes.apply_revision(replace(asker,owner=True),{**claims,'answer':'a'*32})
+        # A newer epoch's answer starts empty, whatever an earlier answer said; an ordinary chat keeps carrying its conversation.
+        with tempfile.TemporaryDirectory() as folder,patch('services.hermes.profile_history.carry',return_value=0) as carry:
+            prepare_profile(Path(folder),Scopes.apply_revision(asker,{**claims,'answer':'a'*32}),'synthetic')
+            carry.assert_not_called()
+            prepare_profile(Path(folder),Scopes.apply_revision(self.scopes.resolve(self.update(-20,123),'-20'),claims),'synthetic')
+            carry.assert_called_once()
+
     def test_native_tool_definitions_are_an_explicit_safe_allowlist(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
         from hermes_cli.plugins import discover_plugins
