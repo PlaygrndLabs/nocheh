@@ -162,5 +162,8 @@ editable texts, the sends it records and the brain's read-only tool list.
   ([store](../../test/store-private-answers.test.ts)); the route list, the
   storage service and broker binding, the MCP tools and the delivery check
   ([unit](../../test/private-answers.test.ts)); Honcho plain search
-  ([memory](../../test/store-native-memory.test.ts)).
+  ([memory](../../test/store-native-memory.test.ts)) and its sessions and
+  receipts in Postgres ([provenance](../../test/store-provenance.test.ts)); the
+  answer's own profile in Hermes
+  ([scopes](../../services/hermes/test_scopes.py)).
 </consequences>
