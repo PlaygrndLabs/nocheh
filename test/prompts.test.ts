@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,approvalTask,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,learningInstruction,learningPrompt,promptKeys,promptProblem,withPrompts} from '../src/prompts.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,learningInstruction,learningPrompt,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,withPrompts} from '../src/prompts.js';
 import {brainSummary} from '../src/brain/brain.js';
 import {fixtureBrain,type FakeCall} from './fixture-brain.js';
 
@@ -52,6 +52,25 @@ test('approval card templates leave out a line whose value is missing and keep d
     '📋 Add a task to the list of “P1”\n👥 Seen in “Group A”\n\nTitle: Book the room','a card with nothing private leaves that line out');
   assert.match(approvalLines('').task_changed,/changed after it was asked/);
   assert.equal(approvalLines('').task_later,'Chats you add to this project later will see it too.','every task card says chats added later see the list');
+});
+
+test('Answer privately has its own editable texts: the button, its popups and the private answer’s first line (ADR-0248)',()=>{
+  for(const key of ['reply.private','telegram.private_answer','telegram.private_answer_texts'])assert.ok((promptKeys as readonly string[]).includes(key),key);
+  const lines=privateAnswerLines('');
+  assert.equal(lines.button,'🔒 Answer privately');
+  assert.ok(Array.from(lines.button).length<=40,'a Telegram button label stays short');
+  for(const code of ['only_asker','expired','used','changed','not_yours','open'] as const){
+    assert.ok(lines[code].length>0&&lines[code].length<=200,code);
+    assert.doesNotMatch(lines[code],/[{}]/,'a popup has no values to fill');
+  }
+  assert.equal(privateAnswerLines('button: 🔒 Ask me privately\nused:').button,'🔒 Ask me privately');
+  assert.equal(privateAnswerLines('used:').used,lines.used,'an empty line keeps the default');
+  assert.equal(promptProblem('telegram.private_answer_texts',privateAnswerTexts),null);
+  // The first line always says where the question was asked and which groups the answer may read.
+  assert.equal(promptProblem('telegram.private_answer',privateAnswerFrame),null);
+  for(const missing of ['{group}','{groups}'])
+    assert.equal(promptProblem('telegram.private_answer',privateAnswerFrame.replaceAll(missing,'')),'prompt_placeholder_missing',missing);
+  assert.match(fillTemplate(privateAnswerFrame,{group:'“GP1”',groups:'“GP1”, “GP2”'}),/^\[Private answer\] .*asked in “GP1”.*: “GP1”, “GP2”\./s);
 });
 
 test('the GitHub copy has its own instruction text, card line and card answers, and the card keeps its other lines',()=>{

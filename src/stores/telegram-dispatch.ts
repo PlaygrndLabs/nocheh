@@ -12,16 +12,18 @@ import type {ArchiveRepository,SourceReference} from './archive.js';
 import type {SourceRepository} from './retrieval.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
-import type {GuardRepository} from './guards.js';
+import type {GuardBinding,GuardRepository} from './guards.js';
 import type {PreparationRepository} from './preparation.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
-import {notAllowedPrivateReply,notAllowedReply,ownerPrompts} from '../prompts.js';
+import {fillTemplate,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
+import {parentSpace,readSetGroups,type ReadSet} from '../spaces.js';
+import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
-import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply} from './telegram-reply.js';
+import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply,type ReplyButton} from './telegram-reply.js';
 
 export const telegramDispatchSchema=`
 CREATE TABLE IF NOT EXISTS dispatches (
@@ -40,7 +42,8 @@ const conversationOrderWaitMs=120000;
 const observeMs=1000;
 /** Context changes after which a finished turn's reply is not sent: the binding or audience moved on, so it runs again. */
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
-const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired'];
+/** A private answer whose record closed (expired, refused or its groups changed) is withdrawn like a retired source (ADR-0248). */
+const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed'];
 /**
  * Who sent a group message and when, as one line for the model. Names come
  * from the guarded representation, the time from the captured original, and
@@ -85,6 +88,17 @@ export function groupAddressing(original:any,botId:string):{direct:boolean;handl
   return {direct,handles:[...handles].sort().slice(0,20)};
 }
 
+/** The record a `/start <id>` in the owner's private chat opens, from the captured original text, or null (ADR-0248).
+ * Only that exact form opens one; a plain /start, or one with anything else, is an ordinary message. */
+export function privateStart(original:any):string|null {
+  const text=original?.message?.text;
+  return typeof text==='string'?/^\/start ([a-f0-9]{32})$/.exec(text)?.[1]??null:null;
+}
+
+/** A group's or topic's name for a private answer's first line: no brackets or control characters, so it cannot end
+ * that line or start another that looks like Nocheh's own, and never a numeric Telegram ID. */
+const placeName=(value:unknown)=>typeof value==='string'?value.replace(/[\[\]\p{Cc}\p{Cf}]+/gu,' ').replace(/\s+/g,' ').trim().slice(0,64).trim():'';
+
 /** The owner's command reply, which Nocheh's bot sends without a brain turn. */
 function controlReply(input:Input):TurnReceipt|null {
   const text=input.body.control_reply;
@@ -96,7 +110,7 @@ export class TelegramDispatchRepository {
     readonly derived:DerivedRepository,readonly guards:GuardRepository,readonly preparation:PreparationRepository,
     readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:ActionCommandRepository,
     readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly brain:Brain,readonly token:string,readonly detect:(text:string)=>Promise<unknown>,
-    readonly groupReplies:GroupReplies=replySettings(process.env)){}
+    readonly groupReplies:GroupReplies=replySettings(process.env),readonly answers?:PrivateAnswerRepository){}
   private get control(){return this.access.stores.control;}
   /** The bot's own username and display name, which address it in groups. */
   private readonly identity=identityCache(()=>this.call('telegram.identity',{},5000));
@@ -139,8 +153,10 @@ export class TelegramDispatchRepository {
       next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       revision=revision+1,updated_at=now() WHERE event_id=$1`,[row.event_id,result.state,reference,result.error_code??null,result.state==='done'?'delivery':'assistant']);
     if(result.state==='done'&&row.input_reference)try {const input=await this.input(row.input_reference);
-      if(input.principal.scope!==null)await this.memoryAccess.suggest(input.principal,String(input.body.text??''));
-    } catch {/* Suggestions are a separate best-effort workflow and never affect the delivered reply. */}
+      // A private answer that went out is recorded once, with the send of its /start; nothing else is suggested from it.
+      if(input.principal.answer!==undefined)await this.answers?.answered(input.principal.answer,String(input.body.source_key));
+      else if(input.principal.scope!==null)await this.memoryAccess.suggest(input.principal,String(input.body.text??''));
+    } catch {/* Suggestions and the answer's record are best effort and never affect the delivered reply; an unrecorded answer expires. */}
     return this.observation(await this.row(row.event_id));
   }
   private async receive(row:any,result:Record<string,unknown>,delay=observeMs) {
@@ -187,9 +203,28 @@ export class TelegramDispatchRepository {
     const target=replyTarget(input,attempt,credential);
     if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
     if(await this.earlierReply(row,input,receipt))return await this.receive(row,{state:'running',stage:'delivery'});
-    const sent=await sendReply(this.call,target,String(input.body.source_key),receipt.reply,{notify:false,presence:input.body.control_reply==null});
+    const button=await this.privateButton(input,receipt);
+    const sent=await sendReply(this.call,target,String(input.body.source_key),receipt.reply,{notify:false,presence:input.body.control_reply==null,...(button?{button}:{})});
     if(!sent||!closed.has(String(sent.state)))return await this.receive(row,{state:'running',stage:'delivery'});
     return await this.storeResult(row,deliveredReceipt(receipt,sent));
+  }
+  /**
+   * The Answer privately button under the owner's own answer in a group or topic whose project has another group Nocheh
+   * serves (ADR-0248). Never under a fixed reply, an empty reply, a private answer or anyone else's question; a follow-up,
+   * a job's report and a scheduled run are not message turns and never get one. Its record is offered once per question,
+   * so a retried reply carries the same button; when it cannot be offered, the reply goes without it.
+   */
+  private async privateButton(input:Input,receipt:TurnReceipt):Promise<ReplyButton|null> {
+    const policy=this.access.policy(),space=input.principal.space,event=input.principal.turnEvent;
+    const sender=String((input.body.payload as {message?:{from?:{id?:unknown}}})?.message?.from?.id??'');
+    if(!this.answers||input.body.control_reply!=null||input.principal.scope===null||input.principal.answer!==undefined||!space||!event||
+      !policy.owner_id||sender!==policy.owner_id||!receipt.reply?.text?.trim()||this.token.length<24)return null;
+    try {
+      const place=await this.answers.offerable(space);if(!place)return null;
+      const row=await this.answers.offer({id:privateAnswerId(this.token,event),question_event:event,from_chat_id:space,project_id:place.project_id,asker_account_id:sender});
+      const label=privateAnswerLines((await ownerPrompts(this.control))['telegram.private_answer_texts']).button;
+      return {text:Array.from(label).slice(0,40).join(''),data:'np'+row.id};
+    }catch(error){if(error instanceof HttpError)return null;throw error;}
   }
   /**
    * The brain runs one chat's turns in order, but each is observed on its own, so a quick turn can finish just after a
@@ -346,6 +381,97 @@ export class TelegramDispatchRepository {
         reply:texts['telegram.not_allowed']??notAllowedReply},15000);
     } catch {/* Best effort: the message stays archived either way. */}
   }
+  /**
+   * What a turn's message and its album parts hold for the model: their text in order (an album's caption usually sits
+   * on one part), voice transcripts, files with their extracted text, and the derivatives these came from. Without
+   * `originals`, as in a private answer, a photo is never sent as an image: the turn gets text only (ADR-0248).
+   */
+  private async contents(album:[string,Awaited<ReturnType<SourceRepository['read']>>][],binding:GuardBinding,originals:boolean) {
+    const transcripts:string[]=[],files:any[]=[],parents:DerivativeReference[]=[];let tooLarge=0;
+    for(const [id,part] of album) {
+      for(const result of part.derived) {
+        const row=(await this.derived.pool.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[result.id])).rows[0];
+        parents.push({store:'derived',kind:'artifact',id:result.id,input_hash:row.content_hash});
+        if(result.kind==='transcript')transcripts.push(Buffer.from(result.content_base64,'base64').toString());
+      }
+      const manifests=(await this.archive.pool.query('SELECT id,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[id])).rows;
+      const large=await this.preparation.attachments.tooLarge(id);tooLarge+=large.size;
+      for(const file of part.artifacts) {
+        if(large.has(file.id))continue;
+        const hash=manifests.find(m=>m.id===file.id)?.file_hash;if(!hash)throw new HttpError(409,'source_file_pending');
+        const extracted=part.derived.find(d=>d.artifact_id===file.id&&d.kind==='extracted_text');
+        files.push({id:file.id,name:typeof file.metadata?.file_name==='string'?file.metadata.file_name:'Attachment',sha256:hash,
+          kind:originals&&binding.mode==='off'&&file.kind==='photo'?'image':'file',text:extracted?Buffer.from(extracted.content_base64,'base64').toString():null});
+      }
+    }
+    const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null;
+    return {transcripts,files,parents,tooLarge,text};
+  }
+  /** A group's name from its latest archived messages, else a fixed name; never its numeric ID. */
+  private async groupName(chat:string):Promise<string> {
+    const rows=(await this.archive.pool.query(`SELECT payload FROM events WHERE scope=$1 AND channel='telegram'
+      AND kind IN ('telegram_update','telegram_delivered_message') ORDER BY received_at DESC LIMIT 20`,[chat])).rows;
+    for(const row of rows) {
+      let message:any;try{const payload=JSON.parse(row.payload.toString());message=payload.message??payload.edited_message??payload;}catch{continue;}
+      if(String(message?.chat?.id)===chat&&placeName(message.chat.title))return '“'+placeName(message.chat.title)+'”';
+    }
+    return 'a Telegram group';
+  }
+  /** A private answer's first line: where the question was asked and every group it may read, the asking one first. */
+  private async answerFrame(row:PrivateAnswer,reads:ReadSet,question:any):Promise<string> {
+    const home=parentSpace(row.from_chat_id)??row.from_chat_id,topic=row.from_chat_id===home?null:
+      placeName(question?.message?.reply_to_message?.forum_topic_created?.name)||'a topic';
+    const names=new Map<string,string>();
+    for(const group of [home,...readSetGroups(reads).filter(group=>group!==home)])names.set(group,await this.groupName(group));
+    const template=(await ownerPrompts(this.control))['telegram.private_answer']??privateAnswerFrame;
+    return fillTemplate(template,{group:names.get(home)!+(topic?' › '+topic:''),groups:[...names.values()].join(', ')}).slice(0,4000);
+  }
+  /**
+   * A /start <id> in the owner's private chat (ADR-0248). The record is claimed for this very message: only by the asker,
+   * only in the asker's own private chat, once, and only while its project still holds the asking group. The turn then
+   * runs under the answer's pass, which reads the groups frozen at the tap: the question's own text, transcripts and
+   * extracted file text (never an original file), the question's speaker line and the asking group's recent messages,
+   * after a first line that says where it was asked and what it may read. A /start that cannot be answered returns the
+   * owner's fixed reply for it instead, and no model runs.
+   */
+  private async answer(source:SourceReference,original:{source_key:string;scope:string},payload:any,space:string,id:string,attempt:number):
+    Promise<string|{reference:DerivativeReference;input:Input}> {
+    const texts=privateAnswerLines((await ownerPrompts(this.control))['telegram.private_answer_texts']);
+    if(!this.answers)return texts.changed;
+    let claimed:PrivateAnswerOutcome;
+    try{claimed=await this.answers.claim(id,{account_id:String(payload?.message?.from?.id??''),start_event:source.id,reply_chat_id:String(original.scope)});}
+    catch(error){if(error instanceof HttpError&&error.status===400)return texts.not_yours;throw error;}
+    if(!claimed.ok)return texts[claimed.code];
+    const row=claimed.answer,binding=await this.guards.state();
+    let principal:Reader;
+    try {
+      principal=await this.access.bindReads({admin:false,scope:String(original.scope),space,turnEvent:source.id,answer:row.id,
+        generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch});
+    }catch(error){if(error instanceof HttpError&&error.code==='private_answer_closed')return texts.changed;throw error;}
+    await this.turns.binding(principal);
+    const selected=await this.sources.read(principal,source.id);
+    // The question itself, read as the answer may read it: retired since, or outside its groups now, it is not answered.
+    let question:typeof selected;
+    try{question=await this.sources.read(principal,row.question_event);}
+    catch(error){if(error instanceof HttpError&&[403,404,409].includes(error.status))return texts.changed;throw error;}
+    const asked=(await this.archive.captured(row.question_event)).reference,members=await albumMembers(this.archive.pool,row.question_event);
+    const others=members.length>1&&members[0]!.id===row.question_event?members.slice(1).map(member=>member.id):[];
+    const album:[string,typeof selected][]=[[row.question_event,question]];
+    for(const part of others.length?await this.albumParts(asked,row.from_chat_id,others)??[]:[])album.push([part,await this.sources.read(principal,part)]);
+    const {transcripts,files,parents,tooLarge,text}=await this.contents(album,binding,false);
+    const questionPayload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[row.question_event])).rows[0].payload.toString());
+    const speaker=speakerLine(questionPayload,question.event.payload,this.access.policy().owner_id),recent=await this.recentGroup(asked,row.from_chat_id,principal);
+    const privateAnswer={frame:await this.answerFrame(row,principal.reads!,questionPayload),question_event:row.question_event};
+    const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
+      payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:null,guard_mode:binding.mode,
+      private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{})};
+    const input={binding,principal,body};
+    await this.prepared.allow(principal,{text,transcripts,files,speaker,recent_group:recent,private_answer:privateAnswer});await currentTurn(this,input);
+    const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
+      ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
+      configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
+    return {reference,input};
+  }
   private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation|'not_addressed'> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
@@ -362,29 +488,21 @@ export class TelegramDispatchRepository {
     if(await this.heldByEarlier(source,space))return observation('waiting','admission',0,Date.now()+2000,'prerequisite');
     const parts=others.length?await this.albumParts(source,space,others):[];
     if(!parts)return observation('waiting','admission',0,Date.now()+1000,'prerequisite');
+    // A /start <id> in the owner's private chat opens a private answer: its whole turn is built under that answer's own
+    // pass, never as the owner (ADR-0248). One that cannot be answered gets a fixed reply in the owner's own turn.
+    const start=scope.owner?privateStart(payload):null;let refusal:string|null=null;
+    if(start) {
+      const answer=await this.answer(source,original,payload,space,start,attempt);
+      if(typeof answer!=='string')return answer;
+      refusal=answer;
+    }
     const binding=await this.guards.state(),principal:Reader={admin:false,scope:scope.owner?null:scope.chat_id,space,turnEvent:source.id,
       generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
     await this.turns.binding(principal);
-    const selected=await this.sources.read(principal,source.id),transcripts:string[]=[],files:any[]=[],parents:DerivativeReference[]=[];
+    const selected=await this.sources.read(principal,source.id);
     const album:[string,typeof selected][]=[[source.id,selected]];
     for(const id of parts)album.push([id,await this.sources.read(principal,id)]);
-    let tooLarge=0;
-    for(const [id,part] of album) {
-      for(const result of part.derived) {
-        const row=(await this.derived.pool.query('SELECT content_hash FROM derived_artifacts WHERE id=$1',[result.id])).rows[0];
-        parents.push({store:'derived',kind:'artifact',id:result.id,input_hash:row.content_hash});
-        if(result.kind==='transcript')transcripts.push(Buffer.from(result.content_base64,'base64').toString());
-      }
-      const manifests=(await this.archive.pool.query('SELECT id,file_hash FROM artifacts WHERE event_id=$1 ORDER BY id',[id])).rows;
-      const large=await this.preparation.attachments.tooLarge(id);tooLarge+=large.size;
-      for(const file of part.artifacts) {
-        if(large.has(file.id))continue;
-        const hash=manifests.find(m=>m.id===file.id)?.file_hash;if(!hash)throw new HttpError(409,'source_file_pending');
-        const extracted=part.derived.find(d=>d.artifact_id===file.id&&d.kind==='extracted_text');
-        files.push({id:file.id,name:typeof file.metadata?.file_name==='string'?file.metadata.file_name:'Attachment',sha256:hash,
-          kind:binding.mode==='off'&&file.kind==='photo'?'image':'file',text:extracted?Buffer.from(extracted.content_base64,'base64').toString():null});
-      }
-    }
+    const {transcripts,files,parents,tooLarge,text}=await this.contents(album,binding,true);
     const botId=/^telegram:(\d+):update:/.exec(original.source_key)?.[1]??'';
     let addressing=groupAddressing(payload,botId);
     for(const id of parts) {
@@ -392,8 +510,6 @@ export class TelegramDispatchRepository {
       const other=groupAddressing(JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString()),botId);
       if(addressing&&other)addressing={direct:addressing.direct||other.direct,handles:[...new Set([...addressing.handles,...other.handles])].sort().slice(0,20)};
     }
-    // An album's caption usually sits on one part; the turn reads every part's text in order.
-    const text=album.map(([,part])=>part.event.text).filter((value):value is string=>typeof value==='string'&&value.length>0).join('\n\n')||null;
     // A group message nobody addressed to the bot stays archived without a turn; the next turn sees it as recent.
     if(!scope.owner) {
       const identity=await this.identity().catch(()=>null);
@@ -402,7 +518,7 @@ export class TelegramDispatchRepository {
       if(!groupTurn(this.groupReplies,addressing,text,identity))return identity?'not_addressed':observation('waiting','admission',0,Date.now()+10000,'prerequisite');
     }
     // Command authority comes from the original owner DM, never a guarded edit.
-    const reply=await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
+    const reply=refusal??await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
     const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
