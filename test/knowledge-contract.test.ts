@@ -5,7 +5,7 @@ import {parseKnowledgeProposal,learnedOrganization,organizationIdentity,proposal
 
 const source=digest('original-evidence'),project=digest('existing-project');
 const organization=():OrganizationProposal=>({kind:'organization',reason:'Evidence identifies a project',creates:[{key:'new_project',name:'Project Aurora',description:'Evidence-backed project',evidence_ids:[source]}],
-  assignments:[{space_id:'-1000/topic/7',project_key:'new_project',expected_revision:0,evidence_ids:[source],reason:'This topic exists for that project',purpose_evidence:true}]});
+  assignments:[{space_id:'-1000',project_key:'new_project',expected_revision:0,evidence_ids:[source],reason:'This group exists for that project',purpose_evidence:true}]});
 
 test('organization proposals are evidence-backed typed effects, not administrative authority',()=>{
   assert.deepEqual(parseKnowledgeProposal(organization()),organization());
@@ -33,7 +33,7 @@ test('discovery can create a project without changing conversation membership',(
 test('deduplication identity excludes descriptive rationale and normalizes original evidence',()=>{
   const a=organization(),b=organization();b.reason='Reprocessed evidence';b.assignments[0]!.reason='Different model wording';b.creates[0]!.description='Different summary';
   assert.deepEqual(organizationIdentity(a),organizationIdentity(b));
-  b.assignments[0]!.space_id='-1000/topic/8';assert.notDeepEqual(organizationIdentity(a),organizationIdentity(b));
+  b.assignments[0]!.space_id='-1001';assert.notDeepEqual(organizationIdentity(a),organizationIdentity(b));
   const duplicate={...a,creates:[{...a.creates[0]!,evidence_ids:[source,source]}]};
   assert.deepEqual((parseKnowledgeProposal(duplicate) as OrganizationProposal).creates[0]!.evidence_ids,[source]);
 });
@@ -48,10 +48,10 @@ test('review proposals cannot smuggle owner operation routing or grant whole pro
 });
 
 test('a learning answer\'s null lists and fields mean absent, so a lone assignment is kept',()=>{
-  const assignment={space_id:'-1000/topic/7',project_id:project,project_key:null,expected_revision:2,reason:'This topic exists for that project',purpose_evidence:true,evidence_ids:[source]};
+  const assignment={space_id:'-1000',project_id:project,project_key:null,expected_revision:2,reason:'This group exists for that project',purpose_evidence:true,evidence_ids:[source]};
   const proposal=learnedOrganization({reason:'Evidence identifies a project',creates:null,assignments:[assignment]})!;
   assert.deepEqual(proposal.creates,[]);
-  assert.deepEqual(proposal.assignments,[{space_id:'-1000/topic/7',project_id:project,expected_revision:2,evidence_ids:[source],reason:'This topic exists for that project',purpose_evidence:true}]);
+  assert.deepEqual(proposal.assignments,[{space_id:'-1000',project_id:project,expected_revision:2,evidence_ids:[source],reason:'This group exists for that project',purpose_evidence:true}]);
   assert.equal(learnedOrganization({reason:null,creates:[{key:'new_project',name:'Project Aurora',description:null,evidence_ids:[source]}],assignments:null})!.creates.length,1);
   assert.throws(()=>learnedOrganization({reason:'Nothing to organize',creates:null,assignments:null}),{code:'organization_batch_limit'});
 });
@@ -92,4 +92,19 @@ test('learning drops a private chat\'s assignment and keeps the groups; only pri
   assert.equal(learnedOrganization({reason:'Only the owner',creates:null,assignments:[assignment('123')]}),null,'not an organization_batch_limit error');
   const created=learnedOrganization({reason:'A project',creates:[{key:'new_project',name:'Project Aurora',description:null,evidence_ids:[source]}],assignments:[assignment('123')]})!;
   assert.deepEqual([created.creates.length,created.assignments.length],[1,0]);
+});
+
+test('a topic always follows its group\'s project: a proposal never gives it one, and learning drops its assignment',()=>{
+  const topic='-1000/topic/7',assignment=(space_id:string)=>({...organization().assignments[0]!,space_id});
+  assert.throws(()=>parseKnowledgeProposal({...organization(),assignments:[assignment(topic)]}),{code:'project_topic_follows_group'});
+  for(const mode of ['assigned','none'])
+    assert.throws(()=>parseKnowledgeProposal({kind:'project_assignment',reason:'Move it',payload:{space_id:topic,mode,...(mode==='assigned'?{project_id:project}:{}),expected_revision:0}}),
+      {code:'project_topic_follows_group'},mode);
+  assert.equal(parseKnowledgeProposal({kind:'project_assignment',reason:'Follow the group',payload:{space_id:topic,mode:'inherit',expected_revision:1}}).kind,'project_assignment');
+  // A proposal saved before that rule still opens as saved; applying it re-checks it as new.
+  const older={kind:'project_assignment',reason:'Move it',payload:{space_id:topic,project_id:project,mode:'assigned',expected_revision:0}};
+  assert.equal(parseKnowledgeProposal(older,{stored:true}).kind,'project_assignment');
+  const learned=(space_id:string)=>({space_id,project_id:project,project_key:null,expected_revision:0,reason:'This chat exists for that project',purpose_evidence:true,evidence_ids:[source]});
+  assert.deepEqual(learnedOrganization({reason:'A project',creates:null,assignments:[learned(topic),learned('-1000')]})!.assignments.map(a=>a.space_id),['-1000']);
+  assert.equal(learnedOrganization({reason:'Only a topic',creates:null,assignments:[learned(topic)]}),null);
 });

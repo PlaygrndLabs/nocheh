@@ -40,7 +40,7 @@ test('owner data travels with its types, and nothing imported acts by itself',
     await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard','{\"title\":\"Plan the beds\"}')",[parent]);
     // Twelve history entries: as text, 10 would sort before 2.
     for(let step=2;step<=12;step++)await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard',$2)",[parent,JSON.stringify({step})]);
-    await source.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,revision,project_id) VALUES('rule-1','Garden to studio','[\"-10042\"]','-10073',true,'filtered',1,$1)",[project]);
+    await source.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,revision) VALUES('rule-1','Garden to studio','[\"-10042\"]','-10073',true,'filtered',1)");
     await source.query("UPDATE background_settings SET cost_limit_usd=7.5,revision=1");
     await source.query("INSERT INTO chat_tool_settings(space_id,shell,browser,mcp) VALUES('*',false,null,null),('-10042',null,true,false)");
     await source.query("UPDATE owner_prompts SET texts='{\"greeting\":\"Hello there\"}',revision=2");

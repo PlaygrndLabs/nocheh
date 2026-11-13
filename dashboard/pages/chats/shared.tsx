@@ -6,6 +6,7 @@ import {href} from '../../lib/routes';
 import {useSettings} from '../../lib/settings';
 import {
   chatError,
+  chatName,
   chatFromId,
   emptyRule,
   parseAccess,
@@ -101,6 +102,18 @@ export function useChat(space: string): Chat {
   if (found) return found;
   const seen = identities.data?.groups.find(group => group.id === space);
   return {...chatFromId(space), name: seen?.name ?? null};
+}
+
+/** Names chats by ID, as useChat does for one: for lists such as a project's groups. */
+export function useChatNames(): (space: string) => string {
+  const {find, identities} = useChats();
+  return space =>
+    chatName(
+      find(space) ?? {
+        ...chatFromId(space),
+        name: identities.data?.groups.find(group => group.id === space)?.name ?? null,
+      },
+    );
 }
 
 /**

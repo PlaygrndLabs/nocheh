@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {eventSpace,validateOverrides,spacePolicy,saveSpace,recallScope,inRecall,recallCondition,groupSpace,groupSpaceSql} from '../src/spaces.js';
+import {eventSpace,validateOverrides,spacePolicy,saveSpace,recallScope,inRecall,recallCondition,groupSpace,groupSpaceSql,groupChatSql,
+  readSet,readSetOf,inReadSet,readSetParam,readSetSql} from '../src/spaces.js';
+import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1} from './fixture-groups.js';
 import {assistantPolicy} from '../src/assistant-policy.js';
 import {initialize} from '../src/database.js';
 import {ingest,type Envelope} from '../src/archive.js';
@@ -52,6 +54,52 @@ test('a group\'s topics share one memory unless the owner keeps topics separate'
     process.env.TELEGRAM_TOPIC_MEMORY='topic';assert.equal(assistantPolicy().topic_memory,'topic');
     process.env.TELEGRAM_TOPIC_MEMORY='everything';assert.throws(()=>assistantPolicy(),/Invalid assistant policy/);
   }finally{if(saved===undefined)delete process.env.TELEGRAM_TOPIC_MEMORY;else process.env.TELEGRAM_TOPIC_MEMORY=saved;}
+});
+// Conversations no read set may ever hold: the owner's chat and its topics, another private chat, desktop imports,
+// system, malformed IDs and an unknown conversation.
+const privateSpaces=[OWNER,OWNER+'/topic/5','456','desktop:personal_chat:9','desktop:private_supergroup:1234567890','system','','-','-0','-12a','-20/topic/0'];
+test('a read set equals the recall scope it is made from, for groups and topics in both topic modes',()=>{
+  const probes=[GP1,GP1_TOPIC,GP1+'/topic/8',GP2,GP2+'/topic/7',GP4,...privateSpaces];
+  for(const mode of ['group','topic'] as const)for(const space of [GP1,GP1_TOPIC]) {
+    const scope=recallScope(space,mode),set=readSetOf(scope,P1);
+    assert.equal(set.home,space);assert.equal(set.project,P1);
+    for(const probe of probes)assert.equal(inReadSet(set,probe),inRecall(scope,probe)&&groupSpace(probe),`${mode} ${space} reads ${probe}`);
+  }
+  // Group mode reads the whole group; topic mode reads the topic, or the General chat, as itself only.
+  assert.deepEqual(readSetOf(recallScope(GP1_TOPIC)),{home:GP1_TOPIC,exact:[],whole:[GP1],project:null});
+  assert.deepEqual(readSetOf(recallScope(GP1_TOPIC,'topic')),{home:GP1_TOPIC,exact:[GP1_TOPIC],whole:[],project:null});
+  const general=readSetOf(recallScope(GP1,'topic'));
+  assert.deepEqual(general,{home:GP1,exact:[GP1],whole:[],project:null});
+  assert.ok(inReadSet(general,GP1));assert.ok(!inReadSet(general,GP1_TOPIC),'the General chat alone is not its topics');
+  // A private chat's recall scope reads itself through inRecall, but a read set never holds it.
+  for(const space of [OWNER,OWNER+'/topic/5','456','desktop:personal_chat:9','system']) {
+    const set=readSetOf(recallScope(space));
+    assert.deepEqual([set.exact,set.whole],[[],[]],space);assert.equal(inReadSet(set,space),false,space);assert.deepEqual(readSetParam(set),[],space);
+  }
+});
+test('a read set holds only groups and topics, whatever it is made from',()=>{
+  const set=readSet({home:GP1,exact:[GP1_TOPIC,GP2+'/topic/7',GP3,...privateSpaces],whole:[GP2,GP1,GP1,GP3+'/topic/9',...privateSpaces],project:P1});
+  // A whole entry must be a group itself; an exact entry a whole group already covers is dropped; sorted, no repeats.
+  assert.deepEqual(set,{home:GP1,exact:[GP3],whole:[GP1,GP2],project:P1});
+  assert.ok(Object.isFrozen(set)&&Object.isFrozen(set.exact)&&Object.isFrozen(set.whole));
+  for(const space of [GP1,GP1_TOPIC,GP1+'/topic/8',GP2,GP2+'/topic/7',GP3])assert.equal(inReadSet(set,space),true,space);
+  for(const space of [GP3+'/topic/9',GP4,GP4+'/topic/1',...privateSpaces,null,undefined])assert.equal(inReadSet(set,space),false,String(space));
+  assert.deepEqual(readSetParam(set),[GP3,GP1+'/*',GP2+'/*']);
+  // A set built by hand with private chats in it still never reads or binds one.
+  const forged={home:OWNER,exact:[OWNER,'desktop:personal_chat:9',GP2],whole:[OWNER,'system',GP1+'/topic/7',GP3],project:null};
+  for(const space of [OWNER,'desktop:personal_chat:9','system',OWNER+'/topic/1'])assert.equal(inReadSet(forged,space),false,space);
+  assert.ok(inReadSet(forged,GP2)&&inReadSet(forged,GP3+'/topic/2'));assert.equal(inReadSet(forged,GP1_TOPIC),false,'a topic is never a whole group');
+  assert.deepEqual(readSetParam(forged),[GP2,GP3+'/*']);
+  assert.deepEqual(readSet({home:OWNER}),{home:OWNER,exact:[],whole:[],project:null});
+  assert.throws(()=>readSet({home:''}),{code:'invalid_space'});
+  assert.throws(()=>readSet({home:GP1,project:'P1'}),{code:'invalid_project_id'});
+});
+test('a read set binds as one text array parameter that never matches a private chat',()=>{
+  const guard="s.audience ~ '^-[1-9][0-9]{0,18}(/topic/[1-9][0-9]{0,15})?$'";
+  assert.equal(readSetSql('s.audience',2),`(${guard} AND (s.audience=ANY($2::text[]) OR split_part(s.audience,'/topic/',1)||'/*'=ANY($2::text[])))`);
+  assert.equal(readSetSql('s.audience','$7'),`(${guard} AND (s.audience=ANY($7::text[]) OR split_part(s.audience,'/topic/',1)||'/*'=ANY($7::text[])))`);
+  for(const param of [0,-1,1.5,'',' '])assert.throws(()=>readSetSql('audience',param),/invalid_read_set_parameter/);
+  assert.equal(groupChatSql('a.space_id'),"a.space_id ~ '^-[1-9][0-9]{0,18}$'");
 });
 test('real PostgreSQL: topic inheritance, revision conflicts and immutable source backfill',{skip:!process.env.PGHOST},async()=>{
   const admin=new pg.Pool(),namespace=`spaces_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);

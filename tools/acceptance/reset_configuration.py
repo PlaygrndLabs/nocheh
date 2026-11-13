@@ -30,12 +30,16 @@ ORIGINAL = {
     'guard_mode': ('SELECT mode FROM guard_state WHERE singleton', ('mode',)),
     'runtime_configuration': ('SELECT c.name,v.document FROM runtime_configuration c '
                               'JOIN runtime_configuration_versions v USING(name,revision) ORDER BY c.name', ('name', 'document')),
-    'projects': ('SELECT id,name,description,state,sharing_enabled,sharing_mode FROM projects ORDER BY id',
-                 ('id', 'name', 'description', 'state', 'sharing_enabled', 'sharing_mode')),
-    'project_assignments': ('SELECT space_id,project_id,mode,share_into FROM project_assignments ORDER BY space_id',
-                            ('space_id', 'project_id', 'mode', 'share_into')),
-    'sharing_rules': ('SELECT id,name,sources,destination,enabled,mode,instructions,project_id FROM sharing_rules ORDER BY id',
-                      ('id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions', 'project_id')),
+    'projects': ('SELECT id,name,description,state FROM projects ORDER BY id',
+                 ('id', 'name', 'description', 'state')),
+    'project_assignments': ('SELECT space_id,project_id,mode FROM project_assignments ORDER BY space_id',
+                            ('space_id', 'project_id', 'mode')),
+    # Only the owner's rules. A store the stores have not started at this version still holds the rules a project's
+    # share box kept; they are deleted at that start, never kept as the owner's (ADR-0246), so they are left out here.
+    # The test reads the row as JSON, so it holds whether or not the old project_id column is still there.
+    'sharing_rules': ("SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules r "
+                      "WHERE to_jsonb(r)->>'project_id' IS NULL ORDER BY id",
+                      ('id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions')),
     'memory_access_settings': ('SELECT destination,suggestions,notify_owner,auto_followup,request_ttl_seconds,default_grant_mode FROM memory_access_settings ORDER BY destination',
                                ('destination', 'suggestions', 'notify_owner', 'auto_followup', 'request_ttl_seconds', 'default_grant_mode')),
     'chat_tool_settings': ('SELECT space_id,shell,browser,mcp FROM chat_tool_settings ORDER BY space_id',
@@ -94,6 +98,10 @@ def validate(snapshot):
         if (any(row['mode'] == 'assigned' and not group_space(row['space_id']) for row in values['project_assignments']) or
                 any(not all(group_space(space) for space in [*row['sources'], row['destination']]) for row in values['sharing_rules'])):
             raise ValueError('reset_configuration_private_chat_requires_review')
+        # A topic always follows its group's project (ADR-0246); the restore refuses a topic's own choice the same way.
+        if any(isinstance(row['space_id'], str) and '/topic/' in row['space_id'] and row['mode'] != 'inherit'
+               for row in values['project_assignments']):
+            raise ValueError('reset_configuration_topic_follows_group')
     if len(reset_protocol.canonical(snapshot)) > reset_protocol.LIMIT:
         raise ValueError('reset_configuration_limit')
     return snapshot
@@ -162,7 +170,7 @@ def _legacy_rules(rows):
                        'sources': sources, 'destination': destination,
                        'enabled': mode == 'filtered' and bool(sources),
                        'mode': 'filtered' if mode == 'filtered' else 'approved',
-                       'instructions': instructions, 'project_id': None})
+                       'instructions': instructions})
     return sorted(result, key=lambda row: row['id'])
 
 

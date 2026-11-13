@@ -1,4 +1,7 @@
-/** Choose one or more chats by name, or type an exact chat or topic ID; optionally groups and their topics only. */
+/**
+ * Choose one or more chats by name, or type an exact chat or topic ID; optionally groups and their topics only, or
+ * whole groups only, as a project takes (a topic always follows its group's project, ADR-0246).
+ */
 import {useDeferredValue, useId, useState} from 'react';
 import {Check, X} from 'lucide-react';
 import {useResource} from '../../lib/resource';
@@ -16,6 +19,7 @@ export function ChatPicker({
   hint,
   owner,
   groupsOnly,
+  wholeGroups,
 }: {
   label: string;
   value: string[];
@@ -26,6 +30,7 @@ export function ChatPicker({
   hint?: string;
   owner?: string;
   groupsOnly?: boolean;
+  wholeGroups?: boolean;
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
@@ -34,9 +39,9 @@ export function ChatPicker({
     '/conversations?limit=100' + (deferred ? '&q=' + encodeURIComponent(deferred) : ''),
   );
   const all = useResource<Directory>('/conversations?limit=100');
-  const rows = (resource.data?.items ?? []).filter(
-    row => !exclude.includes(row.space_id) && (!groupsOnly || groupSpace(row.space_id)),
-  );
+  const allowed = (space: string) =>
+    (!groupsOnly && !wholeGroups) || (groupSpace(space) && (!wholeGroups || !space.includes('/topic/')));
+  const rows = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id) && allowed(row.space_id));
   const find = (space: string): Chat =>
     rows.find(row => row.space_id === space) ??
     all.data?.items.find(row => row.space_id === space) ??
@@ -49,7 +54,7 @@ export function ChatPicker({
   };
   const exact =
     isSpaceId(deferred) &&
-    (!groupsOnly || groupSpace(deferred)) &&
+    allowed(deferred) &&
     !rows.some(row => row.space_id === deferred) &&
     !value.includes(deferred);
 
@@ -134,9 +139,11 @@ export function ChatPicker({
             })}
             {!rows.length && !exact && (
               <li className="px-3 py-2 text-[13px] text-muted">
-                {groupsOnly && isSpaceId(deferred) && !groupSpace(deferred)
-                  ? 'Only groups and topics can be chosen here, never a private chat.'
-                  : 'No chats match. Type an exact ID to use it.'}
+                {wholeGroups && isSpaceId(deferred) && !allowed(deferred)
+                  ? 'Only whole groups can be chosen here. A topic follows its group, and a private chat never joins.'
+                  : groupsOnly && isSpaceId(deferred) && !groupSpace(deferred)
+                    ? 'Only groups and topics can be chosen here, never a private chat.'
+                    : 'No chats match. Type an exact ID to use it.'}
               </li>
             )}
           </ul>

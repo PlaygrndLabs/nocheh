@@ -2,7 +2,7 @@
 import {useState} from 'react';
 import {ArrowRight, Plus, Share2} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
-import {href, setParams} from '../../lib/routes';
+import {setParams} from '../../lib/routes';
 import {useParam} from '../../lib/navigation';
 import {chatFromId, chatName, type Directory} from '../../lib/chats-model';
 import {
@@ -41,7 +41,7 @@ export function SharingView({telegram}: {telegram: Telegram}) {
       <Card>
         <CardHeader
           title="Sharing rules"
-          description="Each chat remembers only its own messages. A rule lets one chat use facts from others. A project whose chats share what they know sets its own rules."
+          description="A group answer uses only that group. A rule is your one exception: it lets a group use facts from others, and everyone allowed there sees what it lets in. Only you make rules."
           action={
             <Button variant="primary" onClick={() => setEditing('new')}>
               <Plus aria-hidden /> New rule
@@ -63,7 +63,7 @@ export function SharingView({telegram}: {telegram: Telegram}) {
                     onClick={() => setParams({rule: rule.id})}
                   >
                     <span className="block truncate text-sm font-medium hover:underline" dir="auto">
-                      {rule.project_id ? 'Set by project ' + rule.name : rule.name}
+                      {rule.name}
                     </span>
                     <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
                       <span className="truncate" dir="auto">
@@ -79,35 +79,23 @@ export function SharingView({telegram}: {telegram: Telegram}) {
                     )}
                   </button>
                   <Badge>{modeText[rule.mode].label}</Badge>
-                  {rule.project_id ? (
-                    <>
-                      <Badge tone={rule.enabled ? 'good' : 'neutral'}>{rule.enabled ? 'On' : 'Off'}</Badge>
-                      <a
-                        href={href('memory', {view: 'projects', project: rule.project_id})}
-                        className="text-[13px] font-medium text-accent-text hover:underline"
-                      >
-                        Open project
-                      </a>
-                    </>
-                  ) : (
-                    <Switch
-                      checked={rule.enabled}
-                      disabled={!!action.busy}
-                      label={(rule.enabled ? 'Turn off ' : 'Turn on ') + rule.name}
-                      onChange={enabled =>
-                        void action.run(rule.id, '/sharing/rules', ruleBody({...rule, enabled}, rule.revision), {
-                          success: enabled ? 'Rule turned on.' : 'Rule turned off.',
-                        })
-                      }
-                    />
-                  )}
+                  <Switch
+                    checked={rule.enabled}
+                    disabled={!!action.busy}
+                    label={(rule.enabled ? 'Turn off ' : 'Turn on ') + rule.name}
+                    onChange={enabled =>
+                      void action.run(rule.id, '/sharing/rules', ruleBody({...rule, enabled}, rule.revision), {
+                        success: enabled ? 'Rule turned on.' : 'Rule turned off.',
+                      })
+                    }
+                  />
                 </li>
               ))}
             </ul>
           ) : (
             <Empty icon={Share2} title="No sharing rules">
-              Without a rule or a project whose chats share, nothing from one chat is used in another unless you approve
-              it in the Inbox.
+              Without a rule, nothing from one chat is used in another unless you approve it in the Inbox. Projects
+              never share between their groups.
             </Empty>
           )}
           <ActionError text={action.error} />

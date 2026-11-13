@@ -3,10 +3,29 @@ import type {ReactNode} from 'react';
 import {Badge, Button, Details, Notice, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
-import {projectSharingWarning, projectTasksWarning} from '../chats/rule-dialog';
+import {otherGroupsText, projectGroupsNote, projectTasksWarning, relatedGroupsHint} from '../chats/rule-dialog';
 import {parentOf} from '../../lib/chats-model';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {stateLabel, useChatNames, useCommand} from './shared';
+
+type ProjectGroups = {id: string; name: string; groups: string[]};
+
+/** The projects a move touches, each with the groups already there, named before the owner decides (ADR-0246). */
+function ProjectGroupsNotice({projects, chat}: {projects: ProjectGroups[]; chat: (space: string) => string}) {
+  if (!projects.length) return null;
+  return (
+    <Notice tone="warn" title="This moves a group into or out of a project">
+      <ul className="space-y-1">
+        {projects.map(project => (
+          <li key={project.id}>{otherGroupsText(project.name, project.groups.map(chat))}</li>
+        ))}
+      </ul>
+      <p className="mt-2">
+        {projectGroupsNote} {relatedGroupsHint}
+      </p>
+    </Notice>
+  );
+}
 
 export type Proposal = {
   id: string;
@@ -23,9 +42,13 @@ export type Proposal = {
   delegation_id?: string | null;
   delegation_revision?: number | null;
   affected_topics?: Record<string, string[]>;
-  /** Projects whose chats share what they know that this change, or undoing it, touches; worked out by the server. */
-  sharing_projects?: {id: string; name: string}[];
-  undo_sharing_projects?: {id: string; name: string}[];
+  /**
+   * Projects this change, or undoing it, moves a group into or out of, each with the other groups Nocheh serves there;
+   * worked out by the server. A project shares nothing between its groups, but people in two of them can get private
+   * answers that combine them (ADR-0246).
+   */
+  project_groups?: ProjectGroups[];
+  undo_project_groups?: ProjectGroups[];
   /** Projects with tasks that a chat this change, or undoing it, moves would join; it sees their whole list (ADR-0243). */
   task_projects?: {id: string; name: string}[];
   undo_task_projects?: {id: string; name: string}[];
@@ -102,8 +125,8 @@ export function KnowledgeReview({
   const command = useCommand();
   const content = proposal.proposal ?? {};
   const kind = String(content.kind ?? proposal.kind);
-  const sharing = proposal.sharing_projects ?? [];
-  const sharingProject = (id: string | null | undefined) => sharing.find(project => project.id === id);
+  const moved = proposal.project_groups ?? [];
+  const movedProject = (id: string | null | undefined) => moved.find(project => project.id === id);
   const listed = proposal.task_projects ?? [];
   const listedProject = (id: string | null | undefined) => listed.find(project => project.id === id);
   const audience = proposal.fact_audience;
@@ -135,11 +158,7 @@ export function KnowledgeReview({
       body: (
         <div className="space-y-3">
           <p>Projects it created and chats it moved go back to how they were, unless you changed them since.</p>
-          {!!proposal.undo_sharing_projects?.length && (
-            <Notice tone="warn" title="A project here shares what its chats know">
-              {projectSharingWarning}
-            </Notice>
-          )}
+          <ProjectGroupsNotice projects={proposal.undo_project_groups ?? []} chat={chat} />
           {!!proposal.undo_task_projects?.length && (
             <Notice tone="warn" title="A chat here goes back to a project with tasks">
               {projectTasksWarning(
@@ -161,7 +180,7 @@ export function KnowledgeReview({
 
   const projectName = (assignment: any) =>
     assignment.project_id
-      ? (sharingProject(assignment.project_id)?.name ??
+      ? (movedProject(assignment.project_id)?.name ??
         listedProject(assignment.project_id)?.name ??
         'an existing project')
       : (content.creates?.find((c: any) => c.key === assignment.project_key)?.name ?? 'a new project');
@@ -259,11 +278,7 @@ export function KnowledgeReview({
             : 'It was made before private chats were left out.'}
         </Notice>
       )}
-      {sharing.length > 0 && (
-        <Notice tone="warn" title="A project here shares what its chats know">
-          {projectSharingWarning}
-        </Notice>
-      )}
+      <ProjectGroupsNotice projects={moved} chat={chat} />
       {listed.length > 0 && (
         <Notice tone="warn" title="A chat here joins a project with tasks">
           {projectTasksWarning(
@@ -304,11 +319,6 @@ export function KnowledgeReview({
                   <li key={assignment.space_id} className="rounded-lg border border-line p-3">
                     <p className="text-sm">
                       <span className="font-medium">{chat(assignment.space_id)}</span> → {projectName(assignment)}
-                      {sharingProject(assignment.project_id) && (
-                        <Badge tone="accent" className="ml-2">
-                          Shares
-                        </Badge>
-                      )}
                     </p>
                     {assignment.reason && <p className="mt-0.5 text-[13px] text-muted">{assignment.reason}</p>}
                     <div className="mt-2">

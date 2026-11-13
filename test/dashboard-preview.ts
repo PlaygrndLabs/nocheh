@@ -142,9 +142,9 @@ const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','r
 const personId='1'.repeat(64),projectEntityId='2'.repeat(64),projectId='ab'.repeat(32),factId='3'.repeat(64),requestId='4'.repeat(64),grantId='5'.repeat(64),conversation='-10042',topic='-10042/topic/7';
 const memoryMapNodes:any[]=[
  {id:`person:${personId}`,kind:'person',label:'Mira Chen',state:'active',detail:{revision:2,fact_count:2}},
- {id:`project:${projectEntityId}`,kind:'project',label:'Aurora field guide',state:'active',detail:{revision:1,project_id:projectId,project:{id:projectId,name:'Aurora field guide',description:'Synthetic project for the isolated preview.',state:'active',sharing_enabled:false,sharing_mode:'filtered',revision:1}}},
- {id:`conversation:${conversation}`,kind:'conversation',label:'Friends travel group',detail:{space_id:conversation,assignment:{space_id:conversation,project_id:projectId,mode:'assigned',share_into:true,revision:1}}},
- {id:`topic:${topic}`,kind:'topic',label:'Topic 7 · Iceland planning',detail:{space_id:topic,parent:conversation,assignment:{space_id:topic,project_id:null,mode:'inherit',share_into:true,revision:1}}},
+ {id:`project:${projectEntityId}`,kind:'project',label:'Aurora field guide',state:'active',detail:{revision:1,project_id:projectId,project:{id:projectId,name:'Aurora field guide',description:'Synthetic project for the isolated preview.',state:'active',revision:1}}},
+ {id:`conversation:${conversation}`,kind:'conversation',label:'Friends travel group',detail:{space_id:conversation,assignment:{space_id:conversation,project_id:projectId,mode:'assigned',revision:1}}},
+ {id:`topic:${topic}`,kind:'topic',label:'Topic 7 · Iceland planning',detail:{space_id:topic,parent:conversation,assignment:{space_id:topic,project_id:null,mode:'inherit',revision:1}}},
  {id:`fact:${factId}`,kind:'fact',label:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',state:'active',detail:{revision:1,predicate:'preference',attribution:'direct',uncertainty:'explicit',evidence:[{id}],author:'fixture-owner',created_at:new Date().toISOString()}},
 ];
 const memoryMapEdges:any[]=[
@@ -165,8 +165,6 @@ const memoryAccessRequest={id:requestId,destination:conversation,state:'pending'
 const memoryGrant={id:grantId,destination:topic,fact_id:factId,fact_revision:1,mode:'persistent',state:'active',revision:1,wording:'Mira prefers quiet aurora viewpoints.',suspended_reason:null,provenance:{fixture:true}};
 // Chats page: sharing rules, shared texts, suggestion settings and project assignments (synthetic, in memory).
 const sharingRules:any[]=[{id:'7'.repeat(64),name:'Trip notes from the topic',enabled:true,sources:[topic],destination:conversation,mode:'approved',instructions:'',revision:1},
- // Kept by the project from when it shared with another group; only the project changes it.
- {id:'7b'.repeat(32),name:'Aurora field guide',enabled:false,sources:['-10077'],destination:conversation,mode:'filtered',instructions:'',revision:2,project_id:projectId},
  // Saved before private chats were refused: Nocheh skips the private chat it still names.
  {id:'7c'.repeat(32),name:'Notes from my chat',enabled:true,sources:['42'],destination:conversation,mode:'approved',instructions:'',revision:1}];
 /** Only a group or one of its topics shares, is shared with or joins a project (ADR-0242). */
@@ -174,9 +172,13 @@ const groupSpace=(space:string)=>/^-[1-9]\d{0,18}(\/topic\/[1-9]\d{0,15})?$/.tes
 const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
 const sharingReleases:any[]=[];
 const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
-const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',share_into:true,revision:1},
+const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',revision:1},
  // Saved before private chats were refused: it puts the owner's chat in no project, and the owner can clear it.
- {space_id:'42',project_id:projectId,mode:'assigned',share_into:true,revision:1}];
+ {space_id:'42',project_id:projectId,mode:'assigned',revision:1}];
+/** The groups Nocheh serves, as the saved Telegram setting lists them. */
+const servedGroups=()=>String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean);
+/** A project's served groups, as the server lists them on /projects (ADR-0246). */
+const projectGroups=(id:string)=>assignments.filter(a=>a.mode==='assigned'&&a.project_id===id&&!a.space_id.includes('/topic/')&&servedGroups().includes(a.space_id)).map(a=>a.space_id).sort();
 // Memory page: learned facts, people and their facts, projects, automatic organizing, long-term memory (synthetic, in memory).
 const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.now()-m*60000).toISOString();
 // Background jobs: one reading a chat now, one that finished with its report.
@@ -254,7 +256,7 @@ function chatSendSummary(){const since=Date.now()-864e5,day=chatSends.filter(row
   last_problem_at:chatSends.find(sendProblem)?.at??null,latest_problems:problems.slice(0,10)};}
 const machineList=(mode:string)=>({available:mode!=='unavailable',...machineControl,machines});
 const machineAt=(id:string)=>{const machine=machines.find(row=>row.id===id);if(!machine)throw new HttpError(404,'machine_not_found');return machine;};
-const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',sharing_enabled:false,sharing_mode:'filtered',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',sharing_enabled:false,sharing_mode:'filtered',revision:2}];
+const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',revision:2}];
 const devonId=hx('d1');
 const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
  {id:projectEntityId,kind:'project',name:'Aurora field guide',state:'active',project_id:projectId,merged_into:null,revision:1}];
@@ -281,7 +283,7 @@ const honchoBudget:any={limit_cents:500,max_limit_cents:1500,revision:3,mode:'mo
 let memoryRevision=4,memoryIncludeHistory=true;
 let failedLearning=3;
 const fixtureProject=(pid?:string)=>memoryProjects.find(p=>p.id===pid)??memoryMapNodes[1].detail.project;
-function effectiveProject(space:string){const parent=space.includes('/topic/')?space.split('/topic/')[0]:null,own=assignments.find(a=>a.space_id===space)??null,inherited=!own||own.mode==='inherit',chosen=inherited?assignments.find(a=>a.space_id===parent):own;
+function effectiveProject(space:string){const parent=space.includes('/topic/')?space.split('/topic/')[0]:null,own=assignments.find(a=>a.space_id===space)??null,inherited=!!parent||!own||own.mode==='inherit',chosen=inherited?assignments.find(a=>a.space_id===parent):own;
  if(!groupSpace(space))return {space,own_assignment:own,assignment:null,project:null,inherited:false};
  return {space,own_assignment:own,assignment:chosen??null,project:chosen?.project_id?fixtureProject(chosen.project_id):null,inherited:!!chosen&&inherited};}
 const previewView=(row:any)=>({...row,input:{rule:sharingRules.find(r=>r.id===row.rule_id),sources:[{id}]},guard_revision:1,text_hash:'9'.repeat(64),current:sharingRules.find(r=>r.id===row.rule_id)?.revision===row.rule_revision,output_provenance:{fixture:true}});
@@ -301,9 +303,9 @@ const folded=(hex:string,name:string,minutes:number)=>({id:hex.repeat(32),name,r
 const projectSuggestion:any={id:'02'.repeat(32),kind:'project',name:'Aurora cabin',candidate_entity_id:null,source_reference:{id},reason:'A cabin booking the group keeps planning around.',status:'pending',revision:1,created_at:inboxAgo(280),
  also_called:[folded('03','Aurora cabin trip',260),folded('04','Aurora cabin (کلبه)',240)]};
 const knowledgeProposal:any={id:'f'.repeat(64),kind:'organization',origin:'learning',state:'review',revision:1,approved:false,created_at:inboxAgo(95),source_scope:conversation,source_reference:{id},error_code:null,result:null,decision_history:[],affected_topics:{},
- // As the server works it out: the topic follows its group in Aurora field guide and would leave it.
- get sharing_projects(){return memoryProjects.filter(p=>p.id===projectId&&p.sharing_enabled).map(({id,name})=>({id,name}));},undo_sharing_projects:[],
- proposal:{kind:'organization',reason:'The Iceland topic is all about one trip; a project keeps its notes together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:topic,project_key:'trip',reason:'Every recent message in this topic is about the trip.',evidence_ids:[id],expected_revision:1}]}};
+ // As the server works it out: the project the group would join, with the groups already there (ADR-0246).
+ get project_groups(){return [{id:projectId,name:'Aurora field guide',groups:projectGroups(projectId).filter(g=>g!=='-10073')}];},undo_project_groups:[],
+ proposal:{kind:'organization',reason:'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:'-10073',project_id:projectId,reason:'Every recent message in this group is about the trip.',evidence_ids:[id],expected_revision:0}]}};
 function inboxDecisions(){
  const summary=(kind:string,row:any,extra:any)=>({kind,id:row.id,state:row.state??row.status,revision:row.revision??1,created_at:row.created_at,source_scope:null,destination:null,fingerprint:null,...extra});
  // An unclear outcome waits until it is closed (ADR-0218).
@@ -613,7 +615,7 @@ const server=createServer((req,res)=>{void(async()=>{
    return json(res,200,{commands:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}
   const taskRead=route.match(/^\/tasks\/([a-f0-9]{64})$/);
   if(taskRead)return json(res,200,await tasks.get(taskOwner,taskRead[1]!));
-  if(route==='/projects')return json(res,200,{projects:memoryProjects,next:null});
+  if(route==='/projects')return json(res,200,{projects:memoryProjects.map(p=>({...p,groups:projectGroups(p.id)})),next:null});
   if(route==='/projects/assignments')return json(res,200,{assignments,next:null});
   const projectContext=route.match(/^\/projects\/([a-f0-9]{64})\/context$/);
   if(projectContext){const project=memoryProjects.find(p=>p.id===projectContext[1]);if(!project)throw new HttpError(404,'project_not_found');
@@ -621,7 +623,7 @@ const server=createServer((req,res)=>{void(async()=>{
    const entityIds=people.filter(p=>p.project_id===project.id).map(p=>p.id);
    const items=[...learned.filter(e=>e.scope_kind==='project'&&e.scope_id===project.id&&!e.retired).map(e=>({type:'learned',id:e.id,subject:e.subject,kind:e.kind,revision:e.active_revision,author:e.author,retired:false,content:null,attribution:null,uncertainty:null,evidence:e.provenance.learning.evidence})),
     ...claims.filter(c=>!c.retired&&(entityIds.includes(c.subject_entity_id)||entityIds.includes(c.object_entity_id))).map(c=>({type:'claim',id:c.id,subject:c.predicate,kind:'fact',revision:c.revision,author:c.author,retired:false,content:c.content,attribution:c.attribution,uncertainty:c.uncertainty,evidence:c.evidence}))];
-   const decisions=project.id===projectId&&knowledgeProposal.state==='review'?[{kind:'knowledge',id:knowledgeProposal.id,title:'Organizing suggestion for Iceland planning',state:'review',created_at:knowledgeProposal.created_at}]:[];
+   const decisions=project.id===projectId&&knowledgeProposal.state==='review'?[{kind:'knowledge',id:knowledgeProposal.id,title:'Organizing suggestion for Weekend notes',state:'review',created_at:knowledgeProposal.created_at}]:[];
    return json(res,200,{project,conversations:chats,observed_at:new Date().toISOString(),state:'current',knowledge:{items,total:items.length,next_cursor:null},decisions:{items:decisions,total:decisions.length,next_cursor:null}});}
   if(route==='/organization/delegations')return json(res,200,{delegations:delegations.map(delegationView),next:null});
   if(route==='/knowledge/proposals')return json(res,200,{proposals:[knowledgeProposal,...pastProposals],next:null});
@@ -714,9 +716,10 @@ const server=createServer((req,res)=>{void(async()=>{
   const taskChange=route.match(/^\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
   if(taskChange)return json(res,200,await (taskChange[2]==='comments'?tasks.comment(taskOwner,taskChange[1]!,body):taskChange[2]==='delete'?tasks.remove(taskOwner,taskChange[1]!)
     :tasks.update(taskOwner,taskChange[1]!,body)));
-  if(route==='/projects'){const prior=body.id?memoryProjects.find(p=>p.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'project_revision_conflict');
+  if(route==='/projects'){if(Object.keys(body).some(key=>!['id','name','description','state','expected_revision','operation_id'].includes(key)))throw new HttpError(400,'unknown_policy_field');
+   const prior=body.id?memoryProjects.find(p=>p.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'project_revision_conflict');
    if(!String(body.name??'').trim()||!['active','archived'].includes(body.state))throw new HttpError(400,'invalid_project');
-   const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2)};Object.assign(saved,{name:String(body.name).trim(),description:String(body.description??''),state:body.state,sharing_enabled:body.sharing_enabled??prior?.sharing_enabled??false,sharing_mode:body.sharing_mode??prior?.sharing_mode??'filtered',revision:(prior?.revision??0)+1});if(!prior)memoryProjects.push(saved);return json(res,200,saved);}
+   const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2)};Object.assign(saved,{name:String(body.name).trim(),description:String(body.description??''),state:body.state,revision:(prior?.revision??0)+1});if(!prior)memoryProjects.push(saved);return json(res,200,saved);}
   if(route==='/organization/delegations'){const prior=body.id?delegations.find(d=>d.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'organization_delegation_changed');
    if(!String(body.name??'').trim()||!Array.isArray(body.scopes)||!body.scopes.length)throw new HttpError(400,'invalid_organization_delegation');
    const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2),baseline_suspended:[]};Object.assign(saved,{name:String(body.name).trim(),enabled:body.enabled,scopes:body.scopes,project_ids:body.project_ids,allow_create:body.allow_create,expires_at:body.expires_at??null,revision:(prior?.revision??0)+1,
@@ -746,13 +749,15 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/knowledge/proposals/'+knowledgeProposal.id+'/decide'||route==='/knowledge/proposals/'+knowledgeProposal.id+'/undo'){if(body.expected_revision!==knowledgeProposal.revision)throw new HttpError(409,'knowledge_proposal_changed');knowledgeProposal.state=route.endsWith('/undo')?'undone':body.decision==='approve'?'queued':'cancelled';knowledgeProposal.revision++;return json(res,200,{id:knowledgeProposal.id,state:knowledgeProposal.state,revision:knowledgeProposal.revision});}
   if(route==='/tools/revoke'){const item=permissions.find(p=>p.id===body.id);if(item)item.revoked_at=new Date().toISOString();return json(res,200,{ok:true});}
   if(route==='/projects/assignments'){if(body.mode==='assigned'&&!groupSpace(String(body.space_id)))throw new HttpError(400,'project_private_chat');
-   const own=assignments.find(a=>a.space_id===body.space_id);if((own?.revision??0)!==body.expected_revision)throw new HttpError(409,'assignment_revision_conflict');if(body.share_into!==undefined&&(typeof body.share_into!=='boolean'||body.mode!=='assigned'))throw new HttpError(400,'invalid_project_assignment');const next={space_id:body.space_id,project_id:body.mode==='assigned'?body.project_id:null,mode:body.mode,share_into:body.share_into??own?.share_into??true,revision:body.expected_revision+1};if(own)Object.assign(own,next);else assignments.push(next);return json(res,200,next);}
+   if(String(body.space_id).includes('/topic/')&&body.mode!=='inherit')throw new HttpError(400,'project_topic_follows_group');
+   if(Object.keys(body).some(key=>!['space_id','project_id','mode','expected_revision','operation_id'].includes(key)))throw new HttpError(400,'unknown_policy_field');
+   const own=assignments.find(a=>a.space_id===body.space_id);if((own?.revision??0)!==body.expected_revision)throw new HttpError(409,'assignment_revision_conflict');const next={space_id:body.space_id,project_id:body.mode==='assigned'?body.project_id:null,mode:body.mode,revision:body.expected_revision+1};if(own)Object.assign(own,next);else assignments.push(next);return json(res,200,next);}
   if(route==='/memory-access/settings'){const row=memorySettings.find(r=>r.destination===body.destination);if(row?row.revision!==body.expected_revision:body.expected_revision!==1)throw new HttpError(409,'memory_access_settings_conflict');const values={suggestions:body.suggestions??null,notify_owner:body.notify_owner??null,auto_followup:body.auto_followup??null,request_ttl_seconds:body.request_ttl_seconds??null,default_grant_mode:body.default_grant_mode??null};const revision=row?row.revision+1:1;if(row)Object.assign(row,values,{revision});else memorySettings.push({destination:body.destination,...values,revision});return json(res,200,{destination:body.destination,revision});}
   if(/^\/memory-access\/grants\/[a-f0-9]{64}\/revoke$/.test(route)){if(memoryGrant.revision!==body.expected_revision||!['active','suspended'].includes(memoryGrant.state))throw new HttpError(409,'memory_fact_grant_changed');memoryGrant.state='revoked';memoryGrant.revision++;return json(res,200,{id:memoryGrant.id,state:'revoked',revision:memoryGrant.revision});}
   if(route==='/sharing/rules'){const rule=body.id?sharingRules.find(r=>r.id===body.id):null;
    // A rule saved earlier that names a private chat can be turned off as it is; nothing else may name one.
    const named=[...(body.sources??[]),body.destination].map(String).filter(space=>!groupSpace(space));
-   if(named.length&&(body.enabled!==false||!named.every(space=>rule&&[...rule.sources,rule.destination].includes(space))))throw new HttpError(400,'sharing_private_chat');if(rule?.project_id)throw new HttpError(409,'sharing_rule_project_managed');if((rule?.revision??0)!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const next={id:rule?.id??randomUUID().replaceAll('-','').padEnd(64,'0'),name:body.name,sources:body.sources,destination:body.destination,enabled:body.enabled,mode:body.mode,instructions:body.instructions??'',revision:body.expected_revision+1};if(rule)Object.assign(rule,next);else sharingRules.push(next);return json(res,200,next);}
+   if(named.length&&(body.enabled!==false||!named.every(space=>rule&&[...rule.sources,rule.destination].includes(space))))throw new HttpError(400,'sharing_private_chat');if((rule?.revision??0)!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const next={id:rule?.id??randomUUID().replaceAll('-','').padEnd(64,'0'),name:body.name,sources:body.sources,destination:body.destination,enabled:body.enabled,mode:body.mode,instructions:body.instructions??'',revision:body.expected_revision+1};if(rule)Object.assign(rule,next);else sharingRules.push(next);return json(res,200,next);}
   if(route==='/sharing/preview'){const rule=sharingRules.find(r=>r.id===body.rule_id);if(!rule||rule.revision!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const row={id:randomUUID().replaceAll('-','').padEnd(64,'0'),rule_id:rule.id,rule_revision:rule.revision,state:'ready',created_at:new Date().toISOString(),text:body.content??''};sharingPreviews.push(row);return json(res,200,previewView(row));}
   if(/^\/sharing\/previews\/[a-f0-9]{64}\/approve$/.test(route)){const row=sharingPreviews.find(p=>p.id===route.split('/')[3]);if(!row)throw new HttpError(404,'sharing_preview_not_found');const release={id:randomUUID().replaceAll('-','').padEnd(64,'0'),preview_id:row.id,rule_id:row.rule_id,state:'active',mode:'approved',revision:1,expires_at:null,created_at:new Date().toISOString()};sharingReleases.push(release);return json(res,200,{id:release.id,revision:1});}
   if(/^\/sharing\/releases\/[a-f0-9]{64}\/revoke$/.test(route)){const release=sharingReleases.find(r=>r.id===route.split('/')[3]);if(!release||release.revision!==body.expected_revision||release.state!=='active')throw new HttpError(409,'sharing_revision_conflict');release.state='revoked';release.revision++;return json(res,200,{id:release.id,revision:release.revision,state:'revoked'});}

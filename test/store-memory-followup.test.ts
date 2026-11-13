@@ -36,7 +36,8 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
       const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
     };
     const project=await services.projects.save(owner,{name:'Orion '+sequence,description:'Synthetic fixture',state:'active',expected_revision:0,operation_id:label+':project'});
-    await services.projects.assign(owner,{space_id:destination,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:label+':assign'});
+    // A topic follows its group's project, so the group joins it (ADR-0246).
+    await services.projects.assign(owner,{space_id:group,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:label+':assign'});
     // The fact comes from another group: a fact from a private chat is never suggested (ADR-0242).
     const evidence=await capture(group+'9',1,'Orion launch schedule milestone is October.'),source=await capture(group,2,'What is the Orion launch schedule?');
     const entity=await services.entities.ensureProject(project),binding=await services.guards.state();

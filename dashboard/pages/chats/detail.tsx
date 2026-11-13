@@ -27,7 +27,6 @@ export type SharingRuleSummary = {
   enabled: boolean;
   sources: string[];
   mode: string;
-  project_id?: string | null;
   through_group?: boolean;
 };
 export type ChatContext = {
@@ -131,7 +130,7 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         />
       )}
       {groupSpace(space) ? (
-        <ProjectCard chat={chat} />
+        <ProjectCard chat={chat} served={telegram.savedGroupIds.includes(space)} />
       ) : (
         <PrivateChatProject chat={chat} yours={owner || (!!parentId && parentId === telegram.owner)} />
       )}

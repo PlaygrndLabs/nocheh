@@ -18,7 +18,8 @@ import type {MemoryAccessRepository} from './memory-access.js';
 import type {SelectionRepository} from './selections.js';
 import {selectionId} from './selections.js';
 import type {SharingContentRepository} from './sharing.js';
-import {ProjectRepository,SharingPolicyRepository,listedRule,writeProject,writeAssignment,type Assignment} from './projects.js';
+import {ProjectRepository,SharingPolicyRepository,writeProject,writeAssignment,type Assignment} from './projects.js';
+import {projectGroups} from './project-groups.js';
 import {foregroundReplyActive} from './automatic-publication.js';
 import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,learnedOrganization,organizationIdentity,proposalPrivateChats,
  type KnowledgeProposal,type OrganizationProposal,type ReviewProposal} from './knowledge-contract.js';
@@ -166,12 +167,13 @@ export class KnowledgeManagementRepository {
   const projects=(await this.stores.control.query(`SELECT * FROM projects WHERE id>$1 AND ($2='' OR name ILIKE '%'||$2||'%') ORDER BY id LIMIT 11`,[cursor('after'),query])).rows;
   const entityPage=await this.s.entities.list(principal,{query,after:cursor('entities_after')});
   const delegationPage=await this.delegations(owner,cursor('delegations_after'));
-  const rules=space?(await this.stores.control.query(`SELECT * FROM sharing_rules s WHERE s.destination=$1 AND s.id>$2 AND ${listedRule('s')} ORDER BY s.id LIMIT 11`,[space,cursor('sharing_after')])).rows:[];
+  const rules=space?(await this.stores.control.query('SELECT * FROM sharing_rules s WHERE s.destination=$1 AND s.id>$2 ORDER BY s.id LIMIT 11',[space,cursor('sharing_after')])).rows:[];
   return prepared({projects:projects.slice(0,10),next:projects.length>10?projects[9].id:null,
    entities:{entities:entityPage.entities.slice(0,10),next:entityPage.entities.length>10?entityPage.entities[9]!.id:entityPage.next},
    ...(space?{assignment:await this.s.projects.effective(space),sharing_rules:rules.slice(0,10),sharing_next:rules.length>10?rules[9].id:null}:{}),
    delegations:delegationPage.delegations.slice(0,10),delegations_next:delegationPage.delegations.length>10?delegationPage.delegations[9]!.id:delegationPage.next,
-   automatic_operations:['create_project','assign_conversation'],review_required:['identity_links','corrections','sharing','fact_access','project_edits']});
+   // Organizing by itself only creates projects; moving a group or topic into or out of one always asks the owner (ADR-0246).
+   automatic_operations:['create_project'],review_required:['project_moves','identity_links','corrections','sharing','fact_access','project_edits']});
  }
 
  private async snapshot(principal:Reader,ids:string[],binding:GuardBinding):Promise<Dependencies> {
@@ -249,15 +251,17 @@ export class KnowledgeManagementRepository {
    await this.s.prepared.allow(principal,status);await this.s.turns.assertAudience(principal);return status;
   }
   const proposal=await this.content(row,undefined,true),decision_history=(await this.stores.control.query('SELECT operation_id,result,created_at FROM knowledge_decisions WHERE proposal_id=$1 ORDER BY created_at,operation_id',[row.id])).rows;
-  // The owner's review and undo say when a project whose chats share what they know is involved now (ADR-0226).
   const moves=proposal.kind==='organization'?proposal.assignments.map(a=>({space_id:a.space_id,mode:'assigned',project_id:a.project_id??null})):
    proposal.kind==='project_assignment'?[{space_id:String(proposal.payload.space_id),mode:String(proposal.payload.mode),project_id:proposal.payload.project_id??null}]:[];
-  const sharing_projects=proposal.kind==='project_save'?proposal.payload.id?(await this.stores.control.query('SELECT id,name FROM projects WHERE id=$1 AND sharing_enabled',[proposal.payload.id])).rows:[]:
-   await this.sharingProjects(moves,this.stores.control);
   const undoMoves=row.state==='applied'&&row.kind==='organization'?(row.result?.assignments??[]).map((change:any)=>({space_id:change.after.space_id,
    mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})):[];
-  const undo_sharing_projects=await this.sharingProjects(undoMoves,this.stores.control);
-  // They also say when a chat it moves joins a project's task list, where it sees every task (ADR-0243).
+  // The owner's review and undo name each project a group moves into or out of, with the groups already in it, since
+  // people in two of them can get private answers that combine them (ADR-0246).
+  // A project the proposal itself creates is named too, with no group in it yet, whenever the proposal puts a group in it.
+  const created=proposal.kind==='organization'?proposal.creates.filter(c=>proposal.assignments.some(a=>a.project_key===c.key))
+   .map(c=>({id:'new:'+c.key,name:c.name,groups:[] as string[]})):[];
+  const project_groups=[...await this.projectGroups(moves,this.stores.control),...created],undo_project_groups=await this.projectGroups(undoMoves,this.stores.control);
+  // They also say when a group joins a project with tasks set on the whole project, which it then sees (ADR-0243).
   const task_projects=await this.taskProjects(moves,this.stores.control),undo_task_projects=await this.taskProjects(undoMoves,this.stores.control);
   // A card that shares or rewords a fact names where it came from and who can read it (ADR-0242).
   const fact=proposal.kind==='fact_grant'?proposal.payload.fact_id:proposal.kind==='entity_correct'?proposal.target_id:null;
@@ -267,7 +271,7 @@ export class KnowledgeManagementRepository {
    catch(error){fact_audience_error=error instanceof HttpError&&error.status===404?error.code:'audience_unavailable';}
   // A proposal saved before private chats were refused still opens, marked, so the owner can cancel it; it never applies.
   const private_chats=proposalPrivateChats(proposal);
-  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},sharing_projects,undo_sharing_projects,task_projects,undo_task_projects,
+  return {...row,proposal,evidence:row.dependencies.sources,affected_topics:row.dependencies.topics??{},project_groups,undo_project_groups,task_projects,undo_task_projects,
    ...(fact?{fact_audience,...(fact_audience_error?{fact_audience_error}:{})}:{}),...(private_chats.length?{private_chats}:{}),decision_history};}
  async proposals(principal:Reader,after=''){admin(principal);if(after)id(after);const rows=(await this.stores.control.query(`SELECT id FROM knowledge_proposals WHERE $1='' OR
   (created_at,id)<(SELECT created_at,id FROM knowledge_proposals WHERE id=$1) ORDER BY created_at DESC,id DESC LIMIT 101`,[after])).rows;
@@ -300,6 +304,9 @@ export class KnowledgeManagementRepository {
  }
 
  private async matchDelegation(proposal:OrganizationProposal,input:{source:SourceReference;space:string;origin:string;binding:GuardBinding},db?:pg.PoolClient,required?:{id:string;revision:number}):Promise<OrganizationDelegation|null>{
+  // Organizing by itself never moves a group or topic into or out of a project: every such move waits for the owner's
+  // review, so a delegation only ever creates projects (ADR-0246).
+  if(proposal.assignments.length)return null;
   const control=db??this.stores.control;
   const rows=(await control.query('SELECT * FROM organization_delegations WHERE enabled AND (expires_at IS NULL OR expires_at>now()) ORDER BY id')).rows as OrganizationDelegation[];
   const captured=await this.s.access.archive.verify(input.source);
@@ -322,56 +329,38 @@ export class KnowledgeManagementRepository {
    for(const space of new Set([...evidence.values(),...(input.origin==='learning'?[input.space]:[])])){
     if(!await this.baselineMatches(permission,space,control))permitted=false;
    }
-   for(const change of [...proposal.creates,...proposal.assignments])if(input.origin==='learning'&&!change.evidence_ids.includes(input.source.id))permitted=false;
-   for(const assignment of proposal.assignments){
-    if(!assignment.purpose_evidence||!scopes.includes(assignment.space_id)||input.origin==='learning'&&assignment.space_id!==input.space){permitted=false;break;}
-    // Evidence of another project's existence is not evidence of this conversation's purpose.
-    if(assignment.evidence_ids.some(e=>evidence.get(e)!==assignment.space_id)){permitted=false;break;}
-    const current=(await control.query('SELECT revision FROM project_assignments WHERE space_id=$1',[assignment.space_id])).rows[0];
-    if(!await this.baselineMatches(permission,assignment.space_id,control)||(current?.revision??0)!==assignment.expected_revision){permitted=false;break;}
-    if(assignment.project_id&&!permission.project_ids.includes(assignment.project_id)&&!(await control.query('SELECT 1 FROM organization_project_origins WHERE project_id=$1 AND delegation_id=$2',[assignment.project_id,permission.id])).rowCount){permitted=false;break;}
-    if(assignment.project_id&&(await control.query(`SELECT 1 FROM projects p JOIN projects other ON lower(other.name)=lower(p.name) AND other.id<>p.id
-     WHERE p.id=$1 AND other.state='active' LIMIT 1`,[assignment.project_id])).rowCount){permitted=false;break;}
-    // Joining or leaving a project whose chats share what they know changes who knows what: only the owner does that (ADR-0226).
-    if((await this.sharingProjects([{space_id:assignment.space_id,mode:'assigned',project_id:assignment.project_id??null}],control)).length){permitted=false;break;}
-    // Joining a project's task list shows the chat every task on it, the owner's included: only the owner does that (ADR-0243).
-    if((await this.taskProjects([{space_id:assignment.space_id,mode:'assigned',project_id:assignment.project_id??null}],control)).length){permitted=false;break;}
-    for(const topic of await this.affectedTopics(assignment.space_id,control)){
-     if(!scopes.includes(topic)||!await this.baselineMatches(permission,topic,control))permitted=false;
-    }
-   }
+   for(const change of proposal.creates)if(input.origin==='learning'&&!change.evidence_ids.includes(input.source.id))permitted=false;
    if(permitted)return permission;
   }
   return null;
  }
 
- /** The projects whose chats share what they know that these moves touch: the one each chat is in now and the one it would be in.
-  * A topic that follows its group is in the group's project, and one set to follow it would be (ADR-0226). */
- private async sharingProjects(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string}[]>{
-  // One cheap check first: while no project shares, as by default, no move can involve one.
-  if(!moves.length||!(await db.query('SELECT 1 FROM projects WHERE sharing_enabled LIMIT 1')).rowCount)return [];
-  const ids=new Set<string>();
-  for(const move of moves){
-   const parent=parentSpace(move.space_id),rows=(await db.query('SELECT space_id,project_id,mode FROM project_assignments WHERE space_id=$1 OR space_id=$2',[move.space_id,parent])).rows;
-   const own=rows.find(r=>r.space_id===move.space_id),group=parent?rows.find(r=>r.space_id===parent&&r.mode==='assigned')?.project_id??null:null;
-   for(const project of [own&&own.mode!=='inherit'?own.project_id:group,move.mode==='assigned'?move.project_id:move.mode==='inherit'?group:null])if(project)ids.add(project);
-  }
-  return ids.size?(await db.query('SELECT id,name FROM projects WHERE id=ANY($1::text[]) AND sharing_enabled ORDER BY id',[[...ids]])).rows:[];
+ /** The project a chat is in now and the one a move puts it in. A topic is always in its group's (ADR-0246). */
+ private async moveProjects(move:{space_id:string;mode:string;project_id:string|null},db:Pick<pg.PoolClient,'query'>):Promise<{now:string|null;next:string|null}>{
+  const parent=parentSpace(move.space_id),rows=(await db.query('SELECT space_id,project_id,mode FROM project_assignments WHERE space_id=$1 OR space_id=$2',[move.space_id,parent])).rows;
+  const own=rows.find(r=>r.space_id===move.space_id),group=parent?rows.find(r=>r.space_id===parent&&r.mode==='assigned')?.project_id??null:null;
+  const now=parent?group:own?.mode==='assigned'?own.project_id:null;
+  return {now,next:move.mode==='assigned'?move.project_id:move.mode==='inherit'?group:null};
  }
 
- /** The projects with tasks that these moves bring a chat into from another project, or from none. A topic set to
-  * follow its group joins the group's project. A chat that joins a project's list sees every task on it, archived and
-  * in the trash too, so only the owner moves one there, after seeing so (ADR-0243). */
+ /** Each existing project these moves put a group into or take one out of: its name and the served groups in it other
+  * than the moved ones, as projectGroups decides (ADR-0246). A project the proposal creates has none yet. */
+ private async projectGroups(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string;groups:string[]}[]>{
+  const ids=new Set<string>(),moved=new Set(moves.map(move=>parentSpace(move.space_id)??move.space_id));
+  for(const move of moves){const {now,next}=await this.moveProjects(move,db);if(next!==now)for(const project of [now,next])if(project)ids.add(project);}
+  if(!ids.size)return [];
+  const served=this.s.access.policy().group_ids??[],rows=(await db.query('SELECT id,name FROM projects WHERE id=ANY($1::text[]) ORDER BY id',[[...ids]])).rows;
+  return Promise.all(rows.map(async row=>({id:row.id as string,name:row.name as string,groups:(await projectGroups(db,row.id,served)).filter(group=>!moved.has(group))})));
+ }
+
+ /** The projects with tasks set on the whole project that these moves bring a chat into from another project, or from
+  * none. A group sees those tasks, archived and in the trash too, besides its own; never another group's (ADR-0243,
+  * ADR-0247). The owner's review says so. */
  private async taskProjects(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string}[]>{
   const ids=new Set<string>();
-  for(const move of moves){
-   const parent=parentSpace(move.space_id),rows=(await db.query('SELECT space_id,project_id,mode FROM project_assignments WHERE space_id=$1 OR space_id=$2',[move.space_id,parent])).rows;
-   const own=rows.find(r=>r.space_id===move.space_id),group=parent?rows.find(r=>r.space_id===parent&&r.mode==='assigned')?.project_id??null:null;
-   const now=own&&own.mode!=='inherit'?own.project_id:group,next=move.mode==='assigned'?move.project_id:move.mode==='inherit'?group:null;
-   if(next&&next!==now)ids.add(next);
-  }
+  for(const move of moves){const {now,next}=await this.moveProjects(move,db);if(next&&next!==now)ids.add(next);}
   return ids.size?(await db.query(`SELECT p.id,p.name FROM projects p WHERE p.id=ANY($1::text[])
-   AND EXISTS(SELECT 1 FROM owner_tasks t WHERE t.project_id=p.id) ORDER BY p.id`,[[...ids]])).rows:[];
+   AND EXISTS(SELECT 1 FROM owner_tasks t WHERE t.project_id=p.id AND t.group_id IS NULL) ORDER BY p.id`,[[...ids]])).rows:[];
  }
 
  private async baselineMatches(permission:OrganizationDelegation,space:string,db:Pick<pg.PoolClient,'query'>){
