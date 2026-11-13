@@ -41,7 +41,7 @@ def check_name(name):
 
 # Compose project names that tests, fixtures and restores make for themselves; a workspace never takes one.
 RESERVED = ('test', 'tester', 'installation', 'stores', 'reset', 'restore', 'restored', 'recovery', 'db-fixture',
-            'release-check', 'candidate', 'preview', 'security-acceptance', 'dev')
+            'release-check', 'candidate', 'preview', 'security-acceptance')
 
 
 def check_new_name(name):
@@ -220,6 +220,15 @@ def _inspect(kind, ids):
     except ValueError: return []
 
 
+def _volume_exists(name):
+    """Whether Docker has the volume. Only Docker's own "no such volume" counts as absent; no answer stops the caller."""
+    try: result = subprocess.run(['docker', 'volume', 'inspect', name], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError): result = None
+    if result is not None and result.returncode == 0: return True
+    if result is not None and 'no such volume' in str(result.stderr).lower(): return False
+    raise WorkspaceError("Docker isn't answering. Start Docker, then run this again.")
+
+
 def containers():
     """Every Compose container on this Docker, running or not; empty when Docker can't be reached."""
     ids = (_docker('ps', '-aq', '--filter', 'label=com.docker.compose.project') or '').split()
@@ -358,6 +367,14 @@ def claim(folder, fresh=False):
         for other, place, theirs in others:
             problems += overlaps(mine, claims(theirs, place), f'the workspace {other} in {place}')
         problems += docker_overlaps(mine, folder, everything)
+        left = mine['project'] + '_postgres_data'
+        held = any(claims(theirs, place)['project'] == mine['project'] for _, place, theirs in others)
+        if fresh and not held and _volume_exists(left):
+            # A new install would take over an earlier one's database, such as one renamed away. Unlisted, it may
+            # still be someone's only copy, so naming this folder comes first.
+            problems.append(f"Docker still has {left} from an earlier {name} install, and this new one would take over its "
+                            f"data. Name this folder with ./bin/nocheh init --workspace NAME, or copy that install's .env here. "
+                            f"Remove its {mine['project']}_* volumes only if nobody needs that data.")
         busy = sorted(port for port in mine['ports'] - _published(everything) if not port_free(port))
         if busy: problems.append(f"Port{'s' if len(busy) > 1 else ''} {', '.join(map(str, busy))} {'are' if len(busy) > 1 else 'is'} "
                                  'used by another program. Set NOCHEH_PORT in .env to a free one.')
@@ -490,3 +507,63 @@ def update(targets, own_folder, run=subprocess.run, say=print):
         else:
             say(f'{name}: {moved}, restarted.')
     return 1 if failed else 0
+
+
+def rename(name, folder, run=subprocess.run, say=print):
+    """Gives the stopped workspace in `folder` a new name. Its database and memory volumes are copied to the new
+    name's, and the old ones stay until the owner removes them; its images are built at its next start."""
+    from tools.operations.installation.configuration import read_env, write_env
+    folder = Path(folder).resolve()
+    values = settings_of(folder)
+    if values is None: raise WorkspaceError('This folder is not a workspace. Run this from a workspace folder.')
+    old = name_of(values)
+    check_new_name(name)
+    if name == old: raise WorkspaceError(f'This workspace is already named {name}.')
+    if any(other == name for other, _, _ in listed()):
+        raise WorkspaceError(f'The workspace {name} already exists. ./bin/nocheh workspaces lists them.')
+    if state_of(folder, containers()) != 'stopped':
+        raise WorkspaceError(f'{old} is running. Stop it first with ./bin/nocheh down, or make dev-stop for make dev.')
+    before, after = identity(values), identity({'NOCHEH_WORKSPACE': name})
+    volumes = [(before['COMPOSE_PROJECT_NAME'] + '_postgres_data', after['COMPOSE_PROJECT_NAME'] + '_postgres_data', 'postgres_data')]
+    volumes += [(values.get(key) or before[key], after[key], volume) for key, volume in
+                (('NOCHEH_HONCHO_DATABASE_VOLUME', 'honcho_database'), ('NOCHEH_HONCHO_REDIS_VOLUME', 'honcho_redis'))]
+    taken = [target for _, target, _ in volumes if _volume_exists(target)]
+    if taken: raise WorkspaceError(f"Docker already has {', '.join(taken)}. Remove it first, or pick another name.")
+    present = [volume for volume in volumes if _volume_exists(volume[0])]
+    if present:
+        # Any image of this workspace with a shell can copy: ./bin/nocheh up builds the first, make dev the second.
+        prefix = images(values)
+        candidates = (f'{prefix}-store-postgres:local', f"{before['COMPOSE_PROJECT_NAME']}-dev:db", f'{prefix}-services:local')
+        copier = next((image for image in candidates if _inspect('image', [image])), None)
+        if copier is None: raise WorkspaceError(f'{old} has no images to copy its data with. Run ./bin/nocheh build first.')
+        created, copying = [], None
+        try:
+            for source, target, volume in present:
+                run(['docker', 'volume', 'create', '--label', f"com.docker.compose.project={after['COMPOSE_PROJECT_NAME']}",
+                     '--label', f'com.docker.compose.volume={volume}', target], check=True, capture_output=True, text=True)
+                created.append(target); copying = 'nocheh-rename-' + target
+                # --init passes Ctrl-C on to the copy, which would ignore it as the container's first process.
+                run(['docker', 'run', '--rm', '--init', '--name', copying, '--pull=never', '--network', 'none', '--user', '0:0',
+                     '--entrypoint', 'sh', '-v', f'{source}:/from:ro', '-v', f'{target}:/to', copier, '-c', 'cp -a /from/. /to/'],
+                    check=True, capture_output=True, text=True)
+                copying = None
+        except (subprocess.CalledProcessError, KeyboardInterrupt) as error:
+            # A stopped copy leaves no half copy behind to block the next try; the old volumes were only read.
+            if copying: run(['docker', 'rm', '--force', copying], capture_output=True)
+            stuck = [target for target in created if run(['docker', 'volume', 'rm', '--force', target], capture_output=True).returncode]
+            after_note = f"{old} keeps its name and data." + (f" Remove {', '.join(stuck)} before trying again." if stuck else '')
+            if isinstance(error, KeyboardInterrupt): raise WorkspaceError('Stopped. ' + after_note) from None
+            detail = (error.stderr or '').strip().splitlines()[-1:] if isinstance(error.stderr, str) else []
+            raise WorkspaceError(f"Copying {source} failed{': ' + detail[0] if detail else ''}. {after_note}") from error
+    saved = read_env(folder / '.env'); saved['NOCHEH_WORKSPACE'] = name
+    for key in DERIVED:
+        if saved.get(key) or (name != DEFAULT and key in ('COMPOSE_PROJECT_NAME', 'NOCHEH_IMAGES')): saved[key] = after[key]
+    write_env(folder / '.env', saved)
+    claim(folder)
+    say(f'{old} is now {name}.')
+    if present:
+        say('Its database and memory were copied. The old copies keep the old names until you remove them, and a new '
+            f"{old} workspace on this machine needs them gone first:\n  docker volume rm {' '.join(source for source, _, _ in present)}")
+    say('Its dashboard asks you to sign in again, and new off-site copies go to its own folder. '
+        'Start it with ./bin/nocheh up or make dev; the first start builds its images.')
+    return 0

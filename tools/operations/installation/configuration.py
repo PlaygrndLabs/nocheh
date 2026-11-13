@@ -321,16 +321,20 @@ def initialize(state, workspace=None):
         workspaces.check_new_name(workspace)
         current = existing.get('NOCHEH_WORKSPACE') or (workspaces.DEFAULT if existing else None)
         if current and current != workspace:
-            raise workspaces.WorkspaceError(f'This folder is already the workspace {current}, and a workspace keeps its name. '
-                                            f'Make another one with ./bin/nocheh workspace new {workspace}.')
+            raise workspaces.WorkspaceError(f'This folder is already the workspace {current}. '
+                                            f'Rename it with ./bin/nocheh workspace rename {workspace}, or make another one with '
+                                            f'./bin/nocheh workspace new {workspace}.')
     for name in ('files', 'spool', 'hermes', 'telegram', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
     github_folders(state); machine_folder(state)
     values = dict(DEFAULTS)
     values.update(existing)
     if workspace: values['NOCHEH_WORKSPACE'] = workspace
-    elif not existing and state == DEFAULT_STATE and (checkout := workspaces.checkout_settings(INSTALLATION_ROOT)):
-        # A session worktree's first .env belongs to the workspace of the checkout it was made from.
+    elif (state == DEFAULT_STATE and (main := workspaces.main_checkout(INSTALLATION_ROOT))
+          and (checkout := workspaces.settings_of(main)) and workspaces.name_of(checkout) != workspaces.name_of(values)):
+        # A session worktree belongs to the workspace of the checkout it was made from, also after a rename.
         values['NOCHEH_WORKSPACE'] = workspaces.name_of(checkout)
+        names = workspaces.identity(values)
+        values.update({key: names[key] for key in workspaces.DERIVED if values.get(key)})
     if workspaces.name_of(values) != workspaces.DEFAULT:
         # Saved too, so a plain `docker compose` in this folder reaches this workspace, never `nocheh` (ADR-0245).
         identity = workspaces.identity(values)

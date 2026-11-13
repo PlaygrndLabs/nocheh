@@ -107,7 +107,7 @@ def claim_folder(fresh):
 
 
 def workspace_command(command, rest):
-    """Several workspaces on one machine (ADR-0245): list them, make a new one, update them."""
+    """Several workspaces on one machine (ADR-0245): list them, make or rename one, update them."""
     from tools.operations.installation import workspaces
     sys.path.insert(0, str(ROOT))
     parser = argparse.ArgumentParser(prog='nocheh ' + command)
@@ -116,6 +116,8 @@ def workspace_command(command, rest):
         new = actions.add_parser('new', help='Copy this folder\'s code into a new folder and set it up as a new workspace.')
         new.add_argument('name', help='Short name, such as acme: 1-50 lowercase letters, digits or dashes')
         new.add_argument('--folder', help='Where the new workspace lives. Default: next to this folder, named nocheh-NAME')
+        renamed = actions.add_parser('rename', help='Give this stopped workspace a new name; its data is copied to it.')
+        renamed.add_argument('name', help='The new name: 1-50 lowercase letters, digits or dashes')
     elif command == 'update':
         parser.add_argument('names', nargs='*', help='Workspaces to update. Default: this folder\'s workspace')
         parser.add_argument('--all', action='store_true', help='Update every workspace on this machine')
@@ -132,6 +134,9 @@ def workspace_command(command, rest):
                 print('This folder overlaps another workspace:\n' + str(error) + '\n', file=sys.stderr)
         if command == 'workspaces':
             print(workspaces.show(INSTALLATION_ROOT)); return 0
+        if command == 'workspace' and selected.action == 'rename':
+            if not env_path(STATE).exists(): raise WorkspaceError('This folder is not a workspace. Run this from a workspace folder.')
+            return workspaces.rename(selected.name, INSTALLATION_ROOT)
         if command == 'workspace':
             if not env_path(STATE).exists() and not selected.folder:
                 # Next to a session worktree, the new workspace would go when the worktree does.

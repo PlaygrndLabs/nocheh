@@ -112,14 +112,20 @@ machine's Docker engine and the code they were cloned from
 
 ```bash
 ./bin/nocheh workspace new acme [--folder DIR]   # clone this folder's main into ../nocheh-acme and run init there
+./bin/nocheh workspace rename dev                # rename this stopped workspace; its data is copied to the new name
 ./bin/nocheh workspaces                          # every workspace: folder, dashboard, state and code revision
 ./bin/nocheh update [NAME ...] [--all]           # pull main and restart the running ones; default: this folder's
 ```
 
-`NOCHEH_WORKSPACE` in `.env` holds the name, set once by `init` or
-`workspace new` and never changed; a folder whose `.env` has none is `personal`.
+`NOCHEH_WORKSPACE` in `.env` holds the name, set by `init` or `workspace new`;
+a folder whose `.env` has none is `personal`. `workspace rename NEW` renames a
+stopped workspace: it copies its database and memory volumes to the new name's
+and keeps the old ones until you remove them with the `docker volume rm` it
+prints. Until they are gone, a new workspace with the old name is refused, because it
+would take over that data. Its dashboard asks for the password again, and its new off-site copies
+go to the new name's folder.
 A name has 1-50 lowercase letters, digits or dashes; names that tests,
-fixtures and restores use for themselves, such as `test`, `dev`, `restored` or
+fixtures and restores use for themselves, such as `test`, `restored` or
 `restore-…`, are refused. Everything else follows from the name:
 
 | What | `personal` | `acme` |

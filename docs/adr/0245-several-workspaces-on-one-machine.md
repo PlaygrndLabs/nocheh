@@ -14,7 +14,9 @@ workspace, not per machine) and the single-stack rule of
 workspace). Amends the off-site layout of
 [ADR-0229](0229-encrypted-off-site-backup-copies.md) (one folder per
 workspace) and the restore port of
-[ADR-0023](0023-consistent-backups-and-inactive-restore.md).
+[ADR-0023](0023-consistent-backups-and-inactive-restore.md). On 2026-11-13 the
+owner said "my current will be name test/dev", so a stopped workspace can be
+renamed and keep its data.
 </status>
 
 <context>
@@ -35,12 +37,12 @@ workspace) and the restore port of
 <decision>
 - A workspace is one installation in its own folder (a Git clone) with its own
   `.env`, state, Telegram bot, dashboard and backups. `NOCHEH_WORKSPACE` holds
-  its name: 1-50 lowercase letters, digits or dashes, set once by `init
-  --workspace` or `workspace new`, never changed. A `.env` without it is
-  `personal`. A name a person picks may not be or start with a name tests,
-  fixtures and restores use (`test`, `tester`, `installation`, `stores`,
-  `reset`, `restore`, `restored`, `recovery`, `db-fixture`, `release-check`,
-  `candidate`, `preview`, `security-acceptance`, `dev`).
+  its name: 1-50 lowercase letters, digits or dashes, set by `init
+  --workspace` or `workspace new`. A `.env` without it is `personal`. A name
+  a person picks may not be or start with a name tests, fixtures and restores
+  use (`test`, `tester`, `installation`, `stores`, `reset`, `restore`,
+  `restored`, `recovery`, `db-fixture`, `release-check`, `candidate`,
+  `preview`, `security-acceptance`).
 - Everything else follows from the name (`tools/operations/installation/workspaces.py`).
   The project is `nocheh` for `personal` and `nocheh-<name>` otherwise. The
   networks are `<project>-agent` and `<project>-memory`, the Honcho volumes
@@ -105,6 +107,20 @@ workspace) and the restore port of
 - Commands: `./bin/nocheh workspace new NAME [--folder DIR]` clones this
   folder's `main` to `../nocheh-NAME`, keeps the origin and the Git hooks, and
   runs `init --workspace NAME` there; it starts nothing.
+  `./bin/nocheh workspace rename NAME` renames this folder's workspace while
+  its stack is stopped: it copies the database and Honcho volumes to the new
+  name's, labelled with the new project, with a shell image the workspace
+  already built, rewrites the names in `.env` and the machine's list, and
+  keeps the old volumes until the owner removes them. It refuses a running
+  stack, a listed or reserved name, new volumes that already exist, and a
+  Docker that does not answer (only Docker's "no such volume" counts as no
+  data); a copy that fails or is stopped removes its half copy and keeps the
+  old name. A session worktree's `.env` follows its main checkout's new name.
+  A new `.env` is refused while its project's `_postgres_data` volume is left
+  from an earlier install that no listed workspace holds, such as one renamed
+  away, because the new install would take over that data; naming the folder
+  comes first in the advice, and removal only if nobody needs the data. That
+  check needs Docker to answer.
   `./bin/nocheh workspaces` lists each workspace's folder, dashboard, state
   (running, development, stopped) and code revision; a moved or deleted
   folder drops out. These commands add their own folder to the list only when
@@ -126,7 +142,11 @@ workspace) and the restore port of
 - The personal installation keeps its names, data and off-site copies. Its
   `.env` gains `NOCHEH_WORKSPACE='personal'` at the next `init` or `up`;
   `NOCHEH_BOX_IMAGE` in an old `.env` is ignored. Its running containers get
-  the new labels at the next `./bin/nocheh up` or `make dev`.
+  the new labels at the next `./bin/nocheh up` or `make dev`. An install that
+  becomes another workspace, such as a development install named `dev`, is
+  renamed with `workspace rename` while stopped; its images are built again
+  under the new name at its next start, and its old volumes take disk space
+  until the owner removes them.
 - Each workspace builds its own images, so several workspaces use more disk.
 - Rejected: one checkout serving several workspaces through
   `NOCHEH_STATE_DIR`. Code, images and updates would be shared, and the backup

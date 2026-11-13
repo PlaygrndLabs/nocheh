@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 from tools.operations.installation import configuration, workspaces
 
+VOLUME_EXISTS = workspaces._volume_exists
+
 ROOT = Path(__file__).resolve().parents[2]
 TUNNEL = 'eyJhIjoic3ludGhldGljLWFjY291bnQiLCJ0IjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIiwicyI6InN5bnRoZXRpYyJ9'
 
@@ -33,7 +35,8 @@ class Machine(unittest.TestCase):
         for patcher in (patch.dict(os.environ, {'NOCHEH_WORKSPACES_FILE': str(self.base / 'machine/workspaces.json')}),
                         patch.object(workspaces, 'containers', side_effect=lambda: self.docker),
                         patch.object(workspaces, '_inspect', side_effect=lambda kind, ids: [] if kind else self.docker),
-                        patch.object(workspaces, 'port_free', return_value=True)):
+                        patch.object(workspaces, 'port_free', return_value=True),
+                        patch.object(workspaces, '_volume_exists', side_effect=lambda name: bool(workspaces._inspect('volume', [name])))):
             patcher.start(); self.addCleanup(patcher.stop)
 
     def folder(self, name, workspace=None, **settings):
@@ -127,6 +130,7 @@ class FolderTests(Machine):
             # A new workspace never lands next to a session worktree, and update needs to know which ones.
             self.assertEqual(main.workspace_command('workspace', ['new', 'acme']), 1)
             self.assertEqual(main.workspace_command('update', []), 1)
+            self.assertEqual(main.workspace_command('workspace', ['rename', 'acme']), 1)
         self.assertFalse((worktree / '.env').exists())
         self.assertEqual([name for name, _, _ in workspaces.listed()], ['personal'])
 
@@ -171,6 +175,14 @@ class FolderTests(Machine):
         # It never starts a second acme stack.
         with self.assertRaisesRegex(workspaces.WorkspaceError, 'name acme is already used'):
             self.claim(worktree, fresh=False)
+        # When its checkout is renamed, its .env follows.
+        configuration.write_env(acme / '.env', {**configuration.read_env(acme / '.env'), 'NOCHEH_WORKSPACE': 'beta',
+                                                'COMPOSE_PROJECT_NAME': 'nocheh-beta', 'NOCHEH_IMAGES': 'nocheh-beta'})
+        with patch.object(configuration, 'INSTALLATION_ROOT', worktree), patch.object(configuration, 'DEFAULT_STATE', state):
+            configuration.initialize(state)
+        saved = configuration.read_env(worktree / '.env')
+        self.assertEqual((saved['NOCHEH_WORKSPACE'], saved['COMPOSE_PROJECT_NAME'], saved['NOCHEH_IMAGES']),
+                         ('beta', 'nocheh-beta', 'nocheh-beta'))
 
     def test_the_dashboard_container_keeps_a_rehearsal_on_the_images_it_started_with(self):
         # The container mounts a session worktree, but not the main checkout its .git file points to.
@@ -428,7 +440,7 @@ class CommandsTests(Machine):
                 ['git', '-C', str(target), 'config', 'core.hooksPath', 'tools/development/git-hooks'],
                 [str(target / 'bin/nocheh'), 'init', '--workspace', 'acme']])
             # Names that tests, fixtures and restores make for themselves stay theirs.
-            for reserved in ('test', 'restore-1', 'restored', 'installation-0123456789ab', 'dev'):
+            for reserved in ('test', 'restore-1', 'restored', 'installation-0123456789ab', 'preview'):
                 with self.assertRaisesRegex(workspaces.WorkspaceError, 'keeps the name'):
                     workspaces.create(reserved, personal, run=run)
             with self.assertRaisesRegex(workspaces.WorkspaceError, 'workspace personal already exists'):
@@ -436,6 +448,98 @@ class CommandsTests(Machine):
             (self.base / 'busy').mkdir(); (self.base / 'busy/file').write_text('x')
             with self.assertRaisesRegex(workspaces.WorkspaceError, 'not empty'):
                 workspaces.create('beta', personal, self.base / 'busy', run=run)
+
+
+    def test_rename_copies_the_data_of_a_stopped_workspace(self):
+        personal = self.folder('nocheh', NOCHEH_HONCHO_DATABASE_VOLUME='nocheh_honcho_database',
+                               NOCHEH_HONCHO_REDIS_VOLUME='nocheh_honcho_redis')
+        self.claim(personal)
+        # The database and one memory volume exist, and only make dev's images were built.
+        existing = {'nocheh_postgres_data', 'nocheh_honcho_database', 'nocheh-dev:db'}
+        calls, said = [], []
+        def run(command, **_): calls.append(command); return SimpleNamespace(returncode=0, stdout='', stderr='')
+        with patch.object(workspaces, '_inspect', side_effect=lambda kind, ids: [{}] if kind and ids[0] in existing else
+                          ([] if kind else self.docker)), \
+                patch.object(workspaces, '_volume_exists', side_effect=lambda volume: volume in existing):
+            self.docker = [running('nocheh', folder=str(personal), service='nocheh-app')]
+            with self.assertRaisesRegex(workspaces.WorkspaceError, 'personal is running. Stop it first'):
+                workspaces.rename('dev', personal, run=run)
+            self.docker = [running('nocheh', folder=str(personal), service='nocheh-app', on=False)]
+            for wrong, reason in (('test', 'keeps the name'), ('personal', 'already named personal')):
+                with self.assertRaisesRegex(workspaces.WorkspaceError, reason): workspaces.rename(wrong, personal, run=run)
+            self.assertEqual(calls, [])
+            self.assertEqual(workspaces.rename('dev', personal, run=run, say=said.append), 0)
+            copy = ['--pull=never', '--network', 'none', '--user', '0:0', '--entrypoint', 'sh']
+            self.assertEqual(calls, [
+                ['docker', 'volume', 'create', '--label', 'com.docker.compose.project=nocheh-dev',
+                 '--label', 'com.docker.compose.volume=postgres_data', 'nocheh-dev_postgres_data'],
+                ['docker', 'run', '--rm', '--init', '--name', 'nocheh-rename-nocheh-dev_postgres_data', *copy,
+                 '-v', 'nocheh_postgres_data:/from:ro', '-v', 'nocheh-dev_postgres_data:/to', 'nocheh-dev:db', '-c', 'cp -a /from/. /to/'],
+                ['docker', 'volume', 'create', '--label', 'com.docker.compose.project=nocheh-dev',
+                 '--label', 'com.docker.compose.volume=honcho_database', 'nocheh-dev_honcho_database'],
+                ['docker', 'run', '--rm', '--init', '--name', 'nocheh-rename-nocheh-dev_honcho_database', *copy,
+                 '-v', 'nocheh_honcho_database:/from:ro', '-v', 'nocheh-dev_honcho_database:/to', 'nocheh-dev:db', '-c', 'cp -a /from/. /to/']])
+            saved = configuration.read_env(personal / '.env')
+            self.assertEqual([saved.get(key) for key in ('NOCHEH_WORKSPACE', 'COMPOSE_PROJECT_NAME', 'NOCHEH_IMAGES',
+                                                         'NOCHEH_HONCHO_DATABASE_VOLUME', 'NOCHEH_HONCHO_REDIS_VOLUME')],
+                             ['dev', 'nocheh-dev', 'nocheh-dev', 'nocheh-dev_honcho_database', 'nocheh-dev_honcho_redis'])
+            self.assertEqual([(name, folder) for name, folder, _ in workspaces.listed()], [('dev', personal)])
+            self.assertIn('docker volume rm nocheh_postgres_data nocheh_honcho_database', '\n'.join(said))
+            # The new name's volumes are never overwritten, and a workspace without images can't copy.
+            existing.add('nocheh-beta_postgres_data'); calls.clear()
+            with self.assertRaisesRegex(workspaces.WorkspaceError, 'already has nocheh-beta_postgres_data'):
+                workspaces.rename('beta', personal, run=run)
+            existing.discard('nocheh-beta_postgres_data'); existing.add('nocheh-dev_postgres_data')
+            existing.discard('nocheh-dev:db')
+            with self.assertRaisesRegex(workspaces.WorkspaceError, 'no images to copy its data with'):
+                workspaces.rename('beta', personal, run=run)
+            self.assertEqual(calls, [])
+            self.assertEqual(configuration.read_env(personal / '.env')['NOCHEH_WORKSPACE'], 'dev')
+            # A copy that fails leaves no half copy behind and keeps the name.
+            existing.add('nocheh-dev-store-postgres:local')
+            def failing(command, **options):
+                calls.append(command)
+                if command[:2] == ['docker', 'run']:
+                    raise subprocess.CalledProcessError(1, command, stderr='cp: write error: No space left on device\n')
+                return SimpleNamespace(returncode=0, stdout='', stderr='')
+            with self.assertRaisesRegex(workspaces.WorkspaceError, 'No space left on device. dev keeps its name and data.$'):
+                workspaces.rename('beta', personal, run=failing)
+            self.assertEqual(calls[-2:], [['docker', 'rm', '--force', 'nocheh-rename-nocheh-beta_postgres_data'],
+                                          ['docker', 'volume', 'rm', '--force', 'nocheh-beta_postgres_data']])
+            # Ctrl-C stops the copy too, and a volume Docker won't remove is named.
+            def interrupted(command, **options):
+                calls.append(command)
+                if command[:2] == ['docker', 'run']: raise KeyboardInterrupt
+                return SimpleNamespace(returncode=1 if command[:3] == ['docker', 'volume', 'rm'] else 0, stdout='', stderr='')
+            with self.assertRaisesRegex(workspaces.WorkspaceError, 'Stopped. dev keeps its name and data. Remove nocheh-beta_postgres_data'):
+                workspaces.rename('beta', personal, run=interrupted)
+            self.assertEqual(configuration.read_env(personal / '.env')['NOCHEH_WORKSPACE'], 'dev')
+        # Without an answer from Docker nothing is renamed: no volume would look like no data.
+        for answer in (SimpleNamespace(returncode=1, stdout='[]', stderr='Cannot connect to the Docker daemon'), OSError('docker')):
+            with patch.object(workspaces, '_volume_exists', VOLUME_EXISTS), patch.object(workspaces.subprocess, 'run', side_effect=[answer]):
+                with self.assertRaisesRegex(workspaces.WorkspaceError, "Docker isn't answering"):
+                    workspaces.rename('beta', personal, run=run)
+        self.assertEqual(configuration.read_env(personal / '.env')['NOCHEH_WORKSPACE'], 'dev')
+        with patch.object(workspaces.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stdout='[]', stderr='Error: No such volume: x')):
+            self.assertFalse(VOLUME_EXISTS('x'))
+
+    def test_a_new_install_never_takes_over_the_database_an_earlier_one_left(self):
+        personal = self.folder('nocheh')
+        with patch.object(workspaces, '_inspect', side_effect=lambda kind, ids: [{}] if ids == ['nocheh_postgres_data'] else
+                          ([] if kind else self.docker)):
+            with self.assertRaisesRegex(workspaces.WorkspaceError, 'still has nocheh_postgres_data from an earlier personal install'):
+                self.claim(personal)
+            # The install that owns it keeps using it.
+            self.assertEqual(self.claim(personal, fresh=False)['workspace'], 'personal')
+            # A second folder of a listed workspace hears only that the name is taken, never to remove its data.
+            clone = self.folder('clone')
+            with self.assertRaises(workspaces.WorkspaceError) as refused: self.claim(clone)
+            self.assertIn('name personal is already used', str(refused.exception))
+            self.assertNotIn('Remove', str(refused.exception))
+        # Without an answer from Docker a new install is not let through.
+        with patch.object(workspaces, '_volume_exists', side_effect=workspaces.WorkspaceError("Docker isn't answering.")):
+            with self.assertRaisesRegex(workspaces.WorkspaceError, "Docker isn't answering"):
+                self.claim(self.folder('nocheh-acme', 'acme'))
 
 
 @unittest.skipUnless(shutil.which('docker'), 'Compose CLI unavailable')

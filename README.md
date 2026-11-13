@@ -113,6 +113,7 @@ Keep each company apart from your personal Nocheh. Each workspace is its own Noc
 
 ```bash
 ./bin/nocheh workspace new acme      # copy this code to ../nocheh-acme and set it up as the workspace acme
+./bin/nocheh workspace rename dev    # rename this folder's stopped workspace; its data comes along
 ./bin/nocheh workspaces              # list the workspaces on this machine, their dashboards and whether they run
 ./bin/nocheh update --all            # pull the newest code into every workspace and restart the ones that run
 ./bin/nocheh update acme             # only acme; with no name, only this folder's workspace

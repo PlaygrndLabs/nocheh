@@ -79,8 +79,8 @@ two running installations.
 
 Several workspaces on one machine (owner, 2026-11-12: "start build", step 0 of the
 members design): each workspace, `personal` and one per company, is its own installation
-in its own folder with its own data, bot, dashboard and backups. Its name, set once at
-setup, decides its Compose project, networks, volumes, images, ports, off-site folder and
+in its own folder with its own data, bot, dashboard and backups. Its name, set at setup
+or changed with `workspace rename` (owner, 2026-11-13: "my current will be name test/dev"), decides its Compose project, networks, volumes, images, ports, off-site folder and
 dashboard sign-in; `personal` keeps the old `nocheh` names. Setup refuses another
 workspace's name, ports, bot, mini app address or tunnel. `workspace new`, `workspaces`
 and `update [NAME|--all]` manage them, and the setup guide shows Docker's address-pool fix
