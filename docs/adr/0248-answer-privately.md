@@ -221,7 +221,13 @@ skills or the owner's default).
 - **Where the owner sees it.** A project's page lists its buttons, newest
   first: where each question was asked, the groups its answer could read, its
   state and reason, and a link to the question. Each private answer's profile
-  shows in Memory › Notes as `Private answer` and the end of its name. No
+  shows in Memory › Notes as `Private answer`, where it was asked and the day
+  it ran. Nocheh sends where it was asked with the turn
+  (`private_answer.group`, the `{group}` of its first line, from the same
+  guarded copies), and the turn keeps it with the time in the profile's own
+  receipt (`answer.json`), which goes with the profile; the same name is
+  already in the profile's conversation. A profile from before the receipt
+  shows the end of its name. No
   later turn opens it and no newer profile of a chat replaces it, so every
   turn's profile preparation removes, with its conversation, each answer
   profile unused for two hours (`prune_answers`): by then its answer has
@@ -263,9 +269,10 @@ skills or the owner's default).
   ([unit](../../test/private-answers.test.ts)); Honcho plain search
   ([memory](../../test/store-native-memory.test.ts)) and its sessions and
   receipts in Postgres ([provenance](../../test/store-provenance.test.ts)); the
-  answer's own profile in Hermes and its removal
+  answer's own profile in Hermes, its removal and its name in Notes
   ([scopes](../../services/hermes/test_scopes.py),
-  [history](../../services/hermes/test_profile_history.py)). The button, the tap and
+  [history](../../services/hermes/test_profile_history.py),
+  [listing](../../services/hermes/test_management.py)). The button, the tap and
   `/start` end to end in storage
   ([button](../../test/store-private-button.test.ts)); the button, the link
   and the bound keyboard in the bot

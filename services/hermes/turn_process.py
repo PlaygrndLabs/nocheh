@@ -83,11 +83,26 @@ def recent_group(value):
 
 def private_answer(value):
     """A private answer's frame and question (ADR-0248): the first line Nocheh wrote from the owner's template, where
-    the question was asked and which groups the answer may read, and the question's event. Anything else is refused."""
-    if (not isinstance(value,dict) or set(value)!={'frame','question_event'} or not isinstance(value['frame'],str)
-            or not 0<len(value['frame'].strip())<=4000 or not isinstance(value['question_event'],str)
-            or not re.fullmatch(r'[a-f0-9]{64}',value['question_event'])):raise ValueError('invalid_private_answer')
+    the question was asked and which groups the answer may read, the question's event, and where it was asked as that
+    line names it (`group`, optional). Anything else is refused."""
+    if (not isinstance(value,dict) or not {'frame','question_event'}<=set(value)<={'frame','question_event','group'}
+            or not isinstance(value['frame'],str) or not 0<len(value['frame'].strip())<=4000
+            or not isinstance(value['question_event'],str) or not re.fullmatch(r'[a-f0-9]{64}',value['question_event'])
+            or 'group' in value and (not isinstance(value['group'],str) or not 0<len(value['group'].strip())<=300
+                                     or any(ord(c)<32 or ord(c)==127 for c in value['group']))):raise ValueError('invalid_private_answer')
     return value
+
+
+def answer_receipt(profile,answer):
+    """Keep where a private answer was asked, as its first line names it, and when it ran, in the answer's own profile,
+    so the owner's notes can tell answers apart (ADR-0248). The same name is already in the profile's conversation, and
+    the receipt goes with the profile."""
+    if 'group' not in answer:return
+    from datetime import datetime,timezone
+    from .native_memory import save_receipt
+    path=Path(profile)/'answer.json'
+    if path.is_symlink():raise ValueError('profile_path_denied')
+    save_receipt(path,json.dumps({'group':answer['group'].strip(),'at':datetime.now(timezone.utc).isoformat(timespec='seconds')}))
 
 
 def job_run(limits):
@@ -108,6 +123,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # A private answer's pass and its framed question come together, or the turn does not run.
     answer = private_answer(body.get('private_answer')) if scope.answer else None
     if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
+    if answer: answer_receipt(profile, answer)
     if background is not None and background['hard_deadline'] <= time.time():
         return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
     text = body.get('text') or ''

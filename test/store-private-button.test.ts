@@ -123,6 +123,7 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     assert.deepEqual(turn.recent_group.map((item:any)=>item.text),['Lunch is at noon'],'with what the asking group said just before it');
     assert.equal(turn.private_answer.question_event,asked);
     assert.match(turn.private_answer.frame,/^\[Private answer\] .*asked in “GP1 team”.*: “GP1 team”, “GP2 team”, “GP3 [^”]+”\./s);
+    assert.equal(turn.private_answer.group,'“GP1 team”','where it was asked, as the first line names it, for the owner’s notes');
     assert.ok(!JSON.stringify(turn).includes(GP2)&&!JSON.stringify(turn).includes(GP3),'no group ID reaches the turn');
     assert.ok(!JSON.stringify(turn).includes('fixture-secret'),'a name comes from its guarded copy, never the original');
     assert.equal(replyTo(start).chat_id,OWNER);assert.equal(replyTo(start).button,undefined,'a private answer carries no button');

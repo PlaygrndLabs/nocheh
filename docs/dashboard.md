@@ -161,7 +161,7 @@ are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the 
 
 ## Native memory and Honcho
 
-Memory › Assistant notes lists configured and historical group/topic profiles. Notes are read-only;
+Memory › Assistant notes lists configured and historical group/topic profiles, and each private answer's own profile by where it was asked and the day it ran. Notes are read-only;
 preferences in Settings › Assistant use the same locked resolver as assistant startup and take effect on
 the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show

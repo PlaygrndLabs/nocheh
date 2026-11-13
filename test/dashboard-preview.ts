@@ -541,7 +541,10 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/data/'+voiceId+'/guarded')return json(res,200,{projections:[]});
   if(route==='/data/'+id+'/guarded')return json(res,200,{projections:[{id:'b'.repeat(64),source_id:id,kind:'events',state:'ready',active_revision:revision,author:revision>1?'owner':'automatic',content:{text:guarded,payload:{text:guarded}}}]});
   if(route==='/data/'+id+'/guarded/history')return json(res,200,url.searchParams.has('revision')?{revision:1,content:{text:source.event.text}}:{revisions:[{revision:1,author:'automatic',created_at:new Date().toISOString()}],next:null});
-  if(route==='/memory/profiles')return json(res,200,{profiles:[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}]});
+  if(route==='/memory/profiles'){const current=[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}];
+   // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
+   return json(res,200,{profiles:current,history_profiles:[...current,{owner:false,scope:'42',profile:'nocheh-'+'a1'.repeat(12),private_answer:true,
+    answer_group:'“Aurora planning” › Iceland planning',answer_at:'2026-11-12T10:00:00+00:00'},{owner:false,scope:'42',profile:'nocheh-'+'b2'.repeat(12),private_answer:true}]});}
   if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy. Verify against original evidence.',citations:[]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));

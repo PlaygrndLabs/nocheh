@@ -454,8 +454,9 @@ export class TelegramDispatchRepository {
     return 'a Telegram group';
   }
   /** A private answer's first line: where the question was asked and every group it may read, the asking one first.
-   * Group and topic names come from guarded copies, as in the speaker line. */
-  private async answerFrame(row:PrivateAnswer,principal:Reader,binding:GuardBinding):Promise<string> {
+   * Group and topic names come from guarded copies, as in the speaker line. `group` is where it was asked, as that line
+   * names it, which the answer's runtime profile keeps so the owner's notes can tell answers apart. */
+  private async answerFrame(row:PrivateAnswer,principal:Reader,binding:GuardBinding):Promise<{frame:string;group:string}> {
     const home=parentSpace(row.from_chat_id)??row.from_chat_id;
     let topic:string|null=null;
     if(row.from_chat_id!==home) {
@@ -466,8 +467,8 @@ export class TelegramDispatchRepository {
     }
     const names=new Map<string,string>();
     for(const group of [home,...readSetGroups(principal.reads!).filter(group=>group!==home)])names.set(group,await this.groupName(group,principal,binding));
-    const template=(await ownerPrompts(this.control))['telegram.private_answer']??privateAnswerFrame;
-    return fillTemplate(template,{group:names.get(home)!+(topic?' › '+topic:''),groups:[...names.values()].join(', ')}).slice(0,4000);
+    const template=(await ownerPrompts(this.control))['telegram.private_answer']??privateAnswerFrame,group=(names.get(home)!+(topic?' › '+topic:'')).slice(0,300);
+    return {frame:fillTemplate(template,{group,groups:[...names.values()].join(', ')}).slice(0,4000),group};
   }
   /**
    * A /start <id> in the owner's private chat (ADR-0248). The record is claimed for this very message: only by the asker,
@@ -507,7 +508,7 @@ export class TelegramDispatchRepository {
     const {transcripts,files,parents,tooLarge,text}=await this.contents(album,binding,false);
     const questionPayload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[row.question_event])).rows[0].payload.toString());
     const speaker=speakerLine(questionPayload,question.event.payload,this.access.policy().owner_id),recent=await this.recentGroup(asked,row.from_chat_id,principal);
-    const privateAnswer={frame:await this.answerFrame(row,principal,binding),question_event:row.question_event};
+    const privateAnswer={...await this.answerFrame(row,principal,binding),question_event:row.question_event};
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:null,guard_mode:binding.mode,
       private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{})};

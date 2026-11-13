@@ -1600,6 +1600,21 @@ test('a project lists its Answer privately buttons: where, what the answer could
   await page.close();
 });
 
+test('Notes names a private answer’s profile by where it was asked and the day it ran', async () => {
+  const {page, problems} = await open('memory?view=notes');
+  const select = page.locator('#notes-profile');
+  await select.waitFor();
+  const labels = await select.locator('option').allTextContents();
+  const day = await page.evaluate(() => new Date('2026-11-12T10:00:00+00:00').toLocaleDateString());
+  assert.ok(
+    labels.includes('Private answer · “Aurora planning” › Iceland planning · ' + day),
+    'named from its receipt: ' + labels.join(' | '),
+  );
+  assert.ok(labels.includes('Private answer · ' + 'b2'.repeat(3)), 'one from before the receipt keeps its short tail');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('turning automatic organizing on is what lets it create projects, with no separate switch', async () => {
   const {page, problems} = await open('memory?view=projects');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Automatic organizing'})});

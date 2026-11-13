@@ -73,6 +73,20 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(result['memories'][0]['text'],'Historical topic note')
             with self.assertRaises(ValueError):dispatch(root,'test',policy,{'action':'memory','scope':'-20/topic/2','profile':name})
 
+    def test_a_private_answers_profile_is_named_by_its_receipt(self):
+        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for name,receipt in (('nocheh-'+'a1'*12,{'group':'“Team” › Plans','at':'2026-11-12T10:00:00+00:00'}),('nocheh-'+'b2'*12,None)):
+                path=root/'profiles'/name;path.mkdir(parents=True)
+                (path/'space.json').write_text(json.dumps({'space':'123','revision':1,'guard_epoch':1,'owner':False,'answer':'a'*32}))
+                if receipt:(path/'answer.json').write_text(json.dumps(receipt))
+            listing={p['profile']:p for p in dispatch(root,'test',policy,{'action':'profiles'})['history_profiles']}
+            named=listing['nocheh-'+'a1'*12]
+            self.assertEqual((named['private_answer'],named['answer_group'],named['answer_at']),(True,'“Team” › Plans','2026-11-12T10:00:00+00:00'))
+            self.assertNotIn('answer_group',listing['nocheh-'+'b2'*12],'one from before the receipt names nothing')
+            self.assertTrue(listing['nocheh-'+'b2'*12]['private_answer'])
+
     def test_preferences_use_revision_and_policy(self):
         policy=Scopes({'enabled':True,'owner_id':'123','group_ids':[]})
         with tempfile.TemporaryDirectory() as root:

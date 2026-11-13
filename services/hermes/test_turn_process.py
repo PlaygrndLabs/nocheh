@@ -79,9 +79,33 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         for scope,extra in ((Scope('42','42',False,'answer',answer='a'*32),{}),(Scope('42','42',False,'answer'),answer),
                             (Scope('42','42',False,'answer',answer='a'*32),{**answer,'private_answer':{'frame':'','question_event':'c'*64}}),
                             (Scope('42','42',False,'answer',answer='a'*32),{**answer,'private_answer':{'frame':frame,'question_event':'x'}}),
-                            (Scope('42','42',False,'answer',answer='a'*32),{**answer,'private_answer':{**answer['private_answer'],'groups':['-20']}})):
+                            (Scope('42','42',False,'answer',answer='a'*32),{**answer,'private_answer':{**answer['private_answer'],'groups':['-20']}}),
+                            (Scope('42','42',False,'answer',answer='a'*32),{**answer,'private_answer':{**answer['private_answer'],'group':'“Team”\nInjected'}}),
+                            (Scope('42','42',False,'answer',answer='a'*32),{**answer,'private_answer':{**answer['private_answer'],'group':'x'*301}})):
             with self.subTest(answer=scope.answer,extra=extra.get('private_answer')),self.assertRaisesRegex(ValueError,'invalid_private_answer'):
                 await run(scope,extra)
+        # Where it was asked, as the first line names it, is kept in the answer's own profile for the owner's notes.
+        with patch('services.hermes.turn_process.answer_receipt') as receipt:
+            await run(Scope('42','42',False,'answer',answer='a'*32),{**answer,'private_answer':{**answer['private_answer'],'group':'“Team” › Plans'}})
+        self.assertEqual(receipt.call_args.args[1]['group'],'“Team” › Plans')
+
+    def test_a_private_answers_receipt_names_where_it_was_asked_and_when(self):
+        from .turn_process import answer_receipt
+        from .management import answer_receipt as listed
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder)
+            answer_receipt(profile,{'frame':'f','question_event':'c'*64})
+            self.assertFalse((profile/'answer.json').exists(),'an answer from before the receipt keeps none')
+            self.assertEqual(listed(profile),{})
+            answer_receipt(profile,{'frame':'f','question_event':'c'*64,'group':' “Team” › Plans '})
+            saved=listed(profile)
+            self.assertEqual(saved['answer_group'],'“Team” › Plans')
+            self.assertRegex(saved['answer_at'],r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$')
+            (profile/'answer.json').write_text('not json')
+            self.assertEqual(listed(profile),{},'an unreadable receipt names nothing and breaks no listing')
+            (profile/'answer.json').unlink();(profile/'answer.json').symlink_to(profile/'elsewhere.json')
+            with self.assertRaisesRegex(ValueError,'profile_path_denied'):answer_receipt(profile,{'frame':'f','question_event':'c'*64,'group':'“Team”'})
+            self.assertEqual(listed(profile),{})
 
     async def test_stream_framing_and_failed_child(self):
         result,events=await self.execute('import sys,json,time; body=json.load(sys.stdin); assert body["channel"]=="browser"; assert body["memory_query"]=="original"; assert 0<body["turn_deadline_epoch"]-time.time()<=230; assert "nocheh:event:event" in body["text"]; print(json.dumps({"event":"message.delta","text":"hello"})); print(json.dumps({"state":"done","text":"hello"}))')
