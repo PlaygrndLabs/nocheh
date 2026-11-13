@@ -219,7 +219,11 @@ skills or the owner's default).
 - **Where the owner sees it.** A project's page lists its buttons, newest
   first: where each question was asked, the groups its answer could read, its
   state and reason, and a link to the question. Each private answer's profile
-  shows in Memory › Notes as `Private answer` and the end of its name.
+  shows in Memory › Notes as `Private answer` and the end of its name. No
+  later turn opens it and no newer profile of a chat replaces it, so every
+  turn's profile preparation removes, with its conversation, each answer
+  profile unused for two hours (`prune_answers`): by then its answer has
+  arrived or can no longer arrive.
 </button_delivery_and_brain>
 
 <alternatives>
@@ -257,8 +261,9 @@ skills or the owner's default).
   ([unit](../../test/private-answers.test.ts)); Honcho plain search
   ([memory](../../test/store-native-memory.test.ts)) and its sessions and
   receipts in Postgres ([provenance](../../test/store-provenance.test.ts)); the
-  answer's own profile in Hermes
-  ([scopes](../../services/hermes/test_scopes.py)). The button, the tap and
+  answer's own profile in Hermes and its removal
+  ([scopes](../../services/hermes/test_scopes.py),
+  [history](../../services/hermes/test_profile_history.py)). The button, the tap and
   `/start` end to end in storage
   ([button](../../test/store-private-button.test.ts)); the button, the link
   and the bound keyboard in the bot

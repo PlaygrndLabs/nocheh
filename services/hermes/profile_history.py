@@ -11,7 +11,8 @@ is prepared again for the new epoch.
 
 Once a newer profile exists, earlier-epoch profiles of the same chat are
 removed after they have been idle for a while, so hidden or corrected content
-does not stay behind in conversations that are no longer used.
+does not stay behind in conversations that are no longer used. A private
+answer's own profile is removed once no answer can run in it any more.
 """
 import fcntl
 import json
@@ -30,6 +31,9 @@ MESSAGES=120
 # A superseded profile may still finish a turn or review that started before
 # the epoch changed; it is removed only after this long without any change.
 IDLE_SECONDS=15*60
+# A private answer's profile serves one answer, which has at most an hour to arrive after its /start (ADR-0248); once it
+# has been unused well past that, nothing can run in it again.
+ANSWER_IDLE_SECONDS=2*60*60
 COMPACTION=('[CONTEXT COMPACTION','[CONTEXT SUMMARY]:')
 
 
@@ -165,13 +169,36 @@ def prune(profile,now=None):
         receipt=_receipt(other)
         epoch=receipt.get('guard_epoch') if receipt else None
         if type(epoch) is not int or not epoch<current['guard_epoch'] or not _same_chat(current,receipt):continue
-        try:
-            if now-_last_change(other)<IDLE_SECONDS:continue
-            # A profile whose memory or carry lock is held is still in use.
-            with (other/'.memory.lock').open('a') as memory,(other/'.carry.lock').open('a') as carrying:
-                fcntl.flock(memory,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(carrying,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                shutil.rmtree(other)
-            removed.append(other.name)
-        except (OSError,BlockingIOError) as failure:
-            logging.getLogger(__name__).warning('profile_not_pruned: %s',type(failure).__name__)
+        if _remove(other,now,IDLE_SECONDS):removed.append(other.name)
     return removed
+
+
+def prune_answers(profile,now=None):
+    """Remove every other private answer's profile once it has been unused for ANSWER_IDLE_SECONDS; return their names.
+
+    Each answer is its own profile that no later turn opens and no chat's newer profile replaces, so without this they
+    would build up for good, and a message hidden since would stay in their conversations. The answer itself is in the
+    asker's private chat (ADR-0248)."""
+    profile=Path(profile)
+    now=time.time() if now is None else now
+    removed=[]
+    for other in profile.parent.iterdir():
+        if other==profile or other.is_symlink() or not other.is_dir():continue
+        receipt=_receipt(other)
+        if not receipt or not isinstance(receipt.get('answer'),str) or not receipt['answer']:continue
+        if _remove(other,now,ANSWER_IDLE_SECONDS):removed.append(other.name)
+    return removed
+
+
+def _remove(other,now,idle):
+    """Remove a profile unused for `idle` seconds whose memory and carry locks are free; return whether it was removed."""
+    try:
+        if now-_last_change(other)<idle:return False
+        # A profile whose memory or carry lock is held is still in use.
+        with (other/'.memory.lock').open('a') as memory,(other/'.carry.lock').open('a') as carrying:
+            fcntl.flock(memory,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(carrying,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            shutil.rmtree(other)
+        return True
+    except (OSError,BlockingIOError) as failure:
+        logging.getLogger(__name__).warning('profile_not_pruned: %s',type(failure).__name__)
+        return False
