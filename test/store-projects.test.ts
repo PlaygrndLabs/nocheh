@@ -118,7 +118,7 @@ test('a project never shares between its groups, lists only its served groups, a
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control,()=>[group,second,third,privateChat,topic]),sharing=new SharingPolicyRepository(stores.control);
   const assign=async(space:string,mode:'assigned'|'none'|'inherit',project:string|null=null)=>projects.assign(owner,{space_id:space,mode,
     ...(mode==='assigned'?{project_id:project}:{}),expected_revision:(await projects.effective(space)).own_assignment?.revision??0,operation_id:op('assign')});
-  const listed=async(id:string)=>{let after='';for(;;){const page=await projects.list(owner,after);const row=page.projects.find(p=>p.id===id);if(row)return row;if(!page.next)return null;after=page.next;}};
+  const listed=async(id:string,repository=projects)=>{let after='';for(;;){const page=await repository.list(owner,after);const row=page.projects.find(p=>p.id===id);if(row)return row;if(!page.next)return null;after=page.next;}};
   const rules=async()=>(await stores.control.query('SELECT count(*)::int AS n FROM sharing_rules')).rows[0].n;
   try {
     // The share box is gone: its fields are refused, never stored or ignored (ADR-0246).
@@ -158,12 +158,27 @@ test('a project never shares between its groups, lists only its served groups, a
     await assign(second,'none');
     assert.deepEqual((await listed(other.id))?.groups,[],'"none" is an answer, and leaves the project');
     assert.equal((await projects.effective(second)).own_assignment?.mode,'none');
-    assert.deepEqual((await new ProjectRepository(stores.control).list(owner)).projects.find(p=>p.id===project.id)?.groups,[],'nothing served, no group listed');
+    assert.deepEqual((await listed(project.id,new ProjectRepository(stores.control)))?.groups,[],'nothing served, no group listed');
 
     // The owner's own rule still works, for its exact chats only, whatever project they are in.
     const rule=await sharing.save(owner,{name:'Owner rule',sources:[group],destination:third,enabled:true,mode:'approved',instructions:'',expected_revision:0,operation_id:op('rule')});
     assert.deepEqual(Object.keys(rule).includes('project_id'),false);
     assert.equal(await sharing.covers(rule,group),true);assert.equal(await sharing.covers(rule,topic),false,'a topic that follows its group into a project is not added');
     assert.deepEqual((await sharing.forDestination(third)).map(row=>row.id),[rule.id]);
+
+    // Ten automatic filters at most reach a group, its General chat and its topics together; an eleventh owner rule
+    // into another topic is refused and changes nothing.
+    const fillers=Array.from({length:10},(_,i)=>digest(key+':filler:'+i));
+    for(const [i,id] of fillers.entries())await stores.control.query(`INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision)
+      VALUES($1,'Synthetic filler','["-1"]',$2,true,'filtered','',1)`,[id,i%2?group:group+'/topic/'+(30+i)]);
+    const stored=async()=>(await stores.control.query("SELECT id,revision,enabled FROM sharing_rules WHERE destination=$1 OR starts_with(destination,$1||'/topic/') ORDER BY id",[group])).rows;
+    const kept=await stored(),eleventh={name:'One too many',sources:[second],destination:group+'/topic/99',enabled:true,mode:'filtered',instructions:'',expected_revision:0};
+    await assert.rejects(sharing.save(owner,{...eleventh,operation_id:op('eleventh')}),{code:'sharing_rule_limit'});
+    assert.deepEqual(await stored(),kept,'a refused rule leaves every revision unchanged');
+    assert.equal((await sharing.save(owner,{...eleventh,enabled:false,operation_id:op('eleventh-off')})).enabled,false,'turned off it is kept');
+    await assert.rejects(sharing.save(owner,{...eleventh,sources:Array.from({length:101},(_,i)=>String(Number(group)-1000-i)),operation_id:op('crowd')}),
+      {code:'invalid_sharing_sources'},'a rule reads at most 100 chats');
+    await stores.control.query('UPDATE sharing_rules SET enabled=false WHERE id=ANY($1::text[])',[fillers]);
+    assert.equal((await sharing.save(owner,{...eleventh,operation_id:op('room')})).enabled,true,'with room again it turns on');
   } finally {await stores.close();}
 });
