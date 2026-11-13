@@ -79,9 +79,8 @@ Both stay as they were accepted.
   listed task, or a change to a listed task that sets anything beyond status,
   state, priority, start and due days and times, archive, trash and its list.
   Group, repeat and reminders are held too. A change that only sets the listed
-  fields, or that takes the task out of every list, applies directly. This is
-  the plan's recommended default for this step, pending the owner's
-  confirmation.
+  fields, or that takes the task out of every list, applies directly. The owner
+  confirmed this split ("Yes, small changes skip it").
 - Holding runs the change in a transaction that is rolled back, so it is
   checked exactly as the real change and its board view can be shown. The
   request is kept in `owner_task_requests` with an ID from its operation, the

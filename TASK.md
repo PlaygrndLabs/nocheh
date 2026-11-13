@@ -33,8 +33,8 @@ else start build.", approving the Members design). One pull request in three par
   for review, and the review, "Add a chat" and a chat's project choice say the chat will see
   and change the list ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
   [store](test/store-tasks.test.ts), [organization](test/store-knowledge-management.test.ts),
-  [columns](test/task-settings.test.ts), [dashboard](test/dashboard-pages.browser.mjs)). By the recommended default, pending the
-  owner's confirmation, a private-chat change to a listed task that only sets status,
+  [columns](test/task-settings.test.ts), [dashboard](test/dashboard-pages.browser.mjs)). As the owner confirmed on 2026-11-13
+  ("Yes, small changes skip it"), a private-chat change to a listed task that only sets status,
   priority, start and due days and times, archive or trash, or takes it off every list,
   applies without a card; repeat and reminders wait for the card (fail closed), and the chat
   tool sets no order. Pending: live acceptance with a real project group, and task cards in
