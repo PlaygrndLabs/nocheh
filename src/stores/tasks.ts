@@ -190,9 +190,10 @@ const seesGroup=(reach:ReadSet|null,space:unknown):space is string=>typeof space
 
 const linked=(kind:string,column:string,match:string)=>`coalesce((SELECT json_agg(json_build_object('id',o.id,'title',o.title,'state',o.state,'project_id',o.project_id,'group_id',o.group_id) ORDER BY o.created_at,o.id)
   FROM owner_task_links l JOIN owner_tasks o ON o.id=l.${column} WHERE l.kind='${kind}' AND l.${match}=owner_tasks.id AND o.deleted_at IS NULL),'[]'::json)`;
-/** A task's columns; `children` is the SQL condition, on the alias `c`, of the subtasks its counts take: a project's
- * chat counts only the subtasks it sees (ADR-0247). */
-const columns=(children='true')=>`id,title,notes,status_id AS status,state,priority,to_char(start_on,'YYYY-MM-DD') AS start_on,to_char(start_time,'HH24:MI') AS start_time,
+/** A task's columns; `children` is the SQL condition, on the alias `c`, of the subtasks its counts take, and
+ * `parent` whether its reader sees the task it sits under: a project's chat counts only the subtasks it sees and
+ * learns of no parent it does not see (ADR-0247). */
+const columns=(children='true',parent='true')=>`id,title,notes,status_id AS status,state,priority,to_char(start_on,'YYYY-MM-DD') AS start_on,to_char(start_time,'HH24:MI') AS start_time,
  to_char(due_on,'YYYY-MM-DD') AS due_on,to_char(due_time,'HH24:MI') AS due_time,repeat,repeated_to,parent_id,position,project_id,project_since,group_id,tags,properties,external,
  coalesce((SELECT json_agg(json_build_object('id',e.id,'name',e.name) ORDER BY lower(e.name),e.id) FROM owner_task_people p
   JOIN memory_entities e ON e.id=p.entity_id WHERE p.task_id=owner_tasks.id AND p.role='person'),'[]'::json) AS people,
@@ -205,10 +206,14 @@ const columns=(children='true')=>`id,title,notes,status_id AS status,state,prior
  (SELECT count(*)::int FROM owner_task_comments c WHERE c.task_id=owner_tasks.id) AS comments,
  (SELECT count(*)::int FROM owner_task_comments c WHERE c.task_id=owner_tasks.id AND c.created_at>=coalesce(owner_tasks.project_since,'infinity'::timestamptz)) AS project_comments,
  coalesce(created_at>=project_since,false) AS made_on_list,coalesce(done_at>=project_since,false) AS finished_on_list,
- origin,source_event,created_by,finished_by,revision,created_at,updated_at,done_at,archived_at,deleted_at`;
+ ${parent} AS parent_seen,origin,source_event,created_by,finished_by,revision,created_at,updated_at,done_at,archived_at,deleted_at`;
 const fields=columns();
+/** Whether a project's chat sees the task that the task on the alias `alias` sits under, if any. A subtask written
+ * before subtasks followed their parent's group can sit under another group's task (ADR-0247). */
+const parentSeesSql=(alias:string,project:string,reach:string)=>
+  `(${alias}parent_id IS NULL OR EXISTS (SELECT 1 FROM owner_tasks u WHERE u.id=${alias}parent_id AND ${seesSql('u.',project,reach)}))`;
 /** A task's columns as a project's chat reads them, with the project and reach bound as `project` and `reach`. */
-const seenFields=(view:View,project:string,reach:string)=>view?columns(seesSql('c.',project,reach)):fields;
+const seenFields=(view:View,project:string,reach:string)=>view?columns(seesSql('c.',project,reach),parentSeesSql('owner_tasks.',project,reach)):fields;
 
 const exact=(input:unknown,keys:string[])=>{const body=object(input);if(Object.keys(body).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_task_field');return body;};
 const title=(value:unknown)=>{const text=string(value,300).trim();if(!text)throw new HttpError(400,'task_title_required');return text;};
@@ -279,15 +284,16 @@ const external=(value:unknown):Record<string,string>=>{
  * A task as its reader sees it. A project's chat sees it only as it is on that project's board: never its outside IDs
  * or the message that asked for it, no archived message attached to it, only the columns the owner shares with project
  * chats, only reminders still to come, links only to tasks it sees, only the comments made since it joined its
- * current audience, its group only when that chat reaches it, and who made or finished it only when that happened
- * there. A project's task with no joining time shows none of these (ADR-0243, ADR-0247).
+ * current audience, its group only when that chat reaches it, the task it sits under only when that chat sees it, no
+ * manual position, which counts every group's tasks, and who made or finished it only when that happened there. A
+ * project's task with no joining time shows none of these (ADR-0243, ADR-0247).
  */
 const row=(value:any,view:View=null)=>{
   if(!value)return value;
-  const {project_comments,made_on_list,finished_on_list,...task}=value,reminders=task.reminders.map((item:any)=>({...item,at:new Date(item.at).toISOString()}));
+  const {project_comments,made_on_list,finished_on_list,parent_seen,...task}=value,reminders=task.reminders.map((item:any)=>({...item,at:new Date(item.at).toISOString()}));
   if(!view)return {...task,revision:Number(task.revision),reminders};
-  const {external:_external,source_event:_source,...seen}=task;
-  return {...seen,revision:Number(task.revision),comments:project_comments,blocked_by:task.blocked_by.filter((item:any)=>sees(view,item)),
+  const {external:_external,source_event:_source,position:_position,...seen}=task;
+  return {...seen,parent_id:parent_seen===false?null:task.parent_id,revision:Number(task.revision),comments:project_comments,blocked_by:task.blocked_by.filter((item:any)=>sees(view,item)),
     reminders:reminders.filter((item:any)=>item.state==='pending'),attachments:task.attachments.filter((item:any)=>item.kind==='link'),
     properties:Object.fromEntries(Object.entries(task.properties).filter(([id])=>view.shared.has(id))),
     group_id:seesGroup(view.reach,task.group_id)?task.group_id:null,created_by:made_on_list?task.created_by:null,
@@ -308,28 +314,38 @@ const boardChange=(changes:Record<string,unknown>,reach:ReadSet|null)=>{
 /**
  * A group's tasks move with it (ADR-0247): when the owner moves group `group` from project `from` to project `to`, its
  * tasks and its topics' tasks in `from`, each with everything under it, move to `to` in the same transaction. They
- * stay that group's, so they keep their joining time, and each gets a history entry. A task under a task of another
- * group stays with its parent, and a task that ends up in another group than the task it sits under joins that
- * task's group, from then on. Moving a group into no project, or from none, moves nothing: its tasks stay on the
- * old list, where only the owner sees them. Returns how many tasks moved.
+ * stay that group's, so they keep their joining time, and each gets a history entry. A task of the group under a task
+ * of another group or of the project itself stays with its parent. A task under them that is set on the project
+ * itself joins their group from then on; one of another group, written before subtasks followed their parent's group,
+ * stays in `from` at the top of the list with everything under it, so its own group keeps seeing it and this group
+ * never does. Moving a group into no project, or from none, moves nothing: its tasks stay on the old list, where only
+ * the owner sees them. Returns how many tasks moved.
  */
 export async function moveGroupTasks(db:Pick<pg.PoolClient,'query'>,group:string,from:string|null,to:string|null,
   by:{actor:TaskActor;origin:'dashboard'|'chat'}={actor:{kind:'owner'},origin:'dashboard'}):Promise<number> {
   if(!groupChatId(group)||!from||!to||from===to)return 0;
-  // Each task with the group it ends up in: the group of the task at the top of its family.
+  // Each task with the group it ends up in: the group of the task at the top of its family. The family takes only
+  // this group's and its topics' tasks and the project's own.
+  const ours=(alias:string)=>`(${alias}group_id IS NULL OR ${alias}group_id=$1 OR starts_with(${alias}group_id,$1||'/topic/'))`;
   const family=(await db.query(`WITH RECURSIVE down AS (
       SELECT id,group_id AS home FROM owner_tasks WHERE project_id=$2 AND parent_id IS NULL AND (group_id=$1 OR starts_with(group_id,$1||'/topic/'))
-      UNION SELECT t.id,down.home FROM owner_tasks t JOIN down ON t.parent_id=down.id)
+      UNION SELECT t.id,down.home FROM owner_tasks t JOIN down ON t.parent_id=down.id WHERE ${ours('t.')})
     SELECT o.id,o.group_id,down.home FROM owner_tasks o JOIN down ON down.id=o.id ORDER BY o.id FOR UPDATE OF o`,[group,from])).rows;
   if(!family.length)return 0;
+  const moved=family.map(task=>task.id as string);
+  const left=(await db.query(`SELECT id FROM owner_tasks WHERE parent_id=ANY($1::text[]) AND NOT id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[moved])).rows.map(task=>task.id as string);
   const at=(await db.query('SELECT clock_timestamp()::text AS at')).rows[0].at as string;
   await db.query(`UPDATE owner_tasks o SET project_id=$3,group_id=f.home,project_since=CASE WHEN o.group_id IS NOT DISTINCT FROM f.home THEN o.project_since ELSE $4::timestamptz END,
-    revision=o.revision+1,updated_at=now() FROM unnest($1::text[],$2::text[]) AS f(id,home) WHERE o.id=f.id`,[family.map(task=>task.id),family.map(task=>task.home),to,at]);
+    revision=o.revision+1,updated_at=now() FROM unnest($1::text[],$2::text[]) AS f(id,home) WHERE o.id=f.id`,[moved,family.map(task=>task.home),to,at]);
+  if(left.length)await db.query('UPDATE owner_tasks SET parent_id=NULL,revision=revision+1,updated_at=now() WHERE id=ANY($1::text[])',[left]);
+  const entry=async(id:string,changes:Record<string,unknown>)=>db.query('INSERT INTO owner_task_activity(task_id,actor,origin,changes,at) VALUES($1,$2,$3,$4,$5::timestamptz)',
+    [id,JSON.stringify(by.actor),by.origin,JSON.stringify(changes),at]);
   for(const task of family){
     const regrouped=task.group_id!==task.home;
-    await db.query('INSERT INTO owner_task_activity(task_id,actor,origin,changes,at) VALUES($1,$2,$3,$4,$5::timestamptz)',[task.id,JSON.stringify(by.actor),by.origin,
-      JSON.stringify({project_id:{from,to},...(regrouped?{group_id:{from:task.group_id,to:task.home}}:{})}),at]);
+    await entry(task.id,{project_id:{from,to},...(regrouped?{group_id:{from:task.group_id,to:task.home}}:{})});
   }
+  // Its history says only that it no longer sits under a task, never which: its group does not see that task.
+  for(const id of left)await entry(id,{parent_id:{to:null}});
   return family.length;
 }
 /** A repeat in words, as a card shows it: "every 2 weeks on Mon, Thu, from when it is done". */
@@ -474,12 +490,15 @@ export class TaskRepository {
    * Repeating the same request within one turn returns the task it already made. In the owner's private chat, a
    * change that a project's chats would see is held for the owner's card instead (ADR-0243). A task added in a
    * group belongs to that group or topic unless it names another group it reaches, the project itself (group null)
-   * or a parent, whose group a subtask takes (ADR-0247).
+   * or a parent, whose group a subtask takes (ADR-0247). A parent given as null or empty names no parent, and an empty
+   * group names no group, so neither puts the task on the whole project.
    */
   async chatCreate(principal:Reader,input:unknown) {
     const turn=this.writable(await this.chatTurn(principal)),{source,project}=turn,body=exact(input,editable);
     if(project&&body.scope!==undefined&&body.scope!==project)throw new HttpError(403,'task_scope_denied');
-    const value={...body,...(project?{scope:project}:{}),...(turn.group&&body.group===undefined&&body.parent===undefined?{group:turn.group}:{})};
+    const {group:named,...rest}=body,given:Record<string,unknown>=named===''?rest:body;
+    const own=!!turn.group&&given.group===undefined&&(given.parent===undefined||given.parent===null||given.parent==='');
+    const value={...given,...(project?{scope:project}:{}),...(own?{group:turn.group}:{})};
     const operation=digest('chat:'+source.reference.id+':'+canonical(value));
     return this.held(turn,'add',null,operation,value,await this.insert(operation,value,this.chatContext(turn)));
   }
@@ -661,9 +680,10 @@ export class TaskRepository {
     if(input.person)filters.push(`EXISTS (SELECT 1 FROM owner_task_people x WHERE x.task_id=owner_tasks.id AND x.entity_id=${p(ids([input.person],'invalid_task_people')[0])}::text)`);
     if(input.status){if(!settings.statuses.some(item=>item.id===input.status))throw new HttpError(400,'invalid_task_status');filters.push(`status_id=${p(input.status)}::text`);}
     if(input.priority){const level=Number(input.priority);if(!Number.isSafeInteger(level)||level<0||level>4)throw new HttpError(400,'invalid_task_priority');filters.push(`priority=${p(level)}::int`);}
-    let parent='true';
-    if(input.parent==='top')parent='parent_id IS NULL';
-    else if(input.parent){if(!hex.test(input.parent))throw new HttpError(400,'invalid_task_parent');parent=`parent_id=${p(input.parent)}::text`;}
+    // A project's chat finds no subtask by a parent it does not see, and lists one under a parent it does not see at
+    // the top, as it is shown there with no parent.
+    const parentSeen=seen?parentSeesSql('owner_tasks.',seen.project,seen.reach):'true',topLevel=seen?`(parent_id IS NULL OR NOT ${parentSeen})`:'parent_id IS NULL';
+    if(input.parent&&input.parent!=='top'&&!hex.test(input.parent))throw new HttpError(400,'invalid_task_parent');
     if(input.q){const words=p('%'+string(input.q,200).trim().replace(/[\\%_]/g,'\\$&')+'%');filters.push(`(title ILIKE ${words}::text OR notes ILIKE ${words}::text)`);}
     const base=filters.join(' AND ');
     // Today holds what is due or starts today or earlier; Upcoming what is due or starts in the next two weeks.
@@ -679,11 +699,13 @@ export class TaskRepository {
       created:'created_at DESC,id',updated:'updated_at DESC,id',title:'lower(title),id',
       finished:`CASE state WHEN 'open' THEN 0 ELSE 1 END,coalesce(done_at,updated_at) DESC,id`};
     // Lists count the tasks at the top of each list; Today and Upcoming count subtasks too, as they show them.
-    const live=places.active,top=`parent_id IS NULL AND ${places.active}`;
+    const live=places.active,top=`${topLevel} AND ${places.active}`;
     const counts=(await this.control.query(`SELECT count(*) FILTER (WHERE ${top} AND state='open')::int AS open,count(*) FILTER (WHERE ${top} AND state='done')::int AS done,
       count(*) FILTER (WHERE ${top} AND state='dropped')::int AS dropped,count(*) FILTER (WHERE ${live} AND state='open' AND ${isToday})::int AS today,
-      count(*) FILTER (WHERE ${live} AND state='open' AND ${isUpcoming})::int AS upcoming,count(*) FILTER (WHERE parent_id IS NULL AND ${places.archive})::int AS archive,
-      count(*) FILTER (WHERE parent_id IS NULL AND ${places.trash})::int AS trash FROM owner_tasks WHERE ${base}`,values.slice())).rows[0];
+      count(*) FILTER (WHERE ${live} AND state='open' AND ${isUpcoming})::int AS upcoming,count(*) FILTER (WHERE ${topLevel} AND ${places.archive})::int AS archive,
+      count(*) FILTER (WHERE ${topLevel} AND ${places.trash})::int AS trash FROM owner_tasks WHERE ${base}`,values.slice())).rows[0];
+    // The parent and state bind after the counts, which take neither.
+    const parent=input.parent==='top'?topLevel:input.parent?`parent_id=${p(input.parent)}::text AND ${parentSeen}`:'true';
     const chosen=state==='all'?'true':`state=${p(state)}::text`;
     const rows=(await this.control.query(`SELECT ${seen?seenFields(view,seen.project,seen.reach):fields} FROM owner_tasks WHERE ${base} AND ${parent} AND ${places[place as keyof typeof places]} AND ${chosen} AND ${window}
       ORDER BY ${orders[sort]} LIMIT ${p(count+1)}::int OFFSET ${p(offset)}::int`,values)).rows;
@@ -1176,10 +1198,11 @@ export class TaskRepository {
     const seen=(value:any)=>{const {related_to,related_from,...rest}=row(value,view);return {...rest,related:same([...related_to,...related_from]),duplicate_of:same(value.duplicate_of)};};
     const task=seen((await db.query(`${select} WHERE id=$1`,[id])).rows[0]);
     if(!family)return task;
+    // Ordered as stored, by the manual position the chats themselves are not shown.
     const under=(await db.query(`WITH RECURSIVE down AS (SELECT id FROM owner_tasks WHERE parent_id=$1 UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id)
-      ${select} WHERE id IN (SELECT id FROM down)`,[id])).rows.map(seen);
+      ${select} WHERE id IN (SELECT id FROM down)`,[id])).rows;
     const order=(parent:string):any[]=>under.filter(item=>item.parent_id===parent)
-      .sort((a,b)=>a.position-b.position||new Date(a.created_at).getTime()-new Date(b.created_at).getTime()||(a.id<b.id?-1:1)).flatMap(item=>[item,...order(item.id)]);
+      .sort((a,b)=>a.position-b.position||new Date(a.created_at).getTime()-new Date(b.created_at).getTime()||(a.id<b.id?-1:1)).flatMap(item=>[seen(item),...order(item.id)]);
     return {...task,descendants:order(id)};
   }
   /**
