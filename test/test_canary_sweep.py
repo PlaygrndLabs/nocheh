@@ -56,6 +56,16 @@ class LeakTests(unittest.TestCase):
         self.assertEqual({hit['where'] for hit in canaries.leaks(value, MARKS, None)}, {'message', 'edit', 'answer', 'call'},
                          'with no owner every chat counts, so the sweep can show the marks reached the owner')
 
+    def test_an_answer_privately_button_is_no_leak_but_a_mark_in_a_members_popup_link_is(self):
+        reply = sent(GROUP, 'Your plan', 1005)
+        reply['parameters']['reply_markup'] = json.dumps({'inline_keyboard': [[{'text': 'Answer privately', 'callback_data': 'np'+'a'*32}]]})
+        reply['message']['reply_markup'] = json.loads(reply['parameters']['reply_markup'])
+        self.assertEqual(canaries.leaks(state(sent=[reply], presses=[press(7, OWNER, GROUP)],
+                                              answers=[{'callback_query_id': 'cb7', 'text': 'Opening', 'url': 'https://t.me/synthetic_fixture_bot?start='+'a'*32}]),
+                                        MARKS, OWNER), [])
+        leaked = state(presses=[press(8, MEMBER, GROUP)], answers=[{'callback_query_id': 'cb8', 'text': 'Opening', 'url': 'https://t.me/x?start=PRIVATEMARK12'}])
+        self.assertEqual(canaries.leaks(leaked, MARKS, OWNER), [{'where': 'answer', 'chat': MEMBER, 'mark': 'PRIVATEMARK12'}])
+
     def test_refused_sends_and_menus_everyone_sees_are_in_the_call_log(self):
         refused = {'method': 'sendMessage', 'parameters': {'chat_id': str(GROUP), 'text': 'PRIVATEMARK12'}, 'status': 400}
         menu = {'method': 'setMyCommands', 'parameters': {'commands': json.dumps([{'command': 'x', 'description': 'PRIVATEMARK13'}])}}
