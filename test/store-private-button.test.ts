@@ -179,9 +179,11 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     assert.equal(replyTo(unsent).button.data,'np'+privateAnswerId(token,unsent));
     assert.deepEqual((({state,refusal_code})=>({state,refusal_code}))(await row(privateAnswerId(token,unsent))),{state:'refused',refusal_code:'not_delivered'});
 
-    // A tap the bot cannot turn into a link gets the changed popup.
+    // A tap the bot cannot turn into a link is told to tap again, never that something changed, and tapping again opens
+    // the private chat.
     link=false;const late=privateAnswerId(token,await say(GP1,'Nocheh, a fourth question?'));
-    assert.equal((await press('np'+late,123)).text,texts.changed);link=true;
+    assert.equal((await press('np'+late,123)).text,texts.retry);link=true;
+    assert.deepEqual(await press('np'+late,123),{kind:'answer',chat_id:GP1,callback_query_id:'query-'+serial,text:texts.open,start:late});
 
     // Anyone else's /start is today's private-chat refusal; a /start that names no record is an ordinary owner turn.
     const count=started.length;await say('9','/start '+id,9);

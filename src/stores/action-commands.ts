@@ -599,8 +599,9 @@ export class ActionCommandRepository {
     catch(error){if(!(error instanceof HttpError)||error.status!==400)throw error;result=null;}
     if(!result){await answer(texts.changed);return true;}
     if(!result.ok){await answer(texts[result.code]);return true;}
-    // The bot builds the link from its own name; when it cannot, the tap gets the changed note instead.
-    if(!await answer(texts.open,result.answer.id))await answer(texts.changed);
+    // The bot builds the link from its own name. When it cannot, nothing changed: the tap stays open for ten minutes, so
+    // the asker is told to tap again.
+    if(!await answer(texts.open,result.answer.id))await answer(texts.retry);
     return true;
   }
   /** Retry failed under a problem notice: only the owner's press in their private chat retries anything. */

@@ -226,8 +226,9 @@ export const privateAnswerTexts=['button: 🔒 Answer privately','open: 🔒 Ope
   'only_asker: Only the person who asked can use this button.','expired: This button has expired. Ask again in the group for a new one.',
   'used: This question was already answered privately. Ask again in the group for a new answer.',
   'changed: This project’s groups or the question changed, so it can’t be answered privately. Ask again in the group.',
-  'not_yours: This private answer was meant for someone else.'].join('\n');
-export type PrivateAnswerText='button'|'open'|'only_asker'|'expired'|'used'|'changed'|'not_yours';
+  'not_yours: This private answer was meant for someone else.',
+  'retry: 🔒 Your private chat can’t be opened right now. Tap the button again in a moment.'].join('\n');
+export type PrivateAnswerText='button'|'open'|'only_asker'|'expired'|'used'|'changed'|'not_yours'|'retry';
 /** The private answer's labeled lines, with any line the owner removed or left empty taken from the default. */
 export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerText,string> {
   return labeledLines(privateAnswerTexts,text) as Record<PrivateAnswerText,string>;

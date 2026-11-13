@@ -67,7 +67,7 @@ test('Answer privately has its own editable texts: the button, its popups and th
   const lines=privateAnswerLines('');
   assert.equal(lines.button,'🔒 Answer privately');
   assert.ok(Array.from(lines.button).length<=40,'a Telegram button label stays short');
-  for(const code of ['only_asker','expired','used','changed','not_yours','open'] as const){
+  for(const code of ['only_asker','expired','used','changed','not_yours','open','retry'] as const){
     assert.ok(lines[code].length>0&&lines[code].length<=200,code);
     assert.doesNotMatch(lines[code],/[{}]/,'a popup has no values to fill');
   }

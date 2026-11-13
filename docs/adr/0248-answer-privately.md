@@ -167,7 +167,8 @@ skills or the owner's default).
   as the asker's private chat with the bot. The bot builds the link from the
   username Telegram gave it and refuses a `start` that is not 32 hex
   characters; without its username there is no link, and the tap gets the
-  `changed` popup instead.
+  `retry` popup instead: nothing changed, and tapping again within the ten
+  minutes opens the private chat.
 - **`/start <id>`.** Only the exact text `/start` and 32 hex characters, in
   the owner's private chat, opens a private answer; a plain `/start`, or
   anything else after it, is an ordinary message. It is checked before the
@@ -214,7 +215,7 @@ skills or the owner's default).
   private answer's reply rules), `telegram.private_answer` (its first line;
   `{group}` and `{groups}` must stay) and `telegram.private_answer_texts`
   (one `name: text` line each for the button and the `open`, `only_asker`,
-  `expired`, `used`, `changed` and `not_yours` popups; a removed line keeps
+  `expired`, `used`, `changed`, `not_yours` and `retry` popups; a removed line keeps
   its default).
 - **Where the owner sees it.** A project's page lists its buttons, newest
   first: where each question was asked, the groups its answer could read, its

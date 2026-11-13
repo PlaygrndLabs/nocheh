@@ -103,7 +103,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'telegram.private_answer_texts',
     title: 'Answer privately button and notices',
-    hint: 'One “name: text” line each for the button under your answer in a group (button, up to 40 characters), the notice when the tap opens your private chat (open), and the short notices when someone else taps it (only_asker), it has expired (expired), it was already used (used), the project’s groups or the question changed (changed), or a private chat link was meant for someone else (not_yours). No model is used. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for the button under your answer in a group (button, up to 40 characters), the notice when the tap opens your private chat (open), and the short notices when someone else taps it (only_asker), it has expired (expired), it was already used (used), the project’s groups or the question changed (changed), a private chat link was meant for someone else (not_yours), or your private chat can’t be opened right now (retry). No model is used. A line you remove keeps its default.',
   },
   {
     key: 'tasks.reminder',
