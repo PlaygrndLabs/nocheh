@@ -163,6 +163,21 @@ test('delegated organization only creates projects; every move asks the owner, n
    const projectTask=await s.tasks.create(owner,{operation_id:key+':project-task',title:'Synthetic project task',scope:created.id});
    assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[{id:created.id,name:created.name}]);
    for(const task of [groupTask,projectTask]){const gone=await s.tasks.update(owner,task.id,{operation_id:key+':trash:'+task.id,expected_revision:task.revision,trashed:true});await s.tasks.remove(owner,gone.id);}
+   // The moving group's own tasks on the project it is about to join: a task with a comment, one under it, and its topic's.
+   const top=await s.tasks.create(owner,{operation_id:key+':moving-top',title:'Synthetic moving task',scope:created.id,group:other});
+   const under=await s.tasks.create(owner,{operation_id:key+':moving-under',title:'Synthetic task under it',parent:top.id});
+   const topical=await s.tasks.create(owner,{operation_id:key+':moving-topic',title:'Synthetic topic task',scope:created.id,group:other+'/topic/5'});
+   await s.tasks.comment(owner,top.id,{operation_id:key+':moving-comment',text:'Synthetic comment'});
+   const family=[top.id,under.id,topical.id];
+   const board=async()=>(await stores.control.query('SELECT id,project_id,group_id,project_since::text FROM owner_tasks WHERE id=ANY($1::text[]) ORDER BY id',[family])).rows;
+   const placed=await board();
+   assert.deepEqual(placed.map(row=>[row.project_id,row.group_id]),placed.map(row=>[created.id,row.id===topical.id?other+'/topic/5':other]),'a subtask has its parent\'s group');
+   const movedTo=async(project:string,why:string)=>{
+    const rows=await board();
+    assert.deepEqual(rows.map(row=>row.project_id),rows.map(()=>project),why);
+    assert.deepEqual(rows.map(row=>[row.id,row.group_id,row.project_since]),placed.map(row=>[row.id,row.group_id,row.project_since]),'each keeps its group and project_since');
+    assert.deepEqual((await s.tasks.get(owner,top.id)).comments.map((item:any)=>item.body),['Synthetic comment'],'and its comments');
+   };
    // The owner approves the move: it applies under the owner's review, and undoing it names the project's groups too.
    await s.knowledge.decide(owner,join.id,{decision:'approve',expected_revision:joinView.revision,operation_id:key+':approve-join'});
    assert.equal((await s.knowledge.process('proposal:'+join.id)).state,'applied');
@@ -171,9 +186,27 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.deepEqual(joinReceipt.undo_project_groups,[{id:created.id,name:created.name,groups:[group]}]);
    const moved=(await s.projects.effective(other)).own_assignment!;
    await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision,operation_id:key+':owner-moves-on'});
+   await movedTo(plain.id,'a group moving from one project to another takes its tasks, its topics\' and the ones under them (ADR-0247)');
    await assert.rejects(s.knowledge.undo(owner,join.id,{expected_revision:joinReceipt.revision,operation_id:key+':undo-conflict'}),{code:'knowledge_undo_conflict'});
    assert.equal((await s.knowledge.proposal(owner,join.id)).state,'applied','conflicting undo preserves original receipt');
    await s.projects.assign(owner,{space_id:other,mode:'inherit',expected_revision:moved.revision+1,operation_id:key+':owner-moves-back'});
+   await movedTo(plain.id,'leaving every project leaves its tasks on the old board');
+   // Undoing an organization that moved the group between two projects moves its tasks back.
+   await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision+2,operation_id:key+':owner-moves-again'});
+   await movedTo(plain.id,'joining from no project moves nothing');
+   const across=await persist('across',{kind:'organization',reason:'Synthetic move across projects',creates:[],
+    assignments:[{space_id:other,project_id:created.id,expected_revision:moved.revision+3,evidence_ids:[moveSource.id],reason:'Explicit purpose evidence',purpose_evidence:true}]},moveSource,other);
+   assert.equal(across.state,'review');
+   await s.knowledge.decide(owner,across.id,{decision:'approve',expected_revision:(await s.knowledge.proposal(owner,across.id)).revision,operation_id:key+':approve-across'});
+   assert.equal((await s.knowledge.process('proposal:'+across.id)).state,'applied');
+   await movedTo(created.id,'an applied organization moves the group\'s tasks with it');
+   const acrossReceipt=await s.knowledge.proposal(owner,across.id);
+   assert.equal((await s.knowledge.undo(owner,across.id,{expected_revision:acrossReceipt.revision,operation_id:key+':undo-across'})).state,'undone');
+   assert.equal((await s.projects.effective(other)).project?.id,plain.id);
+   await movedTo(plain.id,'undoing it moves them back');
+   const back=(await s.projects.effective(other)).own_assignment!;
+   await s.projects.assign(owner,{space_id:other,mode:'inherit',expected_revision:back.revision,operation_id:key+':owner-leaves-again'});
+   for(const id of [topical.id,under.id,top.id]){const task=await s.tasks.get(owner,id);const gone=await s.tasks.update(owner,id,{operation_id:key+':trash:'+id,expected_revision:task.revision,trashed:true});await s.tasks.remove(owner,gone.id);}
 
    // An owner-approved organization applies, and a clean undo restores the prior assignment and archives, rather than
    // erases, the created project.

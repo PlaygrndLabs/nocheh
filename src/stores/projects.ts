@@ -5,6 +5,7 @@ import {HttpError,object,string} from '../http.js';
 import {groupChatId,groupSpace,parentSpace,recallCondition,validateSpace} from '../spaces.js';
 import {OwnerCommands} from './owner-commands.js';
 import {projectGroupsSql} from './project-groups.js';
+import {moveGroupTasks} from './tasks.js';
 
 const id=(value:unknown):string=>{const v=string(value,64);if(!/^[a-f0-9]{64}$/.test(v))throw new HttpError(400,'invalid_project_id');return v;};
 const revision=(value:unknown):number=>{if(!Number.isSafeInteger(value)||Number(value)<0)throw new HttpError(400,'invalid_revision');return Number(value);};
@@ -45,12 +46,15 @@ export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revisio
 export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'revision'>&{expected_revision:number}):Promise<Assignment> {
   if(change.mode==='assigned'&&!groupSpace(change.space_id))throw new HttpError(400,'project_private_chat');
   if(parentSpace(change.space_id)&&change.mode!=='inherit')throw new HttpError(400,'project_topic_follows_group');
-  const previous=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1 FOR UPDATE',[change.space_id])).rows[0];
+  const previous=(await db.query('SELECT revision,project_id,mode FROM project_assignments WHERE space_id=$1 FOR UPDATE',[change.space_id])).rows[0];
   if((previous?.revision??0)!==change.expected_revision)throw new HttpError(409,'assignment_revision_conflict');
   if(change.project_id&&!(await db.query("SELECT id FROM projects WHERE id=$1 AND state='active'",[change.project_id])).rowCount)throw new HttpError(409,'active_project_required');
   const result:Assignment={space_id:change.space_id,project_id:change.project_id,mode:change.mode,revision:change.expected_revision+1};
   await db.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,$4)
     ON CONFLICT(space_id) DO UPDATE SET project_id=$2,mode=$3,revision=$4,updated_at=now()`,[result.space_id,result.project_id,result.mode,result.revision]);
+  // A group moving from one project to another takes its tasks and its topics' tasks with it; leaving every project
+  // leaves them on the old board, where only the owner sees them (ADR-0247).
+  if(groupChatId(change.space_id))await moveGroupTasks(db,change.space_id,previous?.mode==='assigned'?previous.project_id:null,result.mode==='assigned'?result.project_id:null);
   return result;
 }
 
