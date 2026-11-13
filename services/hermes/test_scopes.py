@@ -146,6 +146,23 @@ class ScopeTests(unittest.TestCase):
             prepare_profile(Path(folder),Scopes.apply_revision(self.scopes.resolve(self.update(-20,123),'-20'),claims),'synthetic')
             carry.assert_called_once()
 
+    def test_a_private_answers_pass_is_taken_only_in_the_owners_chat_as_that_chat(self):
+        secret='synthetic-service-token';event='a'*64
+        owner=self.scopes.resolve(self.update(123,123,'private'),'123');group=self.scopes.resolve(self.update(-20,123),'-20')
+        def signed(claims):
+            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        claims={'scope':'123','space':'123','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+                'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,'answer':'b'*32}
+        self.assertEqual(verify_capability(signed(claims),secret,owner,event)['answer'],'b'*32)
+        # Its scope is the chat itself, never the owner's (none); a group, a malformed record or a missing scope is refused.
+        for bad,scope in (({**claims,'scope':None},owner),({**claims,'answer':'B'*32},owner),({**claims,'answer':'b'*31},owner),({**claims,'answer':5},owner),
+                          ({**claims,'scope':'-20','space':'-20'},group),({**claims,'answer':None,'scope':'123'},owner)):
+            with self.subTest(claims=bad),self.assertRaises(ValueError):verify_capability(signed(bad),secret,scope,event)
+        # Without a record, the owner's own pass is unchanged.
+        plain={key:value for key,value in claims.items() if key!='answer'}
+        self.assertNotIn('answer',verify_capability(signed({**plain,'scope':None}),secret,owner,event))
+
     def test_native_tool_definitions_are_an_explicit_safe_allowlist(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
         from hermes_cli.plugins import discover_plugins
@@ -176,6 +193,11 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_MACHINE_TOOLS))
         self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
         for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
+        # A private answer only reads (ADR-0248): no native memory, no tool that sends, changes, starts or asks.
+        removed,answer=turn_tools(False,False,False,True)
+        self.assertEqual(answer,{'session_search','skills_list','skill_view',*('mcp__nocheh__'+name for name in ('archive_search','archive_read','archive_page','memory_search','tasks'))})
+        self.assertEqual(removed,OWNER_SET_TOOLS|(REPLY_TOOLS-answer))
+        self.assertEqual(turn_tools(True,True,True,True),(removed,answer),'an answer is never a job step')
 
     def test_background_job_steps_add_only_the_native_todo_list(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override

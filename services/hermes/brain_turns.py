@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import traceback
+from dataclasses import replace
 from pathlib import Path
 from .assistant_gateway import TURN_CAPACITY,continuation_id,native_turn,render_reply_citations
 from .async_runs import CLOSED,AsyncRuns,identity
@@ -130,6 +131,11 @@ class BrainTurns:
         scope=self.scopes.resolve(body['payload'],body['scope'])
         if scope is None:return {'state':'suppressed'}
         claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
+        # A private answer runs as the owner's private chat but never as the owner: its own scoped profile, the project's
+        # role and read tools only (ADR-0248). Its pass and its framed question must come together.
+        answer=claims.get('answer') is not None
+        if answer!=isinstance(body.get('private_answer'),dict):raise ValueError('invalid_private_answer')
+        if answer:scope=replace(scope,owner=False)
         scope=Scopes.apply_revision(scope,claims)
         # Turns in one conversation keep their arrival order; different chats
         # and topics run side by side, up to the capacity. Lane before capacity, always.

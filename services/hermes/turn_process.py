@@ -55,8 +55,9 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             await asyncio.to_thread((profile/'.foreground').touch)
 
 
-# A line of message text that looks like this module's own group frame, or the owner tag of a speaker line.
-FRAME=re.compile(r'^([ \t]*)\[(?=(?:Group message from|Recent messages in this group|End of recent messages))',re.M|re.I)
+# A line of message text that looks like this module's own group frame, a private answer's first line, or the owner tag
+# of a speaker line.
+FRAME=re.compile(r'^([ \t]*)\[(?=(?:Group message from|Recent messages in this group|End of recent messages|Private answer))',re.M|re.I)
 OWNER_TAG=re.compile(r'\[the owner\]',re.I)
 
 
@@ -80,6 +81,15 @@ def recent_group(value):
     return '\n\n'.join(lines)
 
 
+def private_answer(value):
+    """A private answer's frame and question (ADR-0248): the first line Nocheh wrote from the owner's template, where
+    the question was asked and which groups the answer may read, and the question's event. Anything else is refused."""
+    if (not isinstance(value,dict) or set(value)!={'frame','question_event'} or not isinstance(value['frame'],str)
+            or not 0<len(value['frame'].strip())<=4000 or not isinstance(value['question_event'],str)
+            or not re.fullmatch(r'[a-f0-9]{64}',value['question_event'])):raise ValueError('invalid_private_answer')
+    return value
+
+
 def job_run(limits):
     """A background job run's limits from its context, checked: its box and machine flags, never both, and its soft
     and hard deadlines (epoch seconds)."""
@@ -95,6 +105,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
     # later if nothing stopped it before. Every other turn has the usual reply time.
     background = job_run(body.get('background')) if body.get('channel')=='background' else None
+    # A private answer's pass and its framed question come together, or the turn does not run.
+    answer = private_answer(body.get('private_answer')) if scope.answer else None
+    if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
     if background is not None and background['hard_deadline'] <= time.time():
         return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
     text = body.get('text') or ''
@@ -112,10 +125,16 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
         # Who spoke and when stays out of the memory query; the model and native history see it.
         text = speaker + '\n' + unframed(text)
+    elif answer:
+        # A private answer's question is group text even without its speaker line.
+        text = unframed(text)
     recent=recent_group(body.get('recent_group'))
     if recent:
         # Group messages since the last turn that did not address Nocheh never reached Hermes on their own.
         text = recent + '\n\n' + text
+    if answer:
+        # A private answer says first where its question was asked and which groups it may read.
+        text = answer['frame'].strip() + '\n\n' + text
     waiting=body.get('untranscribed_voice')
     if type(waiting) is int and 0<waiting<=20:
         # Voice notes are archived without transcription; their content never reaches the model.
@@ -128,9 +147,12 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         text += ('\n\n[' + ('One attached file is' if too_large==1 else str(too_large)+' attached files are') +
                  ' over the 20 MB limit for bot downloads, so only a reference is archived and the content is not available to you.]')
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
+    # The question is a source of a private answer too: retiring it withholds the answer's history.
+    if answer: text += '\n[Archive source: nocheh:event:' + answer['question_event'] + ']'
     transport = credentials.runtime()
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
                'model':model, 'memory_query':memory_query, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
+               'private_answer':bool(answer),
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),

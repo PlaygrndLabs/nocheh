@@ -178,9 +178,11 @@ def save(path, role, skills, expected):
 def effective(root, chat, project='', audience='group'):
     """The chat's own role, else its project's, else its audience's default role. Skills add up from that
     default to the project's to the chat's, and a later one wins by name. Without an audience a turn reads
-    the groups default, so a forgotten argument never loads the owner's private default."""
-    layers = [read(default_path(root, audience)), read(project_path(root, project)) if project else {'role': '', 'skills': []},
-              read(chat_path(root, chat))]
+    the groups default, so a forgotten argument never loads the owner's private default. Without a chat, as
+    in a private answer, no chat's own role or skills load: the project's, else the default (ADR-0248)."""
+    empty = {'role': '', 'skills': []}
+    layers = [read(default_path(root, audience)), read(project_path(root, project)) if project else empty,
+              read(chat_path(root, chat)) if chat else empty]
     skills = {}
     for layer in layers: skills.update({skill['name']: skill for skill in layer['skills']})
     return {'role': next((layer['role'] for layer in reversed(layers) if layer['role']), ''),
@@ -190,7 +192,7 @@ def effective(root, chat, project='', audience='group'):
 def materialize(root, profile, chat, project='', audience='group'):
     """Give a turn profile its effective role and skills; the owner's own source folder is never rewritten."""
     profile = Path(profile)
-    if profile.resolve() == chat_path(root, chat).resolve():
+    if chat and profile.resolve() == chat_path(root, chat).resolve():
         # A turn that runs in the canonical profile already reads the chat's own files.
         (profile / 'skills').mkdir(exist_ok=True, mode=0o700)
         if not (profile / 'SOUL.md').exists(): _write(profile / 'SOUL.md', '')

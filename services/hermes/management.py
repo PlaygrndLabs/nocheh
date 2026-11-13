@@ -43,7 +43,9 @@ def dispatch(root, model, policy, body):
             metadata=json.loads(marker.read_text()) if marker.exists() else {}
             historical[path.name]={'scope':metadata.get('space',historical.get(path.name,{}).get('scope',path.name)),
                                    'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),
-                                   'guard_epoch':metadata.get('guard_epoch',0),'exists':True}
+                                   'guard_epoch':metadata.get('guard_epoch',0),'exists':True,
+                                   # A private answer's own profile, in the owner's private chat but never the owner's (ADR-0248).
+                                   **({'private_answer':True} if metadata.get('answer') else {})}
         return {'profiles':profiles,'history_profiles':list(historical.values())}
     if action == 'prompts':
         from .prompts import DEFAULTS, LIMIT

@@ -21,6 +21,14 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(prompts.reply(mine, True), prompts.DEFAULTS['reply.common'] + ' Answer the owner in Persian.')
         self.assertEqual(prompts.reply(mine, False), prompts.DEFAULTS['reply.common'] + ' ' + prompts.DEFAULTS['reply.group'])
         self.assertIn('[NO_REPLY]', prompts.reply({}, False))
+        # A private answer has its own rules, never the owner's or a group's (ADR-0248).
+        self.assertEqual(prompts.reply(mine, False, True), prompts.DEFAULTS['reply.common'] + ' ' + prompts.DEFAULTS['reply.private'])
+        self.assertEqual(prompts.reply(mine, True, True), prompts.reply(mine, True))
+        self.assertEqual(prompts.reply({'reply.private': 'Only read.'}, False, True), prompts.DEFAULTS['reply.common'] + ' Only read.')
+        for tool in ('archive_search', 'archive_read', 'archive_page', 'memory_search', 'tasks'):
+            self.assertIn('mcp__nocheh__' + tool, prompts.DEFAULTS['reply.private'])
+        for tool in ('action_request', 'background_job', 'knowledge_propose', 'owner_read', 'telegram_destinations'):
+            self.assertNotIn(tool, prompts.DEFAULTS['reply.private'])
         for value in (None, '', '   ', 7, 'x' * (prompts.LIMIT + 1)):
             self.assertEqual(prompts.text({'reply.group': value}, 'reply.group'), prompts.DEFAULTS['reply.group'])
         self.assertEqual(prompts.text(None, 'memory.limited'), prompts.DEFAULTS['memory.limited'])

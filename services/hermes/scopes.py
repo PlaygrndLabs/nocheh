@@ -28,7 +28,11 @@ def verify_capability(credential,secret,scope,event_id):
         prefix,body,signature=credential.split('.')
         expected=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
-        if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
+        # A private answer's pass names its record and reads as the owner's private chat, never as the owner: only in that
+        # chat, with the chat itself as its scope (ADR-0248).
+        answer=claims.get('answer')
+        if answer is not None and (not scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):raise ValueError()
+        if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
             raise ValueError()
         if claims.get('space') is not None:
             if claims['space'] != scope.space or type(claims.get('revision')) is not int or claims['revision'] < 1:raise ValueError()
