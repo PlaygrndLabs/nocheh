@@ -191,11 +191,14 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.equal((await s.knowledge.proposal(owner,join.id)).state,'applied','conflicting undo preserves original receipt');
    await s.projects.assign(owner,{space_id:other,mode:'inherit',expected_revision:moved.revision+1,operation_id:key+':owner-moves-back'});
    await movedTo(plain.id,'leaving every project leaves its tasks on the old board');
-   // Undoing an organization that moved the group between two projects moves its tasks back.
-   await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision+2,operation_id:key+':owner-moves-again'});
+   // Joining another project from none takes nothing off the old board: the tasks stay where only the owner sees them.
+   await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:created.id,expected_revision:moved.revision+2,operation_id:key+':owner-joins-other'});
    await movedTo(plain.id,'joining from no project moves nothing');
+   // Undoing an organization that moved the group between two projects moves its tasks back.
+   await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision+3,operation_id:key+':owner-moves-again'});
+   await movedTo(plain.id,'its tasks on the project it leaves, none here, are all that move');
    const across=await persist('across',{kind:'organization',reason:'Synthetic move across projects',creates:[],
-    assignments:[{space_id:other,project_id:created.id,expected_revision:moved.revision+3,evidence_ids:[moveSource.id],reason:'Explicit purpose evidence',purpose_evidence:true}]},moveSource,other);
+    assignments:[{space_id:other,project_id:created.id,expected_revision:moved.revision+4,evidence_ids:[moveSource.id],reason:'Explicit purpose evidence',purpose_evidence:true}]},moveSource,other);
    assert.equal(across.state,'review');
    await s.knowledge.decide(owner,across.id,{decision:'approve',expected_revision:(await s.knowledge.proposal(owner,across.id)).revision,operation_id:key+':approve-across'});
    assert.equal((await s.knowledge.process('proposal:'+across.id)).state,'applied');
