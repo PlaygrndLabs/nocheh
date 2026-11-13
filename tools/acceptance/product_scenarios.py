@@ -727,8 +727,10 @@ class ProductScenarios(Scenarios):
             self.gate('tap_freezes_the_projects_groups', frozen[0] == 'pressed' and set(frozen[1].split(',')) == {str(OTHER_GROUP), str(THIRD_GROUP)},
                       state='|'.join(frozen))
             before = len(self.f.sent())
-            _, answer = self.turn(self.f.message(OWNER, '/start '+record), OWNER)
-            private_reply = [row for row in self.replies(before, OWNER) if row['message'].get('text') == answer][-1]
+            # The answer gives both tools' results from two groups, so it can pass Telegram's 4096 characters and arrive
+            # as several messages, every one in the owner's private chat.
+            _, answer = self.turn(self.f.message(OWNER, '/start '+record), OWNER, chunked=True)
+            private_replies = [row for row in self.replies(before, OWNER) if not self.is_card(row)]
             search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
             listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
             seen = answer+'\n'+search+'\n'+listed
@@ -736,7 +738,7 @@ class ProductScenarios(Scenarios):
                       search=search[:300], tasks=listed[:300])
             self.gate('private_answer_never_reads_other_groups_or_the_private_chat', not canaries.found(seen, {gp4: 'GP4', private: 'private'}),
                       found=canaries.found(seen, {gp4: 'GP4', private: 'private'}))
-            self.gate('private_answer_carries_no_button', not self.buttons(private_reply))
+            self.gate('private_answer_carries_no_button', not any(self.buttons(row) for row in private_replies))
             self.wait('private_answer_recorded', lambda: state().startswith('answered|'), 60)
             after = self.f.http('/fixture/stats')
             self.gate('no_private_text_next_to_the_question', after['private_text_in_group'] == stats['private_text_in_group'],
@@ -751,7 +753,7 @@ class ProductScenarios(Scenarios):
                 replies = self.f.app('/v1/chat-sends?kind=reply&limit=100')['records']
                 answers = self.f.app('/v1/chat-sends?kind=button_answer&limit=100')['records']
                 found = [any(item['chat'] == str(row['message']['chat']['id']) and item['message_id'] == row['message']['message_id']
-                             and item['state'] == 'sent' for item in replies) for row in (reply, private_reply)]
+                             and item['state'] == 'sent' for item in replies) for row in (reply, *private_replies)]
                 found += [any(item['reference'] == 'approval-answer:'+tap['callback_query_id'] and item['state'] == 'sent' for item in answers)
                           for tap in (member, owner)]
                 return all(found)
