@@ -202,7 +202,8 @@ skills or the owner's default).
   private chat, with no button, sent under the answer's pass, which the
   delivery check passes only there. When it went out, the record is answered
   once with the send's key. A record closed while the answer was being written
-  (its hour passed, or the project's groups changed) withdraws it
+  (its hour passed, the project was archived, or the asking group left it or
+  is no longer served) withdraws it
   (`private_answer_closed`), and the private chat gets the `expired` or
   `changed` text instead, once, as a notice keyed by the record. An answer that
   ends in silence or is withdrawn for any other reason closes the record with no

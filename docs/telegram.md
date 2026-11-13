@@ -245,10 +245,13 @@ private answer is its own conversation, titled `Private answer`.
 
 A button lasts a day, a tap waits ten minutes for `/start`, and an answer has
 an hour to arrive. Too late, already answered, someone else's, or a project or
-question that changed since: the tap or `/start` gets a short fixed text and
-no model runs. When the hour passes or the project's groups change while the
-answer is being written, the answer is not sent and the private chat gets that
-short text instead, once. An answer that ends in silence closes the same way,
+question that changed since (an archived project, an asking group that left it,
+or no other of its groups left): the tap or `/start` gets a short fixed text and
+no model runs. When the hour passes, the project is archived or the asking group
+leaves it while the answer is being written, the answer is not sent and the
+private chat gets that short text instead, once. Another group that leaves the
+project only narrows the answer to the groups still in it; a later change never
+widens it. An answer that ends in silence closes the same way,
 without a notice, so a later tap or `/start` is told it expired, never that it
 was already answered. A group reply that the bot does not send takes its button's
 record with it. The button's label, its popups and those texts are one
