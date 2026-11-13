@@ -462,6 +462,29 @@ test('a built-in instruction is replaced, checked and reset to the built-in text
   await page.close();
 });
 
+test('the private answer’s rules, first line, button and notices are built-in instructions the owner can edit', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  for (const title of ['Private answers', 'Private answer’s first line', 'Answer privately button and notices']) {
+    await card.getByText(title, {exact: true}).click();
+    assert.equal(await card.getByRole('textbox', {name: title}).isEditable(), true, title);
+  }
+  assert.equal(
+    await card.getByRole('textbox', {name: 'Private answers'}).inputValue(),
+    'This is a private answer, in the private chat of the person who asked.',
+  );
+  assert.match(
+    await card.getByRole('textbox', {name: 'Private answer’s first line'}).inputValue(),
+    /\{group\}.*\{groups\}/,
+  );
+  assert.match(
+    await card.getByRole('textbox', {name: 'Answer privately button and notices'}).inputValue(),
+    /^button: 🔒 Answer privately$/m,
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('long-term memory is re-run or replaced only after the owner sees what it would send', async () => {
   const {page, problems} = await open('memory?view=longterm');
   const status = page.locator('section').filter({has: page.getByRole('heading', {name: 'Long-term memory'})});

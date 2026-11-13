@@ -115,6 +115,8 @@ const persona=(scope:string)=>({scope,...(personas[scope]??={role:'',skills:[],r
 const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpret':['{trigger_id}','{citable_ids}']},texts:{} as Record<string,string>,
   defaults:{'reply.common':'You are Nocheh. Use authorized sources as evidence.','reply.owner':'This is the owner private conversation.',
     'reply.group':'This is a shared space. For routine chatter return exactly [NO_REPLY].','reply.private':'This is a private answer, in the private chat of the person who asked.','memory.limited':'Long-term memory is limited.',
+    'telegram.private_answer':'[Private answer] The question below was asked in {group}. Answer it from these groups: {groups}.',
+    'telegram.private_answer_texts':'button: 🔒 Answer privately\nonly_asker: Only the person who asked can use this button.',
     'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
     'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.','images.read':'Write out the text in this image, then describe it.',
     'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.'} as Record<string,string>};
