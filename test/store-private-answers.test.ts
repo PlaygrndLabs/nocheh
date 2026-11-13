@@ -11,6 +11,7 @@ import {readSet} from '../src/spaces.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {AudienceRepository} from '../src/stores/audience.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
+import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {runtimeProfile} from '../src/stores/runtime-profile.js';
 import {PrivateAnswerRepository,privateAnswerId,privateAnswerStates,privateAnswerTimes,
   type PrivateAnswer,type PrivateAnswerOffer,type PrivateAnswerOutcome,type PrivateAnswerStart,type PrivateAnswerTap} from '../src/stores/private-answers.js';
@@ -91,9 +92,18 @@ test('the private answers record bootstraps on a fresh and an existing database,
     const group:Reader={admin:false,scope:GP4,space:GP4};
     assert.equal(await answers.bind(group),group,'a reader without an answer is returned as it is');
     const claimed:Reader={admin:false,scope:OWNER,space:OWNER,answer:privateAnswerId(secret,question(3)),turnEvent:question(31)};
-    assert.deepEqual((await answers.bind(claimed)).reads,readSet({home:GP2,whole:[GP2,GP3],project:P2}));
-    await assert.rejects(answers.bind({...claimed,turnEvent:question(30)}),{code:'private_answer_closed'},'the tap is not the /start');
-    await assert.rejects(answers.bind({...claimed,answer:'not-an-id'}),{code:'private_answer_closed'});
+    await assert.rejects(answers.bind(claimed),{code:'private_answer_closed'},'a record whose project is gone reads nothing');
+    await seedGroups(stores.control);
+    await stores.control.query('UPDATE project_assignments SET project_id=$1 WHERE space_id=ANY($2::text[])',[P2,[GP2,GP3]]);
+    try {
+      assert.deepEqual((await answers.bind(claimed)).reads,readSet({home:GP2,whole:[GP2,GP3],project:P2}));
+      await assert.rejects(answers.bind({...claimed,turnEvent:question(30)}),{code:'private_answer_closed'},'the tap is not the /start');
+      await assert.rejects(answers.bind({...claimed,answer:'not-an-id'}),{code:'private_answer_closed'});
+    } finally {
+      // The next test seeds the layout itself.
+      await stores.control.query('DELETE FROM project_assignments WHERE space_id=ANY($1::text[])',[[GP1,GP2,GP3,UNSERVED]]);
+      await stores.control.query('DELETE FROM projects WHERE id=ANY($1::text[])',[[P1,P2]]);
+    }
 
     // An install made before the record existed gets it at the next bootstrap, writable by the control service;
     // bootstrapping again keeps every row.
@@ -150,6 +160,8 @@ test('a private answer is offered, tapped, started, bound, answered and expired 
       await assert.rejects(offer(1,fields),{code:'private_answer_conflict'},JSON.stringify(fields));
     await assert.rejects(offer(2,{project_id:P2}),{code:'private_answer_unavailable'},'not the project of the place');
     await assert.rejects(offer(2,{from_chat_id:GP4}),{code:'private_answer_unavailable'},'a group in no project');
+    await assert.rejects(offer(2,{asker_account_id:'456'}),{code:'private_answer_unavailable'},'a member\'s question gets no button in step 2');
+    assert.equal((await stores.control.query('SELECT 1 FROM private_answers WHERE id=$1',[id(2)])).rowCount,0);
     for(const fields of [{member_id:'m1'},{from_chat_id:OWNER},{asker_account_id:GP1},{id:'x'},{project_id:'P1'},{question_event:'q'}])
       await assert.rejects(offer(2,fields),{code:'invalid_private_answer'},JSON.stringify(fields));
 
@@ -280,6 +292,39 @@ test('a private answer is offered, tapped, started, bound, answered and expired 
     await assert.rejects(answers.bind(pass(16)),{code:'private_answer_closed'},'an answer past its hour reads nothing');
     assert.equal(code(await start(16)),'expired');assert.equal((await row(16)).state,'expired');
     await assert.rejects(answers.answered(id(16),'telegram:fixture:16'),{code:'private_answer_closed'});
+
+    // /start narrows the frozen groups to the groups still in the project and never widens them; every request checks the
+    // project again, so a group that leaves it narrows an answer already started, and an archived project or an asking
+    // group that left closes it.
+    await offer(17);assert.deepEqual((await tap(17)).answer!.read_chats,[GP1,GP2,GP3]);
+    await assign(GP2,P2);await assign(GP4,P1);
+    try {
+      const narrowed=await start(17);
+      assert.equal(narrowed.ok,true);assert.deepEqual(narrowed.answer!.read_chats,[GP1,GP3],'GP2 left between the tap and /start; GP4 joined after the tap');
+      assert.deepEqual((await row(17)).read_chats,[GP1,GP3]);
+    } finally {await assign(GP2,P1);await unassign(GP4);}
+    const p17=(whole:string[])=>readSet({home:GP1,whole,project:P1});
+    assert.deepEqual((await answers.bind(pass(17))).reads,p17([GP1,GP3]),'GP2 coming back does not widen it');
+    assert.deepEqual(await start(17),{ok:true,answer:await row(17)},'a retried /start keeps the narrowed groups');
+    await assign(GP3,P2);
+    try {assert.deepEqual((await answers.bind(pass(17))).reads,p17([GP1]),'a group that leaves after /start drops out');}finally{await assign(GP3,P1);}
+    assert.deepEqual((await answers.bind(pass(17))).reads,p17([GP1,GP3]));
+    await projectState('archived');
+    try {await assert.rejects(answers.bind(pass(17)),{code:'private_answer_closed'},'an archived project closes the answer');}finally{await projectState('active');}
+    await unassign(GP1);
+    try {await assert.rejects(answers.bind(pass(17)),{code:'private_answer_closed'},'the asking group left the project');}finally{await assign(GP1,P1);}
+    await assign(GP1,P2);
+    try {await assert.rejects(answers.bind(pass(17)),{code:'private_answer_closed'},'the asking group moved to another project');}finally{await assign(GP1,P1);}
+    assert.deepEqual((await answers.bind(pass(17))).reads,p17([GP1,GP3]));
+    // With no other frozen group left beside the asking group, /start is refused, even when another group joined since the tap.
+    await offer(18);assert.equal((await tap(18)).ok,true);
+    await assign(GP2,P2);await assign(GP3,P2);await assign(GP4,P1);
+    try {
+      const refused=await start(18);
+      assert.equal(code(refused),'changed');assert.equal(refused.answer!.state,'refused');assert.equal(refused.answer!.start_event,null);
+    } finally {await assign(GP2,P1);await assign(GP3,P1);await unassign(GP4);}
+    await assert.rejects(answers.bind(pass(18)),{code:'private_answer_closed'});
+    assert.equal(code(await start(18)),'changed','for good');
   } finally {await stores.control.query('DELETE FROM private_answers');await stores.close();}
 });
 
@@ -290,19 +335,32 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:secret,policy:()=>policy,
     runtime:async operation=>operation==='guard.detect'?{literals:[]}:{state:'done'},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   let index=0;
-  const capture=async(space:string,text:string)=>{
+  const captured=async(space:string,text:string,extra:Record<string,unknown>={})=>{
     const [chat,topic]=space.split('/topic/') as [string,string|undefined],n=++index;
     const message={message_id:n,date:Math.floor(Date.now()/1000),chat:{id:Number(chat),type:chat.startsWith('-')?'supergroup':'private',...(topic?{is_forum:true}:{})},
-      from:{id:Number(OWNER),first_name:'Owner'},text,...(topic?{message_thread_id:Number(topic),is_topic_message:true}:{})};
+      from:{id:Number(OWNER),first_name:'Owner'},text,...(topic?{message_thread_id:Number(topic),is_topic_message:true}:{}),...extra};
     const event:Envelope={version:1,key:key+':'+n,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:chat,source_id:String(n),revision:'1',occurred_at:null,text,payload:{message}};
-    const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
+    return (await s.capture.capture(event)).source;
   };
+  const capture=async(space:string,text:string)=>{const source=(await captured(space,text)).reference;await s.guards.prepare(source,'fixture',s.detect);return source;};
+  const api=new OwnerStorageApi(s),request=(path:string,body?:unknown,principal:Reader=owner)=>api.request(principal,body===undefined?'GET':'POST',new URL(path,'http://fixture'),body) as Promise<any>;
   try {
     await s.guards.reconcile();await s.selections.reconcile();await s.guards.setMode('on');
     await seedGroups(stores.control);
     const asked=await capture(GP1,'Where does kestrelpine stand?'),inTopic=await capture(GP1_TOPIC,'kestrelpine notes from a topic of GP1');
     const inGP2=await capture(GP2,'kestrelpine budget from GP2'),inGP3=await capture(GP3,'kestrelpine launch from GP3');
     const inGP4=await capture(GP4,'kestrelpine rumour from GP4'),inPrivate=await capture(OWNER,'kestrelpine private note');
+
+    // The owner's sharing rules release one text from GP4 into the asking group and another into GP3. A rule change starts a
+    // new authorization epoch, which suspends grants made before it, so the rules come first.
+    const release=async(destination:string,content:string)=>{
+      const rule=await request('/v1/sharing/rules',{name:key+':'+destination,sources:[GP4],destination,enabled:true,mode:'approved',instructions:'Only this text',
+        expected_revision:0,operation_id:key+':rule:'+destination});
+      const preview=await request('/v1/sharing/preview',{rule_id:rule.id,expected_revision:rule.revision,source_ids:[inGP4.id],content,operation_id:key+':preview:'+destination});
+      return request('/v1/sharing/previews/'+preview.id+'/approve',{expected_revision:1,guard_revision:preview.guard_revision,text_hash:preview.text_hash,
+        operation_id:key+':approve:'+destination}) as Promise<{id:string}>;
+    };
+    const sharedGP1=await release(GP1,'kestrelpine shared into GP1'),sharedGP3=await release(GP3,'kestrelpine shared into GP3');
 
     // The owner grants one fact into the asking group and another into GP3.
     const person=digest(key+':person');
@@ -348,8 +406,17 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
     // Granted context comes from the asking group only: never GP3's grants, nor anything granted into the private chat.
     assert.deepEqual((await s.memoryAccess.context(answer,'')).sources.map(source=>source.text),['Bob owns the budget.']);
     assert.deepEqual((await s.memoryAccess.context({...group,scope:GP3,space:GP3},'')).sources.map(source=>source.text),['Bob signs the launch.']);
-    assert.deepEqual((await s.shared.context(answer,'kestrelpine')).sources,[]);
+    // Shared context likewise: what the owner's rules release into the asking group, never into GP3.
+    assert.deepEqual((await s.shared.context(answer,'kestrelpine')).sources.map(source=>[source.id,source.text]),[[sharedGP1.id,'kestrelpine shared into GP1']]);
+    assert.equal((await s.shared.read(answer,sharedGP1.id)).text,'kestrelpine shared into GP1');
+    await assert.rejects(s.shared.read(answer,sharedGP3.id),{code:'shared_source_not_found'});
+    assert.deepEqual((await s.shared.context({...group,scope:GP3,space:GP3},'kestrelpine')).sources.map(source=>source.text),['kestrelpine shared into GP3']);
     await assert.rejects(s.memoryAccess.context(pass,''),{code:'private_answer_closed'});
+    await assert.rejects(s.shared.context(pass,'kestrelpine'),{code:'private_answer_closed'});
+
+    // The owner's record lists the answer; nobody else reads it.
+    assert.deepEqual((await request('/v1/private-answers?project='+P1)).answers.map((row:PrivateAnswer)=>[row.id,row.state,row.read_chats]),[[id,'pressed',[GP1,GP3]]]);
+    await assert.rejects(request('/v1/private-answers',undefined,answer),{code:'owner_required'});
 
     // The turn runs as the asker's private chat, never as the owner, with the record's project.
     const turn=await s.turns.binding(answer);

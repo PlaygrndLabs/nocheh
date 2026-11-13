@@ -4,7 +4,7 @@ import {admin,answerId,type Reader} from '../access.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import {groupChatId,groupSpace,groupSpaceSql,parentSpace,readSet} from '../spaces.js';
-import {projectGroups} from './project-groups.js';
+import {projectGroups,projectGroupsSql} from './project-groups.js';
 
 /**
  * One row per "Answer privately" button Nocheh offered (ADR-0248): who asked, where, in which project, which groups
@@ -75,18 +75,23 @@ const outcome=(row:PrivateAnswer|null,code?:PrivateAnswerRefusal):PrivateAnswerO
 /**
  * The server-side read set of an answer reader, from its record (ADR-0248). The row must be the one the pass names,
  * claimed by this very turn (its /start event), pressed or answered, inside its time and answered in the asker's private
- * chat. The frozen groups are narrowed to the groups Nocheh still serves; a member's groups are also narrowed to the
- * groups they are still in (step 4; the owner is in every group). Anything else is private_answer_closed: an answer
- * reader never reads without its record.
+ * chat, and its project must still be active. The frozen groups are narrowed to the groups Nocheh still serves that are
+ * still in that project; a member's groups are also narrowed to the groups they are still in (step 4; the owner is in
+ * every group). The asking group must be one of them. Anything else is private_answer_closed: an answer reader never
+ * reads without its record, and a later change only narrows or closes it.
  */
 export async function bindAnswerReads(db:Database,policy:AssistantPolicy,principal:Reader):Promise<Reader> {
   if(principal.answer===undefined)return principal;
   if(!answerId.test(principal.answer)||principal.admin||principal.scope===null||principal.space!==principal.scope||!principal.turnEvent||!event.test(principal.turnEvent))throw closed();
   if(!policy.enabled||!policy.owner_id)throw closed();
-  const row=(await db.query<PrivateAnswer>(`SELECT * FROM private_answers WHERE id=$1 AND start_event=$2 AND reply_chat_id=$3
-    AND state IN ('pressed','answered') AND expires_at>now()`,[principal.answer,principal.turnEvent,principal.scope])).rows[0];
+  // The record is `answer`: projectGroupsSql names its own assignments `a`.
+  const row=(await db.query<PrivateAnswer&{project_groups:string[]}>(`SELECT answer.*,${projectGroupsSql('answer.project_id','$4')} AS project_groups
+    FROM private_answers answer JOIN projects p ON p.id=answer.project_id AND p.state='active'
+    WHERE answer.id=$1 AND answer.start_event=$2 AND answer.reply_chat_id=$3 AND answer.state IN ('pressed','answered') AND answer.expires_at>now()`,
+    [principal.answer,principal.turnEvent,principal.scope,[...new Set(policy.group_ids)].filter(groupChatId)])).rows[0];
   if(!row||!row.read_chats)throw closed();
-  const whole=joinedGroups(policy,row,row.read_chats),home=parentSpace(row.from_chat_id)??row.from_chat_id;
+  const inProject=new Set(row.project_groups);
+  const whole=joinedGroups(policy,row,row.read_chats.filter(group=>inProject.has(group))),home=parentSpace(row.from_chat_id)??row.from_chat_id;
   if(!whole.includes(home))throw closed();
   return {...principal,reads:readSet({home:row.from_chat_id,whole,project:row.project_id})};
 }
@@ -114,8 +119,8 @@ export class PrivateAnswerRepository {
     return groups.includes(group)&&groups.length>1?{project_id:row.project_id,groups}:null;
   }
   /** Records the button under the owner's group answer; repeating it for the same question returns the same row. A new
-   * row needs the place to be offerable for that project now; an existing one is returned as it is, and a tap
-   * checks it again. */
+   * row needs a question the owner asked (step 2; members get the button in step 4) and the place to be offerable for
+   * that project now; an existing one is returned as it is, and a tap checks it again. */
   async offer(input:PrivateAnswerOffer):Promise<PrivateAnswer> {
     const member=input.member_id??null;
     if(!answerId.test(input.id)||!event.test(input.question_event)||!groupSpace(input.from_chat_id)||!event.test(input.project_id)||
@@ -127,7 +132,8 @@ export class PrivateAnswerRepository {
     };
     const existing=same((await this.control.query<PrivateAnswer>('SELECT * FROM private_answers WHERE question_event=$1',[input.question_event])).rows[0]);
     if(existing)return existing;
-    if((await this.offerable(input.from_chat_id))?.project_id!==input.project_id)throw new HttpError(409,'private_answer_unavailable');
+    if(input.asker_account_id!==this.policy().owner_id||(await this.offerable(input.from_chat_id))?.project_id!==input.project_id)
+      throw new HttpError(409,'private_answer_unavailable');
     await this.control.query(`INSERT INTO private_answers(id,question_event,from_chat_id,project_id,member_id,asker_account_id,expires_at)
       VALUES($1,$2,$3,$4,$5,$6,now()+make_interval(hours=>$7)) ON CONFLICT DO NOTHING`,
       [input.id,input.question_event,input.from_chat_id,input.project_id,member,input.asker_account_id,privateAnswerTimes.offerHours]);
@@ -188,9 +194,10 @@ export class PrivateAnswerRepository {
   }
   /**
    * A /start in the asker's private chat. It takes a pressed row for that one start event, only from the asker, only
-   * in the asker's own private chat and only within ten minutes of the tap; the project must still hold the asking
-   * group. The answer then has an hour to be delivered. The same start event claims the same row again, so a retried
-   * turn reads the same groups; any other /start for it is used.
+   * in the asker's own private chat and only within ten minutes of the tap. The project must still hold the asking
+   * group, and the frozen groups are narrowed to the groups still in it, never widened: when no other frozen group is
+   * left, the row is refused as changed. The answer then has an hour to be delivered. The same start event claims the
+   * same row again, so a retried turn reads the same groups; any other /start for it is used.
    */
   async claim(id:string,start:PrivateAnswerStart):Promise<PrivateAnswerOutcome> {
     if(!account.test(start.account_id)||!event.test(start.start_event)||!account.test(start.reply_chat_id))throw new HttpError(400,'invalid_private_answer');
@@ -204,9 +211,11 @@ export class PrivateAnswerRepository {
       if(row.state!=='pressed')return outcome(row,'expired');
       if(stale)return this.expired(db,row);
       if(row.start_event===start.start_event)return outcome(row);
-      if(!await this.current(db,row))return outcome(await this.update(db,row.id,"state='refused',refusal_code='changed'"),'changed');
-      return outcome(await this.update(db,row.id,`start_event=$2,reply_chat_id=$3,expires_at=now()+make_interval(mins=>$4)`,
-        [start.start_event,start.reply_chat_id,privateAnswerTimes.answerMinutes]));
+      const now=await this.current(db,row),groups=row.read_chats!.filter(group=>now?.includes(group));
+      if(groups.length<2||!groups.includes(parentSpace(row.from_chat_id)??row.from_chat_id))
+        return outcome(await this.update(db,row.id,"state='refused',refusal_code='changed'"),'changed');
+      return outcome(await this.update(db,row.id,`start_event=$2,reply_chat_id=$3,read_chats=$5,expires_at=now()+make_interval(mins=>$4)`,
+        [start.start_event,start.reply_chat_id,privateAnswerTimes.answerMinutes,groups]));
     });
   }
   /** The server-side read set of an answer reader, from its record on every request (bindAnswerReads); a reader without

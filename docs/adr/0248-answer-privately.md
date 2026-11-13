@@ -57,10 +57,11 @@ section.
   broker (through storage) and the Telegram turn check resolve the read set
   from the record on each request, never from the pass: the row the claim
   names, claimed by this very turn (its `/start` event), in the asker's private
-  chat, pressed or answered, and within its time. Its whole groups are the
-  frozen groups that Nocheh still serves; the asking group must still be one of
-  them. Anything else is `private_answer_closed`, and an answer whose read set
-  was not resolved reads nothing.
+  chat, pressed or answered, and within its time, with its project still
+  active. Its whole groups are the frozen groups that Nocheh still serves and
+  that are still in that project; the asking group must still be one of them.
+  Anything else is `private_answer_closed`, and an answer whose read set was
+  not resolved reads nothing.
 - **What an answer reads.** A message in one of its groups, by search, by
   reading it or by a page of that group (any group of the set; the asking
   group by default; any other chat is `conversation_not_permitted`), and of its
@@ -91,8 +92,9 @@ section.
   offers the same button. A tap, a `/start` and a refusal each return a fixed
   code (`only_asker`, `used`, `expired`, `changed`, `not_yours`) and never
   model text.
-  - Offer: only under the owner's answer in a served group or topic that is
-    assigned to an active project with at least one other served group.
+  - Offer: only for a question the owner asked, under the owner's answer in a
+    served group or topic that is assigned to an active project with at least
+    one other served group.
     Offering the same question again returns the same row.
   - Tap: only the asker, under the answer it was offered for; anyone else
     changes nothing. It checks the project again and freezes every served group
@@ -102,8 +104,11 @@ section.
     send `/start`; tapping again in that time changes nothing.
   - `/start`: only the asker, only in their own private chat, once. The same
     `/start` claims the same row again, so a retried turn reads the same
-    groups; any other is `used`. The project is checked again, and the answer
-    then has an hour to be delivered, recorded once per send.
+    groups; any other is `used`. The project is checked again: the frozen
+    groups are narrowed to those still in it, never widened, and with no other
+    frozen group left beside the asking group the `/start` is refused for good
+    (`changed`). The answer then has an hour to be delivered, recorded once per
+    send.
   - Expiry: the storage worker marks stale rows expired every hour (an unused
     button after a day, a tap without `/start` after ten minutes, an
     unanswered claim after an hour), and each step checks the time itself.
@@ -138,8 +143,9 @@ editable texts, the sends it records and the brain's read-only tool list.
 
 <consequences>
 - A later project change never widens an old answer; it can only narrow it
-  (a group Nocheh stops serving) or close it (an asking group no longer
-  served).
+  (a group that leaves the project or that Nocheh stops serving) or close it
+  (an archived project, or an asking group that left the project or is no
+  longer served).
 - An answer reads text, transcripts and extracted text, not a message's
   original file: a turn's files are those of its own `/start`.
 - Tasks open to an answer only as far as the task list gives that reader;
