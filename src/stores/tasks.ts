@@ -1197,22 +1197,17 @@ export class TaskRepository {
   }
   /**
    * The chats that see a task in a project's list (ADR-0247). A task set on the project itself (no group) is seen by
-   * every group and topic assigned to the project, and by the chats added to it later. A group's task is seen only by
-   * the chats of that group that are in the project: when topics share what they know, the group's chat (and so the
-   * topics that follow it) and each of its topics assigned to the project on its own; else only the task's own chat
-   * or topic, while it is in the project. A group that is not clearly a group sees nothing (ADR-0242).
+   * every group assigned to the project, and by the chats added to it later. A group's task is seen only while its
+   * group is in the project, as a topic always follows its group's project (ADR-0246): when topics share what they
+   * know, by the group's chat and every topic of it, named as the group; else only by the task's own chat or topic. A
+   * group that is not clearly a group sees nothing (ADR-0242).
    */
   private async audienceOf(db:Pick<pg.Pool,'query'>,project:string,group:string|null):Promise<string[]> {
     if(group===null)return (await db.query(`SELECT ${projectChats('$1')} AS chats`,[project])).rows[0].chats;
     const chat=parentSpace(group)??group;
     if(!groupSpace(group)||!groupChatId(chat))return [];
-    const rows:{space_id:string;project_id:string|null;mode:string}[]=(await db.query(`SELECT space_id,project_id,mode FROM project_assignments
-      WHERE space_id=$1 OR starts_with(space_id,$1||'/topic/') ORDER BY space_id`,[chat])).rows;
-    // A chat's own row decides, unless it follows its group; a topic with no row of its own follows its group.
-    const own=(space:string)=>rows.find(row=>row.space_id===space&&row.mode!=='inherit');
-    const inProject=(space:string)=>{const row=own(space)??(space===chat?undefined:own(chat));return row?.mode==='assigned'&&row.project_id===project;};
-    if(this.topicMemory()==='topic')return inProject(group)?[group]:[];
-    return rows.filter(row=>row.mode==='assigned'&&row.project_id===project).map(row=>row.space_id);
+    const assigned=(await db.query(`SELECT 1 FROM project_assignments WHERE space_id=$1 AND mode='assigned' AND project_id=$2`,[chat,project])).rows.length>0;
+    return assigned?[this.topicMemory()==='topic'?group:chat]:[];
   }
 
   /** A task can move into an active project only; one already in an archived project stays readable. */

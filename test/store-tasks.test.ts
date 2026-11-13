@@ -843,12 +843,11 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     assert.deepEqual(await seenBy(shared.id),[g1,g2]);
     assert.deepEqual(await s.tasks.audience(owner,shared.id,{group:g3}),{project:p1,group:g3,audience:'group',chats:[]},'a group in no project sees nothing');
     assert.deepEqual(await s.tasks.audience(owner,under.id,{group:g2}),{project:p1,group:g1,audience:'group',chats:[g1]},'a subtask keeps its parent\'s group');
-    // A topic set on another project on its own sees that project's tasks of its group there, and is named for them.
-    await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[g1+'/topic/8',p2]);
-    const tent=await s.tasks.create(owner,{operation_id:key+':tent',title:'Rent the tent',scope:p2,group:g1});
-    assert.deepEqual([await seenBy(tent.id),await seenBy(tent.id,{scope:p1})],[[g1+'/topic/8'],[g1]]);
-    assert.equal((await s.tasks.chatGet(await ask(g1,'Anything for the tent?','Alice',8),tent.id)).id,tent.id);
-    await assert.rejects(s.tasks.chatGet(alice,tent.id),{status:404},'the group\'s own chat is in the other project');
+    // A group's task on the list of a project its group is not in is seen by no chat, its topics included, as a topic
+    // always follows its group's project (ADR-0246).
+    const tent=await s.tasks.create(owner,{operation_id:key+':tent',title:'Rent the tent',scope:p2,group:g1+'/topic/8'});
+    assert.deepEqual([await seenBy(tent.id),await seenBy(tent.id,{scope:p1})],[[],[g1]]);
+    for(const reader of [alice,await ask(g1,'Anything for the tent?','Alice',8)])await assert.rejects(s.tasks.chatGet(reader,tent.id),{status:404});
 
     // Set on the project itself by the owner, a group's task shows the other group nothing from before.
     await s.tasks.update(owner,first.id,{operation_id:key+':open-up',expected_revision:first.revision,group:null});

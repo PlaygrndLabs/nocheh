@@ -113,7 +113,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
-  // The owner's private chat reaches every list; a project's chat only that project's own list.
+  // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
   // Who wrote the message a group turn answers: the owner, or a person allowed there, by their Telegram name.
   const sender=async(event:string):Promise<TaskActor>=>{
     const row=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
