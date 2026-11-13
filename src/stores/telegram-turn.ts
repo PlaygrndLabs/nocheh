@@ -35,7 +35,13 @@ export function dispatchPayload(original:any,representation:any,text:string|null
 
 /** The turn's binding is current, its source is not retired and its chat is still served. */
 export async function currentTurn(deps:{archive:ArchiveRepository;access:SourceAccessRepository;guards:GuardRepository;turns:RuntimeTurnRepository},input:TurnInput):Promise<void> {
-  await deps.guards.assertCurrent(input.binding);await deps.turns.binding(input.principal);
+  await deps.guards.assertCurrent(input.binding);
+  // A private answer built in this process still holds its open record, and reads exactly the groups it was given (ADR-0248).
+  if(input.principal.answer!==undefined) {
+    const {reads:_given,...principal}=input.principal,bound=await deps.access.bindReads(principal);
+    if(canonical(bound.reads)!==canonical(input.principal.reads??null))throw new HttpError(409,'private_answer_closed');
+  }
+  await deps.turns.binding(input.principal);
   const source=(await deps.archive.captured(input.principal.turnEvent!)).reference;
   if(await deps.access.retirements?.isRetired(source))throw new HttpError(403,'source_retired');
   const original=(await deps.archive.pool.query('SELECT payload,scope FROM events WHERE id=$1',[input.principal.turnEvent])).rows[0];

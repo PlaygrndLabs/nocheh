@@ -129,6 +129,10 @@ export function readSetOf(scope:RecallScope,project:string|null=null):ReadSet {
 /** Whether a read set reads `space`: one of its `exact` conversations, or a `whole` group or one of its topics. */
 export const inReadSet=(set:ReadSet,space:string|null|undefined):boolean=>
   groupSpace(space)&&(set.exact.includes(space)||set.whole.includes(parentSpace(space)??space));
+/** The groups whose chats a read set reads from: each `whole` group and the group of each `exact` conversation. A
+ * group's archive records carry the group's chat ID, so a read of the archive starts from these and narrows by space. */
+export const readSetGroups=(set:ReadSet):string[]=>
+  [...new Set([...set.whole,...set.exact.map(space=>parentSpace(space)??space)])].filter(groupChatId).sort();
 /**
  * A read set as one SQL `text[]` parameter for readSetSql: each `exact` conversation as itself, and each `whole`
  * group as the group followed by `/*`. Only groups and topics are written, whatever the set holds.

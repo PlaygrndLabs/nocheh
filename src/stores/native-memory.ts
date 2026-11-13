@@ -5,7 +5,7 @@ import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inspectRequest} from '../guard.js';
 import {engineErrors,engineId,engineSummary,type EngineWrite,type MemoryEngine} from '../memory/engine.js';
-import {parentSpace,recallCondition,validateSpace} from '../spaces.js';
+import {parentSpace,readSetParam,readSetSql,recallCondition,validateSpace} from '../spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
@@ -780,7 +780,8 @@ export class NativeMemoryRepository {
   /** Freshness is checked when a message arrives: the turn reads the engine's current context for its own conversation. */
   async context(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
-    if(!workspace||!principal.turnEvent)return limited;
+    // An answer reader reads long-term memory by plain search only: no summary or representation (ADR-0248).
+    if(!workspace||!principal.turnEvent||principal.answer!==undefined)return limited;
     try {
       const current=await this.current(workspace.id),audience=this.principalAudience(principal);
       if(await this.correcting(current))return correcting;
@@ -836,7 +837,9 @@ export class NativeMemoryRepository {
   }
   async recall(principal:Reader,query:string) {
     string(query,2000);
-    const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);if(!workspace)return limited;
+    const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
+    // Plain search only for an answer reader: the engine's answers cite no exact messages (ADR-0248).
+    if(!workspace||principal.answer!==undefined)return limited;
     let corrections:Awaited<ReturnType<NativeMemoryRepository['relevantOwnerCorrections']>>=[];
     try {
       const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
@@ -884,7 +887,9 @@ export class NativeMemoryRepository {
     if(!workspace)return {ids:[],learned:false};
     const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
     const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
-    const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
+    // An answer reader searches the sessions of every group frozen in its record, and no other (ADR-0248).
+    const reads=!principal.admin&&principal.answer!==undefined?readSetParam(this.contexts.access.reads(principal)!):null;
+    const sessions=reads?await this.provenance.readSetSessions(id,reads,1000):audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};
     // The question is checked for secrets before it reaches the engine, as a recall question is.
     const question=await this.prepared.prepare(actor,query,this.detect);
@@ -894,7 +899,8 @@ export class NativeMemoryRepository {
       if(!engineId(message.id)||!/^[a-f0-9]{64}$/.test(message.receipt))continue;
       const row=(await this.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
         WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done' AND retired_at IS NULL
-        AND ($4::text='owner' OR ${recallCondition('audience','$4','$5')})`,[message.receipt,id,message.id,audience,group])).rows[0];
+        AND (CASE WHEN $6::text[] IS NOT NULL THEN ${readSetSql('audience',6)} ELSE ($4::text='owner' OR ${recallCondition('audience','$4','$5')}) END)`,
+        [message.receipt,id,message.id,audience,group,reads])).rows[0];
       if(!row)continue;
       for(const reference of (row.source_references?.length?row.source_references:[row.source_reference]).slice(0,30))
         if(typeof reference?.id==='string'&&/^[a-f0-9]{64}$/.test(reference.id)&&!ids.includes(reference.id))ids.push(reference.id);

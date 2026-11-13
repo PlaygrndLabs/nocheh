@@ -3,7 +3,8 @@ import {createHmac} from 'node:crypto';
 import {admin,answerId,type Reader} from '../access.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
-import {groupSpaceSql} from '../spaces.js';
+import {groupChatId,groupSpace,groupSpaceSql,parentSpace,readSet} from '../spaces.js';
+import {projectGroups} from './project-groups.js';
 
 /**
  * One row per "Answer privately" button Nocheh offered (ADR-0248): who asked, where, in which project, which groups
@@ -41,8 +42,9 @@ CREATE INDEX IF NOT EXISTS private_answers_asker ON private_answers(asker_accoun
 
 export const privateAnswerStates=['offered','pressed','answered','needs_private_chat','refused','expired'] as const;
 export type PrivateAnswerState=typeof privateAnswerStates[number];
-/** An unused button expires a day after it is offered; a tap must be followed by /start within ten minutes. */
-export const privateAnswerTimes={offerHours:24,startMinutes:10} as const;
+/** An unused button expires a day after it is offered; a tap must be followed by /start within ten minutes; a claimed
+ * answer has an hour to be delivered. */
+export const privateAnswerTimes={offerHours:24,startMinutes:10,answerMinutes:60} as const;
 /** Why a tap or a /start is refused; each is a fixed, editable reply that needs no model. */
 export type PrivateAnswerRefusal='only_asker'|'used'|'expired'|'changed'|'not_yours';
 export interface PrivateAnswer {id:string;question_event:string;from_chat_id:string;project_id:string;member_id:string|null;asker_account_id:string;
@@ -64,27 +66,166 @@ export function privateAnswerId(secret:string,questionEvent:string):string {
   return createHmac('sha256',secret).update('private-answer:'+questionEvent).digest('hex').slice(0,32);
 }
 
-const pending=():never=>{throw new HttpError(501,'not_implemented');};
+type Database=Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>;
+const closed=()=>new HttpError(409,'private_answer_closed');
+const event=/^[a-f0-9]{64}$/,account=/^[1-9][0-9]{0,18}$/;
+/** What a tap, a /start or a refusal tells the caller, with the row as it now stands. */
+const outcome=(row:PrivateAnswer|null,code?:PrivateAnswerRefusal):PrivateAnswerOutcome=>code?{ok:false,code,answer:row}:{ok:true,answer:row!};
+
+/**
+ * The server-side read set of an answer reader, from its record (ADR-0248). The row must be the one the pass names,
+ * claimed by this very turn (its /start event), pressed or answered, inside its time and answered in the asker's private
+ * chat. The frozen groups are narrowed to the groups Nocheh still serves; a member's groups are also narrowed to the
+ * groups they are still in (step 4; the owner is in every group). Anything else is private_answer_closed: an answer
+ * reader never reads without its record.
+ */
+export async function bindAnswerReads(db:Database,policy:AssistantPolicy,principal:Reader):Promise<Reader> {
+  if(principal.answer===undefined)return principal;
+  if(!answerId.test(principal.answer)||principal.admin||principal.scope===null||principal.space!==principal.scope||!principal.turnEvent||!event.test(principal.turnEvent))throw closed();
+  if(!policy.enabled||!policy.owner_id)throw closed();
+  const row=(await db.query<PrivateAnswer>(`SELECT * FROM private_answers WHERE id=$1 AND start_event=$2 AND reply_chat_id=$3
+    AND state IN ('pressed','answered') AND expires_at>now()`,[principal.answer,principal.turnEvent,principal.scope])).rows[0];
+  if(!row||!row.read_chats)throw closed();
+  const whole=joinedGroups(policy,row,row.read_chats),home=parentSpace(row.from_chat_id)??row.from_chat_id;
+  if(!whole.includes(home))throw closed();
+  return {...principal,reads:readSet({home:row.from_chat_id,whole,project:row.project_id})};
+}
+/** The groups of `groups` the asker may read now: served groups only, and for the owner (member_id null) every one of
+ * them. A member's groups come in step 4, from their current membership; until then a member reads none. */
+function joinedGroups(policy:AssistantPolicy,row:Pick<PrivateAnswer,'member_id'|'asker_account_id'>,groups:readonly string[]):string[] {
+  const served=groups.filter(group=>groupChatId(group)&&policy.group_ids.includes(group));
+  return row.member_id===null&&row.asker_account_id===policy.owner_id?[...new Set(served)].sort():[];
+}
 
 export class PrivateAnswerRepository {
   constructor(readonly control:pg.Pool,readonly policy:()=>AssistantPolicy){}
-  /** Records the button under the owner's group answer; repeating it for the same question returns the same row. */
-  async offer(input:PrivateAnswerOffer):Promise<PrivateAnswer> {void input;return pending();}
-  /** A tap: refuses anyone but the asker, a used or expired row, or a changed project; otherwise freezes the groups. */
-  async press(id:string,tap:PrivateAnswerTap):Promise<PrivateAnswerOutcome> {void id;void tap;return pending();}
-  /** A /start: takes the row for that one start event, only from the asker and only while the tap is fresh. */
-  async claim(id:string,start:PrivateAnswerStart):Promise<PrivateAnswerOutcome> {void id;void start;return pending();}
-  /** The server-side read set of an answer reader, from its record on every request; a reader without `answer` is
-   * returned as it is. Until it is built, an answer reader is refused (fail closed). */
-  async bind(principal:Reader):Promise<Reader> {
-    if(principal.answer===undefined)return principal;
-    if(!answerId.test(principal.answer))throw new HttpError(409,'private_answer_closed');
-    return pending();
+  /**
+   * The project a group or topic answer may offer the button for, and that project's groups, as projectGroups gives
+   * them: the asking group is served and assigned to an active project that has at least one other served group.
+   * Null otherwise, which means no button. A topic follows its group's project.
+   */
+  async offerable(space:string,db:Database=this.control):Promise<{project_id:string;groups:string[]}|null> {
+    const policy=this.policy(),group=parentSpace(space)??space;
+    if(!policy.enabled||!policy.owner_id||!groupSpace(space)||!groupChatId(group)||!policy.group_ids.includes(group))return null;
+    const row=(await db.query(`SELECT a.project_id FROM project_assignments a JOIN projects p ON p.id=a.project_id
+      WHERE a.space_id=$1 AND a.mode='assigned' AND p.state='active'`,[group])).rows[0];
+    if(!row)return null;
+    const groups=await projectGroups(db,row.project_id,policy.group_ids);
+    return groups.includes(group)&&groups.length>1?{project_id:row.project_id,groups}:null;
   }
-  /** The answer was delivered: records its send. */
-  async answered(id:string,sendKey:string):Promise<void> {void id;void sendKey;return pending();}
-  /** Rows whose button or tap went stale become expired; returns how many. */
-  async expire(now:Date=new Date()):Promise<number> {void now;return pending();}
+  /** Records the button under the owner's group answer; repeating it for the same question returns the same row. A new
+   * row needs the place to be offerable for that project now; an existing one is returned as it is, and a tap
+   * checks it again. */
+  async offer(input:PrivateAnswerOffer):Promise<PrivateAnswer> {
+    const member=input.member_id??null;
+    if(!answerId.test(input.id)||!event.test(input.question_event)||!groupSpace(input.from_chat_id)||!event.test(input.project_id)||
+      !account.test(input.asker_account_id)||member!==null)throw new HttpError(400,'invalid_private_answer');
+    const same=(row:PrivateAnswer|undefined)=>{
+      if(row&&(row.id!==input.id||row.from_chat_id!==input.from_chat_id||row.asker_account_id!==input.asker_account_id||row.member_id!==member))
+        throw new HttpError(409,'private_answer_conflict');
+      return row;
+    };
+    const existing=same((await this.control.query<PrivateAnswer>('SELECT * FROM private_answers WHERE question_event=$1',[input.question_event])).rows[0]);
+    if(existing)return existing;
+    if((await this.offerable(input.from_chat_id))?.project_id!==input.project_id)throw new HttpError(409,'private_answer_unavailable');
+    await this.control.query(`INSERT INTO private_answers(id,question_event,from_chat_id,project_id,member_id,asker_account_id,expires_at)
+      VALUES($1,$2,$3,$4,$5,$6,now()+make_interval(hours=>$7)) ON CONFLICT DO NOTHING`,
+      [input.id,input.question_event,input.from_chat_id,input.project_id,member,input.asker_account_id,privateAnswerTimes.offerHours]);
+    const saved=same((await this.control.query<PrivateAnswer>('SELECT * FROM private_answers WHERE question_event=$1',[input.question_event])).rows[0]);
+    if(!saved)throw new HttpError(409,'private_answer_conflict');
+    return saved;
+  }
+  /** One row under lock, for a tap or a /start, and whether its time is up by the database's clock; the work runs
+   * inside the transaction. */
+  private async locked(id:string,work:(db:pg.PoolClient,row:PrivateAnswer|null,stale:boolean)=>Promise<PrivateAnswerOutcome>):Promise<PrivateAnswerOutcome> {
+    const db=await this.control.connect();
+    try {
+      await db.query('BEGIN');
+      const found=answerId.test(id)?(await db.query<PrivateAnswer&{stale:boolean}>('SELECT *,expires_at<=now() AS stale FROM private_answers WHERE id=$1 FOR UPDATE',[id])).rows[0]:undefined;
+      const {stale,...row}=found??{stale:false};
+      const result=await work(db,found?row as PrivateAnswer:null,stale);
+      await db.query('COMMIT');return result;
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  private async update(db:pg.PoolClient,id:string,set:string,values:unknown[]=[]):Promise<PrivateAnswer> {
+    return (await db.query<PrivateAnswer>(`UPDATE private_answers SET ${set},revision=revision+1 WHERE id=$1 RETURNING *`,[id,...values])).rows[0]!;
+  }
+  private async expired(db:pg.PoolClient,row:PrivateAnswer):Promise<PrivateAnswerOutcome> {
+    return outcome(await this.update(db,row.id,"state='expired'"),'expired');
+  }
+  /** The project and groups this row may still read, or null when the project changed: it is no longer active, the asking
+   * group left it or is no longer served, or no other group the asker may read is left in it. */
+  private async current(db:pg.PoolClient,row:PrivateAnswer):Promise<string[]|null> {
+    const now=await this.offerable(row.from_chat_id,db);
+    if(!now||now.project_id!==row.project_id)return null;
+    const groups=joinedGroups(this.policy(),row,now.groups);
+    return groups.length>1&&groups.includes(parentSpace(row.from_chat_id)??row.from_chat_id)?groups:null;
+  }
+  /**
+   * A tap. Only the asker may tap; anyone else gets only_asker and the row is unchanged. An answered row is used, a
+   * refused one changed and a stale one expired. A valid tap on an offered row checks the project again and freezes its
+   * groups: every served group of the project that the asker may read, the asking group included (for the owner, all of
+   * them). The asker then has ten minutes to send /start. Tapping again while that window is open returns the same row
+   * without freezing again.
+   */
+  async press(id:string,tap:PrivateAnswerTap):Promise<PrivateAnswerOutcome> {
+    if(!account.test(tap.account_id)||!event.test(tap.press_event)||!groupSpace(tap.space))throw new HttpError(400,'invalid_private_answer');
+    return this.locked(id,async(db,row,stale)=>{
+      if(!row)return outcome(null,'expired');
+      if(row.asker_account_id!==tap.account_id)return outcome(row,'only_asker');
+      // The button sits under the group answer, so a tap from anywhere else is refused and changes nothing.
+      if((parentSpace(tap.space)??tap.space)!==(parentSpace(row.from_chat_id)??row.from_chat_id))return outcome(row,'changed');
+      if(row.state==='answered')return outcome(row,'used');
+      if(row.state==='refused')return outcome(row,'changed');
+      if(row.state==='expired')return outcome(row,'expired');
+      if(stale)return this.expired(db,row);
+      if(row.state==='pressed')return row.start_event===null?outcome(row):outcome(row,'used');
+      const groups=await this.current(db,row);
+      if(!groups)return outcome(await this.update(db,row.id,"state='refused',refusal_code='changed'"),'changed');
+      return outcome(await this.update(db,row.id,`state='pressed',read_chats=$2,press_event=$3,pressed_at=now(),
+        expires_at=now()+make_interval(mins=>$4)`,[groups,tap.press_event,privateAnswerTimes.startMinutes]));
+    });
+  }
+  /**
+   * A /start in the asker's private chat. It takes a pressed row for that one start event, only from the asker, only
+   * in the asker's own private chat and only within ten minutes of the tap; the project must still hold the asking
+   * group. The answer then has an hour to be delivered. The same start event claims the same row again, so a retried
+   * turn reads the same groups; any other /start for it is used.
+   */
+  async claim(id:string,start:PrivateAnswerStart):Promise<PrivateAnswerOutcome> {
+    if(!account.test(start.account_id)||!event.test(start.start_event)||!account.test(start.reply_chat_id))throw new HttpError(400,'invalid_private_answer');
+    return this.locked(id,async(db,row,stale)=>{
+      if(!row)return outcome(null,'expired');
+      if(row.asker_account_id!==start.account_id||start.reply_chat_id!==start.account_id)return outcome(row,'not_yours');
+      if(row.start_event!==null&&row.start_event!==start.start_event)return outcome(row,'used');
+      if(row.state==='refused')return outcome(row,'changed');
+      if(row.state==='answered')return outcome(row,row.start_event===start.start_event&&!stale?undefined:'used');
+      // A row never tapped, or expired, has no open /start.
+      if(row.state!=='pressed')return outcome(row,'expired');
+      if(stale)return this.expired(db,row);
+      if(row.start_event===start.start_event)return outcome(row);
+      if(!await this.current(db,row))return outcome(await this.update(db,row.id,"state='refused',refusal_code='changed'"),'changed');
+      return outcome(await this.update(db,row.id,`start_event=$2,reply_chat_id=$3,expires_at=now()+make_interval(mins=>$4)`,
+        [start.start_event,start.reply_chat_id,privateAnswerTimes.answerMinutes]));
+    });
+  }
+  /** The server-side read set of an answer reader, from its record on every request (bindAnswerReads); a reader without
+   * `answer` is returned as it is. */
+  async bind(principal:Reader):Promise<Reader> {return bindAnswerReads(this.control,this.policy(),principal);}
+  /** The answer was delivered: records its send. Repeating it with the same send changes nothing. */
+  async answered(id:string,sendKey:string):Promise<void> {
+    if(!answerId.test(id)||typeof sendKey!=='string'||!sendKey||sendKey.length>200)throw new HttpError(400,'invalid_private_answer');
+    const {rowCount}=await this.control.query(`UPDATE private_answers SET state='answered',answered_at=now(),send_key=$2,revision=revision+1
+      WHERE id=$1 AND state='pressed' AND start_event IS NOT NULL`,[id,sendKey]);
+    if(rowCount)return;
+    if(!(await this.control.query("SELECT 1 FROM private_answers WHERE id=$1 AND state='answered' AND send_key=$2",[id,sendKey])).rowCount)throw closed();
+  }
+  /** Rows whose button, tap or answer went stale become expired; returns how many. An unused button lasts a day, a tap
+   * ten minutes without /start, and a claimed answer an hour. Rows are the record: they are never deleted here. */
+  async expire(now:Date=new Date()):Promise<number> {
+    return (await this.control.query(`UPDATE private_answers SET state='expired',revision=revision+1
+      WHERE state IN ('offered','pressed','needs_private_chat') AND expires_at<=$1`,[now])).rowCount??0;
+  }
   /** The owner's record of private answers, newest first, optionally for one project; `after` is the last id seen. */
   async list(principal:Reader,query:{project?:unknown;after?:unknown}={}):Promise<{answers:PrivateAnswer[];next:string|null}> {
     admin(principal);
@@ -96,3 +237,24 @@ export class PrivateAnswerRepository {
     return {answers:rows.slice(0,100),next:rows.length>100?rows[99]!.id:null};
   }
 }
+
+/**
+ * The routes an answer reader may call: reads only (ADR-0248). Archive search, read and page; plain long-term memory
+ * search and the turn's memory context (limited for an answer reader); the asking group's shared and granted context;
+ * the delivery check; the task list in read mode; context preparation; the turn's own files; and, at the broker, its
+ * binding, guard preparation and model calls. Every other route, every write and every post among them, is refused
+ * with private_answer_read_only, including in_turn notes and owner views. One list for the storage service and the
+ * broker, so neither lets more through than the other.
+ */
+const answerRoutes:readonly [string,RegExp][]=[
+  ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(?:shared|filtered)\/[a-f0-9]{64}|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64})$/],
+  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions)|anthropic\/v1\/messages)$/],
+];
+export function privateAnswerRoute(method:string,path:string):boolean {return answerRoutes.some(([verb,route])=>verb===method&&route.test(path));}
+/** Refuses an answer reader's call to anything but a read route (privateAnswerRoute). */
+export function assertPrivateAnswerRoute(principal:Reader,method:string|undefined,path:string):void {
+  if(principal.answer!==undefined&&!privateAnswerRoute(method??'',path))throw new HttpError(403,'private_answer_read_only');
+}
+/** The data tools an answer reader is offered and may run, each in read mode only; tasks lists and reads, never writes. */
+export const privateAnswerTools:ReadonlySet<string>=new Set(['archive_search','archive_read','archive_page','memory_search','tasks']);
+export const privateAnswerTaskActions:ReadonlySet<string>=new Set(['list','get']);
