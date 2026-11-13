@@ -76,7 +76,6 @@ type Delegation = {
   enabled: boolean;
   scopes: string[];
   project_ids: string[];
-  allow_create: boolean;
   expires_at: string | null;
   revision: number;
   suspended_scopes?: string[];
@@ -586,7 +585,6 @@ function AutoOrganize() {
       enabled,
       scopes: item.scopes,
       project_ids: item.project_ids,
-      allow_create: item.allow_create,
       expires_at: item.expired ? null : item.expires_at,
       expected_revision: item.revision,
     });
@@ -629,7 +627,6 @@ function AutoOrganize() {
                       </span>
                       <span className="mt-0.5 block text-[13px] text-muted">
                         {item.scopes.length === 1 ? '1 chat' : `${item.scopes.length} chats`}
-                        {item.allow_create ? ' · may create projects' : ''}
                         {item.expires_at ? ' · until ' + new Date(item.expires_at).toLocaleDateString() : ''}
                       </span>
                       {item.scopes.some(scope => !groupSpace(scope)) && (
@@ -688,8 +685,7 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
   const [name, setName] = useState(item?.name ?? 'Organize my chats');
   // One saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
   const [scopes, setScopes] = useState<string[]>((item?.scopes ?? []).filter(groupSpace));
-  // A new permission starts off and without project creation until the owner turns them on.
-  const [create, setCreate] = useState(item?.allow_create ?? false);
+  // A new permission starts off; turning it on is what lets Nocheh create projects (ADR-0246).
   const [enabled, setEnabled] = useState(item?.enabled ?? false);
   const [until, setUntil] = useState(item?.expires_at && !item.expired ? item.expires_at.slice(0, 10) : '');
   const [resume, setResume] = useState(false);
@@ -702,7 +698,6 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
       // Kept as saved: a delegation only creates projects, so it never moves a chat into one (ADR-0246).
       project_ids: item?.project_ids ?? [],
       enabled,
-      allow_create: create,
       resume_scopes: resume ? suspended : [],
       expires_at: until ? new Date(until + 'T23:59:59').toISOString() : null,
       expected_revision: item?.revision ?? 0,
@@ -717,7 +712,7 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
       open
       onOpenChange={open => !open && onClose()}
       title={item ? 'Automatic organizing' : 'Allow automatic organizing'}
-      description="Nocheh may only create projects. Moving a chat into or out of a project always asks you, as everything else does."
+      description="While it is on, Nocheh may create projects from what it learns in these chats, and nothing more. Moving a chat into or out of a project always asks you, as everything else does."
       footer={
         <>
           <Button onClick={onClose} disabled={command.busy}>
@@ -747,10 +742,6 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
           hint="Groups and topics only. Choosing a group doesn’t include its topics."
         />
         <div className="space-y-3">
-          <label className="flex items-center justify-between gap-4 text-sm">
-            <span>May create new projects</span>
-            <Switch label="May create new projects" checked={create} onChange={setCreate} />
-          </label>
           <label className="flex items-center justify-between gap-4 text-sm">
             <span>On</span>
             <Switch label="On" checked={enabled} onChange={setEnabled} />

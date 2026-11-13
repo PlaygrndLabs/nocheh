@@ -33,7 +33,7 @@ export interface KnowledgeManagementServices {
  sharing:SharingPolicyRepository;shared:SharingContentRepository;memoryAccess:MemoryAccessRepository;selections:SelectionRepository;
  detect:(text:string)=>Promise<unknown>;
 }
-export type OrganizationDelegation={id:string;name:string;enabled:boolean;scopes:string[];project_ids:string[];allow_create:boolean;expires_at:Date|null;
+export type OrganizationDelegation={id:string;name:string;enabled:boolean;scopes:string[];project_ids:string[];expires_at:Date|null;
  capture_watermark:string;baselines:Record<string,number>;revision:number};
 type Dependencies={sources:SourceReference[];values:PreparedDependency[];owner_rules:{id:string;revision:number;kind:string}[];proposal_revision:number|null;proposal_hash:string;projects?:{id:string;revision:number}[];topics?:Record<string,string[]>};
 type ProposalRow={id:string;request_hash:string;kind:string;origin:'turn'|'learning';source_reference:SourceReference;source_scope:string;logical_profile:string|null;
@@ -56,9 +56,9 @@ export class KnowledgeManagementRepository {
  }
 
  async saveDelegation(principal:Reader,input:unknown) {
-  admin(principal);const b=exact(input,['id','name','enabled','scopes','project_ids','allow_create','expires_at','expected_revision','operation_id','resume_scopes']);
+  admin(principal);const b=exact(input,['id','name','enabled','scopes','project_ids','expires_at','expected_revision','operation_id','resume_scopes']);
   const operation=string(b.operation_id,200),identity=b.id===undefined?digest('organization-delegation:'+operation):id(b.id),expected=revision(b.expected_revision);
-  if(!operation.trim()||typeof b.enabled!=='boolean'||typeof b.allow_create!=='boolean'||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.length>100||!Array.isArray(b.project_ids)||b.project_ids.length>100)throw new HttpError(400,'invalid_organization_delegation');
+  if(!operation.trim()||typeof b.enabled!=='boolean'||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.length>100||!Array.isArray(b.project_ids)||b.project_ids.length>100)throw new HttpError(400,'invalid_organization_delegation');
   const scopes=[...new Set<string>(b.scopes.map(validateSpace))].sort(),projects=[...new Set<string>(b.project_ids.map(id))].sort(),name=string(b.name,200).trim();
   // Organizing puts chats in projects, and a private chat never joins one (ADR-0242).
   const privateScopes=scopes.filter(scope=>!groupSpace(scope));if(privateScopes.length&&b.enabled!==false)throw new HttpError(400,'organization_private_chat');
@@ -82,10 +82,10 @@ export class KnowledgeManagementRepository {
     if(parent&&(!own||own.mode==='inherit'))baselines['parent:'+scope]=prior?.scopes.includes(scope)&&!b.resume_scopes?.includes(scope)&&prior.baselines['parent:'+scope]!==undefined?
      prior.baselines['parent:'+scope]:rows.find(r=>r.space_id===parent)?.revision??0;
    }
-   const saved=(await db.query(`INSERT INTO organization_delegations(id,name,enabled,scopes,project_ids,allow_create,expires_at,capture_watermark,baselines,revision)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET name=$2,enabled=$3,scopes=$4,project_ids=$5,allow_create=$6,
-    expires_at=$7,capture_watermark=$8,baselines=$9,revision=$10,updated_at=now() RETURNING *`,
-    [identity,name,b.enabled,JSON.stringify(scopes),JSON.stringify(projects),b.allow_create,expires,watermark,JSON.stringify(baselines),expected+1])).rows[0];
+   const saved=(await db.query(`INSERT INTO organization_delegations(id,name,enabled,scopes,project_ids,expires_at,capture_watermark,baselines,revision)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET name=$2,enabled=$3,scopes=$4,project_ids=$5,
+    expires_at=$6,capture_watermark=$7,baselines=$8,revision=$9,updated_at=now() RETURNING *`,
+    [identity,name,b.enabled,JSON.stringify(scopes),JSON.stringify(projects),expires,watermark,JSON.stringify(baselines),expected+1])).rows[0];
    await db.query('INSERT INTO organization_delegation_history(operation_id,delegation_id,request_hash,record) VALUES($1,$2,$3,$4)',[operation,identity,hash,saved]);
    await db.query(`UPDATE knowledge_proposals SET state='review',error_code='organization_delegation_changed',revision=revision+1,updated_at=now()
     WHERE delegation_id=$1 AND state IN ('queued','waiting') AND NOT approved`,[identity]);
@@ -305,7 +305,7 @@ export class KnowledgeManagementRepository {
 
  private async matchDelegation(proposal:OrganizationProposal,input:{source:SourceReference;space:string;origin:string;binding:GuardBinding},db?:pg.PoolClient,required?:{id:string;revision:number}):Promise<OrganizationDelegation|null>{
   // Organizing by itself never moves a group or topic into or out of a project: every such move waits for the owner's
-  // review, so a delegation only ever creates projects (ADR-0246).
+  // review, so a delegation only ever creates projects, and turning one on is what lets it (ADR-0246).
   if(proposal.assignments.length)return null;
   const control=db??this.stores.control;
   const rows=(await control.query('SELECT * FROM organization_delegations WHERE enabled AND (expires_at IS NULL OR expires_at>now()) ORDER BY id')).rows as OrganizationDelegation[];
@@ -322,7 +322,7 @@ export class KnowledgeManagementRepository {
    if(required&&(permission.id!==required.id||permission.revision!==required.revision))continue;
    // A delegation saved earlier over a private chat never acts on it (ADR-0242).
    const scopes=permission.scopes.filter(groupSpace);
-   if(input.origin==='learning'&&(!scopes.includes(input.space)||BigInt(captured.sequence)<=BigInt(permission.capture_watermark))||proposal.creates.length&&!permission.allow_create)continue;
+   if(input.origin==='learning'&&(!scopes.includes(input.space)||BigInt(captured.sequence)<=BigInt(permission.capture_watermark)))continue;
    if([...evidence.values()].some(space=>!scopes.includes(space)))continue;
    let permitted=true;
    for(const create of proposal.creates)if((await control.query("SELECT 1 FROM projects WHERE lower(name)=lower($1) LIMIT 1",[create.name])).rowCount)permitted=false;

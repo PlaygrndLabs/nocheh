@@ -1600,6 +1600,25 @@ test('a project lists its Answer privately buttons: where, what the answer could
   await page.close();
 });
 
+test('turning automatic organizing on is what lets it create projects, with no separate switch', async () => {
+  const {page, problems} = await open('memory?view=projects');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Automatic organizing'})});
+  const row = card.getByRole('listitem').filter({hasText: 'Organize the travel group'});
+  await row.waitFor();
+  assert.equal(await row.getByText('may create projects', {exact: false}).count(), 0);
+  await row.getByRole('button', {name: 'Edit'}).click();
+  const dialog = page.getByRole('dialog', {name: 'Automatic organizing'});
+  await dialog
+    .getByText('While it is on, Nocheh may create projects from what it learns in these chats', {exact: false})
+    .waitFor();
+  assert.equal(await dialog.getByRole('switch', {name: 'May create new projects'}).count(), 0);
+  // The preview refuses a save that still sends the old switch, as the server does.
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Saved.'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('the owner’s private chat stays out of sharing rules and projects', async () => {
   // A rule picks only groups and topics; an older rule that names a private chat is flagged.
   const {page: rules, problems} = await open('chats?view=rules');

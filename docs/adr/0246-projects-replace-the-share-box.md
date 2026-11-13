@@ -9,7 +9,7 @@ where it ties joining a project with tasks to joining one whose chats share,
 and its sharing warnings; [ADR-0242](0242-private-chats-stay-out-of-group-sharing.md)
 where it describes project rules; and
 [ADR-0091](0091-bounded-agent-knowledge-organization.md), whose delegated
-organization may now only create projects. Restores
+organization may now only create projects, with no separate switch for that. Restores
 [ADR-0057](0057-memory-relationship-access-map.md)'s "projects remain
 organizational" and ADR-0091's rule that project organization grants no source
 or fact access. Keeps the owner's own sharing rules and fact grants, as the owner
@@ -79,7 +79,12 @@ chose ("Keep them, yours only").
 - **Organizing never moves a chat.** Delegated organization may only create
   projects: a proposal with any assignment never matches a delegation and waits
   for the owner's review. `inspect` lists `create_project` as the only automatic
-  operation and `project_moves` under review.
+  operation and `project_moves` under review. Turning a delegation on is what
+  lets it create projects: its "May create new projects" switch did nothing
+  when off, so it is gone. The `allow_create` column is dropped at start, a
+  delegation saved with it keeps everything else, a save that still sends it
+  is refused (400 `unknown_knowledge_field`), and an older derivative export's
+  delegation record still restores as history, its `allow_create` unread.
 - **Joining asks first.** A proposal's owner view carries `project_groups`
   (and `undo_project_groups`): each project a move puts a group into or takes
   it out of, with the other groups Nocheh serves there, using the step's
@@ -133,6 +138,7 @@ chose ("Keep them, yours only").
 - Checks: [projects](../../test/store-projects.test.ts),
   [sharing and the cleanup](../../test/store-sharing.test.ts),
   [organizing](../../test/store-knowledge-management.test.ts),
+  [older exports](../../test/knowledge-portability.test.ts),
   [contract](../../test/knowledge-contract.test.ts),
   [notes](../../test/store-owner-supervision.test.ts),
   [map](../../test/store-memory-access.test.ts),

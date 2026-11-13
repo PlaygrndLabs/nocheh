@@ -16,7 +16,9 @@ test('portable control authority remains inspectable history without reactivatin
   const stores={control:{query:async()=>{throw Error('portable history must never reach the authority store');}},derived:{query,connect:async()=>({query,release:()=>{}})}} as unknown as StorePools;
   const port=new DerivativePortabilityRepository(stores,{} as ArchiveRepository),owner={admin:true,scope:null};
   const inputs=[
-    record('organization_delegations',identity,{id:identity,name:'Synthetic delegation',enabled:true,scopes:['-100'],project_ids:[],allow_create:true,expires_at:null,capture_watermark:'9007199254740993',baselines:{},revision:1,created_at:time,updated_at:time}),
+    record('organization_delegations',identity,{id:identity,name:'Synthetic delegation',enabled:true,scopes:['-100'],project_ids:[],expires_at:null,capture_watermark:'9007199254740993',baselines:{},revision:1,created_at:time,updated_at:time}),
+    // Exported before turning a delegation on came to mean it may create projects: its old switch is kept as history, unread.
+    record('organization_delegations','b'.repeat(64),{id:'b'.repeat(64),name:'Older delegation',enabled:false,scopes:['-100'],project_ids:[],allow_create:false,expires_at:null,capture_watermark:'1',baselines:{},revision:2,created_at:time,updated_at:time}),
     record('organization_delegation_history','synthetic-command',{operation_id:'synthetic-command',delegation_id:identity,request_hash:identity,record:{enabled:true},created_at:time}),
     record('knowledge_proposals',identity,{id:identity,request_hash:identity,kind:'organization',origin:'learning',source_reference:{id:identity},source_scope:'-100',logical_profile:null,source_job_id:identity,proposal_reference:{id:identity},binding:{},dependencies:{},delegation_id:identity,delegation_revision:1,state:'queued',revision:1,approved:true,result:null,error_code:null,created_at:time,updated_at:time}),
     record('knowledge_decisions','synthetic-decision',{operation_id:'synthetic-decision',proposal_id:identity,request_hash:identity,result:{approved:true},created_at:time}),
@@ -27,4 +29,14 @@ test('portable control authority remains inspectable history without reactivatin
   assert.deepEqual(await port.restore(owner,inputs),{retained:inputs.length,activated:false});
   assert.deepEqual(await port.verify(owner,inputs),{verified:inputs.length,activated:false});
   assert.equal(records.size,inputs.length);assert.equal(queries.some(sql=>sql.includes('workflow_registry')||sql.includes('workflow_outbox')),false);
+});
+test('only a field the installation retired may still ride on an older record, and only on its own type',async()=>{
+  const query=async()=>({rows:[],rowCount:1});
+  const stores={control:{query},derived:{query,connect:async()=>({query,release:()=>{}})}} as unknown as StorePools;
+  const port=new DerivativePortabilityRepository(stores,{} as ArchiveRepository),owner={admin:true,scope:null};
+  const delegation={id:identity,name:'Synthetic delegation',enabled:false,scopes:['-100'],project_ids:[],expires_at:null,capture_watermark:'1',baselines:{},revision:1,created_at:time,updated_at:time};
+  const {name:_name,...unnamed}=delegation;
+  for(const value of [{...delegation,may_move:true},unnamed])
+    await assert.rejects(port.restore(owner,[record('organization_delegations',identity,value)]),/invalid_portable_fields/);
+  await assert.rejects(port.restore(owner,[record('organization_delegation_history','synthetic-command',{operation_id:'synthetic-command',delegation_id:identity,request_hash:identity,record:{},created_at:time,allow_create:true})]),/invalid_portable_fields/);
 });

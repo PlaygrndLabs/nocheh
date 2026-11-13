@@ -8,6 +8,7 @@ import type {OrganizationProposal} from '../src/stores/knowledge-contract.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import type {Interpretation} from '../src/interpretations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {KnowledgeManagementRepository,type KnowledgeManagementServices} from '../src/stores/knowledge-management.js';
 
 test('delegated organization only creates projects; every move asks the owner, names the project\'s groups, and stays reversible',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -55,7 +56,7 @@ test('delegated organization only creates projects; every move asks the owner, n
   let delegation:any;
   const save=async(changes:Record<string,unknown>={},label='save')=>{
    const previous=delegation;
-   delegation=await s.knowledge.saveDelegation(owner,{...(previous?{id:previous.id}:{}),name:'Synthetic organization',enabled:true,scopes:[group],project_ids:[],allow_create:true,
+   delegation=await s.knowledge.saveDelegation(owner,{...(previous?{id:previous.id}:{}),name:'Synthetic organization',enabled:true,scopes:[group],project_ids:[],
     expires_at:null,expected_revision:previous?.revision??0,operation_id:key+':delegation:'+label,...changes});return delegation;
   };
   try {
@@ -67,6 +68,9 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.equal(await match(initial,historical),null,'existing installations have no inferred organization authority');
    await save({enabled:false},'disabled');assert.equal(await match(initial,historical),null);
    await save({},'enable');assert.equal(await match(initial,historical),null,'old capture sequences cannot acquire automatic authority');
+   // Turning it on is what lets it create projects: the old separate switch is no longer a field (ADR-0246).
+   assert.equal('allow_create' in delegation,false);
+   await assert.rejects(save({allow_create:false},'old-switch'),{code:'unknown_knowledge_field'});
    const imported=await capture(group,'import');assert.equal(await match(createOnly(imported,'import'),imported),null);
    const source=await capture(),discovered=createOnly(source,'automatic');assert.equal((await match(discovered,source)).id,delegation.id);
    const outside=await capture(other);assert.equal(await match(createOnly(outside,'outside'),outside,other),null,'only in the chats it may organize');
@@ -293,16 +297,16 @@ test('delegated organization only creates projects; every move asks the owner, n
 
    // Organizing puts chats in projects, so a private chat, the owner's included, is never one it may organize.
    for(const scope of ['123','123/topic/5','desktop:personal_chat:9'])
-    await assert.rejects(s.knowledge.saveDelegation(owner,{name:'Private organization',enabled:true,scopes:[group,scope],project_ids:[],allow_create:true,
+    await assert.rejects(s.knowledge.saveDelegation(owner,{name:'Private organization',enabled:true,scopes:[group,scope],project_ids:[],
      expires_at:null,expected_revision:0,operation_id:key+':private-delegation:'+scope}),{code:'organization_private_chat'},scope);
    // One saved earlier over a private chat never acts on it, and can be turned off as it is, but not turned on again.
-   const olderDelegation=await s.knowledge.saveDelegation(owner,{name:'Older organization',enabled:true,scopes:[other],project_ids:[],allow_create:true,
+   const olderDelegation=await s.knowledge.saveDelegation(owner,{name:'Older organization',enabled:true,scopes:[other],project_ids:[],
     expires_at:null,expected_revision:0,operation_id:key+':older-delegation'});
    await stores.control.query(`UPDATE organization_delegations SET scopes=jsonb_build_array('123',$2::text),baselines=baselines||'{"123":0}'::jsonb WHERE id=$1`,[olderDelegation.id,other]);
    const privateOrganization=await capture('123');
    assert.equal(await match({kind:'organization',reason:'Synthetic',creates:[{key:'p',name:key+':private-project',description:'',evidence_ids:[privateOrganization.id]}],assignments:[]},
     privateOrganization,'123'),null,'an older delegation never organizes from a private chat');
-   const olderBody={id:olderDelegation.id,name:'Older organization',scopes:['123',other],project_ids:[],allow_create:true,expires_at:null,expected_revision:olderDelegation.revision};
+   const olderBody={id:olderDelegation.id,name:'Older organization',scopes:['123',other],project_ids:[],expires_at:null,expected_revision:olderDelegation.revision};
    assert.equal((await s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,operation_id:key+':older-delegation-off'})).enabled,false);
    await assert.rejects(s.knowledge.saveDelegation(owner,{...olderBody,enabled:true,expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-on'}),{code:'organization_private_chat'});
    await assert.rejects(s.knowledge.saveDelegation(owner,{...olderBody,enabled:false,scopes:['123','124',other],expected_revision:olderDelegation.revision+1,operation_id:key+':older-delegation-more'}),{code:'organization_private_chat'});
@@ -346,3 +350,28 @@ test('delegated organization only creates projects; every move asks the owner, n
    knowledge.completed=completed;
   } finally {knowledge.completed=completed;await stores.close();}
  });
+
+test('starting up drops a delegation\'s old project-creation switch and keeps the delegation itself',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config={host:process.env.PGHOST!,port:Number(process.env.PGPORT??5432),user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),owner={admin:true,scope:null},key='old-create-switch:'+Date.now(),id=digest(key),group='-'+Date.now()+'7';
+  const knowledge=new KnowledgeManagementRepository({stores} as unknown as KnowledgeManagementServices);
+  const column=async()=>Number((await stores.control.query(`SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema=current_schema()
+    AND table_name='organization_delegations' AND column_name='allow_create'`)).rows[0].n);
+  try {
+    // A delegation saved while the switch existed, with it off.
+    const schemaOwner=new pg.Client({...config,database:'nocheh_control'});await schemaOwner.connect();
+    try{await schemaOwner.query('SET ROLE nocheh_control_owner;ALTER TABLE organization_delegations ADD COLUMN IF NOT EXISTS allow_create boolean NOT NULL DEFAULT false');}
+    finally{await schemaOwner.end();}
+    await stores.control.query(`INSERT INTO organization_delegations(id,name,enabled,scopes,project_ids,allow_create,expires_at,capture_watermark,baselines,revision)
+      VALUES($1,'Older organization',true,$2,'[]',false,NULL,0,$3,1)`,[id,JSON.stringify([group]),JSON.stringify({[group]:0})]);
+    await initializeStoreDatabases(config,passwords);
+    assert.equal(await column(),0,'the switch\'s column is gone');
+    const listed=(await knowledge.delegations(owner)).delegations.find(row=>row.id===id)!;
+    assert.deepEqual([listed.name,listed.enabled,listed.scopes,'allow_create' in listed],['Older organization',true,[group],false],'the delegation keeps everything else');
+    const saved=await knowledge.saveDelegation(owner,{id,name:'Older organization',enabled:false,scopes:[group],project_ids:[],expires_at:null,expected_revision:1,operation_id:key+':off'});
+    assert.deepEqual([saved.enabled,saved.revision],[false,2],'and can still be turned off');
+  } finally {await stores.close();}
+});
