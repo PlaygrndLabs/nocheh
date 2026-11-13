@@ -1306,7 +1306,7 @@ test('a project shares nothing between its groups, and a group joins one only af
     'Already in Aurora field guide',
     'People in two of these groups can get private answers that combine them.',
     'Put only related groups in one project',
-    'will see and change every task on the list of Aurora field guide.',
+    'will see and change the tasks set on the whole of Aurora field guide, never another group’s own tasks.',
   ].map(part => text.indexOf(part));
   assert.ok(
     order.every((at, index) => at >= 0 && (!index || at > order[index - 1])),
@@ -1430,7 +1430,9 @@ test('a project shares nothing between its groups, and a group joins one only af
   await turnOn
     .getByText('People in two of these groups can get private answers that combine them.', {exact: false})
     .waitFor();
-  await turnOn.getByText('will see and change every task on the list of Aurora field guide.', {exact: false}).waitFor();
+  await turnOn
+    .getByText('the tasks set on the whole of Aurora field guide, never another group’s own', {exact: false})
+    .waitFor();
   await turnOn.getByRole('button', {name: 'Cancel'}).click();
   await turnOn.waitFor({state: 'detached'});
   assert.equal(await placedSwitch.isChecked(), false, 'Cancel leaves it off');

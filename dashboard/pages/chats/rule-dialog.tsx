@@ -40,11 +40,14 @@ export const otherGroupsText = (project: string, groups: string[]) =>
 export const ruleAudienceText = (group: string | null) =>
   `Everyone allowed in ${group ?? 'the chat you share into'}, its topics included, will see what this rule lets in.`;
 
-/** Shown wherever a chat joins a project: everyone allowed there sees and changes the project's task list (ADR-0243). */
+/**
+ * Shown wherever a group joins a project: everyone allowed there sees and changes the tasks set on the whole project,
+ * never another group's own tasks (ADR-0243, ADR-0247).
+ */
 export const projectTasksWarning = (chat: string, projects: string[]) =>
-  `Everyone allowed in ${chat} will see and change every task on the ${projects.length > 1 ? 'lists' : 'list'} of ` +
+  `Everyone allowed in ${chat} will see and change the tasks set on the whole of ` +
   (projects.length < 2 ? (projects[0] ?? '') : projects.slice(0, -1).join(', ') + ' and ' + projects.at(-1)) +
-  '.';
+  ', never another group’s own tasks.';
 
 export const modeText: Record<Rule['mode'], {label: string; hint: string}> = {
   approved: {label: 'I approve each text', hint: 'You write or check the exact text before the chat can use it.'},

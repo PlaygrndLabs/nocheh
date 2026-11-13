@@ -83,8 +83,10 @@ chose ("Keep them, yours only").
   from the Inbox or when the owner turns Nocheh on in it, the dashboard names
   the project's other groups first, then says "People in two of these groups
   can get private answers that combine them. Put only related groups in one
-  project; keep family groups out of projects.", then the task-list sentence of
-  ADR-0243. `task_projects` counts only tasks set on the whole project
+  project; keep family groups out of projects.", then the task sentence:
+  everyone allowed in the group will see and change the tasks set on the
+  whole project, never another group's own tasks ([ADR-0247](0247-tasks-follow-data-access.md)).
+  `task_projects` counts only tasks set on the whole project
   (`group_id IS NULL`), the ones a joining group would see.
 - **Which project a group joins.** Turning Nocheh on in a group with no
   answer asks "Which project does this group join?", with the projects and
