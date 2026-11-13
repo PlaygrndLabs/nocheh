@@ -325,6 +325,36 @@ test('a private answer is offered, tapped, started, bound, answered and expired 
     } finally {await assign(GP2,P1);await assign(GP3,P1);await unassign(GP4);}
     await assert.rejects(answers.bind(pass(18)),{code:'private_answer_closed'});
     assert.equal(code(await start(18)),'changed','for good');
+
+    // A claimed answer that will not arrive closes for its own /start only and says why from then on: changed when its
+    // record closed, expired when it never went out or its hour passed. No later tap or /start is told it was used.
+    await offer(19);await tap(19);
+    await assert.rejects(answers.undelivered(id(19),'x','changed'),{code:'invalid_private_answer'});
+    assert.equal(await answers.undelivered(id(19),startOf(19),'changed'),null,'no /start claimed it yet');
+    assert.equal((await row(19)).state,'pressed');
+    await start(19);
+    assert.equal(await answers.undelivered(id(19),startOf(91),'changed'),null,'another /start closes nothing');
+    const closed=await answers.undelivered(id(19),startOf(19),'changed');
+    assert.deepEqual([closed!.state,closed!.refusal_code,closed!.start_event],['refused','changed',startOf(19)]);
+    assert.deepEqual(await answers.undelivered(id(19),startOf(19),'not_delivered'),await row(19),'repeating it changes nothing');
+    assert.equal(code(await start(19,{start_event:startOf(91)})),'changed');
+    assert.equal(code(await start(19)),'changed');assert.equal(code(await tap(19)),'changed');
+    await assert.rejects(answers.answered(id(19),'telegram:fixture:19'),{code:'private_answer_closed'});
+    await offer(20);await tap(20);await start(20);
+    assert.equal((await answers.undelivered(id(20),startOf(20),'not_delivered'))!.refusal_code,'not_delivered');
+    assert.equal(code(await start(20,{start_event:startOf(91)})),'expired');assert.equal(code(await tap(20)),'expired');
+    await offer(21);await tap(21);await start(21);await stale(21);
+    const late=await answers.undelivered(id(21),startOf(21),'changed');
+    assert.deepEqual([late!.state,late!.refusal_code],['expired',null],'past its hour');
+    // While the claiming /start's answer is on its way, another /start is used.
+    await offer(23);await tap(23);await start(23);
+    assert.equal(code(await start(23,{start_event:startOf(91)})),'used');
+    // A button whose group reply never went out is not listed as waiting for a tap; a row already tapped stays as it is.
+    await offer(22);await answers.unshown(asked(22));
+    assert.deepEqual([(await row(22)).state,(await row(22)).refusal_code],['refused','not_delivered']);
+    assert.equal(code(await tap(22)),'expired');
+    await answers.unshown(asked(23));assert.equal((await row(23)).state,'pressed');
+    await assert.rejects(answers.unshown('q'),{code:'invalid_private_answer'});
   } finally {await stores.control.query('DELETE FROM private_answers');await stores.close();}
 });
 

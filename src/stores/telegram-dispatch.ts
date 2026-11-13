@@ -152,12 +152,34 @@ export class TelegramDispatchRepository {
     await this.control.query(`UPDATE dispatches SET state=$2,result_reference=$3,error_code=$4,runtime_stage=$5,
       next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       revision=revision+1,updated_at=now() WHERE event_id=$1`,[row.event_id,result.state,reference,result.error_code??null,result.state==='done'?'delivery':'assistant']);
-    if(result.state==='done'&&row.input_reference)try {const input=await this.input(row.input_reference);
+    if(row.input_reference&&['done','cancelled','suppressed'].includes(result.state))try {const input=await this.input(row.input_reference);
+      if(result.state!=='done')await this.unanswered(input);
       // A private answer that went out is recorded once, with the send of its /start; nothing else is suggested from it.
-      if(input.principal.answer!==undefined)await this.answers?.answered(input.principal.answer,String(input.body.source_key));
+      else if(input.principal.answer!==undefined)await this.answers?.answered(input.principal.answer,String(input.body.source_key));
       else if(input.principal.scope!==null)await this.memoryAccess.suggest(input.principal,String(input.body.text??''));
     } catch {/* Suggestions and the answer's record are best effort and never affect the delivered reply; an unrecorded answer expires. */}
     return this.observation(await this.row(row.event_id));
+  }
+  /**
+   * A turn that ended for good without its reply (ADR-0248). A private answer's claimed record closes, so a later tap
+   * or /start says why rather than "already answered"; when the record itself closed (its hour passed, or its project or
+   * groups changed), the private chat gets that short notice instead of the answer, once. A group reply that never went
+   * out takes its untapped button's record with it.
+   */
+  private async unanswered(input:Input):Promise<void> {
+    const principal=input.principal,event=principal.turnEvent,policy=this.access.policy();
+    if(!this.answers||!event)return;
+    if(principal.answer===undefined){if(principal.scope!==null)await this.answers.unshown(event);return;}
+    // Whether the record still lets this answer read what it was given, checked before it is closed below.
+    let open:boolean;
+    try{const {reads:_given,...bare}=principal;open=canonical((await this.access.bindReads(bare)).reads??null)===canonical(principal.reads??null);}
+    catch(error){if(!(error instanceof HttpError)||error.code!=='private_answer_closed')throw error;open=false;}
+    const row=await this.answers.undelivered(principal.answer,event,open?'not_delivered':'changed');
+    if(open||!row||!(row.state==='expired'||row.state==='refused'&&row.refusal_code==='changed')||!policy.enabled||!policy.owner_id)return;
+    const texts=privateAnswerLines((await ownerPrompts(this.control))['telegram.private_answer_texts']);
+    // The notice's id is the record's, so the bot sends it at most once however often this runs.
+    await this.call('telegram.notice',{id:digest('private-answer-closed:'+row.id),chat_id:policy.owner_id,
+      text:row.state==='expired'?texts.expired:texts.changed},30000);
   }
   private async receive(row:any,result:Record<string,unknown>,delay=observeMs) {
     if(closed.has(String(result.state)))return this.storeResult(row,result);
@@ -217,8 +239,10 @@ export class TelegramDispatchRepository {
   private async privateButton(input:Input,receipt:TurnReceipt):Promise<ReplyButton|null> {
     const policy=this.access.policy(),space=input.principal.space,event=input.principal.turnEvent;
     const sender=String((input.body.payload as {message?:{from?:{id?:unknown}}})?.message?.from?.id??'');
+    // A reply that is only archive citations renders to nothing, and the bot sends no message to carry a button.
+    const visible=receipt.reply?.text?.replace(/\s*【nocheh:event:[a-f0-9]{64}】/g,'').trim();
     if(!this.answers||input.body.control_reply!=null||input.principal.scope===null||input.principal.answer!==undefined||!space||!event||
-      !policy.owner_id||sender!==policy.owner_id||!receipt.reply?.text?.trim()||this.token.length<24)return null;
+      !policy.owner_id||sender!==policy.owner_id||!visible||this.token.length<24)return null;
     try {
       const place=await this.answers.offerable(space);if(!place)return null;
       const row=await this.answers.offer({id:privateAnswerId(this.token,event),question_event:event,from_chat_id:space,project_id:place.project_id,asker_account_id:sender});
@@ -443,17 +467,20 @@ export class TelegramDispatchRepository {
     catch(error){if(error instanceof HttpError&&error.status===400)return texts.not_yours;throw error;}
     if(!claimed.ok)return texts[claimed.code];
     const row=claimed.answer,binding=await this.guards.state();
+    // Claimed but not answerable after all: the record closes for this /start, so a later one is not told it was used.
+    const close=async()=>(await this.answers!.undelivered(row.id,source.id,'changed'))?.state==='expired'?texts.expired:texts.changed;
     let principal:Reader;
     try {
       principal=await this.access.bindReads({admin:false,scope:String(original.scope),space,turnEvent:source.id,answer:row.id,
         generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch});
-    }catch(error){if(error instanceof HttpError&&error.code==='private_answer_closed')return texts.changed;throw error;}
+    }catch(error){if(error instanceof HttpError&&error.code==='private_answer_closed')return await close();throw error;}
     await this.turns.binding(principal);
     const selected=await this.sources.read(principal,source.id);
     // The question itself, read as the answer may read it: retired since, or outside its groups now, it is not answered.
+    // A guard or binding change meanwhile (409) is not a refusal: the turn is built again.
     let question:typeof selected;
     try{question=await this.sources.read(principal,row.question_event);}
-    catch(error){if(error instanceof HttpError&&[403,404,409].includes(error.status))return texts.changed;throw error;}
+    catch(error){if(error instanceof HttpError&&[403,404].includes(error.status))return await close();throw error;}
     const asked=(await this.archive.captured(row.question_event)).reference,members=await albumMembers(this.archive.pool,row.question_event);
     const others=members.length>1&&members[0]!.id===row.question_event?members.slice(1).map(member=>member.id):[];
     const album:[string,typeof selected][]=[[row.question_event,question]];

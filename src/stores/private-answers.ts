@@ -71,6 +71,8 @@ const closed=()=>new HttpError(409,'private_answer_closed');
 const event=/^[a-f0-9]{64}$/,account=/^[1-9][0-9]{0,18}$/;
 /** What a tap, a /start or a refusal tells the caller, with the row as it now stands. */
 const outcome=(row:PrivateAnswer|null,code?:PrivateAnswerRefusal):PrivateAnswerOutcome=>code?{ok:false,code,answer:row}:{ok:true,answer:row!};
+/** What a refused row tells a later tap or /start: an answer that never arrived is as good as expired; anything else changed. */
+const refusedAs=(row:PrivateAnswer):PrivateAnswerRefusal=>row.refusal_code==='not_delivered'?'expired':'changed';
 
 /**
  * The server-side read set of an answer reader, from its record (ADR-0248). The row must be the one the pass names,
@@ -182,7 +184,7 @@ export class PrivateAnswerRepository {
       // The button sits under the group answer, so a tap from anywhere else is refused and changes nothing.
       if((parentSpace(tap.space)??tap.space)!==(parentSpace(row.from_chat_id)??row.from_chat_id))return outcome(row,'changed');
       if(row.state==='answered')return outcome(row,'used');
-      if(row.state==='refused')return outcome(row,'changed');
+      if(row.state==='refused')return outcome(row,refusedAs(row));
       if(row.state==='expired')return outcome(row,'expired');
       if(stale)return this.expired(db,row);
       if(row.state==='pressed')return row.start_event===null?outcome(row):outcome(row,'used');
@@ -197,20 +199,20 @@ export class PrivateAnswerRepository {
    * in the asker's own private chat and only within ten minutes of the tap. The project must still hold the asking
    * group, and the frozen groups are narrowed to the groups still in it, never widened: when no other frozen group is
    * left, the row is refused as changed. The answer then has an hour to be delivered. The same start event claims the
-   * same row again, so a retried turn reads the same groups; any other /start for it is used.
+   * same row again, so a retried turn reads the same groups. Any other /start gets why the row is closed: used only
+   * once it was answered or while another /start's answer is on its way, else changed or expired.
    */
   async claim(id:string,start:PrivateAnswerStart):Promise<PrivateAnswerOutcome> {
     if(!account.test(start.account_id)||!event.test(start.start_event)||!account.test(start.reply_chat_id))throw new HttpError(400,'invalid_private_answer');
     return this.locked(id,async(db,row,stale)=>{
       if(!row)return outcome(null,'expired');
       if(row.asker_account_id!==start.account_id||start.reply_chat_id!==start.account_id)return outcome(row,'not_yours');
-      if(row.start_event!==null&&row.start_event!==start.start_event)return outcome(row,'used');
-      if(row.state==='refused')return outcome(row,'changed');
+      if(row.state==='refused')return outcome(row,refusedAs(row));
       if(row.state==='answered')return outcome(row,row.start_event===start.start_event&&!stale?undefined:'used');
       // A row never tapped, or expired, has no open /start.
       if(row.state!=='pressed')return outcome(row,'expired');
       if(stale)return this.expired(db,row);
-      if(row.start_event===start.start_event)return outcome(row);
+      if(row.start_event!==null)return row.start_event===start.start_event?outcome(row):outcome(row,'used');
       const now=await this.current(db,row),groups=row.read_chats!.filter(group=>now?.includes(group));
       if(groups.length<2||!groups.includes(parentSpace(row.from_chat_id)??row.from_chat_id))
         return outcome(await this.update(db,row.id,"state='refused',refusal_code='changed'"),'changed');
@@ -228,6 +230,26 @@ export class PrivateAnswerRepository {
       WHERE id=$1 AND state='pressed' AND start_event IS NOT NULL`,[id,sendKey]);
     if(rowCount)return;
     if(!(await this.control.query("SELECT 1 FROM private_answers WHERE id=$1 AND state='answered' AND send_key=$2",[id,sendKey])).rowCount)throw closed();
+  }
+  /**
+   * The answer this /start claimed will not arrive: its turn ended without a reply, or its record closed before or while
+   * it ran. A row still pressed for that start closes, expired once its hour is up, else refused with `code`, so a later
+   * tap or /start says why rather than "already answered". Returns the row as it now stands for that start, or null
+   * when that start claimed none; repeating it changes nothing.
+   */
+  async undelivered(id:string,startEvent:string,code:'changed'|'not_delivered'):Promise<PrivateAnswer|null> {
+    if(!answerId.test(id)||!event.test(startEvent))throw new HttpError(400,'invalid_private_answer');
+    const closed=(await this.control.query<PrivateAnswer>(`UPDATE private_answers SET state=CASE WHEN expires_at<=now() THEN 'expired' ELSE 'refused' END,
+      refusal_code=CASE WHEN expires_at<=now() THEN NULL ELSE $3 END,revision=revision+1
+      WHERE id=$1 AND start_event=$2 AND state='pressed' RETURNING *`,[id,startEvent,code])).rows[0];
+    return closed??(await this.control.query<PrivateAnswer>('SELECT * FROM private_answers WHERE id=$1 AND start_event=$2',[id,startEvent])).rows[0]??null;
+  }
+  /** The group reply that carried a button did not go out: its untapped row is refused as not_delivered, so the record
+   * never lists a button nobody saw as waiting for a tap. */
+  async unshown(questionEvent:string):Promise<void> {
+    if(!event.test(questionEvent))throw new HttpError(400,'invalid_private_answer');
+    await this.control.query(`UPDATE private_answers SET state='refused',refusal_code='not_delivered',revision=revision+1
+      WHERE question_event=$1 AND state='offered'`,[questionEvent]);
   }
   /** Rows whose button, tap or answer went stale become expired; returns how many. An unused button lasts a day, a tap
    * ten minutes without /start, and a claimed answer an hour. Rows are the record: they are never deleted here. */

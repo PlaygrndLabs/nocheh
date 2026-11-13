@@ -22,20 +22,29 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-private-button-')),base=Date.now(),token=digest('private-button:'+base);
   const policy=groupsPolicy({group_access:{[GP1]:{granted:['9'],denied:[]}}});
-  const started:any[]=[],replies:any[]=[],answers:any[]=[],refusals:any[]=[];let serial=base,link=true;
+  const started:any[]=[],replies:any[]=[],answers:any[]=[],refusals:any[]=[],notices:any[]=[];let serial=base,link=true;
+  // What the next brain turn returns, when not an ordinary done reply; a running turn is observed done later.
+  let next:Record<string,unknown>|null=null;
   const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}
+    if(operation==='telegram.notice'){notices.push(input);return {state:'done'};}
+    if(operation==='run.resume')return {state:'done'};
     if(operation==='telegram.approval'){
       // Without the bot's own name there is no link, and the gateway refuses the answer.
       if(input.start!==undefined&&!link)throw Error('approval_link_unavailable');
       answers.push(input);return {state:'done',answered:true};
     }
-    assert.equal(operation,'run.start');started.push(input);return {state:'done',stage:'assistant'};
+    assert.equal(operation,'run.start');started.push(input);
+    const receipt=next??{state:'done',stage:'assistant'};next=null;return receipt;
   };
+  // Nocheh's bot, which sends nothing for a reply that renders to silence.
+  const bot=fixtureTelegram((operation,input)=>{if(operation==='telegram.reply'&&!input.cancel&&!input.observe_only)replies.push(input);});
+  const telegram:FakeCall=async(operation,input,timeout)=>operation==='telegram.reply'&&input.text==='Silent fixture'?
+    (replies.push(input),{state:'suppressed',error_code:'intentional_silence'}):bot(operation,input,timeout);
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,
     memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),groupReplies:{mode:'addressed',names:['Nocheh']},
-    telegram:fixtureTelegram((operation,input)=>{if(operation==='telegram.reply'&&!input.cancel&&!input.observe_only)replies.push(input);})});
+    telegram});
   const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
   const titles:Record<string,string>={[GP1]:'GP1 team',[GP2]:'GP2 team',[GP4]:'GP4 team'};
   const envelope=(chat:string,payload:Record<string,unknown>):Envelope=>{
@@ -130,6 +139,43 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     await fixed('/start '+moved,texts.changed);
     assert.deepEqual((({state,refusal_code})=>({state,refusal_code}))(await row(moved)),{state:'refused',refusal_code:'changed'});
     await seedGroups(stores.control);
+
+    // The project changes while the answer runs: the reply is withdrawn, the private chat gets the changed notice once,
+    // and the record closes, so a later /start or tap is told it changed, never that it was already answered.
+    const busy=privateAnswerId(token,await say(GP1,'Nocheh, a fifth question?'));
+    assert.equal((await press('np'+busy,123)).start,busy);
+    next={state:'running'};const running=await say(OWNER,'/start '+busy);
+    assert.equal((await row(busy)).start_event,running);assert.equal(replyTo(running),undefined);
+    await stores.control.query('DELETE FROM project_assignments WHERE space_id=ANY($1::text[])',[[GP2,GP3]]);
+    const observe=async()=>{await stores.control.query('UPDATE dispatches SET next_attempt=now() WHERE event_id=$1',[running]);
+      return services.telegram.run(running,await authority('telegram'));};
+    await observe();
+    assert.equal(replyTo(running),undefined,'the answer is withdrawn');
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[running])).rows[0].state,'cancelled');
+    assert.deepEqual(notices.map(({chat_id,text})=>({chat_id,text})),[{chat_id:OWNER,text:texts.changed}]);
+    assert.deepEqual((({state,refusal_code})=>({state,refusal_code}))(await row(busy)),{state:'refused',refusal_code:'changed'});
+    await seedGroups(stores.control);
+    await fixed('/start '+busy,texts.changed);
+    assert.equal((await press('np'+busy,123)).text,texts.changed);
+    assert.equal(notices.length,1,'one notice');
+
+    // An answer that ends in silence closes too, without a notice: a later /start is told it expired, never that it was used.
+    const quiet=privateAnswerId(token,await say(GP1,'Nocheh, a sixth question?'));
+    assert.equal((await press('np'+quiet,123)).start,quiet);
+    next={state:'suppressed',error_code:'intentional_silence'};await say(OWNER,'/start '+quiet);
+    assert.deepEqual((({state,refusal_code})=>({state,refusal_code}))(await row(quiet)),{state:'refused',refusal_code:'not_delivered'});
+    await fixed('/start '+quiet,texts.expired);
+    assert.equal(notices.length,1);
+
+    // No button is recorded under a reply that renders to nothing or that the bot did not send.
+    next={state:'done',reply:{text:'【nocheh:event:'+'a'.repeat(64)+'】',session_id:'fixture-session'}};
+    const cited=await say(GP1,'Nocheh, only a citation?');
+    assert.equal((await row(privateAnswerId(token,cited))),undefined,'only a citation: nothing to carry the button');
+    next={state:'done',reply:{text:'Silent fixture',session_id:'fixture-session'}};
+    const unsent=await say(GP1,'Nocheh, a reply the bot holds back?');
+    assert.equal(replyTo(unsent).button.data,'np'+privateAnswerId(token,unsent));
+    assert.deepEqual((({state,refusal_code})=>({state,refusal_code}))(await row(privateAnswerId(token,unsent))),{state:'refused',refusal_code:'not_delivered'});
+
     // A tap the bot cannot turn into a link gets the changed popup.
     link=false;const late=privateAnswerId(token,await say(GP1,'Nocheh, a fourth question?'));
     assert.equal((await press('np'+late,123)).text,texts.changed);link=true;
@@ -142,6 +188,6 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
 
     // The owner reads the record per project.
     const listed=(await services.privateAnswers.list({admin:true,scope:null},{project:P1})).answers.map(answer=>answer.id);
-    for(const each of [id,untapped,moved,late])assert.ok(listed.includes(each));
+    for(const each of [id,untapped,moved,late,busy,quiet])assert.ok(listed.includes(each));
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

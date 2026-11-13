@@ -33,6 +33,7 @@ const reasons: Record<string, string> = {
   expired: 'too late',
   changed: 'the project’s groups or the question changed',
   not_yours: 'meant for someone else',
+  not_delivered: 'its answer was not sent',
 };
 
 export function PrivateAnswers({project}: {project: string}) {
