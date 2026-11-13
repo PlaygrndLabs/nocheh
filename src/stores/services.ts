@@ -62,6 +62,7 @@ import {OwnerSupervisionRepository} from './owner-supervision.js';
 import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
+import {PrivateAnswerRepository} from './private-answers.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -101,6 +102,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const chatTools=new ChatToolSettingsRepository(stores.control,()=>options.policy().owner_id);
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
+  // Answer privately records: who asked, where, and the groups frozen at the tap (ADR-0248).
+  const privateAnswers=new PrivateAnswerRepository(stores.control,options.policy);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
 
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
@@ -143,6 +146,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
     chatSends:new ChatSendRepository(stores.control,stores.archive),
+    privateAnswers,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env)),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
