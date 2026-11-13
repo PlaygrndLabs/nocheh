@@ -394,6 +394,21 @@ export class TaskRepository {
       throw (await this.control.query('SELECT 1 FROM owner_tasks WHERE id=$1',[id])).rows.length?new HttpError(409,'task_not_in_trash'):new HttpError(404,'task_not_found');
     return {deleted:id};
   }
+  /**
+   * The chats that would see a task after the owner moves it to the list `scope` ('personal' or a project ID) and the
+   * group `group` (empty for the project itself); either left out keeps the task's own. A subtask keeps its parent's
+   * group. The dashboard and the mini app name them before they save a move, as the task card does (ADR-0247).
+   */
+  async audience(principal:Reader,id:string,query:{scope?:string|null;group?:string|null}={}) {
+    admin(principal);if(!hex.test(id))throw new HttpError(400,'invalid_identity');
+    const task=(await this.control.query(`SELECT t.project_id,t.group_id,t.parent_id,p.group_id AS parent_group FROM owner_tasks t
+      LEFT JOIN owner_tasks p ON p.id=t.parent_id WHERE t.id=$1`,[id])).rows[0];
+    if(!task)throw new HttpError(404,'task_not_found');
+    const project:string|null=query.scope===undefined||query.scope===null?task.project_id:scope(query.scope);
+    const grouped:string|null=task.parent_id?task.parent_group??null:query.group===undefined||query.group===null?task.group_id:group(query.group);
+    if(!project)return {project:null,group:grouped,audience:null,chats:[] as string[]};
+    return {project,group:grouped,audience:grouped===null?'project' as const:'group' as const,chats:await this.audienceOf(this.control,project,grouped)};
+  }
   /** Archive every finished or dropped task in a list, or in all lists. */
   async archiveFinished(principal:Reader,input:unknown) {
     admin(principal);const body=exact(input,['operation_id','scope']),every=body.scope===undefined||body.scope==='all',project=every?null:scope(body.scope);

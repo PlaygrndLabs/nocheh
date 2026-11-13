@@ -611,6 +611,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/machines/commands'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
    const rows=machineCommands.filter(row=>(!q.get('machine')||row.machine_id===q.get('machine'))&&(!q.get('job')||row.job_id===q.get('job'))&&(q.get('kind')==='all'||row.kind!=='internal')&&(!before||row.id<before));
    return json(res,200,{commands:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}
+  const taskAudience=route.match(/^\/tasks\/([a-f0-9]{64})\/audience$/);
+  if(taskAudience)return json(res,200,await tasks.audience(taskOwner,taskAudience[1]!,{scope:url.searchParams.get('scope'),group:url.searchParams.get('group')}));
   const taskRead=route.match(/^\/tasks\/([a-f0-9]{64})$/);
   if(taskRead)return json(res,200,await tasks.get(taskOwner,taskRead[1]!));
   if(route==='/projects')return json(res,200,{projects:memoryProjects,next:null});

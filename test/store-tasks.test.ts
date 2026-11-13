@@ -835,7 +835,20 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     assert.ok(!(await s.tasks.chatList(general)).tasks.some((item:any)=>item.id===topical.id),'nor does the group\'s own chat see a topic\'s task');
     assert.equal((await s.tasks.chatGet(await ask(g1,'And in five?','Alice',5),cake.id)).group_id,g1+'/topic/5');
     await assert.rejects(s.tasks.chatCreate(five,{title:'Next door',group:g1+'/topic/6'}),{code:'task_group_denied'});
+    // The owner's card and the dashboard name exactly these chats.
+    const seenBy=async(id:string,query:{scope?:string;group?:string|null}={})=>(await s.tasks.audience(owner,id,query)).chats;
+    assert.deepEqual(await seenBy(cake.id),[g1+'/topic/5'],'with its own memory, only the topic sees its task');
     memory='group';
+    assert.deepEqual(await seenBy(cake.id),[g1],'sharing memory, the whole group does');
+    assert.deepEqual(await seenBy(shared.id),[g1,g2]);
+    assert.deepEqual(await s.tasks.audience(owner,shared.id,{group:g3}),{project:p1,group:g3,audience:'group',chats:[]},'a group in no project sees nothing');
+    assert.deepEqual(await s.tasks.audience(owner,under.id,{group:g2}),{project:p1,group:g1,audience:'group',chats:[g1]},'a subtask keeps its parent\'s group');
+    // A topic set on another project on its own sees that project's tasks of its group there, and is named for them.
+    await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[g1+'/topic/8',p2]);
+    const tent=await s.tasks.create(owner,{operation_id:key+':tent',title:'Rent the tent',scope:p2,group:g1});
+    assert.deepEqual([await seenBy(tent.id),await seenBy(tent.id,{scope:p1})],[[g1+'/topic/8'],[g1]]);
+    assert.equal((await s.tasks.chatGet(await ask(g1,'Anything for the tent?','Alice',8),tent.id)).id,tent.id);
+    await assert.rejects(s.tasks.chatGet(alice,tent.id),{status:404},'the group\'s own chat is in the other project');
 
     // Set on the project itself by the owner, a group's task shows the other group nothing from before.
     await s.tasks.update(owner,first.id,{operation_id:key+':open-up',expected_revision:first.revision,group:null});
