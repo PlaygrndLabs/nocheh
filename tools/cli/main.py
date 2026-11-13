@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, machine_folder, DEFAULT_STATE, INSTALLATION_ROOT
+from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, machine_folder, image_tag, DEFAULT_STATE, INSTALLATION_ROOT
 
 ROOT = REPO_ROOT
 STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
@@ -23,7 +23,9 @@ def bootstrap():
 
 def build_image(name, env=None):
     # The disposable tool and sealed job box images; the launcher resolves the box image at each box it makes.
-    return subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/f'deploy/{name}.Dockerfile'),'-t',f'nocheh-{name}:local',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
+    # `make dev` (no env) always builds the `nocheh` project's `local` tag.
+    tag=image_tag(env or {})
+    return subprocess.call(['docker','build','-f',str(INSTALLATION_ROOT/f'deploy/{name}.Dockerfile'),'-t',f'nocheh-{name}:{tag}',str(INSTALLATION_ROOT)],cwd=ROOT,env=env)
 
 
 def development_box_token():

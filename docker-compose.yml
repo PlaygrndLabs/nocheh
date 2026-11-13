@@ -9,7 +9,7 @@ x-logging: &logging
 
 x-service: &service
   logging: *logging
-  image: nocheh-services:local
+  image: nocheh-services:${NOCHEH_IMAGE_TAG:-local}
   build:
     context: .
     target: runtime
@@ -70,7 +70,7 @@ x-honcho-runtime: &honcho-runtime
 
 x-management: &management
   logging: *logging
-  image: nocheh-management:local
+  image: nocheh-management:${NOCHEH_IMAGE_TAG:-local}
   build: &management-build
     context: .
     target: management
@@ -92,8 +92,10 @@ x-management: &management
     NOCHEH_STATE_DIR: ${NOCHEH_STATE_DIR:-${PWD}/data/local}
     NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
     COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-nocheh}
+    # Approved tools run in this installation's own tool image.
+    NOCHEH_IMAGE_TAG: ${NOCHEH_IMAGE_TAG:-local}
     # The GitHub fetcher runs the launcher's box image (ADR-0209).
-    NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
+    NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:${NOCHEH_IMAGE_TAG:-local}}
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${NOCHEH_INSTALLATION_ROOT:-${PWD}}:${NOCHEH_INSTALLATION_ROOT:-${PWD}}
@@ -104,7 +106,7 @@ x-management: &management
 services:
   nocheh-reset-setup:
     logging: *logging
-    image: nocheh-services:local
+    image: nocheh-services:${NOCHEH_IMAGE_TAG:-local}
     build:
       context: .
       target: runtime
@@ -137,7 +139,7 @@ services:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-baseline:
     logging: *logging
-    image: nocheh-services:local
+    image: nocheh-services:${NOCHEH_IMAGE_TAG:-local}
     build:
       context: .
       target: runtime
@@ -166,7 +168,7 @@ services:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-state:
     logging: *logging
-    image: nocheh-services:local
+    image: nocheh-services:${NOCHEH_IMAGE_TAG:-local}
     build:
       context: .
       target: runtime
@@ -193,7 +195,7 @@ services:
       nocheh-db: {condition: service_healthy}
   nocheh-reset-acceptance:
     logging: *logging
-    image: nocheh-services:local
+    image: nocheh-services:${NOCHEH_IMAGE_TAG:-local}
     build:
       context: .
       target: runtime
@@ -245,7 +247,7 @@ services:
   # Without NOCHEH_MACHINE_TOKEN it refuses every request, and nothing waits for it, so Nocheh runs the same without it.
   nocheh-machines:
     logging: *logging
-    image: nocheh-management:local
+    image: nocheh-management:${NOCHEH_IMAGE_TAG:-local}
     build: *management-build
     command: [machines]
     user: "${NOCHEH_UID:-1000}:${NOCHEH_GID:-1000}"
@@ -386,7 +388,7 @@ services:
 
   hermes-agent-sb:
     logging: *logging
-    image: nocheh-hermes:local
+    image: nocheh-hermes:${NOCHEH_IMAGE_TAG:-local}
     command: [python, -m, services.hermes.security_launcher]
     user: "0:0"
     init: true
@@ -399,11 +401,13 @@ services:
     environment:
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       NOCHEH_AGENT_NETWORK: ${NOCHEH_AGENT_NETWORK:-nocheh-agent}
+      # Each turn runs this installation's own Hermes image, never another installation's build.
+      NOCHEH_TURN_IMAGE: nocheh-hermes:${NOCHEH_IMAGE_TAG:-local}
       NOCHEH_PARALLEL_RUNS: ${NOCHEH_PARALLEL_RUNS:-4}
       NOCHEH_UID: ${NOCHEH_UID:-1000}
       NOCHEH_GID: ${NOCHEH_GID:-1000}
       NOCHEH_BOX_TOKEN: ${NOCHEH_BOX_TOKEN:-}
-      NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:local}
+      NOCHEH_BOX_IMAGE: ${NOCHEH_BOX_IMAGE:-nocheh-box:${NOCHEH_IMAGE_TAG:-local}}
       NOCHEH_BOX_LIMIT: ${NOCHEH_BOX_LIMIT:-2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -436,7 +440,7 @@ services:
 
   nocheh-db:
     logging: *logging
-    image: nocheh-store-postgres:local
+    image: nocheh-store-postgres:${NOCHEH_IMAGE_TAG:-local}
     build:
       context: .
       target: store-postgres
@@ -532,7 +536,7 @@ services:
   # dashboard after checking Telegram's signature on each request.
   nocheh-miniapp:
     logging: *logging
-    image: nocheh-miniapp:local
+    image: nocheh-miniapp:${NOCHEH_IMAGE_TAG:-local}
     build:
       context: .
       target: mini-app
@@ -584,7 +588,7 @@ services:
   # The brain: answers turns for Nocheh and never talks to Telegram. It keeps the chat scopes, not the bot token.
   hermes:
     logging: *logging
-    image: nocheh-hermes:local
+    image: nocheh-hermes:${NOCHEH_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: deploy/hermes.Dockerfile

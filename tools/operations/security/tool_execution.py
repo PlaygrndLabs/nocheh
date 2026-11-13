@@ -18,7 +18,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 # The disposable image approved shell commands and page reads run in; `nocheh up` and `make dev` build it.
-TOOLS_IMAGE='nocheh-tools:local'
+# Each installation runs its own tag, so another installation's build never changes it.
+TOOLS_IMAGE='nocheh-tools:'+(os.environ.get('NOCHEH_IMAGE_TAG') or 'local')
 # Why an approved tool failed, as a fixed code a receipt may keep: never remote, command or page content.
 FAILURES=frozenset({'public_https_required','private_destination_denied','remote_unreachable','remote_unauthorized',
     'remote_response_rejected','encoded_response_denied','remote_response_limit','browser_html_required',
@@ -183,7 +184,7 @@ def execute(state,action,request=https_request,run=subprocess.run,container_name
 def bounded_execute(state,action):
     """An overall process deadline also bounds DNS and slow response streams."""
     name='nocheh-tool-'+uuid.uuid4().hex
-    env={key:os.environ[key] for key in ('PATH','HOME','LANG','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG') if key in os.environ}
+    env={key:os.environ[key] for key in ('PATH','HOME','LANG','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG','NOCHEH_IMAGE_TAG') if key in os.environ}
     process=subprocess.Popen([sys.executable,'-m','tools.operations.security.tool_execution'],cwd=REPO_ROOT,env=env,
         stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
     selector=selectors.DefaultSelector();output=bytearray();deadline=time.monotonic()+75

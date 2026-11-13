@@ -53,6 +53,34 @@ class ConfigurationTests(unittest.TestCase):
             initialize(state)
             self.assertFalse(set(volumes)&set(read_env(env_path(state))))
 
+    def test_a_second_installation_gets_its_own_image_tag_and_networks(self):
+        from tools.operations.installation import configuration
+        separate=('NOCHEH_IMAGE_TAG','NOCHEH_AGENT_NETWORK','NOCHEH_MEMORY_NETWORK')
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve();state=root/'data/local'
+            with patch.object(configuration,'INSTALLATION_ROOT',root),patch.object(configuration,'DEFAULT_STATE',state):
+                # The `nocheh` installation keeps the `local` images and the Compose file's networks.
+                initialize(state)
+                self.assertFalse(set(separate)&set(read_env(root/'.env')))
+                self.assertEqual(configuration.image_tag(load(state)),'local')
+                # A checkout that names another project builds and runs only its own images,
+                # so the other installation's builds never change the images its turns, boxes and tools use.
+                saved=read_env(root/'.env');saved['COMPOSE_PROJECT_NAME']='nocheh-synthetic-second';write_env(root/'.env',saved)
+                initialize(state)
+                self.assertEqual([read_env(root/'.env')[key] for key in separate],
+                                 ['nocheh-synthetic-second','nocheh-synthetic-second-agent','nocheh-synthetic-second-memory'])
+                self.assertEqual(compose_environment(state)['NOCHEH_IMAGE_TAG'],'nocheh-synthetic-second')
+                # A saved tag is kept; a tag Docker cannot use is refused.
+                saved=read_env(root/'.env');saved['NOCHEH_IMAGE_TAG']='synthetic-kept';write_env(root/'.env',saved)
+                self.assertEqual(initialize(state)['NOCHEH_IMAGE_TAG'],'synthetic-kept')
+                saved['NOCHEH_IMAGE_TAG']='Not A Tag';write_env(root/'.env',saved)
+                with self.assertRaises(ValueError):initialize(state)
+        with tempfile.TemporaryDirectory() as folder:
+            # Restores and rehearsals run the checkout's own images and set their networks themselves.
+            state=Path(folder);write_env(state/'.env',{'COMPOSE_PROJECT_NAME':'nocheh-synthetic-restored'})
+            initialize(state)
+            self.assertFalse(set(separate)&set(read_env(env_path(state))))
+
     def test_auto_migrates_to_on_and_new_configuration_has_only_two_states(self):
         from tools.operations.installation.configuration import validate
         with tempfile.TemporaryDirectory() as folder:

@@ -15,7 +15,7 @@ from datetime import datetime,timezone
 from contextlib import ExitStack
 from pathlib import Path,PurePosixPath
 
-from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
+from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, read_env, write_env, image_tag, INSTALLATION_ROOT, DEFAULT_STATE, compose_command, archive_url
 ROOT=INSTALLATION_ROOT
 SERVICES=['nocheh-telegram','hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
@@ -269,7 +269,9 @@ def restore(snapshot,state,project,port):
                   NOCHEH_HONCHO_DATABASE_VOLUME=project+'_honcho_database',NOCHEH_HONCHO_REDIS_VOLUME=project+'_honcho_redis',
                   NOCHEH_UID=str(os.getuid()),NOCHEH_GID=str(os.getgid()),NOCHEH_PORT=str(port),
                   NOCHEH_DASHBOARD_PORT=str(port+3 if port<=65532 else port-3),
-                  COMPOSE_PROJECT_NAME=project,NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent')
+                  COMPOSE_PROJECT_NAME=project,NOCHEH_MEMORY_TOKEN='',NOCHEH_MEMORY_NETWORK=project+'-memory',NOCHEH_AGENT_NETWORK=project+'-agent',
+                  # The restored project runs this checkout's images, not the ones the snapshot's installation built.
+                  NOCHEH_IMAGE_TAG=image_tag(read_env(env_path(DEFAULT_STATE))))
     (state/'admin/tools').mkdir(parents=True,exist_ok=True,mode=0o700)
     (state/'admin/tools/inactive').touch()
     (state/'hermes/scheduler-inactive').touch()

@@ -153,7 +153,8 @@ def docker_env(root, values):
     env.update(provider_routes.environment(values))
     env.update(mini_app.environment(values))
     env.update(overlay_environment(ROOT))
-    env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_INSTALLATION_ROOT=str(root),
+    # The development stack is always the `nocheh` project with the `local` image tag.
+    env.update(COMPOSE_PROJECT_NAME=PROJECT, NOCHEH_IMAGE_TAG='local', NOCHEH_INSTALLATION_ROOT=str(root),
                NOCHEH_STATE_DIR=str(root / 'data/local'),
                NOCHEH_NATIVE_ADMIN_PORT=str(int(values['NOCHEH_PORT']) + 5),
                COMPOSE_PROFILES='honcho,miniapp' if mini_app.enabled(values) else 'honcho',
