@@ -305,6 +305,33 @@ const boardChange=(changes:Record<string,unknown>,reach:ReadSet|null)=>{
   if(!group||typeof group!=='object')return shown;
   return {...shown,group_id:Object.fromEntries(Object.entries(group).map(([side,space])=>[side,seesGroup(reach,space)?space:null]))};
 };
+/**
+ * A group's tasks move with it (ADR-0247): when the owner moves group `group` from project `from` to project `to`, its
+ * tasks and its topics' tasks in `from`, each with everything under it, move to `to` in the same transaction. They
+ * stay that group's, so they keep their joining time, and each gets a history entry. A task under a task of another
+ * group stays with its parent, and a task that ends up in another group than the task it sits under joins that
+ * task's group, from then on. Moving a group into no project, or from none, moves nothing: its tasks stay on the
+ * old list, where only the owner sees them. Returns how many tasks moved.
+ */
+export async function moveGroupTasks(db:Pick<pg.PoolClient,'query'>,group:string,from:string|null,to:string|null,
+  by:{actor:TaskActor;origin:'dashboard'|'chat'}={actor:{kind:'owner'},origin:'dashboard'}):Promise<number> {
+  if(!groupChatId(group)||!from||!to||from===to)return 0;
+  // Each task with the group it ends up in: the group of the task at the top of its family.
+  const family=(await db.query(`WITH RECURSIVE down AS (
+      SELECT id,group_id AS home FROM owner_tasks WHERE project_id=$2 AND parent_id IS NULL AND (group_id=$1 OR starts_with(group_id,$1||'/topic/'))
+      UNION SELECT t.id,down.home FROM owner_tasks t JOIN down ON t.parent_id=down.id)
+    SELECT o.id,o.group_id,down.home FROM owner_tasks o JOIN down ON down.id=o.id ORDER BY o.id FOR UPDATE OF o`,[group,from])).rows;
+  if(!family.length)return 0;
+  const at=(await db.query('SELECT clock_timestamp()::text AS at')).rows[0].at as string;
+  await db.query(`UPDATE owner_tasks o SET project_id=$3,group_id=f.home,project_since=CASE WHEN o.group_id IS NOT DISTINCT FROM f.home THEN o.project_since ELSE $4::timestamptz END,
+    revision=o.revision+1,updated_at=now() FROM unnest($1::text[],$2::text[]) AS f(id,home) WHERE o.id=f.id`,[family.map(task=>task.id),family.map(task=>task.home),to,at]);
+  for(const task of family){
+    const regrouped=task.group_id!==task.home;
+    await db.query('INSERT INTO owner_task_activity(task_id,actor,origin,changes,at) VALUES($1,$2,$3,$4,$5::timestamptz)',[task.id,JSON.stringify(by.actor),by.origin,
+      JSON.stringify({project_id:{from,to},...(regrouped?{group_id:{from:task.group_id,to:task.home}}:{})}),at]);
+  }
+  return family.length;
+}
 /** A repeat in words, as a card shows it: "every 2 weeks on Mon, Thu, from when it is done". */
 const repeatWords=(repeat:{every:number;unit:string;weekdays?:number[];from:string})=>
   `every ${repeat.every} ${repeat.unit}${repeat.every===1?'':'s'}${repeat.weekdays?.length?' on '+repeat.weekdays.map(day=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).join(', '):''}`+

@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {groupSpace,groupSpaceSql,readSet} from '../src/spaces.js';
+import {moveGroupTasks} from '../src/stores/tasks.js';
 
 const states=(counts:any)=>({open:counts.open,done:counts.done,dropped:counts.dropped});
 
@@ -842,5 +843,33 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     assert.deepEqual([opened.comments,opened.activity.map((item:any)=>item.changes),opened.group_id],[[],[{group_id:{to:null}}],null]);
     assert.ok(!JSON.stringify(opened).includes('canary-note-'+mark)&&!JSON.stringify(opened).includes(g1));
     assert.equal((await s.tasks.chatGet(bob,under.id)).group_id,null,'the tasks under it move with it');
+
+    // A group's tasks, its topics' too, move with it to another project with everything under them, and keep what
+    // the group saw; a task under them from another group joins their group from then on.
+    const band=await s.tasks.chatComment(bob,second.id,{text:'Booked the band'});
+    const lights=await s.tasks.create(owner,{operation_id:key+':lights',title:'Rent the lights',scope:p1,group:g2+'/topic/3'});
+    const odd=digest(key+':odd');
+    await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
+      VALUES($1,'canary-odd-'||$2,'todo','open',$3,NULL,$4,'dashboard',now()-interval '1 hour')`,[odd,mark,p1,own.id]);
+    await stores.control.query("INSERT INTO owner_task_comments(id,task_id,body,author,origin,created_at) VALUES($1,$2,'canary-odd-note','{\"kind\":\"owner\"}','dashboard',now()-interval '1 minute')",[digest(key+':odd-note'),odd]);
+    const db=await stores.control.connect();
+    try {
+      await db.query('BEGIN');
+      assert.equal(await moveGroupTasks(db,g2,p1,p2),4,'its two tasks, its topic\'s and the one under one of them');
+      assert.equal(await moveGroupTasks(db,g2,p2,null),0,'leaving every project moves nothing');
+      assert.equal(await moveGroupTasks(db,g2,p2,p2),0);
+      await db.query('UPDATE project_assignments SET project_id=$2,revision=revision+1 WHERE space_id=$1',[g2,p2]);
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    const after=await ask(g2,'What do we have now?','Bob');
+    assert.deepEqual(ids(await s.tasks.chatList(after)),[second.id,own.id,lights.id,odd].sort(),'its tasks moved with it, and the project\'s tasks stayed');
+    const kept=await s.tasks.chatGet(after,second.id);
+    assert.deepEqual([kept.project_id,kept.comments.map((item:any)=>item.body)],[p2,band.comments.map((item:any)=>item.body)],'it keeps what the group saw');
+    assert.deepEqual(kept.activity[0].changes,{project_id:{to:p2}});
+    const joined=await s.tasks.chatGet(after,odd);
+    assert.deepEqual([joined.group_id,joined.comments],[g2,[]],'a task under it from elsewhere joins its group from now on');
+    for(const id of [shared.id,all.id])await assert.rejects(s.tasks.chatGet(after,id),{status:404});
+    assert.ok(!(await s.tasks.chatList(alice)).tasks.some((item:any)=>[second.id,own.id,lights.id,odd].includes(item.id)));
+    assert.deepEqual((await s.tasks.get(owner,odd)).activity[0].changes,{project_id:{from:p1,to:p2},group_id:{from:null,to:g2}},'the owner sees the whole move');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
