@@ -670,20 +670,28 @@ class Scenarios:
         self.gate('next_message_not_held', time.monotonic()-started < 90, seconds=round(time.monotonic()-started, 1))
 
     def photo_is_read(self):
-        # A photo keeps its original bytes and is read once by Hermes's vision
-        # tool with the Images model before its reply.
-        content = synthetic_png()
-        file_id = 'photo-'+str(self.f.ids())
+        # A photo keeps its original bytes and is read once, at its largest size, by Hermes's vision tool with the
+        # Images model before its reply. Telegram's smaller sizes stay listed in the update, never fetched or read.
+        sizes = [(synthetic_png(4), 32, 24), (synthetic_png(16), 128, 96), (synthetic_png(8), 64, 48)]
+        files = [('photo-'+str(self.f.ids()), content, width, height) for content, width, height in sizes]
         self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.png',
-                                   'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
+                                   'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}
+                                  for file_id, content, _, _ in files]})
         update = self.f.message(OWNER, None, extra={'caption': 'این تابلو را نگه دار', 'photo': [
-            {'file_id': file_id, 'file_unique_id': 'u'+file_id, 'width': 64, 'height': 48, 'file_size': len(content)}]})
+            {'file_id': file_id, 'file_unique_id': 'u'+file_id, 'width': width, 'height': height, 'file_size': len(content)}
+            for file_id, content, width, height in files]})
         event_id, _ = self.turn(update, OWNER)
+        largest, content = files[1][0], files[1][1]
         expected = hashlib.sha256(content).hexdigest()
         self.wait('photo_bytes_archived', lambda: self.f.query('nocheh_archive', "SELECT file_hash FROM artifacts WHERE event_id='"+event_id+"'") == expected, 120)
+        kept = self.f.query('nocheh_archive', "SELECT string_agg(source_ref,',') FROM artifacts WHERE event_id='"+event_id+"'")
+        self.gate('photo_kept_once_at_its_largest_size', kept == largest, kept=kept)
         read = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='extracted_text' AND event_id='"+event_id+"'"
                             " AND position('SIGNMARK88' in convert_from(content,'UTF8'))>0")
-        self.gate('photo_text_read', read == '1', count=read)
+        self.gate('photo_text_read_once', read == '1', count=read)
+        listed = self.f.query('nocheh_archive', "SELECT jsonb_array_length(convert_from(payload,'UTF8')::jsonb->'message'->'photo') FROM events WHERE id='"
+                              + event_id+"'")
+        self.gate('every_size_stays_in_the_update', listed == '3', sizes=listed)
 
     # Owner authority ------------------------------------------------------------
 
