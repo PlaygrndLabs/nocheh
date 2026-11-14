@@ -90,8 +90,8 @@ test('the GitHub copy has its own instruction text, card line and card answers, 
   assert.equal(lines.repo_removed,'🚫 Withdrawn: its GitHub copy was removed. Nothing runs.');
   assert.equal(fillTemplate(lines.repo!,{repo_name:'example-org/widgets',repo_branch:'main',repo_commit:'3f2a91c',repo_copied:'2026-11-04 10:12 UTC',repo_size:'18 MB, 1,204 files'}),
     'It reads a copy of example-org/widgets, main at 3f2a91c, copied 2026-11-04 10:12 UTC (18 MB, 1,204 files). What it reads is secret-checked before the model sees it, and reading code adds to its cost. Your GitHub key stays outside the box.');
-  assert.equal(fillTemplate(backgroundCard,{title:'T',size:'1 message',minutes:'2',cost:'about $0.10',cost_limit:'$5.0',minutes_limit:'45',unpriced:null,checked:null,notion:null,box:null,repo:null,machine:null,steps:null,origin:null,instruction:'I'}),
-    '🗂 Background job: T\n📏 1 message\n⏱ About 2 min, about $0.10\n🛑 Stops at $5.0 or 45 min, not counting the secret check\n\nI','a job without a copy shows no 📦 line');
+  assert.equal(fillTemplate(backgroundCard,{title:'T',size:'1 message',minutes:'2',cost:'about $0.10',cost_limit:'$5.00',minutes_limit:'45',unpriced:null,checked:null,notion:null,box:null,repo:null,machine:null,steps:null,origin:null,instruction:'I'}),
+    '🗂 Background job: T\n📏 1 message\n⏱ About 2 min, about $0.10\n🛑 Stops at $5.00 or 45 min, not counting the secret check\n\nI','a job without a copy shows no 📦 line');
 });
 
 test('a machine job has its own instruction text, which must keep the plan, and its card shows the machine, the plan and why it was withdrawn',()=>{
@@ -118,7 +118,7 @@ test('a machine job has its own instruction text, which must keep the plan, and 
   assert.equal(lines.report_private,'✅ Done: the job you asked for here finished. Its report is in your private chat.');
   assert.equal(lines.limited_private,'⏱ The job you asked for here stopped at its limit. A short note is in your private chat.');
   assert.equal(labeledLines(backgroundTexts,'done: Done.').report_private,lines.report_private,'an older saved text keeps the new lines\' defaults');
-  assert.equal(fillTemplate(backgroundCard,{title:'T',size:'1 message',minutes:'2',cost:'about $0.10',cost_limit:'$5.0',minutes_limit:'45',unpriced:null,checked:null,notion:null,box:null,repo:null,
+  assert.equal(fillTemplate(backgroundCard,{title:'T',size:'1 message',minutes:'2',cost:'about $0.10',cost_limit:'$5.00',minutes_limit:'45',unpriced:null,checked:null,notion:null,box:null,repo:null,
     machine:'It works on build-vm.',steps:'Plan:\n1. One\n2. Two',origin:'“Made-up group” › Builds',instruction:'I'}),
-    '🗂 Background job: T\n💬 Asked in “Made-up group” › Builds\n📏 1 message\n⏱ About 2 min, about $0.10\n🛑 Stops at $5.0 or 45 min, not counting the secret check\n🖥 It works on build-vm.\n📋 Plan:\n1. One\n2. Two\n\nI');
+    '🗂 Background job: T\n💬 Asked in “Made-up group” › Builds\n📏 1 message\n⏱ About 2 min, about $0.10\n🛑 Stops at $5.00 or 45 min, not counting the secret check\n🖥 It works on build-vm.\n📋 Plan:\n1. One\n2. Two\n\nI');
 });

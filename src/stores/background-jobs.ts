@@ -25,6 +25,7 @@ import {machineJob,machinePin,machineReady,machineTokenSet,type MachinePin} from
 import {followUpTurn} from './owner-autonomy.js';
 import {ProjectRepository} from './projects.js';
 import {reordering,visible} from '../action-text.js';
+import {cents,memberCostLimit,memberDecided,memberJobSchema,MemberJobSpend} from './member-job-spend.js';
 
 export const backgroundJobSchema=`
 CREATE TABLE IF NOT EXISTS background_settings (
@@ -94,7 +95,13 @@ ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS repo jsonb CHECK(repo IS NU
 -- Whether the job may read the owner's Notion without asking: what its card offered when it was asked, narrowed by the
 -- owner's setting when it was approved, so it never says more than the card did (ADR-0225).
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS notion_reads boolean NOT NULL DEFAULT false;
-`;
+-- The owner's marks for what jobs members approved themselves spend in a UTC day: a Telegram notice with a Pause button
+-- at the first, and member jobs paused by themselves until 00:00 UTC past the second (ADR-0251).
+ALTER TABLE background_settings ADD COLUMN IF NOT EXISTS member_notice_usd numeric NOT NULL DEFAULT 20 CHECK(member_notice_usd>0 AND member_notice_usd<=10000);
+ALTER TABLE background_settings ADD COLUMN IF NOT EXISTS member_pause_usd numeric NOT NULL DEFAULT 100 CHECK(member_pause_usd>0 AND member_pause_usd<=10000);
+-- Whether a job a member approved waits for member jobs to resume, so its card says so, and is settled again when it goes on.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS held boolean NOT NULL DEFAULT false;
+${memberJobSchema}`;
 
 const protocol='background-job-v1';
 // Hermes's backstop on the tool and thinking steps of one run; time and cost end a run long before it.
@@ -115,7 +122,7 @@ const REPORT_PART=12000;
 // A job card with the longest line a decided card adds stays below Telegram's 4,096 UTF-16 units, so it can always be sent and settled.
 const CARD_LIMIT=3800;
 // The lines a decided card adds under its text (settleJob).
-const outcomes=['running','running_elsewhere','queued','done','limited','stopped','stopping','failed','rejected','repo_removed','machine_off'];
+const outcomes=['running','running_elsewhere','queued','paused','done','limited','stopped','stopping','failed','rejected','repo_removed','machine_off'];
 /** A machine job's plan as its card and run show it: one numbered line a step. */
 const numbered=(steps:string[])=>steps.map((step,index)=>`${index+1}. ${step}`).join('\n');
 export const closedStates=new Set(['done','failed','stopped','rejected']);
@@ -291,28 +298,52 @@ export class BackgroundJobRepository {
   settled:(id:string)=>Promise<void>=async()=>{};
   /** Ends a stopped job's changes that still wait for the owner; set by the controlled actions. */
   stopped:(id:string)=>Promise<void>=async()=>{};
+  /** What jobs members approved themselves spend in a UTC day, its notice, and the pause of member jobs (ADR-0251). */
+  readonly members:MemberJobSpend;
   constructor(readonly access:SourceAccessRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
     readonly turns:RuntimeTurnRepository,readonly sources:SourceRepository,readonly telegram:TelegramActionRepository,
     readonly call:RuntimeCall,readonly brain:Brain,readonly detect:(text:string)=>Promise<unknown>,token:string){
     this.runs=new BackgroundRunRepository(this,token);
+    this.members=new MemberJobSpend(access.stores.control,access.stores.archive,()=>access.policy().owner_id??null,call);
   }
   get control(){return this.access.stores.control;}
   get guards(){return this.access.guards;}
   async settings(){
     const row=(await this.control.query('SELECT * FROM background_settings WHERE singleton')).rows[0];
     // A value saved before the 50-minute limit reads as the limit, so it never refuses every job.
-    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:Math.min(row.minutes_limit,JOB_MINUTES),member_daily_jobs:row.member_daily_jobs,box_tools:row.box_tools as boolean,revision:row.revision};
+    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:Math.min(row.minutes_limit,JOB_MINUTES),member_daily_jobs:row.member_daily_jobs,box_tools:row.box_tools as boolean,
+      member_notice_usd:Number(row.member_notice_usd),member_pause_usd:Number(row.member_pause_usd),revision:row.revision};
   }
+  /** Save the limits. The box switch and the two marks of members' daily job spend are optional: a save without them keeps
+   *  them. The high mark is never below the notice mark. */
   async saveSettings(principal:Reader,input:unknown){
     admin(principal);const body=object(input);
-    if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','member_daily_jobs','box_tools','revision'].includes(key))||!Number.isSafeInteger(body.revision)||
+    if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','member_daily_jobs','box_tools','member_notice_usd','member_pause_usd','revision'].includes(key))||!Number.isSafeInteger(body.revision)||
       body.box_tools!==undefined&&typeof body.box_tools!=='boolean')throw new HttpError(400,'invalid_settings');
     const cost=Number(body.cost_limit_usd),minutes=Number(body.minutes_limit),daily=Number(body.member_daily_jobs);
     if(!(cost>0&&cost<=1000)||!Number.isSafeInteger(minutes)||minutes<5||minutes>JOB_MINUTES||!Number.isSafeInteger(daily)||daily<0||daily>100)throw new HttpError(400,'invalid_settings');
-    const changed=await this.control.query(`UPDATE background_settings SET cost_limit_usd=$1,minutes_limit=$2,member_daily_jobs=$3,box_tools=coalesce($5,box_tools),
-      revision=revision+1,updated_at=now() WHERE singleton AND revision=$4`,[cost,minutes,daily,body.revision,body.box_tools??null]);
-    if(!changed.rowCount)throw new HttpError(409,'configuration_conflict');
+    const mark=(value:unknown)=>{if(value===undefined)return null;const usd=typeof value==='number'?value:NaN;
+      if(!(usd>=0.01&&usd<=10000))throw new HttpError(400,'invalid_settings');return usd;};
+    const notice=mark(body.member_notice_usd),high=mark(body.member_pause_usd);
+    const db=await this.control.connect();
+    try {
+      await db.query('BEGIN');
+      const changed=await db.query(`UPDATE background_settings SET cost_limit_usd=$1,minutes_limit=$2,member_daily_jobs=$3,box_tools=coalesce($5,box_tools),
+        member_notice_usd=coalesce($6,member_notice_usd),member_pause_usd=coalesce($7,member_pause_usd),revision=revision+1,updated_at=now()
+        WHERE singleton AND revision=$4 RETURNING member_notice_usd<=member_pause_usd AS ordered`,[cost,minutes,daily,body.revision,body.box_tools??null,notice,high]);
+      if(!changed.rowCount)throw new HttpError(409,'configuration_conflict');
+      // Checked on the saved row, so a mark left out keeps the high mark from going below the notice mark too.
+      if(!changed.rows[0].ordered)throw new HttpError(400,'invalid_settings');
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
     return this.settings();
+  }
+  /** Pause member jobs until the owner resumes them, or resume them, from the dashboard (ADR-0251). */
+  async pauseMembers(principal:Reader,input:unknown){
+    admin(principal);const body=object(input);
+    if(Object.keys(body).length!==1||typeof body.paused!=='boolean')throw new HttpError(400,'invalid_member_pause');
+    await this.members.setPaused(body.paused);
+    return this.members.summary(this.access.policy().owner_id??null);
   }
   async row(id:unknown){
     const row=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[managedEventId(id)])).rows[0];
@@ -394,7 +425,10 @@ export class BackgroundJobRepository {
     // A member's job over the owner's limit, or on a model whose cost cannot be measured, waits for the owner instead. A machine
     // job's card always goes to the owner's private chat, wherever it was asked.
     const priced=jobPriced(estimate.rates),approver=machine||requester&&(!priced||(estimate.cost_usd??0)>settings.cost_limit_usd)?'owner':'requester';
-    const costLimit=Math.max(settings.cost_limit_usd,Math.ceil((estimate.cost_usd??0)*1.5)),minutesLimit=Math.max(settings.minutes_limit,Math.ceil(estimate.minutes*1.5));
+    // A member's job gets half again over its estimate to the cent, so a small job never gets a whole extra dollar; the
+    // owner's own job keeps whole dollars (ADR-0251).
+    const costLimit=requester?memberCostLimit(settings.cost_limit_usd,estimate.cost_usd):Math.max(settings.cost_limit_usd,Math.ceil((estimate.cost_usd??0)*1.5));
+    const minutesLimit=Math.max(settings.minutes_limit,Math.ceil(estimate.minutes*1.5));
     const bytes=byteBudget(costLimit,estimate.rates);
     // Refused before the secret check spends anything: the agent narrows the period or splits the work.
     if(minutesLimit>JOB_MINUTES)throw new HttpError(409,'job_too_long');
@@ -456,11 +490,13 @@ export class BackgroundJobRepository {
     try{return (await this.proposal(row)).title;}catch(error){if(error instanceof HttpError)return null;throw error;}
   }
   /** The card a person approves: the exact instruction, what it reads and what it may cost, and `origin`, where it was
-   *  asked, when the card is not in that chat. */
+   *  asked, when the card is not in that chat. An approved job waits for a free slot, or, one a member approved, for
+   *  member jobs to resume (ADR-0251). */
   async card(id:string,origin:string|null=null) {
     const row=await this.row(id),{text,lines}=await this.cardText(row,await this.proposal(row),origin);
+    const paused=row.state==='approved'&&await this.members.holds(row);
     const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
-    return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines};
+    return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,paused,lines};
   }
   /** A card's text from a job's values and the exact proposal it shows; also for a job not yet recorded. */
   private async cardText(row:any,shown:{title:string;instruction:string},origin:string|null=null) {
@@ -471,7 +507,8 @@ export class BackgroundJobRepository {
     const values:Record<string,string|null|undefined>={title:visible(shown.title),instruction:visible(shown.instruction,true),
       size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
       // Without a price only the time limit applies, and the card says so instead of a cost limit.
-      cost_limit:jobPriced(row.rates)?money(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin,
+      // The cap to the cent, so it never reads as less than it is (ADR-0251).
+      cost_limit:jobPriced(row.rates)?cents(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin,
       notion:row.notion_reads?lines.notion_reads:null,box:row.box?(row.repo?lines.box_repo:lines.box):null,
       // From the job's own pin, so a card settled after Remove still shows what was asked.
       repo:row.repo?fillTemplate(lines.repo!,{repo_name:row.repo.name,repo_branch:row.repo.branch,repo_commit:row.repo.commit.slice(0,7),
@@ -534,18 +571,21 @@ export class BackgroundJobRepository {
       rows=principal.scope===null?(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 20')).rows:
         (await this.control.query('SELECT * FROM background_jobs WHERE scope=$1 ORDER BY created_at DESC LIMIT 20',[principal.scope])).rows;
     }
-    const jobs=[];
+    const jobs=[],owner=this.access.policy().owner_id,pause=await this.members.pause();
     for(const row of rows) {
       let title:string|null=null;try{title=(await this.proposal(row)).title;}catch(error){if(!(error instanceof HttpError))throw error;}
       const hidden=!!row.machine&&!principal.admin&&principal.scope!==null;
       jobs.push({id:row.id,title,state:row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.state,chat:row.target,asked_in:row.space_id,
+        // Approved by a member while member jobs are paused: it waits to start (ADR-0251).
+        held:!!pause&&row.state==='approved'&&!row.cancel_requested&&memberDecided(row,owner),
         attempts:row.attempts,ended:row.ended,cost_usd:Number(row.cost_usd),cost_limit_usd:Number(row.cost_limit_usd),priced:jobPriced(row.rates),minutes_limit:row.minutes_limit,estimate:row.estimate,
         todo:hidden?null:row.todo,started_at:row.started_at,finished_at:row.finished_at,created_at:row.created_at,error_code:row.error_code,
         machine:row.machine&&!hidden?{name:row.machine.name}:null,steps:hidden?null:row.steps??null,
         ...(hidden?{private:'A job on the owner\'s machine. Its plan and report are in the owner\'s private chat.'}:{}),
         ...(principal.admin?{logical_profile:row.logical_profile,approver:row.approver,machine_cleanup:row.machine_cleanup??null}:{})});
     }
-    return {jobs,...(repos?{repos}:{}),...(machines?{machines}:{})};
+    // The owner's dashboard also shows what jobs members approved themselves spent today, the marks, and the pause.
+    return {jobs,...(repos?{repos}:{}),...(machines?{machines}:{}),...(principal.admin?{members:await this.members.summary(owner??null)}:{})};
   }
   /** Whether a turn may see the machines: the owner's own live message, not a job's run or a follow-up, in their private chat,
    *  while machine control is on and set up. A group never sees them, the owner's own message there included (ADR-0244): the
@@ -692,6 +732,8 @@ export class BackgroundJobRepository {
       AND started_at IS NOT NULL AND state<>'reporting' AND $2 IN ('failed','stopped') THEN coalesce(machine_cleanup,'pending') ELSE machine_cleanup END,revision=revision+1,updated_at=now()
       WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id,state,code]);
     if(changed.rowCount)await this.settled(row.id);
+    // A member's job that ended looks once more at what members spent today, so its last cost is not left for the next job (ADR-0251).
+    if(changed.rowCount&&memberDecided(row,this.access.policy().owner_id))await this.members.check();
     return observation(state==='done'?'completed':state==='stopped'?'cancelled':'failed','assistant',0,Date.now(),state==='failed'?'workflow_execution_failed':null);
   }
   /** Drive one job: start its run when a slot is free, watch it, and send its report, or a short note at a limit.
@@ -702,13 +744,25 @@ export class BackgroundJobRepository {
     if(row.state==='done')return observation('completed','delivery');
     if(row.state==='stopped')return observation('cancelled','assistant');
     if(row.state==='failed')return observation('failed','assistant',0,Date.now(),'workflow_execution_failed');
+    // Each tick of a running job a member approved looks at what members spent today: the owner's notice at the notice
+    // mark, member jobs paused at the high mark. It never fails the tick (ADR-0251).
+    if(['running','reporting'].includes(row.state)&&memberDecided(row,this.access.policy().owner_id))await this.members.check();
     if((await this.control.query("SELECT 1 FROM workflow_owners WHERE family='background' AND owner=$1 AND epoch=$2 AND admission",[authority.owner,authority.epoch])).rowCount===0)
       return observation('waiting','admission',0,Date.now()+30000,'owner_paused');
     if(row.state==='approved') {
       if(row.cancel_requested)return this.finish(row,'stopped');
+      // A job a member approved waits to start while member jobs are paused, and its card says so; nothing is refused or
+      // sent elsewhere, and the owner's jobs and the member jobs the owner approved never wait (ADR-0251).
+      if(await this.members.holds(row)) {
+        if((await this.control.query('UPDATE background_jobs SET queued=true,held=true WHERE id=$1 AND NOT held',[id])).rowCount)await this.settled(id);
+        return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
+      }
+      if(row.held)await this.control.query('UPDATE background_jobs SET held=false WHERE id=$1',[id]);
       const running=Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count);
       if(running>=RUNNING_JOBS) {
         await this.control.query('UPDATE background_jobs SET queued=true WHERE id=$1 AND NOT queued',[id]);
+        // A card that said member jobs are paused now says the job waits for a free slot.
+        if(row.held)await this.settled(id);
         return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
       }
       await this.addRun(row,1);
@@ -890,7 +944,7 @@ export class BackgroundJobRepository {
     return fillTemplate(prompts['background.job']??backgroundJob,{title:shown.title,instruction:shown.instruction,
       chat:job.target===owner?'your private chat with the owner (chat '+job.target+')':'chat '+job.target,period,size:sizeLine(estimate),
       // Without a price only the time limit applies, so the job is not told of a dollar limit.
-      limits:jobPriced(job.rates)?money(Number(job.cost_limit_usd))+' or '+job.minutes_limit+' minutes, whichever comes first':job.minutes_limit+' minutes'});
+      limits:jobPriced(job.rates)?cents(Number(job.cost_limit_usd))+' or '+job.minutes_limit+' minutes, whichever comes first':job.minutes_limit+' minutes'});
   }
   /** A run may run only while its job runs and the person who asked may still use Nocheh there. */
   async allowed(row:any) {
