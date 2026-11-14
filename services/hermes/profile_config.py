@@ -108,7 +108,7 @@ def policy_root(profile):
     return Path(os.environ.get("NOCHEH_RUNTIME_HOME", profile.parent.parent if profile.parent.name == "profiles" else profile))
 
 
-def inherited_config(profile, config, job=None, policy=None):
+def inherited_config(profile, config, job=None, policy=None, chat=None):
     from .policy_config import effective
     result = json.loads(json.dumps(config))
     # Audience revisions retire memory/history, while the logical scope retains
@@ -119,8 +119,10 @@ def inherited_config(profile, config, job=None, policy=None):
         if binding.get('revision',0)>0 and binding.get('owner') is False:
             from .scopes import Scopes
             base=policy_root(profile)/'profiles'/Scopes.profile(binding['space'])/'config.yaml'
-            parent=policy_root(profile)/'profiles'/Scopes.profile(binding['space'].split('/topic/')[0])/'config.yaml'
-            source=base if base.is_file() else parent
+            # A topic inherits its chat's: the chat the turn names, else the one its marker keeps (ADR-0250).
+            chat=chat or binding.get('chat')
+            parent=policy_root(profile)/'profiles'/Scopes.profile(chat)/'config.yaml' if isinstance(chat,str) and chat else None
+            source=base if base.is_file() or parent is None else parent
             if source.is_file():logical=read(source)
     values, origins = effective(policy_root(profile), logical, job, policy)
     for key, value in values.items():
@@ -145,7 +147,7 @@ def inspect_profile(profile, model):
             'managed': MANAGED}
 
 
-def configure_profile(profile, model, changes=None, expected=None):
+def configure_profile(profile, model, changes=None, expected=None, chat=None):
     profile = Path(profile); profile.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = profile / 'config.yaml'
     from .policy_config import document
@@ -168,7 +170,7 @@ def configure_profile(profile, model, changes=None, expected=None):
                 else:
                     original.setdefault(section, {})[field] = value; inherited.discard(key)
             original.setdefault('nocheh', {})['inherited_preferences'] = sorted(inherited)
-        inherited, origins = inherited_config(profile, original, policy=policy)
+        inherited, origins = inherited_config(profile, original, policy=policy, chat=chat)
         result = resolved(inherited, model)
         if not path.exists() or result != read(path): atomic_yaml(path, result)
         return {'origins': origins, 'revision': profile_revision(result, policy), 'values': preferences(result), 'schema': PREFERENCES,

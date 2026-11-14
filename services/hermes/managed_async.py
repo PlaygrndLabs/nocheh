@@ -158,10 +158,12 @@ class ManagedAsync:
                 # The authenticated control service supplies the admitted logical
                 # profile. Native storage identity comes only from its signed
                 # capability, never from a caller's filesystem/profile lookup.
-                policy=self.admin.policy;chat=context['scope'];space=context['space'];name=context['profile']
-                if not policy.owner or chat!=policy.owner and chat not in policy.groups or space.split('/topic/')[0]!=chat:
+                # The chat is the owner's private chat or a served group, and the space is that chat or one of its
+                # topics, as the app's served list has them (ADR-0250).
+                served=self.admin.policy.current();chat=context['scope'];space=context['space'];name=context['profile']
+                if not served.owner_chat or chat!=served.owner_chat and served.group(chat)!=chat or served.chat_of(space)!=chat:
                     raise ValueError('profile_scope_denied')
-                scope=Scope(chat,policy.owner,chat==policy.owner,name,space,context['revision'],logical_profile=name)
+                scope=Scope(chat,served.owner_user() or '',chat==served.owner_chat,name,space,context['revision'],logical_profile=name)
             else:
                 name,_=self.admin.profile(context['profile']);scope=self.admin.binding(name)
             if scope.chat_id!=context['scope']:raise ValueError('profile_scope_denied')

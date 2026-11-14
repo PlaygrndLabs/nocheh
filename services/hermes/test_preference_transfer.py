@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from . import preference_transfer as transfer
@@ -21,7 +22,8 @@ class PreferenceTransferTests(unittest.TestCase):
         self.source.mkdir(); self.target.mkdir()
         self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.source)})
         self.env.start(); self.addCleanup(self.env.stop)
-        self.policy = Scopes({'enabled': True, 'owner_id': '42', 'group_ids': ['-10']})
+        # The reset's own policy: the owner and groups its setup names (tools/acceptance/reset_preservation.py).
+        self.policy = SimpleNamespace(owner='42', groups=['-10'])
         save(self.source, {'agent.max_iterations': 5, 'agent.reasoning_effort': 'high'}, view(self.source)['revision'])
         save(self.source, {'agent.max_iterations': 2}, view(self.source)['revision'], job='old-schedule')
         self.owner = self.source / 'profiles' / Scopes.profile('42')

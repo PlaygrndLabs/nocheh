@@ -12,7 +12,7 @@ import urllib.error
 from pathlib import Path
 from datetime import datetime,timezone
 from .environment import secret as environment_secret
-from .scopes import Scopes
+from .scopes import Scope,Scopes
 from .turn_process import run_process
 
 async def main():
@@ -58,8 +58,7 @@ async def main():
             value=call('/v1/context/prepare',{'text':selected['event']['text']},credential)
             if value['text']!=edited:raise ValueError('prepared_reuse_changed')
         record('saved_copy_reused',True)
-        scopes=Scopes({'enabled':True,'owner_id':scope_id,'group_ids':[]})
-        scope=scopes.resolve({'message':{'chat':{'id':int(scope_id),'type':'private'},'from':{'id':int(scope_id)}}},scope_id)
+        scope=Scope(scope_id,scope_id,True,Scopes.profile(scope_id),scope_id)
         root=Path(os.environ['HERMES_HOME'])/'synthetic-guarded-rehearsal'
         body={'channel':'browser','event_id':event,'text':question,'archive_credential':credential,'guard_mode':'on'}
         start=time.monotonic()

@@ -10,7 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from .scopes import Scopes,verify_capability
+from .scopes import Scopes,topic_id,verify_capability
+from services.chats import Fixed,Served
 from .assistant_gateway import prepare_profile
 from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,BACKGROUND_TOOLS,BACKGROUND_TOOLSETS,OWNER_SET_TOOLS,TURN_TOOLSETS,UnexpectedProfileTool,turn_tools,verify_profile_tools
 from services.durable import canonical
@@ -24,31 +25,48 @@ JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','mcp__nocheh__shell','mcp__nocheh__browser'})
 JOB_MACHINE_TOOLS=JOB_BOX_TOOLS-{'execute_code'}
 
 
+def turn(update,scopes,scope=None,**changes):
+    """A Telegram turn as storage sends it to Hermes, with the claims of its pass (ADR-0250): the chat and space by their
+    Nocheh ids, and where the chat is in Telegram now. The owner's own turn in a private chat has no scope claim."""
+    message=update['message'];external=str(message['chat']['id']);topic=topic_id(message);served=scopes.current()
+    chat=served.resolve(external) or external
+    space=chat if topic is None else served.resolve(external,topic) or chat+':'+str(topic)
+    app=served.binding(space) or {'app':'telegram','chat':external,'topic':None if topic is None else str(topic)}
+    body={'scope':external if scope is None else scope,'payload':update,'chat':chat,'space':space,'app':app}
+    claims={'scope':None if message['chat']['type']=='private' else chat,'space':space,'app':app}
+    for key,value in changes.items():(claims if key.startswith('claim_') else body)[key.removeprefix('claim_')]=value
+    return body,claims
+
+
 class ScopeTests(unittest.TestCase):
     def setUp(self):
-        self.scopes=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20','-30'],
+        self.scopes=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20','-30'],'topics':[['-20/topic/42','-20','42']],
                             'group_access':{'-30':{'granted':['456'],'denied':[]}}})
 
     def update(self,chat,user,kind='group'):
         return {'update_id':1,'message':{'message_id':1,'chat':{'id':chat,'type':kind},'from':{'id':user,'is_bot':False}}}
 
+    def resolve(self,update,scope,scopes=None,**changes):
+        scopes=scopes or self.scopes
+        return scopes.resolve(*turn(update,scopes,scope,**changes))
+
     def test_group_access_defaults_to_owner_and_denies_override_grants(self):
-        self.assertIsNone(self.scopes.resolve(self.update(-20,456),'-20'))
-        self.assertIsNotNone(self.scopes.resolve(self.update(-30,456),'-30'))
+        self.assertIsNone(self.resolve(self.update(-20,456),'-20'))
+        self.assertIsNotNone(self.resolve(self.update(-30,456),'-30'))
         denied=Scopes({'enabled':True,'owner_id':'123','group_ids':['-30'],
                        'group_access':{'-30':{'granted':['456'],'denied':['456']}}})
-        self.assertIsNone(denied.resolve(self.update(-30,456),'-30'))
-        self.assertIsNotNone(denied.resolve(self.update(-30,123),'-30'))
+        self.assertIsNone(self.resolve(self.update(-30,456),'-30',denied))
+        self.assertIsNotNone(self.resolve(self.update(-30,123),'-30',denied))
 
     def test_native_profile_routes_and_capability_must_agree(self):
-        a=self.scopes.resolve(self.update(-20,123),'-20');b=self.scopes.resolve(self.update(-30,456),'-30')
-        owner=self.scopes.resolve(self.update(123,123,'private'),'123')
+        a=self.resolve(self.update(-20,123),'-20');b=self.resolve(self.update(-30,456),'-30')
+        owner=self.resolve(self.update(123,123,'private'),'123')
         self.assertFalse(a.owner);self.assertTrue(owner.owner);self.assertNotEqual(a.profile,b.profile)
-        self.assertIsNone(self.scopes.resolve(self.update(123,456,'private'),'123'))
-        self.assertIsNone(self.scopes.resolve(self.update(-99,123),'-99'))
-        with self.assertRaises(ValueError):self.scopes.resolve(self.update(-20,123),'-30')
+        self.assertIsNone(self.resolve(self.update(123,456,'private'),'123'))
+        self.assertIsNone(self.resolve(self.update(-99,123),'-99'))
+        with self.assertRaises(ValueError):self.resolve(self.update(-20,123),'-30')
         secret='synthetic-service-token';event='a'*64
-        body=base64.urlsafe_b64encode(canonical({'scope':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant'})).decode().rstrip('=')
+        body=base64.urlsafe_b64encode(canonical({'scope':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant','app':{'app':'telegram','chat':'-20','topic':None}})).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         token='turn.'+body+'.'+signature
         verify_capability(token,secret,a,event)
@@ -56,13 +74,13 @@ class ScopeTests(unittest.TestCase):
             with self.assertRaises(ValueError):verify_capability(token,secret,a,event)
         for scope,target in ((b,event),(owner,event),(a,'b'*64)):
             with self.assertRaises(ValueError):verify_capability(token,secret,scope,target)
-        named_claims={'scope':'-20','space':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+        named_claims={'scope':'-20','space':'-20','app':{'app':'telegram','chat':'-20','topic':None},'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
                       'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':5,'logical_profile':'research'}
         def signed(claims):
             data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         # A background job run's credential lasts until 2 minutes after its job's hard deadline: up to 55 minutes, never past an hour.
-        long_claims={'scope':'-20','event_id':event,'audience':'nocheh-assistant'}
+        long_claims={'scope':'-20','event_id':event,'audience':'nocheh-assistant','app':{'app':'telegram','chat':'-20','topic':None}}
         verify_capability(signed({**long_claims,'expires':time.time()*1000+55*60000}),secret,a,event)
         for expires in (time.time()*1000+61*60000,time.time()*1000-1000):
             with self.assertRaises(ValueError):verify_capability(signed({**long_claims,'expires':expires}),secret,a,event)
@@ -81,6 +99,66 @@ class ScopeTests(unittest.TestCase):
             for invalid in ('C'*64,'../projects',5):
                 with self.assertRaises(ValueError):verify_capability(signed({**named_claims,'project':invalid}),secret,a,event)
 
+    def test_a_chat_keeps_its_profile_and_session_by_its_nocheh_id(self):
+        # ADR-0250: a chat stored before step 2b keeps its Telegram id as its chat id, so its profile, its topic's space and
+        # its session cursor keep the names they had; a group Telegram upgraded keeps them under its new Telegram id, and
+        # a chat first seen after step 2b has its own.
+        from services.durable import digest
+        served=Served.of('123',groups=[('-20','-1007'),('b'*64,'-1009')],old={'-20':['-20']},
+                         topics=[('-20/topic/42','-20','42'),('c'*64,'b'*64,'5')])
+        scopes=Scopes({'enabled':True,'group_access':{}},served)
+        old=self.resolve(self.update(-20,123),'-20')
+        self.assertEqual(old.profile,'nocheh-'+hashlib.sha256(b'-20').hexdigest()[:24])
+        upgraded=self.resolve(self.update(-1007,123,'supergroup'),'-1007',scopes)
+        self.assertEqual((upgraded.chat_id,upgraded.space,upgraded.profile,upgraded.app),('-20','-20',old.profile,('telegram','-1007',None)))
+        self.assertEqual(digest(upgraded.chat_id+':main'),digest('-20:main'),'the same native session')
+        # An update still under the old id, read after the upgrade, is the same chat; its pass binds where it is now.
+        late=self.resolve(self.update(-20,123,'group'),'-20',scopes)
+        self.assertEqual((late.chat_id,late.profile,late.app),('-20',old.profile,('telegram','-1007',None)))
+        topic=self.update(-1007,123,'supergroup');topic['message'].update(message_thread_id=42,is_topic_message=True)
+        self.assertEqual(self.resolve(topic,'-1007',scopes).space,'-20/topic/42')
+        new=self.resolve(self.update(-1009,123,'supergroup'),'-1009',scopes)
+        self.assertEqual((new.chat_id,new.space,new.profile),('b'*64,'b'*64,Scopes.profile('b'*64)))
+        self.assertNotIn(new.profile,(old.profile,Scopes.profile('-1009')))
+        topic=self.update(-1009,123,'supergroup');topic['message'].update(message_thread_id=5,is_topic_message=True)
+        self.assertEqual(self.resolve(topic,'-1009',scopes).space,'c'*64)
+
+    def test_a_pass_that_does_not_match_its_update_is_refused(self):
+        update=self.update(-20,123)
+        for changes in ({'app':{'app':'telegram','chat':'-30','topic':None}},{'claim_app':{'app':'telegram','chat':'-30','topic':None}},
+                        {'app':{'app':'telegram','chat':'-20','topic':'42'}},{'chat':'-30'},{'space':'-30'},{'claim_space':'-30'},
+                        {'claim_scope':'-30'},{'app':None},{'chat':None}):
+            with self.subTest(changes=changes),self.assertRaises(ValueError):self.resolve(update,'-20',**changes)
+        # A group's topic must be the chat's own; the owner's private chat has none.
+        topic=self.update(-20,123,'supergroup');topic['message'].update(message_thread_id=43,is_topic_message=True)
+        with self.assertRaises(ValueError):self.resolve(topic,'-20')
+        with self.assertRaises(ValueError):self.resolve(self.update(123,123,'private'),'123',space='-20/topic/42')
+        # A chat the list no longer serves is not answered.
+        self.assertIsNone(self.resolve(update,'-20',Scopes({'enabled':True,'group_access':{}},Served.of('123',groups=['-30']))))
+
+    def test_a_served_list_that_cannot_be_read_serves_nothing(self):
+        from services.chats import ServedList
+        def refused(request,timeout):raise OSError('synthetic outage')
+        scopes=Scopes({'enabled':True,'group_access':{}},ServedList('http://127.0.0.1:9','synthetic-token',refused))
+        with self.assertRaisesRegex(RuntimeError,'served_chats_unavailable'):self.resolve(self.update(-20,123),'-20',scopes)
+        self.assertEqual(scopes.current().groups(),[])
+        # The environment names no owner or group any more: they come from the app's served list.
+        with patch.dict(os.environ,{'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'123','TELEGRAM_GROUP_IDS':'-20'},clear=True):
+            self.assertIsInstance(Scopes.load(None).served,ServedList)
+
+    def test_a_telegram_turn_is_bound_to_where_its_chat_is_and_a_job_is_not(self):
+        secret='synthetic-service-token';event='a'*64
+        def signed(claims):
+            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        group=self.resolve(self.update(-20,123),'-20')
+        claims={'scope':'-20','space':'-20','revision':1,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant'}
+        verify_capability(signed({**claims,'app':{'app':'telegram','chat':'-20','topic':None}}),secret,group,event)
+        for app in (None,{'app':'telegram','chat':'-30','topic':None},{'app':'telegram','chat':'-20','topic':'42'}):
+            with self.subTest(app=app),self.assertRaises(ValueError):verify_capability(signed({**claims,'app':app}),secret,group,event)
+        from dataclasses import replace
+        verify_capability(signed(claims),secret,replace(group,app=()),event)
+
     def test_native_memory_and_session_search_cannot_open_other_profiles(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
         from hermes_state import SessionDB
@@ -91,7 +169,7 @@ class ScopeTests(unittest.TestCase):
             root=Path(folder);databases=[]
             try:
                 for chat,marker in ((-20,'GROUP_A_JUNIPER'),(-30,'GROUP_B_MAPLE')):
-                    scope=self.scopes.resolve(self.update(chat,123),str(chat));profile=prepare_profile(root,scope,'synthetic')
+                    scope=self.resolve(self.update(chat,123),str(chat));profile=prepare_profile(root,scope,'synthetic')
                     token=set_hermes_home_override(str(profile))
                     try:
                         memory=MemoryStore();memory.load_from_disk();self.assertTrue(memory.add('memory',marker)['success'])
@@ -110,24 +188,24 @@ class ScopeTests(unittest.TestCase):
 
     def test_topics_and_revisions_have_distinct_native_memory(self):
         update=self.update(-20,123,'supergroup');update['message'].update(message_thread_id=42,is_topic_message=True)
-        topic=self.scopes.resolve(update,'-20')
+        topic=self.resolve(update,'-20')
         self.assertEqual(topic.space,'-20/topic/42')
         # Bot API gives a reply chain in an ordinary supergroup its first message
         # as message_thread_id. It is not a topic, so the reply stays in the chat.
         reply=self.update(-20,123,'supergroup');reply['message'].update(message_thread_id=42,reply_to_message={'message_id':42})
-        self.assertEqual(self.scopes.resolve(reply,'-20').space,'-20')
+        self.assertEqual(self.resolve(reply,'-20').space,'-20')
         first=Scopes.apply_revision(topic,{'revision':1});second=Scopes.apply_revision(topic,{'revision':2})
         self.assertNotEqual(first.profile,second.profile)
-        group=self.scopes.resolve(self.update(-20,123),'-20')
+        group=self.resolve(self.update(-20,123),'-20')
         self.assertNotEqual(first.profile,Scopes.apply_revision(group,{'revision':1}).profile)
-        owner=self.scopes.resolve(self.update(123,123,'private'),'123')
+        owner=self.resolve(self.update(123,123,'private'),'123')
         self.assertEqual(Scopes.apply_revision(owner,{'revision':1}).profile,Scopes.apply_revision(owner,{'revision':2}).profile)
 
     def test_each_private_answer_has_its_own_profile_and_carries_no_earlier_conversation(self):
         from dataclasses import replace
         claims={'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1}
         # The answer runs as the asker's private chat, never as the owner (ADR-0249).
-        asker=replace(self.scopes.resolve(self.update(123,123,'private'),'123'),owner=False,space='123')
+        asker=replace(self.resolve(self.update(123,123,'private'),'123'),owner=False,space='123')
         answer=Scopes.apply_revision(asker,{**claims,'answer':'a'*32})
         # test/private-answers.test.ts pins the same name for runtimeProfile with the same claims.
         self.assertEqual(answer.profile,'nocheh-b550c3bb0a154a446943f8f8')
@@ -143,16 +221,16 @@ class ScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder,patch('services.hermes.profile_history.carry',return_value=0) as carry:
             prepare_profile(Path(folder),Scopes.apply_revision(asker,{**claims,'answer':'a'*32}),'synthetic')
             carry.assert_not_called()
-            prepare_profile(Path(folder),Scopes.apply_revision(self.scopes.resolve(self.update(-20,123),'-20'),claims),'synthetic')
+            prepare_profile(Path(folder),Scopes.apply_revision(self.resolve(self.update(-20,123),'-20'),claims),'synthetic')
             carry.assert_called_once()
 
     def test_a_private_answers_pass_is_taken_only_in_the_owners_chat_as_that_chat(self):
         secret='synthetic-service-token';event='a'*64
-        owner=self.scopes.resolve(self.update(123,123,'private'),'123');group=self.scopes.resolve(self.update(-20,123),'-20')
+        owner=self.resolve(self.update(123,123,'private'),'123');group=self.resolve(self.update(-20,123),'-20')
         def signed(claims):
             data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
-        claims={'scope':'123','space':'123','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+        claims={'scope':'123','space':'123','app':{'app':'telegram','chat':'123','topic':None},'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
                 'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,'answer':'b'*32}
         self.assertEqual(verify_capability(signed(claims),secret,owner,event)['answer'],'b'*32)
         # Its scope is the chat itself, never the owner's (none); a group, a malformed record or a missing scope is refused.
@@ -168,7 +246,7 @@ class ScopeTests(unittest.TestCase):
         from hermes_cli.plugins import discover_plugins
         from model_tools import get_tool_definitions
         with tempfile.TemporaryDirectory() as folder:
-            profile=prepare_profile(Path(folder),self.scopes.resolve(self.update(-20,123),'-20'),'synthetic')
+            profile=prepare_profile(Path(folder),self.resolve(self.update(-20,123),'-20'),'synthetic')
             token=set_hermes_home_override(str(profile))
             try:
                 discover_plugins()
@@ -204,7 +282,7 @@ class ScopeTests(unittest.TestCase):
         from hermes_cli.plugins import discover_plugins
         from model_tools import get_tool_definitions
         with tempfile.TemporaryDirectory() as folder:
-            profile=prepare_profile(Path(folder),self.scopes.resolve(self.update(-20,123),'-20'),'synthetic')
+            profile=prepare_profile(Path(folder),self.resolve(self.update(-20,123),'-20'),'synthetic')
             token=set_hermes_home_override(str(profile))
             try:
                 discover_plugins()
@@ -224,7 +302,7 @@ class ScopeTests(unittest.TestCase):
         from tools import tool_search
         from .profile_config import atomic_yaml,read
         with tempfile.TemporaryDirectory() as folder:
-            profile=prepare_profile(Path(folder),self.scopes.resolve(self.update(-20,123),'-20'),'synthetic')
+            profile=prepare_profile(Path(folder),self.resolve(self.update(-20,123),'-20'),'synthetic')
             config=read(profile/'config.yaml')
             config['tools']['tool_search']={'enabled':'on'}
             atomic_yaml(profile/'config.yaml',config)

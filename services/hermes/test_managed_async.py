@@ -6,7 +6,7 @@ from . import managed_async
 from .managed_async import ManagedAsync,ServiceError
 from .async_runs import identity
 from .job_progress import run_cost
-from .scopes import Scope
+from .scopes import Scope,Scopes
 
 
 class ManagedAsyncTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class ManagedAsyncTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.scope=Scope('42','42',True,'owner','42',1)
         self.admin=SimpleNamespace(root=self.root,model='model',token='fixture-service-token',
-            profile=lambda name:(name,self.root),binding=lambda name:self.scope,policy=SimpleNamespace(owner='42',groups=['-123']))
+            profile=lambda name:(name,self.root),binding=lambda name:self.scope,policy=Scopes({'enabled':True,'owner_id':'42','group_ids':['-123'],'topics':[['-123/topic/7','-123','7']]}))
         self.body={'channel':'browser','event_id':'a'*64,'attempt':1,'owner_epoch':2}
         self.context={'event_id':'a'*64,'actor':'run_'+'a'*64,'scope':'42','profile':'owner','conversation':'native-session','owner_epoch':2}
         self.state='captured';self.finished=None;self.count=0;self.failed=None;self.visible=True;self.release=threading.Event();self.release.set()
