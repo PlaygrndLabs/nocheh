@@ -23,6 +23,7 @@ import {fillTemplate,notAllowedPrivateReply,notAllowedReply,ownerPrompts,private
 import {parentSpace,readSetGroups} from '../spaces.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
+import {forwardLine,forwardOrigin} from '../forwarded.js';
 import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply,type ReplyButton} from './telegram-reply.js';
 
 export const telegramDispatchSchema=`
@@ -508,12 +509,13 @@ export class TelegramDispatchRepository {
     const {transcripts,files,parents,tooLarge,text}=await this.contents(album,binding,false);
     const questionPayload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[row.question_event])).rows[0].payload.toString());
     const speaker=speakerLine(questionPayload,question.event.payload,this.access.policy().owner_id),recent=await this.recentGroup(asked,row.from_chat_id,principal);
+    const forwarded=forwardLine(forwardOrigin(questionPayload?.message,question.event.payload?.message),false);
     const privateAnswer={...await this.answerFrame(row,principal,binding),question_event:row.question_event};
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:null,guard_mode:binding.mode,
-      private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{})};
+      private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(forwarded?{forwarded}:{}),...(recent.length?{recent_group:recent}:{})};
     const input={binding,principal,body};
-    await this.prepared.allow(principal,{text,transcripts,files,speaker,recent_group:recent,private_answer:privateAnswer});await currentTurn(this,input);
+    await this.prepared.allow(principal,{text,transcripts,files,speaker,forwarded,recent_group:recent,private_answer:privateAnswer});await currentTurn(this,input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
@@ -568,10 +570,12 @@ export class TelegramDispatchRepository {
     const reply=refusal??await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
     const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
+    // Where a forwarded message came from, in Nocheh's own words, before its text (ADR-0250).
+    const forwarded=forwardLine(forwardOrigin(payload?.message,selected.event.payload?.message),scope.owner);
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
-    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,recent_group:recent});await currentTurn(this,input);
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(forwarded?{forwarded}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
+    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,forwarded,recent_group:recent});await currentTurn(this,input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});

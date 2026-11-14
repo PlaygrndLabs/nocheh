@@ -188,11 +188,12 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
     // The asker's summary leads the card and the exact fields fold under it; a command stays open in code (ADR-0224).
     await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'browser',arguments:{url:'https://example.test/made-up'},summary:'Read the made-up page.'}));
-    const folded=last('card'),details=folded.text.indexOf('Exact details');
-    assert.equal(folded.text,'⚙️ Open a web page · example.test\n📝 Read the made-up page.\n💬 Asked in a Telegram group › General\n\nExact details\nhttps://example.test/made-up'+note);
-    assert.deepEqual(folded.links,[{type:'bold',offset:3,length:30},{type:'expandable_blockquote',offset:details,length:'Exact details\nhttps://example.test/made-up'.length},{type:'bold',offset:details,length:13}]);
+    // A web address is all a page read sends, so it shows open under the summary, which says it is the AI's (ADR-0250).
+    const opened=last('card');
+    assert.equal(opened.text,'⚙️ Open a web page · example.test\n📝 AI says: Read the made-up page.\n💬 Asked in a Telegram group › General\n\nhttps://example.test/made-up'+note);
+    assert.deepEqual(opened.links,[{type:'bold',offset:3,length:30}]);
     await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf said'},summary:'Print a word.'}));
-    assert.equal(last('card').text,'⚙️ Run a command\n📝 Print a word.\n💬 Asked in a Telegram group › General\n\nprintf said'+note);
+    assert.equal(last('card').text,'⚙️ Run a command\n📝 AI says: Print a word.\n💬 Asked in a Telegram group › General\n\nprintf said'+note);
     // When the owner asks in the group, the reply tells them their card is in their private chat.
     const own=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'shell',arguments:{command:'printf mine'}}));
     assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner, so the decision is theirs:.*answer them as "you", briefly: their card is waiting in their private chat, and the answer will follow here\. Do not say it waits for the owner or anyone else/);

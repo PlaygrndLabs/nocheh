@@ -43,9 +43,13 @@ export function cut(card:{text:string;links:Link[]},room:number):{text:string;li
 }
 /** An operation is shown in words while it stays this short and plain; otherwise as its exact JSON. */
 const wordsLimit=3000,wordsEntities=90;
+/** A web address, or another server's input, shows open on a card up to this many characters; past it, a web address
+ * shows its first `addressStart` and the rest folds (ADR-0250). */
+const addressLimit=300,addressStart=120;
 
-/** The owner-editable words an operation's name is made of, and the heading of its folded exact arguments. */
-export type OperationWords={kind_shell:string;kind_browser:string;kind_tools:string;details:string};
+/** The owner-editable words an operation's name is made of, the heading of its folded exact arguments, the label of
+ * what the asker says it does, and the lines on what a long web address or another server's tool carries. */
+export type OperationWords={kind_shell:string;kind_browser:string;kind_tools:string;details:string;ai_says:string;long_address:string;sends:string};
 /** An operation as an approval card shows it: its name, what the asker says it does, and its exact arguments. */
 export type OperationText={title:string;summary:string|null;body:string};
 
@@ -77,6 +81,40 @@ function shows(text:string):(offset:number)=>boolean {
     while(transparent.test(text[letter]??''))letter--;
     return text[offset]==='\u200c'&&joinsAfter.test(text[letter]??'')&&joined.test(text[offset+1]??'');
   };
+}
+/** A Persian or Arabic letter, as a non-joiner may stand between two of them. */
+const arabicLetter=/^(?=\p{L})\p{scx=Arabic}$/u;
+/** Text as a card shows it, one character at a time: each character a reader would not see is written as [U+XXXX]
+ * where it stands, so the rest reads as written. A joiner inside an emoji, and a non-joiner between two Persian or
+ * Arabic letters, as Persian is often typed, stay; with `lines`, so do line breaks and tabs. Unlike a whole text
+ * written out, none of this hides or reorders anything. */
+export function visible(text:string,lines=false):string {
+  if(!unseen.test(text))return text;
+  const kept=shows(text),between=(offset:number)=>{
+    let letter=offset-1;
+    while(transparent.test(text[letter]??''))letter--;
+    return arabicLetter.test(text[letter]??'')&&arabicLetter.test(text[offset+1]??'');
+  };
+  return text.replace(unseenAll,(char,offset:number)=>kept(offset)||char==='\u200c'&&between(offset)||lines&&(char==='\n'||char==='\t')?char:
+    '[U+'+char.codePointAt(0)!.toString(16).toUpperCase().padStart(4,'0')+']');
+}
+/** A name someone else chose, such as a group's or a topic's, as a card shows it: on one line, its curly quotes made
+ * plain so it cannot close the quotes a card puts around it, its hidden characters written out, and cut to `length`
+ * characters without splitting one written out. Null when nothing is left. */
+export function cardName(value:unknown,length=64):string|null {
+  if(typeof value!=='string')return null;
+  const line=value.replace(controls,'').replace(/\s+/g,' ').trim().replace(/[\u201c\u201d\u201e\u201f\u2033\u301d\u301e\uff02]/g,'"');
+  if(!line)return null;
+  const shown=Array.from(visible(line));
+  return shown.length<=length?shown.join(''):shown.slice(0,length-1).join('').replace(/\[(?:U(?:\+[0-9A-F]{0,5})?)?$/,'').trimEnd()+'…';
+}
+/** Characters with no honest use in a job's title, instruction or plan: direction overrides and isolates, which make
+ * text read in another order than it is written, and tag characters outside a flag emoji. */
+const reorders=/[\u202a-\u202e\u2066-\u2069]|[\u{e0000}-\u{e007f}]/gu;
+export function reordering(text:string):boolean {
+  const flags=new Set<number>();
+  for(const match of text.matchAll(emoji))for(let unit=match.index;unit<match.index+match[0].length;unit++)flags.add(unit);
+  return [...text.matchAll(reorders)].some(match=>!flags.has(match.index));
 }
 /** Whether text is in its composed Unicode form, but for the order of the marks on one letter, which reads the
  * same and is how Arabic and Persian with a shadda and a vowel are often typed. */
@@ -312,11 +350,30 @@ export function operationCard(template:string,operation:OperationText,origin:str
  * With a summary from the asker, the arguments fold under it into one quote that opens on a tap, unless
  * they are code, which Telegram cannot put in a quote. */
 export function operationText(kind:string,args:Record<string,any>,names:OperationWords,note:string|null=null):OperationText|null {
-  const title=operationTitle(kind,args,names),summary=said(note),twins=alike(args),json=twins?mark('p',ascii(canonical(args))):exactJson(args);
+  const title=operationTitle(kind,args,names),line=said(note),twins=alike(args),json=twins?mark('p',ascii(canonical(args))):exactJson(args);
+  // The label is put in by code, so a saved template still says whose words the summary are.
+  const summary=line&&[plain(names.ai_says).replace(/\s+/g,' ').trim(),line].filter(Boolean).join(' ');
   const length=(text:string)=>text.replace(marked,'$2').length;
-  let body=twins?json:words(kind,args,!!summary);
-  if(length(body)>wordsLimit||[...body.matchAll(marked)].length>wordsEntities)body=json;
-  if(length(body)>wordsLimit)return null;
-  const folded=!!summary&&!!body&&!/\u0001p\u0002/.test(body);
-  return {title,summary,body:folded?'\u0004'+heading(plain(names.details))+'\n'+body+'\u0005':body};
+  const shown=(folded:boolean)=>{
+    const body=twins?json:words(kind,args,folded);
+    return length(body)>wordsLimit||[...body.matchAll(marked)].length>wordsEntities?json:body;
+  };
+  const fold=(text:string)=>'\u0004'+heading(plain(names.details))+'\n'+text+'\u0005',code=(text:string)=>/\u0001p\u0002/.test(text);
+  // A web address is the whole of what a page read sends, so it shows open while it is short. A long one shows its
+  // start and how much more it carries, and the whole of it folds below.
+  if(kind==='browser'&&!twins&&typeof args.url==='string') {
+    const body=shown(false);if(length(body)>wordsLimit)return null;
+    if(length(body)<=addressLimit)return {title,summary,body};
+    const start=Array.from(body).slice(0,addressStart).join(''),more=Array.from(body).length-addressStart;
+    return {title,summary,body:start+'…\n'+fillTemplate(plain(names.long_address),{count:more.toLocaleString('en-US')})+'\n'+fold(body)};
+  }
+  // Another server's tool gets its whole input: how much of it, and to which site, shows open. A short input shows
+  // open too; a long one folds below a summary, as other cards do.
+  if(kind==='mcp'&&!twins&&typeof args.connection!=='string'&&typeof args.url==='string'&&args.operation!=='list') {
+    const sends=fillTemplate(plain(names.sends),{count:Array.from(canonical(args.input??null)).length.toLocaleString('en-US'),site:site(args.url)||location(args.url)});
+    const open=shown(false);if(!summary||length(open)<=addressLimit||code(open))return length(open)>wordsLimit?null:{title,summary,body:sends+'\n\n'+open};
+    const body=shown(true);return length(body)>wordsLimit?null:{title,summary,body:sends+'\n\n'+fold(body)};
+  }
+  const body=shown(!!summary);if(length(body)>wordsLimit)return null;
+  return {title,summary,body:summary&&body&&!code(body)?fold(body):body};
 }

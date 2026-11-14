@@ -13,7 +13,7 @@ type Value=Record<string,unknown>;
 export const memoryRoutes={recall:'/v1/memory/longterm/recall',search:'/v1/memory/longterm/search',notes:'/v1/memory/recall',shared:'/v1/memory/context'} as const;
 /** What a job request may be told to correct; any other refusal stays opaque. The broker relays exactly these. */
 export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
-  'job_machine_not_allowed','job_machine_not_found','job_card_too_long']);
+  'job_machine_not_allowed','job_machine_not_found','job_card_too_long','job_hidden_characters']);
 /** What the owner must do first, for a refusal the brain cannot correct by itself. */
 const jobNotes:Record<string,string>={job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
   'there until the test passes. In the owner\'s private chat action=status lists the machines and whether each is ready; a group never lists them, so ask the owner for the exact name.'};

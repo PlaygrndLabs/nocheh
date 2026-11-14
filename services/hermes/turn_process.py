@@ -55,9 +55,9 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             await asyncio.to_thread((profile/'.foreground').touch)
 
 
-# A line of message text that looks like this module's own group frame, a private answer's first line, or the owner tag
-# of a speaker line.
-FRAME=re.compile(r'^([ \t]*)\[(?=(?:Group message from|Recent messages in this group|End of recent messages|Private answer))',re.M|re.I)
+# A line of message text that looks like this module's own group frame, a private answer's first line, a forwarded
+# message's line, or the owner tag of a speaker line.
+FRAME=re.compile(r'^([ \t]*)\[(?=(?:Group message from|Recent messages in this group|End of recent messages|Private answer|Forwarded))',re.M|re.I)
 OWNER_TAG=re.compile(r'\[the owner\]',re.I)
 
 
@@ -65,6 +65,14 @@ def unframed(text):
     """Group message text as the model reads it: a look-alike speaker or recent-messages line, or an owner tag,
     is shown as plain text, so only the line Nocheh puts before a message names its sender (ADR-0222)."""
     return OWNER_TAG.sub('(the owner)',FRAME.sub(r'\1(',text))
+
+
+def forwarded(value):
+    """A forwarded message's line, which Nocheh writes from Telegram's own forward fields (ADR-0250), or '' when it is
+    absent or malformed."""
+    ok=(isinstance(value,str) and value.startswith('[Forwarded: ') and value.endswith(']') and len(value)<=600
+        and not any(ord(c)<32 or ord(c)==127 or c in '\u2028\u2029' for c in value))
+    return value if ok else ''
 
 
 def recent_group(value):
@@ -138,10 +146,14 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # belongs in agent provenance, not in the semantic memory query/cache key.
     memory_query=text[:2000]
     speaker=body.get('speaker')
+    forward=forwarded(body.get('forwarded'))
+    if forward:
+        # Where a forwarded message came from goes before its text, which cannot write that line itself.
+        text = forward + '\n' + unframed(text)
     if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
         # Who spoke and when stays out of the memory query; the model and native history see it.
-        text = speaker + '\n' + unframed(text)
-    elif answer:
+        text = speaker + '\n' + (text if forward else unframed(text))
+    elif answer and not forward:
         # A private answer's question is group text even without its speaker line.
         text = unframed(text)
     recent=recent_group(body.get('recent_group'))

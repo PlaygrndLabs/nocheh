@@ -3,8 +3,9 @@ import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import {approvalAction,approvalCard,approvalLines,approvalTask,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
-import {controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,type Link,type OperationText} from '../action-text.js';
+import {cardName,controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
+import {forwardOrigin,forwardedCommand} from '../forwarded.js';
 import {followUpLeft} from './action-continuations.js';
 import {evaluate} from '../security/store.js';
 import type {Effect} from '../security/contract.js';
@@ -36,7 +37,8 @@ const answerButton=/^np([a-f0-9]{32})$/;
 const reviewLimit=2200;
 // Telegram's message limit in UTF-16 units, less room for the outcome a decided card adds.
 const cardLimit=4096,outcomeRoom=300;
-const clean=(value:unknown,length=100)=>typeof value==='string'&&value.replace(controls,'').trim()?value.replace(controls,'').replace(/\s+/g,' ').trim().slice(0,length):null;
+/** A name someone else chose, as a card shows it: one line, its hidden characters written out (ADR-0250). */
+const clean=(value:unknown,length=64)=>cardName(value,length);
 type Mark=(label:string,url:string|null)=>string;
 /** Why an operation failed or did not run, from fixed codes only: no tool or service text reaches a card. */
 const reasons:Record<string,ApprovalText>={notion_not_connected:'reason_sign_in',notion_reconnect_needed:'reason_sign_in',notion_unavailable:'reason_unreachable',
@@ -349,11 +351,20 @@ export class ActionCommandRepository {
     const [chat,topic]=String(row.space_id).split('/topic/'),asked=await this.asked(row.source_reference);
     return {chat:chat!,...(topic?{topic}:{}),here:asked&&asked.chat===chat&&(asked.topic??'')===(topic??'')?asked.message??null:null};
   }
+  /** Where a job was asked, for its card in another chat: a member's or a machine job's card in the owner's private chat
+   *  says which group and topic, in plain text, as an operation's card does. Null when the card is in that chat. */
+  private async jobOrigin(id:string):Promise<string|null> {
+    const row=await this.jobs!.row(id),[chat,topic]=String(row.space_id).split('/topic/');
+    if(chat===this.access.policy().owner_id||(await this.jobPlace(row)).chat===chat)return null;
+    const {line}=await this.texts(),asked=await this.asked(row.source_reference);
+    const words=Object.fromEntries(Object.entries(line).map(([key,value])=>[key,value.replace(controls,'')])) as Record<ApprovalText,string>;
+    return this.where(chat!,words,label=>label,{topic,message:asked?.message,showTopic:true});
+  }
   /** Approve and Reject buttons on a proposed background job, for whoever approves it. */
   private async offerJob<T extends Record<string,any>>(result:T):Promise<T> {
     if(!this.jobs)return result;
     try {
-      const card=await this.jobs.card(result.id),{line}=await this.texts();
+      const card=await this.jobs.card(result.id,await this.jobOrigin(result.id)),{line}=await this.texts();
       if(card.state!=='proposed')return result;
       const place=await this.jobPlace(card.row);
       const sent=await this.approval({kind:'card',chat_id:place.chat,...(place.topic?{topic:place.topic}:{}),...(place.here?{reply_to:place.here}:{}),id:result.id,
@@ -374,7 +385,7 @@ export class ActionCommandRepository {
    *  stops or ends. A job that ended at a limit says a short note is in the chat. */
   private async settleJob(id:string,seen?:Seen) {
     if(!this.jobs)return;
-    const card=await this.jobs.card(id),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
+    const card=await this.jobs.card(id,await this.jobOrigin(id)),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
     const state=row.error_code==='job_repo_removed'?'repo_removed':row.error_code==='job_machine_off'?'machine_off':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
       row.state==='done'&&row.ended?'limited':row.state;
     // A card in another chat than the one the job reports to does not say the report comes here. A job on the owner's machine
@@ -624,6 +635,8 @@ export class ActionCommandRepository {
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0],payload=JSON.parse(row.payload.toString()),text=payload.message?.text;
     const command=typeof text==='string'?text.trim().match(/^\/(actions|action|approve|deny|permissions|revoke)(?:\s+([a-f0-9]{64}))?$/):null;if(!command)return null;
     if(!conversationScope(this.access.policy(),payload,original.scope)?.owner)return 'Only the owner can review or approve actions in their private DM.';
+    // A forwarded command never runs, even one the owner wrote earlier: a forward carries words from elsewhere (ADR-0250).
+    if(forwardOrigin(payload.message))return forwardedCommand;
     const owner={admin:true,scope:null},operation_id='telegram-command:'+source.id;let controlled=false;
     if(command[1]==='actions') {
       const tools=(await this.tools.list(owner)).actions,telegram=await this.telegram.list(owner);

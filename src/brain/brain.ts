@@ -33,7 +33,7 @@ export type TurnEvents={readonly events:readonly {readonly sequence:number;reado
 /**
  * What a turn starts with.
  * - telegram: the message and what Nocheh prepared for it: `source_key`, `scope`, `payload`, `text`, `transcripts`,
- *   `files`, `control_reply`, `guard_mode`, the pass `archive_credential`, and when they apply `speaker`, `recent_group`,
+ *   `files`, `control_reply`, `guard_mode`, the pass `archive_credential`, and when they apply `speaker`, `forwarded`, `recent_group`,
  *   `group_addressing`, `untranscribed_voice`, `files_too_large`, `album_events`, or `continuation` for a follow-up.
  * - browser, scheduler, background: `owner_epoch`. The brain asks Nocheh for the rest through the run routes
  *   `/v1/<channel>/workflow-context`, `claim`, `prepare`, `heartbeat` and `finish`.

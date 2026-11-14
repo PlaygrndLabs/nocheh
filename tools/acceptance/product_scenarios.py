@@ -320,6 +320,7 @@ class ProductScenarios(Scenarios):
         wide = text.encode('utf-16-le')
         span = lambda entity: wide[2*entity['offset']:2*(entity['offset']+entity['length'])].decode('utf-16-le')
         self.gate('card_names_the_operation', text.startswith('⚙️ mcp.example.test · create-page\n'), card=text[:300])
+        self.gate('card_says_what_it_sends', re.search(r'\n📤 Sends [0-9,]+ characters to mcp\.example\.test\n', text) is not None, card=text[:300])
         self.gate('card_shows_fields_in_words', 'properties › title: Open items '+marker in text and 'https://mcp.example.test/mcp' in text
                   and not any(mark in text for mark in ('{', '\\n', '"')), card=text)
         self.gate('entities_inside_the_text', all(entity['length'] > 0 and 0 <= entity['offset'] and entity['offset']+entity['length'] <= len(wide)//2
@@ -342,7 +343,8 @@ class ProductScenarios(Scenarios):
         text, entities = card['message']['text'], card['message'].get('entities') or []
         wide = text.encode('utf-16-le')
         folds = [span(entity) for entity in entities if entity['type'] == 'expandable_blockquote']
-        self.gate('card_leads_with_the_summary', text.startswith('⚙️ mcp.example.test · create-page\n📝 '+said+'\n\nExact details\nhttps://mcp.example.test/mcp\n'), card=text[:400])
+        self.gate('card_leads_with_the_summary', re.match(r'⚙️ mcp\.example\.test · create-page\n📝 AI says: '+re.escape(said)
+                                                          +r'\n\n📤 Sends [0-9,]+ characters to mcp\.example\.test\n\nExact details\nhttps://mcp\.example\.test/mcp\n', text), card=text[:400])
         self.gate('fields_fold_into_one_quote', len(folds) == 1 and folds[0] == text[text.index('Exact details'):] and 'properties › title: Open items '+marker in folds[0]
                   and not [entity for entity in entities if entity['type'] in ('blockquote', 'pre')], entities=entities)
         self.gate('labels_bold_inside_the_fold', sorted(span(entity) for entity in entities if entity['type'] == 'bold')
@@ -2057,7 +2059,7 @@ class ProductScenarios(Scenarios):
         target = json.loads(card['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
         self.gate('card_answers_the_request', target == request['message']['message_id'], target=target)
         self.gate('card_shows_the_machine', '🖥' in text and VM_NAME+' ('+VM_LOGIN+'@'+VM_SERVICE+') over SSH' in text, card=text)
-        self.gate('card_shows_the_plan', '📋' in text and 'Plan:' in text and '1. '+steps[0] in text and '2. '+steps[1] in text, card=text)
+        self.gate('card_shows_the_plan', '📋' in text and 'Plan (a guide, not a limit):' in text and '1. '+steps[0] in text and '2. '+steps[1] in text, card=text)
         self.gate('card_two_buttons', len(self.buttons(card)) == 2, buttons=[button['text'] for button in self.buttons(card)])
         job = self.job_named(title)
         self.gate('job_pinned_to_the_machine', job['state'] == 'proposed' and job.get('machine') == {'name': VM_NAME} and job.get('steps') == steps,

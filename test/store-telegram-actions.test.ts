@@ -128,6 +128,15 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
     const commandAction=await actions.request(principal,{destination:'123',text:'Approved by owner DM'});
     const groupCommand=await capture('group-command','/approve '+commandAction.id,group,123);
     assert.match((await services.actionCommands.controlReply(groupCommand))!,/Only the owner/);assert.equal((await actions.inspect(owner,commandAction.id)).state,'proposed');
+    // A forwarded command, or one sent through an inline bot, is never run, even the owner's own; it still gets a fixed answer (ADR-0250).
+    for(const [label,fields] of <[string,Record<string,unknown>][]>[['forwarded-command',{forward_origin:{type:'user',sender_user:{id:9},date:1699999999}}],
+      ['own-forwarded-command',{forward_origin:{type:'user',sender_user:{id:123},date:1699999999}}],['hidden-forwarded-command',{forward_sender_name:'Made-up name',forward_date:1699999999}],
+      ['bot-command',{via_bot:{id:77,is_bot:true,first_name:'Bot',username:'made_up_bot'}}]]) {
+      const envelope=original(label,'/approve '+commandAction.id,'123',123);Object.assign((envelope.payload as any).message,fields);
+      const forwarded=(await services.capture.capture(envelope)).source.reference;await services.guards.prepare(forwarded,'fixture',services.detect);
+      assert.equal(await services.actionCommands.controlReply(forwarded),'Forwarded commands are ignored. Type it or use the card.',label);
+    }
+    assert.equal((await actions.inspect(owner,commandAction.id)).state,'proposed');
     const ownerCommand=await capture('owner-command','/approve '+commandAction.id,'123',123);
     assert.match((await services.actionCommands.controlReply(ownerCommand))!,/approved/);assert.match((await services.actionCommands.controlReply(ownerCommand))!,/approved/);
     assert.equal((await actions.inspect(owner,commandAction.id)).state,'approved');

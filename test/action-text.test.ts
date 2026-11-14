@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {canonical} from '../src/archive.js';
-import {cut,linked,operationCard,operationText} from '../src/action-text.js';
+import {cardName,cut,linked,operationCard,operationText,reordering,visible} from '../src/action-text.js';
 import {approvalAction,approvalLines} from '../src/prompts.js';
 
 const words=approvalLines('');
@@ -28,8 +28,8 @@ test('a tool card says what it does and shows every field in words, long text in
   assert.equal(card('mcp',{connection:'notion',tool:'notion-move-pages',input:{new_parent:{page_id:'p2'},page_or_database_ids:['a','b, c']}}).text,
     '⚙️ Notion · move pages\n\nnew_parent › page_id: p2\npage_or_database_ids:\n1. a\n2. b, c');
   assert.equal(card('mcp',{url:'https://mcp.example.test/mcp',tool:'search_docs',input:{query:'made-up',limit:5,exact:false,empty:'',none:null}}).text,
-    '⚙️ mcp.example.test · search_docs\n\nhttps://mcp.example.test/mcp\n\nquery: made-up\nlimit: 5\nexact: false\nempty: ""\nnone: null',
-    'another server is named by its address, shown in full, and its tool by its exact name');
+    '⚙️ mcp.example.test · search_docs\n\n📤 Sends 66 characters to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nquery: made-up\nlimit: 5\nexact: false\nempty: ""\nnone: null',
+    'another server is named by its address, shown in full, its tool by its exact name, and how much it is sent shows first');
   assert.equal(card('mcp',{connection:'notion',operation:'list'}).text,'⚙️ Notion · list its tools');
   const shell=card('shell',{command:'printf ok'});
   assert.equal(shell.text,'⚙️ Run a command\n\nprintf ok');assert.deepEqual(spans(shell,'pre'),['printf ok']);
@@ -171,7 +171,7 @@ test('a summary from the asker leads the card, and the exact fields fold under i
   };
   const content='- [ ] Made-up task one\n- [ ] Made-up task two';
   const pages=said('mcp',{connection:'notion',tool:'notion-create-pages',input:{parent:{page_id:'p1'},pages:[{properties:{title:'Plans'},content}]}},'Add a page “Plans” with two made-up tasks.');
-  assert.equal(pages.text,'⚙️ Notion · create pages\n📝 Add a page “Plans” with two made-up tasks.\n\nExact details\nparent › page_id: p1\npages › properties › title: Plans\n'+
+  assert.equal(pages.text,'⚙️ Notion · create pages\n📝 AI says: Add a page “Plans” with two made-up tasks.\n\nExact details\nparent › page_id: p1\npages › properties › title: Plans\n'+
     'pages › content:\n  - [ ] Made-up task one\n  - [ ] Made-up task two');
   assert.deepEqual(spans(pages,'expandable_blockquote'),[pages.text.slice(pages.text.indexOf('Exact details'))],'every field folds into one quote that opens on a tap');
   assert.deepEqual(spans(pages,'blockquote'),[],'with no quote inside it, which Telegram forbids');
@@ -183,17 +183,18 @@ test('a summary from the asker leads the card, and the exact fields fold under i
   assert.ok(!spans(sneaky,'bold').includes('properties › title:'));
   // A command, and an input whose keys read alike, stay open in code, which Telegram cannot put in a quote.
   const shell=said('shell',{command:'ls -la'},'List the files here.');
-  assert.equal(shell.text,'⚙️ Run a command\n📝 List the files here.\n\nls -la');
+  assert.equal(shell.text,'⚙️ Run a command\n📝 AI says: List the files here.\n\nls -la');
   assert.deepEqual([spans(shell,'pre'),spans(shell,'expandable_blockquote')],[['ls -la'],[]]);
   const twins=said('mcp',{connection:'notion',tool:'t',input:{page:'a','p\u0430ge':'b'}},'Update a page.');
   assert.deepEqual([spans(twins,'pre').length,spans(twins,'expandable_blockquote')],[1,[]]);
   // Without a summary the card is as before; a template without a place for one gets it under the name.
   assert.equal(said('browser',{url:'https://example.test/'},null).text,'⚙️ Open a web page · example.test\n\nhttps://example.test/');
-  assert.equal(said('browser',{url:'https://example.test/'},'Read the page.','{kind}\n\n{arguments}').text,'Open a web page · example.test\n📝 Read the page.\n\nExact details\nhttps://example.test/');
-  assert.match(said('browser',{url:'https://example.test/'},'Read the page.','Approve this?\n\n{arguments}').text,/^📝 Read the page\.\nApprove this\?\n/);
-  assert.deepEqual(said('browser',{url:'https://example.test/'},'Read it.','⚙️ {kind}\u0004\n📝 {summary}\u0005\n\n{arguments}').links.length,3,'owner text never opens a fold');
+  assert.equal(said('browser',{url:'https://example.test/'},'Read the page.','{kind}\n\n{arguments}').text,'Open a web page · example.test\n📝 AI says: Read the page.\n\nhttps://example.test/');
+  assert.match(said('browser',{url:'https://example.test/'},'Read the page.','Approve this?\n\n{arguments}').text,/^📝 AI says: Read the page\.\nApprove this\?\n/);
+  const folded=said('mcp',{connection:'notion',tool:'notion-update-page',input:{page_id:'p1'}},'Read it.','⚙️ {kind}\u0004\n📝 {summary}\u0005\n\n{arguments}');
+  assert.deepEqual(spans(folded,'expandable_blockquote'),[folded.text.slice(folded.text.indexOf('Exact details'))],'owner text never opens a fold');
   assert.equal(said('browser',{url:'https://example.test/'},'Read the page.','⚙️ {kind}\n📝 {summary} · {origin}\n\n{arguments}').text,
-    '⚙️ Open a web page · example.test\n📝 Read the page.\n\nExact details\nhttps://example.test/','nor when its own line is left out for a missing value');
+    '⚙️ Open a web page · example.test\n📝 AI says: Read the page.\n\nhttps://example.test/','nor when its own line is left out for a missing value');
   // Folded, long values need no quote each, so an input can fit a card only with its summary; without one it may not.
   const input={notes:Object.fromEntries(Array.from({length:46},(_,index)=>['k'+index,'س'.repeat(16)+'\n'+'د'.repeat(16)])),z:'e\u0301'};
   assert.ok(operationText('mcp',{connection:'notion',tool:'notion-update-page',input},words,'Update the notes.')?.body.startsWith('\u0004'));
@@ -202,12 +203,13 @@ test('a summary from the asker leads the card, and the exact fields fold under i
 
 test('a summary is one line, written out when it hides a character or could pass for structure',()=>{
   const line=(summary:string)=>operationText('browser',{url:'https://example.test/'},words,summary)?.summary;
-  assert.equal(line('  Read   the\nweather\tpage. '),'Read the weather page.');
-  assert.equal(line('مرور صفحه\u200cی هوا'),'مرور صفحه\u200cی هوا','a Persian half-space between joined letters shows');
-  assert.equal(line('Read \u200bthe page'),'"Read \\u200bthe page"');
-  assert.equal(line('Read\u0004 it'),'"Read\\u0004 it"','a control character never makes a fold, and shows');
-  assert.equal(line('"Approved"'),'"\\"Approved\\""');
-  assert.match(line('⚙️ Notion · delete pages')!,/^"⚙/,'it never passes for a change on a list card');
+  assert.equal(line('  Read   the\nweather\tpage. '),'AI says: Read the weather page.','the label is put in by code');
+  assert.equal(line('مرور صفحه\u200cی هوا'),'AI says: مرور صفحه\u200cی هوا','a Persian half-space between joined letters shows');
+  assert.equal(line('Read \u200bthe page'),'AI says: "Read \\u200bthe page"');
+  assert.equal(line('Read\u0004 it'),'AI says: "Read\\u0004 it"','a control character never makes a fold, and shows');
+  assert.equal(line('"Approved"'),'AI says: "\\"Approved\\""');
+  assert.match(line('⚙️ Notion · delete pages')!,/^AI says: "⚙/,'it never passes for a change on a list card');
+  assert.equal(operationText('browser',{url:'https://example.test/'},{...words,ai_says:'  '},'Read it.')?.summary,'Read it.','an owner who empties the label gets none');
   assert.equal(line('   '),null);assert.equal(line('x'.repeat(601)),null,'too long for a line, it is left out');
   assert.equal(operationText('browser',{url:'https://example.test/'},words,'x'.repeat(601))?.body,'https://example.test/','and the fields stay open');
 });
@@ -217,4 +219,47 @@ test('a fold holds the entities inside it and closes at the end of the text',()=
   assert.deepEqual(linked('a\u0004bc'),{text:'abc',links:[{type:'expandable_blockquote',offset:1,length:2}]});
   assert.deepEqual(linked('a\u0004\u0005b'),{text:'ab',links:[]},'an empty fold is no entity');
   assert.deepEqual(cut(linked('ab\u0004cdefgh\u0005'),5),{text:'abcd…',links:[{type:'expandable_blockquote',offset:2,length:2}]});
+});
+
+test('a web card shows its address open, and a long one shows its start, how much more it carries, and the whole of it folded',()=>{
+  const short=linked(operationCard(approvalAction,operationText('browser',{url:'https://example.test/weather?city=made-up'},words,'Read the weather.')!,null));
+  assert.equal(short.text,'⚙️ Open a web page · example.test\n📝 AI says: Read the weather.\n\nhttps://example.test/weather?city=made-up');
+  assert.deepEqual(spans(short,'expandable_blockquote'),[],'nothing to tap open');
+  const url='https://example.test/search?q='+'a1b2c3d4'.repeat(40);
+  const long=linked(operationCard(approvalAction,operationText('browser',{url},words,'Search for it.')!,null));
+  assert.equal(long.text,'⚙️ Open a web page · example.test\n📝 AI says: Search for it.\n\n'+url.slice(0,120)+'…\n⚠️ The address also carries '+(url.length-120)+
+    ' more characters, which can hold data.\nExact details\n'+url);
+  assert.deepEqual(spans(long,'expandable_blockquote'),['Exact details\n'+url],'the whole address folds below');
+  // Without a summary too, and the count is of what the card shows: a hidden character is written out.
+  const hidden=operationText('browser',{url:'https://example.test/?q='+'x'.repeat(300)+'\u200b'},words)!;
+  assert.match(hidden.body,/^"https:\/\/example\.test\/\?q=x{95}…\n⚠️ The address also carries 212 more characters/);
+});
+
+test('another server\'s tool says how much it sends and to which site, and folds a long input below',()=>{
+  const short=operationText('mcp',{url:'https://mcp.example.test/mcp',tool:'search',input:{query:'made-up'}},words,'Search the docs.')!;
+  assert.equal(linked(short.body).text,'📤 Sends 19 characters to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nquery: made-up','a short input shows open, even with a summary');
+  const notes='A made-up note. '.repeat(30);
+  const long=linked(operationCard(approvalAction,operationText('mcp',{url:'https://mcp.example.test/mcp',tool:'save',input:{notes}},words,'Save the notes.')!,null));
+  assert.ok(long.text.startsWith('⚙️ mcp.example.test · save\n📝 AI says: Save the notes.\n\n📤 Sends '+(notes.length+12)+' characters to mcp.example.test\n\nExact details\n'),long.text);
+  assert.deepEqual(spans(long,'expandable_blockquote').length,1,'a long input folds below a summary');
+  const plainCard=linked(operationCard(approvalAction,operationText('mcp',{url:'https://mcp.example.test/mcp',tool:'save',input:{notes}},words)!,null));
+  assert.ok(plainCard.text.startsWith('⚙️ mcp.example.test · save\n\n📤 Sends '+(notes.length+12)+' characters to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nnotes:'),plainCard.text);
+  assert.deepEqual(spans(plainCard,'expandable_blockquote'),[notes.trim()],'without a summary the fields show open, with the long text in its own quote');
+  // Notion keeps its own card, and listing tools sends nothing.
+  assert.doesNotMatch(operationText('mcp',{connection:'notion',tool:'notion-update-page',input:{page_id:'p1'}},words)!.body,/📤/);
+  assert.doesNotMatch(operationText('mcp',{url:'https://mcp.example.test/mcp',operation:'list'},words)!.body,/📤/);
+});
+
+test('a name or job text shows each hidden character where it stands, and keeps Persian half-spaces and emoji',()=>{
+  assert.equal(visible('Plan\u202eevil'),'Plan[U+202E]evil');
+  assert.equal(visible('کار\u200cها و 👩\u200d👩\u200d👧 ok'),'کار\u200cها و 👩\u200d👩\u200d👧 ok','a Persian half-space and an emoji joiner show as intended');
+  assert.equal(visible('ok\u200c ok\u200cها'),'ok[U+200C] ok[U+200C]ها','a non-joiner anywhere else is written out');
+  assert.equal(visible('a\tb\nc\u200b'),'a[U+0009]b[U+000A]c[U+200B]');
+  assert.equal(visible('a\tb\nc\u200b',true),'a\tb\nc[U+200B]','line breaks and tabs stay in a multi-line text');
+  assert.equal(cardName('  The “Family”\u200b  group '),'The "Family"[U+200B] group','curly quotes cannot close the card\'s quotes');
+  assert.equal(cardName('x'.repeat(62)+'\u200b'),'x'.repeat(62)+'…','a written-out character is never cut in half');
+  assert.equal(cardName(' \u0001 '),null);assert.equal(cardName(7),null);
+  assert.equal(reordering('Build \u202esite'),true);assert.equal(reordering('Fix \u2066it\u2069'),true);
+  assert.equal(reordering('Go 🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}'),false,'a flag\'s tag characters are part of it');
+  assert.equal(reordering('Hide \u{e0041}\u{e0042}'),true);assert.equal(reordering('مرور صفحه\u200cی هوا'),false);
 });
