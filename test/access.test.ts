@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import type {IncomingMessage} from 'node:http';
 import {answerId,reader,scopeToken,turnToken} from '../src/access.js';
-import {GP1,GP1_TOPIC,OWNER,fixtureDirectory} from './fixture-groups.js';
+import {GP1,GP1_TOPIC,NG1,NG1_TOPIC,NG2,OWNER,fixtureDirectory} from './fixture-groups.js';
 import {installChatsForTest} from '../src/chats.js';
 
 // A pass's space must be its chat or one of that chat's topics, as the chat directory holds them (ADR-0250).
@@ -28,6 +28,7 @@ test('an answer claim is read only from a turn pass for the asker\'s private cha
     'an owner pass':{scope:null,space:OWNER,revision:1},'a group pass':{scope:GP1,space:GP1,revision:1},'a topic pass':{scope:GP1,space:GP1_TOPIC,revision:1},
     'a pass without a space':{scope:OWNER},'a desktop import':{scope:'desktop:personal_chat:9',space:'desktop:personal_chat:9',revision:1},
     'a topic of the private chat':{scope:OWNER,space:OWNER+'/topic/5',revision:1},
+    'a digest group pass':{scope:NG1,space:NG1,revision:1},'a digest topic pass':{scope:NG1,space:NG1_TOPIC,revision:1},
   }))assert.throws(()=>reader(request(signed('turn',{event_id:event,answer,...claims})),secret),{code:'invalid_scope_token'},why);
   assert.throws(()=>reader(request(signed('scope',{scope:OWNER,answer})),secret),{code:'invalid_scope_token'},'a scope pass');
 });
@@ -40,6 +41,11 @@ test('a read set never comes from a pass, and passes without an answer read as b
   const group=reader(request(turnToken(secret,GP1,later(),event,{space:GP1_TOPIC,revision:2})),secret);
   assert.deepEqual(group,{scope:GP1,admin:false,turnEvent:event,space:GP1_TOPIC,revision:2,brain:'hermes'});
   assert.equal('answer' in group||'reads' in group,false);
+  // Both fixture families: a digest topic's pass reads under its group's row, and a space under another chat is refused.
+  assert.deepEqual(reader(request(turnToken(secret,NG1,later(),event,{space:NG1_TOPIC,revision:2})),secret),
+    {scope:NG1,admin:false,turnEvent:event,space:NG1_TOPIC,revision:2,brain:'hermes'});
+  for(const [scope,space] of [[NG2,NG1_TOPIC],[GP1,NG1_TOPIC],[NG1,GP1_TOPIC]])
+    assert.throws(()=>reader(request(signed('turn',{scope,event_id:event,space,revision:2})),secret),{code:'invalid_scope_token'},scope+' '+space);
   assert.deepEqual(reader(request(turnToken(secret,null,later(),event,{space:OWNER,revision:1})),secret),{scope:null,admin:false,turnEvent:event,space:OWNER,revision:1,brain:'hermes'});
   assert.deepEqual(reader(request(scopeToken(secret,GP1,later())),secret),{scope:GP1,admin:false});
   assert.deepEqual(reader(request(secret),secret),{scope:null,admin:true});

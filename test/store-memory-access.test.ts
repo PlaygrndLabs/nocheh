@@ -12,6 +12,7 @@ import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {installChatsForTest} from '../src/chats.js';
 import {legacyDirectory} from './fixture-groups.js';
+import {families} from './fixture-families.js';
 
 test('fact grants authorize exact destinations while relationships only create reject-once suggestions',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -130,14 +131,15 @@ test('fact grants authorize exact destinations while relationships only create r
   } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('canary: what the owner says about a member in the private chat never reaches a group',
+for(const family of families)test(`canary: what the owner says about a member in the private chat never reaches a group (${family.name})`,
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-canary-'));
   const key='memory-canary:'+Date.now(),group='-'+Date.now(),owner:Reader={admin:true,scope:null},mark='zephyrquill';
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group]};
-  const restore=installChatsForTest(legacyDirectory([group],{owner:'123',served:policy.group_ids}));
+  // The group as the seeder makes its row, old-shaped or a digest id (ADR-0250); the archive keeps Telegram's id.
+  const chat=family.id(group),restore=installChatsForTest(family.directory([group],{owner:'123',served:policy.group_ids}));
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async operation=>operation==='guard.detect'?{literals:[]}:{state:'done'},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const capture=async(scope:string,index:number,text:string)=>{const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(index),revision:'1',occurred_at:null,text,
@@ -146,14 +148,14 @@ test('canary: what the owner says about a member in the private chat never reach
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
     const project=await services.projects.save(owner,{name:'Apollo',description:'Fixture',state:'active',expected_revision:0,operation_id:key+':project'});
-    await services.projects.assign(owner,{space_id:group,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign'});
+    await services.projects.assign(owner,{space_id:chat,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign'});
     const said=await capture('123',1,'Bob is leaving the Apollo team next month '+mark),asked=await capture(group,2,'Is Bob leaving the Apollo team?');
     const projectEntity=await services.entities.ensureProject(project),bob=digest(key+':member');
     await stores.control.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person','Bob','active')",[bob]);
     const fact=await services.entities.publishClaim({subject_id:bob,predicate:'plans',content:'Bob is leaving the Apollo team next month '+mark,object_entity_id:projectEntity.id,
       relationship_kind:'participates',attribution:'reported',uncertainty:'explicit',evidence:[said]},await services.guards.state(),key+':fact');
     const binding=await services.guards.state();
-    const actor:Reader={admin:false,scope:group,space:group,turnEvent:asked.id,generation:binding.generation,guard_epoch:binding.epoch};
+    const actor:Reader={admin:false,scope:chat,space:chat,turnEvent:asked.id,generation:binding.generation,guard_epoch:binding.epoch};
     const query='Is Bob leaving the Apollo team next month?';
     assert.equal(await services.memoryAccess.suggest(actor,query),null,'never suggested to the group');
     assert.ok(!JSON.stringify(await services.memoryAccess.context(actor,query)).includes(mark),'never in its approved facts');
