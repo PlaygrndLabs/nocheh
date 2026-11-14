@@ -2,8 +2,8 @@
 import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
-import {chatName, groupSpace, parentOf, topicNumber, type Chat} from '../../lib/chats-model';
-import {Button, LoadError} from '../../ui/core';
+import {appIdLabel, byTopicKey, chatName, isGroupChat, parentOf, type Chat} from '../../lib/chats-model';
+import {Button, Card, CardBody, CardHeader, LoadError} from '../../ui/core';
 import {AllowedActions} from './actions';
 import {MemoryCard} from './memory';
 import {WhoCanTalk} from './people';
@@ -37,24 +37,28 @@ export type ChatContext = {
 
 export function ChatDetail({space, telegram}: {space: string; telegram: Telegram}) {
   const chat = useChat(space);
-  const parentId = chat.kind === 'topic' ? (chat.parent_space ?? parentOf(space)) : null;
+  // What the chat is comes from the chat directory, never from its id (ADR-0250).
+  const parentId = parentOf(chat);
   const parentChat = useChat(parentId ?? '');
   const parent = parentId ? parentChat : null;
-  const {items} = useChats();
+  const {items, find, settled} = useChats();
   const context = useResource<ChatContext>('/conversations/context?space=' + encodeURIComponent(space));
+  // A chat the directory doesn't know, or hasn't answered for yet, is no private chat, group or topic: nothing is
+  // offered for it, as nothing is decided from its id.
+  if (chat.kind === 'unknown') return <UnknownChat chat={chat} loading={!settled(space)} />;
   const topics: Chat[] =
     chat.kind === 'group'
-      ? items
-          .filter(item => item.kind === 'topic' && (item.parent_space ?? parentOf(item.space_id)) === space)
-          .sort((a, b) => topicNumber(a.space_id) - topicNumber(b.space_id))
+      ? items.filter(item => item.kind === 'topic' && item.parent_space === space).sort(byTopicKey)
       : [];
-  const owner = chat.kind === 'private' && space === telegram.owner;
+  const owner = chat.kind === 'private' && chat.owner === true;
   const group = chat.kind === 'group';
-  const forum = group && telegram.isOn(space) && /^-100/.test(space);
+  const on = group && telegram.isOn(chat);
+  // Telegram lists no topics to a bot: a forum, or a group topics were already seen in, can have older ones added.
+  const forum = on && (chat.is_forum === true || topics.length > 0);
   // The owner's own topics follow the private chat, so only its chat, served groups and their topics have switches.
-  const tools =
-    owner || (group && telegram.isOn(space)) || (chat.kind === 'topic' && !!parentId && telegram.isOn(parentId));
-  const where = owner ? 'your private chat' : chatName(chat, telegram.owner);
+  const tools = owner || on || (chat.kind === 'topic' && telegram.isOn(parent ?? chat));
+  const where = owner ? 'your private chat' : chatName(chat);
+  const label = appIdLabel(chat);
 
   return (
     <div className="space-y-4">
@@ -63,7 +67,7 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       </Button>
       <header className="min-w-0">
         <h2 className="truncate text-lg font-semibold" dir="auto">
-          {owner ? 'Your private chat' : chatName(chat, telegram.owner)}
+          {owner ? 'Your private chat' : chatName(chat)}
         </h2>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
           <span>
@@ -84,16 +88,20 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
               'Private chat'
             )}
           </span>
-          <span aria-hidden>·</span>
-          <span className="font-mono text-xs">ID {space}</span>
+          {label && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="font-mono text-xs">{label}</span>
+            </>
+          )}
         </p>
       </header>
       {context.error && !context.data && (
         <LoadError what="this chat’s details" onRetry={() => void refreshResources()} />
       )}
       <NochehHere chat={chat} parent={parent} telegram={telegram} />
-      {group && <WhoCanTalk group={space} telegram={telegram} />}
-      {(owner || (group && telegram.isOn(space))) && (
+      {group && <WhoCanTalk group={chat} telegram={telegram} />}
+      {(owner || on) && (
         <RoleAndSkills
           scope={space}
           where={where}
@@ -118,6 +126,7 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       {tools && (
         <ToolSwitches
           space={space}
+          parent={parentId ?? '*'}
           title="Tools"
           where={where}
           description={
@@ -129,12 +138,35 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
           }
         />
       )}
-      {groupSpace(space) ? (
-        <ProjectCard chat={chat} served={telegram.savedGroupIds.includes(space)} />
+      {isGroupChat(chat, find) ? (
+        <ProjectCard chat={chat} served={chat.state === 'active'} />
       ) : (
-        <PrivateChatProject chat={chat} yours={owner || (!!parentId && parentId === telegram.owner)} />
+        <PrivateChatProject chat={chat} yours={chat.owner === true} />
       )}
       {forum && <TopicsCard group={chat} topics={topics} />}
+    </div>
+  );
+}
+
+function UnknownChat({chat, loading}: {chat: Chat; loading: boolean}) {
+  return (
+    <div className="space-y-4">
+      <Button variant="ghost" size="sm" className="-ml-2 lg:hidden" onClick={() => setParams({chat: null})}>
+        <ArrowLeft aria-hidden /> All chats
+      </Button>
+      <header className="min-w-0">
+        <h2 className="truncate text-lg font-semibold" dir="auto">
+          {loading ? 'Loading…' : chatName(chat)}
+        </h2>
+      </header>
+      <Card>
+        <CardHeader title="Nocheh here" />
+        <CardBody className="pt-2 text-sm">
+          {loading
+            ? 'Loading this chat…'
+            : 'Nocheh doesn’t know this chat. It shows here once Nocheh sees a message from it.'}
+        </CardBody>
+      </Card>
     </div>
   );
 }

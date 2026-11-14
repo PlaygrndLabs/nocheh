@@ -4,7 +4,7 @@ import {Badge, Button, Details, Notice, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
 import {otherGroupsText, projectGroupsNote, projectTasksWarning, relatedGroupsHint} from '../chats/rule-dialog';
-import {parentOf} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {stateLabel, useChatNames, useCommand} from './shared';
 
@@ -122,6 +122,7 @@ export function KnowledgeReview({
 }) {
   const {toast, confirm} = useFeedback();
   const chat = useChatNames();
+  const chats = useChatDirectory(60000);
   const command = useCommand();
   const content = proposal.proposal ?? {};
   const kind = String(content.kind ?? proposal.kind);
@@ -132,7 +133,7 @@ export function KnowledgeReview({
   const audience = proposal.fact_audience;
   const destination = typeof content.payload?.destination === 'string' ? content.payload.destination : null;
   // Every member of a group can read all of its topics, so a share into a topic is seen by the whole group.
-  const seers = destination ? (parentOf(destination) ?? destination) : null;
+  const seers = destination ? (chats.parentOf(destination) ?? destination) : null;
   const privateChats = proposal.private_chats ?? [];
   // A fact share or correction is approved only after seeing where the fact came from and who will read it.
   const unseen = ['fact_grant', 'entity_correct'].includes(kind) && !audience;

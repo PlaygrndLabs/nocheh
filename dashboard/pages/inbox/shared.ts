@@ -1,5 +1,6 @@
 /** Inbox wording, shapes and small helpers shared by its tabs and drawers. */
 import {useCallback, useRef, useState} from 'react';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {Globe, Plug, Send, Terminal, type LucideIcon} from 'lucide-react';
 import {apiPost} from '../../lib/api';
 import {privateChatErrors} from '../../lib/chats-model';
@@ -246,24 +247,18 @@ export function useCommand() {
   return {busy, error, run, clear: () => setError('')};
 }
 
-/** Chat names by Telegram space, for saying where something happens. */
+/** Chat names, for saying where something happens. What a chat is comes from the chat directory (ADR-0250). */
 export function useChatNames(): (space: string | null | undefined) => string {
-  const {data} = useResource<{
-    items: {space_id: string; name: string | null; kind: string; parent_name?: string | null}[];
-  }>('/conversations?limit=100', 60000);
-  const settings = useResource<{fields?: {key: string; value: unknown}[]}>('/settings');
-  const owner = String(settings.data?.fields?.find(field => field.key === 'TELEGRAM_OWNER_ID')?.value ?? '');
-  return useCallback(
-    (space: string | null | undefined) => {
-      if (!space) return 'Unknown chat';
-      if (owner && space === owner) return 'your private chat';
-      const row = data?.items?.find(item => item.space_id === space);
-      if (row?.name) return row.kind === 'topic' && row.parent_name ? `${row.name} · ${row.parent_name}` : row.name;
-      if (space.includes('/topic/')) return 'A topic in a group';
-      return space.startsWith('-') ? 'A group chat' : 'A private chat';
-    },
-    [data, owner],
-  );
+  const chats = useChatDirectory(60000);
+  return (space: string | null | undefined) => {
+    if (!space) return 'Unknown chat';
+    const row = chats.find(space);
+    if (!row) return 'Unknown chat';
+    if (row.owner && row.kind === 'private') return 'your private chat';
+    if (row.name) return row.kind === 'topic' && row.parent_name ? `${row.name} · ${row.parent_name}` : row.name;
+    if (row.kind === 'topic') return 'A topic in a group';
+    return row.kind === 'group' ? 'A group chat' : 'A private chat';
+  };
 }
 
 const units: [Intl.RelativeTimeFormatUnit, number][] = [

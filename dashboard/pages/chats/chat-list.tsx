@@ -17,8 +17,7 @@ export function ChatList({selected, telegram}: {selected: string | null; telegra
   const [refreshing, setRefreshing] = useState(false);
   const {toast} = useFeedback();
 
-  const extra = [...(identities.data?.groups ?? []), ...telegram.groupIds.map(id => ({id, name: null}))];
-  const tree = chatTree(items, extra, telegram.groupIds, deferred, telegram.owner);
+  const tree = chatTree(items, identities.data?.groups ?? [], telegram.isOn, deferred);
   const nothing = !tree.privates.length && !tree.groups.length;
 
   const refreshNames = async () => {
@@ -50,7 +49,7 @@ export function ChatList({selected, telegram}: {selected: string | null; telegra
             id="chat-search"
             type="search"
             value={query}
-            placeholder="Find a chat by name or ID"
+            placeholder="Find a chat by name or Telegram ID"
             className="pl-9"
             onChange={event => setQuery(event.target.value)}
           />
@@ -91,9 +90,9 @@ export function ChatList({selected, telegram}: {selected: string | null; telegra
                       <Row
                         key={chat.space_id}
                         chat={chat}
-                        label={chatName(chat, telegram.owner)}
+                        label={chatName(chat)}
                         selected={selected === chat.space_id}
-                        state={chat.space_id === telegram.owner ? 'on' : 'off'}
+                        state={chat.owner ? 'on' : 'off'}
                       />
                     ))
                   ) : (
@@ -109,8 +108,8 @@ export function ChatList({selected, telegram}: {selected: string | null; telegra
                             chat={group}
                             label={chatName(group)}
                             selected={selected === group.space_id}
-                            state={telegram.isOn(group.space_id) ? 'on' : 'off'}
-                            unsaved={telegram.onChanged(group.space_id)}
+                            state={telegram.isOn(group) ? 'on' : 'off'}
+                            unsaved={telegram.onChanged(group)}
                           />
                           {topics.map(topic => (
                             <Row

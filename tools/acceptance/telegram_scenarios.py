@@ -17,6 +17,7 @@ from pathlib import Path
 import subprocess
 import time
 import traceback
+import urllib.parse
 from tools.paths import ROOT
 from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_delivery, telegram_health, validate_fixture,
                                                  wait_telegram_connected)
@@ -24,6 +25,13 @@ from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_deli
 OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, -10099, 777
 # A third served group, so two groups can share a project while GROUP stays in none (project_groups_stay_apart).
 THIRD_GROUP = -10044
+# Groups Nocheh first sees after step 2b, so their Nocheh ids are digests (ADR-0250). NEW_GROUP (NG1) is turned on with
+# the 2b-1 switch and joins P1; UPGRADED_GROUP is a basic group Telegram upgrades to UPGRADED_SUPERGROUP, which Nocheh
+# learns from Telegram's service messages; REFRESHED_GROUP is one whose upgrade the owner's refresh finds. No other
+# scenario posts in either upgraded group.
+NEW_GROUP, NEW_TOPIC = -10045, 5
+UPGRADED_GROUP, UPGRADED_SUPERGROUP = -4046, -10047
+REFRESHED_GROUP, REFRESHED_SUPERGROUP = -4048, -10049
 MENTION = '@synthetic_fixture_bot'
 # The fixed, editable reply for people the owner has not allowed (src/prompts.ts).
 NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this group.'
@@ -118,6 +126,38 @@ const text=await response.text();if(!response.ok)throw Error('native_http_'+resp
 
     def telegram(self):
         return self.http('/fixture/telegram')
+
+    def conversations(self):
+        """Every chat in the owner's chat list (GET /v1/conversations), page by page."""
+        items, after = [], None
+        while True:
+            page = self.app('/v1/conversations?limit=100'+('&after='+urllib.parse.quote(after, safe='') if after else ''))
+            items += page['items']
+            after = page.get('next_cursor')
+            if not after:
+                return items
+
+    def chat(self, app_id, topic=None, seconds=60):
+        """The Nocheh id of a Telegram chat, or of one of its topics, found by its Telegram id labels in the owner's chat
+        list (ADR-0250). A chat Nocheh knew before step 2b keeps its stored value as its id; one first seen later, a topic
+        included, has a digest id, so scenarios never build an id from Telegram's. Waits for a chat just captured."""
+        external, started = str(app_id), time.monotonic()
+        while True:
+            items = self.conversations()
+            chat = next((item['space_id'] for item in items if item.get('kind') in ('private', 'group') and any(
+                label.get('app') == 'telegram' and label.get('external') == external for label in item.get('app_ids') or [])), None)
+            found = chat if topic is None or chat is None else next((item['space_id'] for item in items if item.get('kind') == 'topic'
+                                                                   and item.get('parent_space') == chat and str(item.get('topic_key')) == str(topic)), None)
+            if found:
+                return found
+            if time.monotonic()-started >= seconds:
+                raise Failed('chat_not_in_directory:'+external+('' if topic is None else ':'+str(topic)))
+            time.sleep(2)
+
+    def chat_item(self, app_id, topic=None):
+        """The owner's chat list item of a Telegram chat or topic."""
+        chat = self.chat(app_id, topic)
+        return next(item for item in self.conversations() if item['space_id'] == chat)
 
     def ids(self):
         if self.next_id is None:
@@ -218,6 +258,15 @@ class Scenarios:
         markup = row['parameters'].get('reply_markup') or '{}'
         rows = (json.loads(markup) if isinstance(markup, str) else markup).get('inline_keyboard') or []
         return any(not str(button.get('callback_data') or '').startswith('np') for line in rows for button in line)
+
+    def topic_chat(self, chat, topic):
+        """The Nocheh id of a group's topic. Nocheh learns a topic from a message in it (ADR-0250), so a topic nothing was
+        said in yet first gets a message nobody addresses."""
+        try:
+            return self.f.chat(chat, topic, seconds=0)
+        except Failed:
+            self.turn(self.f.message(chat, 'یادداشت برای این تاپیک', topic=topic, mention=False), chat, topic, expect_reply=False)
+            return self.f.chat(chat, topic)
 
     def cards_since(self, before, chat):
         return [row for row in self.f.sent()[before:] if self.is_card(row) and row['message']['chat']['id'] == chat]
@@ -470,14 +519,16 @@ class Scenarios:
 
     def action_approval(self):
         topic, wording = 17, 'سلام تیم، جلسه ساعت ۱۷ است ✅'
+        # The destination is the topic's chat id, as the model gets it from the destinations list (ADR-0250).
+        destination = self.topic_chat(GROUP, topic)
         known = {row['id'] for row in self.proposals()}
         before = len(self.f.sent())
-        _, text = self.turn(self.f.message(OWNER, 'این پیام را به تاپیک تیم بفرست [[action:'+str(GROUP)+'/topic/'+str(topic)+'|'+wording+']]'), OWNER)
+        _, text = self.turn(self.f.message(OWNER, 'این پیام را به تاپیک تیم بفرست [[action:'+destination+'|'+wording+']]'), OWNER)
         created = [row for row in self.proposals() if row['id'] not in known]
         self.gate('one_proposal_created', len(created) == 1, count=len(created))
         self.gate('one_card_in_owner_chat', len(self.cards_since(before, OWNER)) == 1, count=len(self.cards_since(before, OWNER)))
         proposal = created[0]
-        self.gate('proposal_exact', proposal['state'] == 'proposed' and proposal['arguments'] == {'destination': str(GROUP)+'/topic/'+str(topic), 'text': wording},
+        self.gate('proposal_exact', proposal['state'] == 'proposed' and proposal['arguments'] == {'destination': destination, 'text': wording},
                   arguments=proposal['arguments'])
         time.sleep(5)
         self.gate('nothing_sent_before_approval', not self.replies(before, GROUP, topic))
@@ -498,9 +549,10 @@ class Scenarios:
 
     def action_denial(self):
         topic = 17
+        destination = self.topic_chat(GROUP, topic)
         known = {row['id'] for row in self.proposals()}
         before = len(self.f.sent())
-        self.turn(self.f.message(OWNER, 'اینو بفرست [[action:'+str(GROUP)+'/topic/'+str(topic)+'|پیامی که نباید ارسال شود]]'), OWNER)
+        self.turn(self.f.message(OWNER, 'اینو بفرست [[action:'+destination+'|پیامی که نباید ارسال شود]]'), OWNER)
         proposal = [row for row in self.proposals() if row['id'] not in known][0]
         decision = self.f.app('/v1/tools/telegram-decision', {'id': proposal['id'], 'fingerprint': proposal['fingerprint'], 'decision': 'deny'})
         self.gate('denied', decision['state'] == 'rejected')
@@ -515,7 +567,7 @@ class Scenarios:
         self.turn(self.f.message(GROUP, 'اینجا بفرست [[action:current|'+wording+']]', topic=topic), GROUP, topic, posted=wording)
         created = [row for row in self.proposals() if row['id'] not in known]
         self.gate('group_action_created', len(created) == 1)
-        self.gate('current_means_source_topic', created[0]['arguments']['destination'] == str(GROUP)+'/topic/'+str(topic),
+        self.gate('current_means_source_topic', created[0]['arguments']['destination'] == self.f.chat(GROUP, topic),
                   destination=created[0]['arguments']['destination'])
         self.wait('posted_right_away', lambda: [row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording], 180)
         time.sleep(5)
@@ -537,7 +589,7 @@ class Scenarios:
         run = json.loads(run)
         self.gate('scheduled_run_completed', run['state'] == 'done', state=run['state'], error=run['error'])
         proposal = self.wait('result_proposed', lambda: next((row for row in self.proposals() if row['id'] not in known), None), 120)
-        self.gate('result_addressed_to_owner_chat', proposal['state'] == 'proposed' and proposal['arguments']['destination'] == str(OWNER),
+        self.gate('result_addressed_to_owner_chat', proposal['state'] == 'proposed' and proposal['arguments']['destination'] == self.f.chat(OWNER),
                   state=proposal['state'], destination=proposal['arguments']['destination'])
         time.sleep(5)
         self.gate('only_a_card_before_review', all(self.is_card(row) for row in self.replies(before, OWNER))
@@ -695,8 +747,9 @@ class Scenarios:
         final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
         items = json.loads(final['result'])['items']
         named = {item['space_id']: item['name'] for item in items}
-        self.gate('owner_sees_groups', str(GROUP) in named and str(OTHER_GROUP) in named, groups=sorted(k for k in named if '/topic/' not in k))
-        self.gate('topic_named_from_root_message', named.get(str(GROUP)+'/topic/'+str(topic)) == name, name=named.get(str(GROUP)+'/topic/'+str(topic)))
+        self.gate('owner_sees_groups', self.f.chat(GROUP) in named and self.f.chat(OTHER_GROUP) in named,
+                  groups=sorted(item['space_id'] for item in items if item.get('kind') == 'group'))
+        self.gate('topic_named_from_root_message', named.get(self.f.chat(GROUP, topic)) == name, name=named.get(self.f.chat(GROUP, topic)))
         self.turn(self.f.message(GROUP, 'فهرست گروه‌ها [[owner:conversations]]', topic=11), GROUP, 11)
         final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
         self.gate('group_turn_cannot_read_owner_directory', 'owner_read_unavailable' in final['result'] and 'items' not in final['result'])
@@ -720,21 +773,24 @@ class Scenarios:
         self.gate('unparseable_update_visible', (health.get('telegram_details') or {}).get('unparseable_updates', 0) >= 1, health=health.get('telegram_details'))
 
     def telegram_refresh_names(self):
+        # A refresh that finds a group upgraded now moves the chat onto its new Telegram id (ADR-0250); later scenarios
+        # still post in OTHER_GROUP by its id, so a refresh that finds an upgrade is checked on a group no other scenario
+        # posts in, in product_scenarios.supergroup_upgrade_keeps_history.
         self.f.control({'chats': [{'id': GROUP, 'type': 'supergroup', 'title': 'Synthetic Forum Refreshed', 'is_forum': True},
-                                  {'id': OTHER_GROUP, 'type': 'group', 'migrate_to_chat_id': -1001234567890}]})
+                                  {'id': OTHER_GROUP, 'type': 'supergroup', 'title': 'Synthetic Forum '+str(OTHER_GROUP), 'is_forum': True}]})
         before = len(self.f.sent())
         result = self.f.app('/v1/telegram/chats/refresh', {})
         states = {chat['chat_id']: chat for chat in result['chats']}
-        self.gate('refresh_reads_telegram', states[str(GROUP)]['state'] == 'available' and states[str(GROUP)]['title'] == 'Synthetic Forum Refreshed')
-        self.gate('upgraded_group_reports_new_id', states[str(OTHER_GROUP)]['state'] == 'migrated' and states[str(OTHER_GROUP)]['migrate_to_chat_id'] == '-1001234567890')
+        refreshed = lambda chat: next((row for row in states.values() if row.get('external') == str(chat)), states.get(self.f.chat(chat)) or states.get(str(chat)))
+        group = refreshed(GROUP) or {}
+        self.gate('refresh_reads_telegram', group.get('state') == 'available' and group.get('title') == 'Synthetic Forum Refreshed', group=group)
         self.gate('refresh_sends_nothing', len(self.f.sent()) == before)
-        directory = {item['space_id']: item for item in self.f.app('/v1/conversations?limit=100')['items']}
-        self.gate('directory_shows_migration', directory[str(OTHER_GROUP)].get('telegram', {}).get('migrate_to_chat_id') == '-1001234567890')
 
     def owner_freedom_keeps_group_cards(self):
         # The freedom setting covers only the owner's private side: a post the owner asks for in their private chat for a
         # group or topic still shows its card there first, naming the group and showing the exact text (ADR-0244).
         topic, wording, note = 17, 'پیام گروه فقط با کارت مالک', 'یادداشت برای خودم بدون کارت'
+        destination, own = self.topic_chat(GROUP, topic), self.f.chat(OWNER)
         current = self.f.app('/v1/owner-autonomy')
         self.gate('approval_required_by_default', current['mode'] == 'approval_required')
         enabled = self.f.app('/v1/owner-autonomy', {'mode': 'owner_requests_execute', 'expected_revision': current['revision'],
@@ -742,7 +798,7 @@ class Scenarios:
         try:
             known = {row['id'] for row in self.proposals()}
             before = len(self.f.sent())
-            self.turn(self.f.message(OWNER, 'بفرست [[action:'+str(GROUP)+'/topic/'+str(topic)+'|'+wording+']]'), OWNER)
+            self.turn(self.f.message(OWNER, 'بفرست [[action:'+destination+'|'+wording+']]'), OWNER)
             created = [row for row in self.proposals() if row['id'] not in known]
             self.gate('group_post_waits_with_setting_on', len(created) == 1 and created[0]['state'] == 'proposed',
                       state=created[0]['state'] if created else None)
@@ -760,7 +816,7 @@ class Scenarios:
             # A message to the owner's own private chat still goes without a card.
             known = {row['id'] for row in self.proposals()}
             mark = len(self.f.sent())
-            self.turn(self.f.message(OWNER, 'یادداشت کن [[action:'+str(OWNER)+'|'+note+']]'), OWNER, posted=note)
+            self.turn(self.f.message(OWNER, 'یادداشت کن [[action:'+own+'|'+note+']]'), OWNER, posted=note)
             created = [row for row in self.proposals() if row['id'] not in known]
             self.gate('own_chat_approved_by_setting', len(created) == 1 and created[0]['state'] in ('approved', 'running', 'done'),
                       state=created[0]['state'] if created else None)

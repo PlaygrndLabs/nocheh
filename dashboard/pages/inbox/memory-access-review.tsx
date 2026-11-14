@@ -3,7 +3,7 @@
 import {useId, useState} from 'react';
 import {Badge, Button, Details, Field, Notice, Segmented, Technical, Textarea} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
-import {parentOf} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {fromNow, fullTime, stateLabel, useChatNames, useCommand} from './shared';
 
@@ -37,6 +37,7 @@ export function MemoryAccessReview({
 }) {
   const {toast} = useFeedback();
   const chat = useChatNames();
+  const chats = useChatDirectory(60000);
   const command = useCommand();
   const id = useId();
   const [wording, setWording] = useState(request.wording ?? '');
@@ -46,7 +47,7 @@ export function MemoryAccessReview({
   const locked = !!(review.changed || review.unavailable) || !!command.busy;
   const where = chat(request.destination);
   // Every member of a group can read all of its topics, so whatever is posted or answered there is seen by the whole group.
-  const readers = chat(parentOf(request.destination) ?? request.destination);
+  const readers = chat(chats.parentOf(request.destination) ?? request.destination);
   const sources = request.source_spaces ?? [];
   const [label, tone] = stateLabel(request.state);
 

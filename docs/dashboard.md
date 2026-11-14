@@ -37,7 +37,7 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Chat | Talk to the assistant in the browser. It opens the assistant console's chat, where the profile picker chooses your private chat or a group. |
 | Inbox | Waiting: decide approvals, memory-access requests, identity suggestions and organization changes. Allowed actions: standing permissions you can revoke. History: earlier decisions and their outcomes. |
 | Tasks | Personal and per-project to-do lists, also filled by telling Nocheh in chat: Open, Today, Upcoming, Board, Done, Dropped, Archive and Trash. |
-| Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there and which tools it may use (Commands, Web pages, Outside tools), its role and skills, and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: your own rules that let one group use knowledge from another, with who will see it, previews of exactly what is shared, and access defaults. A topic's project is always its group's; turning Nocheh on in a group asks which project it joins, or none, and in a group already in a project first names that project's other groups. |
+| Chats | The one place for memory access. Pick any chat or topic to see who can talk to Nocheh there, what it remembers there, what it may do there and which tools it may use (Commands, Web pages, Outside tools), its role and skills, and its project; turn Nocheh on or off in a group, allow people, add older topics. Sharing: your own rules that let one group use knowledge from another, with who will see it, previews of exactly what is shared, and access defaults. A topic's project is always its group's; turning Nocheh on in a group asks which project it joins, or none, and in a group already in a project first names that project's other groups. Find a chat by its name or any Telegram ID it has had; its page shows its Telegram ID, and the earlier one after Telegram upgraded the group, which stays the same chat. A chat is always picked from the list, never typed in as an ID; a link to a chat Nocheh doesn't know shows only that. Until TELEGRAM_GROUP_IDS is retired, a group's allowed people are saved under a Telegram ID the list names, so an upgraded group still served by its earlier ID keeps them there. A rule or organizing permission keeps a chat the dashboard is still looking up, and saves once it has. |
 | Messages | Messages: every original message, its agent copy and versions, files, transcripts and reactions; hide (retire) a message or restore it. Import: choose a Telegram export, review access and files, then start or resume an import. |
 | Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, a project's groups, its role and skills, its last Answer privately buttons, and automatic organizing, which, once on, only creates projects; removing a group from a project asks first and says its tasks stay on that project's list, for you only). Assistant notes: native notes and history for one chat. Long-term memory: the memory engine in use (Honcho today), readiness, attachment, budget, re-run or replace, and stored data. |
 | Usage | Model calls, tokens and cost by part and by model, calls per day, and reply speed with a per-stage breakdown for each reply. |
@@ -453,13 +453,17 @@ Hermes's native memory review, with no external-action tools. Pause/resume contr
 operate on queued work; an interrupted native write is marked ambiguous and needs
 an explicit resume. Retrying an ambiguous review may repeat a native memory edit.
 
+A chat or topic is named by its Nocheh id ([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)):
+the value it was stored under before step 2b, or a digest for one first seen later. Its link in Chats
+carries it; never build one from a Telegram ID.
+
 ```sh
 ./bin/nocheh memory spaces
-./bin/nocheh memory policy --space=-100123/topic/42
-./bin/nocheh memory policy --space=-100123/topic/42 --set policy.json --revision REVISION
-./bin/nocheh memory share --space=-100123/topic/42 --file shared.txt --revision REVISION
+./bin/nocheh memory policy --space=TOPIC_ID
+./bin/nocheh memory policy --space=TOPIC_ID --set policy.json --revision REVISION
+./bin/nocheh memory share --space=TOPIC_ID --file shared.txt --revision REVISION
 ./bin/nocheh memory revoke SHARE_ID --revision REVISION
-./bin/nocheh memory preview --space=-100123/topic/42 --query Juniper
+./bin/nocheh memory preview --space=TOPIC_ID --query Juniper
 ./bin/nocheh memory recall Juniper
 ./bin/nocheh memory reviews
 ./bin/nocheh memory pause JOB_ID

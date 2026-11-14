@@ -36,7 +36,7 @@ function Subhead({children, action}: {children: React.ReactNode; action?: React.
 
 export function MemoryCard({chat, telegram, context}: {chat: Chat; telegram: Telegram; context: ChatContext | null}) {
   const space = chat.space_id;
-  const owner = chat.kind === 'private' && space === telegram.owner;
+  const owner = chat.kind === 'private' && chat.owner === true;
   const state = context?.memory?.availability;
   const badge = state ? availability[state] : null;
 

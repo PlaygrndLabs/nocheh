@@ -25,8 +25,9 @@ from datetime import datetime, timedelta, timezone
 from tools.acceptance import canaries
 from tools.acceptance.github_mock import key_line
 from tools.acceptance.telegram_rehearsal import wait_telegram_connected
-from tools.acceptance.telegram_scenarios import (GROUP, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP, UNSELECTED_GROUP, Failed, Scenarios, isolated_turns,
-                                                synthetic_pdf)
+from tools.acceptance.telegram_scenarios import (GROUP, NEW_GROUP, NEW_TOPIC, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP, UNSELECTED_GROUP,
+                                                REFRESHED_GROUP, REFRESHED_SUPERGROUP, UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed, Scenarios,
+                                                isolated_turns, synthetic_pdf)
 from tools.paths import ROOT
 
 # 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
@@ -101,6 +102,41 @@ class ProductScenarios(Scenarios):
         self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
         return names
+
+    def serve_groups(self, *groups):
+        """Turn Nocheh on in groups with the step 2b-1 switch: their Telegram ids join TELEGRAM_GROUP_IDS and the services
+        that read it restart. The app then serves every chat any of whose Telegram ids is listed (ADR-0250)."""
+        names = []
+        for name, service in self.f.manifest['services'].items():
+            environment = service.get('environment') or {}
+            if isinstance(environment, dict) and 'TELEGRAM_GROUP_IDS' in environment:
+                listed = [value for value in str(environment['TELEGRAM_GROUP_IDS']).split(',') if value]
+                environment['TELEGRAM_GROUP_IDS'] = ','.join(listed+[str(group) for group in groups if str(group) not in listed])
+                names.append(name)
+        self.gate('group_switch_found', bool(names), services=names)
+        path = self.f.directory/'compose.json'
+        path.write_text(json.dumps(self.f.manifest))
+        path.chmod(0o600)
+        self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
+        wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
+        return names
+
+    def served(self, app_id):
+        """Whether the owner's chat list shows Nocheh on in a Telegram chat."""
+        return self.f.chat_item(app_id).get('state') == 'active'
+
+    def new_group_chat(self):
+        """NG1's Nocheh id, with Nocheh on there. new_id_group_works_end_to_end turns it on; a run of a later scenario on
+        its own does the same here first."""
+        try:
+            chat = self.f.chat(NEW_GROUP, seconds=0)
+        except Failed:
+            self.turn(self.f.message(NEW_GROUP, 'Hello before Nocheh is on here'), NEW_GROUP, expect_reply=False)
+            chat = self.f.chat(NEW_GROUP)
+        if not self.served(NEW_GROUP):
+            self.current.setdefault('recreated', []).extend(self.serve_groups(NEW_GROUP))
+            self.wait('new_group_served', lambda: self.served(NEW_GROUP), 180)
+        return chat
 
     def topic_created(self, chat, topic, name):
         """Telegram's service message for a new forum topic; it carries the topic's name."""
@@ -259,14 +295,14 @@ class ProductScenarios(Scenarios):
             self.gate('owner_list_hides_strangers_'+view, 'STRANGER' not in final['result'] and '"'+str(STRANGER)+'"' not in final['result']
                       and '"'+str(UNSELECTED_GROUP)+'"' not in final['result'], excerpt=final['result'][:300])
         # The dashboard still shows the owner what was tried.
-        listed = self.f.app('/v1/conversations?limit=100')['items']
-        self.gate('dashboard_still_lists_it', any(item['space_id'] == str(STRANGER) for item in listed))
+        listed = self.f.conversations()
+        self.gate('dashboard_still_lists_it', any(any(label.get('external') == str(STRANGER) for label in item.get('app_ids') or []) for item in listed))
 
     # Approvals ------------------------------------------------------------------------
 
     def owner_private_card_and_approve(self):
         wording = 'جلسه‌ی تیم ساعت ۱۷ است ✅ CARD1'
-        destination = str(GROUP)+'/topic/'+str(TEAM_TOPIC)
+        destination = self.topic_chat(GROUP, TEAM_TOPIC)
         request = self.f.message(OWNER, 'به تاپیک تیم بفرست [[action:'+destination+'|'+wording+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         cards = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)
@@ -295,7 +331,7 @@ class ProductScenarios(Scenarios):
 
     def owner_private_card_reject(self):
         wording = 'این پیام نباید برود REJECT1'
-        request = self.f.message(OWNER, 'بفرست [[action:'+str(OTHER_GROUP)+'|'+wording+']] [[after:silent]]')
+        request = self.f.message(OWNER, 'بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         answer = self.press(card, 'reject')
@@ -365,7 +401,7 @@ class ProductScenarios(Scenarios):
     def member_cross_group_card_in_origin(self):
         # A member allowed in both groups reviews their own message to the other group, in the group they asked in.
         wording = 'سلام گروه دوم MEMBERX1'
-        request = self.f.message(GROUP, 'به گروه دیگر بفرست [[action:'+str(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
+        request = self.f.message(GROUP, 'به گروه دیگر بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
         card = self.wait('card_in_origin_topic', lambda: self.cards(before, GROUP), 120)[0]
         target = json.loads(card['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
@@ -384,7 +420,7 @@ class ProductScenarios(Scenarios):
     def owner_reviews_when_member_not_allowed_there(self):
         # 779 is not allowed in OTHER_GROUP: the owner reviews it privately; the group never sees the draft.
         wording = 'پیام مهمان GUESTX1'
-        request = self.f.message(GROUP, 'بفرست [[action:'+str(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', sender=GUEST, topic=TEAM_TOPIC)
+        request = self.f.message(GROUP, 'بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', sender=GUEST, topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
         card = self.wait('card_in_owner_chat', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('card_says_where_it_was_asked', 'Asked in' in card['message']['text'], card=card['message']['text'])
@@ -398,7 +434,7 @@ class ProductScenarios(Scenarios):
     def owner_from_group_to_own_private_chat(self):
         # The owner asking from a group for their own private chat needs no approval.
         wording = 'یادداشت برای خودم PRIV1'
-        request = self.f.message(GROUP, 'برای خودم بفرست [[action:'+str(OWNER)+'|'+wording+']] [[after:silent]]', topic=TEAM_TOPIC)
+        request = self.f.message(GROUP, 'برای خودم بفرست [[action:'+self.f.chat(OWNER)+'|'+wording+']] [[after:silent]]', topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
         self.wait('delivered_to_owner', lambda: [row for row in self.replies(before, OWNER) if row['message']['text'] == wording], 180)
         self.gate('no_card', not self.cards(before))
@@ -406,7 +442,7 @@ class ProductScenarios(Scenarios):
     def owner_from_group_to_other_group(self):
         # The owner's own request from one group to another: card in the owner's private chat.
         wording = 'از گروه اول به دوم OWNERX1'
-        request = self.f.message(GROUP, 'به گروه دوم بفرست [[action:'+str(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', topic=TEAM_TOPIC)
+        request = self.f.message(GROUP, 'به گروه دوم بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
         card = self.wait('card_in_owner_chat', lambda: self.cards(before, OWNER), 120)[0]
         self.gate('no_card_in_group', not self.cards(before, GROUP))
@@ -505,7 +541,7 @@ class ProductScenarios(Scenarios):
             canaries.save(self.f.directory, {mark: kind}, OWNER)
             return mark
 
-        job_card = move_card = dashboard = persona = role = assignment = failed = None
+        job_card = move_card = dashboard = persona = role = assignment = new_assignment = failed = None
         try:
             plant('private chat message', private)
             self.turn(self.f.message(OWNER, 'Every Friday I see my doctor. '+private), OWNER)
@@ -542,13 +578,19 @@ class ProductScenarios(Scenarios):
                                                       'skills': persona['skills'], 'revision': persona['revision']})
             _, text = self.turn(self.f.message(OWNER, 'Who are you here? [[context:'+role_mark+']]'), OWNER)
             self.gate('owner_role_reaches_private_chat', 'present' in text, answer=text)
-            # A project with one chat, OTHER_GROUP, and a task on its board that the chat should see.
+            # A project with OTHER_GROUP and NG1, a group first seen after step 2b (ADR-0250), and a task on its board that
+            # the chat should see.
             project = self.f.app('/v1/projects', {'name': 'Canary project P1', 'description': '', 'state': 'active', 'expected_revision': 0,
                                                   'operation_id': 'scenario-canary-project-'+number})
-            own = self.f.app('/v1/projects/effective?space='+str(OTHER_GROUP))['own_assignment']
-            assignment = self.f.app('/v1/projects/assignments', {'space_id': str(OTHER_GROUP), 'project_id': project['id'], 'mode': 'assigned',
+            other, newer = self.f.chat(OTHER_GROUP), self.new_group_chat()
+            own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(other, safe=''))['own_assignment']
+            assignment = self.f.app('/v1/projects/assignments', {'space_id': other, 'project_id': project['id'], 'mode': 'assigned',
                                                                  'expected_revision': own['revision'] if own else 0,
                                                                  'operation_id': 'scenario-canary-assign-'+number})
+            own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(newer, safe=''))['own_assignment']
+            new_assignment = self.f.app('/v1/projects/assignments', {'space_id': newer, 'project_id': project['id'], 'mode': 'assigned',
+                                                                     'expected_revision': own['revision'] if own else 0,
+                                                                     'operation_id': 'scenario-canary-assign-new-'+number})
             self.task_tool({'action': 'add', 'title': 'Team checklist '+board}, chat=OTHER_GROUP)
             # Moving the personal task onto that board waits for the owner's card (ADR-0243); this one is never approved.
             detail = self.f.app('/v1/tasks/'+task['id'])
@@ -579,7 +621,7 @@ class ProductScenarios(Scenarios):
             spare = 'Where does the owner keep the spare key? '+probe
             # Every probe runs before any gate, so a failure shows all that reached the groups at once.
             held, board_seen = [], None
-            for chat, topic in ((GROUP, TEAM_TOPIC), (OTHER_GROUP, None)):
+            for chat, topic in ((GROUP, TEAM_TOPIC), (OTHER_GROUP, None), (NEW_GROUP, None)):
                 for question, tool in (('Where is the spare key? '+probe+' [[search:'+word+']]', 'mcp__nocheh__archive_search'),
                                        (spare+' [[recall:'+spare+']]', 'mcp__nocheh__memory_recall'),
                                        ('What is on our list? '+probe+' [[tool:mcp__nocheh__tasks {"action":"list","state":"all"}]]', 'mcp__nocheh__tasks'),
@@ -610,9 +652,14 @@ class ProductScenarios(Scenarios):
                 steps.append(lambda: dashboard.post('/memory/persona', {'scope': 'default', 'role': persona['role'], 'skills': persona['skills'],
                                                                          'revision': (role or persona)['revision']}))
             if assignment:
-                steps.append(lambda: self.f.app('/v1/projects/assignments', {'space_id': str(OTHER_GROUP), 'mode': 'none',
+                steps.append(lambda: self.f.app('/v1/projects/assignments', {'space_id': other, 'mode': 'none',
                                                                               'expected_revision': assignment['revision'],
                                                                               'operation_id': 'scenario-canary-unassign-'+number}))
+            if new_assignment:
+                steps.append(lambda: self.f.app('/v1/projects/assignments', {'space_id': newer, 'mode': 'none',
+                                                                              'expected_revision': new_assignment['revision'],
+                                                                              'operation_id': 'scenario-canary-unassign-new-'+number}))
+            if assignment or new_assignment:
                 steps.append(self.memory_settled)
             for undo in steps:
                 try:
@@ -637,19 +684,20 @@ class ProductScenarios(Scenarios):
         return result, canaries.found(reply+'\n'+result, marks)
 
     def project_groups_stay_apart(self):
-        # Two groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1) and THIRD_GROUP (GP2) join a new
-        # project; GROUP (GP4) stays in none. Each group, and the owner's private chat, holds its own mark next to one
-        # shared search word. A group answer reads only its own group: the owner's question in GP1 finds GP1's mark and
-        # its task, never GP2's mark, task, count or tag. Under the owner's answer there sits Answer privately; a member's
-        # tap gets the only-asker popup and runs nothing; the owner's tap opens the private chat with /start <id>, and
-        # that answer reads GP1 and GP2, never GP4 or the owner's private chat. Every send it took is recorded. A
-        # PROBEMARK sits in an unaddressed message just before the question, which both answers get with the group's recent
+        # Groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1), THIRD_GROUP (GP2) and NEW_GROUP (NG1, a
+        # group first seen after step 2b, with a digest id, ADR-0250) join a new project; GROUP (GP4) stays in none. Each
+        # group, and the owner's private chat, holds its own mark next to one shared search word. A group answer reads only
+        # its own group: the owner's question in GP1 finds GP1's mark and its task, never GP2's mark, task, count or tag,
+        # and the same question in NG1 finds NG1's mark and neither group's task. Under the owner's answer there sits Answer
+        # privately; a member's tap gets the only-asker popup and runs nothing; the owner's tap opens the private chat with
+        # /start <id>, and that answer reads GP1, GP2 and NG1, never GP4 or the owner's private chat. Every send it took is
+        # recorded. A PROBEMARK sits in an unaddressed message just before the question, which both answers get with the group's recent
         # messages, so a model request holding it next to a private mark counts as a leak. It stays out of the question:
         # the question holds the search word, so search results, and the private answer the owner's chat keeps beside its
         # private mark, would hold it too. The private mark is saved for private_canaries_never_left_the_owner.
         number = str(self.f.ids())
         word, probe = 'CRATEWORD'+number, 'PROBEMARK'+number
-        gp1, gp2, gp4 = 'GPONEMARK'+number, 'GPTWOMARK'+number, 'GPFOURMARK'+number
+        gp1, gp2, gp4, ng1 = 'GPONEMARK'+number, 'GPTWOMARK'+number, 'GPFOURMARK'+number, 'NGONEMARK'+number
         gp1_task, gp2_task, gp1_tag, gp2_tag = 'GPONETASK'+number, 'GPTWOTASK'+number, 'GPONETAG'+number, 'GPTWOTAG'+number
         private = 'PRIVATEMARK'+str(self.f.ids())
         canaries.save(self.f.directory, {private: 'private chat message (project groups)'}, OWNER)
@@ -660,14 +708,16 @@ class ProductScenarios(Scenarios):
             self.turn(self.f.message(GROUP, 'Crates for the venue '+word+' '+gp4, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
             project = self.f.app('/v1/projects', {'name': 'Project groups P1', 'description': '', 'state': 'active', 'expected_revision': 0,
                                                   'operation_id': 'scenario-project-groups-'+number})
-            for chat in (OTHER_GROUP, THIRD_GROUP):
-                own = self.f.app('/v1/projects/effective?space='+str(chat))['own_assignment']
-                assignments[chat] = self.f.app('/v1/projects/assignments', {'space_id': str(chat), 'project_id': project['id'], 'mode': 'assigned',
-                                                                            'expected_revision': own['revision'] if own else 0,
-                                                                            'operation_id': 'scenario-project-groups-'+str(chat)+'-'+number})
+            members = {OTHER_GROUP: self.f.chat(OTHER_GROUP), THIRD_GROUP: self.f.chat(THIRD_GROUP), NEW_GROUP: self.new_group_chat()}
+            for chat, space in members.items():
+                own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(space, safe=''))['own_assignment']
+                assignments[space] = self.f.app('/v1/projects/assignments', {'space_id': space, 'project_id': project['id'], 'mode': 'assigned',
+                                                                             'expected_revision': own['revision'] if own else 0,
+                                                                             'operation_id': 'scenario-project-groups-'+str(chat)+'-'+number})
             self.memory_settled()
             self.turn(self.f.message(OTHER_GROUP, 'Plan for the crates '+word+' '+gp1), OTHER_GROUP)
             self.turn(self.f.message(THIRD_GROUP, 'Supplier for the crates '+word+' '+gp2), THIRD_GROUP)
+            self.turn(self.f.message(NEW_GROUP, 'Labels for the crates '+word+' '+ng1), NEW_GROUP)
             added = self.task_tool({'action': 'add', 'title': 'Book the hall '+gp1_task, 'tags': [gp1_tag]}, chat=OTHER_GROUP)
             self.gate('gp1_task_added', bool(added.get('task', added).get('id')), result=str(added)[:300])
             added = self.task_tool({'action': 'add', 'title': 'Order the crates '+gp2_task, 'tags': [gp2_tag]}, chat=THIRD_GROUP)
@@ -687,8 +737,8 @@ class ProductScenarios(Scenarios):
             group_replies = [row for row in self.replies(before, OTHER_GROUP) if not self.is_card(row)]
             reply = group_replies[-1]
             self.gate('group_search_finds_its_own_mark', gp1 in search, result=search[:300])
-            self.gate('group_answer_uses_only_that_group', not canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}),
-                      found=canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}))
+            self.gate('group_answer_uses_only_that_group', not canaries.found(text+'\n'+search, {gp2: 'GP2', ng1: 'NG1', gp4: 'GP4', private: 'private'}),
+                      found=canaries.found(text+'\n'+search, {gp2: 'GP2', ng1: 'NG1', gp4: 'GP4', private: 'private'}))
             # 2. GP1's task view: its own task, never GP2's title, count or tag (ADR-0248).
             try:
                 tasks = json.loads(listed)
@@ -697,6 +747,24 @@ class ProductScenarios(Scenarios):
             self.gate('group_task_view_shows_its_own_task', gp1_task in listed, result=listed[:300])
             self.gate('group_task_view_never_shows_another_groups_task', gp2_task not in listed and gp2_tag not in listed
                       and (tasks.get('counts') or {}).get('open') == 1, counts=tasks.get('counts'), result=listed[:300])
+            # 2b. NG1, the group with a digest id whose archive is read through its Telegram ids (ADR-0250), reads only
+            # itself too: its own mark, never GP1's, GP2's or GP4's marks or tasks, though it shares their project.
+            _, new_text = self.turn(self.f.message(NEW_GROUP, 'What do we have on crates? '+tools), NEW_GROUP, chunked=True)
+            new_search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
+            new_listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
+            try:
+                new_tasks = json.loads(new_listed)
+            except ValueError:
+                new_tasks = {}
+            others = {gp1: 'GP1', gp2: 'GP2', gp4: 'GP4', private: 'private', gp1_task: 'GP1 task', gp2_task: 'GP2 task',
+                      gp1_tag: 'GP1 tag', gp2_tag: 'GP2 tag'}
+            new_seen = new_text+'\n'+new_search+'\n'+new_listed
+            self.gate('new_id_group_search_finds_its_own_mark', ng1 in new_search, result=new_search[:300])
+            # Its open count is the open tasks it lists, so no other group's task hides in a number.
+            own_open = [task for task in new_tasks.get('tasks') or [] if task.get('state') == 'open' and not task.get('parent_id')]
+            self.gate('new_id_group_answer_uses_only_that_group', not canaries.found(new_seen, others)
+                      and (new_tasks.get('counts') or {}).get('open') == len(own_open),
+                      found=canaries.found(new_seen, others), counts=new_tasks.get('counts'), listed=len(own_open))
             buttons = self.buttons(reply)
             self.gate('answer_privately_under_the_owners_answer', len(buttons) == 1 and re.fullmatch(r'np[a-f0-9]{32}', buttons[0]['callback_data'] or '')
                       and buttons[0]['text'] == '\U0001f512 Answer privately' and not any(self.buttons(row) for row in group_replies[:-1]),
@@ -728,7 +796,7 @@ class ProductScenarios(Scenarios):
             owner = self.press(reply, 'private')
             self.gate('owner_tap_opens_the_private_chat', owner.get('url') == 'https://t.me/synthetic_fixture_bot?start='+record, answer=owner)
             frozen = state().split('|')
-            self.gate('tap_freezes_the_projects_groups', frozen[0] == 'pressed' and set(frozen[1].split(',')) == {str(OTHER_GROUP), str(THIRD_GROUP)},
+            self.gate('tap_freezes_the_projects_groups', frozen[0] == 'pressed' and set(frozen[1].split(',')) == set(members.values()),
                       state='|'.join(frozen))
             before = len(self.f.sent())
             # The answer gives both tools' results from two groups, so it can pass Telegram's 4096 characters and arrive
@@ -738,7 +806,7 @@ class ProductScenarios(Scenarios):
             search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
             listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
             seen = answer+'\n'+search+'\n'+listed
-            self.gate('private_answer_reads_the_projects_groups', gp2 in search and gp1 in search and gp2_task in listed and gp1_task in listed,
+            self.gate('private_answer_reads_the_projects_groups', gp2 in search and gp1 in search and ng1 in search and gp2_task in listed and gp1_task in listed,
                       search=search[:300], tasks=listed[:300])
             self.gate('private_answer_never_reads_other_groups_or_the_private_chat', not canaries.found(seen, {gp4: 'GP4', private: 'private'}),
                       found=canaries.found(seen, {gp4: 'GP4', private: 'private'}))
@@ -756,7 +824,8 @@ class ProductScenarios(Scenarios):
             def recorded():
                 replies = self.f.app('/v1/chat-sends?kind=reply&limit=100')['records']
                 answers = self.f.app('/v1/chat-sends?kind=button_answer&limit=100')['records']
-                found = [any(item['chat'] == str(row['message']['chat']['id']) and item['message_id'] == row['message']['message_id']
+                # A send record keeps the app's chat and message ids as text (ADR-0250), whatever the app's own type.
+                found = [any(item['chat'] == str(row['message']['chat']['id']) and str(item['message_id']) == str(row['message']['message_id'])
                              and item['state'] == 'sent' for item in replies) for row in (*group_replies, *private_replies)]
                 found += [any(item['reference'] == 'approval-answer:'+tap['callback_query_id'] and item['state'] == 'sent' for item in answers)
                           for tap in (member, owner)]
@@ -766,12 +835,12 @@ class ProductScenarios(Scenarios):
             failed = error
             raise
         finally:
-            # Leave both groups in no project, as later scenarios expect.
+            # Leave every group in no project, as later scenarios expect.
             problems = []
-            for chat, assignment in assignments.items():
+            for space, assignment in assignments.items():
                 try:
-                    self.f.app('/v1/projects/assignments', {'space_id': str(chat), 'mode': 'none', 'expected_revision': assignment['revision'],
-                                                            'operation_id': 'scenario-project-groups-unassign-'+str(chat)+'-'+number})
+                    self.f.app('/v1/projects/assignments', {'space_id': space, 'mode': 'none', 'expected_revision': assignment['revision'],
+                                                            'operation_id': 'scenario-project-groups-unassign-'+space[:16]+'-'+number})
                 except Exception as error:
                     problems.append(type(error).__name__+':'+str(error)[:200])
             if assignments:
@@ -783,6 +852,158 @@ class ProductScenarios(Scenarios):
                 self.current['cleanup_problems'] = problems
                 if failed is None:
                     raise Failed('cleanup_failed')
+
+    def new_id_group_works_end_to_end(self):
+        # NG1 is a group Nocheh first sees after step 2b: its Nocheh id is a digest, never its Telegram id (ADR-0250). It
+        # stays off until the owner lists it in TELEGRAM_GROUP_IDS, the step 2b-1 switch; then a reply, a topic's recall of
+        # the group, a task on its project's board and a topic of its own work as in any group. Answer privately with NG1
+        # is project_groups_stay_apart, where NG1 is in P1.
+        number = str(self.f.ids())
+        mark, word = 'NEWGROUPMARK'+number, 'NEWGROUPWORD'+number
+        project = assignment = failed = None
+        try:
+            self.turn(self.f.message(NEW_GROUP, 'Hello before Nocheh is on here'), NEW_GROUP, expect_reply=False)
+            chat = self.f.chat(NEW_GROUP)
+            item = self.f.chat_item(NEW_GROUP)
+            self.gate('new_group_gets_a_digest_id', re.fullmatch(r'[0-9a-f]{64}', chat) is not None and chat != str(NEW_GROUP), chat=chat)
+            self.gate('new_group_listed_with_its_telegram_id', item.get('kind') == 'group' and item.get('state') == 'off' and
+                      [label.get('external') for label in item.get('app_ids') or []] == [str(NEW_GROUP)],
+                      item={key: item.get(key) for key in ('kind', 'state', 'app_ids')})
+            self.current['recreated'] = self.serve_groups(NEW_GROUP)
+            self.wait('new_group_served', lambda: self.served(NEW_GROUP), 180)
+            self.gate('same_id_after_the_switch', self.f.chat(NEW_GROUP) == chat)
+            self.turn(self.f.message(NEW_GROUP, 'The meteor shower plan '+word+' '+mark), NEW_GROUP)
+            # A topic of NG1 gets its own digest id, and reads what was said in its group.
+            self.topic_created(NEW_GROUP, NEW_TOPIC, 'Sky watch')
+            _, text = self.turn(self.f.message(NEW_GROUP, 'What was the plan? [[search:'+word+']]', topic=NEW_TOPIC), NEW_GROUP, NEW_TOPIC)
+            search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
+            self.gate('topic_recall_reads_the_group', mark in search, result=search[:300])
+            topic = self.f.chat(NEW_GROUP, NEW_TOPIC)
+            self.gate('topic_gets_its_own_id', re.fullmatch(r'[0-9a-f]{64}', topic) is not None and topic != chat, topic=topic)
+            # A task on its project's board, seen from its topic.
+            project = self.f.app('/v1/projects', {'name': 'New group P2', 'description': '', 'state': 'active', 'expected_revision': 0,
+                                                  'operation_id': 'scenario-new-group-project-'+number})
+            own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(chat, safe=''))['own_assignment']
+            assignment = self.f.app('/v1/projects/assignments', {'space_id': chat, 'project_id': project['id'], 'mode': 'assigned',
+                                                                 'expected_revision': own['revision'] if own else 0,
+                                                                 'operation_id': 'scenario-new-group-assign-'+number})
+            self.memory_settled()
+            added = self.task_tool({'action': 'add', 'title': 'Bring the telescope '+mark}, chat=NEW_GROUP)
+            self.gate('group_task_added', bool(added.get('task', added).get('id')), result=str(added)[:300])
+            listed = self.task_tool({'action': 'list', 'state': 'all'}, chat=NEW_GROUP, topic=NEW_TOPIC)
+            self.gate('topic_sees_the_groups_task', mark in json.dumps(listed, ensure_ascii=False), result=str(listed)[:300])
+            effective = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(topic, safe=''))
+            self.gate('topic_follows_its_groups_project', (effective.get('project') or {}).get('id') == project['id'] and effective.get('inherited') is True,
+                      effective={key: effective.get(key) for key in ('inherited', 'project')})
+        except Exception as error:
+            failed = error
+            raise
+        finally:
+            # NG1 stays on for the scenarios after this one, and in no project.
+            if assignment:
+                try:
+                    self.f.app('/v1/projects/assignments', {'space_id': assignment.get('space_id') or self.f.chat(NEW_GROUP), 'mode': 'none',
+                                                            'expected_revision': assignment['revision'], 'operation_id': 'scenario-new-group-unassign-'+number})
+                    self.memory_settled()
+                except Exception as error:
+                    self.current['cleanup_problems'] = [type(error).__name__+':'+str(error)[:200]]
+                    if failed is None:
+                        raise Failed('cleanup_failed')
+
+    def supergroup_upgrade_keeps_history(self):
+        # Telegram upgrades a basic group to a supergroup: the supergroup has a new Telegram id, and Telegram says so in
+        # both chats (migrate_to_chat_id, migrate_from_chat_id). Nocheh keeps one chat (ADR-0250): the new id joins the old
+        # one, so the group keeps its id, its project, its task and its switch, which still lists the old id only, and a
+        # search in the supergroup finds what was said before the upgrade. An upgrade the owner's refresh finds instead
+        # (Telegram answers with migrate_to_chat_id) moves a group onto its new id the same way, at once.
+        number = str(self.f.ids())
+        mark, word = 'BEFOREUPGRADE'+number, 'UPGRADEWORD'+number
+        basic = {'id': UPGRADED_GROUP, 'type': 'group', 'title': 'Synthetic Garden'}
+        supergroup = {'id': UPGRADED_SUPERGROUP, 'type': 'supergroup', 'title': 'Synthetic Garden'}
+        orchard = {'id': REFRESHED_GROUP, 'type': 'group', 'title': 'Synthetic Orchard'}
+        sender = {'id': OWNER, 'is_bot': False, 'first_name': 'Synthetic '+str(OWNER)}
+        project = assignment = failed = None
+        try:
+            self.turn(self.f.message(UPGRADED_GROUP, 'Hello before Nocheh is on here', extra={'chat': basic}), UPGRADED_GROUP, expect_reply=False)
+            self.turn(self.f.message(REFRESHED_GROUP, 'Hello before Nocheh is on here', extra={'chat': orchard}), REFRESHED_GROUP, expect_reply=False)
+            chat, refreshed = self.f.chat(UPGRADED_GROUP), self.f.chat(REFRESHED_GROUP)
+            # One restart turns both on: a refresh asks Telegram only about the groups Nocheh serves.
+            self.current['recreated'] = self.serve_groups(UPGRADED_GROUP, REFRESHED_GROUP)
+            self.wait('basic_group_served', lambda: self.served(UPGRADED_GROUP) and self.served(REFRESHED_GROUP), 180)
+            self.turn(self.f.message(UPGRADED_GROUP, 'Seeds for the swap '+word+' '+mark, extra={'chat': basic}), UPGRADED_GROUP)
+            project = self.f.app('/v1/projects', {'name': 'Garden P3', 'description': '', 'state': 'active', 'expected_revision': 0,
+                                                  'operation_id': 'scenario-upgrade-project-'+number})
+            own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(chat, safe=''))['own_assignment']
+            assignment = self.f.app('/v1/projects/assignments', {'space_id': chat, 'project_id': project['id'], 'mode': 'assigned',
+                                                                 'expected_revision': own['revision'] if own else 0,
+                                                                 'operation_id': 'scenario-upgrade-assign-'+number})
+            self.memory_settled()
+            added = self.task_tool({'action': 'add', 'title': 'Sort the seed packets '+mark}, chat=UPGRADED_GROUP)
+            self.gate('task_before_upgrade', bool(added.get('task', added).get('id')), result=str(added)[:300])
+            # Telegram's two service messages, as it sends them when a group is upgraded.
+            moved, arrived = self.f.ids(), self.f.ids()
+            updates = [{'update_id': moved, 'message': {'message_id': moved, 'date': int(time.time()), 'chat': basic, 'from': sender,
+                                                        'migrate_to_chat_id': UPGRADED_SUPERGROUP}},
+                       {'update_id': arrived, 'message': {'message_id': 1, 'date': int(time.time()), 'chat': supergroup, 'from': sender,
+                                                          'migrate_from_chat_id': UPGRADED_GROUP}}]
+            self.f.inject(*updates)
+            for update in updates:
+                self.captured(update)
+            def joined():
+                try:
+                    return self.f.chat(UPGRADED_SUPERGROUP, seconds=0) == chat
+                except Failed:
+                    return False
+            self.wait('supergroup_is_the_same_chat', joined, 120)
+            item = self.f.chat_item(UPGRADED_SUPERGROUP)
+            labels = [(label.get('external'), label.get('state')) for label in item.get('app_ids') or []]
+            self.gate('one_chat_with_both_telegram_ids', (str(UPGRADED_SUPERGROUP), 'current') in labels and (str(UPGRADED_GROUP), 'old') in labels,
+                      labels=labels)
+            self.gate('still_on_by_its_old_id', item.get('state') == 'active', state=item.get('state'))
+            effective = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(chat, safe=''))
+            self.gate('keeps_its_project', (effective.get('project') or {}).get('id') == project['id'], project=effective.get('project'))
+            # The supergroup is answered, finds what was said before the upgrade and still has its task.
+            _, text = self.turn(self.f.message(UPGRADED_SUPERGROUP, 'What did we plan for the swap? [[search:'+word+']]', extra={'chat': supergroup}),
+                                UPGRADED_SUPERGROUP)
+            search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
+            self.gate('search_finds_messages_from_before', mark in search, result=search[:300])
+            listed = self.task_tool({'action': 'list', 'state': 'all'}, chat=UPGRADED_SUPERGROUP)
+            self.gate('keeps_its_task', mark in json.dumps(listed, ensure_ascii=False), result=str(listed)[:300])
+            # The owner's refresh finds the other group upgraded: Telegram answers its old id with the new one. Nocheh
+            # moves the chat onto the new id at once, keeps the old one, and asks again under the new id. The groups
+            # the refresh also asks about are answered as they are.
+            self.f.control({'chats': [{'id': REFRESHED_GROUP, 'type': 'group', 'migrate_to_chat_id': REFRESHED_SUPERGROUP},
+                                      {'id': REFRESHED_SUPERGROUP, 'type': 'supergroup', 'title': 'Synthetic Orchard'},
+                                      *({'id': group, 'type': 'supergroup', 'title': 'Synthetic Forum '+str(group)}
+                                        for group in (THIRD_GROUP, NEW_GROUP, UPGRADED_SUPERGROUP))]})
+            before = len(self.f.sent())
+            rows = [row for row in self.f.app('/v1/telegram/chats/refresh', {})['chats'] if row.get('chat_id') == refreshed]
+            self.gate('refresh_reports_the_upgrade', any(row.get('external') == str(REFRESHED_GROUP) and row.get('state') == 'migrated'
+                                                         and row.get('migrate_to_chat_id') == str(REFRESHED_SUPERGROUP) for row in rows), rows=rows)
+            self.gate('refresh_asks_again_under_the_new_id', any(row.get('external') == str(REFRESHED_SUPERGROUP) and row.get('state') == 'available'
+                                                                 for row in rows), rows=rows)
+            self.gate('refresh_sends_nothing', len(self.f.sent()) == before)
+            item = self.f.chat_item(REFRESHED_SUPERGROUP)
+            labels = [(label.get('external'), label.get('state')) for label in item.get('app_ids') or []]
+            self.gate('refresh_keeps_one_chat_with_both_telegram_ids', item.get('space_id') == refreshed
+                      and (str(REFRESHED_SUPERGROUP), 'current') in labels and (str(REFRESHED_GROUP), 'old') in labels,
+                      space=item.get('space_id') == refreshed, labels=labels)
+            # Still on by its old id, and the owner's list shows Telegram's last answer, under the new id: nothing to fix.
+            self.gate('refreshed_group_still_on', item.get('state') == 'active', state=item.get('state'))
+            self.gate('directory_shows_the_refresh', (item.get('telegram') or {}).get('state') == 'available', telegram=item.get('telegram'))
+        except Exception as error:
+            failed = error
+            raise
+        finally:
+            if assignment:
+                try:
+                    self.f.app('/v1/projects/assignments', {'space_id': assignment.get('space_id') or self.f.chat(UPGRADED_GROUP), 'mode': 'none',
+                                                            'expected_revision': assignment['revision'], 'operation_id': 'scenario-upgrade-unassign-'+number})
+                    self.memory_settled()
+                except Exception as error:
+                    self.current['cleanup_problems'] = [type(error).__name__+':'+str(error)[:200]]
+                    if failed is None:
+                        raise Failed('cleanup_failed')
 
     def private_canaries_never_left_the_owner(self):
         # The last check of a run: no private mark planted by private_chat_stays_out_of_groups is in anything the fake
@@ -1105,7 +1326,7 @@ class ProductScenarios(Scenarios):
         self.gate('group_read_in_order', None not in order and order[0] < order[1], order=order, items=len(texts))
         self.gate('other_group_not_read', 'ORDERMARKX' not in json.dumps(page, ensure_ascii=False))
         self.gate('page_says_how_far', page.get('complete') is True and page.get('position', {}).get('total', 0) >= 2, position=page.get('position'))
-        owner = self.page_tool({'chat': str(GROUP), 'from': since}, OWNER)
+        owner = self.page_tool({'chat': self.f.chat(GROUP), 'from': since}, OWNER)
         self.gate('owner_reads_group_by_id', 'ORDERMARK2' in json.dumps(owner, ensure_ascii=False), items=len(owner.get('items', [])))
 
     # Background jobs ------------------------------------------------------------------------------------
@@ -1319,7 +1540,7 @@ class ProductScenarios(Scenarios):
         instruction = 'Count the marked messages in the box. '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in calls)
         # Inside the proposal's own directive the instruction's braces are JSON escapes, so its directives stay whole.
         encoded = json.dumps(instruction).replace('{', '\\u007b').replace('}', '\\u007d')
-        proposal = '{"action": "start", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+str(GROUP)+'", "from": "'+since+'", "box": true}'
+        proposal = '{"action": "start", "title": "Box count JOB2", "instruction": '+encoded+', "chat": "'+self.f.chat(GROUP)+'", "from": "'+since+'", "box": true}'
         request = self.f.message(OWNER, 'کار در جعبه JOBMARK2 [[tool:mcp__nocheh__background_job '+proposal+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         proposed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__background_job' and event['phase'] == 'final'
@@ -1539,7 +1760,7 @@ class ProductScenarios(Scenarios):
                      ('read_file', {'path': '/repo/code/src/widget.py'}))
             instruction = 'Read the copy. [[delay:8]] '+' '.join('[[tool:'+name+' '+json.dumps(arguments)+']]' for name, arguments in calls)
             today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            card, job, before = self.repo_job('Repo JOB13', instruction, {'chat': str(GROUP), 'from': today})
+            card, job, before = self.repo_job('Repo JOB13', instruction, {'chat': self.f.chat(GROUP), 'from': today})
             text = card['message']['text']
             self.gate('job_card_shows_the_copy', '📦' in text and self.REPO in text and 'main at '+commit[:7] in text and 'GitHub copy below' in text, card=text)
 
@@ -1739,7 +1960,7 @@ class ProductScenarios(Scenarios):
         time.sleep(20)
         self.gate('no_follow_up_repeats_it', len(replied(again, later)) == 1, replies=len(replied(again, later)))
         rules = [row for row in self.f.app('/v1/tools/actions').get('permissions', []) if row.get('grain') == 'chat' and row.get('kind') == 'shell']
-        self.gate('one_chat_rule', len(rules) == 1 and rules[0]['space_id'] == str(GROUP)+'/topic/'+str(TEAM_TOPIC), rules=[{key: row.get(key) for key in ('space_id', 'match_key', 'remaining')} for row in rules])
+        self.gate('one_chat_rule', len(rules) == 1 and rules[0]['space_id'] == self.f.chat(GROUP, TEAM_TOPIC), rules=[{key: row.get(key) for key in ('space_id', 'match_key', 'remaining')} for row in rules])
 
     def job_operation_runs_after_approval(self):
         # A job's run asks to run a command; the owner approves it on its card after the job reported.
@@ -2243,7 +2464,8 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
-                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart', 'inbox_never_asks_about_the_owner',
+                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
+                 'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
                  'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',

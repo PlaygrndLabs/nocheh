@@ -84,6 +84,14 @@ Desktop identifiers stay in their own namespace even when mapped to an existing
 Telegram audience. Browser and scheduler sources also receive typed identities.
 Unrecognized legacy event kinds use conservative event-level identities.
 
+An original's `scope` stays the chat id its app gave it, such as a Telegram chat
+id, after Nocheh gives the chat its own id and after Telegram upgrades a group to
+a new id ([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)). A read finds the chat an original belongs to
+when it runs, through the control store's `chat_ids` (current and old ids alike),
+and its topic through the observation's audience; no original is rewritten and no
+per-event chat index is kept. A scope that no chat id names belongs to no chat,
+so no group or topic read reaches it.
+
 Owner event reads and portable exports include `source_model` for inspection.
 Explicit `event.source` round-trips as original data. Generated legacy projections
 are rebuilt from original envelopes by the frozen v1 adapter on reimport; the
