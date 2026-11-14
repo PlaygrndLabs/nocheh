@@ -20,7 +20,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
 import type {OperationReference} from './operations.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
-import {ownerChat} from '../assistant-policy.js';
+import {ownerChat,ownerIds} from '../assistant-policy.js';
 
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
@@ -138,7 +138,7 @@ export class ControlledActionRepository {
       // no autonomy: every change it asks for waits for a card (ADR-0207), and
       // neither does a follow-up turn, which no owner request started (ADR-0212).
       const connected='connection' in args,live=source.store==='archive'&&!followUp,fresh=!turn.job||!await relaunchedRun(db,source.id);
-      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,this.access.policy().owner_id,source,turn,true):live):null;
+      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,ownerIds(this.access.policy()),source,turn,true):live):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')
