@@ -679,10 +679,13 @@ class ProductScenarios(Scenarios):
                      '[[tool:mcp__nocheh__tasks {"action":"list","state":"all"}]]')
             self.turn(self.f.message(OTHER_GROUP, 'Before I ask about it: '+probe, mention=False), OTHER_GROUP, expect_reply=False)
             before = len(self.f.sent())
-            asked, text = self.turn(self.f.message(OTHER_GROUP, 'What do we have on crates? '+tools), OTHER_GROUP)
+            # A long answer arrives as several messages, Answer privately under the last one; so a build that lets GP1 read
+            # more stops at the gates below that name what it read, not at the number of messages.
+            asked, text = self.turn(self.f.message(OTHER_GROUP, 'What do we have on crates? '+tools), OTHER_GROUP, chunked=True)
             search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
             listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
-            reply = [row for row in self.replies(before, OTHER_GROUP) if row['message'].get('text') == text][-1]
+            group_replies = [row for row in self.replies(before, OTHER_GROUP) if not self.is_card(row)]
+            reply = group_replies[-1]
             self.gate('group_search_finds_its_own_mark', gp1 in search, result=search[:300])
             self.gate('group_answer_uses_only_that_group', not canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}),
                       found=canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}))
@@ -696,7 +699,8 @@ class ProductScenarios(Scenarios):
                       and (tasks.get('counts') or {}).get('open') == 1, counts=tasks.get('counts'), result=listed[:300])
             buttons = self.buttons(reply)
             self.gate('answer_privately_under_the_owners_answer', len(buttons) == 1 and re.fullmatch(r'np[a-f0-9]{32}', buttons[0]['callback_data'] or '')
-                      and buttons[0]['text'] == '\U0001f512 Answer privately', buttons=buttons)
+                      and buttons[0]['text'] == '\U0001f512 Answer privately' and not any(self.buttons(row) for row in group_replies[:-1]),
+                      buttons=buttons, messages=len(group_replies))
             record = buttons[0]['callback_data'][2:]
             # The record's state and the groups frozen in it, as 'state|groups': the fixture's query strips the output, so
             # nothing may end in a space.
@@ -753,7 +757,7 @@ class ProductScenarios(Scenarios):
                 replies = self.f.app('/v1/chat-sends?kind=reply&limit=100')['records']
                 answers = self.f.app('/v1/chat-sends?kind=button_answer&limit=100')['records']
                 found = [any(item['chat'] == str(row['message']['chat']['id']) and item['message_id'] == row['message']['message_id']
-                             and item['state'] == 'sent' for item in replies) for row in (reply, *private_replies)]
+                             and item['state'] == 'sent' for item in replies) for row in (*group_replies, *private_replies)]
                 found += [any(item['reference'] == 'approval-answer:'+tap['callback_query_id'] and item['state'] == 'sent' for item in answers)
                           for tap in (member, owner)]
                 return all(found)
