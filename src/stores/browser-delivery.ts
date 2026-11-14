@@ -5,6 +5,10 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest,envelope,type Envelope} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {immutableFile} from '../storage.js';
+import {chats} from '../chats.js';
+
+/** A topic's key from its row: a topic with no row is never delivered to. */
+const topicKeyOf=(space:string)=>{const key=chats().get(space)?.topic_key;if(!key)throw new HttpError(409,'delivery_topic_unknown');return key;};
 
 /** An offer is still generated output. Only an authenticated browser receipt
  * moves its exact representation into the capture spool. Offers are retained
@@ -26,7 +30,7 @@ export class BrowserDeliveryRepository {
         operation:'create',completeness:'full',relations:[
           {kind:'contained_in',target:{platform:'browser',namespace:canonical([row.scope,row.logical_profile]),kind:'conversation',external_id:row.conversation_id}},
           {kind:'reply_to',target:{platform:'browser',namespace,kind:'message',external_id:inputId}}],
-        metadata:{audience:{chat_id:row.scope,topic_state:row.space_id===row.scope?'none':'known',...(row.space_id===row.scope?{}:{topic_id:row.space_id.split('/topic/')[1]})}},
+        metadata:{audience:{chat_id:row.scope,topic_state:row.space_id===row.scope?'none':'known',...(row.space_id===row.scope?{}:{topic_id:topicKeyOf(row.space_id)})}},
         provenance:{capture:'authenticated_browser_receipt',generation:row.binding.generation,result:row.result_reference,input:row.source_reference}}});
     const receipt=this.receipt(original);
     await immutableFile(join(this.root,'spool/browser-delivery-offers'),receipt+'.json',Buffer.from(canonical(original)));
