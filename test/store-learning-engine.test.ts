@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {digest,type Envelope} from '../src/archive.js';
+import {canonical,digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
@@ -82,6 +82,10 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await assert.rejects(guards.state(),{code:'guard_transition_pending'});
     learned.finish=realFinish;
     const ids=await learning.run(job,detect,authority);assert.equal(ids.length,2);assert.equal(calls,1,'a saved reasoning result is never rerun after preparation or publication failure');
+    // An entry's id hashes its scope as written. A chat stored before step 2b keeps its old-shaped value as its Nocheh id,
+    // so what is learned for it keeps the id step 2 gave it, and an owner correction stays on it (ADR-0250).
+    assert.deepEqual([...ids].sort(),[digest(canonical([{kind:'conversation',id:space},'meaning','check','inferred'])),
+      digest(canonical([{kind:'conversation',id:space},'state','packet','inferred']))].sort(),'entry ids are unchanged for an old-shaped chat');
     assert.deepEqual(await learning.run(job,detect,authority),ids);
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='organization' AND job_id=$1",['learning:'+job])).rows[0].count,'1',
       'publishing recovery commits completion and one deterministic organization follow-up');
