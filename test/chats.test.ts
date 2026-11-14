@@ -22,13 +22,15 @@ test('a new chat id is a bot-free digest, stable and distinct per app, external 
   assert.equal(chatIdFor('telegram',NG1_TG,7),chatIdFor('telegram',NG1_TG,'7'),'a topic number and its text are one key');
   assert.equal(chatIdFor('telegram',NG1_TG),id,'stable');
   const others=[chatIdFor('telegram',NG2_TG),chatIdFor('telegram',NG1_TG,8),chatIdFor('telegram',NG1_TG,7),chatIdFor('slack',['T0EXAMPLE','C0EXAMPLE1']),
-    chatIdFor('slack',['T0EXAMPLE','C0EXAMPLE1'],'1700000000.000200'),chatIdFor('slack',['T0OTHER','C0EXAMPLE1'])];
+    chatIdFor('slack',['T0OTHER','C0EXAMPLE1'])];
   assert.equal(new Set([id,...others]).size,others.length+1,'distinct per app, team, chat and topic');
   assert.notEqual(chatIdFor('telegram',NG1_TG),NG1_TG,'never the raw id');
   for(const bad of [()=>chatIdFor('telegram',''),()=>chatIdFor('telegram','-1/topic/7'),()=>chatIdFor('telegram',['T0','C0']),
-    ()=>chatIdFor('slack','C0EXAMPLE1'),()=>chatIdFor('discord' as never,'1'),()=>chatIdFor('telegram',NG1_TG,0),()=>chatIdFor('telegram',NG1_TG,'a/b')])
+    ()=>chatIdFor('slack','C0EXAMPLE1'),()=>chatIdFor('discord' as never,'1'),()=>chatIdFor('telegram',NG1_TG,0),()=>chatIdFor('telegram',NG1_TG,'a/b'),
+    // A Slack thread stays with its channel's messages: it is never a chat of its own.
+    ()=>chatIdFor('slack',['T0EXAMPLE','C0EXAMPLE1'],'1700000000.000200')])
     assert.throws(bad,{status:400});
-  assert.equal(topicKey(7),'7');assert.equal(topicKey('1700000000.000200'),'1700000000.000200');assert.throws(()=>topicKey(-1),{code:'invalid_topic_key'});
+  assert.equal(topicKey(7),'7');assert.equal(topicKey('7'),'7');assert.throws(()=>topicKey(-1),{code:'invalid_topic_key'});
   assert.match(connectionIdFor('telegram'),/^[a-f0-9]{64}$/);assert.notEqual(connectionIdFor('telegram'),connectionIdFor('slack'));
   assert.equal(accountIdFor('telegram',OWNER),digest(canonical(['account','telegram','',OWNER])));
   assert.notEqual(accountIdFor('slack','U0EXAMPLE','T0EXAMPLE'),accountIdFor('slack','U0EXAMPLE','T0OTHER'));

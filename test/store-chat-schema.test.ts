@@ -75,13 +75,12 @@ test('the chat records bootstrap with the control store, hold both kinds of chat
       {code:'23505'},'one current id per chat');
     await db.query(`INSERT INTO chat_ids(connection_id,external_id,chat_id,state,reason) VALUES($1,'-4000000000001',$2,'old','migrated')`,[connection,GP1]);
     await assert.rejects(db.query(`INSERT INTO chat_ids(connection_id,external_id,chat_id,state) VALUES($1,'-1001/topic/7',$2,'old')`,[connection,GP1]),{code:'23514'});
-    // A Slack-shaped chat and its thread fit the same tables.
-    const slackChannel=chatIdFor('slack',['T0EXAMPLE','C0EXAMPLE1']),thread=chatIdFor('slack',['T0EXAMPLE','C0EXAMPLE1'],'1700000000.000200');
+    // A Slack-shaped channel fits the same tables; its threads stay with its messages, never chats of their own.
+    const slackChannel=chatIdFor('slack',['T0EXAMPLE','C0EXAMPLE1']);
     await db.query(`INSERT INTO chats(id,connection_id,kind,app_type,state) VALUES($1,$2,'group','public_channel','off')`,[slackChannel,connectionIdFor('slack')]);
-    await db.query(`INSERT INTO chats(id,connection_id,kind,parent_id,topic_key,state) VALUES($1,$2,'topic',$3,'1700000000.000200','off')`,[thread,connectionIdFor('slack'),slackChannel]);
     await db.query(`INSERT INTO chat_ids(connection_id,external_id,chat_id,state) VALUES($1,'C0EXAMPLE1',$2,'current')`,[connectionIdFor('slack'),slackChannel]);
     const both=await load(db,OWNER);
-    assert.equal(both.resolve('slack','C0EXAMPLE1','1700000000.000200'),thread);assert.deepEqual(both.rawScopes([GP1]),['-1001000000001','-4000000000001']);
+    assert.equal(both.resolve('slack','C0EXAMPLE1'),slackChannel);assert.deepEqual(both.rawScopes([GP1]),['-1001000000001','-4000000000001']);
     const account=fixture.accounts[0]!.id;
     await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source,seen_seq) VALUES($1,$2,'in','message',7)`,[GP1,account]);
     await assert.rejects(db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source) VALUES($1,$2,'joined','message')`,[GP2,account]),{code:'23514'});

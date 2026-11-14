@@ -25,7 +25,7 @@ const canonicalList=(values:readonly string[])=>`[${values.map(value=>JSON.strin
 const externalPattern=/^[A-Za-z0-9._:-]{1,128}$/,topicPattern=/^[A-Za-z0-9._-]{1,64}$/,digestPattern=/^[a-f0-9]{64}$/;
 const isApp=(value:unknown):value is ChatApp=>typeof value==='string'&&(chatApps as readonly string[]).includes(value);
 
-/** A topic's key in its app: a Telegram thread id as text ('7'), a Slack thread ts. A number must be a positive integer. */
+/** A topic's key in its app: a Telegram forum topic's thread id as text ('7'). A number must be a positive integer. */
 export function topicKey(value:unknown):string {
   if(typeof value==='number'&&Number.isSafeInteger(value)&&value>0)return String(value);
   if(typeof value==='string'&&topicPattern.test(value))return value;
@@ -34,11 +34,13 @@ export function topicKey(value:unknown):string {
 /**
  * The id of a chat first seen after step 2b: digest(canonical(['chat', app, ...external, 'topic', key])). It holds no
  * bot, so replacing the bot keeps every chat. Telegram names a chat by one id; Slack by [team, channel]. A chat keeps
- * the id made from the first app id it was seen under; a later id (a Telegram upgrade) is another chat_ids row.
+ * the id made from the first app id it was seen under; a later id (a Telegram upgrade) is another chat_ids row. Only a
+ * Telegram forum topic is a topic: a Slack thread is never a chat of its own, so a Slack id takes no topic.
  */
 export function chatIdFor(app:ChatApp,external:string|readonly string[],topic?:string|number|null):string {
   const parts=typeof external==='string'?[external]:[...external];
-  if(!isApp(app)||parts.length!==(app==='slack'?2:1)||parts.some(part=>typeof part!=='string'||!externalPattern.test(part)))
+  if(!isApp(app)||parts.length!==(app==='slack'?2:1)||parts.some(part=>typeof part!=='string'||!externalPattern.test(part))||
+    app!=='telegram'&&topic!==undefined&&topic!==null)
     throw new HttpError(400,'invalid_chat_reference');
   return sha256(canonicalList(['chat',app,...parts,...(topic===undefined||topic===null?[]:['topic',topicKey(topic)])]));
 }

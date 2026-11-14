@@ -5,7 +5,8 @@
 export const chatApps=['telegram','slack'] as const;
 export type ChatApp=typeof chatApps[number];
 /** A private chat (one person and Nocheh), a group (a Telegram group or channel, a Slack channel), or a topic of
- * either (a Telegram forum topic or private-chat topic, a Slack thread). */
+ * either (a Telegram forum topic or private-chat topic). A Slack thread, like a Telegram reply chain, is never a chat:
+ * it stays with its channel's messages. */
 export const chatKinds=['private','group','topic'] as const;
 export type ChatKind=typeof chatKinds[number];
 /**
@@ -25,8 +26,8 @@ export interface ChatAppLabel {app:ChatApp;external:string;state:ChatIdState}
 
 /**
  * The app a turn pass is bound to (ADR-0250): the chat's current id in that app, and the topic key there (a Telegram
- * thread id as text, a Slack thread ts), or null. Signed in a turn pass beside the Nocheh scope and space; the front
- * door that receives the turn checks it against its own update.
+ * forum topic's thread id as text), or null. Signed in a turn pass beside the Nocheh scope and space; the front door
+ * that receives the turn checks it against its own update.
  */
 export interface AppBinding {app:ChatApp;chat:string;topic:string|null}
 
@@ -36,7 +37,7 @@ export interface ServedChat {id:string;app:ChatApp;kind:ChatKind;parent_id:strin
 /**
  * GET /internal/chats, behind the service token: what the Python services may act for. The owner's private chat and
  * the owner's account are separate: owner_chat is a Nocheh chat id, owner_account the owner's id in the app (the
- * Telegram user id). `chats` holds every served chat with its topics and the owner's private chat. `epoch` is the
+ * Telegram user id; one app's only, until a second app's front door needs its own). `chats` holds every served chat with its topics and the owner's private chat. `epoch` is the
  * guard epoch the list was read at; a pass that carries a newer one means the list is stale.
  */
 export interface ServedChats {epoch:number;owner_chat:string|null;owner_account:{app:ChatApp;external:string}|null;chats:ServedChat[]}
