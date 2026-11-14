@@ -9,6 +9,8 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {AudienceRepository} from '../src/stores/audience.js';
 import {ProjectRepository} from '../src/stores/projects.js';
+import {installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 
 test('a turn in a chat of an active project carries that project, so the turn gets its role and skills',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
@@ -18,6 +20,8 @@ test('a turn in a chat of an active project carries that project, so the turn ge
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),key='turn-project:'+Date.now(),group='-100'+Date.now(),owner={admin:true,scope:null};
   const audience=new AudienceRepository(new GuardRepository(stores,new ArchiveRepository(stores.archive))),projects=new ProjectRepository(stores.control);
+  // The group and its topics, as the chat directory knows them (ADR-0250).
+  const restore=installChatsForTest(seededDirectory(()=>({owner_id:'123',group_ids:[group]})));
   const claims=async(space:string)=>{
     const token=await audience.turn('synthetic-secret',{scope:space.split('/topic/')[0]!,space},digest(key+space),Date.now()+60000);
     assert.equal(reader({headers:{authorization:'Bearer '+token}} as IncomingMessage,'synthetic-secret').space,space,'the token still reads');
@@ -31,5 +35,5 @@ test('a turn in a chat of an active project carries that project, so the turn ge
     assert.equal((await claims(group+'/topic/7')).project,project.id,'a topic follows its group');
     await projects.save(owner,{id:project.id,name:key,state:'archived',expected_revision:project.revision,operation_id:key+':archive'});
     assert.equal((await claims(group)).project,undefined,'an archived project no longer applies');
-  }finally{await stores.close();}
+  }finally{restore();await stores.close();}
 });

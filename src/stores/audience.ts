@@ -1,5 +1,6 @@
 import {turnToken,type Reader} from '../access.js';
 import {HttpError} from '../http.js';
+import {appBindingOf} from '../frontdoor/telegram.js';
 import {GuardRepository,carriesForward,jobRun,type GuardBinding} from './guards.js';
 import {ProjectRepository} from './projects.js';
 
@@ -35,8 +36,12 @@ export class AudienceRepository {
     const project=answer!==undefined?principal.reads!.project===null?null:
       (await control.query<{id:string;state:string}>('SELECT id,state FROM projects WHERE id=$1',[principal.reads!.project])).rows[0]??null:
       (await new ProjectRepository(control).effective(principal.space)).project;
+    // The app the turn's chat lives in, as the front door that receives the turn checks it: the chat's current app id
+    // and topic now, so a reply follows a group Telegram upgraded (ADR-0250). A chat the directory does not address
+    // gets none, and no front door accepts a turn without it; storage itself does not require it, so job passes work.
+    const app=appBindingOf(principal.space);
     return turnToken(secret,principal.scope,expires,eventId,{space:principal.space,revision:binding.epoch,
       guard_epoch:binding.epoch,generation:binding.generation,...(principal.purpose?{purpose:principal.purpose}:{}),...(principal.logical_profile?{logical_profile:principal.logical_profile}:{}),
-      ...(project?.state==='active'?{project:project.id}:{}),...(answer!==undefined?{answer}:{})});
+      ...(project?.state==='active'?{project:project.id}:{}),...(answer!==undefined?{answer}:{}),...(app?{app}:{})});
   }
 }

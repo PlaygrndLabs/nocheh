@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import type {IncomingMessage} from 'node:http';
 import {answerId,reader,scopeToken,turnToken} from '../src/access.js';
-import {GP1,GP1_TOPIC,OWNER} from './fixture-groups.js';
+import {installChatsForTest} from '../src/chats.js';
+import {BOB_CHAT,GP1,GP1_TOPIC,GP2,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,OWNER,fixtureDirectory} from './fixture-groups.js';
+
+// Both fixture families, as the chat directory knows them: reader() asks it what a space and a scope are (ADR-0250).
+installChatsForTest(fixtureDirectory());
 
 const secret='synthetic-service-token-only-for-tests',event='e'.repeat(64),answer='a'.repeat(32),later=()=>Date.now()+60000;
 const request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
@@ -39,4 +43,33 @@ test('a read set never comes from a pass, and passes without an answer read as b
   assert.deepEqual(reader(request(turnToken(secret,null,later(),event,{space:OWNER,revision:1})),secret),{scope:null,admin:false,turnEvent:event,space:OWNER,revision:1,brain:'hermes'});
   assert.deepEqual(reader(request(scopeToken(secret,GP1,later())),secret),{scope:GP1,admin:false});
   assert.deepEqual(reader(request(secret),secret),{scope:null,admin:true});
+});
+
+test('a scoped pass reads in its own chat or one of its topics, as the chat directory says',()=>{
+  // Old-shaped and new chats alike, a topic by its own chat id.
+  for(const [scope,space] of [[GP1,GP1],[GP1,GP1_TOPIC],[NG1,NG1],[NG1,NG1_TOPIC],[NG2,NG2]] as const)
+    assert.equal(reader(request(turnToken(secret,scope,later(),event,{space,revision:1})),secret).space,space,`${scope} ${space}`);
+  // Another chat, another chat's topic, or a topic the directory does not know: never read by the shape of an id.
+  for(const [scope,space] of [[GP1,GP2],[NG1,GP1_TOPIC],[GP2,GP1_TOPIC],[GP1,GP1+'/topic/99'],[NG1,NG1+'/topic/7'],[NG2,NG1_TOPIC]] as const)
+    assert.throws(()=>reader(request(signed('turn',{scope,event_id:event,space,revision:1})),secret),{code:'invalid_scope_token'},`${scope} ${space}`);
+});
+
+test('a turn pass may carry its chat\'s app binding; storage does not require it',()=>{
+  const app={app:'telegram' as const,chat:NG1_TG,topic:'7'};
+  assert.deepEqual(reader(request(turnToken(secret,NG1,later(),event,{space:NG1_TOPIC,revision:1,app})),secret),
+    {scope:NG1,admin:false,turnEvent:event,space:NG1_TOPIC,revision:1,brain:'hermes',app});
+  assert.deepEqual(reader(request(turnToken(secret,NG2,later(),event,{space:NG2,revision:1,app:{app:'telegram',chat:NG2_TG,topic:null}})),secret).app,
+    {app:'telegram',chat:NG2_TG,topic:null});
+  // A job's or a schedule's pass has no app binding and still reads.
+  assert.equal('app' in reader(request(turnToken(secret,GP1,later(),event,{space:GP1,revision:1})),secret),false);
+  for(const bad of [{app:'telegram',chat:NG1_TG},{app:'telegram',chat:NG1_TG,topic:7},{app:'email',chat:NG1_TG,topic:null},{app:'telegram',chat:'',topic:null},
+    {app:'telegram',chat:NG1_TG,topic:null,extra:1},'telegram'])
+    assert.throws(()=>reader(request(signed('turn',{scope:NG1,event_id:event,space:NG1,revision:1,app:bad})),secret),{code:'invalid_scope_token'},JSON.stringify(bad));
+  assert.throws(()=>reader(request(signed('scope',{scope:NG1,app:{app:'telegram',chat:NG1_TG,topic:null}})),secret),{code:'invalid_scope_token'});
+});
+
+test('an answer pass reads only as the owner\'s private chat row, never another private chat or an unknown id',()=>{
+  assert.equal(reader(request(turnToken(secret,OWNER,later(),event,{space:OWNER,revision:1,answer})),secret).answer,answer);
+  for(const scope of [BOB_CHAT,GP1,NG1,'777'])
+    assert.throws(()=>reader(request(signed('turn',{scope,event_id:event,space:scope,revision:1,answer})),secret),{code:'invalid_scope_token'},scope);
 });

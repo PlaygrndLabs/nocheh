@@ -2,10 +2,11 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { HttpError, object, string } from './http.js';
 import type pg from 'pg';
-import {policyRevision,validateSpace,parentSpace,type ReadSet} from './spaces.js';
+import {policyRevision,validateSpace,type ReadSet} from './spaces.js';
 import {guardState} from './guarded.js';
 import {activeBrain} from './brain/brains.js';
 import {chatApps,type AppBinding} from './chat-wire.js';
+import {chats} from './chats.js';
 
 export interface Reader {readonly scope:string|null; readonly admin:boolean;readonly turnEvent?:string;readonly space?:string;readonly revision?:number;readonly guard_epoch?:number;readonly generation?:string;readonly logical_profile?:string;readonly purpose?:'assistant'|'memory-review'|'filter';readonly brain?:string;
   /** The "Answer privately" record this turn answers (32 hex, ADR-0249). Signed in a turn pass, and only in one whose
@@ -40,6 +41,8 @@ export function appBinding(value:unknown):AppBinding {
     throw new HttpError(400,'invalid_app_binding');
   return {app:claim.app as AppBinding['app'],chat:claim.chat,topic:claim.topic as string|null};
 }
+/** The owner's private chat itself, never one of its topics, as the chat directory knows it. */
+const ownersPrivateChat=(id:string)=>{const chat=chats().get(id);return chat?.kind==='private'&&chat.owner;};
 export function reader(req:IncomingMessage,secret:string,now=Date.now()):Reader {
   if (!req.headers.authorization?.startsWith('Bearer ')) throw new HttpError(401,'unauthorized');
   const bearer=req.headers.authorization?.replace(/^Bearer /,'') ?? '';
@@ -55,7 +58,9 @@ export function reader(req:IncomingMessage,secret:string,now=Date.now()):Reader 
     let policy:{}|{space:string;revision:number}={};
     if(claims.space!==undefined || claims.revision!==undefined){
       const space=validateSpace(claims.space);
-      if(!Number.isSafeInteger(claims.revision)||Number(claims.revision)<1||(scope!==null&&(parentSpace(space)??space)!==scope))throw Error();
+      // A scoped pass reads as its chat, in the chat itself or one of its topics, as the chat directory says; never by
+      // the shape of an id, and a topic the directory does not know belongs to no chat (ADR-0250, fail closed).
+      if(!Number.isSafeInteger(claims.revision)||Number(claims.revision)<1||(scope!==null&&space!==scope&&chats().parentOf(space)!==scope))throw Error();
       policy={space,revision:claims.revision as number};
     }
     if(claims.guard_epoch!==undefined&&(!Number.isSafeInteger(claims.guard_epoch)||Number(claims.guard_epoch)<1))throw Error();
@@ -64,9 +69,10 @@ export function reader(req:IncomingMessage,secret:string,now=Date.now()):Reader 
     if(claims.logical_profile!==undefined&&(prefix!=='turn'||!claims.generation||typeof claims.logical_profile!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(claims.logical_profile)))throw Error();
     if(claims.project!==undefined&&(prefix!=='turn'||typeof claims.project!=='string'||!/^[a-f0-9]{64}$/.test(claims.project)))throw Error();
     if(claims.brain!==undefined&&(prefix!=='turn'||typeof claims.brain!=='string'||!brainName.test(claims.brain)))throw Error();
-    // An answer pass reads as the asker's private chat, never as the owner: its scope and space are that chat.
+    // An answer pass reads as the asker's private chat, never as the owner: its scope and space are that chat, a private
+    // chat row of the owner's (ADR-0249, ADR-0250).
     if(claims.answer!==undefined&&(prefix!=='turn'||typeof claims.answer!=='string'||!answerId.test(claims.answer)||scope===null||
-      !/^[1-9][0-9]{0,18}$/.test(scope)||!('space' in policy)||policy.space!==scope))throw Error();
+      !ownersPrivateChat(scope)||!('space' in policy)||policy.space!==scope))throw Error();
     // What an answer may read comes from its record on the server, never from the pass.
     if(claims.reads!==undefined)throw Error();
     const app=claims.app===undefined?undefined:appBinding(claims.app);
