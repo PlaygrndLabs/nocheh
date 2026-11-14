@@ -40,6 +40,33 @@ const sends = (extra = {}) => ({
   ...extra,
 });
 
+test('files a locked-down reader could not read say why and how to read them again', () => {
+  const found = issues({
+    reader_problems: [
+      {day: '2026-11-14', reader: 'document', label: 'Documents', failure: 'temp_full', failed: 2, ok: 0},
+      {day: '2026-11-14', reader: 'voice', label: 'Voice notes', failure: 'read_only', failed: 1, ok: 3},
+    ],
+  });
+  assert.deepEqual(found, [
+    {
+      tone: 'warn',
+      text: 'Documents: 2 files couldn’t be read today',
+      detail:
+        'Hermes’s temporary space was full. Restarting Hermes empties it. The originals are kept: Make a new version on a message’s page reads one again.',
+      link: '#messages',
+      action: 'Messages',
+    },
+    {
+      tone: 'warn',
+      text: 'Voice notes: 1 recording couldn’t be transcribed today',
+      detail:
+        'Hermes’s locked-down container refused a file write. The originals are kept: Make a new version on a message’s page transcribes one again.',
+      link: '#messages',
+      action: 'Messages',
+    },
+  ]);
+});
+
 test('failed sends to chat apps need a look and open the Problems list', () => {
   const one = issues(
     monitoring(

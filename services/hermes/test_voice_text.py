@@ -1,15 +1,18 @@
 """Voice notes transcribed by Hermes's own transcriber for Nocheh's preparation step."""
 import base64
+import errno
 import json
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from services.hermes import usage, voice_text
+from tools.operations.provider import usage as provider_usage
 
 ROUTE = {'NOCHEH_TRANSCRIPTION_ROUTE_URL': 'https://transcribe.example.test/v1', 'NOCHEH_TRANSCRIPTION_ROUTE_KEY': 'synthetic-voice-key',
          'NOCHEH_TRANSCRIPTION_ROUTE_MODEL': 'gpt-transcribe', 'NOCHEH_TRANSCRIPTION_ROUTE_PROVIDER': 'openai',
@@ -101,6 +104,40 @@ class VoiceTextTests(unittest.TestCase):
             with patch.object(voice_text, 'LIMIT', 3), patch.object(voice_text.subprocess, 'run') as run:
                 self.assertEqual(voice_text.transcribe(body), {'state': 'too_large'})
                 run.assert_not_called()
+
+    def test_a_refused_write_is_counted_for_the_notice_never_as_a_model_call(self):
+        refused = OSError(errno.EROFS, 'Read-only file system')
+        with patch.dict(sys.modules, {'tools.transcription_tools': transcriber({'success': True, 'transcript': 'x'})}), \
+                patch.object(voice_text.Path, 'write_bytes', side_effect=refused):
+            self.assertEqual(voice_text.answer(b'x', {'name': 'a.ogg', 'mime_type': '', 'kind': ''}),
+                             {'state': 'failed', 'reason': 'nocheh_error', 'write_failure': 'read_only'})
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'kind': 'voice'}
+        child = lambda answer: subprocess.CompletedProcess([], 0, json.dumps(answer).encode(), b'')
+        seen = {}
+
+        def run(command, **options):
+            seen.update(options['env'])
+            return child({'state': 'failed', 'reason': 'nocheh_error', 'write_failure': 'read_only'})
+        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', ROUTE):
+            target = Path(state) / 'hermes/usage/usage.sqlite'
+            target.parent.mkdir(parents=True)
+            with patch.object(usage, 'DATABASE', target):
+                with patch.object(voice_text.subprocess, 'run', side_effect=run):
+                    self.assertEqual(voice_text.transcribe(body), {'state': 'failed', 'reason': 'nocheh_error'},
+                                     'the recording gets today’s status')
+                # A failure nobody explains, while /tmp has no room for the recording, failed for want of room.
+                with patch.object(voice_text.subprocess, 'run', return_value=child({'state': 'failed', 'reason': 'unknown'})), \
+                        patch.object(usage, 'temp_full', return_value=True):
+                    voice_text.transcribe(body)
+                with patch.object(voice_text.subprocess, 'run', return_value=child({'state': 'done', 'text': 'Synthetic', 'seconds': 2})):
+                    voice_text.transcribe(body)
+                calls = usage.rows('2000-01-01', target)
+            day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            readers = provider_usage.reader_rows(state, day)
+        self.assertEqual(seen['HERMES_DISABLE_LAZY_INSTALLS'], '1')
+        self.assertEqual(readers, [{'day': day, 'reader': 'voice', 'done': 1, 'temp_full': 1, 'read_only': 1}])
+        self.assertEqual([(row['part'], row['runs'], row['failed']) for row in calls], [('transcription', 1, 0)],
+                         'only the transcription that reached the model is a model call')
 
 
 if __name__ == '__main__':

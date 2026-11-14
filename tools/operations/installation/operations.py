@@ -15,7 +15,7 @@ from datetime import datetime,timezone
 from contextlib import ExitStack
 from pathlib import Path,PurePosixPath
 
-from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url
+from tools.operations.installation.configuration import compose_environment, env_path, initialize, load, write_env, INSTALLATION_ROOT, compose_command, archive_url, runtime_folders
 ROOT=INSTALLATION_ROOT
 SERVICES=['nocheh-telegram','hermes','nocheh-app','honcho-api','honcho-deriver','honcho-provider-gateway','honcho-redis','inngest-server','hermes-agent-sb','nocheh-security']
 TABLES={'events':'id','artifacts':'id','derived_artifacts':'id','dispatches':'event_id',
@@ -267,8 +267,9 @@ def restore(snapshot,state,project,port):
             destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             with tar.extractfile(member) as source,destination.open('xb') as target: shutil.copyfileobj(source,target)
             destination.chmod(0o600)
+    runtime_folders(state)
     # Machine keys are never in a snapshot: the restored machines need a new key and test before a job may use them.
-    for directory in ('reports','files','spool','hermes','telegram','secrets','machines'): (state/directory).mkdir(exist_ok=True,mode=0o700)
+    for directory in ('secrets','machines'): (state/directory).mkdir(exist_ok=True,mode=0o700)
     # Retain the saved settings, but don't activate a duplicate Hermes credential owner.
     auth=state/'hermes/auth.json'
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')

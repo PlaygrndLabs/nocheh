@@ -1,7 +1,7 @@
 """Problems worth telling the owner about, and the Telegram notice that tells them.
 
 The dashboard runs `check` every two minutes. It reads what System › Health reads, plus
-today's model usage, and sends the owner's private chat one message that lists every
+today's model usage and the files Hermes's readers could not read, and sends the owner's private chat one message that lists every
 problem that is new or worse. A problem repeats at most once an hour, and only when it got
 worse; one that goes away and comes back is new again. Failed and uncertain background
 tasks are kept forever, so only their growth is news: the first check after an
@@ -31,7 +31,11 @@ FOLLOW_SECONDS = 7 * 86400
 MAX_FOLLOWED = 50
 # What each kind of problem needs to read before it may count as cleared.
 SOURCES = {'application': 'application', 'service': 'services', 'models': 'routes', 'work_unchecked': 'work', 'workers': 'work',
-           'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram'}
+           'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram',
+           'reader': 'readers'}
+# A part's model calls and a reader's files, counted per day with the calls or reads that worked: they clear once
+# one works after the last failure a check saw.
+COUNTED_TODAY = ('model', 'reader')
 # Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
 OWN_SENDS = ('notice', 'notice_update')
 # Background work families, as System › Work names them.
@@ -72,6 +76,14 @@ CAUSES = {
     'rebuilt_restart_limit_exceeded': 'the run restarted too often and stopped',
 }
 CAUSE = re.compile(r'([a-z][a-z0-9_]{0,47})(?::([1-5][0-9]{2}))?')
+# Hermes's file readers (services/hermes/usage.py READERS): the part, one file, more files, and what reading one is.
+READERS = {'document': ('Documents', 'file', 'files', 'read'), 'image': ('Images', 'image', 'images', 'read'),
+           'voice': ('Voice notes', 'recording', 'recordings', 'transcribed')}
+# Why a reader could not read a file in Hermes's locked-down container (ADR-0251; services/hermes/usage.py WRITE_FAILURES).
+WRITE_FAILURES = {
+    'temp_full': 'Hermes’s temporary space was full. Restarting Hermes empties it',
+    'read_only': 'Hermes’s locked-down container refused a file write',
+}
 TELEGRAM_REASONS = {
     'telegram_network_error': 'it couldn’t reach Telegram', 'telegram_polling_conflict': 'another copy of the bot was running',
     'invalid_token': 'Telegram refused the bot token', 'missing_credentials': 'no bot token is set',
@@ -149,6 +161,14 @@ def problems(monitoring, usage_rows, today):
             # Calls that worked today, so a notice can say when the model works again. A run Nocheh stopped, such as
             # one cut by a new safety epoch, did not work.
             ok=runs - failed - (row.get('stopped') or 0) if type(runs) is int else None)
+    # Files a reader could not read because a write failed; not model calls, so never a model line too.
+    readers = monitoring.get('reader_problems')
+    for row in readers if isinstance(readers, list) else []:
+        if row.get('day') == today and row.get('failure') in WRITE_FAILURES and type(row.get('failed')) is int:
+            add(f"reader:{today}:{row['reader']}:{row['failure']}", row['failed'], 'reader', reader=row['reader'],
+                label=row.get('label') or row['reader'], failure=row['failure'],
+                # Reads that worked today, so a notice can say when reading works again.
+                ok=row.get('ok') if type(row.get('ok')) is int else None)
     # Nocheh's GitHub app: its key never expires, so only a refused one gives a notice.
     if (monitoring.get('github') or {}).get('reconnect'):
         add('github', 1, 'github', reason='reconnect')
@@ -232,6 +252,10 @@ def text(problem, new):
         return f"Telegram stopped working at {problem['at'][:16].replace('T', ' ')} UTC: {reason}."
     if kind == 'github':
         return 'GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Settings › Connections.'
+    if kind == 'reader':
+        label, one, many, verb = READERS.get(problem['reader'], (problem['label'], 'file', 'files', 'read'))
+        return (f"{label}: {_plural(count, one, many)} couldn’t be {verb} today because {WRITE_FAILURES[problem['failure']]}. "
+                f"The originals are kept: Make a new version on a message’s page {'reads' if verb == 'read' else 'transcribes'} one again.")
     parts = []
     if problem['failed']:
         reasons = why(problem)
@@ -313,6 +337,8 @@ def readable(monitoring):
         found.add('github')
     if ((monitoring.get('runtime') or {}).get('status') or {}).get('telegram') == 'connected':
         found.add('telegram')
+    if isinstance(monitoring.get('reader_problems'), list):
+        found.add('readers')
     return found
 
 
@@ -321,7 +347,7 @@ def _watch(problem, new):
     watch = {'key': problem['key'], 'kind': problem['kind']}
     if problem['total']:
         watch['base'] = problem['count'] - new
-    if problem['kind'] == 'model':
+    if problem['kind'] in COUNTED_TODAY:
         watch.update(count=problem['count'], ok=problem.get('ok'))
     return watch
 
@@ -330,7 +356,7 @@ def back(watch, current, seen, before):
     """Whether a problem whose line was marked cleared is back, such as a retried task that failed again.
     A down service or worker counts as back only when the previous check (`before`) saw it too."""
     kind, problem = watch['kind'], current.get(watch['key'])
-    if kind == 'model':
+    if kind in COUNTED_TODAY:
         if not problem or problem['count'] <= watch['count']:
             return False
         watch.update(count=problem['count'], ok=problem.get('ok'))
@@ -349,7 +375,7 @@ def cleared(watch, current, seen, totals=None):
     works after the last failure a check saw; anything else clears when a check that could read it no
     longer finds it. A part's model calls from an earlier day stay as they were."""
     kind, problem = watch['kind'], current.get(watch['key'])
-    if kind == 'model':
+    if kind in COUNTED_TODAY:
         if not problem or type(problem.get('ok')) is not int or type(watch.get('ok')) is not int:
             return False
         if problem['count'] > watch['count']:
@@ -376,7 +402,7 @@ def resolution(line, since):
     """The short status shown on its own line under a notice line whose problem cleared, or None while it is open."""
     if line.get('done') is None:
         return None
-    worked = all(watch['kind'] == 'model' for watch in line['watch'])
+    worked = all(watch['kind'] in COUNTED_TODAY for watch in line['watch'])
     return f"{'Working again since' if worked else 'Fixed at'} {_when(line['done'], since)}"
 
 

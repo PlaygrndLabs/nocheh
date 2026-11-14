@@ -685,6 +685,92 @@ class Scenarios:
                             " AND position('SIGNMARK88' in convert_from(content,'UTF8'))>0")
         self.gate('photo_text_read', read == '1', count=read)
 
+    # Locked-down Hermes (ADR-0251) ---------------------------------------------------
+
+    def hermes_exec(self, *command):
+        result = subprocess.run(self.f.command+['exec', '-T', 'hermes', *command], capture_output=True, text=True, timeout=120)
+        return result.stdout if result.returncode == 0 else ''
+
+    def hermes_is_locked_down(self):
+        # Hermes runs read-only without capabilities, writes only its mounted folders and a memory /tmp, and sees
+        # neither the dashboard's token nor the rest of the spool.
+        container = subprocess.check_output(self.f.command+['ps', '-q', 'hermes'], text=True).strip()
+        found = json.loads(subprocess.check_output(['docker', 'inspect', container], text=True))[0]
+        host, mounts = found['HostConfig'], {mount['Destination']: mount for mount in found['Mounts']}
+        environment = dict(item.split('=', 1) for item in found['Config']['Env'] if '=' in item)
+        self.gate('read_only_root', host.get('ReadonlyRootfs') is True)
+        self.gate('no_capabilities', 'ALL' in [name.upper() for name in host.get('CapDrop') or []] and not host.get('CapAdd'),
+                  dropped=host.get('CapDrop'), added=host.get('CapAdd'))
+        self.gate('no_new_privileges', any(option.startswith('no-new-privileges') and not option.endswith('false')
+                                           for option in host.get('SecurityOpt') or []), options=host.get('SecurityOpt'))
+        self.gate('memory_tmp', '/tmp' in (host.get('Tmpfs') or {}) or mounts.get('/tmp', {}).get('Type') == 'tmpfs', tmpfs=host.get('Tmpfs'))
+        self.gate('home_and_lazy_installs_off', environment.get('HOME') == '/tmp/home' and environment.get('HERMES_DISABLE_LAZY_INSTALLS') == '1',
+                  home=environment.get('HOME'))
+        self.gate('only_the_folders_it_uses', {'/dashboard-state/home', '/data/spool/brain-turns'} <= set(mounts)
+                  and not {'/dashboard-state', '/data/spool'} & set(mounts), mounts=sorted(mounts))
+        probe = ('token=absent; [ -e /dashboard-state/token ] && token=present; '
+                 'write() { if ( : > "$1/.nocheh-write-probe" ) 2>/dev/null; then rm -f "$1/.nocheh-write-probe"; echo written; else echo refused; fi; }; '
+                 'home=missing; [ -d "$HOME" ] && home=present; '
+                 'printf \'{"token":"%s","spool":"%s","image":"%s","tmp":"%s","home":"%s"}\\n\' '
+                 '"$token" "$(write /data/spool)" "$(write /workspace)" "$(write /tmp)" "$home"')
+        output = self.hermes_exec('sh', '-c', probe).strip()
+        probed = json.loads(output.splitlines()[-1]) if output else {}
+        self.current['observed'] = probed
+        self.gate('dashboard_token_not_seen', probed.get('token') == 'absent', **probed)
+        self.gate('spool_root_and_image_refuse_writes', probed.get('spool') == 'refused' and probed.get('image') == 'refused')
+        self.gate('tmp_and_home_writable', probed.get('tmp') == 'written' and probed.get('home') == 'present')
+
+    def files_upload_over_1mb(self):
+        # The Files page's upload over 1 MB is spooled through /tmp, now memory: it is kept whole in the profile's
+        # workspace, listed, downloaded unchanged and deleted.
+        script = """import crypto from 'node:crypto';
+const folder='nocheh-tester-'+process.argv[1],name='large-upload.bin',file=folder+'/'+name;
+const call=async(path,options={})=>{const response=await fetch('http://hermes:8785'+path,{...options,
+headers:{'X-Hermes-Session-Token':process.env.SERVICE_TOKEN,...(options.headers||{})},signal:AbortSignal.timeout(120000)});
+if(!response.ok)throw Error('native_http_'+response.status+':'+(await response.text()).slice(0,300));return response;};
+const content=crypto.randomBytes(1536*1024),form=new FormData();
+form.append('file',new Blob([content]),name);form.append('path',file);form.append('overwrite','true');
+await call('/api/files/upload-stream?profile=default',{method:'POST',body:form});
+const listed=await (await call('/api/files?profile=default&path='+encodeURIComponent(folder))).json();
+const downloaded=Buffer.from(await (await call('/api/files/download?profile=default&path='+encodeURIComponent(file))).arrayBuffer());
+await call('/api/files?profile=default',{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({path:folder,recursive:true})});
+const after=await (await call('/api/files?profile=default')).json();
+const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
+console.log(JSON.stringify({bytes:content.length,sent:digest(content),received:digest(downloaded),
+listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),left:after.entries.some(entry=>entry.name===folder)}));"""
+        found = json.loads(subprocess.check_output(self.f.command+['exec', '-T', 'nocheh-app', 'node', '--input-type=module', '-e', script,
+                                                                  str(self.f.ids())], text=True).strip().splitlines()[-1])
+        self.current['observed'] = {'bytes': found['bytes']}
+        self.gate('uploaded_whole', found['listed'] == [found['bytes']], listed=found['listed'])
+        self.gate('downloaded_unchanged', found['sent'] == found['received'])
+        self.gate('upload_deleted', not found['left'])
+
+    def profiles_round_trip(self):
+        # A profile made, listed and retired from the dashboard, with Hermes's image read-only.
+        name = 'tester-'+str(self.f.ids())
+        created = self.f.native('/api/profiles', {'name': name})
+        self.gate('profile_created', created.get('status') == 'created', name=name)
+        self.gate('profile_listed', any(row['name'] == name for row in self.f.native('/api/profiles')['profiles']))
+        retired = self.f.native('/api/profiles/'+name, {}, 'DELETE')
+        self.gate('profile_retired', retired.get('ok') is True and all(row['name'] != name or row.get('state') == 'retired'
+                                                                      for row in self.f.native('/api/profiles')['profiles']))
+
+    def no_refused_writes(self):
+        # After the document, photo and voice scenarios, no file failed to be read for want of room in /tmp or a
+        # refused write. HOME is emptied at each restart, so what it holds is listed to show it holds only caches.
+        script = ('import json,sqlite3\n'
+                  "db=sqlite3.connect('/workspace/data/local/hermes/usage/usage.sqlite')\n"
+                  'try:rows=db.execute("SELECT day,reader,done,temp_full,read_only FROM reader_daily").fetchall()\n'
+                  'except sqlite3.OperationalError:rows=[]\n'
+                  'print(json.dumps(rows))')
+        output = self.hermes_exec('python', '-c', script).strip()
+        self.gate('reader_counts_read', bool(output))
+        rows = json.loads(output.splitlines()[-1])
+        listed = self.hermes_exec('find', '/tmp/home', '-maxdepth', '3')
+        (self.report/'hermes-home.txt').write_text(listed)
+        self.current['observed'] = {'reads': rows, 'home_entries': len(listed.splitlines())}
+        self.gate('no_reader_write_failures', not [row for row in rows if row[3] or row[4]], rows=rows)
+
     # Owner authority ------------------------------------------------------------
 
     def owner_directory_lists_conversations(self):
@@ -883,10 +969,11 @@ class Scenarios:
                   and all(stage['label'] in output.getvalue() for stage in sample['stages']))
 
 
-ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
+ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'hermes_is_locked_down', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
          'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'photo_is_read',
+         'files_upload_over_1mb', 'profiles_round_trip', 'no_refused_writes',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_keeps_group_cards', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
 

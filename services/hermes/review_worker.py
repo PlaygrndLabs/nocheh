@@ -159,7 +159,7 @@ def stopped(profile,review_id,before):
 
 
 def _review(profile,policy,model,credentials,body):
-    env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
+    env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE','HERMES_DISABLE_LAZY_INSTALLS') if key in os.environ}
     env.update(HERMES_HOME=str(profile),GUARD_MODE=body.get('guard_mode','on'))
     transport = credentials.runtime()
     request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),

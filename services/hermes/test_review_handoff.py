@@ -149,10 +149,12 @@ class ReviewHandoffTests(unittest.TestCase):
                                                               'failure_reason':'provider_error','failure_cause':'overloaded:529',
                                                               'usage':{'calls':1}}).encode())
         with patch('services.hermes.security_transport.isolated_enabled',return_value=False), \
-                patch('services.hermes.usage.record') as record:
-            with patch('services.hermes.review_worker.subprocess.run',return_value=child):
+                patch('services.hermes.usage.record') as record, patch.dict('os.environ',{'HERMES_DISABLE_LAZY_INSTALLS':'1'}):
+            with patch('services.hermes.review_worker.subprocess.run',return_value=child) as run:
                 self.assertEqual(_review(self.profile,self.policy,'model',credentials,self.body),
                                  {'state':'failed','error_code':'assistant_runtime_unavailable'})
+            # The locked-down container's lazy-install switch reaches the review child (ADR-0251).
+            self.assertEqual(run.call_args.kwargs['env']['HERMES_DISABLE_LAZY_INSTALLS'],'1')
             with patch('services.hermes.review_worker.subprocess.run',side_effect=subprocess.TimeoutExpired('review',220)):
                 with self.assertRaises(subprocess.TimeoutExpired):_review(self.profile,self.policy,'model',credentials,self.body)
         self.assertEqual([(c.kwargs['reason'],c.kwargs.get('cause')) for c in record.call_args_list],

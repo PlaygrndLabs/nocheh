@@ -5,6 +5,9 @@ Hermes's transcriber converts audio a provider rejects, trims silence and splits
 recordings. The provider and model are chosen in Settings › Models (Voice notes). Each
 recording is transcribed in a child process that holds only that provider's key, bounded in
 time and memory, with a Hermes home of its own, so the reply profile keeps transcription off.
+A recording that fails because a write found no room in the memory /tmp or was refused by
+the locked-down container (ADR-0251) is no model call: it is counted for the owner's problem
+notice instead.
 """
 import base64
 import json
@@ -64,24 +67,37 @@ def transcribe(body):
     def bounded():
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (MEMORY, MEMORY))
-    with tempfile.TemporaryDirectory(prefix='nocheh-voice-') as home:
-        # An empty language lets the model detect it; Hermes' default 'en' hint garbles other languages' voices.
-        Path(home, 'config.yaml').write_text(json.dumps({'stt': {'enabled': True, 'provider': 'openai', 'language': '', 'openai': {
-            'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}'}}}))
-        environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
-                       'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'],
-                       **{name: os.environ[name] for name in ('HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy',
-                                                              'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE') if name in os.environ}}
-        try:
-            child = subprocess.run([sys.executable, '-m', 'services.hermes.voice_text', json.dumps(hint)], input=data,
-                                   capture_output=True, timeout=SECONDS, env=environment, preexec_fn=bounded, check=False)
-            result = json.loads((child.stdout.strip().splitlines() or [b''])[-1])
-        except subprocess.TimeoutExpired:
-            result = {'state': 'failed', 'reason': 'timed_out'}
-        except ValueError:
-            result = {'state': 'failed', 'reason': 'nocheh_error'}
-    if not isinstance(result, dict) or result.get('state') not in ('done', 'silent', 'failed', 'unsupported', 'too_large'):
-        result = {'state': 'failed', 'reason': 'nocheh_error'}
+    failure = None
+    try:
+        with tempfile.TemporaryDirectory(prefix='nocheh-voice-') as home:
+            # An empty language lets the model detect it; Hermes' default 'en' hint garbles other languages' voices.
+            Path(home, 'config.yaml').write_text(json.dumps({'stt': {'enabled': True, 'provider': 'openai', 'language': '', 'openai': {
+                'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}'}}}))
+            environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
+                           'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'], 'HERMES_DISABLE_LAZY_INSTALLS': '1',
+                           **{name: os.environ[name] for name in ('HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy',
+                                                                  'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE') if name in os.environ}}
+            try:
+                child = subprocess.run([sys.executable, '-m', 'services.hermes.voice_text', json.dumps(hint)], input=data,
+                                       capture_output=True, timeout=SECONDS, env=environment, preexec_fn=bounded, check=False)
+                result = json.loads((child.stdout.strip().splitlines() or [b''])[-1])
+            except subprocess.TimeoutExpired:
+                result = {'state': 'failed', 'reason': 'timed_out'}
+            except ValueError:
+                result = {'state': 'failed', 'reason': 'nocheh_error'}
+            if not isinstance(result, dict) or result.get('state') not in ('done', 'silent', 'failed', 'unsupported', 'too_large'):
+                result = {'state': 'failed', 'reason': 'nocheh_error'}
+            # A failure the provider does not explain, while /tmp has no room for the recording, failed for want of room.
+            if result['state'] == 'failed' and result.get('reason') in ('nocheh_error', 'unknown'):
+                failure = result.get('write_failure') if result.get('write_failure') in usage.WRITE_FAILURES else \
+                    'temp_full' if usage.temp_full(home, len(data)) else None
+    except OSError as error:
+        failure = usage.write_failure(error)
+        if failure is None:
+            raise
+    if failure:
+        usage.reader_failed('voice', failure)
+        return {'state': 'failed', 'reason': 'nocheh_error'}
     seconds = result.get('seconds') if type(result.get('seconds')) in (int, float) else hint['duration']
     if result['state'] in ('done', 'silent', 'failed'):
         spent = {'calls': 1, 'audio_seconds': seconds or 0}
@@ -90,6 +106,8 @@ def transcribe(body):
             spent['cost_usd'] = math.ceil(seconds) / 60 * price
         usage.record('transcription', spent, selected['model'], failed=result['state'] == 'failed',
                      provider=selected['provider'], reason=result.get('reason'), cause=result.get('cause'))
+    if result['state'] in ('done', 'silent'):
+        usage.reader_done('voice')
     return {key: value for key, value in result.items() if key in ('state', 'text', 'reason')}
 
 
@@ -155,7 +173,18 @@ def read(data, hint):
     return {'state': 'failed', 'reason': reason(error), 'cause': cause(error), 'seconds': seconds}
 
 
+def answer(data, hint):
+    """The child's answer: a write that found no room or was refused says so; any other error fails the read."""
+    try:
+        return read(data, hint)
+    except Exception as error:
+        failure = usage.write_failure(error)
+        if failure is None:
+            raise
+        return {'state': 'failed', 'reason': 'nocheh_error', 'write_failure': failure}
+
+
 if __name__ == '__main__':
     import logging
     logging.disable(logging.CRITICAL)
-    print(json.dumps(read(sys.stdin.buffer.read(LIMIT + 1), json.loads(sys.argv[1])), ensure_ascii=False))
+    print(json.dumps(answer(sys.stdin.buffer.read(LIMIT + 1), json.loads(sys.argv[1])), ensure_ascii=False))

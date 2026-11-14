@@ -139,6 +139,9 @@ class SnapshotTests(unittest.TestCase):
                     starts.append(command)
                     for name in ('spool/.restore-inactive','workflows/inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json'):
                         self.assertTrue((state/name).is_file(),name)
+                    # Hermes's two mounted folders exist before any service starts, so Docker never makes them as root.
+                    for name in ('spool/brain-turns','admin/dashboard/home'):
+                        self.assertEqual((state/name).stat().st_mode&0o777,0o700,name)
                     self.assertFalse((state/'hermes/auth.json').exists())
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
                     self.assertNotIn("NOCHEH_WORKFLOWS_ENABLED",(state/'.env').read_text())

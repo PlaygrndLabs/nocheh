@@ -63,6 +63,30 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(initialize(state)['NOCHEH_GUARD_MODE'],'on')
             self.assertEqual(read_env(env_path(state))['NOCHEH_GUARD_MODE'],'on')
             with self.assertRaises(ValueError):validate(values)
+    def test_setup_and_make_dev_make_every_mounted_folder_private_one_level_at_a_time(self):
+        import stat
+        import tools.cli.main as cli
+        from tools.operations.installation.configuration import DEFAULTS, generate
+        # Hermes mounts only spool/brain-turns and admin/dashboard/home; Docker would make a missing one as root, and
+        # admin/dashboard holds the dashboard's token, so no parent may get the default mode either.
+        folders=('files','spool','spool/brain-turns','hermes','telegram','reports','admin','admin/dashboard','admin/dashboard/home')
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)/'state';initialize(state)
+            for name in folders:
+                with self.subTest(name=name):
+                    self.assertEqual(stat.S_IMODE((state/name).stat().st_mode),0o700)
+            (state/'admin/dashboard/home/config.yaml').write_text('dashboard: {font: system-mono}\n')
+            initialize(state)
+            self.assertTrue((state/'admin/dashboard/home/config.yaml').is_file(),'a folder that exists is left as it is')
+            # make dev runs on the operating .env without initialize().
+            root=Path(folder)/'main';root.mkdir()
+            write_env(root/'.env',generate({**DEFAULTS,'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'123456789','TELEGRAM_BOT_TOKEN':'made-up-bot-token',
+                                            'NOCHEH_HONCHO_DATABASE_VOLUME':'made-up_honcho_database','NOCHEH_HONCHO_REDIS_VOLUME':'made-up_honcho_redis'}))
+            with patch('tools.development.live_dev.operating_root',return_value=root):cli.development_box_token()
+            for name in folders:
+                with self.subTest(dev=name):
+                    self.assertEqual(stat.S_IMODE((root/'data/local'/name).stat().st_mode),0o700)
+
     def test_literal_roundtrip_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'.env'
