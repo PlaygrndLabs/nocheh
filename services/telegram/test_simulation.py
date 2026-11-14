@@ -463,8 +463,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.deliver(self.envelope()), {'state': 'done'})
         [record] = await self.sends()
         self.assertEqual({key: value for key, value in record.items() if key not in ('key', 'at', 'ms')},
-                         {'version': 1, 'channel': 'telegram', 'account': '123456', 'kind': 'reply', 'method': 'sendMessage', 'chat': '-20',
-                          'topic': 17, 'message_id': 1001, 'detail': None, 'state': 'sent', 'status': 200, 'error_code': None,
+                         {'version': 2, 'channel': 'telegram', 'account': '123456', 'kind': 'reply', 'method': 'sendMessage', 'chat': '-20',
+                          'thread': '17', 'message_id': '1001', 'detail': None, 'state': 'sent', 'status': 200, 'error_code': None,
                           'reference': 'telegram:123456:update:1'})
         self.assertIsInstance(record['ms'], int)
         raw = b''.join(path.read_bytes() for path in (self.root / 'spool/sends').glob('*'))
@@ -478,7 +478,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.deliver(self.envelope(), work=0.05), {'state': 'done'})
         reactions = sorted((r for r in await self.sends() if r['kind'] == 'reaction'), key=lambda r: r['at'])
         self.assertEqual([(r['method'], r['chat'], r['message_id'], r['detail'], r['state'], r['reference']) for r in reactions],
-                         [('setMessageReaction', '-20', 1, '\U0001f440', 'sent', None), ('setMessageReaction', '-20', 1, '\U0001f44d', 'sent', None)])
+                         [('setMessageReaction', '-20', '1', '\U0001f440', 'sent', None), ('setMessageReaction', '-20', '1', '\U0001f44d', 'sent', None)])
         journal = b''.join(path.read_bytes() for path in (self.root / 'spool/outbound').glob('*'))
         self.assertNotIn(b'setMessageReaction', journal)
 
@@ -507,9 +507,9 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual((await self.deliver(self.envelope(identifier=2)))['state'], 'done')
         self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), 1, 'the second reply never leaves')
         records = sorted(await self.sends(), key=lambda r: r['reference'])
-        self.assertEqual([(r['kind'], r['chat'], r['topic'], r['state'], r['status'], r['error_code'], r['reference']) for r in records],
-                         [('reply', '-20', 17, 'failed', 429, 'rate_limited', 'telegram:123456:update:1'),
-                          ('reply', '-20', 17, 'not_sent', 0, 'rate_limited', 'telegram:123456:update:2')])
+        self.assertEqual([(r['kind'], r['chat'], r['thread'], r['state'], r['status'], r['error_code'], r['reference']) for r in records],
+                         [('reply', '-20', '17', 'failed', 429, 'rate_limited', 'telegram:123456:update:1'),
+                          ('reply', '-20', '17', 'not_sent', 0, 'rate_limited', 'telegram:123456:update:2')])
 
     async def test_each_try_of_a_reply_that_recovers_leaves_its_own_record(self):
         """The sender's own retries are separate requests, so each leaves one record under the same reference;
