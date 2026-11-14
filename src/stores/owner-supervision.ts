@@ -4,6 +4,7 @@ import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
 import {graphChatType,graphGroupLabel} from '../graph-labels.js';
 import {HttpError} from '../http.js';
 import {groupChatId,parentSpace,validateSpace} from '../spaces.js';
+import type {ConversationChatFields} from '../chat-wire.js';
 import type {TelegramChatRepository} from './telegram-chats.js';
 import type {TelegramTopicRepository} from './telegram-topics.js';
 import type {StorePools} from './connections.js';
@@ -27,6 +28,10 @@ export interface ConversationDirectoryItem {
   closed?:boolean;
   /** The owner added this topic because the Bot API cannot list topics. */
   registered?:boolean;
+  /** From the chat directory (ADR-0250, ConversationChatFields): Part A fills these from chats rows and makes them
+   * required; the dashboard reads them instead of an id's shape. */
+  topic_key?:ConversationChatFields['topic_key'];app_ids?:ConversationChatFields['app_ids'];is_forum?:ConversationChatFields['is_forum'];
+  state?:ConversationChatFields['state'];owner?:ConversationChatFields['owner'];
 }
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
