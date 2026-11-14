@@ -204,6 +204,7 @@ test('a background job is started with one call, approved on its card, runs as o
     rates={input:1000,output:1000,cache_read:100,cache_write:1000};
     const big=await s.actionCommands.offer('background',await s.jobs.start(await actor((await message('big',8)).id),{title:'Huge',instruction:'Read years.'}));
     assert.equal(big.approver,'owner');assert.equal(last('card').chat_id,'123');assert.match(big.message,/owner was asked privately/);
+    assert.match(last('card').text,/^🗂 Background job: Huge\n💬 Asked in /,'the card in the private chat says where the job was asked (ADR-0250)');
     const huge=(big.estimate as any).cost_usd;assert.ok(huge>5);
     assert.equal(Number((await job(big.id)).cost_limit_usd),Math.ceil(huge*1.5),'an approved estimate sets the limit at half again');
     // So does a member's job on a model with no input or output price: only its time limits it, and the card says so.
@@ -223,7 +224,13 @@ test('a background job is started with one call, approved on its card, runs as o
     try {assert.equal((await s.jobs.card(unpriced.id)).text,"Unpriced\n\nRead the made-up notes.\n\n🛑 Cost can't be measured for this model: only the time limit applies (45 min)");}
     finally {await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',[JSON.stringify(savedTexts)]);}
     rates=sonnet;
-    // A job whose time limit would pass the longest one is refused before anything is recorded or checked.
+    // A job's text shows each hidden character where it stands, Persian half-spaces kept; a direction override is refused (ADR-0250).
+    await assert.rejects(s.jobs.start(await actor((await privately('reordered','Tasks')).id,null),{title:'Tasks \u202etxt.exe',instruction:'Read it.'}),{status:400,code:'job_hidden_characters'});
+    await assert.rejects(s.jobs.start(await actor((await privately('isolated','Tasks')).id,null),{title:'Tasks',instruction:'Read \u2066it\u2069.'}),{code:'job_hidden_characters'});
+    const marked=await s.jobs.start(await actor((await privately('marked','Tasks')).id,null),{title:'Tasks\u200b',instruction:'Read\u00a0it.  \nکار\u200cها\u200b'});
+    const markedCard=(await s.jobs.card(marked.id)).text;
+    assert.ok(markedCard.startsWith('🗂 Background job: Tasks[U+200B]\n'),markedCard);
+    assert.ok(markedCard.endsWith('\n\nRead it.\nکار\u200cها[U+200B]'),'a no-break space reads as a space and no space ends a line');
     const sources=s.jobs.sources,size=sources.size.bind(sources),before=Number((await stores.control.query('SELECT count(*) FROM background_jobs')).rows[0].count);
     sources.size=async(...args:Parameters<typeof size>)=>({...await size(...args),characters:200000000});
     try {

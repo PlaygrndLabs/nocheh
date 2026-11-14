@@ -138,8 +138,9 @@ test('only the owner\'s own request in their private chat or an active project\'
   };
   const rows=async(where:string,params:unknown[]=[])=>(await stores.control.query('SELECT * FROM machine_commands WHERE '+where+' ORDER BY id',params)).rows;
   const settledWith=(id:string,line:string)=>until(()=>approvals.some(input=>input.kind==='settle'&&input.id===id&&String(input.text).endsWith('\n\n'+line)),'the card of '+id+' says '+line);
-  const machineLine='🖥 It works on build-vm (nocheh@192.0.2.10) over SSH: one approval covers every command it runs there. Stop ends the programs it started there.';
-  const planLine='📋 Plan:\n1. Install the made-up tool\n2. Run its tests',withdrawn='🚫 Withdrawn: its machine was turned off or changed. Nothing runs.';
+  const machineLine='🖥 It works on build-vm (nocheh@192.0.2.10) over SSH: one approval lets it run any command nocheh can run there. The plan guides it but does not limit it, '+
+    'and what it reads can change what it does. Stop ends the programs it started there, but not ones the system started for it, such as with open or brew services.';
+  const planLine='📋 Plan (a guide, not a limit):\n1. Install the made-up tool\n2. Run its tests',withdrawn='🚫 Withdrawn: its machine was turned off or changed. Nothing runs.';
   try {
     await s.guards.reconcile();await s.guards.setMode('on');await s.configuration.configure(policy,'on');
     await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'Made-up project','active',1)",[projectId]);
@@ -220,6 +221,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     approvals.length=0;
     const offered=await s.actionCommands.offer('background',asked);
     assert.equal(approvals.length,1);assert.deepEqual([approvals[0].kind,approvals[0].chat_id,approvals[0].reply_to],['card','123',privateMessage]);
+    assert.doesNotMatch(approvals[0].text,/💬 Asked in/,'a card under its own request does not say where it was asked');
     assert.ok(approvals[0].text.endsWith('\n'+machineLine+'\n'+planLine+'\n\nSet up the made-up project on the machine.'),approvals[0].text);
     assert.match(String(offered.message),/^A card with Approve and Reject buttons for this job was posted here as the reply to the request/);
     // A saved card without the machine or plan line still shows them, at its end.
@@ -238,6 +240,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     approvals.length=0;
     const groupOffer=await s.actionCommands.offer('background',grouped);
     assert.deepEqual([approvals[0].chat_id,approvals[0].reply_to],['123',undefined]);
+    assert.match(approvals[0].text,/^🗂 Background job: [^\n]+\n💬 Asked in (“[^”\n]+”|a Telegram group)/,'the card in the private chat says which group asked (ADR-0250)');
     assert.match(String(groupOffer.message),/was sent to them in their private chat with you\. In this chat answer them as "you"[^]*the report goes there too/);
     assert.equal((await job(grouped.id)).space_id,project,'it was asked in the group');
 
