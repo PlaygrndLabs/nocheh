@@ -211,12 +211,15 @@ export class TelegramActionRepository {
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,3500);
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
+    // The request names its chat by its Nocheh id, as its space and destination do (ADR-0250): a group first seen after
+    // step 2b, or upgraded since, has no archive scope that is its id.
+    const chat=principal.scope??chatOf(principal.space??turn.scope);
     const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
     try {
       await db.query('BEGIN');await this.fence(db,binding);
       await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-        [id,source,proposal,binding,turn.scope,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
+        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
       const effect=this.effect(row);let decision=await evaluate(db,effect);
