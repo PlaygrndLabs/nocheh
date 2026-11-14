@@ -46,6 +46,11 @@ export function ChatPicker({
   const rows = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id) && allowed(row));
   const display = (chat: Chat) =>
     chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
+  // A chosen chat the directory is still looking up is shown as loading, never as unknown.
+  const chip = (space: string) => {
+    const chat = find(space);
+    return chat ? display(chat) : all.settled(space) ? display(unknownChat(space)) : 'Loading…';
+  };
   const toggle = (space: string) => {
     if (value.includes(space)) onChange(value.filter(item => item !== space));
     else onChange(multiple ? [...value, space] : [space]);
@@ -66,12 +71,12 @@ export function ChatPicker({
               className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-subtle py-0.5 pr-1 pl-2.5 text-xs"
             >
               <span className="truncate" dir="auto">
-                {display(find(space) ?? unknownChat(space))}
+                {chip(space)}
               </span>
               <button
                 type="button"
                 disabled={disabled}
-                aria-label={'Remove ' + display(find(space) ?? unknownChat(space))}
+                aria-label={'Remove ' + chip(space)}
                 className="rounded-full p-0.5 text-muted hover:bg-line hover:text-fg"
                 onClick={() => toggle(space)}
               >

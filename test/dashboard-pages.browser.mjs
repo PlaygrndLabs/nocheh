@@ -1876,6 +1876,70 @@ test('a sharing rule finds messages from its groups by their chat, a new-id grou
   await page.close();
 });
 
+test('a rule keeps a source the chat directory is still looking up, and saving waits for it', async () => {
+  // Past the first 100 chats a source is looked up by itself (ADR-0250). Until that lookup answers, the source is
+  // neither a group nor private: it stays chosen, and Save waits. A failed lookup is asked again, never taken as unknown.
+  const rule = {
+    id: '5f'.repeat(32),
+    name: 'Seed notes',
+    enabled: true,
+    sources: ['-10073', UPGRADED],
+    destination: '-10042',
+    mode: 'approved',
+    instructions: '',
+    revision: 1,
+    private_sources: [],
+  };
+  let failing = true;
+  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const problems = [];
+  page.on('pageerror', error => problems.push('page error: ' + error.message));
+  await page.route(/\/api\/nocheh\/sharing\/rules\?after=$/, route =>
+    route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({rules: [rule], next: null})}),
+  );
+  await page.route(/\/api\/nocheh\/conversations\?limit=100$/, async route => {
+    const response = await route.fetch(),
+      page = await response.json();
+    page.items = page.items.filter(item => item.space_id !== UPGRADED);
+    page.next_cursor = page.items.at(-1).space_id;
+    return route.fulfill({response, json: page});
+  });
+  await page.route(/\/api\/nocheh\/conversations\?limit=100&q=/, route =>
+    failing ? route.abort('failed') : route.fallback(),
+  );
+  const posted = [];
+  await page.route(/\/api\/nocheh\/sharing\/rules$/, route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    posted.push(route.request().postDataJSON());
+    return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({...rule, revision: 2})});
+  });
+  await page.goto(origin + '/#chats?view=rules&rule=' + rule.id);
+  await page.getByRole('dialog', {name: 'Seed notes'}).getByRole('button', {name: 'Edit'}).click();
+  const dialog = page.getByRole('dialog', {name: 'Edit sharing rule'});
+  const chosen = dialog.getByRole('list', {name: 'Chosen: Share facts from'});
+  await chosen.getByText('Weekend notes').waitFor();
+  await chosen.getByText('Loading…').waitFor();
+  await dialog.getByLabel('Name').fill('Seed and weekend notes');
+  assert.equal(await dialog.getByRole('button', {name: 'Save'}).isDisabled(), true, 'saving waits for the lookup');
+  failing = false;
+  await chosen.getByText('Garden swap').waitFor({timeout: 30000});
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Sharing rule saved.'}).last().waitFor();
+  assert.deepEqual(posted.at(-1)?.sources, ['-10073', UPGRADED]);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a chat the directory doesn’t know offers nothing, and nothing is read from its id', async () => {
+  const {page, problems} = await open('chats?chat=' + 'f'.repeat(64));
+  await page.getByRole('heading', {name: 'Unknown chat', level: 2}).waitFor();
+  await page.getByText('Nocheh doesn’t know this chat. It shows here once Nocheh sees a message from it.').waitFor();
+  assert.equal(await page.getByRole('switch', {name: 'Nocheh in this group'}).count(), 0);
+  assert.equal(await page.getByText('Private chat', {exact: true}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a share from the private side names where it came from and who will see it', async () => {
   // Sharing a fact from the private chat lists groups only, names where it came from and who sees it, and asks first.
   const {page: people, problems: peopleProblems} = await open('memory?view=people&person=' + '1'.repeat(64));

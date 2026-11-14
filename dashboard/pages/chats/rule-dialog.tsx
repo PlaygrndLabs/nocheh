@@ -97,16 +97,18 @@ export function RuleDialog({
   const chats = useChatDirectory();
   const [name, setName] = useState(rule?.name ?? '');
   // A rule saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242). What a chat is
-  // comes from the chat directory, so a chat it doesn't know yet counts as private too.
+  // comes from the chat directory, so a chat it doesn't know counts as private too. A chat it hasn't answered for yet
+  // (past the first page, still being looked up) is kept, and the rule waits to be saved until it has.
   const [chosenSources, setSources] = useState<string[]>(rule?.sources ?? []);
   const [chosenDestination, setDestination] = useState(rule ? rule.destination : (presetDestination ?? ''));
-  const sources = chosenSources.filter(chats.isGroup);
-  const destination = chats.isGroup(chosenDestination) ? chosenDestination : '';
+  const sources = chosenSources.filter(space => !chats.notGroup(space));
+  const destination = chats.notGroup(chosenDestination) ? '' : chosenDestination;
+  const waiting = [...sources, destination].some(space => !chats.settled(space));
   const [mode, setMode] = useState<Rule['mode']>(rule?.mode ?? 'approved');
   const [instructions, setInstructions] = useState(rule?.instructions ?? '');
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const action = useAction();
-  const ready = name.trim() && sources.length && destination;
+  const ready = !waiting && name.trim() && sources.length && destination;
   // A rule into a topic is named by its group, which is who sees it.
   const target = useChat(chats.parentOf(destination) ?? destination);
 

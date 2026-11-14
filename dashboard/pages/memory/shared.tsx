@@ -124,6 +124,8 @@ export function useChats() {
     name,
     find: chats.find,
     isGroup: chats.isGroup,
+    settled: chats.settled,
+    notGroup: chats.notGroup,
     parentOf: chats.parentOf,
     error: chats.directory.error,
     loading: chats.directory.loading,

@@ -627,7 +627,7 @@ function AutoOrganize() {
                         {item.scopes.length === 1 ? '1 chat' : `${item.scopes.length} chats`}
                         {item.expires_at ? ' · until ' + new Date(item.expires_at).toLocaleDateString() : ''}
                       </span>
-                      {item.scopes.some(scope => !chats.isGroup(scope)) && (
+                      {item.scopes.some(chats.notGroup) && (
                         <span className="mt-0.5 block text-xs text-warn">
                           Covers a private chat. Nocheh skips it; edit to remove it.
                         </span>
@@ -683,9 +683,11 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
   const chats = useChats();
   const [name, setName] = useState(item?.name ?? 'Organize my chats');
   // One saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242). What a chat is comes
-  // from the chat directory, so a chat it doesn't know yet counts as private too.
+  // from the chat directory, so a chat it doesn't know counts as private too. A chat it hasn't answered for yet is
+  // kept, and saving waits until it has.
   const [chosen, setScopes] = useState<string[]>(item?.scopes ?? []);
-  const scopes = chosen.filter(chats.isGroup);
+  const scopes = chosen.filter(scope => !chats.notGroup(scope));
+  const waiting = scopes.some(scope => !chats.settled(scope));
   // A new permission starts off; turning it on is what lets Nocheh create projects (ADR-0247).
   const [enabled, setEnabled] = useState(item?.enabled ?? false);
   const [until, setUntil] = useState(item?.expires_at && !item.expired ? item.expires_at.slice(0, 10) : '');
@@ -722,7 +724,7 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
           <Button
             variant="primary"
             busy={command.busy}
-            disabled={!name.trim() || !scopes.length}
+            disabled={waiting || !name.trim() || !scopes.length}
             onClick={() => void save()}
           >
             Save

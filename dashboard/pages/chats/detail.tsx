@@ -3,7 +3,7 @@ import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
 import {appIdLabel, byTopicKey, chatName, isGroupChat, parentOf, type Chat} from '../../lib/chats-model';
-import {Button, LoadError} from '../../ui/core';
+import {Button, Card, CardBody, CardHeader, LoadError} from '../../ui/core';
 import {AllowedActions} from './actions';
 import {MemoryCard} from './memory';
 import {WhoCanTalk} from './people';
@@ -41,8 +41,11 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
   const parentId = parentOf(chat);
   const parentChat = useChat(parentId ?? '');
   const parent = parentId ? parentChat : null;
-  const {items, find} = useChats();
+  const {items, find, settled} = useChats();
   const context = useResource<ChatContext>('/conversations/context?space=' + encodeURIComponent(space));
+  // A chat the directory doesn't know, or hasn't answered for yet, is no private chat, group or topic: nothing is
+  // offered for it, as nothing is decided from its id.
+  if (chat.kind === 'unknown') return <UnknownChat chat={chat} loading={!settled(space)} />;
   const topics: Chat[] =
     chat.kind === 'group'
       ? items.filter(item => item.kind === 'topic' && item.parent_space === space).sort(byTopicKey)
@@ -141,6 +144,29 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         <PrivateChatProject chat={chat} yours={chat.owner === true} />
       )}
       {forum && <TopicsCard group={chat} topics={topics} />}
+    </div>
+  );
+}
+
+function UnknownChat({chat, loading}: {chat: Chat; loading: boolean}) {
+  return (
+    <div className="space-y-4">
+      <Button variant="ghost" size="sm" className="-ml-2 lg:hidden" onClick={() => setParams({chat: null})}>
+        <ArrowLeft aria-hidden /> All chats
+      </Button>
+      <header className="min-w-0">
+        <h2 className="truncate text-lg font-semibold" dir="auto">
+          {loading ? 'Loading…' : chatName(chat)}
+        </h2>
+      </header>
+      <Card>
+        <CardHeader title="Nocheh here" />
+        <CardBody className="pt-2 text-sm">
+          {loading
+            ? 'Loading this chat…'
+            : 'Nocheh doesn’t know this chat. It shows here once Nocheh sees a message from it.'}
+        </CardBody>
+      </Card>
     </div>
   );
 }
