@@ -114,6 +114,22 @@ test('unknown conversation context does not inherit a parent sharing grant or eq
   assert.equal(unknown.knowledge_access.owner_access,false);
 });
 
+test('a group Telegram upgraded shows the access lists under both its ids joined, deny winning, as the turn gate applies them',async()=>{
+  const before='-2000000000002',after='-1002000000002',chat=chatIdFor('telegram',before);
+  const snapshot:ChatSnapshot={chats:[group(chat,null,'active')],ids:[{app:'telegram',external_id:before,chat_id:chat,state:'old'},current(chat,after)],owner_chat:null};
+  // Alice was let in before the upgrade; Bob was let in before it and turned away after it.
+  const access={[before]:{granted:['301','302'],denied:[]},[after]:{granted:[],denied:['302']}};
+  const {value}=repository((store,sql)=>{
+    if(store==='archive')return [];
+    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:[after],group_access:access},revision:2}];
+    if(sql.includes('security_policy'))return [{revision:1,document:{version:1,rules:[]}}];
+    return [];
+  },snapshot);
+  const context=await value.context(owner,chat);
+  assert.deepEqual([context.addressing.granted,context.addressing.denied],[['301','302'],['302']]);
+  assert.equal(context.addressing.group_enabled,true);
+});
+
 test('inbox uses database totals rather than visible page length and retains exact review identity',async()=>{
   const rows=Array.from({length:101},(_,index)=>({kind:'entity',id:digest('suggestion:'+index),state:'pending',revision:7,created_at:date,title:'Same entity name'}));
   // The second read lists names folded into the page's person and project cards.

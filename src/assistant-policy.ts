@@ -61,7 +61,12 @@ export function assistantPolicy(path?:string):AssistantPolicy {
  * are joined; a person denied under any of them stays denied. Undefined when none names the chat.
  */
 export function groupAccessFor(policy:Pick<AssistantPolicy,'group_access'>,chat:string):GroupAccess|undefined {
-  const found=chats().rawScopes([chat],'telegram').map(id=>policy.group_access?.[id]).filter((entry):entry is GroupAccess=>!!entry);
+  return groupAccessOf(policy,chats().rawScopes([chat],'telegram'));
+}
+/** The access lists the policy keeps under any of `externals` (one chat's Telegram ids, current and old), joined as
+ * groupAccessFor joins them; undefined when none has any. */
+export function groupAccessOf(policy:Pick<AssistantPolicy,'group_access'>|undefined,externals:readonly string[]):GroupAccess|undefined {
+  const found=externals.map(id=>policy?.group_access?.[id]).filter((entry):entry is GroupAccess=>!!entry);
   if(!found.length)return undefined;
   const join=(values:string[])=>[...new Set(values)].sort();
   return {granted:join(found.flatMap(entry=>entry.granted)),denied:join(found.flatMap(entry=>entry.denied))};

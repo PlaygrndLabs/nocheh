@@ -1,6 +1,6 @@
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
-import type {AssistantPolicy} from '../assistant-policy.js';
+import {groupAccessOf,type AssistantPolicy} from '../assistant-policy.js';
 import {conversationFields,type ChatDirectory} from '../chats.js';
 import {HttpError} from '../http.js';
 import {validateSpace} from '../spaces.js';
@@ -258,9 +258,10 @@ export class OwnerSupervisionRepository {
       this.stores.control.query('SELECT * FROM organization_delegations WHERE scopes ? $1 ORDER BY id',[space]),
       this.services.memory.status(),
     ]);
-    // The policy keys a group's access by its Telegram ids; the owner's private chat is the directory's.
+    // The policy keys a group's access by its Telegram ids, joined over every id the group has had as the turn gate joins
+    // them (groupAccessFor); the owner's private chat is the directory's.
     const guard=memory.guard,policy=configuration?.policy,externals=chats.get(parent)?.app_ids.map(label=>label.external)??[parent];
-    const access=externals.map(id=>policy?.group_access?.[id]).find(Boolean),owner=space===chats.ownerChat();
+    const access=groupAccessOf(policy,externals),owner=space===chats.ownerChat();
     // While a group's topics share memory, a turn there reads the rules into the group and every one of its topics too.
     const groupWide=(policy?.topic_memory??'group')==='group'&&chats.kind(parent)==='group';
     const sharingRules=rules.rows.filter(row=>row.destination===space||groupWide).map(row=>row.destination===space?row:{...row,through_group:true});
