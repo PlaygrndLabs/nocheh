@@ -75,13 +75,30 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   new forum topic answered where they are in Telegram now
   ([dispatch](test/store-telegram-dispatch-chats.test.ts)) and Answer privately on digest chat
   ids ([button](test/store-private-button-chats.test.ts)).
+- Review fixes: a private chat a reset or an owner-record import restored gets its person back
+  at the next start or its next live message, so Answer privately works after a reset
+  ([reset](test/store-reset-setup.test.ts), [records](test/store-chat-records.test.ts));
+  runtime profile labels, destination names and a card's fallback name come from the owner's
+  last refresh, as before, not from a title a later update showed
+  ([runtime profiles](test/store-runtime-profiles.test.ts),
+  [destinations](test/store-approval-buttons.test.ts), [cards](test/store-tasks.test.ts),
+  [refresh](test/store-telegram-chats.test.ts)); preparing attachments and Telegram dispatch
+  look again for a chat recorded a moment ago before skipping its message
+  ([policy](test/assistant.test.ts)); the bot answers the owner's own turn only in the owner's
+  private chat, never in a topic of it, as Hermes does ([bot](services/telegram/test_service.py));
+  the owner's conversation context shows an upgraded group's allowed people merged over all its
+  Telegram ids, as the gate applies them ([supervision](test/owner-supervision.test.ts)); a
+  Slack thread is never a chat, so no Slack topic id is made ([chats](test/chats.test.ts)); a
+  Telegram id with no record reads nothing in a store test with no fixture filling it in
+  ([retrieval](test/store-retrieval.test.ts)). ADR-0250 now lists what a rollback to main
+  loses and every small dashboard change.
 
-  Checks on the integrated branch: the build; node unit and dashboard tests (536: 339 pass,
-  193 store tests skipped there, and the 4 workflow tests that also fail on main); all 93 store
-  test files on old-shaped and digest chats (230 pass, 0 fail); dashboard format; the dashboard
-  browser tests (45: 43 pass, and the 2 settings-apply tests that also fail on main); Python
-  Hermes (920, with the 2 environment errors that also occur on main), Telegram (121) and tools
-  (119, 2 skipped). The format gate's allowlist holds only adapter, legacy and unrelated sites.
+  Checks on the integrated branch after the review fixes: the build; node unit and dashboard
+  tests (538: 341 pass, 193 store tests skipped there, and the 4 workflow tests that also fail on
+  main); all 93 store test files on old-shaped and digest chats (230 pass, 0 fail); Python
+  Telegram (122). Before them, unchanged since: dashboard format; the dashboard browser tests
+  (45: 43 pass, and the 2 settings-apply tests that also fail on main); Python Hermes (920, with
+  the 2 environment errors that also occur on main) and tools (119, 2 skipped). The format gate's allowlist holds only adapter, legacy and unrelated sites.
   Pending:
   - 2b-2, "Only the owner adds Nocheh": adoption, leave-and-tell, the Telegram "which
     project?" card, and the served set kept in `chats` with `TELEGRAM_GROUP_IDS` retired. It
@@ -90,18 +107,29 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   - A live check after merge: that the first seeding on a real archive gives every stored chat
     value a row (no group, topic, task, rule or switch becomes unknown) and how long it took
     (the `ms` of the `chat_records_ready` log; about 23 s per 300,000 archived events in a
-    local benchmark, and the app's health check allows 120 s).
+    local benchmark; the app's health check allows 120 s and `nocheh deploy` waits 180 s, after
+    which the app keeps seeding and serves when done).
   - A rollback check: redeploying main after this step, System › Sent to apps still reads
     send records whose thread and message ids are text, and reactions still work with
     numeric update ids. A private answer offered under 2b-1 then refuses (`only_asker`) until
-    it expires within a day.
+    it expires within a day. Owner exports, reset snapshots and undrained send records made
+    under 2b-1 do not read on main.
+  - Owner question: a chat first seen under 2b-1 has a digest id, so after a rollback to main
+    it is served by its Telegram id without its project, tool switches (an off switch reads
+    on), rules, tasks, Answer privately or memories, until 2b-1 is deployed again; what main
+    sets for it in between is then not applied. Recommended: keep the approved digest ids and
+    accept this, as a rollback is for emergencies; the other choice keeps Telegram ids for new
+    chats until 2b-2.
   - The whole full tester on the integrated branch, with the new scenarios, as a release run.
   - Live acceptance on the owner's install after merge, while Nocheh is idle (a turn in
     flight at deploy is refused once, then retried).
   Owner steps: small things you see change. Chats says "Telegram ID" (with the earlier one
   after Telegram upgrades a group) and "Unknown chat" for a chat Nocheh has no record of; the
   people list also shows people who left, marked as left; a topic name you gave stays even
-  after Telegram shows another, and removing yours brings Telegram's back; asking Nocheh to
+  after Telegram shows another, and removing yours brings Telegram's back; the chat picker no
+  longer offers "Use the ID" for an id Nocheh has not seen, and searches say "name or Telegram
+  ID"; a group's Topics card shows only for a forum or a group with topics already seen;
+  asking Nocheh to
   post to a topic it has never seen is refused until a message there, or adding the topic in
   Chats › Topics by its link or number, makes it known (recommended: keep, it fails closed).
   A group Telegram upgraded before this step stays two chats, as it was; later upgrades keep

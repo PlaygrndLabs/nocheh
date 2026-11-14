@@ -76,7 +76,7 @@ retired), gets its own record.
   - `chat_details` (`src/stores/chats.ts`): what the owner's lists show and
     nothing decides with: the public username, the last title Telegram showed,
     when a chat or topic last had a message, whether a topic is closed, and the
-    owner's last refresh.
+    owner's last refresh (its answer and the title and username it gave).
   - `chat_seed_state`: how far the seeder and the membership backfill have
     read the archive.
 - **Old values are kept.** Every chat value stored before step 2b stays,
@@ -89,7 +89,11 @@ retired), gets its own record.
   2b gets `chatIdFor(app, external[, topic])` =
   `digest(canonical(['chat', app, ...external, 'topic', key]))`. Telegram
   names a chat by one id; Slack by `[team, channel]`. A chat keeps the id made
-  from the first app id it was seen under.
+  from the first app id it was seen under. Only a Telegram forum topic is a
+  topic: a Slack thread, like a Telegram reply chain, stays at message level
+  and is never a chat, so `chatIdFor('slack', …)` refuses a topic. The served
+  list's `owner_account` names one app's owner account until a second app's
+  front door needs its own (the Slack step).
 - **One chat id check.** `chatIdPattern`, `chatIdSql` and `chatIdListSql`
   (`src/chats.ts`) accept a 64-hex digest or the frozen old Telegram shapes,
   nothing else. Every chat CHECK uses them.
@@ -124,9 +128,13 @@ retired), gets its own record.
 - **A chat recorded a moment ago.** A process that misses the chat it is asked
   about looks again before refusing. The security service and the app server
   check a turn pass whose space they do not know once more after the loader's
-  `current()` (`currentReader`, `chatsAfterMiss`). nocheh-telegram and Hermes
-  read their served list again, at most once a second, when it lacks the chat,
-  topic or Telegram id they are asked about. A chat still unknown is refused.
+  `current()` (`currentReader`, `chatsAfterMiss`). Preparing a message's
+  attachments and Telegram dispatch look again before they skip a message as
+  outside or refuse its turn (`settleTelegramChat`), as a capture records a
+  new Telegram id in the same commit that queues them. nocheh-telegram and
+  Hermes read their served list again, at most once a second, when it lacks
+  the chat, topic or Telegram id they are asked about. A chat still unknown is
+  refused.
 
 ## Recording chats
 
@@ -138,7 +146,10 @@ retired), gets its own record.
   refresh finds a group migrated, the old Telegram id becomes `old` and the
   new one `current`, and the group stays the same chat. No message text is
   read or stored. Bots, anonymous admins, channel posts and `sender_chat` are
-  never members.
+  never members. A live message in a private chat whose row names no person
+  (one a reset or an owner-record import restored) names its person then
+  (`namePrivateChats`), unless another private chat already names that
+  person.
 - **Order.** A change applies only when its update is newer than the one that
   last set the row. Within one bot the update id decides, unless the two
   updates were taken in more than seven days apart (the later one wins then);
@@ -159,14 +170,22 @@ retired), gets its own record.
   in windows of 20,000 events; `TELEGRAM_OWNER_ID` and `TELEGRAM_GROUP_IDS`;
   and `telegram_chat_observations` and `telegram_topic_registrations`, which
   step 2b-1 keeps read-only and step 2b-2 drops. It sets a private chat's
-  account and a group's `is_forum` from what it reads. It only inserts, so a
-  second run changes nothing (a test checksums every policy table before and
+  account, a group's `is_forum` and the owner's last refresh (its answer, name
+  and username, in `chat_details`) from what it reads. It only inserts, with
+  one fill: a private chat whose row names no person, as a reset or an
+  owner-record import restores it, gets its person's account, unless another
+  private chat already names that person; Answer privately needs it. A second
+  run changes nothing (a test checksums every policy table before and
   after). `owner`, `*`, `system`, `desktop:*`, import scopes and digests get no
   row. After the first seeding, a chat found only in the environment or the
   archive gets a digest id. A background loop then fills memberships from the
   archive in batches of 500, by the same ordering rule. The app logs
   `chat_records_ready` with how long seeding took, and its health check allows
-  120 s at first start.
+  120 s at first start. `nocheh deploy` waits 180 s for the app to be healthy;
+  if a very large archive takes longer, the deploy reports a timeout while the
+  app keeps seeding and starts serving when it is done. Nothing restarts an app
+  that is still starting, and a manual restart reads the archive again from
+  the start.
 
 ## What is served in step 2b-1
 
@@ -184,7 +203,8 @@ retired), gets its own record.
   `active` chat and a topic of one. A list that cannot be read serves nothing.
 - Group access (`TELEGRAM_GROUP_ACCESS`) is looked up under every Telegram id
   a group has had, merged with deny winning, so an upgrade keeps who may talk
-  there.
+  there. The owner's conversation context shows the same merged lists
+  (`groupAccessOf`).
 
 ## Reads and rules on chat rows
 
@@ -244,7 +264,9 @@ retired), gets its own record.
 - **Every front door checks the binding.** nocheh-telegram accepts a reply or
   presence only when the binding names that Telegram chat and topic. Hermes
   runs a turn only when the binding names the update's chat and topic, by its
-  Telegram id now or before, and both agree with the served list.
+  Telegram id now or before, and both agree with the served list. The owner's
+  own turn is answered only in the owner's private chat itself, never in a
+  topic of it, by both.
 - **Translation at the front door.** Storage names a chat by its Nocheh id
   everywhere. `src/frontdoor/telegram.ts` alone translates:
   `telegramTarget`/`telegramAddress` give a chat's current Telegram id and its
@@ -279,7 +301,11 @@ retired), gets its own record.
   records its chat, so a topic inherits its chat's preferences without reading
   its id; an older marker finds its chat in the served list.
 - **Runtime profiles, cards and destinations** are named from `chats` rows and
-  `chat_details`, not from the read-only Telegram tables.
+  `chat_details`, not from the read-only Telegram tables. As before step 2b, a
+  runtime profile's label and an action destination's name are the title and
+  username of the owner's last refresh (`chat_details.refreshed_title`,
+  `refreshed_username`), never a title a later update showed, and a card uses
+  that refresh when no captured message names the group.
 - **Reset preferences.** The reset's preference snapshot
   (`nocheh-runtime-preferences-v2`) keys each profile by its chat's Nocheh id
   and records the owner's chat, each served group with every Telegram id it
@@ -291,10 +317,10 @@ retired), gets its own record.
 - Conversations, people, topics and the Telegram refresh read `chats`,
   `chat_details`, `chat_accounts` and `chat_memberships`, not the archive or
   the old Telegram tables. People who left a group are listed as left. A
-  refresh writes a name only where no captured update gave one, never changes
-  whether a chat is served, and, when Telegram reports a group migrated to an
-  id that already names another chat, keeps the migrated notice and asks
-  nothing more. A topic name the owner gives stays over the one Telegram
+  refresh writes a name only where no captured update gave one, keeps its own
+  answer apart in `chat_details`, never changes whether a chat is served, and,
+  when Telegram reports a group migrated to an id that already names another
+  chat, keeps the migrated notice and asks nothing more. A topic name the owner gives stays over the one Telegram
   shows; removing it brings Telegram's back. A chat with no original here
   that is neither served nor configured is kept out of the owner's own turns,
   as a stranger's chat is.
@@ -316,8 +342,9 @@ retired), gets its own record.
   numeric. Version 1 files still read.
 - Owner records and reset snapshots (`nocheh-reset-configuration-v2`) carry
   `chats` and `chat_ids`. Only names the owner gave travel; an imported chat
-  arrives off, with no account; a row that would break the directory is
-  refused. Older records import through `legacyChat`.
+  arrives off, with no account (a private chat gets its person back at the
+  next start or its next live message); a row that would break the directory
+  is refused. Older records import through `legacyChat`.
 
 </decision>
 
@@ -373,11 +400,22 @@ retired), gets its own record.
   tasks, switches, allowed people and history.
 - Every read depends on chat rows being there: the app seeds before it
   serves, and the security service loads its directory before it serves.
-- Small owner-visible changes: Chats shows a "Telegram ID" label and "Unknown
-  chat"; the people list shows people who left; a topic name the owner gave
-  stays over Telegram's; and a send or action to a topic Nocheh has never seen
-  is refused until a message there, or adding the topic in Chats by link or
-  number, makes it known.
+- Small owner-visible changes:
+  - Chats: a chat's header reads "Telegram ID -1001000000001" (with the
+    earlier id after an upgrade) where it read "ID -1001000000001/topic/7";
+    an id the directory lacks is "Unknown chat"; the people list shows people
+    who left; a topic name the owner gave stays over Telegram's.
+  - The chat picker no longer offers "Use the ID …" for a typed id Nocheh has
+    not seen, since a Telegram id is no longer a chat id; its placeholder and
+    the chat list's say "name or Telegram ID", and its empty text says "No
+    chats match. Search by name or Telegram ID."
+  - A served group's Topics card shows only for a forum or a group topics were
+    already seen in, where main showed it for every supergroup.
+  - Tasks and task settings name a chat the dashboard cannot find "A group",
+    where main said "A topic" for a topic-shaped id.
+  - A send or action to a topic Nocheh has never seen is refused until a
+    message there, or adding the topic in Chats by link or number, makes it
+    known.
 - **What is lost or deferred:**
   - An upgrade whose new group's messages are captured in an earlier spool
     batch than both upgrade messages stays two chats, as an upgrade before step
@@ -389,10 +427,28 @@ retired), gets its own record.
   - After a rollback to main, a private answer offered under step 2b (its
     asker stored as a `chat_accounts` id) cannot be pressed (`only_asker`) and
     expires within a day. Rows main writes after the rollback keep working.
-    Chats first seen under step 2b have digest ids main does not know, so it
-    treats them as private and shares nothing with them. Topic names given and
-    refreshes made under step 2b live only in `chats` rows, so main does not
-    show them; the old Telegram tables are as they were.
+    A chat first seen under step 2b has a digest id main does not know. Main
+    still serves such a group under its Telegram id from
+    `TELEGRAM_GROUP_IDS`, but everything step 2b kept under the digest is
+    out of its reach: the group answers with no project, a tool the owner
+    turned off for it reads as the every-chat setting (on by default), its
+    sharing rules, tasks and Answer privately are gone, and its
+    memories are not read. Redeploying step 2b brings them back; what main
+    set for the group in between is not applied (below). Topic names given
+    and refreshes made under step 2b live only in `chats` and `chat_details`
+    rows, so main does not show them; the old Telegram tables are as they
+    were.
+  - After a redeploy that follows a rollback, a value main stored under the
+    Telegram id of a chat step 2b had given a digest (a project, a tool
+    switch or a rule set during the rollback) gets no row of its own, so it
+    is not applied, and nothing says so; the owner sets it again. A topic
+    value under that Telegram id gets its row when the topic has none yet.
+  - Formats written under step 2b do not read on main: an owner export
+    (it holds `chats` and `chat_ids`; main refuses it with
+    `owner_format_unsupported`), a reset snapshot
+    (`nocheh-reset-configuration-v2`; main reads only v1), and send records
+    of version 2 still in the spool at rollback, which main drops from
+    System › Sent to apps.
   - Changed column types stay after a rollback: `chat_sends.topic` and
     `message_id` are text and `reaction_states.update_id` is numeric, with
     their values unchanged.
