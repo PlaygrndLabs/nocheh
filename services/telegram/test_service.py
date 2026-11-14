@@ -239,6 +239,19 @@ class ServiceTests(unittest.TestCase):
             self.service.reply({**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, answer=answer, app=binding(GROUP))})
         self.assertEqual(len(self.sent()), 1)
 
+    def test_the_owners_turn_is_answered_only_in_the_owners_chat_never_in_a_topic_of_it(self):
+        # A topic of the owner's private chat, as the app lists it: Hermes runs the owner's turns only in the chat itself,
+        # so the bot refuses a pass bound there, as it did before step 2b, and nothing is shown or sent.
+        topic = 'd' * 64
+        self.service.policy = self.policy = Policy.of(True, OWNER, [GROUP, (NEW, NEW_TG)], {}, topics=[*TOPICS, (topic, OWNER, '3')], old={NEW: [NEW_OLD]})
+        self.assertEqual(self.policy.current().binding(topic), {'app': 'telegram', 'chat': OWNER, 'topic': '3'})
+        body = self.turn(25, OWNER, 3, space=topic, text='In a topic of my chat')
+        for call in (self.service.presence, self.service.reply):
+            with self.subTest(call.__name__), self.assertRaises(ValueError):
+                call(body)
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(self.service.reply(self.turn(26, text='In my chat'))['state'], 'done')
+
     def test_presence_shows_typing_and_eyes_then_thumbs_up(self):
         body = self.turn(12, GROUP, 1, text='done')
         self.assertEqual(self.service.presence(body), {'state': 'shown'})

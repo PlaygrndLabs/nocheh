@@ -176,7 +176,8 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
 
     It binds a reply or presence to the chat and topic the turn was admitted for (ADR-0250): its app binding names this
     Telegram chat and topic, and the served list agrees that its space (a Nocheh chat id) is there now and belongs to its
-    scope: a served group, or for the owner's own turn (no scope) the owner's private chat. Whether the space still
+    scope: a served group, or for the owner's own turn (no scope) the owner's private chat itself, never a topic of it, as
+    Hermes runs the owner's turns only there. Whether the space still
     allows delivery is asked separately, per request (check_delivery_policy). A private answer's pass names its record
     and reads as the owner's private chat, never as the owner, so its scope and space are that chat; anywhere else it is
     refused (ADR-0249)."""
@@ -197,7 +198,7 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
         if answer is not None:
             if not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer) or not served.owner_chat or scope!=served.owner_chat or space!=scope:raise ValueError()
         elif scope is None:
-            if not served.is_owner(space):raise ValueError()
+            if not served.owner_chat or space!=served.owner_chat:raise ValueError()
         elif served.group(scope)!=scope or space!=scope and served.parent(space)!=scope:raise ValueError()
         return claims,served
     except Exception:raise ValueError('archive_capability_scope_mismatch') from None
