@@ -49,28 +49,35 @@ export class TelegramChatRepository {
         try{result=await this.call('telegram.chat',{chat_id:external},20000);}catch{throw new HttpError(503,'telegram_refresh_unavailable');}
         const state=states.includes(String(result.state))?String(result.state):'not_found';
         const moved=state==='migrated'&&isTelegramChat(result.migrate_to_chat_id)&&result.migrate_to_chat_id!==external?result.migrate_to_chat_id as string:null;
-        const row=await this.record(group.id,external,state,moved,result);
+        const {row,follow}=await this.record(group.id,external,state,moved,result);
         chats.push(row);
-        if(!moved)break;
+        // Asked again only under an id this chat now has: an id that names another chat keeps the 'migrated' answer.
+        if(!moved||!follow)break;
         linked=true;external=moved;
       }
     }
-    if(linked)await reloadChats();
+    // This process's directory shows the names and ids just saved (a name decides nothing, but cards and lists show it).
+    if(linked||chats.length)await reloadChats();
     return {chats};
   }
 
-  /** Writes one answer from Telegram: presentation on the chat row, the refresh outcome in chat_details. */
-  private async record(chat:string,external:string,state:string,moved:string|null,result:Record<string,unknown>):Promise<ChatObservation> {
+  /**
+   * Writes one answer from Telegram: presentation on the chat row, the refresh outcome in chat_details. `follow` says
+   * whether the id Telegram moved the chat to is now this chat's (linked here, or already), so it may be asked next.
+   */
+  private async record(chat:string,external:string,state:string,moved:string|null,result:Record<string,unknown>):Promise<{row:ChatObservation;follow:boolean}> {
     const db=await this.control.connect();
     try {
       await db.query('BEGIN');
       const available=state==='available',type=available?text(result.type,32):null,title=available?text(result.title,256):null;
       const username=available?text(result.username,64)?.replace(/^@+/,'')||null:null,isForum=available?result.is_forum===true:null;
+      let follow=false;
       if(moved) {
         const connection=await ensureConnection(db);
         // Only the id this chat was asked under moves; an id that already names another chat stays apart.
         const asked=await chatOfApp(db,connection,external);
         if(asked?.id===chat&&await this.chats.migrate(db,connection,external,moved,this.chats.policy()))await bumpChatRevision(db);
+        follow=(await chatOfApp(db,connection,moved))?.id===chat;
       }
       if(available) {
         // A name a captured update showed stays preferred; the refresh names a chat Telegram never named in one.
@@ -82,7 +89,7 @@ export class TelegramChatRepository {
         ON CONFLICT(chat_id) DO UPDATE SET username=CASE WHEN $3='available' THEN excluded.username ELSE chat_details.username END,
           refreshed_state=$3,refreshed_to=$4,refreshed_at=now() RETURNING refreshed_at`,[chat,username,state,moved])).rows[0];
       await db.query('COMMIT');
-      return {chat_id:chat,external,state,chat_type:type,title,username,is_forum:isForum,migrate_to_chat_id:moved,observed_at:saved.refreshed_at.toISOString()};
+      return {row:{chat_id:chat,external,state,chat_type:type,title,username,is_forum:isForum,migrate_to_chat_id:moved,observed_at:saved.refreshed_at.toISOString()},follow};
     } catch(error){await db.query('ROLLBACK');throw error;}
     finally{db.release();}
   }
