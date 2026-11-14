@@ -19,16 +19,8 @@ import {fileURLToPath} from 'node:url';
 type Owner='A'|'B'|'C'|'D'|'adapter'|'legacy'|'unrelated';
 /** [file, owner, matching lines, what they are]. One entry per file and owner, so each part edits only its own lines. */
 const allowlist:readonly (readonly [string,Owner,number,string])[]=[
-  // Part A: chat records, seeding and the directory
-  ['services/telegram/sends.py','A',1,'a send record\'s chat as a Telegram number'],
-  ['src/stores/owner-portability.ts','A',1,'an older record\'s topic assignment found by its id'],
-  ['src/stores/owner-supervision.ts','A',8,'the conversation directory\'s archive scan and /topic/ SQL; outsiders by shape'],
-  ['src/stores/reset-setup.ts','A',3,'reset snapshot: policy ids and tool spaces'],
-  ['src/stores/server.ts','A',1,'the outsiders check splits a topic off its group'],
-  ['src/stores/telegram-chats.ts','A',3,'refresh observations keyed by raw group ids'],
-  ['src/stores/telegram-directory.ts','A',3,'people found by scanning group scopes in the archive'],
-  ['src/stores/telegram-topics.ts','A',3,'topic registrations keyed by a -100 id'],
-  ['tools/acceptance/reset_configuration.py','A',5,'reset snapshot spaces and topics'],
+  // Part A: chat records, seeding and the directory. Every site is gone: the conversation directory, people, refresh,
+  // topics, send records, owner records and reset snapshots read chats rows (src/stores/chats.ts).
   // Part B: reads and rules on chat rows
   ['src/assistant-policy.ts','B',1,'outsideChat decides a chat from the scope\'s shape'],
   ['src/observed-source.ts','B',1,'a Desktop export\'s topic read back out of eventSpace'],
@@ -96,6 +88,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],
   ['tools/operations/security/group_access.py','adapter',1,'a Telegram user id typed by the owner'],
   ['src/honcho.ts','legacy',1,'legacy layout audience by sign'],
+  ['tools/acceptance/reset_configuration.py','legacy',1,'chat values of the legacy layout and of a version 1 reset snapshot, read once to convert them'],
   ['tools/operations/installation/store_recovery.py','unrelated',1,'a PostgreSQL sequence value'],
 ];
 /** Whole files that are the adapter: Telegram's formats live here. */
