@@ -129,7 +129,8 @@ export class ActionCommandRepository {
       task:prompts['telegram.approval_task']??approvalTask,line:approvalLines(prompts['telegram.approval_texts'])};
   }
   /** A group's name, public username, topic flag and latest message, from its captured messages under every Telegram id it
-   *  has had, else the owner's last refresh, else its chat row; and its Telegram id now, for links (ADR-0250). */
+   *  has had, else its chat row and details (what captured updates and the owner's refreshes recorded); and its Telegram
+   *  id now, for links (ADR-0250). */
   private async chat(chat:string) {
     const external=telegramAddress(chat)?.chat_id??null,scopes=telegramScopes(chat);
     const facts={title:null as string|null,username:null as string|null,forum:null as boolean|null,message:null as string|null,external};
@@ -143,13 +144,13 @@ export class ActionCommandRepository {
       // A message links only into the chat it is in now.
       if(String(message.chat.id)===external&&/^[1-9][0-9]{0,15}$/.test(String(message.message_id)))facts.message??=String(message.message_id);
     }
-    const seen=scopes.length?(await this.access.stores.control.query(`SELECT title,username,is_forum FROM telegram_chat_observations WHERE chat_id=ANY($1::text[])
-      AND state='available' ORDER BY chat_id=$2 DESC,chat_id LIMIT 1`,[scopes,external])).rows[0]:undefined;
-    facts.title??=clean(seen?.title);facts.username??=clean(seen?.username,32);if(typeof seen?.is_forum==='boolean')facts.forum??=seen.is_forum;
-    facts.title??=clean(chats().get(chat)?.title);
+    const row=(await this.access.stores.control.query(`SELECT c.title,c.is_forum,d.username FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id
+      WHERE c.id=$1`,[chat])).rows[0];
+    facts.title??=clean(row?.title);facts.username??=clean(row?.username,32);if(typeof row?.is_forum==='boolean')facts.forum??=row.is_forum;
     return facts;
   }
-  /** A topic's name from its creation or latest edit, or the name the owner gave it, or its chat row's. `topic` is its key. */
+  /** A topic's name from its creation or latest edit, else its topic row's: the name the owner gave it, or the one Telegram
+   *  last showed. `topic` is its key. */
   private async topicName(chat:string,topic:string):Promise<string|null> {
     const scopes=telegramScopes(chat);
     const named=(await this.access.stores.archive.query(`SELECT name FROM (
@@ -160,9 +161,8 @@ export class ActionCommandRepository {
             AND kind IN ('telegram_update','telegram_delivered_message') AND pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb')) e) messages
         WHERE m->>'message_thread_id'=$2) topics WHERE name IS NOT NULL ORDER BY edited DESC,received_at DESC LIMIT 1`,[scopes,topic])).rows[0]?.name;
     if(clean(named))return clean(named);
-    const added=(await this.access.stores.control.query('SELECT name FROM telegram_topic_registrations WHERE chat_id=ANY($1::text[]) AND topic_id=$2 ORDER BY updated_at DESC LIMIT 1',
-      [scopes,Number(topic)])).rows[0]?.name;
-    return clean(added)??clean(chats().get(chats().topicOf(chat,topic))?.title);
+    const row=(await this.access.stores.control.query(`SELECT title FROM chats WHERE kind='topic' AND parent_id=$1 AND topic_key=$2`,[chat,topic])).rows[0];
+    return clean(row?.title);
   }
   /** A chat's or topic's name (`space`, a chat id), linked to a message in it, and to its topic and the topic's name when
    *  there is one. */

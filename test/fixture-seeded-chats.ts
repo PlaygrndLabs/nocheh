@@ -1,7 +1,9 @@
 // The chat directory a store test gets when it installs none (ADR-0250). Synthetic values only.
+import type pg from 'pg';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {chatDirectory,chats,installChatsForTest,type Chat,type ChatAddress,type ChatApp,type ChatDirectory,type ChatKind} from '../src/chats.js';
 import {legacyChat} from '../src/chats-telegram.js';
+import {ensureConnection} from '../src/stores/chats.js';
 import {legacyChats} from './fixture-groups.js';
 
 type Policy=Pick<AssistantPolicy,'owner_id'|'owner_chat'|'group_ids'>;
@@ -54,4 +56,27 @@ export function seedChatsForTest(policy:()=>Policy):void {
   const installed=chats();
   if(installed.all().length&&!seededDirectories.has(installed))return;
   installChatsForTest(seededDirectory(policy));
+}
+
+type Names={title?:string|null;title_source?:'observed'|'refreshed'|'owner';is_forum?:boolean;username?:string|null;refreshed?:boolean};
+/**
+ * Tests only: the chats row a store test's directory names `id` by, with the name, public username and forum flag that
+ * capture, an owner's refresh or the owner would have recorded there (ADR-0250). Readers of chat names (approval cards,
+ * runtime profile labels, send destinations) read these rows, not the old Telegram tables. A topic value also gets its
+ * group's row. `refreshed` marks the owner's refresh as answered, as Telegram's refresh does. Names decide nothing.
+ */
+export async function chatRowForTest(control:Pick<pg.Pool,'connect'>,id:string,names:Names={}):Promise<void> {
+  const value=legacyChat(id);if(!value)throw Error('chatRowForTest takes an old-shaped chat value');
+  const db=await control.connect();
+  try {
+    const connection=await ensureConnection(db);
+    if(value.parent_id!==null)await db.query(`INSERT INTO chats(id,connection_id,kind,state) VALUES($1,$2,'group','off') ON CONFLICT DO NOTHING`,[value.parent_id,connection]);
+    await db.query(`INSERT INTO chats(id,connection_id,kind,parent_id,topic_key,state) VALUES($1,$2,$3,$4,$5,'off') ON CONFLICT DO NOTHING`,
+      [id,connection,value.kind,value.parent_id,value.topic_key]);
+    await db.query(`UPDATE chats SET title=$2,title_source=CASE WHEN $2::text IS NULL THEN NULL ELSE $3 END,is_forum=$4,updated_at=now() WHERE id=$1`,
+      [id,names.title??null,names.title_source??'refreshed',names.is_forum===true]);
+    await db.query(`INSERT INTO chat_details(chat_id,username,refreshed_state,refreshed_at) VALUES($1,$2,$3,CASE WHEN $3::text IS NULL THEN NULL ELSE now() END)
+      ON CONFLICT(chat_id) DO UPDATE SET username=excluded.username,refreshed_state=excluded.refreshed_state,refreshed_at=excluded.refreshed_at`,
+      [id,names.username??null,names.refreshed===false?null:'available']);
+  } finally{db.release();}
 }

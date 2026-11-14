@@ -4,7 +4,6 @@ import {HttpError,object,string} from '../http.js';
 import {validateSpace} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
-import {telegramScopes} from '../frontdoor/telegram.js';
 import type {SourceAccessRepository} from './access.js';
 import type {GuardBinding} from './guards.js';
 import {OwnerCommands} from './owner-commands.js';
@@ -56,13 +55,10 @@ export class RuntimeProfileRepository {
   /** Readable names for the owner's chat and each group. The name is only how the dashboard finds a
    * profile; the chat link stays its logical_profile, so a renamed group keeps its profile. */
   private async labels(owner:string,groups:string[],taken:Set<string>):Promise<Map<string,Label>>{
-    // A group's name is its chat row's title, else the owner's last refresh under any Telegram id it has had.
-    const ids=new Map(groups.map(group=>[group,telegramScopes(group)]));
-    const rows=(await this.control.query("SELECT chat_id,title,username FROM telegram_chat_observations WHERE state='available' AND chat_id=ANY($1)",
-      [[...ids.values()].flat()])).rows;
-    const seen=new Map(groups.map(group=>{const own=ids.get(group)!,found=rows.filter(row=>own.includes(String(row.chat_id)));
-      const title=chats().get(group)?.title??found.find(row=>row.title)?.title??null;
-      return [group,{title,username:found.find(row=>row.username)?.username??null}];}));
+    // A group is named once the owner has refreshed it and Telegram answered, as before step 2b: by its chat row's name
+    // and public username (ADR-0250; the old refresh table is only the seeder's now). A group never refreshed keeps its code.
+    const seen=new Map((await this.control.query(`SELECT c.id,c.title,d.username FROM chats c JOIN chat_details d ON d.chat_id=c.id
+      WHERE c.id=ANY($1::text[]) AND d.refreshed_state='available'`,[groups])).rows.map(row=>[row.id as string,{title:row.title as string|null,username:row.username as string|null}]));
     const labels=new Map<string,Label>([[owner,{name:'private-chat',display_name:'Private chat'}]]);taken.add('private-chat');
     for(const group of groups){if(group===owner)continue;
       const chat=seen.get(group),code=digest(group),readable=slug(chat?.title)||slug(chat?.username);

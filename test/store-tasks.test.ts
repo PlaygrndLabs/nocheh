@@ -8,6 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
+import {chatRowForTest} from './fixture-seeded-chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {groupSpace,groupSpaces,readSet} from '../src/spaces.js';
 import {installChatsForTest} from '../src/chats.js';
@@ -588,10 +589,10 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     const padded='-0'+group.slice(1);
     for(const space of [group,forum+'/topic/7','456',padded,padded+'/topic/7'])
       await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[space,launch]);
+    // The groups' names as the owner's refresh recorded them, and the topic name the owner gave (ADR-0250: chats rows).
     for(const [chat,title,forumChat] of [[group,'Launch team',false],[forum,'Plans team',true]] as const)
-      await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
-        VALUES($1,'available','supergroup',$2,NULL,$3,NULL,now()) ON CONFLICT DO NOTHING`,[chat,title,forumChat]);
-    await stores.control.query("INSERT INTO telegram_topic_registrations(chat_id,topic_id,name) VALUES($1,7,'Venue')",[forum]);
+      await chatRowForTest(stores.control,chat,{title,is_forum:forumChat});
+    await chatRowForTest(stores.control,forum+'/topic/7',{title:'Venue',title_source:'owner',refreshed:false});
     // The chats a card names are the ones groupSpace counts as groups: the same test, in SQL (ADR-0242).
     const spaces=[group,forum+'/topic/7','456','123/topic/5','-0123','-0','-0123/topic/7','-12345678901234567890','-20/topic/abc','-20/topic/0','desktop:personal_chat:9','system',''];
     assert.deepEqual((await stores.control.query(`SELECT x=ANY($2::text[]) AS grouped FROM unnest($1::text[]) WITH ORDINALITY u(x,n) ORDER BY n`,[spaces,groupSpaces()])).rows.map(row=>row.grouped),
