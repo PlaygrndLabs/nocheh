@@ -75,8 +75,14 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   closed).
 
   Build, unit, store, dashboard, browser and Python checks pass, apart from failures that also
-  fail on main. Pending:
-  - the whole full tester as a release run, with `project_groups_stay_apart` not yet run;
+  fail on main, and so do the step's 29 full-tester scenarios on the fake Telegram (the ones
+  on projects, tasks, sharing and approval buttons; `group_members`,
+  `project_groups_stay_apart`, `private_chat_stays_out_of_groups`, the private-mark sweep and
+  `dashboard_pages` again after the review follow-ups). `project_groups_stay_apart` fails on a
+  build that lets a group turn read every group of its project: at
+  `group_answer_uses_only_that_group` when its search does, and at
+  `group_task_view_never_shows_another_groups_task` when its task list does. Pending:
+  - the whole full tester as a release run;
   - live checks only a real phone can answer: whether each Telegram client (iOS, Android,
     Desktop, Web) sends `/start <id>` by itself when the private chat with the bot already
     exists, whether Telegram accepts the tap's `t.me/<bot>?start=<id>` link in
