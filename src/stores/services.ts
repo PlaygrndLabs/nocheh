@@ -6,7 +6,7 @@ import {readSetOf,recallScope,servedGroups} from '../spaces.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
-import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
+import {ownerChat,settleTelegramChat,type AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
 import {groupReplies,type GroupReplies} from '../telegram-addressing.js';
 import type {Brain} from '../brain/brain.js';
@@ -82,7 +82,10 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const access=new SourceAccessRepository(stores,archive,guards,options.policy,retirements,reactions);
   const prepared=new PreparedContextRepository(derived,guards,async(principal,binding)=>{
     try {
-      const source=(await archive.captured(principal.turnEvent!)).reference;
+      const captured=await archive.captured(principal.turnEvent!),source=captured.reference;
+      // The turn's chat as another process recorded it a moment ago (a served group's new Telegram id after an upgrade):
+      // this process, the security service included, reads it once its chat directory has looked again (ADR-0250).
+      await settleTelegramChat(captured);
       if(!await access.canRead(principal,source,binding))throw new HttpError(403,'turn_source_denied');return source;
     } catch(error) {if(!(error instanceof HttpError)||error.code!=='source_not_found')throw error;}
     const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind IN ('scheduled_trigger','background_run')",[principal.turnEvent])).rows[0];

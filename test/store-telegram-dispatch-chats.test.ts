@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
-import {chats} from '../src/chats.js';
+import {chats,installChats} from '../src/chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
@@ -66,6 +66,7 @@ test('a group Telegram upgraded and a forum topic first seen after step 2b are a
     await say(NG2_OLD_TG,'Count me in',ALICE);
 
     // Telegram upgrades it: the old chat says where it went, the new one where it came from. One chat, two ids.
+    const beforeUpgrade=chats();
     await say(NG2_OLD_TG,null,ALICE,{migrate_to_chat_id:Number(NG2_TG)});
     await say(NG2_TG,null,ALICE,{migrate_from_chat_id:Number(NG2_OLD_TG)});
     assert.equal(chats().resolve('telegram',NG2_TG),NG2,'the new id names the same chat');
@@ -83,6 +84,13 @@ test('a group Telegram upgraded and a forum topic first seen after step 2b are a
     assert.ok(!JSON.stringify(turn.recent_group).includes(NG2_OLD_TG)&&!JSON.stringify(turn.recent_group).includes(NG2_TG),'no Telegram ID in them');
     const ng2=pass(turn);
     assert.deepEqual([ng2.scope,ng2.space,ng2.app],[NG2,NG2,{app:'telegram',chat:NG2_TG,topic:null}],'the pass names the Nocheh chat and where it is now');
+    // The security service binds this turn with its own directory, which may still be the one from before the upgrade:
+    // it reads the turn once that directory has looked again, never refusing it as a chat it does not know.
+    // Nothing here looks the new id up first: a lookup that misses would start a reload of its own.
+    installChats(beforeUpgrade);
+    assert.equal(chats(),beforeUpgrade,'a directory from before the upgrade');
+    assert.equal((await services.turns.binding(ng2)).scope,NG2,'the upgraded group\'s turn is bound');
+    assert.equal(chats().resolve('telegram',NG2_TG),NG2,'after the directory looked again');
     assert.equal(replyTo(after).chat_id,NG2_TG);assert.equal(replyTo(after).topic,undefined);
 
     // NG1 is a forum: a topic message makes the group and its topic, and its turn is the topic's.
