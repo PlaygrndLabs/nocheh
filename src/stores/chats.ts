@@ -318,9 +318,7 @@ export async function loadChatSnapshot(control:pg.Pool,policy:Pick<AssistantPoli
   const db=await control.connect();
   try {
     await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const chatRows=(await db.query<ChatRow>(`SELECT c.id,n.app,c.kind,c.parent_id,c.topic_key,c.state,c.title,c.is_forum,c.account_id,c.app_type
-      FROM chats c JOIN chat_connections n ON n.id=c.connection_id`)).rows;
-    const ids=(await db.query<ChatIdRow>(`SELECT n.app,i.external_id,i.chat_id,i.state FROM chat_ids i JOIN chat_connections n ON n.id=i.connection_id`)).rows;
+    const {chats:chatRows,ids}=await readChatRows(db);
     const revision=Number((await db.query('SELECT revision FROM chat_directory_state WHERE singleton')).rows[0]?.revision??0);
     const epoch=Number((await db.query('SELECT epoch FROM guard_state WHERE singleton')).rows[0]?.epoch??0);
     await db.query('COMMIT');
@@ -328,6 +326,21 @@ export async function loadChatSnapshot(control:pg.Pool,policy:Pick<AssistantPoli
     return {chats:chatRows,ids,owner_chat:named??ownerChat(policy),epoch,revision};
   } catch(error){await db.query('ROLLBACK').catch(()=>{});throw error;}
   finally{db.release();}
+}
+
+/** Every chats and chat_ids row as `db` sees them, with each connection's app. */
+async function readChatRows(db:Db):Promise<{chats:ChatRow[];ids:ChatIdRow[]}> {
+  return {chats:(await db.query<ChatRow>(`SELECT c.id,n.app,c.kind,c.parent_id,c.topic_key,c.state,c.title,c.is_forum,c.account_id,c.app_type
+      FROM chats c JOIN chat_connections n ON n.id=c.connection_id`)).rows,
+    ids:(await db.query<ChatIdRow>(`SELECT n.app,i.external_id,i.chat_id,i.state FROM chat_ids i JOIN chat_connections n ON n.id=i.connection_id`)).rows};
+}
+/**
+ * Throws unless the rows `db` sees (its own uncommitted writes included) still make a valid directory: for a writer of
+ * rows that did not come from this installation (an owner record), so one bad row can never stop every later load.
+ */
+export async function assertChatDirectory(db:Db):Promise<void> {
+  try{chatDirectory({...await readChatRows(db),owner_chat:null});}
+  catch(error){if(error instanceof Error&&error.message.startsWith('invalid_chat_directory:'))throw new HttpError(400,'invalid_chat_directory');throw error;}
 }
 
 /**

@@ -126,7 +126,8 @@ test('owner data travels with its types, and nothing imported acts by itself',
     assert.deepEqual([again.added,again.unchanged,again.kept],[0,2,0]);
     assert.equal((await to.restore(owner,[registration(9,'Another name')])).kept,1,'the owner\'s name here stays');
     // An export carries the chats and their app ids, parents first; importing it elsewhere gives the same chats, off.
-    await target.query(`UPDATE chats SET state='active' WHERE id='-10042'`);
+    // Only the owner's own names travel: a name Telegram showed was written by the chat's people.
+    await target.query(`UPDATE chats SET state='active',title='Shown by Telegram',title_source='observed' WHERE id='-10042'`);
     const chatRecords:OwnerRecord[]=[];
     for(const table of ['chats','chat_ids']){let after:string|null=null;do{const page=await to.page(owner,table,after,2);chatRecords.push(...page.records);after=page.next;}while(after);}
     assert.deepEqual(chatRecords.map(record=>record.table+':'+record.key.join('/')),['chats:group/-10042','chats:group/-10073','chats:topic/-10042/topic/7',
@@ -137,6 +138,16 @@ test('owner data travels with its types, and nothing imported acts by itself',
       [['-10042',null,'off'],['-10042/topic/7','Seed beds','off'],['-10042/topic/9','Watering','off'],['-10073',null,'off']]);
     let same=0;for(const record of chatRecords)same+=(await from.restore(owner,[record])).unchanged;
     assert.equal(same,chatRecords.length,'a second import changes nothing');
+    // A record that would break the directory every process loads (a topic of a topic, an app id on a topic) is refused,
+    // and nothing of it stays.
+    const connection=(await source.query('SELECT id FROM chat_connections')).rows[0].id as string,revision=async()=>Number((await source.query('SELECT revision FROM chat_directory_state')).rows[0].revision);
+    const at=await revision(),nested={id:'c'.repeat(64),connection_id:connection,kind:'topic',parent_id:'-10042/topic/7',topic_key:'3',title:null,title_source:null,is_forum:false,state:'off'};
+    await assert.rejects(from.restore(owner,[sealed('chats',['topic',nested.id],nested)]),/invalid_owner_record_value/);
+    const onTopic={connection_id:connection,external_id:'-10099',chat_id:'-10042/topic/7',state:'current',reason:null,changed_at:'2026-10-01T00:00:00Z'};
+    await assert.rejects(from.restore(owner,[sealed('chat_ids',[connection,'-10099'],onTopic)]),/invalid_owner_record_value/);
+    assert.equal(Number((await source.query(`SELECT count(*) FROM chats WHERE id=$1`,[nested.id])).rows[0].count),0);
+    assert.equal(Number((await source.query(`SELECT count(*) FROM chat_ids WHERE external_id='-10099'`)).rows[0].count),0);
+    assert.equal(await revision(),at);
   } finally {
     for(const pool of [...pools,...app])await pool.end();
     for(const schema of schemas)await setup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);

@@ -75,10 +75,16 @@ test('someone Nocheh does not serve costs no download or model call, is never re
     const chat=async(external:string)=>(await stores.control.query('SELECT chat_id FROM chat_ids WHERE external_id=$1',[external])).rows[0]?.chat_id as string;
     const [first,second,elsewhere,mine,ours]=await Promise.all(['555','556',unselected,'123',group].map(chat));
     assert.equal(first,chatIdFor('telegram','555'));
+    // A chat row with no original here at all (an owner record from another installation, say) has nothing the owner
+    // brought in, so it is left out the same way, named or not.
+    const connection=(await stores.control.query(`SELECT id FROM chat_connections WHERE app='telegram'`)).rows[0].id,arrived=chatIdFor('telegram','558');
+    await stores.control.query(`INSERT INTO chats(id,connection_id,kind,title,title_source,state) VALUES($1,$2,'private','Someone <instructions>','observed','off')`,[arrived,connection]);
+    await stores.control.query(`INSERT INTO chat_ids(connection_id,external_id,chat_id,state) VALUES($1,'558',$2,'current')`,[connection,arrived]);
     const hidden=await s.supervision.outsiders(policy());
-    assert.deepEqual([...hidden].sort(),[first,second,elsewhere].sort());
+    assert.deepEqual([...hidden].sort(),[first,second,elsewhere,arrived].sort());
     const listed=(await s.supervision.conversations(dashboard,{limit:100},hidden)).items.map(item=>item.space_id);
-    assert.ok(listed.includes(mine!)&&listed.includes(ours!)&&!listed.includes(first!)&&!listed.includes(elsewhere!));
+    assert.ok(listed.includes(mine!)&&listed.includes(ours!)&&!listed.includes(first!)&&!listed.includes(elsewhere!)&&!listed.includes(arrived));
+    assert.ok(await s.supervision.outsider(policy(),arrived));
     assert.ok((await s.supervision.conversations(dashboard,{limit:100})).items.some(item=>item.space_id===first));
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

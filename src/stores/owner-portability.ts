@@ -6,7 +6,7 @@ import type {StorePools} from './connections.js';
 import {chats as directory} from '../chats.js';
 import {legacyChat,legacyChatValue} from '../chats-telegram.js';
 import {ChatSeeder,chatValuesOf} from './chat-seed.js';
-import {bumpChatRevision,ensureConnection,reloadChats} from './chats.js';
+import {assertChatDirectory,bumpChatRevision,ensureConnection,reloadChats} from './chats.js';
 
 /**
  * The owner's own work and choices in the control store, which the derivative
@@ -181,7 +181,11 @@ export class OwnerPortabilityRepository {
           }
           const same=(await db.query(`SELECT (SELECT to_jsonb(x) FROM json_populate_record(NULL::${record.table},$1::json) x)-$${definition.key.length+2}::text[]
             =to_jsonb(t)-$${definition.key.length+2}::text[] AS same FROM ${record.table} t WHERE ${match}`,[JSON.stringify(row),...record.key,columns.filter(name=>!present.includes(name))])).rows[0];
-          if(inserted&&(record.table==='chats'||record.table==='chat_ids')){await bumpChatRevision(db);chatsAdded=true;}
+          // A chat row from elsewhere must leave a directory every process can still load (ADR-0250).
+          if(inserted&&(record.table==='chats'||record.table==='chat_ids')){
+            await assertChatDirectory(db).catch(error=>{throw error instanceof HttpError?new HttpError(400,'invalid_owner_record_value'):error;});
+            await bumpChatRevision(db);chatsAdded=true;
+          }
           await db.query('COMMIT');
           if(inserted)added++;else if(same?.same)unchanged++;else kept++;
         } catch(error){await db.query('ROLLBACK').catch(()=>{});throw error;}
@@ -194,7 +198,9 @@ export class OwnerPortabilityRepository {
   private safe(table:string,row:Record<string,unknown>):Record<string,unknown> {
     if(table==='sharing_rules')return {...row,enabled:false};
     // A chat arrives off and names no person or add of this installation's; the app's start serves it as its settings say.
-    if(table==='chats')return {...row,state:'off',account_id:null,added_by_account_id:null};
+    // Only a name the owner gave travels: a name Telegram showed was written by the chat's people, maybe strangers.
+    if(table==='chats')return {...row,state:'off',account_id:null,added_by_account_id:null,
+      ...(row.title_source==='owner'?{}:{title:null,title_source:null})};
     // A tool switch arrives off or inherited, never on: an import never turns a tool on that this installation turned off.
     // Only a real false stays off; anything else, such as "t" or 1 that the database would read as on, arrives inherited.
     if(table==='chat_tool_settings')return Object.fromEntries(Object.entries(row).map(([key,value])=>

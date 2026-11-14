@@ -122,7 +122,9 @@ export class OwnerSupervisionRepository {
   /**
    * Live chats with someone Nocheh doesn't serve that nothing of the owner's brought in: no import,
    * project, sharing rule or setting. Their names are written by strangers, so the owner's own turns
-   * never see them listed; the dashboard still does. Chats, not topics: a topic is its chat's.
+   * never see them listed; the dashboard still does. Chats, not topics: a topic is its chat's. A chat
+   * row with no original at all (from an owner record or an older refresh) has nothing the owner
+   * brought in either, and is left out the same way.
    */
   async outsiders(policy:AssistantPolicy):Promise<Set<string>> {
     if(!policy.enabled||!policy.owner_id)return new Set();
@@ -130,14 +132,14 @@ export class OwnerSupervisionRepository {
     const candidates=items.filter(item=>(item.kind==='private'||item.kind==='group')&&!item.configured&&!directory.served(item.space_id)&&
       !directory.isOwner(item.space_id)&&directory.get(item.space_id)?.app==='telegram');
     const scopes=directory.rawScopes(candidates.map(item=>item.space_id),'telegram');
-    if(!scopes.length)return new Set();
+    if(!candidates.length)return new Set();
     // Only chats every original of which came live: an import is something the owner brought in.
     const live=new Map((await this.stores.archive.query(`SELECT scope,bool_and(origin='live') AS live FROM events
       WHERE channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message') AND scope=ANY($1::text[]) GROUP BY scope`,[scopes])).rows
       .map(row=>[String(row.scope),row.live===true]));
     return new Set(candidates.filter(item=>{
       const found=directory.get(item.space_id)!.app_ids.map(label=>live.get(label.external)).filter(value=>value!==undefined);
-      return found.length>0&&found.every(Boolean);
+      return found.every(Boolean);
     }).map(item=>item.space_id));
   }
   /** Whether a conversation is, or is a topic of, one of the outsiders. */
