@@ -2,7 +2,7 @@ import type {Reader} from '../access.js';
 import {admin} from '../access.js';
 import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {groupSpace,inRecall,parentSpace,recallScope,type RecallScope} from '../spaces.js';
+import {groupSpace,inReadSet,inRecall,parentSpace,readSetGroups,readSetOf,recallScope,type ReadSet,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
@@ -10,6 +10,7 @@ import {RelationshipRepository} from './relationships.js';
 import {OwnerCommands} from './owner-commands.js';
 import type {SourceRetirementRepository} from './source-retirement.js';
 import type {ReactionStateRepository} from './reaction-state.js';
+import {bindAnswerReads} from './private-answers.js';
 
 /** Source access is independent of project membership and sharing configuration. */
 export class SourceAccessRepository {
@@ -29,10 +30,17 @@ export class SourceAccessRepository {
     // What someone Nocheh doesn't serve wrote stays out of every conversation, the owner's included.
     if(!principal.admin&&outsideChat(this.policy(),source))return false;
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
-    if(!['telegram','browser'].includes(source.channel)||source.scope!==principal.scope)return false;
-    const observed=(await this.relationships.describe(reference)).audience,scope=this.recall(principal)!;
+    if(!['telegram','browser'].includes(source.channel))return false;
+    // An answer reader reads the groups frozen in its record, and of its own private chat only its own turn's message
+    // (the /start that opened it): never the rest of that chat, and nothing without its record (ADR-0249).
+    const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
+    if(answer&&!reads)return false;
+    const own=answer&&reference.id===principal.turnEvent&&source.scope===principal.scope;
+    if(answer?!own&&!readSetGroups(reads!).includes(source.scope):source.scope!==principal.scope)return false;
+    const observed=(await this.relationships.describe(reference)).audience;
     const space=!observed||observed.topic_state==='unknown'?null:observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id;
-    const allowed=!!observed&&observed.chat_id===principal.scope&&space!==null&&inRecall(scope,space);
+    const allowed=!!observed&&observed.chat_id===source.scope&&space!==null&&
+      (answer?own?space===principal.space:inReadSet(reads!,space):observed.chat_id===principal.scope&&inRecall(this.recall(principal)!,space));
     await this.guards.assertCurrent(binding);return allowed;
   }
   async canLearn(reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
@@ -59,11 +67,24 @@ export class SourceAccessRepository {
     if(!observed||observed.topic_state==='unknown')return false;
     await this.guards.assertCurrent(binding);return true;
   }
-  /** The conversations a scoped principal recalls; null for the owner and administration, which read everything. */
+  /** The conversations a scoped principal recalls; null for the owner and administration, which read everything.
+   * For an answer reader, the asking group or topic (its read set's home): what its shared and granted context is for
+   * (ADR-0249). An answer reader whose read set was not bound reads nothing. */
   recall(principal:Reader):RecallScope|null {
     if(principal.admin||principal.scope===null)return null;
+    if(principal.answer!==undefined){if(!principal.reads)throw new HttpError(409,'private_answer_closed');return recallScope(principal.reads.home,this.policy().topic_memory);}
     return recallScope(principal.space??principal.scope,this.policy().topic_memory);
   }
+  /** The conversations a scoped principal reads, as a read set; null for the owner and administration. An answer
+   * reader reads the groups frozen in its record; anyone else its recall scope (ADR-0249). */
+  reads(principal:Reader):ReadSet|null {
+    if(principal.admin||principal.scope===null)return null;
+    if(principal.answer!==undefined){if(!principal.reads)throw new HttpError(409,'private_answer_closed');return principal.reads;}
+    return readSetOf(this.recall(principal)!);
+  }
+  /** A reader with its read set resolved on the server from its record, for every request; a reader without an answer is
+   * returned as it is. An answer whose record is closed, expired or not this turn's is refused (private_answer_closed). */
+  bindReads(principal:Reader):Promise<Reader> {return bindAnswerReads(this.stores.control,this.policy(),principal);}
   async space(reference:SourceReference):Promise<string|null> {
     const source=await this.archive.verify(reference);
     const observed=(await this.relationships.describe(reference)).audience;

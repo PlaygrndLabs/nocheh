@@ -41,13 +41,17 @@ export async function finishPresence(call:RuntimeCall,target:ReturnType<typeof r
 /** How a closed brain receipt that has no reply to send ends the working reaction. */
 export const unansweredFinish=(state:string):ReplyFinish=>state==='failed'?'failed':'clear';
 
+/** The one button a group reply may carry: Answer privately under the owner's own answer (ADR-0249). Its data is `np`
+ * and the record's id, which the bot checks is the one for this turn's question. */
+export interface ReplyButton {text:string;data:string}
 /**
  * Send a done turn's reply. A follow-up notifies, as nobody watched it being typed. The answer is the bot's closed
  * receipt, `running` while it still sends, or null when the bot did not answer, so the same call is made again.
  */
 export async function sendReply(call:RuntimeCall,target:ReturnType<typeof replyTarget>,dispatchKey:string,reply:{text:string;session_id:string},
-  options:{notify:boolean;presence:boolean}):Promise<Record<string,unknown>|null> {
-  try{return await call('telegram.reply',{...target,dispatch_key:dispatchKey,text:reply.text,session_id:reply.session_id,...options},30000);}
+  options:{notify:boolean;presence:boolean;button?:ReplyButton}):Promise<Record<string,unknown>|null> {
+  const {button,...rest}=options;
+  try{return await call('telegram.reply',{...target,dispatch_key:dispatchKey,text:reply.text,session_id:reply.session_id,...rest,...(button?{button}:{})},30000);}
   catch{return null;}
 }
 

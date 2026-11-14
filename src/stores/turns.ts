@@ -63,6 +63,8 @@ export class RuntimeTurnRepository implements BrokerStorage {
       throw new HttpError(409,'runtime_turn_conflict');
     await this.assertAudience(principal);
   }
+  /** An answer reader's read set from its record, for the broker (ADR-0249). */
+  bindReads(principal:Reader):Promise<Reader> {return this.access.bindReads(principal);}
   async close(id:string):Promise<void> {
     await this.access.stores.control.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);
   }

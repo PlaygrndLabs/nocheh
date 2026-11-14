@@ -273,12 +273,16 @@ class TelegramMock:
             result=message
         elif method=='answerCallbackQuery':
             # https://core.telegram.org/bots/api#answercallbackquery: answers a press
-            # the fixture delivered; an unknown or repeated answer is refused.
+            # the fixture delivered; an unknown or repeated answer is refused. Outside a game, its url may only be a
+            # t.me link that opens this bot with a start parameter.
             query=str(data.get('callback_query_id') or '');answers=self.state.setdefault('answers',[])
             pressed={str(item['callback_query']['id']) for item in self.state.setdefault('presses',[])}
             if query not in pressed or any(row['callback_query_id']==query for row in answers):
                 return self.error(400,'Bad Request: query is too old and response timeout expired or query ID is invalid')
-            answers.append({'callback_query_id':query,'text':data.get('text'),'at':time.time()});result=True
+            url=data.get('url')
+            if url is not None and not (isinstance(url,str) and re.fullmatch(r'https://t\.me/'+re.escape(BOT['username'])+r'\?start=[A-Za-z0-9_-]{1,64}',url)):
+                return self.error(400,'Bad Request: URL_INVALID')
+            answers.append({'callback_query_id':query,'text':data.get('text'),**({'url':url} if url is not None else {}),'at':time.time()});result=True
         elif method=='getChat':
             # https://core.telegram.org/bots/api#getchat: presentation for a chat the
             # bot belongs to. The fixture answers from configured synthetic chats.

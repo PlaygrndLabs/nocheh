@@ -34,20 +34,24 @@ def space_of(chat_id, topic):
     return str(chat_id) + ('/topic/' + str(topic) if topic else '')
 
 
-def outbound_check(chat_id, space, authorized, cancelled=None, requests=None):
+def outbound_check(chat_id, space, authorized, cancelled=None, requests=None, markup=None):
     """Bind every physical send to the authorized conversation, including retries.
 
     ``requests`` records each message request admitted for transmission, so a
     failed delivery with none admitted is known not to have reached Telegram.
+    ``markup`` is the one keyboard a send may carry; any other is held, and
+    without one no request carries a keyboard.
     """
     topic = int(space.split('/topic/', 1)[1]) if '/topic/' in space else None
+    expected = None if markup is None else markup.to_dict() if hasattr(markup, 'to_dict') else markup
 
     def check(method, parameters):
         if (method not in ('sendMessage', 'sendChatAction') or
                 str(parameters.get('chat_id')) != str(chat_id) or
                 parameters.get('message_thread_id') not in ((None, 1) if topic == 1 else (topic,)) or
                 parameters.get('direct_messages_topic_id') is not None or
-                parameters.get('ephemeral_message_parameters') is not None):
+                parameters.get('ephemeral_message_parameters') is not None or
+                parameters.get('reply_markup') not in (None, expected)):
             raise Held('telegram_delivery_audience_changed')
         if cancelled is not None and cancelled.is_set():
             raise Held('telegram_delivery_cancelled')
@@ -155,17 +159,36 @@ def notice_buttons(buttons):
     return InlineKeyboardMarkup([row])
 
 
+def answer_button(button, chat_id, event_id, owner):
+    """The one button a turn's reply may carry: Answer privately under the owner's answer in a group (ADR-0249).
+
+    Never in the owner's private chat. Its label is short, and its data is ``np`` and the record id Nocheh derives from
+    this very turn's question with the service token, so no other answer's button can ride on this reply."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if button is None: return None
+    if not isinstance(button, dict) or set(button) != {'text', 'data'} or str(chat_id) == str(owner): raise ValueError('invalid_reply')
+    label, data = button['text'], button['data']
+    if not isinstance(label, str) or not 0 < len(label) <= 40 or not label.strip() or not isinstance(data, str): raise ValueError('invalid_reply')
+    record = hmac.new(secret('SERVICE_TOKEN').encode(), ('private-answer:' + str(event_id)).encode(), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(data, 'np' + record): raise ValueError('invalid_reply')
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data)]])
+
+
 def verify_turn_credential(credential, event_id, chat_id, space, owner):
     """The turn credential Nocheh minted for this event and conversation, unexpired and signed with the service token.
 
     It binds a reply or presence to the chat and topic the turn was admitted for; whether the
-    space still allows delivery is asked separately, per request (check_delivery_policy)."""
+    space still allows delivery is asked separately, per request (check_delivery_policy). A private
+    answer's pass names its record and reads as the owner's private chat, never as the owner, so in
+    that chat its scope is the chat itself; anywhere else it is refused (ADR-0249)."""
     try:
         prefix,body,signature=credential.split('.')
         expected=base64.urlsafe_b64encode(hmac.new(secret('SERVICE_TOKEN').encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
+        answer=claims.get('answer')
+        if answer is not None and (not owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):raise ValueError()
         if (prefix!='turn' or not hmac.compare_digest(signature,expected) or claims.get('event_id')!=event_id or
-                claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if owner else str(chat_id)) or
+                claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(str(chat_id) if answer is not None or not owner else None) or
                 not time.time()*1000<claims['expires']<=time.time()*1000+3600000):raise ValueError()
         if claims.get('space') is not None:
             if claims['space']!=space or type(claims.get('revision')) is not int or claims['revision']<1:raise ValueError()

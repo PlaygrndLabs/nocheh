@@ -5,7 +5,7 @@ import {HttpError,object,string} from '../http.js';
 import {fillTemplate,ownerPrompts,taskReminder} from '../prompts.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
-import {groupSpaceSql,validateSpace} from '../spaces.js';
+import {groupChatId,groupSpace,groupSpaceSql,inReadSet,parentSpace,readSet,readSetOf,readSetParam,readSetSql,recallScope,validateSpace,type ReadSet} from '../spaces.js';
 import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
 export const taskSchema=`
@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS owner_tasks (
  archived_at timestamptz,deleted_at timestamptz,
  CHECK(start_time IS NULL OR start_on IS NOT NULL),CHECK(due_time IS NULL OR due_on IS NOT NULL),CHECK(parent_id<>id)
 );
--- When a task joined its project's list: that project's chats see its comments and history only from then (ADR-0243).
+-- When a task joined its current audience, its project's list and its group in it: the chats that see it see its
+-- comments and history only from then (ADR-0243, ADR-0248).
 ALTER TABLE owner_tasks ADD COLUMN IF NOT EXISTS project_since timestamptz;
 CREATE INDEX IF NOT EXISTS owner_tasks_listing ON owner_tasks(state,due_on,created_at);
 CREATE INDEX IF NOT EXISTS owner_tasks_scope ON owner_tasks(project_id,state);
@@ -125,25 +126,38 @@ CREATE TABLE IF NOT EXISTS owner_task_requests (
  state text NOT NULL DEFAULT 'proposed' CHECK(state IN ('proposed','done','rejected','changed','refused')),
  error_code text,result_task text,created_at timestamptz NOT NULL DEFAULT now(),decided_at timestamptz
 );
+-- The group the task would belong to: null for a task set on the project itself, which every chat of the project
+-- sees; otherwise only that group sees it, and the card names only that group (ADR-0248).
+ALTER TABLE owner_task_requests ADD COLUMN IF NOT EXISTS group_id text;
 `;
 
 export type TaskState='open'|'done'|'dropped';
 type Origin='dashboard'|'chat';
 /** Who did something to a task: the owner, someone allowed in a project's chat, or Nocheh itself. */
 export type TaskActor={kind:'owner'}|{kind:'member';name?:string}|{kind:'nocheh'};
-type Turn={source:{reference:{id:string}};project:string|null;group:string|null;actor?:TaskActor};
+export type TopicMemory='group'|'topic';
+/**
+ * The live turn asking. `project` null is the owner's private chat, which reaches every list. A group or topic turn
+ * names its project, its own conversation (`group`, which a task added there belongs to) and what it reads
+ * (`reach`): its own group, with its topics when they share memory. An "Answer privately" answer reads the groups
+ * frozen in its record and changes nothing (`readOnly`) (ADR-0248).
+ */
+type Turn={source:{reference:{id:string}};project:string|null;group:string|null;reach?:ReadSet|null;readOnly?:boolean;actor?:TaskActor};
 /** `card`: asked in the owner's private chat, so a change a project's chats would see waits for the owner's card.
  * `approved`: the card the owner approved; its change lands only in the list, and before the chats, the card named,
  * and only while the tasks under a moved task, and a commented task, are as the card showed them. */
-type Approved={project:string;chats:string[];family:string|null;revision:number|null};
-type Context={origin:Origin;actor:TaskActor;source:string|null;within:string|null;chat:boolean;card?:boolean;approved?:Approved};
-/** Who reads a task: the owner (null), or a project's chat, which sees that project's list, the columns the owner
- * shares, and the groups and topics that see that list. */
-type View={project:string;shared:Set<string>;chats:string[]}|null;
-/** A change held for the owner's card instead of written: the list it lands in, the chats that see that list, whether
- * the task joins it, the task as those chats would see it, the tasks that move with it (`family`) and the revision of
- * a task commented on. */
-type Held={held:{project:string;chats:string[];joining:boolean;preview:Record<string,unknown>;family:string|null;revision:number|null}};
+type Approved={project:string;group:string|null;chats:string[];family:string|null;revision:number|null};
+/** `reach`: in a project's chat (`within`), the groups and topics whose tasks that chat sees besides the tasks set on
+ * the project itself. */
+type Context={origin:Origin;actor:TaskActor;source:string|null;within:string|null;reach?:ReadSet|null;chat:boolean;card?:boolean;approved?:Approved};
+/** Who reads a task: the owner (null), or a project's chat, which sees, in that project's list, the tasks set on the
+ * project itself and those of the groups and topics it reaches (`reach`; null reaches none), with the columns the
+ * owner shares (ADR-0248). */
+type View={project:string;shared:Set<string>;reach:ReadSet|null}|null;
+/** A change held for the owner's card instead of written: the list it lands in, the group in it (null: the project
+ * itself), the chats that will see the task, whether the task joins them, the task as those chats would see it, the
+ * tasks that move with it (`family`) and the revision of a task commented on. */
+type Held={held:{project:string;group:string|null;chats:string[];joining:boolean;preview:Record<string,unknown>;family:string|null;revision:number|null}};
 const states=['open','done','dropped'];
 const hex=/^[a-f0-9]{64}$/;
 /** The chats that see a project's list: the groups and topics assigned to it. Anything that is not clearly a group (a
@@ -158,25 +172,48 @@ const projectChats=(project:string)=>`(SELECT coalesce(array_agg(a.space_id ORDE
  * reminders, a move into a project's list, and a comment wait for the owner's card.
  */
 const direct=new Set(['expected_revision','status','state','priority','start_on','start_time','due_on','due_time','archived','trashed','scope']);
-/** Whether a project's chats see a task's group: one of those chats, or a topic of one. */
-const seenGroup=(chats:string[],space:string|null)=>!!space&&(chats.includes(space)||chats.includes(space.split('/topic/')[0]!));
+/**
+ * Whether a reader sees a task (ADR-0248): the owner sees every task; a project's chat sees, in that project's list
+ * only, the tasks set on the project itself (no group) and the tasks of the groups and topics it reaches, never another
+ * group's. A group that is not clearly a group or topic is never reached (ADR-0242).
+ */
+const sees=(view:{project:string;reach:ReadSet|null}|null,task:{project_id:string|null;group_id:string|null}):boolean=>
+  !view||task.project_id===view.project&&(task.group_id===null||!!view.reach&&inReadSet(view.reach,task.group_id));
+/** The same test in SQL on the task columns prefixed `alias`, with the project and readSetParam of the reach bound as
+ * the placeholders `project` and `reach`. */
+const seesSql=(alias:string,project:string,reach:string)=>
+  `(${alias}project_id=${project}::text AND (${alias}group_id IS NULL OR ${readSetSql(alias+'group_id',reach)}))`;
+/** A reach as the one SQL parameter seesSql takes; no reach is an empty set, which matches no group. */
+const reachParam=(reach:ReadSet|null|undefined)=>reach?readSetParam(reach):[];
+/** Whether a reader sees a group or topic named on a task or in its history. */
+const seesGroup=(reach:ReadSet|null,space:unknown):space is string=>typeof space==='string'&&!!reach&&inReadSet(reach,space);
 
-const linked=(kind:string,column:string,match:string)=>`coalesce((SELECT json_agg(json_build_object('id',o.id,'title',o.title,'state',o.state,'project_id',o.project_id) ORDER BY o.created_at,o.id)
+const linked=(kind:string,column:string,match:string)=>`coalesce((SELECT json_agg(json_build_object('id',o.id,'title',o.title,'state',o.state,'project_id',o.project_id,'group_id',o.group_id) ORDER BY o.created_at,o.id)
   FROM owner_task_links l JOIN owner_tasks o ON o.id=l.${column} WHERE l.kind='${kind}' AND l.${match}=owner_tasks.id AND o.deleted_at IS NULL),'[]'::json)`;
-const fields=`id,title,notes,status_id AS status,state,priority,to_char(start_on,'YYYY-MM-DD') AS start_on,to_char(start_time,'HH24:MI') AS start_time,
+/** A task's columns; `children` is the SQL condition, on the alias `c`, of the subtasks its counts take, and
+ * `parent` whether its reader sees the task it sits under: a project's chat counts only the subtasks it sees and
+ * learns of no parent it does not see (ADR-0248). */
+const columns=(children='true',parent='true')=>`id,title,notes,status_id AS status,state,priority,to_char(start_on,'YYYY-MM-DD') AS start_on,to_char(start_time,'HH24:MI') AS start_time,
  to_char(due_on,'YYYY-MM-DD') AS due_on,to_char(due_time,'HH24:MI') AS due_time,repeat,repeated_to,parent_id,position,project_id,project_since,group_id,tags,properties,external,
  coalesce((SELECT json_agg(json_build_object('id',e.id,'name',e.name) ORDER BY lower(e.name),e.id) FROM owner_task_people p
   JOIN memory_entities e ON e.id=p.entity_id WHERE p.task_id=owner_tasks.id AND p.role='person'),'[]'::json) AS people,
  coalesce((SELECT json_agg(json_build_object('id',e.id,'name',e.name) ORDER BY lower(e.name),e.id) FROM owner_task_people p
   JOIN memory_entities e ON e.id=p.entity_id WHERE p.task_id=owner_tasks.id AND p.role='assignee'),'[]'::json) AS assignees,
- (SELECT json_build_object('open',count(*) FILTER (WHERE c.state='open'),'total',count(*)) FROM owner_tasks c WHERE c.parent_id=owner_tasks.id AND c.deleted_at IS NULL) AS subtasks,
+ (SELECT json_build_object('open',count(*) FILTER (WHERE c.state='open'),'total',count(*)) FROM owner_tasks c WHERE c.parent_id=owner_tasks.id AND c.deleted_at IS NULL AND ${children}) AS subtasks,
  ${linked('blocked_by','other_id','task_id')} AS blocked_by,
  coalesce((SELECT json_agg(json_build_object('at',r.remind_at,'state',r.state) ORDER BY r.remind_at) FROM owner_task_reminders r WHERE r.task_id=owner_tasks.id),'[]'::json) AS reminders,
  coalesce((SELECT json_agg(json_build_object('kind',a.kind,'id',a.event_id,'url',a.url,'title',a.title) ORDER BY a.position) FROM owner_task_attachments a WHERE a.task_id=owner_tasks.id),'[]'::json) AS attachments,
  (SELECT count(*)::int FROM owner_task_comments c WHERE c.task_id=owner_tasks.id) AS comments,
  (SELECT count(*)::int FROM owner_task_comments c WHERE c.task_id=owner_tasks.id AND c.created_at>=coalesce(owner_tasks.project_since,'infinity'::timestamptz)) AS project_comments,
  coalesce(created_at>=project_since,false) AS made_on_list,coalesce(done_at>=project_since,false) AS finished_on_list,
- origin,source_event,created_by,finished_by,revision,created_at,updated_at,done_at,archived_at,deleted_at`;
+ ${parent} AS parent_seen,origin,source_event,created_by,finished_by,revision,created_at,updated_at,done_at,archived_at,deleted_at`;
+const fields=columns();
+/** Whether a project's chat sees the task that the task on the alias `alias` sits under, if any. A subtask written
+ * before subtasks followed their parent's group can sit under another group's task (ADR-0248). */
+const parentSeesSql=(alias:string,project:string,reach:string)=>
+  `(${alias}parent_id IS NULL OR EXISTS (SELECT 1 FROM owner_tasks u WHERE u.id=${alias}parent_id AND ${seesSql('u.',project,reach)}))`;
+/** A task's columns as a project's chat reads them, with the project and reach bound as `project` and `reach`. */
+const seenFields=(view:View,project:string,reach:string)=>view?columns(seesSql('c.',project,reach),parentSeesSql('owner_tasks.',project,reach)):fields;
 
 const exact=(input:unknown,keys:string[])=>{const body=object(input);if(Object.keys(body).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_task_field');return body;};
 const title=(value:unknown)=>{const text=string(value,300).trim();if(!text)throw new HttpError(400,'task_title_required');return text;};
@@ -246,33 +283,71 @@ const external=(value:unknown):Record<string,string>=>{
 /**
  * A task as its reader sees it. A project's chat sees it only as it is on that project's board: never its outside IDs
  * or the message that asked for it, no archived message attached to it, only the columns the owner shares with project
- * chats, only reminders still to come, links only to tasks in the same list, only the comments made since it joined
- * that list, its group only when that group or topic sees the list, and who made or finished it only when that
- * happened on the list. A project's task with no joining time shows none of these (ADR-0243).
+ * chats, only reminders still to come, links only to tasks it sees, only the comments made since it joined its
+ * current audience, its group only when that chat reaches it, the task it sits under only when that chat sees it, no
+ * manual position, which counts every group's tasks, and who made or finished it only when that happened there. A
+ * project's task with no joining time shows none of these (ADR-0243, ADR-0248).
  */
 const row=(value:any,view:View=null)=>{
   if(!value)return value;
-  const {project_comments,made_on_list,finished_on_list,...task}=value,reminders=task.reminders.map((item:any)=>({...item,at:new Date(item.at).toISOString()}));
+  const {project_comments,made_on_list,finished_on_list,parent_seen,...task}=value,reminders=task.reminders.map((item:any)=>({...item,at:new Date(item.at).toISOString()}));
   if(!view)return {...task,revision:Number(task.revision),reminders};
-  const {external:_external,source_event:_source,...seen}=task;
-  return {...seen,revision:Number(task.revision),comments:project_comments,blocked_by:task.blocked_by.filter((item:any)=>item.project_id===view.project),
+  const {external:_external,source_event:_source,position:_position,...seen}=task;
+  return {...seen,parent_id:parent_seen===false?null:task.parent_id,revision:Number(task.revision),comments:project_comments,blocked_by:task.blocked_by.filter((item:any)=>sees(view,item)),
     reminders:reminders.filter((item:any)=>item.state==='pending'),attachments:task.attachments.filter((item:any)=>item.kind==='link'),
     properties:Object.fromEntries(Object.entries(task.properties).filter(([id])=>view.shared.has(id))),
-    group_id:seenGroup(view.chats,task.group_id)?task.group_id:null,created_by:made_on_list?task.created_by:null,
+    group_id:seesGroup(view.reach,task.group_id)?task.group_id:null,created_by:made_on_list?task.created_by:null,
     finished_by:finished_on_list?task.finished_by:null};
 };
 /** The change that brought a task into a project's list, as that project's chats see it: where each field went, never
  * where it came from, such as its earlier list, parent or title. */
 const arrived=(changes:Record<string,unknown>)=>Object.fromEntries(Object.entries(changes).map(([key,value])=>
   [key,value&&typeof value==='object'&&!Array.isArray(value)&&'to' in value?{to:(value as {to:unknown}).to}:value]));
-/** A history entry as a project's chat sees it: the change that brought the task in shows only where it went, and a
- * group or topic that chat does not see shows as none (ADR-0243). */
-const boardChange=(changes:Record<string,unknown>,chats:string[])=>{
-  const shown='project_id' in changes?arrived(changes):changes,group=shown.group_id;
+/** A history entry as a project's chat sees it: the change that brought the task to its current audience, a change of
+ * its list or of its group, shows only where it went, and a group or topic that chat does not reach shows as none
+ * (ADR-0243, ADR-0248). */
+const boardChange=(changes:Record<string,unknown>,reach:ReadSet|null)=>{
+  const shown='project_id' in changes||'group_id' in changes?arrived(changes):changes,group=shown.group_id;
   if(!group||typeof group!=='object')return shown;
-  const seen=(space:unknown)=>typeof space==='string'&&seenGroup(chats,space)?space:null;
-  return {...shown,group_id:Object.fromEntries(Object.entries(group).map(([side,space])=>[side,seen(space)]))};
+  return {...shown,group_id:Object.fromEntries(Object.entries(group).map(([side,space])=>[side,seesGroup(reach,space)?space:null]))};
 };
+/**
+ * A group's tasks move with it (ADR-0248): when the owner moves group `group` from project `from` to project `to`, its
+ * tasks and its topics' tasks in `from`, each with everything under it, move to `to` in the same transaction. They
+ * stay that group's, so they keep their joining time, and each gets a history entry. A task of the group under a task
+ * of another group or of the project itself stays with its parent. A task under them that is set on the project
+ * itself joins their group from then on; one of another group, written before subtasks followed their parent's group,
+ * stays in `from` at the top of the list with everything under it, so its own group keeps seeing it and this group
+ * never does. Moving a group into no project, or from none, moves nothing: its tasks stay on the old list, where only
+ * the owner sees them. Returns how many tasks moved.
+ */
+export async function moveGroupTasks(db:Pick<pg.PoolClient,'query'>,group:string,from:string|null,to:string|null,
+  by:{actor:TaskActor;origin:'dashboard'|'chat'}={actor:{kind:'owner'},origin:'dashboard'}):Promise<number> {
+  if(!groupChatId(group)||!from||!to||from===to)return 0;
+  // Each task with the group it ends up in: the group of the task at the top of its family. The family takes only
+  // this group's and its topics' tasks and the project's own.
+  const ours=(alias:string)=>`(${alias}group_id IS NULL OR ${alias}group_id=$1 OR starts_with(${alias}group_id,$1||'/topic/'))`;
+  const family=(await db.query(`WITH RECURSIVE down AS (
+      SELECT id,group_id AS home FROM owner_tasks WHERE project_id=$2 AND parent_id IS NULL AND (group_id=$1 OR starts_with(group_id,$1||'/topic/'))
+      UNION SELECT t.id,down.home FROM owner_tasks t JOIN down ON t.parent_id=down.id WHERE ${ours('t.')})
+    SELECT o.id,o.group_id,down.home FROM owner_tasks o JOIN down ON down.id=o.id ORDER BY o.id FOR UPDATE OF o`,[group,from])).rows;
+  if(!family.length)return 0;
+  const moved=family.map(task=>task.id as string);
+  const left=(await db.query(`SELECT id FROM owner_tasks WHERE parent_id=ANY($1::text[]) AND NOT id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[moved])).rows.map(task=>task.id as string);
+  const at=(await db.query('SELECT clock_timestamp()::text AS at')).rows[0].at as string;
+  await db.query(`UPDATE owner_tasks o SET project_id=$3,group_id=f.home,project_since=CASE WHEN o.group_id IS NOT DISTINCT FROM f.home THEN o.project_since ELSE $4::timestamptz END,
+    revision=o.revision+1,updated_at=now() FROM unnest($1::text[],$2::text[]) AS f(id,home) WHERE o.id=f.id`,[moved,family.map(task=>task.home),to,at]);
+  if(left.length)await db.query('UPDATE owner_tasks SET parent_id=NULL,revision=revision+1,updated_at=now() WHERE id=ANY($1::text[])',[left]);
+  const entry=async(id:string,changes:Record<string,unknown>)=>db.query('INSERT INTO owner_task_activity(task_id,actor,origin,changes,at) VALUES($1,$2,$3,$4,$5::timestamptz)',
+    [id,JSON.stringify(by.actor),by.origin,JSON.stringify(changes),at]);
+  for(const task of family){
+    const regrouped=task.group_id!==task.home;
+    await entry(task.id,{project_id:{from,to},...(regrouped?{group_id:{from:task.group_id,to:task.home}}:{})});
+  }
+  // Its history says only that it no longer sits under a task, never which: its group does not see that task.
+  for(const id of left)await entry(id,{parent_id:{to:null}});
+  return family.length;
+}
 /** A repeat in words, as a card shows it: "every 2 weeks on Mon, Thu, from when it is done". */
 const repeatWords=(repeat:{every:number;unit:string;weekdays?:number[];from:string})=>
   `every ${repeat.every} ${repeat.unit}${repeat.every===1?'':'s'}${repeat.weekdays?.length?' on '+repeat.weekdays.map(day=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).join(', '):''}`+
@@ -297,19 +372,21 @@ const editable=['title','notes','status','state','priority','start_on','start_ti
 /**
  * The owner's task lists in the control store. The dashboard and mini app edit
  * them as the owner; the assistant reaches them only from a current live turn:
- * the owner's private chat reaches every list, a project's chat only its own,
- * and sees each task only as it is on that project's board. A change asked in
- * the owner's private chat that a project's chats would see waits for the
- * owner's card, which names them (ADR-0243).
+ * the owner's private chat reaches every list, a group or topic in a project
+ * only its own group's tasks and the tasks set on the project itself, and sees
+ * each task only as it is on that project's board. A change asked in the
+ * owner's private chat that a project's chats would see waits for the owner's
+ * card, which names them (ADR-0243, ADR-0248).
  */
 export class TaskRepository {
   /**
    * The live turn asking; project null is the owner's private chat, which
-   * reaches every list. A group's turn names its group, which a task added there points to.
+   * reaches every list. A group's turn names its group, which a task added there belongs to.
    * Reminders go to the owner's private chat through the runtime, when one is given.
+   * `topicMemory` is whether a group's topics share what they know, as they share its tasks.
    */
   constructor(readonly control:pg.Pool,private chatTurn:(principal:Reader)=>Promise<Turn>,
-    private delivery?:{call:RuntimeCall;owner:()=>string|null|undefined}){}
+    private delivery?:{call:RuntimeCall;owner:()=>string|null|undefined},private topicMemory:()=>TopicMemory=()=>'group'){}
 
   async list(principal:Reader,input:ListInput={}) {admin(principal);return this.page(input);}
   async get(principal:Reader,id:string) {admin(principal);return this.detail(id,null);}
@@ -332,6 +409,21 @@ export class TaskRepository {
     if(!(await this.control.query('DELETE FROM owner_tasks WHERE id=$1 AND deleted_at IS NOT NULL RETURNING id',[id])).rows.length)
       throw (await this.control.query('SELECT 1 FROM owner_tasks WHERE id=$1',[id])).rows.length?new HttpError(409,'task_not_in_trash'):new HttpError(404,'task_not_found');
     return {deleted:id};
+  }
+  /**
+   * The chats that would see a task after the owner moves it to the list `scope` ('personal' or a project ID) and the
+   * group `group` (empty for the project itself); either left out keeps the task's own. A subtask keeps its parent's
+   * group. The dashboard and the mini app name them before they save a move, as the task card does (ADR-0248).
+   */
+  async audience(principal:Reader,id:string,query:{scope?:string|null;group?:string|null}={}) {
+    admin(principal);if(!hex.test(id))throw new HttpError(400,'invalid_identity');
+    const task=(await this.control.query(`SELECT t.project_id,t.group_id,t.parent_id,p.group_id AS parent_group FROM owner_tasks t
+      LEFT JOIN owner_tasks p ON p.id=t.parent_id WHERE t.id=$1`,[id])).rows[0];
+    if(!task)throw new HttpError(404,'task_not_found');
+    const project:string|null=query.scope===undefined||query.scope===null?task.project_id:scope(query.scope);
+    const grouped:string|null=task.parent_id?task.parent_group??null:query.group===undefined||query.group===null?task.group_id:group(query.group);
+    if(!project)return {project:null,group:grouped,audience:null,chats:[] as string[]};
+    return {project,group:grouped,audience:grouped===null?'project' as const:'group' as const,chats:await this.audienceOf(this.control,project,grouped)};
   }
   /** Archive every finished or dropped task in a list, or in all lists. */
   async archiveFinished(principal:Reader,input:unknown) {
@@ -383,40 +475,51 @@ export class TaskRepository {
   }
 
   /**
-   * Assistant reads. The owner's private chat reads any list; a project's chat
-   * reads only that project's list, learns of no other list or project, and
-   * sees each task only from when it joined that list.
+   * Assistant reads. The owner's private chat reads any list; a group or topic
+   * in a project reads only its own group's tasks and the tasks set on the
+   * project itself, learns of no other group's task, list or project, and sees
+   * each task only from when it joined its current audience (ADR-0248).
    */
   async chatList(principal:Reader,input:ListInput={}) {
-    const {project}=await this.chatTurn(principal);
+    const {project,reach}=await this.chatTurn(principal);
     if(project&&input.scope&&input.scope!=='all'&&input.scope!==project)throw new HttpError(403,'task_scope_denied');
-    return this.page(project?{...input,scope:project}:input,project);
+    return this.page(project?{...input,scope:project}:input,project,reach??null);
   }
-  async chatGet(principal:Reader,id:string) {const {project}=await this.chatTurn(principal);return this.detail(id,project);}
+  async chatGet(principal:Reader,id:string) {const {project,reach}=await this.chatTurn(principal);return this.detail(id,project,reach??null);}
   /**
    * Repeating the same request within one turn returns the task it already made. In the owner's private chat, a
-   * change that a project's chats would see is held for the owner's card instead (ADR-0243).
+   * change that a project's chats would see is held for the owner's card instead (ADR-0243). A task added in a
+   * group belongs to that group or topic unless it names another group it reaches, the project itself (group null)
+   * or a parent, whose group a subtask takes (ADR-0248). A parent given as null or empty names no parent, and an empty
+   * group names no group, so neither puts the task on the whole project.
    */
   async chatCreate(principal:Reader,input:unknown) {
-    const turn=await this.chatTurn(principal),{source,project}=turn,body=exact(input,editable);
+    const turn=this.writable(await this.chatTurn(principal)),{source,project}=turn,body=exact(input,editable);
     if(project&&body.scope!==undefined&&body.scope!==project)throw new HttpError(403,'task_scope_denied');
-    const value={...body,...(project?{scope:project}:{}),...(turn.group&&body.group===undefined?{group:turn.group}:{})};
+    const {group:named,...rest}=body,given:Record<string,unknown>=named===''?rest:body;
+    const own=!!turn.group&&given.group===undefined&&(given.parent===undefined||given.parent===null||given.parent==='');
+    const value={...given,...(project?{scope:project}:{}),...(own?{group:turn.group}:{})};
     const operation=digest('chat:'+source.reference.id+':'+canonical(value));
     return this.held(turn,'add',null,operation,value,await this.insert(operation,value,this.chatContext(turn)));
   }
   async chatUpdate(principal:Reader,id:string,input:unknown) {
-    const turn=await this.chatTurn(principal),body=exact(input,['expected_revision',...editable,'archived','trashed']);
+    const turn=this.writable(await this.chatTurn(principal)),body=exact(input,['expected_revision',...editable,'archived','trashed']);
     if(turn.project&&body.scope!==undefined&&body.scope!==turn.project)throw new HttpError(403,'task_scope_denied');
     const operation=digest('chat:'+turn.source.reference.id+':'+id+':'+canonical(body));
     return this.held(turn,'update',id,operation,body,await this.change(operation,id,body,this.chatContext(turn)));
   }
   async chatComment(principal:Reader,id:string,input:unknown) {
-    const turn=await this.chatTurn(principal),body=exact(input,['text']);
+    const turn=this.writable(await this.chatTurn(principal)),body=exact(input,['text']);
     const operation=digest('chat-comment:'+turn.source.reference.id+':'+id+':'+canonical(body));
     return this.held(turn,'comment',id,operation,body,await this.discuss(operation,id,body,this.chatContext(turn)));
   }
+  /** An "Answer privately" answer only reads its groups' tasks; it adds, changes and comments on none (ADR-0248). */
+  private writable(turn:Turn):Turn {
+    if(turn.readOnly)throw new HttpError(403,'task_read_only');
+    return turn;
+  }
   private chatContext(turn:Turn):Context {
-    return {origin:'chat',actor:turn.actor??{kind:'owner'},source:turn.source.reference.id,within:turn.project,chat:true,card:turn.project===null};
+    return {origin:'chat',actor:turn.actor??{kind:'owner'},source:turn.source.reference.id,within:turn.project,reach:turn.reach??null,chat:true,card:turn.project===null};
   }
 
   /**
@@ -426,10 +529,10 @@ export class TaskRepository {
   private async held(turn:Turn,action:'add'|'update'|'comment',task:string|null,operation:string,body:Record<string,unknown>,result:any) {
     if(!result||typeof result!=='object'||!('held' in result))return result;
     const {held}=result as Held,id=digest(canonical(['owner-task-request-v1',operation]));
-    const fingerprint=digest(canonical(['owner-task-request-v1',id,action,task,body,held.project,held.joining,held.chats,held.family,held.revision]));
-    await this.control.query(`INSERT INTO owner_task_requests(id,action,task_id,operation_id,body,project_id,joining,chats,preview,source_reference,fingerprint,family,revision)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(id) DO NOTHING`,
-      [id,action,task,operation,JSON.stringify(body),held.project,held.joining,held.chats,JSON.stringify(held.preview),JSON.stringify(turn.source.reference),fingerprint,
+    const fingerprint=digest(canonical(['owner-task-request-v2',id,action,task,body,held.project,held.group,held.joining,held.chats,held.family,held.revision]));
+    await this.control.query(`INSERT INTO owner_task_requests(id,action,task_id,operation_id,body,project_id,group_id,joining,chats,preview,source_reference,fingerprint,family,revision)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(id) DO NOTHING`,
+      [id,action,task,operation,JSON.stringify(body),held.project,held.group,held.joining,held.chats,JSON.stringify(held.preview),JSON.stringify(turn.source.reference),fingerprint,
         held.family,held.revision]);
     const row=(await this.control.query('SELECT id,action,task_id,project_id,state,result_task FROM owner_task_requests WHERE id=$1',[id])).rows[0];
     const base={request_id:row.id,action:row.action,project_id:row.project_id,...(row.task_id?{task_id:row.task_id}:{})};
@@ -441,9 +544,12 @@ export class TaskRepository {
   }
 
   /**
-   * A task card's content: what changes in which project's list, the chats that see that list, and exactly what they
-   * will see, from the task as it would be after the change (ADR-0243). A task that moves in brings every task under
-   * it, archived and in the trash too, and the card shows each of them as well. `space` names a group or topic.
+   * A task card's content: what changes in which project's list, the chats that will see the task, and exactly what
+   * they will see, from the task as it would be after the change (ADR-0243). A task that moves in brings every task
+   * under it, archived and in the trash too, and the card shows each of them as well. `space` names a group or topic.
+   * `audience` is 'project' for a task set on the project itself, which every chat of the project sees, chats added
+   * later included, and 'group' for a group's task, which only that group sees; `group` names that group, or null
+   * (ADR-0248).
    */
   async request(principal:Reader,id:string,space:(chat:string)=>Promise<string>) {
     admin(principal);
@@ -494,10 +600,15 @@ export class TaskRepository {
     // What the card says stays private: everything from before a task joined, and the parts a project's chats never see.
     const hidden=(Array.isArray(body.attachments)&&body.attachments.some((item:any)=>item?.kind==='message'))||
       (body.properties&&typeof body.properties==='object'&&Object.keys(body.properties as object).some(key=>!shared.some(item=>item.id===key||item.name.toLocaleLowerCase()===key.trim().toLocaleLowerCase())));
-    const moving=row.action==='update'&&row.joining;
+    const moving=row.action==='update'&&row.joining,grouped=row.group_id!==null&&row.group_id!==undefined;
+    // A move to a group says which group it goes to; a group's task set on its own project itself says that every
+    // group of the project gets it.
+    const kind=grouped?'move_group':preview.within_list===true?'move_project':'move';
+    const moved=moving?(family.length?`${kind}_family` as const:kind):null;
     return {id:row.id,state:row.state as string,fingerprint:row.fingerprint as string,source_reference:row.source_reference,chats:row.chats as string[],
-      change:(row.action==='add'?'add':row.action==='comment'?'comment':moving?(family.length?'move_family':'move'):'change') as 'add'|'move'|'move_family'|'change'|'comment',
-      project:row.project_name as string|null,subtasks:family.length,
+      change:(row.action==='add'?'add':row.action==='comment'?'comment':moved??'change') as
+        'add'|'move'|'move_family'|'move_group'|'move_group_family'|'move_project'|'move_project_family'|'change'|'comment',
+      project:row.project_name as string|null,group:grouped?row.group_id as string:null,audience:(grouped?'group':'project') as 'group'|'project',subtasks:family.length,
       private:moving?(family.length?'family' as const:'move' as const):hidden?'parts' as const:null,fields};
   }
   /** A card too long for Telegram never applies its change from chat: a shortened card would not show it exactly. */
@@ -523,7 +634,7 @@ export class TaskRepository {
       let state='rejected',task:string|null=null,code:string|null=null;
       if(input.decision==='approve') {
         const context:Context={origin:'chat',actor:{kind:'owner'},source:String(row.source_reference?.id??'')||null,within:null,chat:true,
-          approved:{project:row.project_id,chats:row.chats,family:row.family??null,revision:row.revision===null?null:Number(row.revision)}};
+          approved:{project:row.project_id,group:row.group_id??null,chats:row.chats,family:row.family??null,revision:row.revision===null?null:Number(row.revision)}};
         try {
           const done=row.action==='add'?await this.insert(row.operation_id,row.body,context):row.action==='update'?await this.change(row.operation_id,row.task_id,row.body,context):
             await this.discuss(row.operation_id,row.task_id,row.body,context);
@@ -545,7 +656,7 @@ export class TaskRepository {
     return (await db.query(`SELECT to_char(now() AT TIME ZONE $1,'YYYY-MM-DD') AS day`,[zone])).rows[0].day;
   }
 
-  private async page(input:ListInput,within:string|null=null) {
+  private async page(input:ListInput,within:string|null=null,reach:ReadSet|null=null) {
     const state=input.state||'open',count=limit(input.limit,100,200),offset=input.after?Number(input.after):0;
     if(state!=='all'&&!states.includes(state))throw new HttpError(400,'invalid_task_state');
     if(!Number.isSafeInteger(offset)||offset<0)throw new HttpError(400,'invalid_cursor');
@@ -554,23 +665,28 @@ export class TaskRepository {
     if(!['','today','upcoming'].includes(when))throw new HttpError(400,'invalid_task_when');
     if(!['due','manual','priority','created','updated','title','finished'].includes(sort))throw new HttpError(400,'invalid_task_sort');
     const {settings}=await this.current(this.control),today=await this.today(this.control,settings.time_zone);
-    const view:View=within?{project:within,shared:sharedColumns(settings),chats:await this.chats(this.control,within)}:null;
+    const view:View=within?{project:within,shared:sharedColumns(settings),reach}:null;
     const values:unknown[]=[],p=(value:unknown)=>{values.push(value);return '$'+values.length;},filters:string[]=['true'];
     // 'all' lists every scope; 'personal' only the owner's own life tasks; a project id only that project.
     const every=!input.scope||input.scope==='all',project=every?null:scope(input.scope);
     if(!every)filters.push(`project_id IS NOT DISTINCT FROM ${p(project)}::text`);
+    // A project's chat lists only the tasks set on the project itself and those of the groups and topics it reaches,
+    // and every count it gets counts only those (ADR-0248).
+    const seen=view?{project:p(view.project),reach:p(reachParam(view.reach))}:null;
+    if(seen)filters.push(seesSql('',seen.project,seen.reach));
     // A tag matches whatever its case; a group matches its own tasks and those of its topics.
     if(input.tag)filters.push(`lower(${p(tag(input.tag))}::text) IN (SELECT lower(t) FROM unnest(tags) t)`);
-    // A project's chat finds tasks only by a group or topic that sees its list, as it sees no other group on them.
+    // A project's chat finds tasks only by a group or topic it reaches, as it sees no other group on them.
     if(input.group){const space=validateSpace(input.group);
-      if(view&&!seenGroup(view.chats,space))filters.push('false');
+      if(view&&!seesGroup(view.reach,space))filters.push('false');
       else {const chat=p(space);filters.push(`(group_id=${chat}::text OR starts_with(group_id,${chat}::text||'/topic/'))`);}}
     if(input.person)filters.push(`EXISTS (SELECT 1 FROM owner_task_people x WHERE x.task_id=owner_tasks.id AND x.entity_id=${p(ids([input.person],'invalid_task_people')[0])}::text)`);
     if(input.status){if(!settings.statuses.some(item=>item.id===input.status))throw new HttpError(400,'invalid_task_status');filters.push(`status_id=${p(input.status)}::text`);}
     if(input.priority){const level=Number(input.priority);if(!Number.isSafeInteger(level)||level<0||level>4)throw new HttpError(400,'invalid_task_priority');filters.push(`priority=${p(level)}::int`);}
-    let parent='true';
-    if(input.parent==='top')parent='parent_id IS NULL';
-    else if(input.parent){if(!hex.test(input.parent))throw new HttpError(400,'invalid_task_parent');parent=`parent_id=${p(input.parent)}::text`;}
+    // A project's chat finds no subtask by a parent it does not see, and lists one under a parent it does not see at
+    // the top, as it is shown there with no parent.
+    const parentSeen=seen?parentSeesSql('owner_tasks.',seen.project,seen.reach):'true',topLevel=seen?`(parent_id IS NULL OR NOT ${parentSeen})`:'parent_id IS NULL';
+    if(input.parent&&input.parent!=='top'&&!hex.test(input.parent))throw new HttpError(400,'invalid_task_parent');
     if(input.q){const words=p('%'+string(input.q,200).trim().replace(/[\\%_]/g,'\\$&')+'%');filters.push(`(title ILIKE ${words}::text OR notes ILIKE ${words}::text)`);}
     const base=filters.join(' AND ');
     // Today holds what is due or starts today or earlier; Upcoming what is due or starts in the next two weeks.
@@ -586,49 +702,58 @@ export class TaskRepository {
       created:'created_at DESC,id',updated:'updated_at DESC,id',title:'lower(title),id',
       finished:`CASE state WHEN 'open' THEN 0 ELSE 1 END,coalesce(done_at,updated_at) DESC,id`};
     // Lists count the tasks at the top of each list; Today and Upcoming count subtasks too, as they show them.
-    const live=places.active,top=`parent_id IS NULL AND ${places.active}`;
+    const live=places.active,top=`${topLevel} AND ${places.active}`;
     const counts=(await this.control.query(`SELECT count(*) FILTER (WHERE ${top} AND state='open')::int AS open,count(*) FILTER (WHERE ${top} AND state='done')::int AS done,
       count(*) FILTER (WHERE ${top} AND state='dropped')::int AS dropped,count(*) FILTER (WHERE ${live} AND state='open' AND ${isToday})::int AS today,
-      count(*) FILTER (WHERE ${live} AND state='open' AND ${isUpcoming})::int AS upcoming,count(*) FILTER (WHERE parent_id IS NULL AND ${places.archive})::int AS archive,
-      count(*) FILTER (WHERE parent_id IS NULL AND ${places.trash})::int AS trash FROM owner_tasks WHERE ${base}`,values.slice())).rows[0];
+      count(*) FILTER (WHERE ${live} AND state='open' AND ${isUpcoming})::int AS upcoming,count(*) FILTER (WHERE ${topLevel} AND ${places.archive})::int AS archive,
+      count(*) FILTER (WHERE ${topLevel} AND ${places.trash})::int AS trash FROM owner_tasks WHERE ${base}`,values.slice())).rows[0];
+    // The parent and state bind after the counts, which take neither.
+    const parent=input.parent==='top'?topLevel:input.parent?`parent_id=${p(input.parent)}::text AND ${parentSeen}`:'true';
     const chosen=state==='all'?'true':`state=${p(state)}::text`;
-    const rows=(await this.control.query(`SELECT ${fields} FROM owner_tasks WHERE ${base} AND ${parent} AND ${places[place as keyof typeof places]} AND ${chosen} AND ${window}
+    const rows=(await this.control.query(`SELECT ${seen?seenFields(view,seen.project,seen.reach):fields} FROM owner_tasks WHERE ${base} AND ${parent} AND ${places[place as keyof typeof places]} AND ${chosen} AND ${window}
       ORDER BY ${orders[sort]} LIMIT ${p(count+1)}::int OFFSET ${p(offset)}::int`,values)).rows;
-    // Every list with its open count: personal first, then each active project with the chats that see its list.
+    // Every list with its open count: personal first, then each active project with the chats that see its list. A
+    // project's chat counts only the tasks it sees.
     const open=`count(t.id) FILTER (WHERE t.state='open' AND t.deleted_at IS NULL AND t.archived_at IS NULL)::int AS open`;
-    const scopes=within?(await this.control.query(`SELECT p.id,p.name,${open} FROM projects p LEFT JOIN owner_tasks t ON t.project_id=p.id WHERE p.id=$1 GROUP BY p.id,p.name`,[within])).rows
+    const scopes=view?(await this.control.query(`SELECT p.id,p.name,${open} FROM projects p LEFT JOIN owner_tasks t ON ${seesSql('t.','p.id','$2')} WHERE p.id=$1 GROUP BY p.id,p.name`,
+      [view.project,reachParam(view.reach)])).rows
       :(await this.control.query(`SELECT 'personal' AS id,NULL AS name,${open},'{}'::text[] AS chats FROM (SELECT 1) one LEFT JOIN owner_tasks t ON t.project_id IS NULL
       UNION ALL SELECT * FROM (SELECT p.id,p.name,${open},${projectChats('p.id')} AS chats FROM projects p
         LEFT JOIN owner_tasks t ON t.project_id=p.id WHERE p.state='active' OR t.id IS NOT NULL GROUP BY p.id,p.name ORDER BY lower(p.name),p.id) listed`)).rows;
-    // Tags in use in this list, each once whatever its case, spelled as most recently written.
+    // Tags in use in this list, each once whatever its case, spelled as most recently written; a project's chat learns
+    // only the tags of the tasks it sees.
     const tagged=(await this.control.query(`SELECT (array_agg(t ORDER BY updated_at DESC))[1] AS name,count(*) FILTER (WHERE state='open')::int AS open
-      FROM owner_tasks,unnest(tags) t WHERE deleted_at IS NULL AND ($1 OR project_id IS NOT DISTINCT FROM $2) GROUP BY lower(t) ORDER BY lower(t)`,[every,project])).rows;
+      FROM owner_tasks,unnest(tags) t WHERE deleted_at IS NULL AND ($1 OR project_id IS NOT DISTINCT FROM $2) AND ${view?seesSql('','$3','$4'):'$3::text IS NULL AND $4::text[] IS NULL'}
+      GROUP BY lower(t) ORDER BY lower(t)`,[every,project,view?.project??null,view?reachParam(view.reach):null])).rows;
     // A project's chat learns the names of the shared columns only.
     return {tasks:rows.slice(0,count).map(value=>row(value,view)),next:rows.length>count?String(offset+count):null,counts,scopes,tags:tagged,
       settings:view?{...settings,properties:settings.properties.filter(item=>item.shared)}:settings,today};
   }
 
   /** One task with its subtasks, links, comments, history and the task it sits under. */
-  private async detail(id:string,within:string|null) {
+  private async detail(id:string,within:string|null,reach:ReadSet|null=null) {
     if(!hex.test(id))throw new HttpError(400,'invalid_identity');
-    const view=await this.view(this.control,within);
-    const task=row((await this.control.query(`SELECT ${fields},${linked('blocked_by','task_id','other_id')} AS blocking,
+    // A project's chat binds its project and reach as $2 and $3 to every query that reads tasks.
+    const view=await this.view(this.control,within,reach),bound=view?[view.project,reachParam(view.reach)]:[];
+    const found=(await this.control.query(`SELECT ${seenFields(view,'$2','$3')},${linked('blocked_by','task_id','other_id')} AS blocking,
       ${linked('related','other_id','task_id')} AS related_to,${linked('related','task_id','other_id')} AS related_from,
       ${linked('duplicate_of','other_id','task_id')} AS duplicate_of,${linked('duplicate_of','task_id','other_id')} AS duplicates
-      FROM owner_tasks WHERE id=$1`,[id])).rows[0],view);
-    // Another list's task is not found from a project's chat, so its existence stays private.
-    if(!task||within&&task.project_id!==within)throw new HttpError(404,'task_not_found');
-    const visible=(items:any[])=>within?items.filter(item=>item.project_id===within):items;
+      FROM owner_tasks WHERE id=$1`,[id,...bound])).rows[0];
+    // Another list's task, or another group's in the same list, is not found from a project's chat, so its existence
+    // stays private (ADR-0248).
+    if(!found||!sees(view,found))throw new HttpError(404,'task_not_found');
+    const task=row(found,view),visible=(items:any[])=>items.filter(item=>sees(view,item));
     const {related_to,related_from,...rest}=task;
-    const parent=task.parent_id?(await this.control.query('SELECT id,title,state FROM owner_tasks WHERE id=$1 AND ($2::text IS NULL OR project_id=$2)',[task.parent_id,within])).rows[0]??null:null;
-    const subtasks=(await this.control.query(`SELECT ${fields} FROM owner_tasks WHERE parent_id=$1 AND deleted_at IS NULL AND ($2::text IS NULL OR project_id=$2)
-      ORDER BY position,created_at,id`,[id,within])).rows.map(value=>row(value,view));
-    // A project's chat sees comments and history only from when the task joined its list, the change that brought it
-    // in shows only where it went, and a group that chat does not see shows as none (ADR-0243).
+    const seenHere=view?seesSql('','$2','$3'):'true';
+    const parent=task.parent_id?(await this.control.query(`SELECT id,title,state FROM owner_tasks WHERE id=$1 AND ${seenHere}`,[task.parent_id,...bound])).rows[0]??null:null;
+    const subtasks=(await this.control.query(`SELECT ${seenFields(view,'$2','$3')} FROM owner_tasks WHERE parent_id=$1 AND deleted_at IS NULL AND ${seenHere}
+      ORDER BY position,created_at,id`,[id,...bound])).rows.map(value=>row(value,view));
+    // A project's chat sees comments and history only from when the task joined its current audience, the change that
+    // brought it there shows only where it went, and a group that chat does not reach shows as none (ADR-0243, ADR-0248).
     const since=`($2::boolean OR %s>=coalesce((SELECT project_since FROM owner_tasks WHERE id=$1),'infinity'::timestamptz))`;
     const comments=(await this.control.query(`SELECT id,body,author,origin,created_at FROM owner_task_comments WHERE task_id=$1 AND ${since.replace('%s','created_at')} ORDER BY created_at,id`,[id,!within])).rows;
     const activity=(await this.control.query(`SELECT id::text,at,actor,origin,changes FROM owner_task_activity WHERE task_id=$1 AND ${since.replace('%s','at')} ORDER BY id DESC LIMIT 100`,[id,!within])).rows
-      .map(item=>view?{...item,changes:boardChange(item.changes,view.chats)}:item);
+      .map(item=>view?{...item,changes:boardChange(item.changes,view.reach)}:item);
     // The owner learns how many tasks sit under it at every level, archived and in the trash too: a move takes them all.
     const descendants=within?{}:{descendants:Number((await this.control.query(`WITH RECURSIVE down AS (SELECT id FROM owner_tasks WHERE parent_id=$1
       UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id) SELECT count(*)::int AS count FROM down`,[id])).rows[0].count)};
@@ -662,7 +787,11 @@ export class TaskRepository {
     if('parent' in body)patch.parent_id=body.parent===null||body.parent===''?null:ids([body.parent],'invalid_task_parent',1)[0]!;
     if(body.position!==undefined){if(typeof body.position!=='number'||!Number.isFinite(body.position)||Math.abs(body.position)>1e12)throw new HttpError(400,'invalid_task_position');patch.position=body.position;}
     if(body.scope!==undefined)patch.project_id=scope(body.scope);
-    if('group' in body)patch.group_id=group(body.group);
+    if('group' in body){
+      patch.group_id=group(body.group);
+      // A project's chat sets only a group or topic it reaches, or none: the project itself (ADR-0248).
+      if(context.within&&patch.group_id!==null&&!seesGroup(context.reach??null,patch.group_id))throw new HttpError(403,'task_group_denied');
+    }
     if(body.tags!==undefined)patch.tags=tags(body.tags);
     if(body.people!==undefined)patch.people=ids(body.people,'invalid_task_people');
     if(body.assignees!==undefined)patch.assignees=ids(body.assignees,'invalid_task_assignees');
@@ -726,15 +855,17 @@ export class TaskRepository {
     const hash=digest(canonical(patch)),db=await this.control.connect();
     try {
       await db.query('BEGIN');
-      const prior=await this.replay(db,operation,hash,context.within);if(prior){await db.query('COMMIT');return prior;}
+      const prior=await this.replay(db,operation,hash,context);if(prior){await db.query('COMMIT');return prior;}
       const status=patch.status_id?settings.statuses.find(item=>item.id===patch.status_id)!:this.statusFor(settings,patch.state??'open',null);
       // The parent is held while the new task is added under it, so a move of the parent in the meantime brings it along.
-      const parent=patch.parent_id?await this.parentOf(db,patch.parent_id,null,context.within,true):null;
+      const parent=patch.parent_id?await this.parentOf(db,patch.parent_id,null,context,true):null;
       if(parent&&patch.project_id!==undefined&&patch.project_id!==parent.project_id)throw new HttpError(400,'task_parent_other_list');
-      const project=parent?parent.project_id:patch.project_id??null;
+      // A subtask belongs to its parent's group, as it sits in its parent's list (ADR-0248).
+      if(parent&&patch.group_id!==undefined&&patch.group_id!==parent.group_id)throw new HttpError(400,'task_parent_other_group');
+      const project=parent?parent.project_id:patch.project_id??null,grouped=parent?parent.group_id:patch.group_id??null;
       if(project)await this.activeProject(db,project);
-      // A new task in a project's list is seen by that project's chats.
-      const gate=await this.gate(db,context,project,true);
+      // A new task in a project's list is seen by the chats that will see it there.
+      const gate=await this.gate(db,context,project,grouped,true);
       const id=digest('task:'+operation);
       const position=patch.position??Number((await db.query(`SELECT coalesce(max(position),0)+1 AS next FROM owner_tasks WHERE project_id IS NOT DISTINCT FROM $1
         AND parent_id IS NOT DISTINCT FROM $2`,[project,patch.parent_id??null])).rows[0].next);
@@ -744,15 +875,15 @@ export class TaskRepository {
         properties,external,origin,source_event,created_by,done_at,finished_by,project_since)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,${finished?'now()':'NULL'},$22,CASE WHEN $14::text IS NULL THEN NULL ELSE now() END)`,
         [id,patch.title,patch.notes??'',status.id,stateOf(status.category),patch.priority??0,patch.start_on??null,patch.start_time??null,patch.due_on??null,patch.due_time??null,
-          patch.repeat?JSON.stringify(patch.repeat):null,patch.parent_id??null,position,project,patch.group_id??null,patch.tags??[],
+          patch.repeat?JSON.stringify(patch.repeat):null,patch.parent_id??null,position,project,grouped,patch.tags??[],
           JSON.stringify(Object.fromEntries(Object.entries(patch.properties??{}).filter(([,value])=>value!==null))),JSON.stringify(patch.external??{}),
           context.origin,context.source,JSON.stringify(context.actor),finished?JSON.stringify(context.actor):null]);
       await this.attach(db,id,patch,context,true);
       await db.query('INSERT INTO owner_task_operations(operation_id,task_id,request_hash) VALUES($1,$2,$3)',[operation,id,hash]);
       await this.record(db,id,context.actor,context.origin,{created:true});
       // A change held for the owner's card was checked in full here; it is undone and kept with how it would look.
-      if(gate){const preview=await this.preview(db,id,gate.project,false);await db.query('ROLLBACK');return {held:{...gate,joining:true,preview,family:null,revision:null}} satisfies Held;}
-      const created=await this.one(db,id,context.within);
+      if(gate){const preview=await this.preview(db,id,gate,false);await db.query('ROLLBACK');return {held:{...gate,joining:true,preview,family:null,revision:null}} satisfies Held;}
+      const created=await this.one(db,id,context);
       await db.query('COMMIT');return created;
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
@@ -766,12 +897,12 @@ export class TaskRepository {
     const hash=digest(canonical({id,expected_revision:body.expected_revision,...patch})),db=await this.control.connect();
     try {
       await db.query('BEGIN');
-      const prior=await this.replay(db,operation,hash,context.within);if(prior){await db.query('COMMIT');return prior;}
+      const prior=await this.replay(db,operation,hash,context);if(prior){await db.query('COMMIT');return prior;}
       const current=(await db.query(`SELECT id,title,notes,status_id,state,priority,to_char(start_on,'YYYY-MM-DD') AS start_on,to_char(start_time,'HH24:MI') AS start_time,
         to_char(due_on,'YYYY-MM-DD') AS due_on,to_char(due_time,'HH24:MI') AS due_time,repeat,repeated_to,parent_id,position,project_id,project_since,group_id,tags,properties,
         archived_at,deleted_at,revision FROM owner_tasks WHERE id=$1 FOR UPDATE`,[id])).rows[0];
-      // Another list's task is not found from a project's chat, so its existence stays private.
-      if(!current||context.within&&current.project_id!==context.within)throw new HttpError(404,'task_not_found');
+      // Another list's task, or another group's, is not found from a project's chat, so its existence stays private.
+      if(!current||!sees(this.reader(context),current))throw new HttpError(404,'task_not_found');
       if(Number(current.revision)!==Number(body.expected_revision))throw new HttpError(409,'task_revision_conflict');
       if(current.deleted_at&&patch.trashed!==false&&Object.keys(patch).some(key=>key!=='trashed'))throw new HttpError(409,'task_in_trash');
       await this.joined(db,current);
@@ -790,41 +921,45 @@ export class TaskRepository {
       for(const column of ['start_on','start_time','due_on','due_time'] as const)if(patch[column]!==undefined)scalar(column,patch[column]);
       if(patch.repeat!==undefined)scalar('repeat',patch.repeat);
       if(patch.position!==undefined&&patch.position!==Number(current.position))set.position=patch.position;
-      if(patch.group_id!==undefined)scalar('group_id',patch.group_id);
       if(patch.tags!==undefined)scalar('tags',patch.tags,false);
       if(patch.external!==undefined)scalar('external',patch.external,false);
       if(patch.properties!==undefined){
         const merged={...current.properties};for(const [key,value] of Object.entries(patch.properties))if(value===null)delete merged[key];else merged[key]=value;
         scalar('properties',merged,false);
       }
-      // A subtask stays in its parent's list; moving a task moves everything under it.
+      // A subtask stays in its parent's list and group; moving a task moves everything under it.
       const parentId=patch.parent_id!==undefined?patch.parent_id:current.parent_id,newParent=patch.parent_id!==undefined&&patch.parent_id!==current.parent_id;
-      const parentProject=!parentId?null:(newParent?await this.parentOf(db,parentId,id,context.within)
-        :(await db.query('SELECT project_id FROM owner_tasks WHERE id=$1',[parentId])).rows[0]??{project_id:null}).project_id;
+      const parentTask=!parentId?null:newParent?await this.parentOf(db,parentId,id,context)
+        :(await db.query('SELECT project_id,group_id FROM owner_tasks WHERE id=$1',[parentId])).rows[0]??{project_id:null,group_id:null};
       if(patch.parent_id!==undefined)scalar('parent_id',patch.parent_id);
-      // An explicit list wins; a new parent brings its own list; otherwise the list stays.
-      const project:string|null=patch.project_id!==undefined?patch.project_id:newParent&&parentId?parentProject:current.project_id;
-      if(parentId&&project!==parentProject)throw new HttpError(400,'task_parent_other_list');
+      // An explicit list or group wins; a new parent brings its own list and group; otherwise they stay.
+      const project:string|null=patch.project_id!==undefined?patch.project_id:newParent&&parentTask?parentTask.project_id:current.project_id;
+      const grouped:string|null=patch.group_id!==undefined?patch.group_id:newParent&&parentTask?parentTask.group_id:current.group_id;
+      if(parentTask&&project!==parentTask.project_id)throw new HttpError(400,'task_parent_other_list');
+      if(parentTask&&(patch.group_id!==undefined||newParent)&&grouped!==parentTask.group_id)throw new HttpError(400,'task_parent_other_group');
       if(project!==current.project_id){if(project)await this.activeProject(db,project);scalar('project_id',project);}
-      // Everything under a task moves with it. They are all locked before the joining time is read, so nothing written
-      // to any of them before the move counts as written on the new list (ADR-0243).
+      scalar('group_id',grouped);
+      // A change of list or of group gives the task a new audience. Everything under it moves with it. They are all
+      // locked before the joining time is read, so nothing written to any of them before the move counts as written
+      // for the new audience (ADR-0243, ADR-0248).
+      const moving='project_id' in set||'group_id' in set;
       let since:string|null=null;
-      if('project_id' in set){
+      if(moving){
         await db.query(`WITH RECURSIVE down AS (SELECT id FROM owner_tasks WHERE parent_id=$1 UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id)
           SELECT id FROM owner_tasks WHERE id IN (SELECT id FROM down) ORDER BY id FOR UPDATE`,[id]);
         if(project)since=(await db.query('SELECT clock_timestamp()::text AS at')).rows[0].at;
       }
-      // A task that joins a project's list, or a change to one already there beyond its status, priority, dates,
-      // archive and trash, is seen by that project's chats.
-      const joining=!!project&&project!==current.project_id;
-      const gate=await this.gate(db,context,project,joining||Object.keys(body).some(key=>!direct.has(key)));
+      // A task that joins a project's list or a group in it, or a change to one already there beyond its status,
+      // priority, dates, archive and trash, is seen by the chats that see it there.
+      const joining=!!project&&moving;
+      const gate=await this.gate(db,context,project,grouped,joining||Object.keys(body).some(key=>!direct.has(key)));
       const dates={start_on:'start_on' in set?set.start_on:current.start_on,start_time:'start_time' in set?set.start_time:current.start_time,
         due_on:'due_on' in set?set.due_on:current.due_on,due_time:'due_time' in set?set.due_time:current.due_time} as Record<string,string|null>;
       this.checkDates(dates);
       const category=(status??now).category,opened=stateOf(now.category)==='open',next=stateOf(category);
       const columns=Object.entries(set),values:unknown[]=[id];
       const assignments=columns.map(([column,value])=>{values.push(['repeat','properties','external'].includes(column)?(value===null?null:JSON.stringify(value)):value);return `${column}=$${values.length}`;});
-      if('project_id' in set){values.push(since);assignments.push(`project_since=$${values.length}::timestamptz`);}
+      if(moving){values.push(since);assignments.push(`project_since=$${values.length}::timestamptz`);}
       if(status&&next!==current.state){
         values.push(next);assignments.push(`state=$${values.length}`);
         if(next==='open')assignments.push('done_at=NULL','finished_by=NULL');
@@ -838,18 +973,23 @@ export class TaskRepository {
       // An edit that changes nothing leaves the task and its revision as they were.
       if(assignments.length||Object.keys(sides).length)
         await db.query(`UPDATE owner_tasks SET ${[...assignments,'revision=revision+1','updated_at=now()'].join(',')} WHERE id=$1`,values);
-      const family='project_id' in set?await this.descendants(db,id,'project_id=$2,project_since=$3::timestamptz',[project,since]):null;
+      // A project's chat moves, archives or trashes only the tasks under it that it sees; another group's task under
+      // them first leaves the family, so the sweeps below never reach it (ADR-0248).
+      const reader=this.reader(context);
+      if(reader&&(moving||changes.archived||changes.trashed))await this.release(db,id,reader,context.origin);
+      const family=moving?await this.descendants(db,id,'project_id=$2,group_id=$3,project_since=$4::timestamptz',[project,grouped,since]):null;
       // An approved move takes exactly the tasks under it that its card showed, as the card showed them.
       if(context.approved&&context.approved.family!==family)throw new HttpError(409,'task_request_changed');
       if(changes.archived)await this.descendants(db,id,`archived_at=${patch.archived?'now()':'NULL'}`,[]);
       if(changes.trashed)await this.descendants(db,id,`deleted_at=${patch.trashed?'now()':'NULL'}`,[]);
-      // The change that brings a task into a list is the first thing its chats see of it.
+      // The change that brings a task into a list or a group is the first thing its chats see of it.
       if(Object.keys(changes).length)await this.record(db,id,context.actor,context.origin,changes,since);
       if(status&&next==='done'&&opened&&!current.repeated_to&&('repeat' in set?set.repeat:current.repeat))await this.repeat(db,id,settings);
       await db.query('INSERT INTO owner_task_operations(operation_id,task_id,request_hash) VALUES($1,$2,$3)',[operation,id,hash]);
-      if(gate){const preview={...await this.preview(db,id,gate.project,joining),task_title:current.title};await db.query('ROLLBACK');
+      // The card says when a task only changes group in the list it is already in.
+      if(gate){const preview={...await this.preview(db,id,gate,joining),task_title:current.title,within_list:current.project_id===project};await db.query('ROLLBACK');
         return {held:{...gate,joining,preview,family,revision:null}} satisfies Held;}
-      const updated=await this.one(db,id,context.within);
+      const updated=await this.one(db,id,context);
       await db.query('COMMIT');return updated;
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
@@ -892,16 +1032,17 @@ export class TaskRepository {
     }
     for(const kind of ['blocked_by','related','duplicate_of'] as const){
       const chosen=patch[kind];if(chosen===undefined)continue;
-      // A project's chat sees and replaces only the links to tasks on its own list; the owner's links to tasks
-      // anywhere else stay (ADR-0243).
+      // A project's chat sees and replaces only the links to tasks it sees; the owner's links to tasks anywhere else,
+      // another group's included, stay (ADR-0243, ADR-0248).
+      const linkedHere=`($3::text IS NULL OR ${seesSql('o.','$3','$4')})`,bound=[context.within,reachParam(context.reach)];
       const before=fresh?[]:(await db.query(`SELECT l.other_id FROM owner_task_links l JOIN owner_tasks o ON o.id=l.other_id
-        WHERE l.task_id=$1 AND l.kind=$2 AND ($3::text IS NULL OR o.project_id=$3) ORDER BY l.other_id`,[id,kind,context.within])).rows.map(item=>item.other_id);
+        WHERE l.task_id=$1 AND l.kind=$2 AND ${linkedHere} ORDER BY l.other_id`,[id,kind,...bound])).rows.map(item=>item.other_id);
       if(canonical(before)===canonical(chosen))continue;
       if(chosen.includes(id))throw new HttpError(400,'invalid_task_links');
-      const found=(await db.query('SELECT id,project_id FROM owner_tasks WHERE id=ANY($1) AND deleted_at IS NULL',[chosen])).rows;
-      if(found.length!==chosen.length||context.within&&found.some(item=>item.project_id!==context.within))throw new HttpError(404,'task_not_found');
+      const found=(await db.query('SELECT id,project_id,group_id FROM owner_tasks WHERE id=ANY($1) AND deleted_at IS NULL',[chosen])).rows;
+      if(found.length!==chosen.length||found.some(item=>!sees(this.reader(context),item)))throw new HttpError(404,'task_not_found');
       await db.query(`DELETE FROM owner_task_links l USING owner_tasks o WHERE l.task_id=$1 AND l.kind=$2 AND o.id=l.other_id
-        AND ($3::text IS NULL OR o.project_id=$3)`,[id,kind,context.within]);
+        AND ${linkedHere}`,[id,kind,...bound]);
       if(chosen.length)await db.query('INSERT INTO owner_task_links(task_id,other_id,kind) SELECT $1,unnest($2::text[]),$3',[id,chosen,kind]);
       changes[kind]=true;
     }
@@ -942,14 +1083,14 @@ export class TaskRepository {
       await db.query('BEGIN');
       const prior=(await db.query('SELECT request_hash FROM owner_task_operations WHERE operation_id=$1',[operation])).rows[0];
       if(prior&&prior.request_hash!==hash)throw new HttpError(409,'task_operation_conflict');
-      const task=(await db.query('SELECT project_id,project_since,title,revision FROM owner_tasks WHERE id=$1 FOR UPDATE',[id])).rows[0];
-      if(!task||context.within&&task.project_id!==context.within)throw new HttpError(404,'task_not_found');
+      const task=(await db.query('SELECT project_id,group_id,project_since,title,revision FROM owner_tasks WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if(!task||!sees(this.reader(context),task))throw new HttpError(404,'task_not_found');
       if(!prior){
         // An approved comment lands only on the task as its card showed it.
         if(context.approved&&context.approved.revision!==null&&Number(task.revision)!==context.approved.revision)throw new HttpError(409,'task_request_changed');
-        // A comment on a task in a project's list is seen by that project's chats.
-        const gate=await this.gate(db,context,task.project_id,!!text);
-        if(gate){const preview={...await this.preview(db,id,gate.project,false),task_title:task.title};await db.query('ROLLBACK');
+        // A comment on a task in a project's list is seen by the chats that see that task.
+        const gate=await this.gate(db,context,task.project_id,task.group_id,!!text);
+        if(gate){const preview={...await this.preview(db,id,gate,false),task_title:task.title};await db.query('ROLLBACK');
           return {held:{...gate,joining:false,preview,family:null,revision:Number(task.revision)}} satisfies Held;}
         await this.joined(db,{id,...task});
         if(text)await db.query('INSERT INTO owner_task_comments(id,task_id,body,author,origin,source_event) VALUES($1,$2,$3,$4,$5,$6)',
@@ -960,7 +1101,7 @@ export class TaskRepository {
       }
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
-    return this.detail(id,context.within);
+    return this.detail(id,context.within,context.reach??null);
   }
 
   /** Send the reminders that are due to the owner's private chat. Returns how many were handled. */
@@ -1001,13 +1142,30 @@ export class TaskRepository {
     if(dates.due_time&&!dates.due_on)throw new HttpError(400,'task_due_time_needs_day');
     if(dates.start_on&&dates.due_on&&dates.start_on>dates.due_on)throw new HttpError(400,'task_start_after_due');
   }
-  /** The task a subtask sits under: it exists, is not in the trash, and is not the task itself or below it. */
-  private async parentOf(db:pg.PoolClient,parent:string,self:string|null,within:string|null,hold=false) {
-    const found=(await db.query(`SELECT id,project_id FROM owner_tasks WHERE id=$1 AND deleted_at IS NULL${hold?' FOR SHARE':''}`,[parent])).rows[0];
-    if(!found||within&&found.project_id!==within)throw new HttpError(404,'task_not_found');
+  /** The task a subtask sits under: it exists, is not in the trash, the asking chat sees it, and it is not the task
+   * itself or below it. */
+  private async parentOf(db:pg.PoolClient,parent:string,self:string|null,context:Context,hold=false) {
+    const found=(await db.query(`SELECT id,project_id,group_id FROM owner_tasks WHERE id=$1 AND deleted_at IS NULL${hold?' FOR SHARE':''}`,[parent])).rows[0];
+    if(!found||!sees(this.reader(context),found))throw new HttpError(404,'task_not_found');
     if(self&&(await db.query(`WITH RECURSIVE up AS (SELECT id,parent_id FROM owner_tasks WHERE id=$1 UNION SELECT t.id,t.parent_id FROM owner_tasks t JOIN up ON t.id=up.parent_id)
       SELECT 1 FROM up WHERE id=$2`,[parent,self])).rows.length)throw new HttpError(400,'task_parent_cycle');
-    return found as {id:string;project_id:string|null};
+    return found as {id:string;project_id:string|null;group_id:string|null};
+  }
+  /**
+   * Before a project's chat moves, archives or trashes a task, each task under that task's family as the chat sees it
+   * that the chat does not see, such as another group's written before subtasks followed their parent's group, leaves
+   * the family with everything under it: it keeps its list, group and state, sits at the top of its list, where its own
+   * group sees it as before, and its history says only that it no longer sits under a task, never which or whose chat
+   * asked. So the chat neither changes nor learns of it, as when a group moves (moveGroupTasks, ADR-0248).
+   */
+  private async release(db:pg.PoolClient,id:string,reader:{project:string;reach:ReadSet|null},origin:Origin):Promise<void> {
+    const seen=(alias:string)=>`coalesce(${seesSql(alias,'$2','$3')},false)`;
+    const left=(await db.query(`WITH RECURSIVE down AS (SELECT $1::text AS id UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id WHERE ${seen('t.')})
+      SELECT o.id FROM owner_tasks o WHERE o.parent_id IN (SELECT id FROM down) AND NOT ${seen('o.')} ORDER BY o.id FOR UPDATE OF o`,
+      [id,reader.project,reachParam(reader.reach)])).rows.map(task=>task.id as string);
+    if(!left.length)return;
+    await db.query('UPDATE owner_tasks SET parent_id=NULL,revision=revision+1,updated_at=now() WHERE id=ANY($1::text[])',[left]);
+    for(const task of left)await this.record(db,task,{kind:'nocheh'},origin,{parent_id:{to:null}});
   }
   /** Change every task under a task; returns a digest of which they are and their revisions after the change. */
   private async descendants(db:pg.PoolClient,id:string,assignment:string,values:unknown[]):Promise<string> {
@@ -1026,44 +1184,77 @@ export class TaskRepository {
     await db.query('INSERT INTO owner_task_activity(task_id,actor,origin,changes,at) VALUES($1,$2,$3,$4,coalesce($5::timestamptz,now()))',
       [id,JSON.stringify(actor),origin,JSON.stringify(changes),at]);
   }
-  private async one(db:Pick<pg.Pool,'query'>,id:string,within:string|null) {
-    return row((await db.query(`SELECT ${fields} FROM owner_tasks WHERE id=$1`,[id])).rows[0],await this.view(db,within));
+  /** One task as the asking reader sees it; a project's chat does not find a task it no longer sees, such as one the
+   * owner moved to another group since (ADR-0248). */
+  private async one(db:Pick<pg.Pool,'query'>,id:string,context:{within:string|null;reach?:ReadSet|null}) {
+    const view=await this.view(db,context.within,context.reach??null),bound=view?[view.project,reachParam(view.reach)]:[];
+    const found=(await db.query(`SELECT ${seenFields(view,'$2','$3')} FROM owner_tasks WHERE id=$1`,[id,...bound])).rows[0];
+    if(!found||!sees(view,found))throw new HttpError(404,'task_not_found');
+    return row(found,view);
   }
-  /** How a project's chat reads tasks: that project's list, with the columns the owner shares and the chats that see it. */
-  private async view(db:Pick<pg.Pool,'query'>,within:string|null):Promise<View> {
-    return within?{project:within,shared:sharedColumns((await this.current(db)).settings),chats:await this.chats(db,within)}:null;
+  /** Who reads for a context: the owner, or a project's chat with the groups and topics it reaches. */
+  private reader(context:{within:string|null;reach?:ReadSet|null}) {
+    return context.within?{project:context.within,reach:context.reach??null}:null;
+  }
+  /** How a project's chat reads tasks: in that project's list, the tasks set on the project itself and those of the
+   * groups and topics it reaches, with the columns the owner shares. */
+  private async view(db:Pick<pg.Pool,'query'>,within:string|null,reach:ReadSet|null):Promise<View> {
+    return within?{project:within,shared:sharedColumns((await this.current(db)).settings),reach}:null;
   }
   /**
-   * A task as `project`'s chats would see it, with its related tasks in that list and the title of the task it sits
+   * What the chats a card names read: a group's task is read by that group as its turns read it; a task set on the
+   * project itself by every chat of the project, so the card shows the most any of them sees (ADR-0248).
+   */
+  private reachOf(project:string,group:string|null,chats:string[]):ReadSet|null {
+    const memory=this.topicMemory(),named=chats.filter(groupSpace);
+    if(group!==null)return groupSpace(group)?readSetOf(recallScope(group,memory),project):null;
+    if(!named.length)return null;
+    return readSet({home:named[0]!,project,...(memory==='group'?{whole:named.map(chat=>parentSpace(chat)??chat)}:{exact:named})});
+  }
+  /**
+   * A task as the chats of `audience` would see it, with its related tasks they see and the title of the task it sits
    * under; with `family`, every task under it too, archived and in the trash as well, each after the task it sits under.
    */
-  private async preview(db:pg.PoolClient,id:string,project:string,family:boolean):Promise<Record<string,unknown>> {
-    const view=await this.view(db,project),same=(items:any[])=>items.filter(item=>item.project_id===project);
+  private async preview(db:pg.PoolClient,id:string,audience:{project:string;group:string|null;chats:string[]},family:boolean):Promise<Record<string,unknown>> {
+    const view=await this.view(db,audience.project,this.reachOf(audience.project,audience.group,audience.chats)),same=(items:any[])=>items.filter(item=>sees(view,item));
     const select=`SELECT ${fields},${linked('related','other_id','task_id')} AS related_to,${linked('related','task_id','other_id')} AS related_from,
       ${linked('duplicate_of','other_id','task_id')} AS duplicate_of,(SELECT t.title FROM owner_tasks t WHERE t.id=owner_tasks.parent_id) AS parent_title FROM owner_tasks`;
     const seen=(value:any)=>{const {related_to,related_from,...rest}=row(value,view);return {...rest,related:same([...related_to,...related_from]),duplicate_of:same(value.duplicate_of)};};
     const task=seen((await db.query(`${select} WHERE id=$1`,[id])).rows[0]);
     if(!family)return task;
+    // Ordered as stored, by the manual position the chats themselves are not shown.
     const under=(await db.query(`WITH RECURSIVE down AS (SELECT id FROM owner_tasks WHERE parent_id=$1 UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id)
-      ${select} WHERE id IN (SELECT id FROM down)`,[id])).rows.map(seen);
+      ${select} WHERE id IN (SELECT id FROM down)`,[id])).rows;
     const order=(parent:string):any[]=>under.filter(item=>item.parent_id===parent)
-      .sort((a,b)=>a.position-b.position||new Date(a.created_at).getTime()-new Date(b.created_at).getTime()||(a.id<b.id?-1:1)).flatMap(item=>[item,...order(item.id)]);
+      .sort((a,b)=>a.position-b.position||new Date(a.created_at).getTime()-new Date(b.created_at).getTime()||(a.id<b.id?-1:1)).flatMap(item=>[seen(item),...order(item.id)]);
     return {...task,descendants:order(id)};
   }
   /**
    * Asked in the owner's private chat, a change that a project's chats would see is held for the owner's card, with
-   * the chats that see that list. The change of an approved card lands only in the list it named, and only while the
-   * same chats see that list (ADR-0243).
+   * the chats that will see the task. The change of an approved card lands only in the list and group it named, and
+   * only while the same chats would see it (ADR-0243, ADR-0248).
    */
-  private async gate(db:pg.PoolClient,context:Context,project:string|null,seen:boolean):Promise<{project:string;chats:string[]}|null> {
+  private async gate(db:pg.PoolClient,context:Context,project:string|null,group:string|null,seen:boolean):Promise<{project:string;group:string|null;chats:string[]}|null> {
     if(context.approved) {
-      if(project!==context.approved.project||canonical(await this.chats(db,project))!==canonical(context.approved.chats))throw new HttpError(409,'task_request_changed');
+      if(project!==context.approved.project||group!==context.approved.group||
+        canonical(await this.audienceOf(db,project,group))!==canonical(context.approved.chats))throw new HttpError(409,'task_request_changed');
       return null;
     }
-    return context.card&&project&&seen?{project,chats:await this.chats(db,project)}:null;
+    return context.card&&project&&seen?{project,group,chats:await this.audienceOf(db,project,group)}:null;
   }
-  private async chats(db:Pick<pg.Pool,'query'>,project:string):Promise<string[]> {
-    return (await db.query(`SELECT ${projectChats('$1')} AS chats`,[project])).rows[0].chats;
+  /**
+   * The chats that see a task in a project's list (ADR-0248). A task set on the project itself (no group) is seen by
+   * every group assigned to the project, and by the chats added to it later. A group's task is seen only while its
+   * group is in the project, as a topic always follows its group's project (ADR-0247): when topics share what they
+   * know, by the group's chat and every topic of it, named as the group; else only by the task's own chat or topic. A
+   * group that is not clearly a group sees nothing (ADR-0242).
+   */
+  private async audienceOf(db:Pick<pg.Pool,'query'>,project:string,group:string|null):Promise<string[]> {
+    if(group===null)return (await db.query(`SELECT ${projectChats('$1')} AS chats`,[project])).rows[0].chats;
+    const chat=parentSpace(group)??group;
+    if(!groupSpace(group)||!groupChatId(chat))return [];
+    const assigned=(await db.query(`SELECT 1 FROM project_assignments WHERE space_id=$1 AND mode='assigned' AND project_id=$2`,[chat,project])).rows.length>0;
+    return assigned?[this.topicMemory()==='topic'?group:chat]:[];
   }
 
   /** A task can move into an active project only; one already in an archived project stays readable. */
@@ -1081,10 +1272,10 @@ export class TaskRepository {
   }
 
   /** A repeated operation returns the task's current state; a different request under the same id conflicts. */
-  private async replay(db:pg.PoolClient,operation:string,hash:string,within:string|null) {
+  private async replay(db:pg.PoolClient,operation:string,hash:string,context:Context) {
     const prior=(await db.query('SELECT task_id,request_hash FROM owner_task_operations WHERE operation_id=$1',[operation])).rows[0];
     if(!prior)return null;
     if(prior.request_hash!==hash)throw new HttpError(409,'task_operation_conflict');
-    return this.one(db,prior.task_id,within);
+    return this.one(db,prior.task_id,context);
   }
 }

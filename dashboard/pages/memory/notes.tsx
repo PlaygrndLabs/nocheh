@@ -24,7 +24,16 @@ import {
 import {Drawer} from '../../ui/overlay';
 import {useChats} from './shared';
 
-type Profile = {scope: string; profile: string; owner?: boolean; revision?: number};
+type Profile = {
+  scope: string;
+  profile: string;
+  owner?: boolean;
+  revision?: number;
+  private_answer?: boolean;
+  /** Where a private answer was asked, as its first line names it, and when it ran (ADR-0249). */
+  answer_group?: string;
+  answer_at?: string;
+};
 type Note = {name: string; exists: boolean; text: string; truncated?: boolean; citations: unknown[]};
 type Session = {id: string; title: string; source: string};
 type MemoryView = {memories: Note[]; sessions: Session[]};
@@ -44,6 +53,12 @@ const sourceLabel: Record<string, string> = {
   cron: 'Scheduled',
 };
 
+function answerLabel(p: Profile) {
+  const day = p.answer_at ? new Date(p.answer_at) : null;
+  const date = day && !Number.isNaN(day.getTime()) ? ' · ' + day.toLocaleDateString() : '';
+  return 'Private answer · ' + (p.answer_group ? p.answer_group + date : p.profile.slice(-6));
+}
+
 export function Notes() {
   const chosen = useParam('profile');
   const session = useParam('session');
@@ -51,7 +66,10 @@ export function Notes() {
   const profiles = useResource<{profiles: Profile[]; history_profiles?: Profile[]}>('/memory/profiles', 60000);
   const list = profiles.data?.history_profiles ?? profiles.data?.profiles ?? [];
   const profile = list.find(p => p.profile === chosen) ?? list[0] ?? null;
-  const label = (p: Profile) => (p.owner ? 'Your private chat' : chats.name(p.scope));
+  // Each private answer has its own profile in your private chat, named by where it was asked, as its first line names
+  // it, and the day it ran; one without that receipt by a short tail of its name.
+  const label = (p: Profile) =>
+    p.private_answer ? answerLabel(p) : p.owner ? 'Your private chat' : chats.name(p.scope);
   const memory = useResource<MemoryView>(
     profile ? '/memory?' + new URLSearchParams({scope: profile.scope, profile: profile.profile}) : null,
     30000,

@@ -9,7 +9,7 @@ import {OwnerCommands} from './owner-commands.js';
 import type {Project,ProjectRepository} from './projects.js';
 import type {PreparedLearningContext} from './learning-context.js';
 import {resultItems,withoutNulls,type LearningRejection} from '../interpretations.js';
-import {groupSpace,parentSpace} from '../spaces.js';
+import {groupSpace,parentSpace,readSetGroups} from '../spaces.js';
 
 const protocol='nocheh-connected-entities-v1';
 export type EntityKind='person'|'project';
@@ -538,10 +538,16 @@ export class EntityRepository {
   }
   private async visible(principal:Reader,entity:MemoryEntity):Promise<boolean> {
     if(principal.admin||principal.scope===null)return true;
-    if(entity.kind==='project'&&(await this.projects.effective(principal.space??principal.scope)).project?.id===entity.project_id)return true;
+    // An answer reader sees its record's project and the people of the groups frozen in it, never those of its own
+    // private chat (ADR-0249); without its record, only what it may read.
+    const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
+    if(entity.kind==='project'&&(answer?!!reads&&reads.project===entity.project_id&&
+      (await this.stores.control.query("SELECT 1 FROM projects WHERE id=$1 AND state='active'",[entity.project_id])).rowCount===1:
+      (await this.projects.effective(principal.space??principal.scope)).project?.id===entity.project_id))return true;
+    const chats=answer?reads?readSetGroups(reads):[]:[principal.scope];
     const ids=(await this.stores.control.query("SELECT source_object_id FROM memory_entity_bindings WHERE entity_id=$1 AND state IN ('exact','confirmed') AND source_object_id IS NOT NULL",[entity.id])).rows.map(r=>r.source_object_id);
-    if(ids.length&&(await this.stores.archive.query(`SELECT 1 FROM source_relations r JOIN events e ON e.id=r.event_id
-      WHERE r.target_id=ANY($1::text[]) AND r.kind='authored_by' AND e.scope=$2 LIMIT 1`,[ids,principal.scope])).rowCount)return true;
+    if(ids.length&&chats.length&&(await this.stores.archive.query(`SELECT 1 FROM source_relations r JOIN events e ON e.id=r.event_id
+      WHERE r.target_id=ANY($1::text[]) AND r.kind='authored_by' AND e.scope=ANY($2::text[]) LIMIT 1`,[ids,chats])).rowCount)return true;
     const claims=(await this.stores.derived.query(`SELECT v.evidence FROM entity_claims e JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision
       WHERE NOT v.retired AND (e.subject_entity_id=$1 OR e.object_entity_id=$1) ORDER BY e.id LIMIT 101`,[entity.id])).rows;
     const binding=await this.access.guards.state();

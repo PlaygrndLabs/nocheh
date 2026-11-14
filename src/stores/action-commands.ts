@@ -2,7 +2,7 @@ import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {approvalAction,approvalCard,approvalLines,approvalTask,fillTemplate,labeledLines,ownerPrompts,problemButtons,type ApprovalText} from '../prompts.js';
+import {approvalAction,approvalCard,approvalLines,approvalTask,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
 import {controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
 import {followUpLeft} from './action-continuations.js';
@@ -14,6 +14,7 @@ import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import {closedStates,type BackgroundJobRepository} from './background-jobs.js';
 import type {TaskRepository} from './tasks.js';
+import type {PrivateAnswerRepository} from './private-answers.js';
 
 type ActionKind='telegram'|'controlled'|'background'|'list'|'task';
 /** One card of a job's waiting changes, as frozen when it was sent. */
@@ -30,6 +31,8 @@ const ruleButtons:Record<string,[ApprovalText,string][]>={
 const ruleChoices=(row:{job_id:string|null;match_key:string|null;kind:string})=>!row.job_id&&row.match_key?ruleButtons[row.kind]??null:null;
 /** The Retry failed button under a problem notice in the owner's private chat. */
 export const retryButton='nr';
+/** The Answer privately button under the owner's answer in a group: `np` and its record's id (ADR-0249). */
+const answerButton=/^np([a-f0-9]{32})$/;
 const reviewLimit=2200;
 // Telegram's message limit in UTF-16 units, less room for the outcome a decided card adds.
 const cardLimit=4096,outcomeRoom=300;
@@ -96,7 +99,7 @@ export function telegramLink(chat:string,username:string|null,path:(string|null|
  * it was asked, where that person or the owner decides it. */
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
-    readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository,readonly tasks?:TaskRepository){}
+    readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository,readonly tasks?:TaskRepository,readonly answers?:PrivateAnswerRepository){}
   private async approval(input:Record<string,unknown>,timeout=15000) {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
@@ -287,9 +290,10 @@ export class ActionCommandRepository {
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
   /**
-   * A task card: what changes in which project's list, every group and topic that sees that list by name, and that chats
-   * added later see it too, what stays private, then exactly what those chats will see, with each task that moves in
-   * under it. Null when it does not fit one Telegram card (ADR-0243).
+   * A task card: what changes in which project's list, every group and topic that will see the task by name, and,
+   * for a task set on the project itself, that chats added later see it too, or, for a group's task, that the
+   * project's other groups don't; what stays private, then exactly what those chats will see, with each task that
+   * moves in under it. Null when it does not fit one Telegram card (ADR-0243, ADR-0248).
    */
   private async taskCard(id:string) {
     const texts=await this.texts(),urls:string[]=[],owner={admin:true,scope:null};
@@ -301,8 +305,11 @@ export class ActionCommandRepository {
     const request=await this.tasks!.request(owner,id,space);
     const chats=[];for(const chat of request.chats){const [group,topic]=chat.split('/topic/');chats.push(await this.where(group!,line,mark,{topic,showTopic:true}));}
     const project=`“${(request.project??'').replace(controls,'')}”`,slot='\u0001\u0003';
-    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project,count:String(request.subtasks)}),chats:(chats.length?chats.join(', '):line.task_no_chats)+'. '+line.task_later,
-      private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
+    const group=request.group?`“${(await space(request.group)).replace(controls,'')}”`:'';
+    // Chats added to the project later see only the tasks set on the project itself; a group's task stays its own.
+    const after=request.audience==='project'?line.task_later:chats.length?line.task_group_only:fillTemplate(line.task_group_later,{group});
+    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project,group,count:String(request.subtasks)}),
+      chats:(chats.length?chats.join(', '):line.task_no_chats)+'. '+after,private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
     const card=linked(filled.replaceAll(slot,()=>fields(request.fields)),urls);
     if(card.text.length>cardLimit-outcomeRoom||card.links.length>entityLimit)return null;
     return {...card,line,state:request.state,fingerprint:request.fingerprint,source:request.source_reference};
@@ -482,6 +489,8 @@ export class ActionCommandRepository {
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
     const query=row?JSON.parse(row.payload.toString()).callback_query:null,data=typeof query?.data==='string'?query.data.match(buttonData):null;
     if(query?.data===retryButton&&typeof query.id==='string')return this.retryPressed(query);
+    const privately=typeof query?.data==='string'?answerButton.exec(query.data):null;
+    if(privately&&typeof query.id==='string')return this.answerPressed(privately[1]!,query,source);
     if(!data||typeof query.id!=='string')return false;
     const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),{line}=await this.texts();
     const answer=(text:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:text.slice(0,200)},10000);
@@ -574,6 +583,26 @@ export class ActionCommandRepository {
       reply=line.job_ended;
     }
     await answer(reply);await this.settle('background',action.id,seen);return true;
+  }
+  /**
+   * Answer privately under the owner's answer in a group (ADR-0249). Only the person who asked can use it; anyone else
+   * gets a short note and nothing changes. A valid tap freezes the groups the answer may read and answers with a link that
+   * opens the asker's private chat with Nocheh, where its /start asks for the answer. A tap the record refuses gets its
+   * fixed note; no model runs either way.
+   */
+  private async answerPressed(id:string,query:any,source:SourceReference):Promise<boolean> {
+    const chat=String(query.message?.chat?.id??''),texts=privateAnswerLines((await ownerPrompts(this.access.stores.control))['telegram.private_answer_texts']);
+    const answer=(text:string,start?:string)=>this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(text).slice(0,200).join(''),...(start?{start}:{})},10000);
+    const topic=query.message?.is_topic_message===true&&Number.isSafeInteger(query.message?.message_thread_id)?'/topic/'+query.message.message_thread_id:'';
+    let result;
+    try{result=this.answers?await this.answers.press(id,{account_id:String(query.from?.id??''),press_event:source.id,space:chat+topic}):null;}
+    catch(error){if(!(error instanceof HttpError)||error.status!==400)throw error;result=null;}
+    if(!result){await answer(texts.changed);return true;}
+    if(!result.ok){await answer(texts[result.code]);return true;}
+    // The bot builds the link from its own name. When it cannot, nothing changed: the tap stays open for ten minutes, so
+    // the asker is told to tap again.
+    if(!await answer(texts.open,result.answer.id))await answer(texts.retry);
+    return true;
   }
   /** Retry failed under a problem notice: only the owner's press in their private chat retries anything. */
   private async retryPressed(query:any):Promise<boolean> {

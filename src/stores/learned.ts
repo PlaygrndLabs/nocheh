@@ -1,7 +1,7 @@
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {inRecall,type RecallScope} from '../spaces.js';
+import {inReadSet,inRecall,type RecallScope} from '../spaces.js';
 import type {Interpretation,InterpretationVersion} from '../interpretations.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
@@ -207,7 +207,16 @@ export class LearnedMemoryRepository {
     const row=(await this.stores.derived.query(`SELECT e.*,v.author,v.retired,v.evidence,v.dependencies,v.derived_id FROM learned_entries e
       JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[id])).rows[0];
     if(!row||row.retired||row.imported&&!principal.admin)throw new HttpError(404,'learned_memory_not_found');
-    if(!principal.admin&&principal.scope!==null) {
+    if(!principal.admin&&principal.answer!==undefined) {
+      // An answer reader reads what was learned in the groups frozen in its record and in its project, when that project
+      // is still active (ADR-0249); without its record, nothing.
+      const reads=principal.reads;
+      if(!reads||row.scope_kind==='conversation'&&!inReadSet(reads,row.scope_id))throw new HttpError(404,'learned_memory_not_found');
+      if(row.scope_kind==='project'&&(reads.project!==row.scope_id||
+        (await this.stores.control.query("SELECT 1 FROM projects WHERE id=$1 AND state='active'",[row.scope_id])).rowCount!==1))throw new HttpError(404,'learned_memory_not_found');
+      if(!['conversation','project'].includes(row.scope_kind))throw new HttpError(404,'learned_memory_not_found');
+    }
+    else if(!principal.admin&&principal.scope!==null) {
       const space=principal.space??principal.scope;
       if(row.scope_kind==='conversation'&&!(recall?inRecall(recall,row.scope_id):row.scope_id===space))throw new HttpError(404,'learned_memory_not_found');
       if(row.scope_kind==='project') {

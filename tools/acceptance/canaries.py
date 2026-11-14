@@ -2,10 +2,11 @@
 
 `private_chat_stays_out_of_groups` plants each PRIVATEMARK<n> in the owner's private chat (a plain message, a native
 note, a personal task, a private job and the owner's default role) and saves it in the fixture's canaries.json.
-`private_canaries_never_left_the_owner` then reads everything the fake Telegram (tools/acceptance/telegram_mock.py)
-holds and looks for any of them outside that chat. Nothing on the owner's private side reaches a group or a member
-without a card in the private chat that names who will see it, and no planted mark ever gets such a card, so a mark
-anywhere else is a leak.
+`project_groups_stay_apart` adds one more, a private message next to the search word its groups share, so the
+private answer it opens in that chat (ADR-0249) is swept too. `private_canaries_never_left_the_owner` then reads
+everything the fake Telegram (tools/acceptance/telegram_mock.py) holds and looks for any of them outside that chat.
+Nothing on the owner's private side reaches a group or a member without a card in the private chat that names who
+will see it, and no planted mark ever gets such a card, so a mark anywhere else is a leak.
 """
 import json
 import re
@@ -30,7 +31,7 @@ def load(directory):
     """The saved marks. A missing or empty list fails: the sweep never passes on nothing."""
     path = Path(directory)/FILE
     if not path.exists():
-        raise FileNotFoundError('canaries_missing: private_chat_stays_out_of_groups plants them earlier in the same run')
+        raise FileNotFoundError('canaries_missing: private_chat_stays_out_of_groups and project_groups_stay_apart plant them earlier in the same run')
     value = json.loads(path.read_text())
     if not isinstance(value, dict) or type(value.get('owner')) is not int or not isinstance(value.get('marks'), dict) or not value['marks']:
         raise ValueError('canaries_invalid')
@@ -66,9 +67,9 @@ def leaks(state, marks, owner):
     """Each place a mark reached outside the owner's private chat, from the fake Telegram's saved state.
 
     It reads every message sent to another chat (text, entities, buttons and reply parameters, as sent and as each edit
-    set them), every answer to a press by someone other than the owner, and the call log, which also holds sends and
-    edits Telegram refused (only its latest 2000 calls are kept). With owner None, every chat counts. Pure: it reads
-    only its arguments; an empty list is a clean sweep.
+    set them), every answer to a press by someone other than the owner (its popup text and any link it opens), and the
+    call log, which also holds sends and edits Telegram refused (only its latest 2000 calls are kept). With owner None,
+    every chat counts. Pure: it reads only its arguments; an empty list is a clean sweep.
     """
     owner = None if owner is None else int(owner)
     hits = []
@@ -91,7 +92,7 @@ def leaks(state, marks, owner):
     for answer in state.get('answers', []):
         presser = pressers.get(str(answer.get('callback_query_id')))
         if presser != owner:
-            scan('answer', presser, answer.get('text') or '')
+            scan('answer', presser, (answer.get('text') or '')+('\n'+answer['url'] if isinstance(answer.get('url'), str) else ''))
     for call in state.get('calls', []):
         parameters = call.get('parameters') or {}
         reached = pressers.get(str(parameters.get('callback_query_id'))) if call.get('method') == 'answerCallbackQuery' else chat_of(parameters)

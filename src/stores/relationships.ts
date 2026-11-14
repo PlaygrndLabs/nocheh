@@ -4,12 +4,15 @@ import {telegramMessageAudience,type ObservedAudience,type ObservedReaction} fro
 import {canonical} from '../archive.js';
 import {sourceObjectId,type SourceIdentity} from '../source-model.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
+import {inReadSet,type ReadSet} from '../spaces.js';
 
-/** `group` admits every known conversation of the chat, for groups whose topics share memory. */
-export type RelationshipAudience={kind:'owner'}|{kind:'conversation';chat_id:string;topic_id:string|null;group?:boolean};
+/** `group` admits every known conversation of the chat, for groups whose topics share memory. `reads` admits the
+ * known conversations of a read set, for an answer reader (ADR-0249). */
+export type RelationshipAudience={kind:'owner'}|{kind:'conversation';chat_id:string;topic_id:string|null;group?:boolean}|{kind:'reads';set:ReadSet};
 const permits=(audience:RelationshipAudience,observed:ObservedAudience|null):boolean=>audience.kind==='owner'||!!observed&&
+  (audience.kind==='reads'?observed.topic_state!=='unknown'&&inReadSet(audience.set,observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id):
   audience.chat_id===observed.chat_id&&(observed.topic_state==='known'?audience.group||audience.topic_id===observed.topic_id:
-    observed.topic_state==='none'&&(audience.group||audience.topic_id===null));
+    observed.topic_state==='none'&&(audience.group||audience.topic_id===null)));
 
 // Resolve the older adapter's unknown General projection from the immutable
 // full message. This changes neither archived bytes nor the saved descriptor.

@@ -149,6 +149,36 @@ class ProfileHistoryTests(unittest.TestCase):
         self.assertEqual(prune(new,now=time.time()+IDLE_SECONDS+60),[])
         self.assertTrue(old.exists())
 
+    def test_a_private_answers_profile_is_removed_once_no_answer_can_run_in_it(self):
+        import fcntl
+        import time
+        from unittest.mock import patch
+        from .assistant_gateway import prepare_profile
+        from .profile_history import ANSWER_IDLE_SECONDS, prune_answers
+        from .scopes import Scope, Scopes
+        def answer(letter):
+            claims={'generation':GENERATION,'guard_epoch':5,'revision':1,'answer':letter*32}
+            return prepare_profile(self.root,Scopes.apply_revision(Scope('123','123',False,'unused','123'),claims),'subscription-model')
+        first,second=answer('a'),answer('b')
+        owner=self.profile(5);self.converse(owner)
+        group=self.profile(5,chat='-100')
+        self.assertTrue(first.exists() and second.exists(),'a recent answer stays, as its hour may not be over')
+        self.assertEqual(prune_answers(owner,now=time.time()+ANSWER_IDLE_SECONDS-60),[])
+        later=time.time()+ANSWER_IDLE_SECONDS+60
+        with (first/'.memory.lock').open('a') as busy:
+            fcntl.flock(busy,fcntl.LOCK_EX)
+            self.assertEqual(prune_answers(group,now=later),[second.name],'an answer still in use is left alone')
+        self.assertEqual(prune_answers(first,now=later),[],'never the profile that is being prepared')
+        self.assertEqual(prune_answers(owner,now=later),[first.name])
+        self.assertFalse(first.exists() or second.exists())
+        self.assertTrue(owner.exists() and group.exists(),"the owner's own profile and other chats' stay")
+        self.assertTrue(self.replay(owner),"with the owner's conversation")
+        # Every turn runs the same sweep while its profile is prepared.
+        third=answer('c')
+        with patch('services.hermes.profile_history.ANSWER_IDLE_SECONDS',-1):self.profile(5,chat='-100')
+        self.assertFalse(third.exists())
+        self.assertTrue(owner.exists() and group.exists())
+
 
 if __name__=='__main__':
     unittest.main()

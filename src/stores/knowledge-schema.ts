@@ -2,10 +2,13 @@
 export const knowledgeManagementSchema=`
 CREATE TABLE IF NOT EXISTS organization_delegations (
  id text PRIMARY KEY,name text NOT NULL,enabled boolean NOT NULL DEFAULT false,
- scopes jsonb NOT NULL,project_ids jsonb NOT NULL,allow_create boolean NOT NULL DEFAULT false,
+ scopes jsonb NOT NULL,project_ids jsonb NOT NULL,
  expires_at timestamptz,capture_watermark bigint NOT NULL,baselines jsonb NOT NULL,
  revision integer NOT NULL CHECK(revision>0),created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- Dev mode: turning automatic organizing on lets it create projects, its only automatic change, so the separate
+-- switch's column goes; a delegation saved with it keeps everything else (ADR-0247).
+ALTER TABLE organization_delegations DROP COLUMN IF EXISTS allow_create;
 CREATE TABLE IF NOT EXISTS organization_delegation_history (
  operation_id text PRIMARY KEY,delegation_id text NOT NULL REFERENCES organization_delegations(id),
  request_hash text NOT NULL,record jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now()

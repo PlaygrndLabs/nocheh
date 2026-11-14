@@ -37,13 +37,14 @@ source identifiers and links do not change when a derivative is activated.
 | GET `/v1/learned/:id` | Active pointer and bounded version history |
 | GET `/v1/learned/:id/history` | Prior text, evidence, uncertainty, conflicts and provenance |
 | POST `/v1/learned/:id/correct` | Owner correction or retirement with an expected revision |
-| GET/POST `/v1/projects` | List or create/edit/archive a project, and whether its chats share what they know |
-| GET/POST `/v1/projects/assignments` | Explicit chat/topic assignment, exclusion or inheritance |
+| GET/POST `/v1/projects` | List, with each project's served `groups`, or create/edit/archive a project |
+| GET/POST `/v1/projects/assignments` | A group's project, or none; a topic only follows its group |
 | GET `/v1/projects/effective?space=…` | Effective membership, with inheritance shown |
 | GET/POST `/v1/sharing/rules` | Selected source spaces, exact destination, mode and enabled state |
 | POST `/v1/sharing/preview`; GET `/v1/sharing/previews[/:id]`; POST `/v1/sharing/previews/:id/approve` | Prepare, inspect or approve a release from chosen sources |
 | GET `/v1/sharing/releases`; POST `/v1/sharing/releases/:id/revoke` | List or revoke releases |
 | POST `/v1/memory/provenance` | Bounded Honcho conclusion ancestry, each conclusion's exact cited messages or derivation batch, and confirmed ingestion references |
+| GET `/v1/private-answers` | The record of Answer privately buttons, newest first, 100 a page: who asked, where, the project, the groups frozen at the tap, the state and its times; `project` keeps one project and `after` continues from an answer's id ([ADR-0249](adr/0249-answer-privately.md)) |
 
 List cursors use `after`; histories use `before`. Learned filters use both
 `scope_kind=conversation|project` and `scope_id`. Sharing rules configure preparation;
@@ -90,23 +91,27 @@ local API configuration without running setup or activating services.
   Archiving sets a project's state to `archived`; revocation disables the sharing rule.
 
 Project save fields: optional existing `id`, `name`, `description`, `state`,
-optional `sharing_enabled` (false for a new project) and `sharing_mode`
-(`filtered`, the default, or `approved`), `expected_revision` (zero for create),
-`operation_id`; a sharing field left out keeps its saved value. Assignment fields:
+`expected_revision` (zero for create), `operation_id`. Assignment fields:
 `space_id`, `mode` (`assigned`, `none`, or `inherit`), optional `project_id`,
-optional `share_into` (only with `assigned`; false is "Don't share into this
-chat", kept when left out), `expected_revision`, `operation_id`. Sharing fields:
-optional existing `id`, `name`, `sources`, `destination`, `enabled`, `mode`
-(`approved` or `filtered`), `instructions`, `expected_revision`, `operation_id`.
+`expected_revision`, `operation_id`; a topic takes only `inherit`, and any other
+mode is refused with 400 `project_topic_follows_group`. Any other field, such as
+the removed `sharing_enabled`, `sharing_mode` or `share_into`, is refused with
+400 `unknown_policy_field`. Sharing fields: optional existing `id`, `name`,
+`sources`, `destination`, `enabled`, `mode` (`approved` or `filtered`),
+`instructions`, `expected_revision`, `operation_id`.
 
-While a project shares what its chats know, Nocheh keeps its own sharing rules,
-listed with `project_id` set ([ADR-0226](adr/0226-a-project-can-share-what-its-chats-know.md)).
-They change only through the project and its assignments: saving one is refused
-with 409 `sharing_rule_project_managed`. A change that would give a rule more
-than 100 sources, or a group more than ten enabled filtered rules, is refused
+A project shares no knowledge between its groups: a group answer uses only that
+group ([ADR-0247](adr/0247-projects-replace-the-share-box.md)); its groups share
+only the tasks set on the whole project
+([ADR-0248](adr/0248-tasks-follow-data-access.md)). Every sharing rule is
+the owner's own. A rule with more than 100 sources is refused with 400
+`invalid_sharing_sources`, and a change that would give a group more than ten
+enabled filtered rules, counted over its General chat and topics, is refused
 with 409 `sharing_rule_limit`. A knowledge proposal read by the owner lists in
-`sharing_projects` the projects that share which its change touches, and an
-applied organization lists in `undo_sharing_projects` those its undo touches.
+`project_groups` each project its change moves a group into or out of, with the
+other served groups there; a project the proposal creates and puts a group in
+is listed with the id `new:<key>` and no groups. An applied organization lists
+in `undo_project_groups` the projects its undo touches.
 </cli>
 
 </owner_operations>

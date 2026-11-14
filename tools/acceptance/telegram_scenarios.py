@@ -22,6 +22,8 @@ from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_deli
                                                  wait_telegram_connected)
 
 OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, -10099, 777
+# A third served group, so two groups can share a project while GROUP stays in none (project_groups_stay_apart).
+THIRD_GROUP = -10044
 MENTION = '@synthetic_fixture_bot'
 # The fixed, editable reply for people the owner has not allowed (src/prompts.ts).
 NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this group.'
@@ -211,18 +213,23 @@ class Scenarios:
 
     @staticmethod
     def is_card(row):
-        """An approval card: sent with Approve and Reject buttons (settling it later removes them)."""
+        """An approval card: sent with Approve and Reject buttons (settling it later removes them). A reply whose one
+        button is Answer privately (ADR-0249) is a reply, not a card."""
         markup = row['parameters'].get('reply_markup') or '{}'
-        return bool((json.loads(markup) if isinstance(markup, str) else markup).get('inline_keyboard'))
+        rows = (json.loads(markup) if isinstance(markup, str) else markup).get('inline_keyboard') or []
+        return any(not str(button.get('callback_data') or '').startswith('np') for line in rows for button in line)
 
     def cards_since(self, before, chat):
         return [row for row in self.f.sent()[before:] if self.is_card(row) and row['message']['chat']['id'] == chat]
 
-    def turn(self, update, chat, topic=None, expect_reply=True, attempts=1, posted=None):
+    def turn(self, update, chat, topic=None, expect_reply=True, attempts=1, posted=None, chunked=False):
         """Inject one update and verify its single causal reply or its silence.
 
         Approval cards and a post the turn made right away (`posted`, exact
-        text) are not the turn's reply; scenarios check those themselves."""
+        text) are not the turn's reply; scenarios check those themselves.
+        `chunked` lets a reply longer than Telegram's 4096 characters arrive
+        as several messages in the same conversation, the first replying to
+        the source; the text returned is the chunks joined."""
         before = len(self.f.sent())
         self.f.inject(update)
         event_id = self.captured(update)
@@ -236,12 +243,18 @@ class Scenarios:
         if attempts is not None:
             self.gate('dispatch_attempts', row['attempts'] == attempts, attempts=row['attempts'])
         new = [row for row in self.replies(before, chat, topic) if not self.is_card(row) and row['message'].get('text') != posted]
-        self.gate('one_reply_in_exact_conversation', len(new) == 1, count=len(new))
+        if chunked:
+            self.gate('reply_chunks_in_exact_conversation', bool(new) and all(len(row['message'].get('text') or '') <= 4096 for row in new),
+                      count=len(new))
+        else:
+            self.gate('one_reply_in_exact_conversation', len(new) == 1, count=len(new))
         reply = json.loads(new[0]['parameters'].get('reply_parameters', '{}') or '{}')
         self.gate('reply_targets_source', reply.get('message_id') == update['message']['message_id'])
-        self.wait('delivery_archived', lambda: archived_delivery(self.f.query, new[0]['message'], update['update_id']), 60)
+        for row in new if chunked else new[:1]:
+            self.wait('delivery_archived', lambda row=row: archived_delivery(self.f.query, row['message'], update['update_id']), 60)
         self.replied.append((self.current['scenario'], event_id))
-        return event_id, new[0]['message']['text']
+        # Joined without a separator, so a mark the split cut in two is still found whole.
+        return event_id, ''.join(row['message']['text'] for row in new) if chunked else new[0]['message']['text']
 
     def execute(self, name, function):
         self.current = {'scenario': name, 'gates': [], 'passed': False, 'started': time.time()}

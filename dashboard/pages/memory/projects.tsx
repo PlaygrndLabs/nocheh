@@ -1,8 +1,7 @@
 /**
- * Memory › Projects: group chats into projects so Nocheh keeps related
- * knowledge together, and optionally let Nocheh organize them itself.
- * A project's chats share what they know only when the owner turns that on,
- * and never their messages.
+ * Memory › Projects: put related groups in one project for a shared role, skills and task list, and optionally let
+ * Nocheh create projects itself. A project's groups share only the tasks set on the whole project: a group answer uses
+ * only that group, and a topic always follows its group's project (ADR-0247, ADR-0248).
  */
 import {useState} from 'react';
 import {ChevronRight, FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
@@ -22,7 +21,6 @@ import {
   LoadError,
   LoadingRows,
   Notice,
-  Segmented,
   Switch,
   Textarea,
   type Tone,
@@ -30,25 +28,25 @@ import {
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 import {groupSpace} from '../../lib/chats-model';
 import {ChatPicker} from '../chats/chat-picker';
-import {modeText, projectSharingWarning, projectTasksWarning} from '../chats/rule-dialog';
+import {JoinNotes} from '../chats/project';
+import {leaveTasksText, moveTasksText, relatedGroupsHint} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
+import {PrivateAnswers} from './private-answers';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
 
-type SharingMode = 'approved' | 'filtered';
 type Project = {
   id: string;
   name: string;
   description: string;
   state: 'active' | 'archived';
-  sharing_enabled?: boolean;
-  sharing_mode?: SharingMode;
+  /** The groups Nocheh serves that are in this project, as the server lists them. */
+  groups?: string[];
   revision: number;
 };
 type Assignment = {
   space_id: string;
   project_id: string | null;
   mode: 'assigned' | 'none' | 'inherit';
-  share_into?: boolean;
   revision: number;
 };
 type ContextChat = Conversation & {
@@ -78,7 +76,6 @@ type Delegation = {
   enabled: boolean;
   scopes: string[];
   project_ids: string[];
-  allow_create: boolean;
   expires_at: string | null;
   revision: number;
   suspended_scopes?: string[];
@@ -103,11 +100,11 @@ export function Projects() {
     a.state === b.state ? a.name.localeCompare(b.name) : a.state === 'active' ? -1 : 1,
   );
   const chats = useChats();
-  // The project each chat ends up in: its own choice, or its group's when it inherits.
+  // The project each chat ends up in: a group's own choice; a topic always follows its group.
   const projectOf = (space: string, parent?: string | null): string | null => {
+    if (parent) return projectOf(parent);
     const mine = own.find(row => row.space_id === space);
-    if (mine && mine.mode !== 'inherit') return mine.mode === 'assigned' ? mine.project_id : null;
-    return parent ? projectOf(parent) : null;
+    return mine?.mode === 'assigned' ? mine.project_id : null;
   };
   // A private chat is in no project, even one an older setting still names (ADR-0242).
   const chatCount = (id: string) => {
@@ -122,7 +119,7 @@ export function Projects() {
       <Card>
         <CardHeader
           title="Projects"
-          description="Chats in one project share what Nocheh learns about the project. They share what they know with each other only when you turn that on."
+          description="A project gives related groups one role, skills and task list. It never shares what one group knows with another: a group answer uses only that group."
           action={
             <Button variant="primary" onClick={() => setEditing('new')}>
               <Plus aria-hidden /> New project
@@ -163,10 +160,7 @@ export function Projects() {
                       {project.state === 'archived' ? (
                         <Badge>Archived</Badge>
                       ) : (
-                        <>
-                          {project.sharing_enabled && <Badge tone="accent">Shares</Badge>}
-                          <Badge>{count === 1 ? '1 chat' : `${count} chats`}</Badge>
-                        </>
+                        <Badge>{count === 1 ? '1 chat' : `${count} chats`}</Badge>
                       )}
                       <ChevronRight className="size-4 shrink-0 text-muted" aria-hidden />
                     </button>
@@ -178,7 +172,7 @@ export function Projects() {
         </CardBody>
       </Card>
 
-      <AutoOrganize projects={projects} />
+      <AutoOrganize />
 
       {editing && (
         <ProjectDialog
@@ -199,17 +193,12 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
   const command = useCommand();
   const [name, setName] = useState(project?.name ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
-  // Off for a new project; nothing is shared until the owner ticks it.
-  const [sharing, setSharing] = useState(project?.sharing_enabled ?? false);
-  const [mode, setMode] = useState<SharingMode>(project?.sharing_mode ?? 'filtered');
   const save = async () => {
     const result = await command.run<Project>('/projects', {
       ...(project ? {id: project.id} : {}),
       name: name.trim(),
       description,
       state: project?.state ?? 'active',
-      sharing_enabled: sharing,
-      sharing_mode: mode,
       expected_revision: project?.revision ?? 0,
     });
     if (result) {
@@ -262,35 +251,7 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
             onChange={event => setDescription(event.target.value)}
           />
         </Field>
-        <div className="space-y-3">
-          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
-            <input
-              type="checkbox"
-              className="size-4 accent-accent"
-              checked={sharing}
-              onChange={event => setSharing(event.target.checked)}
-            />
-            Chats in this project share what they know
-          </label>
-          {sharing && (
-            <div className="space-y-3 pl-6">
-              <Notice tone="warn">{projectSharingWarning}</Notice>
-              <div className="space-y-1.5">
-                <Segmented
-                  label="How chats share"
-                  value={mode}
-                  options={[
-                    {value: 'filtered', label: modeText.filtered.label},
-                    {value: 'approved', label: modeText.approved.label},
-                  ]}
-                  onChange={setMode}
-                />
-                <p className="text-xs text-muted">{modeText[mode].hint}</p>
-              </div>
-              <p className="text-xs text-muted">Only groups and topics share. Your private chat is never shared.</p>
-            </div>
-          )}
-        </div>
+        <p className="text-xs text-muted">{relatedGroupsHint}</p>
         {command.error && <Notice tone="bad">{command.error}</Notice>}
         <button type="submit" hidden />
       </form>
@@ -387,6 +348,7 @@ function ProjectDetail({
             description="Only you set these. Every chat in this project uses them, on top of the default for groups, with the chat’s own on top. Defaults are in Settings › Assistant."
           />
           <ProjectKnowledge project={project} context={context} />
+          <PrivateAnswers project={project.id} />
           {context.decisions.total > 0 && (
             <section>
               <h3 className="mb-2 text-sm font-semibold">Waiting for you</h3>
@@ -419,7 +381,8 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   const {projects, own} = useProjects();
   const [adding, setAdding] = useState('');
   const members = context.conversations;
-  const shares = project.state === 'active' && !!project.sharing_enabled;
+  // The list row names the project's served groups; the context's own row does not.
+  const listed = {...project, groups: projects.find(p => p.id === project.id)?.groups ?? []};
   const ownOf = (space: string) => own.find(row => row.space_id === space);
   const elsewhere = (space: string) => {
     const assignment = ownOf(space);
@@ -428,7 +391,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
       : null;
   };
 
-  // Adding a chat is confirmed first: it sees this project's task list, and what the other chats know when they share.
+  // Adding a group is confirmed first: the groups already here, what that means for private answers, its task list.
   const add = async () => {
     const other = elsewhere(adding),
       name = chats.name(adding);
@@ -437,9 +400,9 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
         title: other ? `Move ${name}?` : `Add ${name} to ${project.name}?`,
         body: (
           <div className="space-y-3">
-            {other && <p>It is in {other} now. A chat belongs to one project at a time.</p>}
-            <p>{projectTasksWarning(name, [project.name])}</p>
-            {shares && <Notice tone="warn">{projectSharingWarning}</Notice>}
+            {other && <p>It is in {other} now. A group belongs to one project at a time.</p>}
+            <JoinNotes space={adding} name={name} project={listed} names={chats.name} />
+            {other && <p>{moveTasksText(other, project.name)}</p>}
           </div>
         ),
         confirm: other ? 'Move here' : 'Add',
@@ -458,30 +421,21 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
     }
   };
 
-  const leaveOut = async (chat: ContextChat, out: boolean) => {
-    const result = await command.run('/projects/assignments', {
-      space_id: chat.space_id,
-      mode: 'assigned',
-      project_id: project.id,
-      share_into: !out,
-      expected_revision: ownOf(chat.space_id)?.revision ?? chat.effective.own_assignment?.revision ?? 0,
-    });
-    if (result)
-      feedback.toast(
-        out
-          ? `Nothing from this project goes into ${chats.name(chat.space_id)} now.`
-          : `${chats.name(chat.space_id)} gets what the other chats know again.`,
-      );
-  };
-
+  // A group taken out of a project joins none, which answers "Which project does this group join?" too. It asks first:
+  // the group's tasks stay on this project's list, where only the owner sees them (ADR-0248).
   const remove = async (chat: ContextChat) => {
-    const parent = chat.parent_space;
-    // A topic that would fall back to this same project through its group is set to "no project" instead.
-    const parentHere = parent && members.some(member => member.space_id === parent);
-    const mode = !parent ? 'inherit' : chat.effective.inherited || parentHere ? 'none' : 'inherit';
+    const name = chats.name(chat.space_id);
+    if (
+      !(await feedback.confirm({
+        title: `Remove ${name} from ${project.name}?`,
+        body: <p>It then joins no project. {leaveTasksText(project.name)}</p>,
+        confirm: 'Remove',
+      }))
+    )
+      return;
     const result = await command.run('/projects/assignments', {
       space_id: chat.space_id,
-      mode,
+      mode: 'none',
       project_id: null,
       expected_revision: ownOf(chat.space_id)?.revision ?? chat.effective.own_assignment?.revision ?? 0,
     });
@@ -491,71 +445,48 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   return (
     <section>
       <h3 className="mb-2 text-sm font-semibold">Chats in this project</h3>
-      {shares && (
-        <div className="mb-3 space-y-2">
-          <p className="text-[13px] text-muted">
-            These chats share what they know ({modeText[project.sharing_mode ?? 'filtered'].label}).
-          </p>
-          <Notice tone="warn">{projectSharingWarning}</Notice>
-        </div>
-      )}
       {members.length === 0 ? (
         <p className="text-[13px] text-muted">No chats yet.</p>
       ) : (
         <ul className="divide-y divide-line rounded-lg border border-line">
           {members.map(chat => {
-            const out = chat.effective.own_assignment?.share_into === false;
+            const topic = !!chat.parent_space || chat.space_id.includes('/topic/');
             return (
               <li key={chat.space_id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm">{chats.name(chat.space_id)}</span>
-                  {chat.effective.inherited ? (
-                    <span className="text-xs text-muted">Through its group</span>
-                  ) : (
-                    shares &&
-                    chat.kind === 'private' && (
-                      <span className="text-xs text-muted">Private chats are never shared</span>
-                    )
-                  )}
+                  {topic && <span className="text-xs text-muted">Through its group</span>}
                 </span>
-                {(shares || out) && !chat.effective.inherited && chat.kind !== 'private' && (
-                  <label className="flex items-center gap-2 text-xs text-muted">
-                    Don’t share into this chat
-                    <Switch
-                      label={'Don’t share into ' + chats.name(chat.space_id)}
-                      checked={out}
-                      disabled={command.busy}
-                      onChange={value => void leaveOut(chat, value)}
-                    />
-                  </label>
+                {!topic && (
+                  <Button size="sm" variant="ghost" disabled={command.busy} onClick={() => void remove(chat)}>
+                    Remove
+                  </Button>
                 )}
-                <Button size="sm" variant="ghost" disabled={command.busy} onClick={() => void remove(chat)}>
-                  Remove
-                </Button>
               </li>
             );
           })}
         </ul>
       )}
-      {shares && members.length > 0 && (
+      {members.length > 1 && (
         <p className="mt-2 text-xs text-muted">
-          Leaving out any chat leaves its whole group, topics included, out of this project’s sharing. A chat you leave
-          out still shares what it knows, and still uses the project’s role, skills and tasks.
+          These groups share only the tasks set on the whole project. People in two of them can get private answers that
+          combine them.
         </p>
       )}
       {project.state === 'active' && (
         <div className="mt-3 space-y-2">
           <ChatPicker
-            label="Add a chat"
+            label="Add a group"
             value={adding ? [adding] : []}
             onChange={ids => setAdding(ids.at(-1) ?? '')}
             exclude={members.map(member => member.space_id)}
             disabled={command.busy}
-            groupsOnly
+            wholeGroups
             hint={
               adding && elsewhere(adding)
                 ? `It is in ${elsewhere(adding)} now; adding it here moves it.`
-                : 'A group or topic belongs to one project at a time, and sees and changes its task list. Private chats never join a project.'
+                : 'A group belongs to one project at a time, with its topics, and sees and changes its task list. ' +
+                  relatedGroupsHint
             }
           />
           <Button variant="primary" busy={command.busy} disabled={!adding} onClick={() => void add()}>
@@ -635,7 +566,7 @@ function delegationState(item: Delegation): {label: string; tone: Tone} {
   return {label: 'On', tone: 'good'};
 }
 
-function AutoOrganize({projects}: {projects: Project[]}) {
+function AutoOrganize() {
   const feedback = useFeedback();
   const command = useCommand();
   const delegations = useResource<{delegations: Delegation[]; next: string | null}>(
@@ -654,7 +585,6 @@ function AutoOrganize({projects}: {projects: Project[]}) {
       enabled,
       scopes: item.scopes,
       project_ids: item.project_ids,
-      allow_create: item.allow_create,
       expires_at: item.expired ? null : item.expires_at,
       expected_revision: item.revision,
     });
@@ -665,7 +595,7 @@ function AutoOrganize({projects}: {projects: Project[]}) {
     <Card>
       <CardHeader
         title="Automatic organizing"
-        description="Let Nocheh create projects and sort chats into them by itself, only in the chats you pick."
+        description="Let Nocheh create projects by itself from what it learns in the chats you pick. Moving a chat into or out of a project always asks you."
         action={
           <Button onClick={() => setEditing('new')}>
             <Plus aria-hidden /> Allow in chats
@@ -680,7 +610,7 @@ function AutoOrganize({projects}: {projects: Project[]}) {
           delegations.data &&
           (list.length === 0 ? (
             <Empty icon={Sparkles} title="Off" className="py-6">
-              Nocheh only suggests changes. Allow it in chosen chats to organize them without asking.
+              Nocheh only suggests changes. Allow it in chosen chats to create projects without asking.
             </Empty>
           ) : (
             <ul className="divide-y divide-line rounded-lg border border-line">
@@ -697,7 +627,6 @@ function AutoOrganize({projects}: {projects: Project[]}) {
                       </span>
                       <span className="mt-0.5 block text-[13px] text-muted">
                         {item.scopes.length === 1 ? '1 chat' : `${item.scopes.length} chats`}
-                        {item.allow_create ? ' · may create projects' : ''}
                         {item.expires_at ? ' · until ' + new Date(item.expires_at).toLocaleDateString() : ''}
                       </span>
                       {item.scopes.some(scope => !groupSpace(scope)) && (
@@ -745,49 +674,30 @@ function AutoOrganize({projects}: {projects: Project[]}) {
         )}
         {proposals.error && <p className="text-xs text-muted">Couldn’t load recent suggestions.</p>}
       </CardBody>
-      {editing && (
-        <DelegationDialog
-          item={editing === 'new' ? null : editing}
-          projects={projects}
-          onClose={() => setEditing(null)}
-        />
-      )}
+      {editing && <DelegationDialog item={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
     </Card>
   );
 }
 
-function DelegationDialog({
-  item,
-  projects,
-  onClose,
-}: {
-  item: Delegation | null;
-  projects: Project[];
-  onClose: () => void;
-}) {
+function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: () => void}) {
   const feedback = useFeedback();
   const command = useCommand();
   const [name, setName] = useState(item?.name ?? 'Organize my chats');
   // One saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
   const [scopes, setScopes] = useState<string[]>((item?.scopes ?? []).filter(groupSpace));
-  const [allowed, setAllowed] = useState<string[]>(item?.project_ids ?? []);
-  // A new permission starts off and without project creation until the owner turns them on.
-  const [create, setCreate] = useState(item?.allow_create ?? false);
+  // A new permission starts off; turning it on is what lets Nocheh create projects (ADR-0247).
   const [enabled, setEnabled] = useState(item?.enabled ?? false);
   const [until, setUntil] = useState(item?.expires_at && !item.expired ? item.expires_at.slice(0, 10) : '');
   const [resume, setResume] = useState(false);
   const suspended = (item?.suspended_scopes ?? []).filter(scope => scopes.includes(scope));
-  const toggle = (list: string[], value: string, on: boolean) =>
-    on ? [...new Set([...list, value])] : list.filter(v => v !== value);
-  const active = projects.filter(project => project.state === 'active');
   const save = async () => {
     const result = await command.run('/organization/delegations', {
       ...(item ? {id: item.id} : {}),
       name: name.trim(),
       scopes,
-      project_ids: allowed,
+      // Kept as saved: a delegation only creates projects, so it never moves a chat into one (ADR-0247).
+      project_ids: item?.project_ids ?? [],
       enabled,
-      allow_create: create,
       resume_scopes: resume ? suspended : [],
       expires_at: until ? new Date(until + 'T23:59:59').toISOString() : null,
       expected_revision: item?.revision ?? 0,
@@ -802,7 +712,7 @@ function DelegationDialog({
       open
       onOpenChange={open => !open && onClose()}
       title={item ? 'Automatic organizing' : 'Allow automatic organizing'}
-      description="Nocheh may only create projects and move chats between them. Everything else still asks you."
+      description="While it is on, Nocheh may create projects from what it learns in these chats, and nothing more. Moving a chat into or out of a project always asks you, as everything else does."
       footer={
         <>
           <Button onClick={onClose} disabled={command.busy}>
@@ -831,31 +741,7 @@ function DelegationDialog({
           groupsOnly
           hint="Groups and topics only. Choosing a group doesn’t include its topics."
         />
-        {active.length > 0 && (
-          <fieldset>
-            <legend className="text-[13px] font-medium">Existing projects it may use</legend>
-            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-line p-2">
-              {active.map(project => (
-                <li key={project.id}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-subtle">
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-accent"
-                      checked={allowed.includes(project.id)}
-                      onChange={event => setAllowed(toggle(allowed, project.id, event.target.checked))}
-                    />
-                    {project.name}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </fieldset>
-        )}
         <div className="space-y-3">
-          <label className="flex items-center justify-between gap-4 text-sm">
-            <span>May create new projects</span>
-            <Switch label="May create new projects" checked={create} onChange={setCreate} />
-          </label>
           <label className="flex items-center justify-between gap-4 text-sm">
             <span>On</span>
             <Switch label="On" checked={enabled} onChange={setEnabled} />

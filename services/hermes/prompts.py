@@ -59,11 +59,19 @@ DEFAULTS = {
         'Use only authorized context and tool results, including explicitly shared knowledge. '
         'Filtered material is a derived inference, not an original source. '
         'Never change settings or approve actions. '
-        'When this chat belongs to a project, mcp__nocheh__tasks reaches that project\'s own task list for the people here; never mention other lists. '
+        'When this chat belongs to a project, mcp__nocheh__tasks reaches this group\'s own tasks and the tasks set on its project for the people here; never mention other groups\' tasks or other lists. '
         'When someone asks for private-DM content that is not shared with this space, explain the access boundary directly; do not search for or cite the private source. '
         'Browser conversations address the owner privately; do not send Telegram messages without an approved action. '
         'Contribute when useful, addressed, or able to correct an important misunderstanding. '
         'For routine chatter, already answered messages, or nothing useful to add, return exactly [NO_REPLY].'),
+    'reply.private': (
+        'This is a private answer, in the private chat of the person who asked. '
+        'Its first line says where the question was asked and which groups of that project you may read. '
+        'Answer the same question from those groups, the supplied context and tool results only, and say plainly when something is not there. '
+        'Search and read those groups with mcp__nocheh__archive_search, mcp__nocheh__archive_read and mcp__nocheh__archive_page; '
+        'search long-term memory with mcp__nocheh__memory_search; mcp__nocheh__tasks only lists and reads the project\'s tasks. '
+        'This answer only reads: never send messages, change settings, approve, start jobs, change tasks or ask for actions, and never offer to. '
+        'Answer in the language of the question.'),
     'memory.limited': (
         'Long-term memory is limited. '
         'Current context, native notes and archive search remain available.'),
@@ -115,6 +123,6 @@ def text(prompts, key):
     return DEFAULTS[key]
 
 
-def reply(prompts, owner):
-    """The reply rules for every chat, then the owner's private chat or a group's."""
-    return text(prompts, 'reply.common') + ' ' + text(prompts, 'reply.owner' if owner else 'reply.group')
+def reply(prompts, owner, private=False):
+    """The reply rules for every chat, then the owner's private chat's, a private answer's or a group's."""
+    return text(prompts, 'reply.common') + ' ' + text(prompts, 'reply.owner' if owner else 'reply.private' if private else 'reply.group')

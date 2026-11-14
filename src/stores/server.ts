@@ -39,6 +39,8 @@ import {JobBoxRepository} from './job-box.js';
 import {MACHINE_BODY} from './machines.js';
 import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
+import {assertPrivateAnswerRoute} from './private-answers.js';
+import {readSetGroups} from '../spaces.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -72,7 +74,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       return json(res,200,await s.memory.prepareRequest(body));
     }
-    const principal=reader(req,config.token);
+    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249).
+    const parsed=reader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
+    assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
@@ -428,6 +432,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         await s.turns.assertAudience(principal);return json(res,200,copy);
       }
       if(path==='/v1/imports/pending') {
+        // An answer reader hears only about imports into the groups of its record, not the owner's (ADR-0249).
+        if(principal.answer!==undefined)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
         const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
       }

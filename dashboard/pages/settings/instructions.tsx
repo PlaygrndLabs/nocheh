@@ -31,6 +31,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Added after the rules above in groups. [NO_REPLY] is how Nocheh stays quiet.',
   },
   {
+    key: 'reply.private',
+    title: 'Private answers',
+    hint: 'Added after the rules above when Nocheh answers a group question in the asker’s private chat, after a tap on Answer privately. Such an answer only reads.',
+  },
+  {
     key: 'memory.evidence',
     title: 'Using remembered facts',
     hint: 'Explains the remembered facts that come with each message.',
@@ -89,6 +94,16 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     key: 'telegram.action_continued',
     title: 'After an approved operation ends',
     hint: 'Sent to the agent, not to the chat, when operations a message asked for have ended, so it answers in that chat as a reply to the message. {actions} lists each operation’s ID, tool and state.',
+  },
+  {
+    key: 'telegram.private_answer',
+    title: 'Private answer’s first line',
+    hint: 'Sent to the agent, not to the chat, before the question when it answers privately. {group} is where the question was asked and {groups} every group of that project it may read.',
+  },
+  {
+    key: 'telegram.private_answer_texts',
+    title: 'Answer privately button and notices',
+    hint: 'One “name: text” line each for the button under your answer in a group (button, up to 40 characters), the notice when the tap opens your private chat (open), and the short notices when someone else taps it (only_asker), it has expired (expired), it was already used (used), the project’s groups or the question changed (changed), a private chat link was meant for someone else (not_yours), or your private chat can’t be opened right now (retry). No model is used. A line you remove keeps its default.',
   },
   {
     key: 'tasks.reminder',

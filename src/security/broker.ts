@@ -14,6 +14,7 @@ import type {OperationReference} from '../stores/operations.js';
 import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
 import {MACHINE_BODY,MachineRepository,machineErrors} from '../stores/machines.js';
 import {RuntimeTurnRepository} from '../stores/turns.js';
+import {assertPrivateAnswerRoute} from '../stores/private-answers.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
 import {jobErrors} from '../mcp/tools.js';
@@ -28,6 +29,8 @@ export interface BrokerStorage {
   binding(principal:Reader):Promise<TurnBinding>;
   assertAudience(principal:Reader):Promise<unknown>;
   turnFile(principal:Reader,hash:string):Promise<string>;
+  /** An answer reader's read set from its record (ADR-0249); a reader without an answer comes back as it is. */
+  bindReads?(principal:Reader):Promise<Reader>;
 }
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
 /** A fixed label for preparation-only guard requests; nothing is sent there. */
@@ -135,7 +138,11 @@ export function brokerServer(options:BrokerOptions) {
       if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
       await options.assertReady?.();return json(res,200,await box.live());
     }
-    const principal=reader(req,options.token),job=jobRun(principal);
+    // An answer reader is bound to its record on every call, or refused without one, and reaches read routes only (ADR-0249).
+    const parsed=reader(req,options.token);
+    if(parsed.answer!==undefined&&!options.storage?.bindReads)throw new HttpError(409,'private_answer_closed');
+    const principal=parsed.answer!==undefined?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
+    assertPrivateAnswerRoute(principal,req.method,path);
     await afterPending(job,async()=>options.assertReady?.());
     // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0233).
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:true});

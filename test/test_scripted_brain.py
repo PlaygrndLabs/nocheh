@@ -46,6 +46,16 @@ class ScriptedBrainTests(unittest.TestCase):
         action=self.brain.respond(request(message('user','[[action:-10042/topic/7|exact text]]')))
         self.assertEqual(action['arguments'],{'destination':'-10042/topic/7','text':'exact text'})
 
+    def test_a_private_answer_follows_the_directives_of_its_framed_question(self):
+        # A private answer's message is Nocheh's first line, the question's speaker line and the group question (ADR-0249).
+        framed=message('user','[Private answer] The question below was asked in “Synthetic Forum -10043”.\n\n'
+                       '[Group message from Synthetic 123, sent 2026-11-13 10:00 UTC] [the owner]\n@synthetic_fixture_bot What do we have? '
+                       '[[tool:mcp__nocheh__archive_search {"mode":"text","query":"CRATEWORD1","limit":10}]] [[tool:mcp__nocheh__tasks {"action":"list","state":"all"}]]')
+        tools=('mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__nocheh__archive_page','mcp__nocheh__memory_search','mcp__nocheh__tasks')
+        self.assertEqual(self.brain.respond(request(framed,tools=tools)),
+                         {'tool':'mcp__nocheh__archive_search','arguments':{'mode':'text','query':'CRATEWORD1','limit':10}})
+        self.assertEqual(self.brain.respond(request(framed,message('assistant',None),message('tool','{"sources":[]}'),tools=tools))['tool'],'mcp__nocheh__tasks')
+
     def test_a_nocheh_tool_result_is_read_inside_hermes_mcp_envelope(self):
         # Hermes's MCP client gives the model {"result": <the tool's text>}; a job's notice may follow it.
         user=message('user','[[tool:mcp__nocheh__background_job {"action":"status"}]] [[tool:terminal {"command":"id"}]]')

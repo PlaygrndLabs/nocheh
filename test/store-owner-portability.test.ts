@@ -40,7 +40,7 @@ test('owner data travels with its types, and nothing imported acts by itself',
     await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard','{\"title\":\"Plan the beds\"}')",[parent]);
     // Twelve history entries: as text, 10 would sort before 2.
     for(let step=2;step<=12;step++)await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard',$2)",[parent,JSON.stringify({step})]);
-    await source.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,revision,project_id) VALUES('rule-1','Garden to studio','[\"-10042\"]','-10073',true,'filtered',1,$1)",[project]);
+    await source.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,revision) VALUES('rule-1','Garden to studio','[\"-10042\"]','-10073',true,'filtered',1)");
     await source.query("UPDATE background_settings SET cost_limit_usd=7.5,revision=1");
     await source.query("INSERT INTO chat_tool_settings(space_id,shell,browser,mcp) VALUES('*',false,null,null),('-10042',null,true,false)");
     await source.query("UPDATE owner_prompts SET texts='{\"greeting\":\"Hello there\"}',revision=2");
@@ -91,6 +91,22 @@ test('owner data travels with its types, and nothing imported acts by itself',
     assert.equal(unchanged,records.length-1);
     // A changed record is refused.
     await assert.rejects(to.restore(owner,[{...records[1]!,row:{...records[1]!.row,title:'Edited'}}]),/owner_record_integrity/);
+    // A record exported before projects stopped sharing comes back as starting the stores converts its rows (ADR-0247):
+    // the share box's fields go, a rule a project's share box kept is not brought at all, never as the owner's own, and
+    // a topic's own project choice becomes "follows its group".
+    const sealed=(table:string,key:string[],row:Record<string,unknown>):OwnerRecord=>({format:'nocheh-owner-record-v1',table,key,row,sha256:digest(canonical({table,key,row}))});
+    const rule={id:'rule-owner',name:'Owner rule',sources:['-10042'],destination:'-10073',enabled:true,mode:'filtered',instructions:'',revision:1,project_id:null};
+    const shareBox={...rule,id:'rule-project',name:'Project share box',project_id:project};
+    const before=await to.restore(owner,[sealed('sharing_rules',[rule.id],rule),sealed('sharing_rules',[shareBox.id],shareBox),
+      sealed('project_assignments',['-10042'],{space_id:'-10042',project_id:project,mode:'assigned',share_into:true,revision:1}),
+      sealed('project_assignments',['-10042/topic/7'],{space_id:'-10042/topic/7',project_id:project,mode:'assigned',share_into:false,revision:1})]);
+    assert.deepEqual([before.added,before.unchanged,before.kept],[3,1,0]);
+    assert.deepEqual((await target.query("SELECT id,enabled FROM sharing_rules WHERE id LIKE 'rule-%' ORDER BY id")).rows,[{id:'rule-1',enabled:false},{id:'rule-owner',enabled:false}],
+      'the owner\'s rule comes back switched off; the project\'s rule does not come back');
+    assert.deepEqual((await target.query("SELECT space_id,project_id,mode FROM project_assignments WHERE space_id LIKE '-10042%' ORDER BY space_id")).rows,
+      [{space_id:'-10042',project_id:project,mode:'assigned'},{space_id:'-10042/topic/7',project_id:null,mode:'inherit'}]);
+    // Any other column a store no longer has is still refused.
+    await assert.rejects(to.restore(owner,[sealed('project_assignments',['-10073'],{space_id:'-10073',project_id:null,mode:'none',revision:1,unknown:true})]),/invalid_owner_record_fields/);
   } finally {
     for(const pool of [...pools,...app])await pool.end();
     for(const schema of schemas)await setup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);

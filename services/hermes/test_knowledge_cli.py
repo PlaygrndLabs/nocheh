@@ -53,7 +53,7 @@ class KnowledgeCliTests(unittest.TestCase):
         self.assertEqual(self.invoke('knowledge',['decisions']),('/v1/decisions?after=',None))
         with tempfile.TemporaryDirectory() as folder:
             file=Path(folder)/'request.json'
-            delegation={'name':'Example','scopes':['-10'],'project_ids':[],'enabled':False,'allow_create':False,'expected_revision':0,'operation_id':'synthetic-save'}
+            delegation={'name':'Example','scopes':['-10'],'project_ids':[],'enabled':False,'expected_revision':0,'operation_id':'synthetic-save'}
             file.write_text(json.dumps(delegation))
             self.assertEqual(self.invoke('organization',['save','--file',str(file)]),('/v1/organization/delegations',delegation))
             review={'decision':'approve','expected_revision':2,'operation_id':'synthetic-review'}

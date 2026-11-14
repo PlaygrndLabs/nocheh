@@ -28,6 +28,20 @@ def profile_path(root, chat, policy, selected=None):
     return path
 
 
+def answer_receipt(path):
+    """Where a private answer was asked, as its first line names it, and when it ran, from the receipt its turn left in
+    its profile (ADR-0249); nothing when there is none or it cannot be read."""
+    import json
+    receipt=path/'answer.json'
+    try:
+        if receipt.is_symlink() or not receipt.is_file():return {}
+        value=json.loads(receipt.read_text())
+    except (OSError,ValueError):return {}
+    group,at=value.get('group') if isinstance(value,dict) else None,value.get('at') if isinstance(value,dict) else None
+    return {**({'answer_group':group} if isinstance(group,str) and 0<len(group)<=300 else {}),
+            **({'answer_at':at} if isinstance(at,str) and len(at)<=40 else {})}
+
+
 def dispatch(root, model, policy, body):
     action = body.get('action')
     if action == 'profiles':
@@ -43,7 +57,10 @@ def dispatch(root, model, policy, body):
             metadata=json.loads(marker.read_text()) if marker.exists() else {}
             historical[path.name]={'scope':metadata.get('space',historical.get(path.name,{}).get('scope',path.name)),
                                    'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),
-                                   'guard_epoch':metadata.get('guard_epoch',0),'exists':True}
+                                   'guard_epoch':metadata.get('guard_epoch',0),'exists':True,
+                                   # A private answer's own profile, in the owner's private chat but never the owner's (ADR-0249),
+                                   # named by where it was asked and when, as its receipt keeps them.
+                                   **({'private_answer':True,**answer_receipt(path)} if metadata.get('answer') else {})}
         return {'profiles':profiles,'history_profiles':list(historical.values())}
     if action == 'prompts':
         from .prompts import DEFAULTS, LIMIT

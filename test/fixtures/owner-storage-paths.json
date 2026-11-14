@@ -1,6 +1,7 @@
 {
 "about": "Owner storage paths with the answer of each list: ownerStoragePath (src/stores/owner-api.ts), which the dashboard forwards, and allowed_path (tools/operations/archive/knowledge.py), which management lets through to storage. test/store-owner-api.test.ts and services/hermes/test_knowledge_cli.py read it.",
 "paths": [
+ {"path": "/v1/private-answers", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/owner-autonomy", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/notion", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/chat-tools", "owner_storage": true, "allowed_path": true},
@@ -20,6 +21,7 @@
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/comments", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/delete", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/audience", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/prompts", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/chat-sends", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/telegram/chats/refresh", "owner_storage": true, "allowed_path": true},
@@ -91,6 +93,7 @@
  {"path": "/v1/guards/derived_artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/revisions/3", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/memory/provenance", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs/copies", "owner_storage": false, "allowed_path": false},
+ {"path": "/v1/private-answers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": false, "allowed_path": false},
  {"path": "/v1/chat-tools/history", "owner_storage": false, "allowed_path": false},
  {"path": "/v1/chat-sends/1", "owner_storage": false, "allowed_path": false},
  {"path": "/v1/background-jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": false, "allowed_path": false},

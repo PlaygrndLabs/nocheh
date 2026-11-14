@@ -36,6 +36,8 @@ class SessionTitleTests(unittest.TestCase):
         group={'chat':{'id':-100,'type':'supergroup','title':'Garden club','is_forum':True}}
         self.assertEqual(session_title({'chat':{'id':42,'type':'private','first_name':'Sam'}},True),'Private chat')
         self.assertEqual(session_title(group,False),'Garden club')
+        self.assertEqual(session_title({'chat':{'id':42,'type':'private','first_name':'Sam'}},False,True),'Private answer',
+                         'a private answer\'s session never takes the private chat\'s name')
         self.assertEqual(session_title({'chat':{'id':-100,'type':'group'}},False),'Telegram group')
         opened={**group,'message_thread_id':7,'is_topic_message':True,
                 'reply_to_message':{'message_id':7,'forum_topic_created':{'name':'Seeds'}}}

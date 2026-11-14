@@ -10,15 +10,15 @@ import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.
  * learning text it sends to long-term memory. Only replacements are stored, so a text the
  * owner never changed follows the code's default.
  */
-export const promptKeys=['reply.common','reply.owner','reply.group','memory.limited','memory.evidence','memory.notes_review',
+export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_task','telegram.approval_texts','telegram.action_continued','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
+  'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}'],'background.machine':['{steps}']};
 
 /** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
@@ -30,6 +30,7 @@ export const learningPrompt=(
   "Interpret permitted conversation evidence silently. "+
   "Return only JSON with interpretations (at most 12), entity_suggestions (at most 12), entity_claims (at most 20), and optional organization. "+
   "Organization is only a proposal, never authorization: use {creates:[{key,name,description,evidence_ids}],assignments:[{space_id,project_id OR project_key,expected_revision,reason,purpose_evidence:true,evidence_ids}]} with at most 8 creates and 20 assignments; use the current conversation exact space and recorded assignment revision below. "+
+  "When organization_context.assignment has follows_group, the conversation is a topic, which always follows its group's project: propose no assignment for it. "+
   "Creates require evidence of an actual project; assignment requires explicit evidence that the conversation serves that project, not merely mentions it. "+
   "Existing project IDs must come from the supplied context; use project_key only for a create in the same proposal. "+
   "Cite original observation IDs, including the trigger. "+
@@ -106,6 +107,9 @@ export const approvalTexts=[
   'task_add: Add a task to the list of {project}','task_move: Move a task into the list of {project}',
   'task_move_family: Move a task, with {count} under it, into the list of {project}','task_change: Change a task in the list of {project}',
   'task_comment: Comment on a task in the list of {project}','task_no_chats: no chat yet','task_later: Chats you add to this project later will see it too.',
+  'task_move_group: Move a task to {group} in the list of {project}','task_move_group_family: Move a task, with {count} under it, to {group} in the list of {project}',
+  'task_move_project: Set a task on {project} itself, for every group in it','task_move_project_family: Set a task, with {count} under it, on {project} itself, for every group in it',
+  'task_group_only: Other groups in this project don\'t see it.','task_group_later: {group} will see it once you add that group to this project.',
   'task_private_move: Its earlier comments and history, the archived messages attached to it, its IDs in outside tools such as Notion and the columns you have not shared stay private.',
   'task_private_family: Their earlier comments and history, the archived messages attached to them, their IDs in outside tools such as Notion and the columns you have not shared stay private.',
   'task_private_parts: The archived messages attached to it and the columns you have not shared stay private.',
@@ -119,7 +123,8 @@ export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_alw
   'kind_shell'|'kind_browser'|'kind_tools'|'details'|
   'failed_action'|'unsure'|'not_run'|'read_closed'|'marked_ran'|'marked_not_run'|'marked_sent'|'marked_not_sent'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
   'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
-  'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed';
+  'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed'|
+  'task_move_group'|'task_move_group_family'|'task_move_project'|'task_move_project_family'|'task_group_only'|'task_group_later';
 /** The labeled lines, with any line the owner removed or left empty taken from the default. */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
   return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;
@@ -209,9 +214,29 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'steps: Plan:','machine_off: 🚫 Withdrawn: its machine was turned off or changed. Nothing runs.',
   'report_private: ✅ Done: the job you asked for here finished. Its report is in your private chat.',
   'limited_private: ⏱ The job you asked for here stopped at its limit. A short note is in your private chat.'].join('\n');
+/** The first line of a private answer, before the question (ADR-0249): {group} is the group or topic where it was asked,
+ * {groups} every group the answer may read, the asking one included. Group and topic names lose their brackets and
+ * control characters, so no one can write a line that looks like it. */
+export const privateAnswerFrame='[Private answer] The question below was asked in {group}, and the person who asked tapped Answer privately. '+
+  'Answer it here, in their private chat, from what you can read in these groups of its project: {groups}. '+
+  'This answer only reads: it cannot send anything to a group, change a task, start a job or ask for an action.';
+/** The "Answer privately" button under the owner's own answer in a group, and the short answers to a tap on it or to a
+ * /start in the private chat that cannot be answered. One "name: text" line each; no model writes them (ADR-0249). */
+export const privateAnswerTexts=['button: 🔒 Answer privately','open: 🔒 Opening your private chat. Tap Start there if Telegram asks.',
+  'only_asker: Only the person who asked can use this button.','expired: This button has expired. Ask again in the group for a new one.',
+  'used: This question was already answered privately. Ask again in the group for a new answer.',
+  'changed: This project’s groups or the question changed, so it can’t be answered privately. Ask again in the group.',
+  'not_yours: This private answer was meant for someone else.',
+  'retry: 🔒 Your private chat can’t be opened right now. Tap the button again in a moment.'].join('\n');
+export type PrivateAnswerText='button'|'open'|'only_asker'|'expired'|'used'|'changed'|'not_yours'|'retry';
+/** The private answer's labeled lines, with any line the owner removed or left empty taken from the default. */
+export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerText,string> {
+  return labeledLines(privateAnswerTexts,text) as Record<PrivateAnswerText,string>;
+}
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
-  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
+  'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,
+  'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine};
 

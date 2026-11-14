@@ -2,6 +2,7 @@ import {OwnerAutonomyRepository} from './owner-autonomy.js';
 import {NotionRepository} from './notion.js';
 import {ChatToolSettingsRepository} from './chat-tools.js';
 import {TaskRepository,type TaskActor} from './tasks.js';
+import {readSetOf,recallScope} from '../spaces.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
@@ -62,6 +63,7 @@ import {OwnerSupervisionRepository} from './owner-supervision.js';
 import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
+import {PrivateAnswerRepository} from './private-answers.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -88,7 +90,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     await operations.verify(reference);return reference;
   },options.detectorVersion);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
-  const projects=new ProjectRepository(stores.control),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
+  const projects=new ProjectRepository(stores.control,()=>options.policy().group_ids??[]),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
@@ -101,6 +103,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const chatTools=new ChatToolSettingsRepository(stores.control,()=>options.policy().owner_id);
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
+  // Answer privately records: who asked, where, and the groups frozen at the tap (ADR-0249).
+  const privateAnswers=new PrivateAnswerRepository(stores.control,options.policy);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
 
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
@@ -109,7 +113,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
-  // The owner's private chat reaches every list; a project's chat only that project's own list.
+  // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
   // Who wrote the message a group turn answers: the owner, or a person allowed there, by their Telegram name.
   const sender=async(event:string):Promise<TaskActor>=>{
     const row=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
@@ -118,14 +122,25 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const name=[from?.first_name,from?.last_name].filter(part=>typeof part==='string').join(' ').replace(/\s+/g,' ').trim().slice(0,100);
     return name?{kind:'member',name}:{kind:'member'};
   };
+  // A group or topic reaches its own group's tasks, with its topics' when they share what they know, and the tasks set
+  // on its project itself; a task added there belongs to that group or topic (ADR-0248).
+  const topicMemory=()=>options.policy().topic_memory??'group';
   const tasks=new TaskRepository(stores.control,async principal=>{
     if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null,actor:{kind:'owner'}};
-    const {turn,source}=await knowledge.liveGroupTurn(principal),project=(await projects.effective(turn.scope)).project;
+    const {source}=await knowledge.liveGroupTurn(principal);
+    // An "Answer privately" answer reads only the tasks of the groups frozen in its record and of their project
+    // itself, as the server bound them for this request, and changes nothing (ADR-0248, ADR-0249).
+    if(principal.answer!==undefined){
+      const reads=principal.reads,project=reads?.project?(await stores.control.query('SELECT state FROM projects WHERE id=$1',[reads.project])).rows[0]:null;
+      if(!reads?.project||project?.state!=='active')throw new HttpError(403,'task_project_required');
+      return {source,project:reads.project,group:null,reach:reads,readOnly:true,actor:await sender(source.reference.id)};
+    }
+    const space=principal.space!,project=(await projects.effective(space)).project;
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
-    return {source,project:project.id,group:turn.scope,actor:await sender(source.reference.id)};
-  },{call:options.runtime,owner:()=>options.policy().owner_id});
+    return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),actor:await sender(source.reference.id)};
+  },{call:options.runtime,owner:()=>options.policy().owner_id},topicMemory);
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
-  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks),machines=new MachineRepository(access,jobs);
+  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
@@ -143,7 +158,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
     chatSends:new ChatSendRepository(stores.control,stores.archive),
-    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env)),
+    privateAnswers,
+    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env),privateAnswers),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),

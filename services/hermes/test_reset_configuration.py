@@ -20,8 +20,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.values.update(security_policy=[{'document': {'version': 1, 'rules': []}}],
                            installation_generation=[{'generation': '11111111-1111-4111-8111-111111111111'}],
                            guard_mode=[{'mode': 'on'}])
-        self.values['projects'] = [{'id': 'a' * 64, 'name': 'Saved project', 'description': 'Private configuration', 'state': 'active',
-                                    'sharing_enabled': False, 'sharing_mode': 'filtered'}]
+        self.values['projects'] = [{'id': 'a' * 64, 'name': 'Saved project', 'description': 'Private configuration', 'state': 'active'}]
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False, 'content_copied': False,
             'blockers': [], 'containers': [], 'volumes': [], 'installation': {'root': str(self.state.parent), 'state': str(self.state),
             'state_anchor': reset_inventory.entry(self.state, 'retain_root', 'fixture'), 'memory_state': str(self.state / 'honcho'),
@@ -79,7 +78,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertTrue(rules['-10']['enabled']); self.assertEqual(rules['-10']['mode'], 'filtered')
         self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
         self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')
-        self.assertTrue(all(row['project_id'] is None for row in rules.values()))
+        self.assertTrue(all(set(row) == {'id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions'} for row in rules.values()))
         self.assertEqual(configuration.original_only(source, values, preferences, reset_id), result)
         values['TELEGRAM_GROUP_ACCESS'] = '{"-10":{"granted":["77"],"denied":["88"]}}'
         preserved = configuration.original_only(source, values, preferences, reset_id)
@@ -101,8 +100,8 @@ class ResetConfigurationTests(unittest.TestCase):
 
     def test_a_private_chat_in_a_rule_or_project_stops_the_reset_before_erasure(self):
         rule = {'id': 'b' * 64, 'name': 'Saved share', 'sources': ['-1001'], 'destination': '-1002', 'enabled': True,
-                'mode': 'approved', 'instructions': '', 'project_id': None}
-        assigned = {'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned', 'share_into': True}
+                'mode': 'approved', 'instructions': ''}
+        assigned = {'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned'}
         values = copy.deepcopy(self.values); values['sharing_rules'] = [rule]; values['project_assignments'] = [assigned]
         self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values)
         for change in ('source', 'topic', 'destination', 'desktop', 'assignment', 'padded'):
@@ -119,6 +118,47 @@ class ResetConfigurationTests(unittest.TestCase):
         values = copy.deepcopy(self.values); values['project_assignments'] = [{**assigned, 'space_id': '123', 'mode': 'none', 'project_id': None}]
         self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values,
                          'a private chat may be kept out of every project')
+
+    def test_old_share_box_fields_and_a_topic_choice_stop_the_reset_before_erasure(self):
+        # A project never shares between its groups and a topic always follows its group's project (ADR-0247).
+        assigned = {'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned'}
+        values = copy.deepcopy(self.values); values['project_assignments'] = [assigned, {'space_id': '-1001/topic/7', 'project_id': None, 'mode': 'inherit'}]
+        self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values)
+        for change in ('sharing_enabled', 'sharing_mode', 'share_into', 'project_id'):
+            values = copy.deepcopy(self.values); values['project_assignments'] = [dict(assigned)]
+            values['sharing_rules'] = [{'id': 'b' * 64, 'name': 'Saved share', 'sources': ['-1001'], 'destination': '-1002', 'enabled': True,
+                                        'mode': 'approved', 'instructions': ''}]
+            if change == 'sharing_enabled': values['projects'][0]['sharing_enabled'] = True
+            if change == 'sharing_mode': values['projects'][0]['sharing_mode'] = 'filtered'
+            if change == 'share_into': values['project_assignments'][0]['share_into'] = True
+            if change == 'project_id': values['sharing_rules'][0]['project_id'] = 'a' * 64
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'fields_invalid'):
+                configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
+        for mode, project in (('assigned', 'a' * 64), ('none', None)):
+            values = copy.deepcopy(self.values); values['project_assignments'] = [{'space_id': '-1001/topic/7', 'project_id': project, 'mode': mode}]
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, 'topic_follows_group'):
+                configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
+
+    def test_a_project_rule_in_a_store_not_yet_started_is_left_out_never_kept_as_the_owners(self):
+        # Starting the stores at this version deletes the rules a project's share box kept (ADR-0247). A reset that reads
+        # an older store selects only the owner's rules, by a test that holds with or without the old column, so a
+        # project rule never comes back as an owner rule after the reset.
+        query = Mock(return_value=json.dumps(self.values))
+        configuration.snapshot(query, 'original-only-v1')
+        sql = query.call_args.args[1]
+        self.assertIn("FROM sharing_rules r WHERE to_jsonb(r)->>'project_id' IS NULL ORDER BY id", sql)
+        self.assertNotIn('project_id FROM sharing_rules', sql)
+        self.assertEqual(sql.count('FROM sharing_rules'), 1)
+
+    def test_a_topic_choice_in_a_store_not_yet_started_is_read_as_following_its_group(self):
+        # Starting the stores at this version turns a topic's own project choice into "follows its group" (ADR-0247). A
+        # reset that reads an older store reads every topic row that way, so such a store does not stop the reset.
+        query = Mock(return_value=json.dumps(self.values))
+        configuration.snapshot(query, 'original-only-v1')
+        sql = query.call_args.args[1]
+        self.assertIn("SELECT space_id,CASE WHEN space_id LIKE '%/topic/%' THEN NULL ELSE project_id END AS project_id,"
+                      "CASE WHEN space_id LIKE '%/topic/%' THEN 'inherit' ELSE mode END AS mode FROM project_assignments", sql)
+        self.assertEqual(sql.count('FROM project_assignments'), 1)
 
     def test_unknown_fields_and_missing_critical_configuration_fail_closed(self):
         for change in ('content', 'columns', 'security', 'generation', 'guard', 'runtime'):

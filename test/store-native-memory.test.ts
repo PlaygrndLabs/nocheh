@@ -145,10 +145,12 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     [digest('receipt-c')]:{source_reference:ref('first'),source_references:[ref('first'),ref('second')]}};
   const queries:unknown[][]=[],bodies:{path:string;body:any}[]=[],asked:string[]=[];let learned=sessions;
   const contexts={access:{stores:{control:{query:async(_sql:string,params:unknown[])=>{queries.push(params);const row=receipts[String(params[0])];return {rows:row?[row]:[]};}}},
-    policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:'-100'})},guards:{}};
+    policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:'-100'}),reads:(principal:Reader)=>principal.reads},guards:{}};
   const binding={generation:'fixture',epoch:1,mode:'on'};
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>{asked.push(query);return 'checked: '+query;},allow:async()=>{}};
-  const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,{sessions:async()=>learned} as any,honchoEngine(async(path:string,body:any)=>{
+  const readSessions:unknown[][]=[];
+  const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,{sessions:async()=>learned,
+    readSetSessions:async(...args:unknown[])=>{readSessions.push(args);return learned;}} as any,honchoEngine(async(path:string,body:any)=>{
     bodies.push({path,body});
     return [{id:'A'.repeat(21),metadata:{nocheh_receipt:digest('receipt-a')}},{id:'B'.repeat(21),metadata:{nocheh_receipt:digest('receipt-b')}},
       {id:'not-native',metadata:{nocheh_receipt:digest('receipt-a')}},{id:'C'.repeat(21),metadata:{nocheh_receipt:digest('receipt-c')}}];
@@ -158,8 +160,20 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
   assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
-  assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3','-100'],[workspace,'B'.repeat(21),'-100/topic/3','-100'],
-    [workspace,'C'.repeat(21),'-100/topic/3','-100']],'a hit counts only with its own receipt, in this audience or its group');
+  assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3','-100',null],[workspace,'B'.repeat(21),'-100/topic/3','-100',null],
+    [workspace,'C'.repeat(21),'-100/topic/3','-100',null]],'a hit counts only with its own receipt, in this audience or its group');
+  assert.deepEqual(readSessions,[],'a group reader searches its own sessions');
+  // An answer reader searches the sessions of the groups frozen in its record, and a hit counts only with a receipt of one
+  // of them; Honcho's context and recall stay closed to it: plain search only (ADR-0249).
+  const answer={admin:false,scope:'123',space:'123',turnEvent:digest('start'),answer:'a'.repeat(32),
+    reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
+  queries.length=0;
+  assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
+  assert.deepEqual(readSessions,[[workspace,['-100/*','-200/*'],1000]]);
+  assert.deepEqual(queries.map(params=>params.at(-1)),[['-100/*','-200/*'],['-100/*','-200/*'],['-100/*','-200/*']]);
+  assert.equal((await memory.context(answer)).limited_memory,true);
+  assert.equal((await memory.recall(answer,'invoice')).limited_memory,true);
+  bodies.splice(1);
   await memory.search({admin:false,scope:null,space:'123',turnEvent:digest('turn')} as Reader,'invoice',2);
   assert.deepEqual(bodies[1]!.body,{query:'checked: invoice',limit:6},'the owner searches everything learned');
   learned=[];

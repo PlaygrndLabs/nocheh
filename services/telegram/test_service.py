@@ -26,9 +26,9 @@ OWNER, GROUP = '123', '-10042'
 BOT_ID = TOKEN.split(':')[0]
 
 
-def credential(event_id, scope=None, space=None, expires=None):
+def credential(event_id, scope=None, space=None, expires=None, **extra):
     claims = {'event_id': event_id, 'audience': 'nocheh-assistant', 'scope': scope,
-              'expires': expires or int(time.time() * 1000) + 600000, **({'space': space, 'revision': 1} if space else {})}
+              'expires': expires or int(time.time() * 1000) + 600000, **({'space': space, 'revision': 1} if space else {}), **extra}
     body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
     signature = base64.urlsafe_b64encode(hmac.new(SECRET.encode(), body.encode(), hashlib.sha256).digest()).decode().rstrip('=')
     return 'turn.' + body + '.' + signature
@@ -171,6 +171,55 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.reply({**group, 'topic': 8})
         self.assertEqual(self.sent(), [])
+
+    def answer_button(self, event, label='🔒 Answer privately'):
+        # The record id Nocheh derives from the question with the service token (ADR-0249).
+        return {'text': label, 'data': 'np' + hmac.new(SECRET.encode(), ('private-answer:' + event).encode(), hashlib.sha256).hexdigest()[:32]}
+
+    def test_answer_privately_rides_only_on_the_last_part_of_its_own_group_reply(self):
+        self.service.sender.limit = 60
+        body = self.turn(20, GROUP, 7, text=' '.join(['word'] * 40))
+        button = self.answer_button(body['event_id'])
+        self.assertEqual(self.service.reply({**body, 'button': button})['state'], 'done')
+        sent = self.sent()
+        self.assertGreater(len(sent), 1)
+        self.assertIn('reply_parameters', sent[0], 'the first part still answers the question')
+        keyboard = {'inline_keyboard': [[{'callback_data': button['data'], 'text': button['text']}]]}
+        self.assertEqual(json.loads(sent[-1]['reply_markup']), keyboard, 'the button sits under the whole reply')
+        self.assertTrue(all('reply_markup' not in row for row in sent[:-1]))
+        self.assertEqual(self.mock.state['sent'][-1]['message']['reply_markup'], keyboard)
+        self.assertEqual(len(button['data'].encode()), 34, 'well inside the 64 bytes Telegram allows')
+
+    def test_a_reply_carries_no_other_button(self):
+        group = self.turn(21, GROUP, text='x')
+        button = self.answer_button(group['event_id'])
+        refused = {'the owner\'s private chat': {**self.turn(22, text='x'), 'button': self.answer_button(digest(f'telegram:{BOT_ID}:update:22'))},
+                   'another question\'s button': {**group, 'button': self.answer_button(digest('other question'))},
+                   'other data': {**group, 'button': {**button, 'data': 'na' + button['data'][2:]}},
+                   'a long label': {**group, 'button': {**button, 'text': 'x' * 41}}, 'an empty label': {**group, 'button': {**button, 'text': ' '}},
+                   'a link': {**group, 'button': {**button, 'url': 'https://example.com'}}, 'a list': {**group, 'button': [button]}}
+        for why, body in refused.items():
+            with self.subTest(why), self.assertRaisesRegex(ValueError, 'invalid_reply'):
+                self.service.reply(body)
+        self.assertEqual(self.sent(), [])
+        # Retried with a smaller button, the reply answers from its first send's receipt.
+        self.assertEqual(self.service.reply({**group, 'button': button})['state'], 'done')
+        self.assertEqual(json.loads(self.sent()[0]['reply_markup'])['inline_keyboard'][0][0]['callback_data'], button['data'])
+
+    def test_a_private_answers_pass_replies_only_in_the_owners_chat_as_that_chat(self):
+        answer = 'a' * 32
+        body = self.turn(23, text='Private answer')
+        event = body['event_id']
+        self.assertEqual(self.service.reply({**body, 'archive_credential': credential(event, OWNER, OWNER, answer=answer)})['state'], 'done')
+        group = self.turn(24, GROUP, text='x')
+        for why, change in {'as the owner': {'archive_credential': credential(event, None, OWNER, answer=answer)},
+                            'a malformed record': {'archive_credential': credential(event, OWNER, OWNER, answer='A' * 32)},
+                            'a plain pass scoped to the owner\'s chat': {'archive_credential': credential(event, OWNER, OWNER)}}.items():
+            with self.subTest(why), self.assertRaises(ValueError):
+                self.service.reply({**body, 'id': digest(event + ':2'), 'attempt': 2, **change})
+        with self.assertRaises(ValueError):
+            self.service.reply({**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, answer=answer)})
+        self.assertEqual(len(self.sent()), 1)
 
     def test_presence_shows_typing_and_eyes_then_thumbs_up(self):
         body = self.turn(12, GROUP, 1, text='done')

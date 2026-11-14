@@ -303,6 +303,26 @@ class BrainTurnTests(unittest.TestCase):
         self.assertEqual(self.calls,[])
         self.content_free('private',kept=('.request',))
 
+    def test_a_private_answer_runs_as_the_owners_private_chat_never_as_the_owner(self):
+        def signed(event,**extra):
+            claims={'scope':'123','space':'123','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+                    'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,**extra}
+            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(SECRET.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        owner=lambda payload,chat:Scope(chat,'123',True,Scopes.profile(chat),chat)
+        brain=self.brain(self.replying(),resolve=owner)
+        framed={'frame':'[Private answer] Asked in a Telegram group.','question_event':'c'*64}
+        body=turn_body(80,chat='123',private_answer=framed);body['archive_credential']=signed(body['event_id'],answer='a'*32)
+        brain.start(body);self.assertEqual(self.wait(brain,body)['state'],'done')
+        scope=self.calls[0][0]
+        self.assertEqual((scope.chat_id,scope.space,scope.owner,scope.answer),('123','123',False,'a'*32))
+        # The pass and the framed question come together, or nothing runs.
+        for update,changes,extra in ((81,{},{'answer':'a'*32}),(82,{'private_answer':framed},{'scope':None})):
+            body=turn_body(update,chat='123',**changes);body['archive_credential']=signed(body['event_id'],**extra)
+            brain.start(body);state=self.wait(brain,body)
+            self.assertNotEqual(state['state'],'done',update)
+        self.assertEqual(len(self.calls),1)
+
     def test_the_real_native_turn_returns_its_reply(self):
         from .assistant_gateway import native_turn
         child={'state':'done','text':f'Synthetic native answer 【nocheh:event:{CITED}】','session_id':'nocheh-native-session','timings':{'total':{'ms':9,'calls':1}}}

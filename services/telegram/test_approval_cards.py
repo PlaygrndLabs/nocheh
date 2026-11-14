@@ -40,7 +40,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
         async def edit_message_text(text,chat_id,message_id,reply_markup=None,entities=None,parse_mode=None,link_preview_options=None):
             previews_off(link_preview_options);edits.append((chat_id,message_id,text,reply_markup,links(entities)));return True
         links=lambda entities:[(entity.type,entity.offset,entity.length,entity.url) for entity in entities or []]
-        async def answer_callback_query(query,text=None):answers.append((query,text));return True
+        async def answer_callback_query(query,text=None,url=None):answers.append((query,text)+((url,) if url is not None else ()));return True
         value=TelegramService(Policy(True,'123',list(groups),access or {}),'123456:synthetic',root/'spool',root/'state')
         value.status='connected';value.action_lock=asyncio.Lock()
         value.bot=SimpleNamespace(send_message=send_message,edit_message_text=edit_message_text,answer_callback_query=answer_callback_query)
@@ -102,6 +102,27 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(answers,[('q1','Approved.')])
             offline=self.gateway(Path(folder),sent);offline.status='reconnecting'
             self.assertEqual(await offline.send_approval({**card,'id':'d'*64}),{'state':'not_started','error_code':'telegram_not_connected'})
+
+    async def test_an_answer_privately_tap_opens_the_bots_private_chat_with_its_record_and_nothing_else(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];answers=[];gateway=self.gateway(Path(folder),sent,[],answers)
+            gateway.identity={'bot_id':'1','username':'synthetic_fixture_bot','first_name':'Synthetic'}
+            tap={'kind':'answer','chat_id':'-20','callback_query_id':'q1','text':'🔒 Opening your private chat.','start':'a'*32}
+            self.assertEqual(await gateway.send_approval(tap),{'state':'done','answered':True})
+            self.assertEqual(answers,[('q1','🔒 Opening your private chat.','https://t.me/synthetic_fixture_bot?start='+'a'*32)],
+                             'the link opens this bot, with the record id as /start')
+            for start in ('A'*32,'a'*31,'a'*33,'a'*30+'/x','',32,['a'*32]):
+                with self.subTest(start=start),self.assertRaisesRegex(ValueError,'invalid_approval'):
+                    await gateway.send_approval({**tap,'callback_query_id':'q2','start':start})
+            for identity in (None,{'bot_id':'1'},{'bot_id':'1','username':'x/../y'},{'bot_id':'1','username':'bot'}):
+                gateway.identity=identity
+                with self.subTest(identity=identity),self.assertRaisesRegex(ValueError,'approval_link_unavailable'):
+                    await gateway.send_approval({**tap,'callback_query_id':'q3'})
+            self.assertEqual(len(answers),1,'a refused tap answer reaches Telegram never; without the bot name there is no link')
+            self.assertEqual(await gateway.send_approval({'kind':'answer','chat_id':'-20','callback_query_id':'q4','text':'Only the person who asked can use this button.'}),
+                             {'state':'done','answered':True})
+            self.assertEqual(answers[-1],('q4','Only the person who asked can use this button.'),'a refusal popup carries no link')
+            self.assertEqual(sent,[])
 
     async def test_a_card_whose_send_lost_its_answer_is_settled_through_the_press(self):
         with tempfile.TemporaryDirectory() as folder:

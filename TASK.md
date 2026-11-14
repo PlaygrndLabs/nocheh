@@ -2,6 +2,105 @@
 
 <current>
 
+Members step 2: projects and the private button (owner, 2026-11-12: "I just review the
+tables and seems what I want if there is a important point or need my answer ask, else start
+build.", approving the Members design; 2026-11-13: chose "Keep them, yours only" when asked
+whether the owner's own sharing tools stay). One pull request in four parts:
+- Projects replace the share box ([ADR-0247](docs/adr/0247-projects-replace-the-share-box.md)):
+  a group answer uses only that group, for everyone. The project share box, its modes, "Don't
+  share into this chat" and "Set by project" are gone, and project rules are deleted at start,
+  not converted. The owner's own sharing rules and fact grants stay, yours only, and the rule
+  dialog names the group that will see the result. A topic always follows its group's
+  project, and automatic organizing only creates projects: every move waits in the Inbox.
+  Wherever a group joins a project, the dashboard names the project's other groups first,
+  with the private-answer note, then says the group will see and change the tasks set on the
+  whole project, never another group's own tasks. Turning Nocheh on in a group asks which
+  project it joins, or none, and in a group already in a project names its other groups first
+  ([projects](test/store-projects.test.ts), [sharing](test/store-sharing.test.ts),
+  [organization](test/store-knowledge-management.test.ts),
+  [reset](services/hermes/test_reset_configuration.py),
+  [dashboard](test/dashboard-pages.browser.mjs)).
+- Tasks follow data access ([ADR-0248](docs/adr/0248-tasks-follow-data-access.md); owner: "task
+  access and edit should behave like data access for project and groups. user Bob can
+  manage(crud) other tasks that are for project1 or all joined groups."): in a project, a group
+  or topic sees and manages only its own group's tasks (its topics' too when they share what
+  they know) and the tasks set on the project itself, never another group's task, count, tag,
+  link, parent or history. A task added there belongs to that chat unless it is set on the
+  whole project; a subtask has its parent's group. The owner's card, the dashboard and the
+  mini app name exactly who will see a task before a move or a group change. A group's tasks
+  move with it to another project, through the owner's assignment, an approved organization
+  and its undo; leaving every project leaves them on the old list for the owner only. A
+  group's own move, archive or trash takes only the tasks under it that the group sees;
+  another group's task under them stays where it is, no longer under it
+  ([store](test/store-tasks.test.ts), [moves](test/store-knowledge-management.test.ts),
+  [card lines](test/prompts.test.ts), [audience route](test/mini-app.test.ts),
+  [dashboard](test/dashboard-pages.browser.mjs)). Tasks that groups added before this keep
+  their group and are now seen only by it.
+- Answer privately, the read side ([ADR-0249](docs/adr/0249-answer-privately.md)): a private
+  answer reads the groups frozen in its record when the button is tapped (the asking group
+  and the project's other served groups). A later change in the project only narrows or
+  closes it. It reads by search, page and plain long-term memory search only, plus the
+  frozen groups' tasks and their project's, gets what the owner's rules and grants let into
+  the asking group, reaches read routes and read tools only, opens no group's original file,
+  runs in its own profile, removed once unused for two hours, and is delivered only into the
+  asker's private chat. Stale rows
+  expire hourly, and the owner lists the record at `GET /v1/private-answers`
+  ([record](test/store-private-answers.test.ts), [routes and tools](test/private-answers.test.ts),
+  [memory](test/store-provenance.test.ts), [profile](services/hermes/test_scopes.py)).
+- Answer privately, the button ([ADR-0249](docs/adr/0249-answer-privately.md)): under the
+  owner's own answer in a group or topic whose project has another served group, a 🔒 Answer
+  privately button. Only the owner's tap works; anyone else's gets a short popup and nothing
+  runs. `/start <id>` in the private chat answers read-only from the groups frozen at the tap,
+  with the project's role, else the groups default. An answer that never arrives closes its
+  record, and one closed mid-answer sends the changed or expired text once. Texts are
+  editable in Settings › Assistant, and a project's page lists its buttons
+  ([button](test/store-private-button.test.ts), [bot](services/telegram/test_service.py),
+  [dashboard](test/dashboard-pages.browser.mjs)). The full tester's `project_groups_stay_apart`
+  carries the step's gates: the group answer uses only its group, a group's task view never
+  shows another group's task, and the button, the tap and the private answer
+  ([scenario](tools/acceptance/product_scenarios.py)).
+- Review follow-ups, decided by the owner's standing rule to take the recommended answer on
+  small product polish: removing a group from a project, or choosing "No project", asks
+  first and says its tasks, its topics' too, stay on that project's list, where only you see
+  them, and moving a group to another project says they move with it
+  ([dashboard](test/dashboard-pages.browser.mjs)); turning automatic organizing on is what
+  lets it create projects, and the "May create new projects" switch, which did nothing when
+  off, is gone (its column dropped at start, a delegation saved with it kept, an older export
+  still restores) ([organizing](test/store-knowledge-management.test.ts),
+  [exports](test/knowledge-portability.test.ts)); Memory › Notes names a private answer's
+  profile by where it was asked, as its first line names it, and the day it ran
+  ([button](test/store-private-button.test.ts), [listing](services/hermes/test_management.py),
+  [receipt](services/hermes/test_turn_process.py)). Recorded decision: a topic's tasks left
+  on another project's list at the upgrade stay there, where only you see them (fails
+  closed).
+
+  Build, unit, store, dashboard, browser and Python checks pass, apart from failures that also
+  fail on main, and so do the step's 29 full-tester scenarios on the fake Telegram (the ones
+  on projects, tasks, sharing and approval buttons; `group_members`,
+  `project_groups_stay_apart`, `private_chat_stays_out_of_groups`, the private-mark sweep and
+  `dashboard_pages` again after the review follow-ups). `project_groups_stay_apart` fails on a
+  build that lets a group turn read every group of its project: at
+  `group_answer_uses_only_that_group` when its search does, and at
+  `group_task_view_never_shows_another_groups_task` when its task list does. Pending:
+  - the whole full tester as a release run;
+  - live checks only a real phone can answer: whether each Telegram client (iOS, Android,
+    Desktop, Web) sends `/start <id>` by itself when the private chat with the bot already
+    exists, whether Telegram accepts the tap's `t.me/<bot>?start=<id>` link in
+    answerCallbackQuery, and how fast the tap's popup and the private answer arrive;
+  - live acceptance with two groups in one project on the owner's install;
+  - before merging, a read-only check on the owner's install for any project with the share
+    box on (`SELECT count(*) FROM projects WHERE sharing_enabled`);
+  - a fake-Telegram end-to-end test of the button (`services/telegram/test_simulation.py`),
+    not written.
+  Owner steps: a project that had the box on stops sharing at the next start, and its project
+  rules, their previews and texts not yet said are deleted. Every move of a group into or out
+  of a project now waits for your review, and a topic that had its own project follows its
+  group, also onto that group's task board; its tasks on another project's list stay there,
+  where only you see them. An owner export from before this change restores without the
+  share box: its project rules are left out and a topic's own project becomes its group's.
+  An automatic-organizing permission that is on may now create projects even if its old "May
+  create new projects" switch was off; turn it off in Memory › Projects if that is not wanted.
+
 Members step 1: keep the owner's private side out of groups (owner, 2026-11-12: "I just
 review the tables and seems what I want if there is a important point or need my answer ask,
 else start build.", approving the Members design). One pull request in three parts:
@@ -30,8 +129,8 @@ else start build.", approving the Members design). One pull request in three par
   keep what it cannot see; from the owner's private chat, a change those chats would see waits
   for a card that names them, and a move into a list from the dashboard or mini app names them
   first. Only the owner moves a chat into a project with tasks: automatic organization waits
-  for review, and the review, "Add a chat" and a chat's project choice say the chat will see
-  and change the list ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
+  for review, and the review, "Add a group" and a group's project choice say what the group
+  will see and change on the list (since step 2, the tasks set on the whole project) ([ADR-0243](docs/adr/0243-project-boards-get-the-private-side-only-through-a-card.md),
   [store](test/store-tasks.test.ts), [organization](test/store-knowledge-management.test.ts),
   [columns](test/task-settings.test.ts), [dashboard](test/dashboard-pages.browser.mjs)). As the owner confirmed on 2026-11-13
   ("Yes, small changes skip it"), a private-chat change to a listed task that only sets status,
@@ -262,26 +361,6 @@ card with the note. Owner steps: pull main in the operating checkout, run
 Assistant › Built-in instructions › Approval buttons and results was ever saved, update its `allowed_here` and
 `allowed_always` lines or reset it to the built-in text, since saved lines keep the old
 wording.
-
-Project sharing (owner, 2026-11-09: "isnt better to have check box to share entities
-in create/edit project to do it?", then "yes" to the checkbox and five safety fixes):
-a project's checkbox "Chats in this project share what they know", off by default,
-filtered or approved, keeps one project rule into each of its groups and topics from
-the others; "Don't share into this chat" leaves one chat's group out; the Sharing page
-shows these rules as "Set by project"; automatic organization never moves a chat into
-or out of such a project ([ADR-0226](docs/adr/0226-a-project-can-share-what-its-chats-know.md),
-[rules](test/store-projects.test.ts), [sharing](test/store-sharing.test.ts),
-[organization](test/store-knowledge-management.test.ts), [reset](test/store-reset-setup.test.ts)).
-Pending: two related groups sharing on the owner's live install. Open points for the
-owner: with `TELEGRAM_TOPIC_MEMORY=topic` a topic that follows its group into the
-project, or is assigned to the same project as its group, gets no project sharing and
-is a source only for the project's other groups; "Don't share into this chat" covers
-the whole group in both topic modes; the chat stays a source, so it may need an "also
-keep this chat's knowledge in" option; an approved text reaches one chat, so each chat
-needs its own approval; a topic that stops following a source group invalidates every
-approved text of the rules reading that group; an owner rule given a project rule's ID
-by hand blocks that chat from joining while the project shares; project rules have no
-privacy notes of their own.
 
 Hermes dashboard names (owner, 2026-11-09: "what are thesse?", "naming is not well",
 "ints not clear what is it", then "yes" to the fix): the native profile selector lists

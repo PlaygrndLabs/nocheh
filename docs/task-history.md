@@ -2867,3 +2867,32 @@ home in Hermes. Honcho 3.4.0 added a migration that Honcho runs itself at
 startup. Superseded by the November 9 upgrade in [TASK.md](../TASK.md).
 
 </entry>
+
+
+<entry date="2026-11-09" area="Project sharing">
+
+Project sharing (owner, 2026-11-09: "isnt better to have check box to share entities
+in create/edit project to do it?", then "yes" to the checkbox and five safety fixes):
+a project's checkbox "Chats in this project share what they know", off by default,
+filtered or approved, keeps one project rule into each of its groups and topics from
+the others; "Don't share into this chat" leaves one chat's group out; the Sharing page
+shows these rules as "Set by project"; automatic organization never moves a chat into
+or out of such a project ([ADR-0226](adr/0226-a-project-can-share-what-its-chats-know.md),
+[rules](../test/store-projects.test.ts), [sharing](../test/store-sharing.test.ts),
+[organization](../test/store-knowledge-management.test.ts), [reset](../test/store-reset-setup.test.ts)).
+Left pending then: two related groups sharing on the owner's live install. Open points
+left for the owner: with `TELEGRAM_TOPIC_MEMORY=topic` a topic that follows its group into the
+project, or is assigned to the same project as its group, gets no project sharing and
+is a source only for the project's other groups; "Don't share into this chat" covers
+the whole group in both topic modes; the chat stays a source, so it may need an "also
+keep this chat's knowledge in" option; an approved text reaches one chat, so each chat
+needs its own approval; a topic that stops following a source group invalidates every
+approved text of the rules reading that group; an owner rule given a project rule's ID
+by hand blocks that chat from joining while the project shares; project rules have no
+privacy notes of their own.
+Superseded on 2026-11-13 by Members step 2: a project shares nothing between its groups,
+its share box is gone and its project rules are deleted at start
+([ADR-0247](adr/0247-projects-replace-the-share-box.md)); the pending live check and
+the open points above no longer apply.
+
+</entry>

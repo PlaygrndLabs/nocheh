@@ -90,10 +90,12 @@ class Sender:
         self.floods[str(chat_id)] = asyncio.get_running_loop().time() + max(1.0, min(wait, 300.0))
         return False
 
-    async def send(self, chat_id, text, reply_to=None, topic=None, notify=False):
+    async def send(self, chat_id, text, reply_to=None, topic=None, notify=False, markup=None):
         """Send ``text`` as one reply. True when every chunk was delivered; False otherwise.
 
-        Errors are not raised: the bound check's request record tells the caller what reached Telegram."""
+        ``markup``, a reply's one button, goes on the last chunk only, so it sits under the whole reply; the first
+        chunk still answers the message. Errors are not raised: the bound check's request record tells the caller
+        what reached Telegram."""
         if not text or not text.strip():
             return True
         async with self.chat(chat_id):
@@ -110,7 +112,8 @@ class Sender:
                     chunks = [formatting._separate_chunk_indicator_from_fence(re.sub(r' \((\d+)/(\d+)\)$', r' \\(\1/\2\\)', chunk))
                               for chunk in chunks]
                 for index, chunk in enumerate(chunks):
-                    if not await self._chunk(chat_id, chunk, reply_to if index == 0 else None, topic, notify):
+                    if not await self._chunk(chat_id, chunk, reply_to if index == 0 else None, topic, notify,
+                                             markup if index == len(chunks) - 1 else None):
                         return False
                 return True
             except Exception:
@@ -125,14 +128,15 @@ class Sender:
                 return await asyncio.wait_for(self.bot.send_message(text=formatting._strip_mdv2(chunk), parse_mode=None, link_preview_options=no_preview(), **parameters), SEND_DEADLINE)
             raise
 
-    async def _chunk(self, chat_id, chunk, reply_to, topic, notify):
+    async def _chunk(self, chat_id, chunk, reply_to, topic, notify, markup=None):
         from telegram.error import BadRequest, NetworkError, TimedOut
         # Telegram refuses message_thread_id 1, the forum's General topic, on a send.
         thread = None if not topic or int(topic) == 1 else int(topic)
         retried_thread, fresh = False, 0
         for attempt in range(3):
             parameters = {'chat_id': int(chat_id), 'reply_to_message_id': int(reply_to) if reply_to else None,
-                          'message_thread_id': thread, **({} if notify else {'disable_notification': True})}
+                          'message_thread_id': thread, **({} if notify else {'disable_notification': True}),
+                          **({'reply_markup': markup} if markup is not None else {})}
             # A retry after a refusal or a connect timeout reached no chat, so it gets its own journal entry;
             # under the same entry the journal would answer with the first attempt's saved result.
             token = DISPATCH_KEY.set(f'{base}:retry:{fresh}') if fresh and (base := DISPATCH_KEY.get()) else None
