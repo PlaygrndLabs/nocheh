@@ -320,7 +320,7 @@ class ProductScenarios(Scenarios):
         wide = text.encode('utf-16-le')
         span = lambda entity: wide[2*entity['offset']:2*(entity['offset']+entity['length'])].decode('utf-16-le')
         self.gate('card_names_the_operation', text.startswith('⚙️ mcp.example.test · create-page\n'), card=text[:300])
-        self.gate('card_says_what_it_sends', re.search(r'\n📤 Sends [0-9,]+ characters to mcp\.example\.test\n', text) is not None, card=text[:300])
+        self.gate('card_says_what_it_sends', re.search(r'\n📤 Sends [0-9,]+ characters of input to mcp\.example\.test\n', text) is not None, card=text[:300])
         self.gate('card_shows_fields_in_words', 'properties › title: Open items '+marker in text and 'https://mcp.example.test/mcp' in text
                   and not any(mark in text for mark in ('{', '\\n', '"')), card=text)
         self.gate('entities_inside_the_text', all(entity['length'] > 0 and 0 <= entity['offset'] and entity['offset']+entity['length'] <= len(wide)//2
@@ -335,7 +335,8 @@ class ProductScenarios(Scenarios):
         self.gate('decided_card_keeps_its_formatting', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
                   entities=edited['message'].get('entities'))
         # With the asker's own summary the card leads with it, and the exact fields fold under it into one quote that
-        # opens on a tap, their labels still bold and no quote inside it (ADR-0224).
+        # opens on a tap, their labels still bold and no quote inside it (ADR-0224). How much goes to which site, and
+        # the server's address, stay open above it (ADR-0250).
         said = 'Add a made-up page with two open items '+marker
         request = self.f.message(OWNER, 'یک صفحه دیگر [[tool:mcp__nocheh__mcp '+json.dumps({**call, 'summary': said})+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
@@ -344,7 +345,7 @@ class ProductScenarios(Scenarios):
         wide = text.encode('utf-16-le')
         folds = [span(entity) for entity in entities if entity['type'] == 'expandable_blockquote']
         self.gate('card_leads_with_the_summary', re.match(r'⚙️ mcp\.example\.test · create-page\n📝 AI says: '+re.escape(said)
-                                                          +r'\n\n📤 Sends [0-9,]+ characters to mcp\.example\.test\n\nExact details\nhttps://mcp\.example\.test/mcp\n', text), card=text[:400])
+                                                          +r'\n\n📤 Sends [0-9,]+ characters of input to mcp\.example\.test\n\nhttps://mcp\.example\.test/mcp\nExact details\n', text), card=text[:400])
         self.gate('fields_fold_into_one_quote', len(folds) == 1 and folds[0] == text[text.index('Exact details'):] and 'properties › title: Open items '+marker in folds[0]
                   and not [entity for entity in entities if entity['type'] in ('blockquote', 'pre')], entities=entities)
         self.gate('labels_bold_inside_the_fold', sorted(span(entity) for entity in entities if entity['type'] == 'bold')
