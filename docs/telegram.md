@@ -26,6 +26,13 @@ Omit `--group-id` for DM only, or repeat it to select multiple groups. These IDs
 are examples; use the discovered values. The ignored `.env`
 holds the policy. To disable the assistant, set `TELEGRAM_ENABLED=false` and run `up`.
 
+Nocheh keeps its own record of every chat and names each by an id of its own
+([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)); a group Telegram upgrades to a
+supergroup stays the same chat under its new Telegram id. At each start the app serves
+the groups `TELEGRAM_GROUP_IDS` lists, by any Telegram id they have had, and the owner's
+private chat. `nocheh-telegram` and Hermes read which chats are served from the app, not
+from `.env`, and stay quiet while they cannot.
+
 Once your user ID is saved, the dashboard shows it read-only; it changes only from
 the command line ([ADR-0244](adr/0244-owner-defaults-posts-and-machine-reports-stay-private.md)):
 

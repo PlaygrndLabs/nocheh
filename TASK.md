@@ -2,6 +2,114 @@
 
 <current>
 
+Members step 2b-1: Nocheh's own chat ids ([ADR-0250](docs/adr/0250-chats-get-nochehs-own-ids.md);
+owner, 2026-11-12: "I just review the tables and seems what I want if there is a important point
+or need my answer ask, else start build.", approving the Members design, whose step 2b is "Chat
+records ready for Slack"; "want ensure the db design cover slack for future"). One branch: a
+shared contract, four parts and their integration. What Nocheh serves does not change, and
+redeploying main undoes it: no stored value is rewritten and the archive is never changed.
+- Contract: the chat records (`chat_connections`, `chat_accounts`, `chats`, `chat_ids`,
+  `chat_memberships`, `chat_directory_state`), bot-free ids (`chatIdFor`), one chat id check
+  and the synchronous chat directory, which fails closed for an id it does not know
+  ([chats](test/chats.test.ts), [schema](test/store-chat-schema.test.ts),
+  [format gate](test/chat-id-format-gate.test.ts), whose allowlist now holds only adapter,
+  legacy and unrelated sites).
+- Chat records, seeding and the directory: every chat value stored before this step keeps
+  naming its chat as that chat's Nocheh id; a chat first seen later gets a digest with no bot
+  in it, and history the owner imports keeps its old ids. Each captured update records its
+  chats, topics, people and memberships, newer update wins (update order within one bot,
+  capture time across bots or after a week), and a Telegram upgrade keeps one chat with both
+  ids. At app start the seeder fills chat records, insert only, then a background loop fills
+  memberships. The app and the security service load the directory before serving and reload
+  it on a new row, a newer guard epoch or a miss. `TELEGRAM_GROUP_IDS` still decides what is
+  served, by any Telegram id a group has had, and `GET /internal/chats` gives the bot and
+  Hermes the served list. The owner's conversations, people, topics and refresh read the
+  records; send records keep the app's ids as text and name the Nocheh chat; owner records
+  and reset snapshots carry the chats, only names the owner gave travel, and a chat arrives
+  off ([records](test/store-chat-records.test.ts), [seeding](test/store-chat-seed.test.ts),
+  [directory](test/store-owner-supervision.test.ts), [refresh](test/store-telegram-chats.test.ts),
+  [topics](test/store-telegram-topics.test.ts), [strangers](test/store-strangers.test.ts),
+  [sends](test/store-chat-sends.test.ts), [portability](test/store-owner-portability.test.ts),
+  [reset](test/store-reset-setup.test.ts), [portable](services/hermes/test_portable_bundle.py),
+  [reset tools](services/hermes/test_reset_configuration.py)).
+- Reads and rules on chat rows: groups, topics, private chats, served chats, read sets,
+  private answers, tool switches and a group's tasks come from the chat records, never from
+  an id's shape, and a chat with no record is private and reads nothing. Archive reads expand
+  a chat to every Telegram id it has had, so an upgraded group keeps its history and allowed
+  people. Read sets are marked SQL parameters, a turn names its chat by its Nocheh id, and the
+  owner's chat (`owner_chat`) is kept apart from the owner's account (`owner_id`). Private
+  answers check chat kinds against the records and still accept an old-shaped value with no
+  record, so a redeployed main keeps writing. Privacy store tests run on old-shaped (GP1 to
+  GP4) and digest (NG1, NG2) chats ([spaces](test/spaces.test.ts),
+  [tasks](test/store-tasks.test.ts), [private answers](test/store-private-answers.test.ts),
+  [jobs](test/store-background-jobs.test.ts), [read sets](test/store-project-groups.test.ts),
+  [provenance](test/store-provenance.test.ts),
+  [conversation page](test/store-conversation-page.test.ts),
+  [memory rebuild](test/store-memory-rebuild.test.ts)).
+- Turns, sends and the two front doors: a turn pass carries its chat's app binding, checked by
+  storage, nocheh-telegram and Hermes. Only the Telegram front door turns Nocheh chats into
+  Telegram ids, so replies, cards, notices, owner notices and approved sends follow a group
+  Telegram upgraded, and an unknown chat is never sent to. Destinations are chat ids; a link or
+  Telegram id is read once into the chat it names. nocheh-telegram and Hermes read the served
+  list from the app, not from `.env`, and look again before refusing a chat recorded a moment
+  ago. Hermes profiles, sessions and carry keep their names, and a reset keeps preferences by
+  Nocheh chat ([front door](test/telegram-frontdoor.test.ts), [pass checks](test/access.test.ts),
+  [destinations](test/store-telegram-actions.test.ts),
+  [runtime profiles](test/store-runtime-profiles.test.ts), [bot](services/telegram/test_service.py),
+  [Hermes](services/hermes/test_scopes.py),
+  [reset preferences](services/hermes/test_preference_transfer.py)).
+- Dashboard, docs and the full tester: the dashboard reads what a chat is from
+  `/v1/conversations` and never parses an id. Chats shows a Telegram ID label, with the
+  earlier one after an upgrade, and finds a chat by name or any Telegram ID it has had (the
+  server's search matches them too); rules and organizing permissions keep a chat still being
+  looked up; an upgraded group's allowed people are saved under an id `TELEGRAM_GROUP_IDS`
+  lists ([model](test/dashboard-chats-model.test.mjs), [search](test/conversation-search.test.ts),
+  [pages](test/dashboard-pages.browser.mjs)). The full tester finds chats by their Telegram
+  IDs and adds `new_id_group_works_end_to_end` and `supergroup_upgrade_keeps_history`;
+  `project_groups_stay_apart` and the private-mark sweep run with the new-id group NG1 in P1
+  ([scenarios](tools/acceptance/product_scenarios.py), [fixture](test/test_fixture_chats.py)).
+- Integration: owner notices go to where the owner's private chat is in Telegram now; card,
+  destination and profile names come from the chat records; the app server reads a turn pass
+  for a chat recorded a moment ago again; end-to-end store tests cover the owner's search by
+  any Telegram id ([search](test/store-conversation-search.test.ts)), an upgraded group and a
+  new forum topic answered where they are in Telegram now
+  ([dispatch](test/store-telegram-dispatch-chats.test.ts)) and Answer privately on digest chat
+  ids ([button](test/store-private-button-chats.test.ts)).
+
+  Checks on the integrated branch: the build; node unit and dashboard tests (536: 339 pass,
+  193 store tests skipped there, and the 4 workflow tests that also fail on main); all 93 store
+  test files on old-shaped and digest chats (230 pass, 0 fail); dashboard format; the dashboard
+  browser tests (45: 43 pass, and the 2 settings-apply tests that also fail on main); Python
+  Hermes (920, with the 2 environment errors that also occur on main), Telegram (121) and tools
+  (119, 2 skipped). The format gate's allowlist holds only adapter, legacy and unrelated sites.
+  Pending:
+  - 2b-2, "Only the owner adds Nocheh": adoption, leave-and-tell, the Telegram "which
+    project?" card, and the served set kept in `chats` with `TELEGRAM_GROUP_IDS` retired. It
+    waits on the owner's answer about groups Nocheh is already in that the owner never turned
+    on.
+  - A live check after merge: that the first seeding on a real archive gives every stored chat
+    value a row (no group, topic, task, rule or switch becomes unknown) and how long it took
+    (the `ms` of the `chat_records_ready` log; about 23 s per 300,000 archived events in a
+    local benchmark, and the app's health check allows 120 s).
+  - A rollback check: redeploying main after this step, System › Sent to apps still reads
+    send records whose thread and message ids are text, and reactions still work with
+    numeric update ids. A private answer offered under 2b-1 then refuses (`only_asker`) until
+    it expires within a day.
+  - The whole full tester on the integrated branch, with the new scenarios, as a release run.
+  - Live acceptance on the owner's install after merge, while Nocheh is idle (a turn in
+    flight at deploy is refused once, then retried).
+  Owner steps: small things you see change. Chats says "Telegram ID" (with the earlier one
+  after Telegram upgrades a group) and "Unknown chat" for a chat Nocheh has no record of; the
+  people list also shows people who left, marked as left; a topic name you gave stays even
+  after Telegram shows another, and removing yours brings Telegram's back; asking Nocheh to
+  post to a topic it has never seen is refused until a message there, or adding the topic in
+  Chats › Topics by its link or number, makes it known (recommended: keep, it fails closed).
+  A group Telegram upgraded before this step stays two chats, as it was; later upgrades keep
+  one chat. Known limits: an upgrade whose new group's messages are captured a spool batch
+  before both upgrade messages stays two chats; a package made after this step that names a
+  group by its digest, imported where the first start already gave that group its old id,
+  does not reach the group until adoption.
+
 Members step 2: projects and the private button (owner, 2026-11-12: "I just review the
 tables and seems what I want if there is a important point or need my answer ask, else start
 build.", approving the Members design; 2026-11-13: chose "Keep them, yours only" when asked

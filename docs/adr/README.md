@@ -24,6 +24,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Sources have platform-independent identities, revisions and relations beside the unchanging event log ([0051](0051-platform-independent-sources.md)).
 - Preparation turns media into text with Hermes tools: the document reader for files, the transcriber for voice notes and the vision tool for images ([0192](0192-files-are-read-by-the-runtime-document-reader.md), [0193](0193-voice-notes-are-transcribed-by-the-runtime-transcriber.md), [0194](0194-images-are-read-by-the-runtime-vision-tool.md)).
 - The agent reads a chat oldest first through access checks, searches Honcho memory by meaning within readable sessions, and finds current reactions with masked excerpts ([0195](0195-the-agent-reads-a-chat-in-order-and-searches-by-meaning.md), [0084](0084-scoped-reaction-discovery.md), [0086](0086-reaction-discovery-evidence.md)).
+- Every chat has Nocheh's own id that never changes: a chat value stored before step 2b stays as its chat's id, a chat first seen later gets a digest of its app ids with no bot in it, and each app id a chat has had, current or old, maps to it. Code asks the chat directory what a chat is, never an id's shape; an id it does not know is private and reads nothing. Archive reads expand chats to their app ids at query time, with no event index, and the owner's private chat is kept apart from the owner's account ([0250](0250-chats-get-nochehs-own-ids.md)).
 
 ### Secret check and security
 
@@ -43,6 +44,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Every physical send is re-checked against its approved chat, topic and current policy; a rate-limited send gets at most three journaled attempts, and an uncertain send never resends ([0089](0089-physical-telegram-delivery-boundary.md), [0090](0090-durable-telegram-rate-limit-retries.md)).
 - Hermes shows typing while a turn works and reacts on the answered message: eyes while working, then thumbs up or down ([0188](0188-typing-status-while-a-turn-works.md), [0211](0211-hermes-working-reactions-on-the-answered-message.md)).
 - Every request a front door sends to a chat app, reactions included, leaves one content-free send record (kind, chat, when, outcome and a code), drained into `control.chat_sends` and shown in System › Sent to apps, on Health and in the owner's notices; "typing…" and reads never; a record never decides a send ([0238](0238-record-every-send-to-a-chat-app.md)).
+- A Telegram turn's pass is bound to where its chat is in Telegram (`{app, chat, topic}`); storage, the bot and Hermes refuse a pass that does not match, and only the Telegram front door translates Nocheh chats to Telegram ids, so a group Telegram upgrades stays the same chat and sends follow it. The bot and Hermes read the served chats from the app; until step 2b-2, `TELEGRAM_GROUP_IDS` serves a group by any of its Telegram ids ([0250](0250-chats-get-nochehs-own-ids.md)).
 
 ### Replies and turns
 
