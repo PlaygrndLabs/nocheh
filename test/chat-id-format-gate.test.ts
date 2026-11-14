@@ -46,8 +46,6 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/stores/relationships.ts','B',1,'an observed audience built as chat/topic'],
   ['src/stores/retrieval.ts','B',1,'a reader\'s topic split off its space'],
   ['src/stores/tasks.ts','B',3,'group tasks found by topic prefix'],
-  // Part C: turns, sends and the two front doors
-  ['services/hermes/preference_transfer.py','C',7,'topic and group patterns; owner and groups from env'],
   // Part D: dashboard, docs and the full tester
   ['dashboard/lib/chats-model.ts','D',6,'isSpaceId, parentOf, topicNumber, groupSpace and inferKind'],
   ['dashboard/pages/chats/chat-picker.tsx','D',1,'whole groups by topic test'],
@@ -81,6 +79,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['tools/operations/installation/configuration.py','adapter',3,'installer checks of TELEGRAM_OWNER_ID, TELEGRAM_GROUP_IDS and access'],
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],
   ['tools/operations/security/group_access.py','adapter',1,'a Telegram user id typed by the owner'],
+  ['services/hermes/preference_transfer.py','legacy',1,'a legacy-layout reset, or a preferences snapshot from before step 2b: its topic spaces read once'],
   ['src/honcho.ts','legacy',1,'legacy layout audience by sign'],
   ['tools/operations/installation/store_recovery.py','unrelated',1,'a PostgreSQL sequence value'],
 ];
