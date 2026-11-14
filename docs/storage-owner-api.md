@@ -50,8 +50,9 @@ Chat and topic values in these routes (`space`, `space_id`, `scope_id`, a rule's
 `sources` and `destination`) are Nocheh chat ids ([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)).
 They are opaque: a chat Nocheh knew before step 2b keeps the value it was stored
 under, and a chat or topic first seen later has a 64-character digest id. Never
-build or parse one; find a chat by name or by its Telegram ID in GET
-`/v1/conversations`, whose items carry `kind`, `parent_space`, `topic_key`,
+build or parse one; find a chat in GET `/v1/conversations`, whose `q` matches a
+chat's id, its name, its group's name and every Telegram ID it has had, current
+or old (a topic has its group's), and whose items carry `kind`, `parent_space`, `topic_key`,
 `app_ids` (each app id with `current` or `old`, so an upgraded group lists both),
 `is_forum`, `state` and `owner`. Only a group the chat directory knows, or one of
 its topics, joins a project or shares; any other id counts as a private chat.

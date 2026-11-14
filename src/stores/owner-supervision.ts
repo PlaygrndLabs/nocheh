@@ -48,6 +48,15 @@ const clean=(value:unknown):string|null=>typeof value==='string'?value.replace(/
 const identity=(id:string)=>{if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_decision_id');return id;};
 const kindOf=(kind:string):DecisionKind=>{if(!decisionKinds.includes(kind as DecisionKind))throw new HttpError(400,'invalid_decision_kind');return kind as DecisionKind;};
 function pageLimit(value:number|undefined) {if(value!==undefined&&(!Number.isSafeInteger(value)||value<1||value>100))throw new HttpError(400,'invalid_supervision_limit');return value??50;}
+/**
+ * A /v1/conversations search (ADR-0250): a chat's Nocheh id, name, its group's name, or any id it has had in its app,
+ * such as a Telegram ID, so a chat first seen after step 2b, whose Nocheh id is a digest, is found by its Telegram ID.
+ * A topic carries its group's app ids, so it is found with its group.
+ */
+export function conversationMatches(item:Pick<ConversationDirectoryItem,'space_id'|'name'|'parent_name'|'app_ids'>,q:string):boolean {
+  const query=q.toLocaleLowerCase();
+  return !query||[item.space_id,item.name,item.parent_name,...(item.app_ids??[]).map(label=>label.external)].some(value=>value?.toLocaleLowerCase().includes(query));
+}
 /** One line on what an action would do: the message, command, page or tool. */
 export function actionSummary(kind:unknown,args:unknown):string|null {
   const value=args&&typeof args==='object'?args as Record<string,unknown>:{},text=(key:string)=>typeof value[key]==='string'?value[key] as string:null;
@@ -163,8 +172,7 @@ export class OwnerSupervisionRepository {
   async conversations(principal:Reader,input:PageInput={},hidden=new Set<string>()) {
     admin(principal);const limit=pageLimit(input.limit),after=input.after??'',q=input.q??'';
     if(after)validateSpace(after);if(typeof q!=='string'||q.length>200)throw new HttpError(400,'invalid_conversation_query');
-    const query=q.toLocaleLowerCase(),all=(await this.directory()).filter(item=>!hidden.has(item.parent_space??item.space_id)&&
-      (!query||[item.space_id,item.name,item.parent_name].some(value=>value?.toLocaleLowerCase().includes(query))));
+    const all=(await this.directory()).filter(item=>!hidden.has(item.parent_space??item.space_id)&&conversationMatches(item,q));
     const remaining=all.filter(item=>item.space_id>after),items=remaining.slice(0,limit);
     return {items,total:all.length,next_cursor:remaining.length>limit?items.at(-1)!.space_id:null,observed_at:new Date().toISOString(),state:'current' as const};
   }
