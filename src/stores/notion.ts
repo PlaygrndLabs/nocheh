@@ -4,6 +4,7 @@ import {HttpError,object} from '../http.js';
 import {plainHost} from '../action-arguments.js';
 import {canonical} from '../archive.js';
 import {parentSpace} from '../spaces.js';
+import type {OwnerIds} from '../assistant-policy.js';
 
 export const notionSchema=`
 CREATE TABLE IF NOT EXISTS owner_notion (
@@ -132,12 +133,15 @@ export async function notionJobReads(db:Pick<pg.PoolClient,'query'>):Promise<boo
  * job was not approved to make. A scheduled task's call, which has no background job, runs only by its own card or the
  * owner's exact permission. Null when it may run.
  */
-export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,owner:string|null):Promise<string|null> {
-  if(!owner||row.scope!==owner||(parentSpace(row.space_id)??row.space_id)!==owner)return 'notion_owner_private_only';
+export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ownerIds:OwnerIds|string|null):Promise<string|null> {
+  // The owner's private chat (a row's chat, ADR-0250) and the owner's account (who decided). A plain string is both, as
+  // before step 2b, when the owner's private chat had the owner's Telegram user id.
+  const {chat:owner,account}=typeof ownerIds==='string'||!ownerIds?{chat:ownerIds,account:ownerIds}:ownerIds;
+  if(!owner||!account||row.scope!==owner||(parentSpace(row.space_id)??row.space_id)!==owner)return 'notion_owner_private_only';
   if(!row.job_id)return null;
   const bySetting=row.state==='approved'&&canonical(row.decision_reference)===canonical(row.source_reference);
   const job=(await db.query('SELECT scope,requester,decided_by,logical_profile,notion_reads FROM background_jobs WHERE id=$1',[row.job_id])).rows[0];
   if(!job)return bySetting?'notion_job_not_approved':null;
-  return job.scope===owner&&job.requester===null&&job.decided_by===owner&&job.logical_profile===row.logical_profile&&(!bySetting||job.notion_reads)?
+  return job.scope===owner&&job.requester===null&&job.decided_by===account&&job.logical_profile===row.logical_profile&&(!bySetting||job.notion_reads)?
     null:'notion_job_not_approved';
 }

@@ -9,12 +9,13 @@ import type {Settings} from './config.js';
 import {readFile} from 'node:fs/promises';
 import {storedTranscripts} from './assistant.js';
 import type {RuntimeCall} from './runtime.js';
-import {validateSpace,parentSpace,policyRevision} from './spaces.js';
+import {parentSpace,policyRevision,servedGroup,validateSpace} from './spaces.js';
 import {requestAction} from './actions.js';
 import {guardState,guardedValue} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 import {recordSchedule} from './workflows/schedules.js';
+import {ownerChat} from './assistant-policy.js';
 
 export const managedRunSchema=`CREATE TABLE IF NOT EXISTS managed_runs (
   event_id text PRIMARY KEY REFERENCES events(id),
@@ -33,8 +34,8 @@ CREATE INDEX IF NOT EXISTS managed_runs_job ON managed_runs(logical_profile,job_
 CREATE INDEX IF NOT EXISTS managed_runs_lease ON managed_runs(lease_until) WHERE state='running';`;
 const identifier=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_run_identity');return id;};
 function scopeFor(config:Settings,value:unknown) {
-  const scope=string(value,64),owner=scope===config.assistant.owner_id;
-  if(!config.assistant.owner_id||(!owner&&!config.assistant.group_ids.includes(scope)))throw new HttpError(403,'run_scope_denied');
+  const scope=string(value,64),owner=scope===ownerChat(config.assistant);
+  if(!config.assistant.owner_id||(!owner&&!servedGroup(scope)))throw new HttpError(403,'run_scope_denied');
   return {scope,owner};
 }
 export async function captureInput(pool:pg.Pool,config:Settings,input:unknown,channel:'browser'|'scheduler'='browser',authority?:ExecutionAuthority) {

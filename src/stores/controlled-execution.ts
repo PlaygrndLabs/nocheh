@@ -8,6 +8,7 @@ import {hostActionAuthority} from '../workflows/host-tools.js';
 import {covers,type ControlledActionRepository} from './controlled-actions.js';
 import {notionRunRefusal} from './notion.js';
 import {chatToolAllowed} from './chat-tools.js';
+import {ownerChat,ownerIds} from '../assistant-policy.js';
 
 const protocol='controlled-execution-v2';
 const operation=(id:string)=>'controlled-result:'+id;
@@ -99,13 +100,13 @@ export class ControlledExecutionRepository {
       }
       // Turning a tool off for a chat or topic stops what was asked there and has not run yet, approved or not. It is
       // the chat's switch, also for a job's or a scheduled task's operation; a Notion call is an outside tool call.
-      if(!await chatToolAllowed(db,row.kind,row.space_id,this.actions.access.policy().owner_id??null,true))
+      if(!await chatToolAllowed(db,row.kind,row.space_id,ownerChat(this.actions.access.policy()),true))
         {const result=await this.blocked(db,row,'tool_disabled_by_owner');await db.query('COMMIT');this.closed(row.id);return result;}
       // Turning Notion off stops Notion calls that were approved but have not run yet.
       if('connection' in (args as object)&&!(await db.query('SELECT enabled FROM owner_notion WHERE singleton')).rows[0]?.enabled)
         {const result=await this.blocked(db,row,'notion_not_enabled');await db.query('COMMIT');this.closed(row.id);return result;}
       // It must still come from the owner's private chat, or from a job the owner asked for and approved there (ADR-0225).
-      const refused='connection' in (args as object)?await notionRunRefusal(db,row,this.actions.access.policy().owner_id??null):null;
+      const refused='connection' in (args as object)?await notionRunRefusal(db,row,ownerIds(this.actions.access.policy())):null;
       if(refused){const result=await this.blocked(db,row,refused);await db.query('COMMIT');this.closed(row.id);return result;}
       // Stop also stops what a job's Notion setting let run without a card but has not run yet (ADR-0203).
       // A call the owner approved on its own card stays approved.

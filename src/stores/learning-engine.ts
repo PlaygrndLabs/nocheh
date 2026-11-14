@@ -12,6 +12,7 @@ import {MemoryProvenanceRepository} from './memory-provenance.js';
 import {LearnedMemoryRepository,type LearnedPublication} from './learned.js';
 import {LearningContextRepository,type PreparedLearningContext} from './learning-context.js';
 import {evidencePeerId,memoryPeerId} from './entities.js';
+import {ownerChat} from '../assistant-policy.js';
 
 const protocol='honcho-contextual-learning-v1';
 /** A saved reasoning result is never rerun, so a result that fails these checks fails identically on every retry. */
@@ -58,7 +59,7 @@ export class ContextualLearningRepository {
   private async prepare(source:SourceReference,workspace:string,audience:string,binding:GuardBinding) {
     await this.provenance.current(workspace,audience,binding);
     const context=await this.contexts.prepare(source,binding);
-    const owner=this.contexts.access.policy().owner_id;
+    const owner=ownerChat(this.contexts.access.policy());
     if(audience!==(context.space===owner?'owner':context.space))throw new HttpError(403,'learning_workspace_scope_mismatch');
     // Waiting cards change as learning and the owner work through them; like rules, they never make a
     // finished message learn again.

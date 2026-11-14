@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { HttpError, object } from './http.js';
-import { isChatId } from './chats.js';
+import { chats, isChatId } from './chats.js';
+import { isTelegramChat } from './chats-telegram.js';
 
 export interface GroupAccess {granted:string[];denied:string[]}
 /** Whether every topic of a group shares one memory ('group', the default) or each topic keeps its own ('topic'). */
@@ -16,6 +17,9 @@ export interface AssistantPolicy {enabled:boolean;
   owner_chat?:string|null}
 /** The owner's private chat (ADR-0250): policy.owner_chat, or for a policy without one the chat owner_id names. */
 export const ownerChat=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):string|null=>policy.owner_chat===undefined?policy.owner_id:policy.owner_chat;
+/** The owner as stored rows name them: their private chat (a row's chat) and their account (who asked or decided). */
+export interface OwnerIds {chat:string|null;account:string|null}
+export const ownerIds=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):OwnerIds=>({chat:ownerChat(policy),account:policy.owner_id});
 export function groupAccess(value:unknown,groups:string[],owner:string|null):Record<string,GroupAccess> {
   const input=object(value),result:Record<string,GroupAccess>={};
   if(Object.keys(input).length>100)throw new Error('Invalid TELEGRAM_GROUP_ACCESS');
@@ -51,6 +55,22 @@ export function assistantPolicy(path?:string):AssistantPolicy {
     group_access:groupAccess(value.group_access??{},groups,value.owner_id as string|null),topic_memory:(value.topic_memory as TopicMemory|undefined)??'group',
     owner_chat:ownerChatId as string|null};
 }
+/**
+ * A served group's access lists (ADR-0250). TELEGRAM_GROUP_ACCESS names a group by a raw Telegram id, which may be the
+ * id the group had before Telegram upgraded it, so the lists under every Telegram id the chat has had (current and old)
+ * are joined; a person denied under any of them stays denied. Undefined when none names the chat.
+ */
+export function groupAccessFor(policy:Pick<AssistantPolicy,'group_access'>,chat:string):GroupAccess|undefined {
+  const found=chats().rawScopes([chat],'telegram').map(id=>policy.group_access?.[id]).filter((entry):entry is GroupAccess=>!!entry);
+  if(!found.length)return undefined;
+  const join=(values:string[])=>[...new Set(values)].sort();
+  return {granted:join(found.flatMap(entry=>entry.granted)),denied:join(found.flatMap(entry=>entry.denied))};
+}
+/**
+ * Whom a live Telegram message comes from, and in which chat Nocheh may answer it: the owner in their own private
+ * chat, or someone allowed in a served group. `scope` is the archive's raw Telegram chat id; chat_id is the Nocheh chat
+ * it names, from the chat directory (ADR-0250), so a chat with no row is answered nowhere (ADR-0242).
+ */
 export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:string):{owner:boolean;chat_id:string;user_id:string}|null {
   if (!policy.enabled) return null;
   const update=object(payload);
@@ -58,24 +78,29 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
   const message=object(update.message),chat=object(message.chat),sender=object(message.from ?? {});
   if (String(chat.id)!==scope) throw new HttpError(400,'source_scope_mismatch');
   if (sender.is_bot===true || !sender.id) return null;
-  const owner=chat.type==='private' && String(chat.id)===policy.owner_id && String(sender.id)===policy.owner_id;
+  const directory=chats(),id=isTelegramChat(scope)?directory.resolve('telegram',scope):null;
+  if (id===null) return null;
+  const owner=chat.type==='private' && directory.kind(id)==='private' && id===ownerChat(policy) && String(sender.id)===policy.owner_id;
   if (!owner) {
-    if (!['group','supergroup'].includes(String(chat.type)) || !policy.group_ids.includes(scope)) return null;
-    const user=String(sender.id),access=policy.group_access?.[scope];
+    if (!['group','supergroup'].includes(String(chat.type)) || directory.kind(id)!=='group' || !directory.served(id)) return null;
+    const user=String(sender.id),access=groupAccessFor(policy,id);
     if(user!==policy.owner_id && (!access?.granted.includes(user)||access.denied.includes(user)))return null;
   }
-  return {owner,chat_id:scope,user_id:String(sender.id)};
+  return {owner,chat_id:id,user_id:String(sender.id)};
 }
 
 /**
  * A live Telegram update from a chat Nocheh does not serve: a private chat with
- * anyone but the owner, or a group or channel the owner has not selected. It is
- * kept as received, but never prepared, learned from or read by the assistant.
+ * anyone but the owner, a group or channel the owner has not selected, or a chat
+ * the chat directory does not know (ADR-0250). It is kept as received, but never
+ * prepared, learned from or read by the assistant.
  */
 export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel:string;kind:string;scope:string}):boolean {
   if(!policy.enabled||!policy.owner_id||source.origin!=='live'||source.channel!=='telegram'||source.kind!=='telegram_update')return false;
   // Updates without a chat (scope "system") are not a conversation anyone holds.
-  return /^-?\d+$/.test(source.scope)&&source.scope!==policy.owner_id&&!policy.group_ids.includes(source.scope);
+  if(!isTelegramChat(source.scope))return false;
+  const directory=chats(),id=directory.resolve('telegram',source.scope);
+  return id===null||!(id===ownerChat(policy)&&directory.kind(id)==='private'||directory.kind(id)==='group'&&directory.served(id));
 }
 
 /** Final Telegram send authorization uses the captured original, never a prepared representation. An answer reader's

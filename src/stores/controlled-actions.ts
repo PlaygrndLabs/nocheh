@@ -20,6 +20,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
 import type {OperationReference} from './operations.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
+import {ownerChat} from '../assistant-policy.js';
 
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
@@ -82,7 +83,7 @@ export class ControlledActionRepository {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
     if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
     const body=exact(value,['kind','arguments','summary']),raw=actionArguments(body.kind,body.arguments),note=summaryOf(body.summary);
-    const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=this.access.policy().owner_id??null;
+    const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=ownerChat(this.access.policy());
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
     // Its switch is the chat's, never the asking turn's: a job or a scheduled task follows the chat it belongs to.
     if(!await chatToolAllowed(this.control,body.kind as string,principal.space!,owner))throw new HttpError(403,'tool_disabled_by_owner');

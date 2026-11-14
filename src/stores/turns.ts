@@ -10,6 +10,7 @@ import type {PreparedContextRepository} from './prepared-context.js';
 import type {GuardBinding} from './guards.js';
 import {albumMembers} from './albums.js';
 import {defaultLogicalProfile,runtimeProfile} from './runtime-profile.js';
+import {ownerChat} from '../assistant-policy.js';
 
 export const runtimeTurnSchema=`
 CREATE TABLE IF NOT EXISTS runtime_turns (
@@ -75,7 +76,7 @@ export class RuntimeTurnRepository implements BrokerStorage {
       return parentSpace(row.scope)??row.scope;
     }
     const source=await this.access.archive.verify(reference),space=await this.access.space(reference);
-    if(principal.scope===null&&principal.purpose==='memory-review'&&principal.space===this.access.policy().owner_id) {
+    if(principal.scope===null&&principal.purpose==='memory-review'&&principal.space===ownerChat(this.access.policy())) {
       const binding=await this.assertAudience(principal);
       if(!await this.access.canLearn(reference,binding))throw new HttpError(403,'learning_consent_required');
       // An owner-only native review learns permitted evidence into the owner's

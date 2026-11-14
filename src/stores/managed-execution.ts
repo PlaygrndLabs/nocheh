@@ -11,6 +11,8 @@ import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {carriesForward,type GuardBinding} from './guards.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
+import {ownerChat} from '../assistant-policy.js';
+import {servedGroup} from '../spaces.js';
 
 export const managedStorageSchema=`
 CREATE TABLE IF NOT EXISTS managed_runs (
@@ -58,8 +60,8 @@ export abstract class ManagedExecutionRepository {
   protected get guards(){return this.access.guards;}
   protected async row(id:string){return (await this.control.query("SELECT * FROM managed_runs WHERE event_id=$1 AND channel=$2",[id,this.channel])).rows[0];}
   protected scope(value:unknown){const scope=string(value,64),policy=this.access.policy();
-    if(!policy.owner_id||scope!==policy.owner_id&&!policy.group_ids.includes(scope))throw new HttpError(403,'run_scope_denied');return scope;}
-  protected principal(row:any):Reader {return {admin:false,scope:row.scope===this.access.policy().owner_id?null:row.scope,space:row.space_id,
+    const owner=ownerChat(policy);if(!policy.owner_id||!owner||scope!==owner&&!servedGroup(scope))throw new HttpError(403,'run_scope_denied');return scope;}
+  protected principal(row:any):Reader {return {admin:false,scope:row.scope===ownerChat(this.access.policy())?null:row.scope,space:row.space_id,
     turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};}
   protected async scoped(input:unknown){const body=object(input),id=managedEventId(body.event_id),scope=this.scope(body.scope),profile=managedIdentity(body.profile),row=await this.row(id);
     if(!row||row.scope!==scope)throw new HttpError(404,'captured_run_not_found');
@@ -129,7 +131,7 @@ export abstract class ManagedExecutionRepository {
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{await releaseOperation(db,async()=>{if(held)await leaveFamily(db,this.family);});}
     await this.current(row);await this.turns.binding(built.input.principal);
-    return {claimed:true,event_id:row.event_id,state:'running',channel:this.channel,scope:row.scope,owner:row.scope===this.access.policy().owner_id,
+    return {claimed:true,event_id:row.event_id,state:'running',channel:this.channel,scope:row.scope,owner:row.scope===ownerChat(this.access.policy()),
       guard_mode:row.binding.mode,text:built.input.text,source_key:built.input.source_key,payload:{profile:row.logical_profile,space:row.space_id,conversation_id:row.conversation_id},
       archive_credential:await this.turns.prepared.audience.turn(this.token,built.input.principal,row.event_id,expires,this.carries?row.binding:undefined)};
   }

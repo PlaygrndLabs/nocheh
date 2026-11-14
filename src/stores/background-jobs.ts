@@ -2,7 +2,8 @@ import {randomBytes} from 'node:crypto';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope} from '../assistant-policy.js';
+import {conversationScope,groupAccessFor,ownerChat,ownerIds,type OwnerIds} from '../assistant-policy.js';
+import {parentSpace,servedGroup} from '../spaces.js';
 import {HttpError,object,string} from '../http.js';
 import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
@@ -235,8 +236,12 @@ export function reportParts(text:string,limit=REPORT_PART):string[] {
 /** Whether the broker has counted a job's model requests past its byte backstop; it refuses their calls from then on. */
 const bytesSpent=(row:any)=>row.byte_budget!==null&&Number(row.model_bytes)>=Number(row.byte_budget);
 
-/** A job the owner asked for in their private chat; only its card is the owner's own to approve. */
+/** A job the owner asked for in their private chat (`owner`, the owner's chat); only its card is the owner's own to approve. */
 const privateJob=(row:any,owner:string|null|undefined)=>!!owner&&row.scope===owner&&!row.requester;
+/** The owner as a job row names them: its scope is the owner's private chat and its decided_by the owner's account. A
+ * plain string names both, as it did before step 2b, when the owner's private chat had the owner's Telegram user id. */
+export type JobOwner=OwnerIds|string|null|undefined;
+const jobOwner=(owner:JobOwner):OwnerIds=>typeof owner==='string'||!owner?{chat:owner??null,account:owner??null}:owner;
 
 /**
  * Whether a turn is a run of a running job that the owner asked for in their
@@ -244,13 +249,14 @@ const privateJob=(row:any,owner:string|null|undefined)=>!!owner&&row.scope===own
  * credential and Nocheh's own rows. The job row is locked FOR SHARE, so Stop
  * waits for the caller's transaction and a later call sees the stop.
  */
-export async function ownerApprovedJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
+export async function ownerApprovedJob(db:Pick<pg.PoolClient,'query'>,owner:JobOwner,source:{store:string;id:string},
   turn:{owner?:boolean;job?:string|null;logical_profile?:string|null},notion=false):Promise<boolean> {
-  if(!owner||!turn.owner||!turn.job||source.store!=='control')return false;
+  const {chat,account}=jobOwner(owner);
+  if(!chat||!account||!turn.owner||!turn.job||source.store!=='control')return false;
   // `notion` also asks that the job was approved with Notion reads on its card (ADR-0225).
   return !!(await db.query(`SELECT 1 FROM background_runs s JOIN background_jobs j ON j.id=s.job_id
     WHERE s.event_id=$1 AND j.id=$2 AND j.state='running' AND NOT j.cancel_requested AND j.scope=$3 AND j.requester IS NULL
-      AND j.decided_by=$3 AND j.logical_profile=$4${notion?' AND j.notion_reads':''} FOR SHARE OF j`,[source.id,turn.job,owner,turn.logical_profile??null])).rowCount;
+      AND j.decided_by=$5 AND j.logical_profile=$4${notion?' AND j.notion_reads':''} FOR SHARE OF j`,[source.id,turn.job,chat,turn.logical_profile??null,account])).rowCount;
 }
 
 /** SQL over a job row `j`: whether its box time has not passed yet. A box lasts until 5 minutes after the job's hard
@@ -270,7 +276,7 @@ export const repoKept="(j.repo IS NULL OR EXISTS (SELECT 1 FROM github_copies c 
 /** A run's job when the run runs in the job's sealed box: a run of a job that asked for the box and whose box time
  *  has not passed, that `ownerApprovedJob` lets through, while the owner's box switch and the guard are on, and whose
  *  GitHub copy, if it pinned one, was not removed. Null otherwise. */
-export async function boxJob(db:Pick<pg.PoolClient,'query'>,owner:string|null|undefined,source:{store:string;id:string},
+export async function boxJob(db:Pick<pg.PoolClient,'query'>,owner:JobOwner,source:{store:string;id:string},
   turn:{owner?:boolean;job?:string|null;logical_profile?:string|null},guard:GuardBinding):Promise<any|null> {
   if(!turn.job||guard.mode!=='on'||source.store!=='control')return null;
   const job=(await db.query(`SELECT j.* FROM background_jobs j JOIN background_runs t ON t.job_id=j.id AND t.event_id=$2
@@ -365,7 +371,8 @@ export class BackgroundJobRepository {
     const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim(),steps=body.steps===undefined?null:planSteps(body.steps);
     if(!title||!instruction)throw new HttpError(400,'invalid_job_request');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
-    const owner=this.access.policy().owner_id!,space=principal.space!,scope=space.split('/topic/')[0]===owner?owner:turn.scope,box=body.box===true;
+    // A job asked in the owner's private chat or one of its topics is the owner's chat's (ADR-0250: by its row).
+    const owner=ownerChat(this.access.policy())!,space=principal.space!,scope=(parentSpace(space)??space)===owner?owner:turn.scope,box=body.box===true;
     // A machine only for the owner's own request, in their private chat or an active project's group; refused before anything is spent.
     const machine=body.machine===undefined?null:await this.machineFor(principal,space,requester,box,(body.machine as string).trim());
     const size=await this.sources.size(principal,{chat:body.chat===undefined?'':string(body.chat,64),from,to}),settings=await this.settings();
@@ -759,7 +766,7 @@ export class BackgroundJobRepository {
   }
   /** Whether the person who asked for a job may still use Nocheh in its chat; the owner's own job always. */
   permitted(job:any):boolean {
-    const access=this.access.policy().group_access?.[job.scope];
+    const access=groupAccessFor(this.access.policy(),job.scope);
     return !job.requester||!!access?.granted.includes(job.requester)&&!access.denied.includes(job.requester);
   }
   /** The newest to-do list a run of the job kept, while what that run read may still be shown: its binding carries to `binding`. */
@@ -786,7 +793,7 @@ export class BackgroundJobRepository {
   }
   /** The job's audience in the current epoch, for the report it sends to the chat where it was asked, or to the owner. */
   private audience(row:any,binding:GuardBinding):Reader {
-    const owner=this.access.policy().owner_id;
+    const owner=ownerChat(this.access.policy());
     return {admin:false,scope:row.scope===owner?null:row.scope,space:row.space_id,turnEvent:row.source_reference.id,
       logical_profile:row.logical_profile,generation:binding.generation,guard_epoch:binding.epoch};
   }
@@ -798,7 +805,7 @@ export class BackgroundJobRepository {
     if(!result||digest(result.content)!==row.report_reference.input_hash)return this.finish(row,'failed','job_report_missing');
     const parts=reportParts(String(JSON.parse(result.content.toString()).text??''));
     if(!parts.length)return this.finish(row,'failed','job_report_empty');
-    const owner=this.access.policy().owner_id!,machine=!!row.machine&&row.scope!==owner;
+    const owner=ownerChat(this.access.policy())!,machine=!!row.machine&&row.scope!==owner;
     const sent=(await this.control.query(`SELECT b.part,a.state,a.destination FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
       WHERE b.job_id=$1 ORDER BY b.part`,[row.id])).rows;
     // A report that began in the group before machine reports went private keeps the parts sent there; the owner then gets
@@ -876,7 +883,7 @@ export class BackgroundJobRepository {
       branch:job.repo.branch,commit:job.repo.commit,copied:job.repo.copied_at.slice(0,16).replace('T',' ')+' UTC'}):''):text;
   }
   private async firstMessage(job:any,shown:{title:string;instruction:string},prompts:Awaited<ReturnType<typeof ownerPrompts>>):Promise<string> {
-    const estimate=job.estimate,owner=this.access.policy().owner_id,period=estimate.from||estimate.to?[estimate.from??'the start',estimate.to??'now'].join(' to '):'the whole chat';
+    const estimate=job.estimate,owner=ownerChat(this.access.policy()),period=estimate.from||estimate.to?[estimate.from??'the start',estimate.to??'now'].join(' to '):'the whole chat';
     return fillTemplate(prompts['background.job']??backgroundJob,{title:shown.title,instruction:shown.instruction,
       chat:job.target===owner?'your private chat with the owner (chat '+job.target+')':'chat '+job.target,period,size:sizeLine(estimate),
       // Without a price only the time limit applies, so the job is not told of a dollar limit.
@@ -913,7 +920,7 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
   protected async readiness(_row:any){return observation('completed','preparation');}
   protected override async profile(scope:string,space:string,profile:string,binding:GuardBinding){
     const policy=this.access.policy(),job=(await this.control.query('SELECT scope,space_id FROM background_jobs WHERE logical_profile=$1',[profile])).rows[0];
-    if(!job||job.scope!==scope||job.space_id!==space||scope!==policy.owner_id&&!policy.group_ids.includes(scope))throw new HttpError(403,'profile_scope_denied');
+    if(!job||job.scope!==scope||job.space_id!==space||scope!==ownerChat(policy)&&!servedGroup(scope))throw new HttpError(403,'profile_scope_denied');
     await this.guards.assertCarried(binding);
   }
   protected async sourceAllowed(row:any,_binding:GuardBinding){
@@ -932,11 +939,12 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
   }
   /** Whether a run runs in its job's sealed box: the same rule that puts the box in its binding (job-box.ts). */
   private async box(row:any):Promise<boolean> {
-    const owner=this.access.policy().owner_id;
-    return !!await boxJob(this.control,owner,row.source_reference,{owner:row.scope===owner,job:row.job_id,logical_profile:row.logical_profile},await this.guards.state());
+    const owner=ownerIds(this.access.policy());
+    return !!await boxJob(this.control,owner,row.source_reference,{owner:row.scope===owner.chat,job:row.job_id,logical_profile:row.logical_profile},await this.guards.state());
   }
   /** Whether a run works on its job's machine: the same rule that puts the machine in its binding (machines.ts). */
   private async machine(row:any):Promise<boolean> {
+    // A machine job is the owner's by who decided it: the owner's account.
     return !!await machineJob(this.control,this.access.policy().owner_id,row.source_reference,{job:row.job_id,logical_profile:row.logical_profile});
   }
   protected async build(row:any){
@@ -994,7 +1002,7 @@ export class BackgroundRunRepository extends ManagedExecutionRepository {
   async deliveryAllowed(principal:Reader):Promise<boolean> {
     const row=principal.turnEvent?await this.row(principal.turnEvent):null;
     if(!row||row.state!=='running'||row.cancel_requested||row.space_id!==principal.space||row.logical_profile!==principal.logical_profile||
-      (row.scope===this.access.policy().owner_id?null:row.scope)!==principal.scope)return false;
+      (row.scope===ownerChat(this.access.policy())?null:row.scope)!==principal.scope)return false;
     try{await afterPending(true,()=>this.current(row));return true;}catch(error){if(error instanceof HttpError&&error.status<500)return false;throw error;}
   }
 }

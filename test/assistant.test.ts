@@ -8,7 +8,9 @@ import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
-import {assistantPolicy,conversationScope,telegramDeliveryAllowed} from '../src/assistant-policy.js';
+import {assistantPolicy,conversationScope,groupAccessFor,outsideChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
+import {installChatsForTest} from '../src/chats.js';
+import {BOB,BOB_CHAT,GP1,GP_GROUP_IDS,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureDirectory,policyDirectory} from './fixture-groups.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {dispatchCommitted,storedTranscripts} from '../src/assistant.js';
 import {fixtureBrain} from './fixture-brain.js';
@@ -16,6 +18,8 @@ import {preparationStatus} from '../src/workflows/preparation-status.js';
 import {requestAction,controlReply,executeApproved} from '../src/actions.js';
 
 const policy={enabled:true,owner_id:'123',group_ids:['-20','-30']};
+// The chats these tests use, as the seeder makes their rows from the policy (ADR-0250).
+installChatsForTest(policyDirectory(policy,['456','-99']));
 const update=(chat:number,user:number,type='group')=>({update_id:1,message:{message_id:7,chat:{id:chat,type},from:{id:user,is_bot:false},text:'exact Aws 😃\r\n '}});
 test('only owner private messages receive owner scope; selected groups stay group-local even for the owner',()=>{
   assert.equal(conversationScope(policy,update(123,123,'private'),'123')?.owner,true);
@@ -34,6 +38,44 @@ test('group participants need an explicit grant and a deny overrides it',()=>{
   const denied={...policy,group_access:{'-20':{granted:['456'],denied:['456']}}};
   assert.equal(conversationScope(denied,update(-20,456),'-20'),null);
   assert.equal(conversationScope(denied,update(-20,123),'-20')?.owner,false);
+});
+
+test('a chat is answered by its chat row: digest chats, upgraded groups and access under an old id (ADR-0250)',()=>{
+  const restore=installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
+  try {
+    const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS],group_access:{}};
+    // A group first seen after step 2b is answered under its Nocheh id, never its Telegram id.
+    assert.deepEqual(conversationScope(served,update(Number(NG1_TG),123,'supergroup'),NG1_TG),{owner:false,chat_id:NG1,user_id:'123'});
+    assert.deepEqual(conversationScope(served,update(Number(GP1),123,'supergroup'),GP1),{owner:false,chat_id:GP1,user_id:'123'});
+    // An upgraded group is one chat under its current and its old Telegram id.
+    for(const raw of [NG2_TG,NG2_OLD_TG])assert.equal(conversationScope(served,update(Number(raw),123,'supergroup'),raw)?.chat_id,NG2,raw);
+    // Access the owner gave under the group's old id still holds after the upgrade; a deny under either id wins.
+    const granted={...served,group_access:{[NG2_OLD_TG]:{granted:[BOB],denied:[]}}};
+    assert.deepEqual(groupAccessFor(granted,NG2),{granted:[BOB],denied:[]});
+    assert.equal(conversationScope(granted,update(Number(NG2_TG),Number(BOB),'supergroup'),NG2_TG)?.user_id,BOB);
+    assert.equal(conversationScope(granted,update(Number(NG1_TG),Number(BOB),'supergroup'),NG1_TG),null,'a grant is for its own group only');
+    const denied={...served,group_access:{[NG2_OLD_TG]:{granted:[BOB],denied:[]},[NG2_TG]:{granted:[],denied:[BOB]}}};
+    assert.equal(conversationScope(denied,update(Number(NG2_TG),Number(BOB),'supergroup'),NG2_TG),null);
+    // A group with no row, or one the owner does not serve, is answered nowhere; neither is Bob's own private chat.
+    assert.equal(conversationScope(served,update(-1009999999999,123,'supergroup'),'-1009999999999'),null);
+    const unserved={...served,group_ids:[...GP_GROUP_IDS]};
+    restore();installChatsForTest(fixtureDirectory(unserved.group_ids));
+    assert.equal(conversationScope(unserved,update(Number(NG1_TG),123,'supergroup'),NG1_TG),null);
+    assert.equal(conversationScope(served,update(Number(BOB),Number(BOB),'private'),BOB),null);
+    assert.equal(conversationScope(served,update(123,123,'private'),'123')?.owner,true);
+    // Delivery compares Nocheh chats: a digest group's turn may answer its own original only.
+    installChatsForTest(fixtureDirectory(served.group_ids));
+    const source={origin:'live',channel:'telegram',kind:'telegram_update',scope:NG1_TG,payload:Buffer.from(JSON.stringify(update(Number(NG1_TG),123,'supergroup')))};
+    assert.equal(telegramDeliveryAllowed(served,{scope:NG1},source),true);
+    assert.equal(telegramDeliveryAllowed(served,{scope:NG1_TG},source),false,'a Telegram id is no Nocheh chat');
+    // Outside chats: a private chat with anyone but the owner, an unserved group, and any chat with no row.
+    const live=(scope:string)=>({origin:'live',channel:'telegram',kind:'telegram_update',scope});
+    for(const scope of [OWNER,GP1,NG1_TG,NG2_OLD_TG,NG2_TG,'system'])assert.equal(outsideChat(served,live(scope)),false,scope);
+    for(const scope of [BOB,'-1009999999999','789'])assert.equal(outsideChat(served,live(scope)),true,scope);
+    installChatsForTest(fixtureDirectory(unserved.group_ids));
+    assert.equal(outsideChat(unserved,live(NG1_TG)),true,'an unserved digest group');
+    assert.equal(BOB_CHAT.length,64);
+  }finally{installChatsForTest(policyDirectory(policy,['456','-99']));}
 });
 
 test('the owner listed as a person allowed or denied in a group stops the services from starting',async()=>{
