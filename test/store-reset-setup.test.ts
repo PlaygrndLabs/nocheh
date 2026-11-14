@@ -32,7 +32,7 @@ test('reset setup restores only current configuration under a new generation and
     installation_generation:[{generation:'11111111-1111-4111-8111-111111111111'}],guard_mode:[{mode:'off'}],
     runtime_configuration:[{name:'assistant',document:{enabled:true,owner_id:'123',group_ids:['-1001','-1002']}}],
     projects:[{id:'a'.repeat(64),name:'Saved project',description:'Configuration only',state:'archived'}],
-    // A topic follows its group's project, so its only row says so (ADR-0246).
+    // A topic follows its group's project, so its only row says so (ADR-0247).
     project_assignments:[{space_id:'-1001',project_id:'a'.repeat(64),mode:'assigned'},{space_id:'-1001/topic/3',project_id:null,mode:'inherit'},{space_id:'-1002',project_id:'a'.repeat(64),mode:'assigned'}],
     sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:'-1002',enabled:true,mode:'approved',instructions:'Share only approved text'}],
     // A fresh install starts with automatic follow-up off; the owner's saved choice comes back over it.
@@ -43,7 +43,7 @@ test('reset setup restores only current configuration under a new generation and
     profile_commands:[{id:profile,name:'research',state:'active',expected_revision:0,operation_id:'restore-preferences:'+profile}]};
   try {
     assert.deepEqual(resetSetupSnapshot(snapshot),snapshot);
-    // A project never shares between its groups: a snapshot that still carries the share box is refused (ADR-0246).
+    // A project never shares between its groups: a snapshot that still carries the share box is refused (ADR-0247).
     const [project]=snapshot.configuration.projects,[assigned]=snapshot.configuration.project_assignments,[ownerRule]=snapshot.configuration.sharing_rules;
     for(const configuration of [{projects:[{...project,sharing_enabled:false}]},{projects:[{...project,sharing_mode:'filtered'}]},
       {project_assignments:[{...assigned,share_into:true}]},{sharing_rules:[{...ownerRule,project_id:null}]}])

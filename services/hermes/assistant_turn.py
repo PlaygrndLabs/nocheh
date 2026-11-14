@@ -20,7 +20,7 @@ DATA_TOOLS={'mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__noch
             'mcp__nocheh__shell','mcp__nocheh__browser','mcp__nocheh__mcp','mcp__nocheh__owner_read','mcp__nocheh__tasks','mcp__nocheh__notion',
             'mcp__nocheh__action_status','mcp__nocheh__knowledge_inspect','mcp__nocheh__knowledge_propose','mcp__nocheh__knowledge_status'}
 ALLOWED_TOOLS={'memory','session_search','skills_list','skill_view'}|DATA_TOOLS
-# A private answer only reads (ADR-0248): Nocheh offers it these data tools alone, and tasks only lists and reads.
+# A private answer only reads (ADR-0249): Nocheh offers it these data tools alone, and tasks only lists and reads.
 # Native memory is left out too, so it writes no notes.
 ANSWER_DATA_TOOLS={'mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__nocheh__archive_page','mcp__nocheh__memory_search','mcp__nocheh__tasks'}
 ANSWER_TOOLS={'session_search','skills_list','skill_view'}|ANSWER_DATA_TOOLS
@@ -275,7 +275,7 @@ def run(body, emit=None, relay=None):
     install();native_gate();restrict_session_search();untitled_telegram()
     review = body.get('review') is True
     background = body.get('channel')=='background' and not review
-    # A private answer (ADR-0248): never the owner, only in a Telegram turn, never a review or a job.
+    # A private answer (ADR-0249): never the owner, only in a Telegram turn, never a review or a job.
     answer = body.get('private_answer') is True
     if answer and (body['owner'] or review or body.get('channel','telegram')!='telegram'):raise ValueError('invalid_private_answer')
     iterations = background_limits(body) if background else None

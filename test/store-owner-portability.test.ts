@@ -91,7 +91,7 @@ test('owner data travels with its types, and nothing imported acts by itself',
     assert.equal(unchanged,records.length-1);
     // A changed record is refused.
     await assert.rejects(to.restore(owner,[{...records[1]!,row:{...records[1]!.row,title:'Edited'}}]),/owner_record_integrity/);
-    // A record exported before projects stopped sharing comes back as starting the stores converts its rows (ADR-0246):
+    // A record exported before projects stopped sharing comes back as starting the stores converts its rows (ADR-0247):
     // the share box's fields go, a rule a project's share box kept is not brought at all, never as the owner's own, and
     // a topic's own project choice becomes "follows its group".
     const sealed=(table:string,key:string[],row:Record<string,unknown>):OwnerRecord=>({format:'nocheh-owner-record-v1',table,key,row,sha256:digest(canonical({table,key,row}))});

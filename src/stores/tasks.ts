@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS owner_tasks (
  CHECK(start_time IS NULL OR start_on IS NOT NULL),CHECK(due_time IS NULL OR due_on IS NOT NULL),CHECK(parent_id<>id)
 );
 -- When a task joined its current audience, its project's list and its group in it: the chats that see it see its
--- comments and history only from then (ADR-0243, ADR-0247).
+-- comments and history only from then (ADR-0243, ADR-0248).
 ALTER TABLE owner_tasks ADD COLUMN IF NOT EXISTS project_since timestamptz;
 CREATE INDEX IF NOT EXISTS owner_tasks_listing ON owner_tasks(state,due_on,created_at);
 CREATE INDEX IF NOT EXISTS owner_tasks_scope ON owner_tasks(project_id,state);
@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS owner_task_requests (
  error_code text,result_task text,created_at timestamptz NOT NULL DEFAULT now(),decided_at timestamptz
 );
 -- The group the task would belong to: null for a task set on the project itself, which every chat of the project
--- sees; otherwise only that group sees it, and the card names only that group (ADR-0247).
+-- sees; otherwise only that group sees it, and the card names only that group (ADR-0248).
 ALTER TABLE owner_task_requests ADD COLUMN IF NOT EXISTS group_id text;
 `;
 
@@ -140,7 +140,7 @@ export type TopicMemory='group'|'topic';
  * The live turn asking. `project` null is the owner's private chat, which reaches every list. A group or topic turn
  * names its project, its own conversation (`group`, which a task added there belongs to) and what it reads
  * (`reach`): its own group, with its topics when they share memory. An "Answer privately" answer reads the groups
- * frozen in its record and changes nothing (`readOnly`) (ADR-0247).
+ * frozen in its record and changes nothing (`readOnly`) (ADR-0248).
  */
 type Turn={source:{reference:{id:string}};project:string|null;group:string|null;reach?:ReadSet|null;readOnly?:boolean;actor?:TaskActor};
 /** `card`: asked in the owner's private chat, so a change a project's chats would see waits for the owner's card.
@@ -152,7 +152,7 @@ type Approved={project:string;group:string|null;chats:string[];family:string|nul
 type Context={origin:Origin;actor:TaskActor;source:string|null;within:string|null;reach?:ReadSet|null;chat:boolean;card?:boolean;approved?:Approved};
 /** Who reads a task: the owner (null), or a project's chat, which sees, in that project's list, the tasks set on the
  * project itself and those of the groups and topics it reaches (`reach`; null reaches none), with the columns the
- * owner shares (ADR-0247). */
+ * owner shares (ADR-0248). */
 type View={project:string;shared:Set<string>;reach:ReadSet|null}|null;
 /** A change held for the owner's card instead of written: the list it lands in, the group in it (null: the project
  * itself), the chats that will see the task, whether the task joins them, the task as those chats would see it, the
@@ -173,7 +173,7 @@ const projectChats=(project:string)=>`(SELECT coalesce(array_agg(a.space_id ORDE
  */
 const direct=new Set(['expected_revision','status','state','priority','start_on','start_time','due_on','due_time','archived','trashed','scope']);
 /**
- * Whether a reader sees a task (ADR-0247): the owner sees every task; a project's chat sees, in that project's list
+ * Whether a reader sees a task (ADR-0248): the owner sees every task; a project's chat sees, in that project's list
  * only, the tasks set on the project itself (no group) and the tasks of the groups and topics it reaches, never another
  * group's. A group that is not clearly a group or topic is never reached (ADR-0242).
  */
@@ -192,7 +192,7 @@ const linked=(kind:string,column:string,match:string)=>`coalesce((SELECT json_ag
   FROM owner_task_links l JOIN owner_tasks o ON o.id=l.${column} WHERE l.kind='${kind}' AND l.${match}=owner_tasks.id AND o.deleted_at IS NULL),'[]'::json)`;
 /** A task's columns; `children` is the SQL condition, on the alias `c`, of the subtasks its counts take, and
  * `parent` whether its reader sees the task it sits under: a project's chat counts only the subtasks it sees and
- * learns of no parent it does not see (ADR-0247). */
+ * learns of no parent it does not see (ADR-0248). */
 const columns=(children='true',parent='true')=>`id,title,notes,status_id AS status,state,priority,to_char(start_on,'YYYY-MM-DD') AS start_on,to_char(start_time,'HH24:MI') AS start_time,
  to_char(due_on,'YYYY-MM-DD') AS due_on,to_char(due_time,'HH24:MI') AS due_time,repeat,repeated_to,parent_id,position,project_id,project_since,group_id,tags,properties,external,
  coalesce((SELECT json_agg(json_build_object('id',e.id,'name',e.name) ORDER BY lower(e.name),e.id) FROM owner_task_people p
@@ -209,7 +209,7 @@ const columns=(children='true',parent='true')=>`id,title,notes,status_id AS stat
  ${parent} AS parent_seen,origin,source_event,created_by,finished_by,revision,created_at,updated_at,done_at,archived_at,deleted_at`;
 const fields=columns();
 /** Whether a project's chat sees the task that the task on the alias `alias` sits under, if any. A subtask written
- * before subtasks followed their parent's group can sit under another group's task (ADR-0247). */
+ * before subtasks followed their parent's group can sit under another group's task (ADR-0248). */
 const parentSeesSql=(alias:string,project:string,reach:string)=>
   `(${alias}parent_id IS NULL OR EXISTS (SELECT 1 FROM owner_tasks u WHERE u.id=${alias}parent_id AND ${seesSql('u.',project,reach)}))`;
 /** A task's columns as a project's chat reads them, with the project and reach bound as `project` and `reach`. */
@@ -286,7 +286,7 @@ const external=(value:unknown):Record<string,string>=>{
  * chats, only reminders still to come, links only to tasks it sees, only the comments made since it joined its
  * current audience, its group only when that chat reaches it, the task it sits under only when that chat sees it, no
  * manual position, which counts every group's tasks, and who made or finished it only when that happened there. A
- * project's task with no joining time shows none of these (ADR-0243, ADR-0247).
+ * project's task with no joining time shows none of these (ADR-0243, ADR-0248).
  */
 const row=(value:any,view:View=null)=>{
   if(!value)return value;
@@ -305,14 +305,14 @@ const arrived=(changes:Record<string,unknown>)=>Object.fromEntries(Object.entrie
   [key,value&&typeof value==='object'&&!Array.isArray(value)&&'to' in value?{to:(value as {to:unknown}).to}:value]));
 /** A history entry as a project's chat sees it: the change that brought the task to its current audience, a change of
  * its list or of its group, shows only where it went, and a group or topic that chat does not reach shows as none
- * (ADR-0243, ADR-0247). */
+ * (ADR-0243, ADR-0248). */
 const boardChange=(changes:Record<string,unknown>,reach:ReadSet|null)=>{
   const shown='project_id' in changes||'group_id' in changes?arrived(changes):changes,group=shown.group_id;
   if(!group||typeof group!=='object')return shown;
   return {...shown,group_id:Object.fromEntries(Object.entries(group).map(([side,space])=>[side,seesGroup(reach,space)?space:null]))};
 };
 /**
- * A group's tasks move with it (ADR-0247): when the owner moves group `group` from project `from` to project `to`, its
+ * A group's tasks move with it (ADR-0248): when the owner moves group `group` from project `from` to project `to`, its
  * tasks and its topics' tasks in `from`, each with everything under it, move to `to` in the same transaction. They
  * stay that group's, so they keep their joining time, and each gets a history entry. A task of the group under a task
  * of another group or of the project itself stays with its parent. A task under them that is set on the project
@@ -376,7 +376,7 @@ const editable=['title','notes','status','state','priority','start_on','start_ti
  * only its own group's tasks and the tasks set on the project itself, and sees
  * each task only as it is on that project's board. A change asked in the
  * owner's private chat that a project's chats would see waits for the owner's
- * card, which names them (ADR-0243, ADR-0247).
+ * card, which names them (ADR-0243, ADR-0248).
  */
 export class TaskRepository {
   /**
@@ -413,7 +413,7 @@ export class TaskRepository {
   /**
    * The chats that would see a task after the owner moves it to the list `scope` ('personal' or a project ID) and the
    * group `group` (empty for the project itself); either left out keeps the task's own. A subtask keeps its parent's
-   * group. The dashboard and the mini app name them before they save a move, as the task card does (ADR-0247).
+   * group. The dashboard and the mini app name them before they save a move, as the task card does (ADR-0248).
    */
   async audience(principal:Reader,id:string,query:{scope?:string|null;group?:string|null}={}) {
     admin(principal);if(!hex.test(id))throw new HttpError(400,'invalid_identity');
@@ -478,7 +478,7 @@ export class TaskRepository {
    * Assistant reads. The owner's private chat reads any list; a group or topic
    * in a project reads only its own group's tasks and the tasks set on the
    * project itself, learns of no other group's task, list or project, and sees
-   * each task only from when it joined its current audience (ADR-0247).
+   * each task only from when it joined its current audience (ADR-0248).
    */
   async chatList(principal:Reader,input:ListInput={}) {
     const {project,reach}=await this.chatTurn(principal);
@@ -490,7 +490,7 @@ export class TaskRepository {
    * Repeating the same request within one turn returns the task it already made. In the owner's private chat, a
    * change that a project's chats would see is held for the owner's card instead (ADR-0243). A task added in a
    * group belongs to that group or topic unless it names another group it reaches, the project itself (group null)
-   * or a parent, whose group a subtask takes (ADR-0247). A parent given as null or empty names no parent, and an empty
+   * or a parent, whose group a subtask takes (ADR-0248). A parent given as null or empty names no parent, and an empty
    * group names no group, so neither puts the task on the whole project.
    */
   async chatCreate(principal:Reader,input:unknown) {
@@ -513,7 +513,7 @@ export class TaskRepository {
     const operation=digest('chat-comment:'+turn.source.reference.id+':'+id+':'+canonical(body));
     return this.held(turn,'comment',id,operation,body,await this.discuss(operation,id,body,this.chatContext(turn)));
   }
-  /** An "Answer privately" answer only reads its groups' tasks; it adds, changes and comments on none (ADR-0247). */
+  /** An "Answer privately" answer only reads its groups' tasks; it adds, changes and comments on none (ADR-0248). */
   private writable(turn:Turn):Turn {
     if(turn.readOnly)throw new HttpError(403,'task_read_only');
     return turn;
@@ -549,7 +549,7 @@ export class TaskRepository {
    * under it, archived and in the trash too, and the card shows each of them as well. `space` names a group or topic.
    * `audience` is 'project' for a task set on the project itself, which every chat of the project sees, chats added
    * later included, and 'group' for a group's task, which only that group sees; `group` names that group, or null
-   * (ADR-0247).
+   * (ADR-0248).
    */
   async request(principal:Reader,id:string,space:(chat:string)=>Promise<string>) {
     admin(principal);
@@ -671,7 +671,7 @@ export class TaskRepository {
     const every=!input.scope||input.scope==='all',project=every?null:scope(input.scope);
     if(!every)filters.push(`project_id IS NOT DISTINCT FROM ${p(project)}::text`);
     // A project's chat lists only the tasks set on the project itself and those of the groups and topics it reaches,
-    // and every count it gets counts only those (ADR-0247).
+    // and every count it gets counts only those (ADR-0248).
     const seen=view?{project:p(view.project),reach:p(reachParam(view.reach))}:null;
     if(seen)filters.push(seesSql('',seen.project,seen.reach));
     // A tag matches whatever its case; a group matches its own tasks and those of its topics.
@@ -740,7 +740,7 @@ export class TaskRepository {
       ${linked('duplicate_of','other_id','task_id')} AS duplicate_of,${linked('duplicate_of','task_id','other_id')} AS duplicates
       FROM owner_tasks WHERE id=$1`,[id,...bound])).rows[0];
     // Another list's task, or another group's in the same list, is not found from a project's chat, so its existence
-    // stays private (ADR-0247).
+    // stays private (ADR-0248).
     if(!found||!sees(view,found))throw new HttpError(404,'task_not_found');
     const task=row(found,view),visible=(items:any[])=>items.filter(item=>sees(view,item));
     const {related_to,related_from,...rest}=task;
@@ -749,7 +749,7 @@ export class TaskRepository {
     const subtasks=(await this.control.query(`SELECT ${seenFields(view,'$2','$3')} FROM owner_tasks WHERE parent_id=$1 AND deleted_at IS NULL AND ${seenHere}
       ORDER BY position,created_at,id`,[id,...bound])).rows.map(value=>row(value,view));
     // A project's chat sees comments and history only from when the task joined its current audience, the change that
-    // brought it there shows only where it went, and a group that chat does not reach shows as none (ADR-0243, ADR-0247).
+    // brought it there shows only where it went, and a group that chat does not reach shows as none (ADR-0243, ADR-0248).
     const since=`($2::boolean OR %s>=coalesce((SELECT project_since FROM owner_tasks WHERE id=$1),'infinity'::timestamptz))`;
     const comments=(await this.control.query(`SELECT id,body,author,origin,created_at FROM owner_task_comments WHERE task_id=$1 AND ${since.replace('%s','created_at')} ORDER BY created_at,id`,[id,!within])).rows;
     const activity=(await this.control.query(`SELECT id::text,at,actor,origin,changes FROM owner_task_activity WHERE task_id=$1 AND ${since.replace('%s','at')} ORDER BY id DESC LIMIT 100`,[id,!within])).rows
@@ -789,7 +789,7 @@ export class TaskRepository {
     if(body.scope!==undefined)patch.project_id=scope(body.scope);
     if('group' in body){
       patch.group_id=group(body.group);
-      // A project's chat sets only a group or topic it reaches, or none: the project itself (ADR-0247).
+      // A project's chat sets only a group or topic it reaches, or none: the project itself (ADR-0248).
       if(context.within&&patch.group_id!==null&&!seesGroup(context.reach??null,patch.group_id))throw new HttpError(403,'task_group_denied');
     }
     if(body.tags!==undefined)patch.tags=tags(body.tags);
@@ -860,7 +860,7 @@ export class TaskRepository {
       // The parent is held while the new task is added under it, so a move of the parent in the meantime brings it along.
       const parent=patch.parent_id?await this.parentOf(db,patch.parent_id,null,context,true):null;
       if(parent&&patch.project_id!==undefined&&patch.project_id!==parent.project_id)throw new HttpError(400,'task_parent_other_list');
-      // A subtask belongs to its parent's group, as it sits in its parent's list (ADR-0247).
+      // A subtask belongs to its parent's group, as it sits in its parent's list (ADR-0248).
       if(parent&&patch.group_id!==undefined&&patch.group_id!==parent.group_id)throw new HttpError(400,'task_parent_other_group');
       const project=parent?parent.project_id:patch.project_id??null,grouped=parent?parent.group_id:patch.group_id??null;
       if(project)await this.activeProject(db,project);
@@ -941,7 +941,7 @@ export class TaskRepository {
       scalar('group_id',grouped);
       // A change of list or of group gives the task a new audience. Everything under it moves with it. They are all
       // locked before the joining time is read, so nothing written to any of them before the move counts as written
-      // for the new audience (ADR-0243, ADR-0247).
+      // for the new audience (ADR-0243, ADR-0248).
       const moving='project_id' in set||'group_id' in set;
       let since:string|null=null;
       if(moving){
@@ -974,7 +974,7 @@ export class TaskRepository {
       if(assignments.length||Object.keys(sides).length)
         await db.query(`UPDATE owner_tasks SET ${[...assignments,'revision=revision+1','updated_at=now()'].join(',')} WHERE id=$1`,values);
       // A project's chat moves, archives or trashes only the tasks under it that it sees; another group's task under
-      // them first leaves the family, so the sweeps below never reach it (ADR-0247).
+      // them first leaves the family, so the sweeps below never reach it (ADR-0248).
       const reader=this.reader(context);
       if(reader&&(moving||changes.archived||changes.trashed))await this.release(db,id,reader,context.origin);
       const family=moving?await this.descendants(db,id,'project_id=$2,group_id=$3,project_since=$4::timestamptz',[project,grouped,since]):null;
@@ -1033,7 +1033,7 @@ export class TaskRepository {
     for(const kind of ['blocked_by','related','duplicate_of'] as const){
       const chosen=patch[kind];if(chosen===undefined)continue;
       // A project's chat sees and replaces only the links to tasks it sees; the owner's links to tasks anywhere else,
-      // another group's included, stay (ADR-0243, ADR-0247).
+      // another group's included, stay (ADR-0243, ADR-0248).
       const linkedHere=`($3::text IS NULL OR ${seesSql('o.','$3','$4')})`,bound=[context.within,reachParam(context.reach)];
       const before=fresh?[]:(await db.query(`SELECT l.other_id FROM owner_task_links l JOIN owner_tasks o ON o.id=l.other_id
         WHERE l.task_id=$1 AND l.kind=$2 AND ${linkedHere} ORDER BY l.other_id`,[id,kind,...bound])).rows.map(item=>item.other_id);
@@ -1156,7 +1156,7 @@ export class TaskRepository {
    * that the chat does not see, such as another group's written before subtasks followed their parent's group, leaves
    * the family with everything under it: it keeps its list, group and state, sits at the top of its list, where its own
    * group sees it as before, and its history says only that it no longer sits under a task, never which or whose chat
-   * asked. So the chat neither changes nor learns of it, as when a group moves (moveGroupTasks, ADR-0247).
+   * asked. So the chat neither changes nor learns of it, as when a group moves (moveGroupTasks, ADR-0248).
    */
   private async release(db:pg.PoolClient,id:string,reader:{project:string;reach:ReadSet|null},origin:Origin):Promise<void> {
     const seen=(alias:string)=>`coalesce(${seesSql(alias,'$2','$3')},false)`;
@@ -1185,7 +1185,7 @@ export class TaskRepository {
       [id,JSON.stringify(actor),origin,JSON.stringify(changes),at]);
   }
   /** One task as the asking reader sees it; a project's chat does not find a task it no longer sees, such as one the
-   * owner moved to another group since (ADR-0247). */
+   * owner moved to another group since (ADR-0248). */
   private async one(db:Pick<pg.Pool,'query'>,id:string,context:{within:string|null;reach?:ReadSet|null}) {
     const view=await this.view(db,context.within,context.reach??null),bound=view?[view.project,reachParam(view.reach)]:[];
     const found=(await db.query(`SELECT ${seenFields(view,'$2','$3')} FROM owner_tasks WHERE id=$1`,[id,...bound])).rows[0];
@@ -1203,7 +1203,7 @@ export class TaskRepository {
   }
   /**
    * What the chats a card names read: a group's task is read by that group as its turns read it; a task set on the
-   * project itself by every chat of the project, so the card shows the most any of them sees (ADR-0247).
+   * project itself by every chat of the project, so the card shows the most any of them sees (ADR-0248).
    */
   private reachOf(project:string,group:string|null,chats:string[]):ReadSet|null {
     const memory=this.topicMemory(),named=chats.filter(groupSpace);
@@ -1232,7 +1232,7 @@ export class TaskRepository {
   /**
    * Asked in the owner's private chat, a change that a project's chats would see is held for the owner's card, with
    * the chats that will see the task. The change of an approved card lands only in the list and group it named, and
-   * only while the same chats would see it (ADR-0243, ADR-0247).
+   * only while the same chats would see it (ADR-0243, ADR-0248).
    */
   private async gate(db:pg.PoolClient,context:Context,project:string|null,group:string|null,seen:boolean):Promise<{project:string;group:string|null;chats:string[]}|null> {
     if(context.approved) {
@@ -1243,9 +1243,9 @@ export class TaskRepository {
     return context.card&&project&&seen?{project,group,chats:await this.audienceOf(db,project,group)}:null;
   }
   /**
-   * The chats that see a task in a project's list (ADR-0247). A task set on the project itself (no group) is seen by
+   * The chats that see a task in a project's list (ADR-0248). A task set on the project itself (no group) is seen by
    * every group assigned to the project, and by the chats added to it later. A group's task is seen only while its
-   * group is in the project, as a topic always follows its group's project (ADR-0246): when topics share what they
+   * group is in the project, as a topic always follows its group's project (ADR-0247): when topics share what they
    * know, by the group's chat and every topic of it, named as the group; else only by the task's own chat or topic. A
    * group that is not clearly a group sees nothing (ADR-0242).
    */

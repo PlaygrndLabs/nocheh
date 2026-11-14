@@ -115,7 +115,7 @@ test('fact grants authorize exact destinations while relationships only create r
       if(map.next)assert.notEqual(map.next,after,'memory map pagination must advance');after=map.next??'';
     }while(after&&(!relationship||!accessEdge));assert.ok(relationship);assert.ok(accessEdge);
     await assert.rejects(services.memoryMap.read(actor,{after:'',limit:10,focus:'',query:'',kind:'',state:''}),{code:'owner_required'});
-    // A project assignment never grants access: a project shares nothing between its groups (ADR-0246).
+    // A project assignment never grants access: a project shares nothing between its groups (ADR-0247).
     const contains=async()=>{const edge=(await services.memoryMap.read(owner,{after:'',limit:250,focus:'',query:group,kind:'conversation',state:''})).edges
       .find(row=>row.id==='project_assignment:'+group)!;return {label:edge.label,authoritative:edge.authoritative,detail:Object.keys(edge.detail??{}).sort()};};
     const other=String(Number(group)-1),plain={label:'contains',authoritative:false,detail:['destination','mode','project_id','revision']};

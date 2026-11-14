@@ -1,4 +1,4 @@
-# ADR-0248: Answer privately: a frozen read set in the asker's private chat
+# ADR-0249: Answer privately: a frozen read set in the asker's private chat
 
 <status>
 Accepted on 2026-11-13 with the owner's Members design, approved on 2026-11-12

@@ -1,6 +1,6 @@
 /**
  * Choose one or more chats by name, or type an exact chat or topic ID; optionally groups and their topics only, or
- * whole groups only, as a project takes (a topic always follows its group's project, ADR-0246).
+ * whole groups only, as a project takes (a topic always follows its group's project, ADR-0247).
  */
 import {useDeferredValue, useId, useState} from 'react';
 import {Check, X} from 'lucide-react';

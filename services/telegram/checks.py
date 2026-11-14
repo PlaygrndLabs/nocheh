@@ -160,7 +160,7 @@ def notice_buttons(buttons):
 
 
 def answer_button(button, chat_id, event_id, owner):
-    """The one button a turn's reply may carry: Answer privately under the owner's answer in a group (ADR-0248).
+    """The one button a turn's reply may carry: Answer privately under the owner's answer in a group (ADR-0249).
 
     Never in the owner's private chat. Its label is short, and its data is ``np`` and the record id Nocheh derives from
     this very turn's question with the service token, so no other answer's button can ride on this reply."""
@@ -180,7 +180,7 @@ def verify_turn_credential(credential, event_id, chat_id, space, owner):
     It binds a reply or presence to the chat and topic the turn was admitted for; whether the
     space still allows delivery is asked separately, per request (check_delivery_policy). A private
     answer's pass names its record and reads as the owner's private chat, never as the owner, so in
-    that chat its scope is the chat itself; anywhere else it is refused (ADR-0248)."""
+    that chat its scope is the chat itself; anywhere else it is refused (ADR-0249)."""
     try:
         prefix,body,signature=credential.split('.')
         expected=base64.urlsafe_b64encode(hmac.new(secret('SERVICE_TOKEN').encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')

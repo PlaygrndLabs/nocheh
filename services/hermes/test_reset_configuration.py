@@ -120,7 +120,7 @@ class ResetConfigurationTests(unittest.TestCase):
                          'a private chat may be kept out of every project')
 
     def test_old_share_box_fields_and_a_topic_choice_stop_the_reset_before_erasure(self):
-        # A project never shares between its groups and a topic always follows its group's project (ADR-0246).
+        # A project never shares between its groups and a topic always follows its group's project (ADR-0247).
         assigned = {'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned'}
         values = copy.deepcopy(self.values); values['project_assignments'] = [assigned, {'space_id': '-1001/topic/7', 'project_id': None, 'mode': 'inherit'}]
         self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values)
@@ -140,7 +140,7 @@ class ResetConfigurationTests(unittest.TestCase):
                 configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
 
     def test_a_project_rule_in_a_store_not_yet_started_is_left_out_never_kept_as_the_owners(self):
-        # Starting the stores at this version deletes the rules a project's share box kept (ADR-0246). A reset that reads
+        # Starting the stores at this version deletes the rules a project's share box kept (ADR-0247). A reset that reads
         # an older store selects only the owner's rules, by a test that holds with or without the old column, so a
         # project rule never comes back as an owner rule after the reset.
         query = Mock(return_value=json.dumps(self.values))
@@ -151,7 +151,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertEqual(sql.count('FROM sharing_rules'), 1)
 
     def test_a_topic_choice_in_a_store_not_yet_started_is_read_as_following_its_group(self):
-        # Starting the stores at this version turns a topic's own project choice into "follows its group" (ADR-0246). A
+        # Starting the stores at this version turns a topic's own project choice into "follows its group" (ADR-0247). A
         # reset that reads an older store reads every topic row that way, so such a store does not stop the reset.
         query = Mock(return_value=json.dumps(self.values))
         configuration.snapshot(query, 'original-only-v1')

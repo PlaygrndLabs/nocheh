@@ -42,14 +42,14 @@ export class OwnerStorageApi {
     if(path==='/v1/tasks')return method==='GET'?s.tasks.list(principal,taskQuery(q)):s.tasks.create(principal,input);
     if(path==='/v1/tasks/settings')return method==='GET'?s.tasks.settings(principal):s.tasks.saveSettings(principal,input);
     if(path==='/v1/tasks/archive-finished'&&method==='POST')return s.tasks.archiveFinished(principal,input);
-    // Who would see a task after a move, named before the dashboard or the mini app saves it (ADR-0247).
+    // Who would see a task after a move, named before the dashboard or the mini app saves it (ADR-0248).
     const audience=path.match(/^\/v1\/tasks\/([a-f0-9]{64})\/audience$/);
     if(audience&&method==='GET')return s.tasks.audience(principal,audience[1]!,{scope:q.get('scope'),group:q.get('group')});
     const task=path.match(/^\/v1\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
     if(task&&!task[2])return method==='GET'?s.tasks.get(principal,task[1]!):s.tasks.update(principal,task[1]!,input);
     if(task&&method==='POST')return task[2]==='comments'?s.tasks.comment(principal,task[1]!,input):s.tasks.remove(principal,task[1]!);
     if(path==='/v1/prompts')return method==='GET'?s.prompts.get(principal):s.prompts.save(principal,input);
-    // The record of Answer privately buttons, newest first, read-only (ADR-0248).
+    // The record of Answer privately buttons, newest first, read-only (ADR-0249).
     if(path==='/v1/private-answers'&&method==='GET')return s.privateAnswers.list(principal,{project:q.get('project')??undefined,after:q.get('after')??undefined});
     if(path==='/v1/chat-sends'&&method==='GET')return s.chatSends.list(principal,{filter:q.get('filter')??'all',kind:q.get('kind')??'',
       before:q.get('before')??'',limit:limit(q.get('limit'),50,100)});

@@ -29,7 +29,7 @@ def verify_capability(credential,secret,scope,event_id):
         expected=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
         # A private answer's pass names its record and reads as the owner's private chat, never as the owner: only in that
-        # chat, with the chat itself as its scope (ADR-0248).
+        # chat, with the chat itself as its scope (ADR-0249).
         answer=claims.get('answer')
         if answer is not None and (not scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):raise ValueError()
         if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
@@ -105,7 +105,7 @@ class Scopes:
         logical=claims.get('logical_profile')
         if 'logical_profile' in claims and (generation is None or not isinstance(logical,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',logical)):
             raise ValueError('invalid_logical_profile')
-        # A private answer is its own conversation: its record is part of its profile, which is never the owner's (ADR-0248).
+        # A private answer is its own conversation: its record is part of its profile, which is never the owner's (ADR-0249).
         answer=claims.get('answer')
         if 'answer' in claims and (generation is None or scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):
             raise ValueError('invalid_private_answer')

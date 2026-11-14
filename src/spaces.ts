@@ -100,7 +100,7 @@ export const recallCondition=(column:string,space:string,group:string)=>
   `(${column}=${space} OR (${group}::text IS NOT NULL AND (${column}=${group} OR starts_with(${column},${group}||'/topic/'))))`;
 
 /**
- * The conversations a scoped reader may read (ADR-0248). A group or topic turn reads its own recall scope; an
+ * The conversations a scoped reader may read (ADR-0249). A group or topic turn reads its own recall scope; an
  * "Answer privately" answer reads the groups frozen when the button was tapped.
  * - `home`: the conversation the reads are for (the asking group or topic). It names the reader; it grants nothing.
  * - `exact`: groups or topics read as themselves only (a topic, or a group's General chat, when topics keep their

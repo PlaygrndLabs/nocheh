@@ -179,7 +179,7 @@ def effective(root, chat, project='', audience='group'):
     """The chat's own role, else its project's, else its audience's default role. Skills add up from that
     default to the project's to the chat's, and a later one wins by name. Without an audience a turn reads
     the groups default, so a forgotten argument never loads the owner's private default. Without a chat, as
-    in a private answer, no chat's own role or skills load: the project's, else the default (ADR-0248)."""
+    in a private answer, no chat's own role or skills load: the project's, else the default (ADR-0249)."""
     empty = {'role': '', 'skills': []}
     layers = [read(default_path(root, audience)), read(project_path(root, project)) if project else empty,
               read(chat_path(root, chat)) if chat else empty]

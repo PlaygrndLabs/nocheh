@@ -17,7 +17,7 @@ export const projectGroupsSql=(project:string,served:string)=>`(SELECT coalesce(
   AND ${groupChatSql('project_group.space_id')} AND project_group.space_id=ANY(${served}::text[]))`;
 
 /**
- * A project's groups: the served groups assigned to it, as projectGroupsSql decides (ADR-0246, ADR-0248). The one
+ * A project's groups: the served groups assigned to it, as projectGroupsSql decides (ADR-0247, ADR-0249). The one
  * answer to "which groups are in this project" for the project page, its confirmations, the Answer privately button
  * and the groups an answer may read.
  */

@@ -67,7 +67,7 @@ test('stored owner directory and decisions span every page without turning reads
       assert.deepEqual((await view.context(owner,group+'/topic/19')).knowledge_access.sharing_rules,[],'inherited project context never becomes sharing authority');
       assert.equal(detectorCalls,0,'directory, decisions and context do not call the runtime');
 
-      // A project shares nothing between its groups: a group's context lists no rule unless the owner wrote it (ADR-0246).
+      // A project shares nothing between its groups: a group's context lists no rule unless the owner wrote it (ADR-0247).
       await services.projects.assign(owner,{space_id:second,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign-second'});
       for(const space of [second,group,group+'/topic/19']){
         const shown=await view.context(owner,space);

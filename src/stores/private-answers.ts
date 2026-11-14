@@ -7,7 +7,7 @@ import {groupChatId,groupSpace,groupSpaceSql,parentSpace,readSet} from '../space
 import {projectGroups,projectGroupsSql} from './project-groups.js';
 
 /**
- * One row per "Answer privately" button Nocheh offered (ADR-0248): who asked, where, in which project, which groups
+ * One row per "Answer privately" button Nocheh offered (ADR-0249): who asked, where, in which project, which groups
  * the answer may read and what became of it. The groups (`read_chats`, whole groups) are frozen when the button is
  * tapped, so a later change can't widen an old answer. Columns are named like the Members data design and hold raw
  * Telegram IDs until chats, members and accounts get their own IDs; `member_id` null is the owner. Rows are the
@@ -75,7 +75,7 @@ const outcome=(row:PrivateAnswer|null,code?:PrivateAnswerRefusal):PrivateAnswerO
 const refusedAs=(row:PrivateAnswer):PrivateAnswerRefusal=>row.refusal_code==='not_delivered'?'expired':'changed';
 
 /**
- * The server-side read set of an answer reader, from its record (ADR-0248). The row must be the one the pass names,
+ * The server-side read set of an answer reader, from its record (ADR-0249). The row must be the one the pass names,
  * claimed by this very turn (its /start event), pressed or answered, inside its time and answered in the asker's private
  * chat, and its project must still be active. The frozen groups are narrowed to the groups Nocheh still serves that are
  * still in that project; a member's groups are also narrowed to the groups they are still in (step 4; the owner is in
@@ -270,7 +270,7 @@ export class PrivateAnswerRepository {
 }
 
 /**
- * The routes an answer reader may call: reads only (ADR-0248). Archive search, read and page; plain long-term memory
+ * The routes an answer reader may call: reads only (ADR-0249). Archive search, read and page; plain long-term memory
  * search and the turn's memory context (limited for an answer reader); the asking group's shared and granted context;
  * the delivery check; the task list in read mode; context preparation; the turn's own files; and, at the broker, its
  * binding, guard preparation and model calls. Every other route, every write and every post among them, is refused

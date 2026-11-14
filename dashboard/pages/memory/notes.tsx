@@ -30,7 +30,7 @@ type Profile = {
   owner?: boolean;
   revision?: number;
   private_answer?: boolean;
-  /** Where a private answer was asked, as its first line names it, and when it ran (ADR-0248). */
+  /** Where a private answer was asked, as its first line names it, and when it ran (ADR-0249). */
   answer_group?: string;
   answer_at?: string;
 };

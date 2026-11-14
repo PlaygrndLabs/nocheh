@@ -21,7 +21,7 @@ export type Rule = {
 
 /**
  * Shown wherever a group joins a project, after the project's other groups: a project grants no access in a group,
- * but a person in two of its groups can ask for a private answer that combines them (ADR-0246).
+ * but a person in two of its groups can ask for a private answer that combines them (ADR-0247).
  */
 export const projectGroupsNote = 'People in two of these groups can get private answers that combine them.';
 export const relatedGroupsHint = 'Put only related groups in one project; keep family groups out of projects.';
@@ -42,7 +42,7 @@ export const ruleAudienceText = (group: string | null) =>
 
 /**
  * Shown wherever a group joins a project: everyone allowed there sees and changes the tasks set on the whole project,
- * never another group's own tasks (ADR-0243, ADR-0247).
+ * never another group's own tasks (ADR-0243, ADR-0248).
  */
 export const projectTasksWarning = (chat: string, projects: string[]) =>
   `Everyone allowed in ${chat} will see and change the tasks set on the whole of ` +
@@ -51,12 +51,12 @@ export const projectTasksWarning = (chat: string, projects: string[]) =>
 
 /**
  * Shown before a group leaves its project for none: its tasks, its topics' too, stay on that project's list, where
- * only the owner sees them (ADR-0247).
+ * only the owner sees them (ADR-0248).
  */
 export const leaveTasksText = (project: string) =>
   `Its tasks, and its topics’ tasks, stay on ${project}’s list, where only you see them.`;
 
-/** Shown before a group moves from one project to another: its tasks, its topics' too, move with it (ADR-0247). */
+/** Shown before a group moves from one project to another: its tasks, its topics' too, move with it (ADR-0248). */
 export const moveTasksText = (from: string, to: string) =>
   `Its tasks, and its topics’ tasks, move with it from ${from} to ${to}.`;
 

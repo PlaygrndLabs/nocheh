@@ -780,7 +780,7 @@ export class NativeMemoryRepository {
   /** Freshness is checked when a message arrives: the turn reads the engine's current context for its own conversation. */
   async context(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
-    // An answer reader reads long-term memory by plain search only: no summary or representation (ADR-0248).
+    // An answer reader reads long-term memory by plain search only: no summary or representation (ADR-0249).
     if(!workspace||!principal.turnEvent||principal.answer!==undefined)return limited;
     try {
       const current=await this.current(workspace.id),audience=this.principalAudience(principal);
@@ -838,7 +838,7 @@ export class NativeMemoryRepository {
   async recall(principal:Reader,query:string) {
     string(query,2000);
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
-    // Plain search only for an answer reader: the engine's answers cite no exact messages (ADR-0248).
+    // Plain search only for an answer reader: the engine's answers cite no exact messages (ADR-0249).
     if(!workspace||principal.answer!==undefined)return limited;
     let corrections:Awaited<ReturnType<NativeMemoryRepository['relevantOwnerCorrections']>>=[];
     try {
@@ -887,7 +887,7 @@ export class NativeMemoryRepository {
     if(!workspace)return {ids:[],learned:false};
     const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
     const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
-    // An answer reader searches the sessions of every group frozen in its record, and no other (ADR-0248).
+    // An answer reader searches the sessions of every group frozen in its record, and no other (ADR-0249).
     const reads=!principal.admin&&principal.answer!==undefined?readSetParam(this.contexts.access.reads(principal)!):null;
     const sessions=reads?await this.provenance.readSetSessions(id,reads,1000):audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};

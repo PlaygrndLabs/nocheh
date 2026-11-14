@@ -173,7 +173,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.sent(), [])
 
     def answer_button(self, event, label='🔒 Answer privately'):
-        # The record id Nocheh derives from the question with the service token (ADR-0248).
+        # The record id Nocheh derives from the question with the service token (ADR-0249).
         return {'text': label, 'data': 'np' + hmac.new(SECRET.encode(), ('private-answer:' + event).encode(), hashlib.sha256).hexdigest()[:32]}
 
     def test_answer_privately_rides_only_on_the_last_part_of_its_own_group_reply(self):

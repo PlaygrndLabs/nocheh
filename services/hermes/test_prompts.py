@@ -21,7 +21,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(prompts.reply(mine, True), prompts.DEFAULTS['reply.common'] + ' Answer the owner in Persian.')
         self.assertEqual(prompts.reply(mine, False), prompts.DEFAULTS['reply.common'] + ' ' + prompts.DEFAULTS['reply.group'])
         self.assertIn('[NO_REPLY]', prompts.reply({}, False))
-        # A private answer has its own rules, never the owner's or a group's (ADR-0248).
+        # A private answer has its own rules, never the owner's or a group's (ADR-0249).
         self.assertEqual(prompts.reply(mine, False, True), prompts.DEFAULTS['reply.common'] + ' ' + prompts.DEFAULTS['reply.private'])
         self.assertEqual(prompts.reply(mine, True, True), prompts.reply(mine, True))
         self.assertEqual(prompts.reply({'reply.private': 'Only read.'}, False, True), prompts.DEFAULTS['reply.common'] + ' Only read.')

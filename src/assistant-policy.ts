@@ -64,7 +64,7 @@ export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel
 }
 
 /** Final Telegram send authorization uses the captured original, never a prepared representation. An answer reader's
- * pass (ADR-0248) delivers only into the owner's own private chat, from the owner's own update there, and only with
+ * pass (ADR-0249) delivers only into the owner's own private chat, from the owner's own update there, and only with
  * its read set bound from its open record; never into a group. */
 export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null;answer?:string;reads?:unknown},source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
   if(!source)return false;

@@ -19,7 +19,7 @@ export interface PreparedLearningContext {
   // Older persisted contexts predate rule_inputs; fresh preparation always supplies it.
   rules:ReturnType<typeof applicableInterpretations>;rule_ids:string[];rule_inputs?:LearningRuleInput[];projects:{id:string;name:string}[];
   entities:EntityContext&KnownPeople&WaitingCards;
-  /** A topic's assignment names the group whose project it always follows (`follows_group`); only that group moves (ADR-0246). */
+  /** A topic's assignment names the group whose project it always follows (`follows_group`); only that group moves (ADR-0247). */
   organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean;follows_group?:string};projects:{id:string;name:string;revision:number}[]};
   limitations:string[];
 }

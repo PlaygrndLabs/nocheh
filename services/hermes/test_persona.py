@@ -207,7 +207,7 @@ class PersonaTurnTests(unittest.TestCase):
             chat = persona.chat_path(root, '123')
             persona.save(chat, 'Private chat role PRIVATEMARK2', [diary], persona.view(chat)['revision'])
             persona.save(groups, 'Group role', [COOKING], persona.view(groups)['revision'])
-            # The answer runs in the owner's private chat as that chat, never as the owner (ADR-0248).
+            # The answer runs in the owner's private chat as that chat, never as the owner (ADR-0249).
             asker = Scope('123', '123', False, Scopes.profile('123'), '123')
             profile = prepare_profile(root, Scopes.apply_revision(asker, claims), 'fixture-model')
             self.assertEqual(persona.read(profile), {'role': 'Group role', 'skills': [COOKING]}, 'without a project role it reads the groups default')

@@ -99,7 +99,7 @@ export class TelegramActionRepository {
   }
   async request(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
-    // A private answer only reads and talks; its own private chat is not a group it may post in (ADR-0248).
+    // A private answer only reads and talks; its own private chat is not a group it may post in (ADR-0249).
     if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
     const turn=await this.turns.binding(principal),binding=await this.guards.state(),source=await this.prepared.root(principal,binding),input=object(value);
     if(Object.keys(input).some(key=>!['destination','text'].includes(key)))throw new HttpError(400,'invalid_action');

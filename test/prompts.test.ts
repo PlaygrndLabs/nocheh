@@ -52,7 +52,7 @@ test('approval card templates leave out a line whose value is missing and keep d
     '📋 Add a task to the list of “P1”\n👥 Seen in “Group A”\n\nTitle: Book the room','a card with nothing private leaves that line out');
   assert.match(approvalLines('').task_changed,/changed after it was asked/);
   assert.equal(approvalLines('').task_later,'Chats you add to this project later will see it too.','a card for a task set on the project says chats added later see it');
-  // A group's task is that group's alone: its card says so instead, and a move to a group names the group (ADR-0247).
+  // A group's task is that group's alone: its card says so instead, and a move to a group names the group (ADR-0248).
   assert.equal(approvalLines('').task_group_only,'Other groups in this project don\'t see it.');
   assert.equal(fillTemplate(approvalLines('').task_group_later,{group:'“Group A”'}),'“Group A” will see it once you add that group to this project.');
   assert.equal(fillTemplate(approvalLines('').task_move_group,{group:'“Group A”',project:'“P1”'}),'Move a task to “Group A” in the list of “P1”');
@@ -62,7 +62,7 @@ test('approval card templates leave out a line whose value is missing and keep d
   assert.equal(fillTemplate(approvalLines('').task_move_project_family,{project:'“P1”',count:'2'}),'Set a task, with 2 under it, on “P1” itself, for every group in it');
 });
 
-test('Answer privately has its own editable texts: the button, its popups and the private answer’s first line (ADR-0248)',()=>{
+test('Answer privately has its own editable texts: the button, its popups and the private answer’s first line (ADR-0249)',()=>{
   for(const key of ['reply.private','telegram.private_answer','telegram.private_answer_texts'])assert.ok((promptKeys as readonly string[]).includes(key),key);
   const lines=privateAnswerLines('');
   assert.equal(lines.button,'🔒 Answer privately');

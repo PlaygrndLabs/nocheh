@@ -1281,7 +1281,7 @@ test('moving a task into a project’s list names the chats that will see it fir
 });
 
 test('a project shares nothing between its groups, and a group joins one only after seeing the groups already there', async () => {
-  // The project has no box that makes its groups share (ADR-0246).
+  // The project has no box that makes its groups share (ADR-0247).
   const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
   const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
   await drawer.getByRole('button', {name: 'Edit'}).click();

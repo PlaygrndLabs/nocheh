@@ -1,6 +1,6 @@
 /**
  * "Project": which project a group belongs to. A topic always follows its group's project, and a project grants no
- * access in a group: a group answer uses only that group (ADR-0246).
+ * access in a group: a group answer uses only that group (ADR-0247).
  */
 import {useState} from 'react';
 import {useResource} from '../../lib/resource';
@@ -187,7 +187,7 @@ export function ProjectCard({chat, served}: {chat: Chat; served: boolean}) {
   return <GroupProject chat={chat} served={served} />;
 }
 
-/** A topic always follows its group's project: its card only says which (ADR-0246). */
+/** A topic always follows its group's project: its card only says which (ADR-0247). */
 function TopicProject({chat}: {chat: Chat}) {
   const parent = chat.parent_space ?? parentOf(chat.space_id) ?? '';
   const group = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(parent));
@@ -377,7 +377,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
 /**
  * A private chat never joins a project (ADR-0242). A setting saved before that rule may still name one: Nocheh
  * ignores it, and the owner removes it here, as a reset asks before it runs. A topic's row can only go back to
- * following its chat (ADR-0246).
+ * following its chat (ADR-0247).
  */
 export function PrivateChatProject({chat, yours}: {chat: Chat; yours: boolean}) {
   const effective = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(chat.space_id));

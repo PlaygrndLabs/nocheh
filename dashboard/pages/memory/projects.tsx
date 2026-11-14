@@ -1,7 +1,7 @@
 /**
  * Memory › Projects: put related groups in one project for a shared role, skills and task list, and optionally let
  * Nocheh create projects itself. A project's groups share only the tasks set on the whole project: a group answer uses
- * only that group, and a topic always follows its group's project (ADR-0246, ADR-0247).
+ * only that group, and a topic always follows its group's project (ADR-0247, ADR-0248).
  */
 import {useState} from 'react';
 import {ChevronRight, FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
@@ -422,7 +422,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   };
 
   // A group taken out of a project joins none, which answers "Which project does this group join?" too. It asks first:
-  // the group's tasks stay on this project's list, where only the owner sees them (ADR-0247).
+  // the group's tasks stay on this project's list, where only the owner sees them (ADR-0248).
   const remove = async (chat: ContextChat) => {
     const name = chats.name(chat.space_id);
     if (
@@ -685,7 +685,7 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
   const [name, setName] = useState(item?.name ?? 'Organize my chats');
   // One saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
   const [scopes, setScopes] = useState<string[]>((item?.scopes ?? []).filter(groupSpace));
-  // A new permission starts off; turning it on is what lets Nocheh create projects (ADR-0246).
+  // A new permission starts off; turning it on is what lets Nocheh create projects (ADR-0247).
   const [enabled, setEnabled] = useState(item?.enabled ?? false);
   const [until, setUntil] = useState(item?.expires_at && !item.expired ? item.expires_at.slice(0, 10) : '');
   const [resume, setResume] = useState(false);
@@ -695,7 +695,7 @@ function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: ()
       ...(item ? {id: item.id} : {}),
       name: name.trim(),
       scopes,
-      // Kept as saved: a delegation only creates projects, so it never moves a chat into one (ADR-0246).
+      // Kept as saved: a delegation only creates projects, so it never moves a chat into one (ADR-0247).
       project_ids: item?.project_ids ?? [],
       enabled,
       resume_scopes: resume ? suspended : [],

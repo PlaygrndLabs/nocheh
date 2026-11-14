@@ -47,7 +47,7 @@ class ScriptedBrainTests(unittest.TestCase):
         self.assertEqual(action['arguments'],{'destination':'-10042/topic/7','text':'exact text'})
 
     def test_a_private_answer_follows_the_directives_of_its_framed_question(self):
-        # A private answer's message is Nocheh's first line, the question's speaker line and the group question (ADR-0248).
+        # A private answer's message is Nocheh's first line, the question's speaker line and the group question (ADR-0249).
         framed=message('user','[Private answer] The question below was asked in “Synthetic Forum -10043”.\n\n'
                        '[Group message from Synthetic 123, sent 2026-11-13 10:00 UTC] [the owner]\n@synthetic_fixture_bot What do we have? '
                        '[[tool:mcp__nocheh__archive_search {"mode":"text","query":"CRATEWORD1","limit":10}]] [[tool:mcp__nocheh__tasks {"action":"list","state":"all"}]]')

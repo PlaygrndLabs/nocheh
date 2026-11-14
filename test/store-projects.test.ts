@@ -26,7 +26,7 @@ test('owner project inheritance, explicit sharing and revocation are separate, v
     await projects.assign(owner,{space_id:second,mode:'assigned',project_id:project.id,expected_revision:0,operation_id:key+':assign-two'});
     const inherited=await projects.effective(topic);assert.equal(inherited.project?.id,project.id);assert.equal(inherited.inherited,true);
     assert.deepEqual(await sharing.forDestination(second),[],'same project never creates a sharing policy');
-    // A topic always follows its group's project; its only choice is to follow it (ADR-0246).
+    // A topic always follows its group's project; its only choice is to follow it (ADR-0247).
     await assert.rejects(projects.assign(owner,{space_id:topic,mode:'none',expected_revision:0,operation_id:key+':exclude'}),{code:'project_topic_follows_group'});
     assert.equal((await projects.effective(topic)).project?.id,project.id);
     await projects.assign(owner,{space_id:topic,mode:'inherit',expected_revision:0,operation_id:key+':inherit'});
@@ -121,7 +121,7 @@ test('a project never shares between its groups, lists only its served groups, a
   const listed=async(id:string,repository=projects)=>{let after='';for(;;){const page=await repository.list(owner,after);const row=page.projects.find(p=>p.id===id);if(row)return row;if(!page.next)return null;after=page.next;}};
   const rules=async()=>(await stores.control.query('SELECT count(*)::int AS n FROM sharing_rules')).rows[0].n;
   try {
-    // The share box is gone: its fields are refused, never stored or ignored (ADR-0246).
+    // The share box is gone: its fields are refused, never stored or ignored (ADR-0247).
     const fields={name:'P1',description:'',state:'active',expected_revision:0};
     for(const extra of [{sharing_enabled:true},{sharing_enabled:false},{sharing_mode:'filtered'}])
       await assert.rejects(projects.save(owner,{...fields,...extra,operation_id:op('box')}),{code:'unknown_policy_field'},JSON.stringify(extra));

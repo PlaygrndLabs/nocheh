@@ -47,7 +47,7 @@ const shapes:Record<string,Shape>={
 export const portableDerivativeTypes=Object.keys(shapes);
 /** Fields an older export may still carry that this installation no longer has. Such a record is still checked
  * against its own hash and kept as history; the field is not read. A delegation's "may create projects" switch went
- * when turning automatic organizing on came to mean it may create them (ADR-0246). */
+ * when turning automatic organizing on came to mean it may create them (ADR-0247). */
 const retiredFields:Record<string,string[]>={organization_delegations:['allow_create']};
 export interface PortableRecord {format:'nocheh-derivative-record-v1';type:string;key:string;value:Record<string,unknown>;sha256:string}
 function wire(type:string,row:Record<string,unknown>):PortableRecord {

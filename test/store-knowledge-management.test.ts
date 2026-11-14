@@ -62,13 +62,13 @@ test('delegated organization only creates projects; every move asks the owner, n
   try {
    await s.guards.reconcile();await s.guards.setMode('on');
    // Organizing by itself only ever creates projects: every move of a group or topic into or out of a project waits for
-   // the owner's review (ADR-0246). A delegation's create-only authority keeps its exact checks.
+   // the owner's review (ADR-0247). A delegation's create-only authority keeps its exact checks.
    const createOnly=(source:SourceReference,name:string):OrganizationProposal=>({...proposal(source,name),assignments:[]});
    const historical=await capture(),initial=createOnly(historical,'historical');
    assert.equal(await match(initial,historical),null,'existing installations have no inferred organization authority');
    await save({enabled:false},'disabled');assert.equal(await match(initial,historical),null);
    await save({},'enable');assert.equal(await match(initial,historical),null,'old capture sequences cannot acquire automatic authority');
-   // Turning it on is what lets it create projects: the old separate switch is no longer a field (ADR-0246).
+   // Turning it on is what lets it create projects: the old separate switch is no longer a field (ADR-0247).
    assert.equal('allow_create' in delegation,false);
    await assert.rejects(save({allow_create:false},'old-switch'),{code:'unknown_knowledge_field'});
    const imported=await capture(group,'import');assert.equal(await match(createOnly(imported,'import'),imported),null);
@@ -139,7 +139,7 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.equal((await match(createOnly(resumedTopicSource,'topic-resumed'),resumedTopicSource,inheritedTopic)).id,delegation.id);
 
    // Every move asks the owner, whatever the project: one without tasks or groups, or one with groups in it. The review
-   // names the groups already in the project, for a move in and a move out (ADR-0246).
+   // names the groups already in the project, for a move in and a move out (ADR-0247).
    const plain=await s.projects.save(owner,{name:key+':plain',description:'',state:'active',expected_revision:0,operation_id:key+':plain-project'});
    await save({scopes:[inheritedTopic,other],project_ids:[created.id,plain.id]},'moves');
    const moveSource=await capture(other);
@@ -160,7 +160,7 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.equal(leave.state,'review');
    assert.deepEqual((await s.knowledge.proposal(owner,leave.id)).project_groups,[{id:created.id,name:created.name,groups:[]}],'leaving names the project too');
    assert.deepEqual((await s.knowledge.proposal(owner,leave.id)).task_projects,[]);
-   // A group joining a project sees the tasks set on the whole project, never another group's own (ADR-0247).
+   // A group joining a project sees the tasks set on the whole project, never another group's own (ADR-0248).
    const groupTask=await s.tasks.create(owner,{operation_id:key+':group-task',title:'Synthetic group task',scope:created.id});
    await stores.control.query('UPDATE owner_tasks SET group_id=$2 WHERE id=$1',[groupTask.id,group]);
    assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[],'another group\'s own task is not on the joining group\'s board');
@@ -190,7 +190,7 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.deepEqual(joinReceipt.undo_project_groups,[{id:created.id,name:created.name,groups:[group]}]);
    const moved=(await s.projects.effective(other)).own_assignment!;
    await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision,operation_id:key+':owner-moves-on'});
-   await movedTo(plain.id,'a group moving from one project to another takes its tasks, its topics\' and the ones under them (ADR-0247)');
+   await movedTo(plain.id,'a group moving from one project to another takes its tasks, its topics\' and the ones under them (ADR-0248)');
    await assert.rejects(s.knowledge.undo(owner,join.id,{expected_revision:joinReceipt.revision,operation_id:key+':undo-conflict'}),{code:'knowledge_undo_conflict'});
    assert.equal((await s.knowledge.proposal(owner,join.id)).state,'applied','conflicting undo preserves original receipt');
    await s.projects.assign(owner,{space_id:other,mode:'inherit',expected_revision:moved.revision+1,operation_id:key+':owner-moves-back'});

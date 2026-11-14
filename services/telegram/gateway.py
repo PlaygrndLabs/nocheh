@@ -276,7 +276,7 @@ class TelegramService:
         if (not isinstance(text, str) or len(text) > 100000 or not isinstance(session, str) or not 0 < len(session) <= 200
                 or not isinstance(body.get('notify', False), bool) or not isinstance(body.get('presence', False), bool)):
             raise ValueError('invalid_reply')
-        # Answer privately, the one button a reply may carry: only in a group and only this turn's own (ADR-0248).
+        # Answer privately, the one button a reply may carry: only in a group and only this turn's own (ADR-0249).
         markup = answer_button(body.get('button'), chat, body['event_id'], self.policy.owner)
         if self.loop is None:
             return dict(NOT_TRANSMITTED)
@@ -486,7 +486,7 @@ class TelegramService:
             if (not isinstance(query,str) or not 0<len(query)<=64 or len(text)>200 or
                     start is not None and (not isinstance(start,str) or not re.fullmatch(r'[a-f0-9]{32}',start))):raise ValueError('invalid_approval')
             # A tap on Answer privately opens the asker's private chat with the bot, with the record's id as its /start
-            # parameter (ADR-0248). The link names the bot as Telegram itself named it; without that name there is no link.
+            # parameter (ADR-0249). The link names the bot as Telegram itself named it; without that name there is no link.
             link={}
             if start is not None:
                 username=(self.identity or {}).get('username')

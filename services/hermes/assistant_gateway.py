@@ -59,7 +59,7 @@ def prepare_profile(root,scope,model):
     configure_profile(profile, model)
     from .persona import audience, materialize
     # A private answer runs in the owner's private chat but never loads that chat's own role or skills: it gets the
-    # project's, else the groups default (ADR-0248).
+    # project's, else the groups default (ADR-0249).
     materialize(root, profile, None if scope.answer else scope.chat_id, scope.project, audience(scope))
     from .native_memory import save_receipt
     save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'revision':scope.revision,'owner':scope.owner,
@@ -72,7 +72,7 @@ def prepare_profile(root,scope,model):
         # A new guard epoch starts a new profile; the chat keeps its conversation
         # and the superseded profiles are removed once idle.
         from .profile_history import carry, prune, prune_answers
-        # A private answer starts empty: no earlier answer's conversation, from any group, is carried into it (ADR-0248).
+        # A private answer starts empty: no earlier answer's conversation, from any group, is carried into it (ADR-0249).
         if scope.purpose!='filter' and not scope.answer:carry(profile)
         prune(profile)
         # No later turn opens a private answer's profile, so any turn removes those no answer can run in any more.
@@ -106,7 +106,7 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
 
 def session_title(message,owner,answer=False):
     """The chat a Telegram session belongs to, as the dashboard's session list shows it. A private answer's own
-    session is named as one, so the owner's private chat keeps its own name (ADR-0248)."""
+    session is named as one, so the owner's private chat keeps its own name (ADR-0249)."""
     if answer:return 'Private answer'
     chat=message.get('chat') if isinstance(message.get('chat'),dict) else {}
     title=chat.get('title') if isinstance(chat.get('title'),str) else ''

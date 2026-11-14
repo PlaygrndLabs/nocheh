@@ -88,7 +88,7 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
       capabilities:{tools:{listChanged:false}},serverInfo}});
   }
   if(method==='ping')return rpc(res,200,{jsonrpc:'2.0',id,result:{}});
-  // An answer reader is offered and runs only the read tools, and tasks only to list and read (ADR-0248).
+  // An answer reader is offered and runs only the read tools, and tasks only to list and read (ADR-0249).
   const answering=options.principal.answer!==undefined,tools=answering?mcpTools.filter(item=>privateAnswerTools.has(item.name)):mcpTools;
   if(method==='tools/list')return rpc(res,200,{jsonrpc:'2.0',id,result:{tools:tools.map(({name,description,inputSchema})=>({name,description,inputSchema}))}});
   if(method==='tools/call') {

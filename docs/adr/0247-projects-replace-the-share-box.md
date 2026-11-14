@@ -1,4 +1,4 @@
-# ADR-0246: Projects replace the share box: a group answer uses only that group
+# ADR-0247: Projects replace the share box: a group answer uses only that group
 
 <status>
 Accepted on 2026-11-13 with the owner's Members design, as part of its step 2,
@@ -96,7 +96,7 @@ chose ("Keep them, yours only").
   can get private answers that combine them. Put only related groups in one
   project; keep family groups out of projects.", then the task sentence:
   everyone allowed in the group will see and change the tasks set on the
-  whole project, never another group's own tasks ([ADR-0247](0247-tasks-follow-data-access.md)).
+  whole project, never another group's own tasks ([ADR-0248](0248-tasks-follow-data-access.md)).
   `task_projects` counts only tasks set on the whole project
   (`group_id IS NULL`), the ones a joining group would see.
 - **Which project a group joins.** Turning Nocheh on in a group with no

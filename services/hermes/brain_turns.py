@@ -132,7 +132,7 @@ class BrainTurns:
         if scope is None:return {'state':'suppressed'}
         claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
         # A private answer runs as the owner's private chat but never as the owner: its own scoped profile, the project's
-        # role and read tools only (ADR-0248). Its pass and its framed question must come together.
+        # role and read tools only (ADR-0249). Its pass and its framed question must come together.
         answer=claims.get('answer') is not None
         if answer!=isinstance(body.get('private_answer'),dict):raise ValueError('invalid_private_answer')
         if answer:scope=replace(scope,owner=False)

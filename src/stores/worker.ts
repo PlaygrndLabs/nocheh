@@ -44,7 +44,7 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     // A stopped machine job's programs on its machine are ended, and log rows a stopped process left running are closed.
     machines:async()=>{if(Date.now()-machinesChecked<5000)return;machinesChecked=Date.now();await s.machines.cleanupTick();},
     // Answer privately buttons nobody used, taps without /start and answers never delivered expire, checked hourly; the
-    // rows stay as the record (ADR-0248).
+    // rows stay as the record (ADR-0249).
     answers:async()=>{if(Date.now()-answersExpired<3600000)return;await s.privateAnswers.expire();answersExpired=Date.now();},
   };
   const stop=startLoops(Object.fromEntries(Object.entries(jobs).map(([stage,run])=>[stage,async()=>{

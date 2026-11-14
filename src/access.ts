@@ -7,7 +7,7 @@ import {guardState} from './guarded.js';
 import {activeBrain} from './brain/brains.js';
 
 export interface Reader {readonly scope:string|null; readonly admin:boolean;readonly turnEvent?:string;readonly space?:string;readonly revision?:number;readonly guard_epoch?:number;readonly generation?:string;readonly logical_profile?:string;readonly purpose?:'assistant'|'memory-review'|'filter';readonly brain?:string;
-  /** The "Answer privately" record this turn answers (32 hex, ADR-0248). Signed in a turn pass, and only in one whose
+  /** The "Answer privately" record this turn answers (32 hex, ADR-0249). Signed in a turn pass, and only in one whose
    * scope and space are the asker's private chat; it never makes the pass an owner pass. */
   readonly answer?:string;
   /** The conversations an answer reader may read, resolved on the server from the frozen record for every request.

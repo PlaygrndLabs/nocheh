@@ -103,7 +103,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const chatTools=new ChatToolSettingsRepository(stores.control,()=>options.policy().owner_id);
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
-  // Answer privately records: who asked, where, and the groups frozen at the tap (ADR-0248).
+  // Answer privately records: who asked, where, and the groups frozen at the tap (ADR-0249).
   const privateAnswers=new PrivateAnswerRepository(stores.control,options.policy);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
 
@@ -123,13 +123,13 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     return name?{kind:'member',name}:{kind:'member'};
   };
   // A group or topic reaches its own group's tasks, with its topics' when they share what they know, and the tasks set
-  // on its project itself; a task added there belongs to that group or topic (ADR-0247).
+  // on its project itself; a task added there belongs to that group or topic (ADR-0248).
   const topicMemory=()=>options.policy().topic_memory??'group';
   const tasks=new TaskRepository(stores.control,async principal=>{
     if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null,actor:{kind:'owner'}};
     const {source}=await knowledge.liveGroupTurn(principal);
     // An "Answer privately" answer reads only the tasks of the groups frozen in its record and of their project
-    // itself, as the server bound them for this request, and changes nothing (ADR-0247, ADR-0248).
+    // itself, as the server bound them for this request, and changes nothing (ADR-0248, ADR-0249).
     if(principal.answer!==undefined){
       const reads=principal.reads,project=reads?.project?(await stores.control.query('SELECT state FROM projects WHERE id=$1',[reads.project])).rows[0]:null;
       if(!reads?.project||project?.state!=='active')throw new HttpError(403,'task_project_required');

@@ -637,7 +637,7 @@ class ProductScenarios(Scenarios):
         return result, canaries.found(reply+'\n'+result, marks)
 
     def project_groups_stay_apart(self):
-        # Two groups of one project (ADR-0246, ADR-0247, ADR-0248): OTHER_GROUP (GP1) and THIRD_GROUP (GP2) join a new
+        # Two groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1) and THIRD_GROUP (GP2) join a new
         # project; GROUP (GP4) stays in none. Each group, and the owner's private chat, holds its own mark next to one
         # shared search word. A group answer reads only its own group: the owner's question in GP1 finds GP1's mark and
         # its task, never GP2's mark, task, count or tag. Under the owner's answer there sits Answer privately; a member's
@@ -689,7 +689,7 @@ class ProductScenarios(Scenarios):
             self.gate('group_search_finds_its_own_mark', gp1 in search, result=search[:300])
             self.gate('group_answer_uses_only_that_group', not canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}),
                       found=canaries.found(text+'\n'+search, {gp2: 'GP2', gp4: 'GP4', private: 'private'}))
-            # 2. GP1's task view: its own task, never GP2's title, count or tag (ADR-0247).
+            # 2. GP1's task view: its own task, never GP2's title, count or tag (ADR-0248).
             try:
                 tasks = json.loads(listed)
             except ValueError:

@@ -214,7 +214,7 @@ class Scenarios:
     @staticmethod
     def is_card(row):
         """An approval card: sent with Approve and Reject buttons (settling it later removes them). A reply whose one
-        button is Answer privately (ADR-0248) is a reply, not a card."""
+        button is Answer privately (ADR-0249) is a reply, not a card."""
         markup = row['parameters'].get('reply_markup') or '{}'
         rows = (json.loads(markup) if isinstance(markup, str) else markup).get('inline_keyboard') or []
         return any(not str(button.get('callback_data') or '').startswith('np') for line in rows for button in line)

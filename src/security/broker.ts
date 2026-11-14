@@ -29,7 +29,7 @@ export interface BrokerStorage {
   binding(principal:Reader):Promise<TurnBinding>;
   assertAudience(principal:Reader):Promise<unknown>;
   turnFile(principal:Reader,hash:string):Promise<string>;
-  /** An answer reader's read set from its record (ADR-0248); a reader without an answer comes back as it is. */
+  /** An answer reader's read set from its record (ADR-0249); a reader without an answer comes back as it is. */
   bindReads?(principal:Reader):Promise<Reader>;
 }
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
@@ -138,7 +138,7 @@ export function brokerServer(options:BrokerOptions) {
       if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
       await options.assertReady?.();return json(res,200,await box.live());
     }
-    // An answer reader is bound to its record on every call, or refused without one, and reaches read routes only (ADR-0248).
+    // An answer reader is bound to its record on every call, or refused without one, and reaches read routes only (ADR-0249).
     const parsed=reader(req,options.token);
     if(parsed.answer!==undefined&&!options.storage?.bindReads)throw new HttpError(409,'private_answer_closed');
     const principal=parsed.answer!==undefined?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);

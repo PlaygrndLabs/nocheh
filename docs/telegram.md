@@ -263,7 +263,7 @@ Every send it takes is recorded like any other
 answer without its link, and the private answer. A project's page in
 Memory › Projects lists its buttons with where each was asked, the groups its
 answer could read and what became of it
-([ADR-0248](adr/0248-answer-privately.md)).
+([ADR-0249](adr/0249-answer-privately.md)).
 
 ## Validation
 

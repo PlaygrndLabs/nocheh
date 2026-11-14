@@ -32,7 +32,7 @@ ORIGINAL = {
                               'JOIN runtime_configuration_versions v USING(name,revision) ORDER BY c.name', ('name', 'document')),
     'projects': ('SELECT id,name,description,state FROM projects ORDER BY id',
                  ('id', 'name', 'description', 'state')),
-    # A topic always follows its group's project (ADR-0246). A store the stores have not started at this version can
+    # A topic always follows its group's project (ADR-0247). A store the stores have not started at this version can
     # still hold a topic's own choice; starting them turns it into "follows its group", so it is read that way here.
     'project_assignments': ("SELECT space_id,"
                             "CASE WHEN space_id LIKE '%/topic/%' THEN NULL ELSE project_id END AS project_id,"
@@ -40,7 +40,7 @@ ORIGINAL = {
                             "FROM project_assignments ORDER BY space_id",
                             ('space_id', 'project_id', 'mode')),
     # Only the owner's rules. A store the stores have not started at this version still holds the rules a project's
-    # share box kept; they are deleted at that start, never kept as the owner's (ADR-0246), so they are left out here.
+    # share box kept; they are deleted at that start, never kept as the owner's (ADR-0247), so they are left out here.
     # The test reads the row as JSON, so it holds whether or not the old project_id column is still there.
     'sharing_rules': ("SELECT id,name,sources,destination,enabled,mode,instructions FROM sharing_rules r "
                       "WHERE to_jsonb(r)->>'project_id' IS NULL ORDER BY id",
@@ -103,7 +103,7 @@ def validate(snapshot):
         if (any(row['mode'] == 'assigned' and not group_space(row['space_id']) for row in values['project_assignments']) or
                 any(not all(group_space(space) for space in [*row['sources'], row['destination']]) for row in values['sharing_rules'])):
             raise ValueError('reset_configuration_private_chat_requires_review')
-        # A topic always follows its group's project (ADR-0246). The snapshot reads every topic row that way, so only a
+        # A topic always follows its group's project (ADR-0247). The snapshot reads every topic row that way, so only a
         # hand-edited snapshot can hold another choice; the restore refuses it the same way.
         if any(isinstance(row['space_id'], str) and '/topic/' in row['space_id'] and row['mode'] != 'inherit'
                for row in values['project_assignments']):

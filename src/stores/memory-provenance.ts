@@ -26,7 +26,7 @@ export class MemoryProvenanceRepository {
       AND EXISTS(SELECT 1 FROM memory_ingestion_receipts r WHERE r.session_id=s.session_id AND r.retired_at IS NULL AND r.state='done')
       ORDER BY s.updated_at DESC,s.session_id LIMIT $3`,[workspace,audience,limit,group])).rows.map(row=>String(row.session_id));
   }
-  /** Sessions a read set may read (ADR-0248), bound as readSetParam: those of every conversation of the set with completed
+  /** Sessions a read set may read (ADR-0249), bound as readSetParam: those of every conversation of the set with completed
    * writes, newest first. Never the owner's sessions or a private chat's, whatever the parameter holds. */
   async readSetSessions(workspace:string,reads:readonly string[],limit=1000):Promise<string[]> {
     return (await this.stores.control.query(`SELECT s.session_id FROM memory_sessions s WHERE s.workspace=$1 AND ${readSetSql('s.audience',2)}

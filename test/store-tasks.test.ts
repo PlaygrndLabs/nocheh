@@ -428,7 +428,7 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
       {code:'invalid_task_attachments'},'up to 20 archived messages');
 
     // A task made and finished in another group stays that group's, even moved to this project's list: this group
-    // neither finds it nor takes it (ADR-0247).
+    // neither finds it nor takes it (ADR-0248).
     const porchTask=await s.tasks.create(owner,{operation_id:key+':porch',title:'Paint the porch',scope:house,group:porch});
     await stores.control.query(`UPDATE owner_tasks SET created_by='{"kind":"member","name":"Alice"}',finished_by='{"kind":"member","name":"Alice"}',state='done',
       status_id='done',done_at=now() WHERE id=$1`,[porchTask.id]);
@@ -516,7 +516,7 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     assert.ok(!JSON.stringify(cut).includes('canary-race-'+mark));
 
     // The same holds for a move into this group: a comment written meanwhile under the moved task, while it was the
-    // other group's, stays private (ADR-0247).
+    // other group's, stays private (ADR-0248).
     const rack=await s.tasks.create(owner,{operation_id:key+':rack',title:'Build the rack',scope:launch,group:porch});
     const bolt=await s.tasks.create(owner,{operation_id:key+':bolt',title:'Buy the bolts',parent:rack.id});
     assert.deepEqual([bolt.project_id,bolt.group_id],[launch,porch],'a subtask takes its parent\'s list and group');
@@ -685,7 +685,7 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     for(const title of ['Pack the crates','Label the crates','Old labels','Tape the crates'])assert.deepEqual((await tasks(title)).map(item=>item.project_id),[launch],title);
 
     // A group's task is that group's alone: its card names only that group and says the project's other groups don't
-    // see it, and a chat added to the project in the meantime leaves the card as it was (ADR-0247).
+    // see it, and a chat added to the project in the meantime leaves the card as it was (ADR-0248).
     await s.actionCommands.offer('task',await s.tasks.chatCreate(chat,{title:'Set up the stage',scope:launch,group}));
     assert.equal(last('card').text,'📋 Add a task to the list of “Launch”\n👥 Seen in “Launch team”. Other groups in this project don\'t see it.\n\nTitle: Set up the stage\nStatus: To do\nGroup: Launch team');
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[other,launch]);
@@ -723,7 +723,7 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('a group or topic reaches only its own tasks and the tasks set on its project, never another group\'s (ADR-0247)',
+test('a group or topic reaches only its own tasks and the tasks set on its project, never another group\'s (ADR-0248)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -826,7 +826,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     assert.equal((await s.tasks.chatGet(alice,stray)).parent.id,all.id,'its own group sees it with the task it sits under');
 
     // An "Answer privately" answer reads the tasks of the groups frozen in its record and of their project itself,
-    // and adds, changes and comments on nothing (ADR-0248).
+    // and adds, changes and comments on nothing (ADR-0249).
     const start=await capture('123',123,'/start','Owner');
     const answering=await actor(start.id,'123','123',{answer:'a'.repeat(32),reads:readSet({home:g2,whole:[g2],project:p1})});
     assert.deepEqual(ids(await s.tasks.chatList(answering)),[shared.id,second.id,own.id,all.id,step.id].sort());
@@ -836,7 +836,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     await assert.rejects(s.tasks.chatCreate(both,{title:'Sneak'}),{code:'task_read_only'});
     await assert.rejects(s.tasks.chatUpdate(both,second.id,{expected_revision:second.revision,state:'done'}),{code:'task_read_only'});
     await assert.rejects(s.tasks.chatComment(both,second.id,{text:'Sneak'}),{code:'task_read_only'});
-    // With no bound read set an answer cannot even read its own /start (ADR-0248); with groups but no project it
+    // With no bound read set an answer cannot even read its own /start (ADR-0249); with groups but no project it
     // reaches no project's tasks.
     await assert.rejects(s.tasks.chatList(await actor(start.id,'123','123',{answer:'a'.repeat(32)})),{code:'turn_source_denied'},'an answer with no bound groups reads nothing');
     await assert.rejects(s.tasks.chatList(await actor(start.id,'123','123',{answer:'a'.repeat(32),reads:readSet({home:g2,whole:[g1,g2]})})),{code:'task_project_required'},
@@ -865,7 +865,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     assert.deepEqual(await s.tasks.audience(owner,shared.id,{group:g3}),{project:p1,group:g3,audience:'group',chats:[]},'a group in no project sees nothing');
     assert.deepEqual(await s.tasks.audience(owner,under.id,{group:g2}),{project:p1,group:g1,audience:'group',chats:[g1]},'a subtask keeps its parent\'s group');
     // A group's task on the list of a project its group is not in is seen by no chat, its topics included, as a topic
-    // always follows its group's project (ADR-0246).
+    // always follows its group's project (ADR-0247).
     const tent=await s.tasks.create(owner,{operation_id:key+':tent',title:'Rent the tent',scope:p2,group:g1+'/topic/8'});
     assert.deepEqual([await seenBy(tent.id),await seenBy(tent.id,{scope:p1})],[[],[g1]]);
     for(const reader of [alice,await ask(g1,'Anything for the tent?','Alice',8)])await assert.rejects(s.tasks.chatGet(reader,tent.id),{status:404});
@@ -927,7 +927,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('a group\'s move, archive or trash takes only the tasks under it that it sees; another group\'s stays where it is (ADR-0247)',
+test('a group\'s move, archive or trash takes only the tasks under it that it sees; another group\'s stays where it is (ADR-0248)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}

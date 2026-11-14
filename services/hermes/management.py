@@ -30,7 +30,7 @@ def profile_path(root, chat, policy, selected=None):
 
 def answer_receipt(path):
     """Where a private answer was asked, as its first line names it, and when it ran, from the receipt its turn left in
-    its profile (ADR-0248); nothing when there is none or it cannot be read."""
+    its profile (ADR-0249); nothing when there is none or it cannot be read."""
     import json
     receipt=path/'answer.json'
     try:
@@ -58,7 +58,7 @@ def dispatch(root, model, policy, body):
             historical[path.name]={'scope':metadata.get('space',historical.get(path.name,{}).get('scope',path.name)),
                                    'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),
                                    'guard_epoch':metadata.get('guard_epoch',0),'exists':True,
-                                   # A private answer's own profile, in the owner's private chat but never the owner's (ADR-0248),
+                                   # A private answer's own profile, in the owner's private chat but never the owner's (ADR-0249),
                                    # named by where it was asked and when, as its receipt keeps them.
                                    **({'private_answer':True,**answer_receipt(path)} if metadata.get('answer') else {})}
         return {'profiles':profiles,'history_profiles':list(historical.values())}

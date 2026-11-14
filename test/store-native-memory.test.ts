@@ -164,7 +164,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     [workspace,'C'.repeat(21),'-100/topic/3','-100',null]],'a hit counts only with its own receipt, in this audience or its group');
   assert.deepEqual(readSessions,[],'a group reader searches its own sessions');
   // An answer reader searches the sessions of the groups frozen in its record, and a hit counts only with a receipt of one
-  // of them; Honcho's context and recall stay closed to it: plain search only (ADR-0248).
+  // of them; Honcho's context and recall stay closed to it: plain search only (ADR-0249).
   const answer={admin:false,scope:'123',space:'123',turnEvent:digest('start'),answer:'a'.repeat(32),
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
   queries.length=0;

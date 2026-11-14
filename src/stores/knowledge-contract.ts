@@ -23,7 +23,7 @@ const payloadKeys:Record<ReviewKind,string[]>={
 };
 /** The organization part of a learning answer, or null when only private-chat or topic assignments were proposed. Honcho answers an
  * absent field as null: a null list is empty, and an item's null field, such as the unused one of project_id and project_key, is left
- * out. A private chat never joins a project (ADR-0242) and a topic always follows its group's (ADR-0246), so an assignment of
+ * out. A private chat never joins a project (ADR-0242) and a topic always follows its group's (ADR-0247), so an assignment of
  * either is dropped, not the whole answer. */
 export function learnedOrganization(organization:Record<string,unknown>):OrganizationProposal|null {
  const items=(value:unknown)=>Array.isArray(value)?value.map(withoutNulls):value??[];
@@ -46,7 +46,7 @@ export function proposalPrivateChats(value:KnowledgeProposal):string[] {
 /**
  * A proposal the agent makes, or one already saved. A new one never names a private chat where it would share from or
  * into, or put in a project (ADR-0242), and never puts a topic in a project or in none: a topic follows its group's
- * project (ADR-0246). A saved one (`stored`) is read as it was saved, so a proposal from before those rules still lists
+ * project (ADR-0247). A saved one (`stored`) is read as it was saved, so a proposal from before those rules still lists
  * and opens, and the owner can cancel it; applying it parses it as new and so is refused.
  */
 export function parseKnowledgeProposal(input:unknown,options:{stored?:boolean}={}):KnowledgeProposal {

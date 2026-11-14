@@ -126,7 +126,7 @@ class ScopeTests(unittest.TestCase):
     def test_each_private_answer_has_its_own_profile_and_carries_no_earlier_conversation(self):
         from dataclasses import replace
         claims={'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1}
-        # The answer runs as the asker's private chat, never as the owner (ADR-0248).
+        # The answer runs as the asker's private chat, never as the owner (ADR-0249).
         asker=replace(self.scopes.resolve(self.update(123,123,'private'),'123'),owner=False,space='123')
         answer=Scopes.apply_revision(asker,{**claims,'answer':'a'*32})
         # test/private-answers.test.ts pins the same name for runtimeProfile with the same claims.
@@ -193,7 +193,7 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_MACHINE_TOOLS))
         self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
         for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
-        # A private answer only reads (ADR-0248): no native memory, no tool that sends, changes, starts or asks.
+        # A private answer only reads (ADR-0249): no native memory, no tool that sends, changes, starts or asks.
         removed,answer=turn_tools(False,False,False,True)
         self.assertEqual(answer,{'session_search','skills_list','skill_view',*('mcp__nocheh__'+name for name in ('archive_search','archive_read','archive_page','memory_search','tasks'))})
         self.assertEqual(removed,OWNER_SET_TOOLS|(REPLY_TOOLS-answer))

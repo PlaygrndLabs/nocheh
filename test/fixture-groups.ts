@@ -1,4 +1,4 @@
-// Synthetic groups and projects shared by the Members tests (ADR-0246, ADR-0247, ADR-0248). Never live values.
+// Synthetic groups and projects shared by the Members tests (ADR-0247, ADR-0248, ADR-0249). Never live values.
 import type pg from 'pg';
 import {digest} from '../src/archive.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';

@@ -1,4 +1,4 @@
-# ADR-0247: A group sees only its own tasks and its project's tasks
+# ADR-0248: A group sees only its own tasks and its project's tasks
 
 <status>
 Accepted on 2026-11-13, in "Members step 2: projects and the private button",
@@ -29,7 +29,7 @@ chats added later will see it. Both stay as they were accepted.
   keep it apart (`topic`). A turn's read set
   ([`readSetOf`](../../src/spaces.ts)) already says which groups and topics it
   reads.
-- An "Answer privately" reply (ADR-0248) answers in the asker's private chat
+- An "Answer privately" reply (ADR-0249) answers in the asker's private chat
   from the group it was asked in and the project's other groups the asker is
   in, frozen when the button is tapped. It is not a turn in any of those
   groups, and nothing in it should change their tasks.
@@ -82,7 +82,7 @@ chats added later will see it. Both stay as they were accepted.
   project itself is seen by every group assigned to the project and by chats
   added to it later. A group's task is seen only while its group is in the
   project, as a topic always follows its group's project
-  ([ADR-0246](0246-projects-replace-the-share-box.md)): when topics share
+  ([ADR-0247](0247-projects-replace-the-share-box.md)): when topics share
   what they know, by the group's chat and all its topics, named as the group;
   else only by the task's own chat or topic.
 - The owner's card (ADR-0243) names those chats. Only a task set on the

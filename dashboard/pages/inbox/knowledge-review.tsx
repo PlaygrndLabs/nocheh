@@ -10,7 +10,7 @@ import {stateLabel, useChatNames, useCommand} from './shared';
 
 type ProjectGroups = {id: string; name: string; groups: string[]};
 
-/** The projects a move touches, each with the groups already there, named before the owner decides (ADR-0246). */
+/** The projects a move touches, each with the groups already there, named before the owner decides (ADR-0247). */
 function ProjectGroupsNotice({projects, chat}: {projects: ProjectGroups[]; chat: (space: string) => string}) {
   if (!projects.length) return null;
   return (
@@ -45,7 +45,7 @@ export type Proposal = {
   /**
    * Projects this change, or undoing it, moves a group into or out of, each with the other groups Nocheh serves there;
    * worked out by the server. A project's groups share only the tasks set on the whole project, but people in two of
-   * them can get private answers that combine them (ADR-0246, ADR-0247).
+   * them can get private answers that combine them (ADR-0247, ADR-0248).
    */
   project_groups?: ProjectGroups[];
   undo_project_groups?: ProjectGroups[];

@@ -7,7 +7,7 @@ import {ArchiveRepository,type SourceReference} from './archive.js';
 import {inReadSet,type ReadSet} from '../spaces.js';
 
 /** `group` admits every known conversation of the chat, for groups whose topics share memory. `reads` admits the
- * known conversations of a read set, for an answer reader (ADR-0248). */
+ * known conversations of a read set, for an answer reader (ADR-0249). */
 export type RelationshipAudience={kind:'owner'}|{kind:'conversation';chat_id:string;topic_id:string|null;group?:boolean}|{kind:'reads';set:ReadSet};
 const permits=(audience:RelationshipAudience,observed:ObservedAudience|null):boolean=>audience.kind==='owner'||!!observed&&
   (audience.kind==='reads'?observed.topic_state!=='unknown'&&inReadSet(audience.set,observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id):

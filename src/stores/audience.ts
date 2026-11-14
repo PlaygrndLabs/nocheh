@@ -25,7 +25,7 @@ export class AudienceRepository {
   /** A turn's credential, for the current binding, or for `own`, a job run's kept binding while it carries (ADR-0208). */
   async turn(secret:string,principal:Pick<Reader,'scope'|'space'|'purpose'|'logical_profile'|'answer'|'reads'>,eventId:string,expires:number,own?:GuardBinding):Promise<string> {
     if(!principal.space)throw new HttpError(400,'conversation_required');
-    // A private answer's pass names its record and reads as the asker's private chat, never as the owner (ADR-0248).
+    // A private answer's pass names its record and reads as the asker's private chat, never as the owner (ADR-0249).
     const answer=principal.answer;
     if(answer!==undefined&&(!principal.reads||principal.scope===null||principal.scope!==principal.space))throw new HttpError(409,'private_answer_closed');
     const binding=own?(await this.guards.assertCarried(own),own):await this.guards.state();

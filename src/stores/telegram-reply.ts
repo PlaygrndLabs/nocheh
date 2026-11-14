@@ -41,7 +41,7 @@ export async function finishPresence(call:RuntimeCall,target:ReturnType<typeof r
 /** How a closed brain receipt that has no reply to send ends the working reaction. */
 export const unansweredFinish=(state:string):ReplyFinish=>state==='failed'?'failed':'clear';
 
-/** The one button a group reply may carry: Answer privately under the owner's own answer (ADR-0248). Its data is `np`
+/** The one button a group reply may carry: Answer privately under the owner's own answer (ADR-0249). Its data is `np`
  * and the record's id, which the bot checks is the one for this turn's question. */
 export interface ReplyButton {text:string;data:string}
 /**

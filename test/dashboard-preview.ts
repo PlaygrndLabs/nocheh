@@ -174,7 +174,7 @@ const groupSpace=(space:string)=>/^-[1-9]\d{0,18}(\/topic\/[1-9]\d{0,15})?$/.tes
 const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
 const sharingReleases:any[]=[];
 const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
-// Answer privately buttons offered under the owner's answers in the project's group (ADR-0248).
+// Answer privately buttons offered under the owner's answers in the project's group (ADR-0249).
 const privateAnswers:any[]=[
  {id:'a'.repeat(32),question_event:'1'.repeat(64),from_chat_id:topic,project_id:projectId,member_id:null,asker_account_id:'42',read_chats:[conversation,'-10077'],reply_chat_id:'42',
   state:'answered',refusal_code:null,offered_at:new Date(Date.now()-7200000).toISOString(),pressed_at:new Date(Date.now()-7100000).toISOString(),answered_at:new Date(Date.now()-7000000).toISOString()},
@@ -185,7 +185,7 @@ const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assig
  {space_id:'42',project_id:projectId,mode:'assigned',revision:1}];
 /** The groups Nocheh serves, as the saved Telegram setting lists them. */
 const servedGroups=()=>String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean);
-/** A project's served groups, as the server lists them on /projects (ADR-0246). */
+/** A project's served groups, as the server lists them on /projects (ADR-0247). */
 const projectGroups=(id:string)=>assignments.filter(a=>a.mode==='assigned'&&a.project_id===id&&!a.space_id.includes('/topic/')&&servedGroups().includes(a.space_id)).map(a=>a.space_id).sort();
 // Memory page: learned facts, people and their facts, projects, automatic organizing, long-term memory (synthetic, in memory).
 const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.now()-m*60000).toISOString();
@@ -311,7 +311,7 @@ const folded=(hex:string,name:string,minutes:number)=>({id:hex.repeat(32),name,r
 const projectSuggestion:any={id:'02'.repeat(32),kind:'project',name:'Aurora cabin',candidate_entity_id:null,source_reference:{id},reason:'A cabin booking the group keeps planning around.',status:'pending',revision:1,created_at:inboxAgo(280),
  also_called:[folded('03','Aurora cabin trip',260),folded('04','Aurora cabin (کلبه)',240)]};
 const knowledgeProposal:any={id:'f'.repeat(64),kind:'organization',origin:'learning',state:'review',revision:1,approved:false,created_at:inboxAgo(95),source_scope:conversation,source_reference:{id},error_code:null,result:null,decision_history:[],affected_topics:{},
- // As the server works it out: the project the group would join, with the groups already there (ADR-0246).
+ // As the server works it out: the project the group would join, with the groups already there (ADR-0247).
  get project_groups(){return [{id:projectId,name:'Aurora field guide',groups:projectGroups(projectId).filter(g=>g!=='-10073')}];},undo_project_groups:[],
  proposal:{kind:'organization',reason:'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:'-10073',project_id:projectId,reason:'Every recent message in this group is about the trip.',evidence_ids:[id],expected_revision:0}]}};
 function inboxDecisions(){

@@ -539,7 +539,7 @@ export class EntityRepository {
   private async visible(principal:Reader,entity:MemoryEntity):Promise<boolean> {
     if(principal.admin||principal.scope===null)return true;
     // An answer reader sees its record's project and the people of the groups frozen in it, never those of its own
-    // private chat (ADR-0248); without its record, only what it may read.
+    // private chat (ADR-0249); without its record, only what it may read.
     const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
     if(entity.kind==='project'&&(answer?!!reads&&reads.project===entity.project_id&&
       (await this.stores.control.query("SELECT 1 FROM projects WHERE id=$1 AND state='active'",[entity.project_id])).rowCount===1:

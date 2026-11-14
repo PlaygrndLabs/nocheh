@@ -27,7 +27,7 @@ async function filteredLimit(db:Pick<pg.PoolClient,'query'>,destination:string):
 }
 
 /** Trusted callers hold the guard lock and own the surrounding receipt transaction. A project decides its role and
- * skills, its task board and what an Answer privately answer may add; it never shares between its groups (ADR-0246). */
+ * skills, its task board and what an Answer privately answer may add; it never shares between its groups (ADR-0247). */
 export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revision'>&{expected_revision:number}):Promise<Project> {
   const prior=(await db.query('SELECT revision FROM projects WHERE id=$1 FOR UPDATE',[change.id])).rows[0];
   if((prior?.revision??0)!==change.expected_revision)throw new HttpError(409,'project_revision_conflict');
@@ -40,7 +40,7 @@ export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revisio
 
 /**
  * Only a group joins a project, and a topic always follows its group's project: a topic's only choice is to follow
- * it (ADR-0246). A private chat, the owner's included, never joins one (ADR-0242). This one check covers the owner's
+ * it (ADR-0247). A private chat, the owner's included, never joins one (ADR-0242). This one check covers the owner's
  * assignment, an applied organization proposal and its undo.
  */
 export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'revision'>&{expected_revision:number}):Promise<Assignment> {
@@ -53,7 +53,7 @@ export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'r
   await db.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,$4)
     ON CONFLICT(space_id) DO UPDATE SET project_id=$2,mode=$3,revision=$4,updated_at=now()`,[result.space_id,result.project_id,result.mode,result.revision]);
   // A group moving from one project to another takes its tasks and its topics' tasks with it; leaving every project
-  // leaves them on the old board, where only the owner sees them (ADR-0247).
+  // leaves them on the old board, where only the owner sees them (ADR-0248).
   if(groupChatId(change.space_id))await moveGroupTasks(db,change.space_id,previous?.mode==='assigned'?previous.project_id:null,result.mode==='assigned'?result.project_id:null);
   return result;
 }
@@ -88,11 +88,11 @@ export class ProjectRepository {
     // A private chat is in no project, even through a row written before private chats were refused. That row is
     // still returned as its own, so the owner sees it and can clear it (ADR-0242).
     if(!groupSpace(space))return {space,own_assignment:own?assignment(own):null,assignment:null,project:null,inherited:false};
-    // A topic always follows its group, whatever row of its own was written before that rule (ADR-0246).
+    // A topic always follows its group, whatever row of its own was written before that rule (ADR-0247).
     const inherited=!!parent||!own||own.mode==='inherit',chosen=inherited?rows.find(r=>r.space_id===parent):own;
     return {space,own_assignment:own?assignment(own):null,assignment:chosen?assignment(chosen):null,project:chosen?.project??null,inherited:!!chosen&&inherited};
   }
-  /** Each project lists its groups: the served groups assigned to it, as projectGroups decides (ADR-0246). */
+  /** Each project lists its groups: the served groups assigned to it, as projectGroups decides (ADR-0247). */
   async list(principal:Reader,after='') {
     admin(principal);const served=[...new Set(this.served())].filter(groupChatId);
     const {rows}=await this.control.query(`SELECT p.*,${projectGroupsSql('p.id','$2')} AS groups FROM projects p WHERE p.id>$1 ORDER BY p.id LIMIT 101`,[after,served]);
@@ -147,7 +147,7 @@ export class SharingPolicyRepository {
       .filter(rule=>groupSpace(rule.destination));
   }
   /** Whether a rule reads a conversation: only the exact groups and topics it names. It never reads a private chat,
-   * whatever an older or imported rule says (ADR-0242), and a project never adds one (ADR-0246). Async for its callers. */
+   * whatever an older or imported rule says (ADR-0242), and a project never adds one (ADR-0247). Async for its callers. */
   async covers(rule:SharingRule,space:string):Promise<boolean> {
     return groupSpace(space)&&rule.sources.includes(space);
   }

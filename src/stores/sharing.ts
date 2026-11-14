@@ -235,7 +235,7 @@ export class SharingContentRepository {
   async read(principal:Reader,id:string):Promise<Shared> {
     if(principal.admin||principal.scope===null||!principal.space||(parentSpace(principal.space)??principal.space)!==principal.scope)
       throw new HttpError(403,'space_context_required');
-    // What is shared into the reader's own conversation; for an answer reader, into the asking group (ADR-0248).
+    // What is shared into the reader's own conversation; for an answer reader, into the asking group (ADR-0249).
     const home=this.access.recall(principal)!,binding=await this.prepared.audience.assert(principal);
     const row=(await this.stores.control.query(`SELECT r.* FROM sharing_releases r JOIN sharing_rules s ON s.id=r.rule_id
       WHERE r.id=$1 AND r.state='active' AND s.enabled AND s.revision=r.rule_revision AND ${recallCondition('s.destination','$2','$5')}
@@ -282,7 +282,7 @@ export class SharingContentRepository {
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');
     // A group whose topics share memory shares its approved releases and filters across those topics too. An answer
-    // reader gets exactly what the asking group gets, never what is shared into its own private chat (ADR-0248).
+    // reader gets exactly what the asking group gets, never what is shared into its own private chat (ADR-0249).
     const home=this.access.recall(principal)!,group=home.group;
     string(query,2000);const binding=await this.prepared.audience.assert(principal),rules=await this.policies.forDestination(home.space,group),sources:Shared[]=[];
     const rows=(await this.stores.control.query(`SELECT r.id FROM sharing_releases r JOIN sharing_rules s ON s.id=r.rule_id

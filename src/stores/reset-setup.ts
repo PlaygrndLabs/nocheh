@@ -69,7 +69,7 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
       projects.has(id))throw Error('reset_setup_snapshot_invalid');projects.add(id);}
   const assignments=new Set<string>();
   for(const item of c.project_assignments as unknown[]) {const row=exact(item,['space_id','project_id','mode']),space=validateSpace(row.space_id),mode=String(row.mode);
-    // A private chat never joins a project (ADR-0242), and a topic always follows its group's (ADR-0246).
+    // A private chat never joins a project (ADR-0242), and a topic always follows its group's (ADR-0247).
     if(assignments.has(space)||!['assigned','none','inherit'].includes(mode)||parentSpace(space)&&mode!=='inherit'||
       (mode==='assigned'?(typeof row.project_id!=='string'||!projects.has(row.project_id)||!groupSpace(space)):row.project_id!==null))
       throw Error('reset_setup_snapshot_invalid');assignments.add(space);}

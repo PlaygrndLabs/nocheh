@@ -119,7 +119,7 @@ const listed = (names: string[]) =>
   names.length < 2 ? (names[0] ?? '') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
 
 /** Who would see a task after a move, as the server works it out for the task card too: every chat of the project for
- * a task set on the project itself, or only its group for a group's task (ADR-0247). */
+ * a task set on the project itself, or only its group for a group's task (ADR-0248). */
 export type Audience = {
   project: string | null;
   group: string | null;

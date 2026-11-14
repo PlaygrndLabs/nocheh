@@ -214,14 +214,14 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'steps: Plan:','machine_off: 🚫 Withdrawn: its machine was turned off or changed. Nothing runs.',
   'report_private: ✅ Done: the job you asked for here finished. Its report is in your private chat.',
   'limited_private: ⏱ The job you asked for here stopped at its limit. A short note is in your private chat.'].join('\n');
-/** The first line of a private answer, before the question (ADR-0248): {group} is the group or topic where it was asked,
+/** The first line of a private answer, before the question (ADR-0249): {group} is the group or topic where it was asked,
  * {groups} every group the answer may read, the asking one included. Group and topic names lose their brackets and
  * control characters, so no one can write a line that looks like it. */
 export const privateAnswerFrame='[Private answer] The question below was asked in {group}, and the person who asked tapped Answer privately. '+
   'Answer it here, in their private chat, from what you can read in these groups of its project: {groups}. '+
   'This answer only reads: it cannot send anything to a group, change a task, start a job or ask for an action.';
 /** The "Answer privately" button under the owner's own answer in a group, and the short answers to a tap on it or to a
- * /start in the private chat that cannot be answered. One "name: text" line each; no model writes them (ADR-0248). */
+ * /start in the private chat that cannot be answered. One "name: text" line each; no model writes them (ADR-0249). */
 export const privateAnswerTexts=['button: 🔒 Answer privately','open: 🔒 Opening your private chat. Tap Start there if Telegram asks.',
   'only_asker: Only the person who asked can use this button.','expired: This button has expired. Ask again in the group for a new one.',
   'used: This question was already answered privately. Ask again in the group for a new answer.',

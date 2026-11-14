@@ -3,7 +3,7 @@
 `private_chat_stays_out_of_groups` plants each PRIVATEMARK<n> in the owner's private chat (a plain message, a native
 note, a personal task, a private job and the owner's default role) and saves it in the fixture's canaries.json.
 `project_groups_stay_apart` adds one more, a private message next to the search word its groups share, so the
-private answer it opens in that chat (ADR-0248) is swept too. `private_canaries_never_left_the_owner` then reads
+private answer it opens in that chat (ADR-0249) is swept too. `private_canaries_never_left_the_owner` then reads
 everything the fake Telegram (tools/acceptance/telegram_mock.py) holds and looks for any of them outside that chat.
 Nothing on the owner's private side reaches a group or a member without a card in the private chat that names who
 will see it, and no planted mark ever gets such a card, so a mark anywhere else is a leak.

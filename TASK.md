@@ -6,7 +6,7 @@ Members step 2: projects and the private button (owner, 2026-11-12: "I just revi
 tables and seems what I want if there is a important point or need my answer ask, else start
 build.", approving the Members design; 2026-11-13: chose "Keep them, yours only" when asked
 whether the owner's own sharing tools stay). One pull request in four parts:
-- Projects replace the share box ([ADR-0246](docs/adr/0246-projects-replace-the-share-box.md)):
+- Projects replace the share box ([ADR-0247](docs/adr/0247-projects-replace-the-share-box.md)):
   a group answer uses only that group, for everyone. The project share box, its modes, "Don't
   share into this chat" and "Set by project" are gone, and project rules are deleted at start,
   not converted. The owner's own sharing rules and fact grants stay, yours only, and the rule
@@ -20,7 +20,7 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   [organization](test/store-knowledge-management.test.ts),
   [reset](services/hermes/test_reset_configuration.py),
   [dashboard](test/dashboard-pages.browser.mjs)).
-- Tasks follow data access ([ADR-0247](docs/adr/0247-tasks-follow-data-access.md); owner: "task
+- Tasks follow data access ([ADR-0248](docs/adr/0248-tasks-follow-data-access.md); owner: "task
   access and edit should behave like data access for project and groups. user Bob can
   manage(crud) other tasks that are for project1 or all joined groups."): in a project, a group
   or topic sees and manages only its own group's tasks (its topics' too when they share what
@@ -36,7 +36,7 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   [card lines](test/prompts.test.ts), [audience route](test/mini-app.test.ts),
   [dashboard](test/dashboard-pages.browser.mjs)). Tasks that groups added before this keep
   their group and are now seen only by it.
-- Answer privately, the read side ([ADR-0248](docs/adr/0248-answer-privately.md)): a private
+- Answer privately, the read side ([ADR-0249](docs/adr/0249-answer-privately.md)): a private
   answer reads the groups frozen in its record when the button is tapped (the asking group
   and the project's other served groups). A later change in the project only narrows or
   closes it. It reads by search, page and plain long-term memory search only, plus the
@@ -47,7 +47,7 @@ whether the owner's own sharing tools stay). One pull request in four parts:
   expire hourly, and the owner lists the record at `GET /v1/private-answers`
   ([record](test/store-private-answers.test.ts), [routes and tools](test/private-answers.test.ts),
   [memory](test/store-provenance.test.ts), [profile](services/hermes/test_scopes.py)).
-- Answer privately, the button ([ADR-0248](docs/adr/0248-answer-privately.md)): under the
+- Answer privately, the button ([ADR-0249](docs/adr/0249-answer-privately.md)): under the
   owner's own answer in a group or topic whose project has another served group, a 🔒 Answer
   privately button. Only the owner's tap works; anyone else's gets a short popup and nothing
   runs. `/start <id>` in the private chat answers read-only from the groups frozen at the tap,

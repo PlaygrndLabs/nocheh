@@ -2892,7 +2892,7 @@ by hand blocks that chat from joining while the project shares; project rules ha
 privacy notes of their own.
 Superseded on 2026-11-13 by Members step 2: a project shares nothing between its groups,
 its share box is gone and its project rules are deleted at start
-([ADR-0246](adr/0246-projects-replace-the-share-box.md)); the pending live check and
+([ADR-0247](adr/0247-projects-replace-the-share-box.md)); the pending live check and
 the open points above no longer apply.
 
 </entry>

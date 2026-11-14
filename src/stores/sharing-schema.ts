@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS sharing_releases (
  created_at timestamptz NOT NULL DEFAULT now(),revoked_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS sharing_releases_rule ON sharing_releases(rule_id,id) WHERE state='active';
--- Dev mode: a project never shares between its groups (ADR-0246). Rules a project wrote are deleted, never turned off or
+-- Dev mode: a project never shares between its groups (ADR-0247). Rules a project wrote are deleted, never turned off or
 -- kept as the owner's, with their previews and released texts; the owner's own rules and their texts stay. Texts already
 -- said in a group stay in its history. Runs only while the column that marks a project's rule still exists.
 DO $$BEGIN

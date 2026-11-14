@@ -340,7 +340,7 @@ export class MemoryAccessRepository {
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);await this.reconcile();
     // Persistent grants to any conversation the principal recalls apply, so a group's topics share them. An answer reader
-    // gets the asking group's grants, never grants into its own private chat (ADR-0248).
+    // gets the asking group's grants, never grants into its own private chat (ADR-0249).
     const home=this.access.recall(principal)!;
     const binding=await this.prepared.audience.assert(principal),rows=(await this.stores.control.query(`SELECT * FROM memory_fact_grants
       WHERE ${recallCondition('destination','$1','$2')} AND mode='persistent' AND state='active' AND (expires_at IS NULL OR expires_at>now()) ORDER BY id LIMIT 100`,

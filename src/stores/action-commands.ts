@@ -31,7 +31,7 @@ const ruleButtons:Record<string,[ApprovalText,string][]>={
 const ruleChoices=(row:{job_id:string|null;match_key:string|null;kind:string})=>!row.job_id&&row.match_key?ruleButtons[row.kind]??null:null;
 /** The Retry failed button under a problem notice in the owner's private chat. */
 export const retryButton='nr';
-/** The Answer privately button under the owner's answer in a group: `np` and its record's id (ADR-0248). */
+/** The Answer privately button under the owner's answer in a group: `np` and its record's id (ADR-0249). */
 const answerButton=/^np([a-f0-9]{32})$/;
 const reviewLimit=2200;
 // Telegram's message limit in UTF-16 units, less room for the outcome a decided card adds.
@@ -293,7 +293,7 @@ export class ActionCommandRepository {
    * A task card: what changes in which project's list, every group and topic that will see the task by name, and,
    * for a task set on the project itself, that chats added later see it too, or, for a group's task, that the
    * project's other groups don't; what stays private, then exactly what those chats will see, with each task that
-   * moves in under it. Null when it does not fit one Telegram card (ADR-0243, ADR-0247).
+   * moves in under it. Null when it does not fit one Telegram card (ADR-0243, ADR-0248).
    */
   private async taskCard(id:string) {
     const texts=await this.texts(),urls:string[]=[],owner={admin:true,scope:null};
@@ -585,7 +585,7 @@ export class ActionCommandRepository {
     await answer(reply);await this.settle('background',action.id,seen);return true;
   }
   /**
-   * Answer privately under the owner's answer in a group (ADR-0248). Only the person who asked can use it; anyone else
+   * Answer privately under the owner's answer in a group (ADR-0249). Only the person who asked can use it; anyone else
    * gets a short note and nothing changes. A valid tap freezes the groups the answer may read and answers with a link that
    * opens the asker's private chat with Nocheh, where its /start asks for the answer. A tap the record refuses gets its
    * fixed note; no model runs either way.

@@ -44,7 +44,7 @@ source identifiers and links do not change when a derivative is activated.
 | POST `/v1/sharing/preview`; GET `/v1/sharing/previews[/:id]`; POST `/v1/sharing/previews/:id/approve` | Prepare, inspect or approve a release from chosen sources |
 | GET `/v1/sharing/releases`; POST `/v1/sharing/releases/:id/revoke` | List or revoke releases |
 | POST `/v1/memory/provenance` | Bounded Honcho conclusion ancestry, each conclusion's exact cited messages or derivation batch, and confirmed ingestion references |
-| GET `/v1/private-answers` | The record of Answer privately buttons, newest first, 100 a page: who asked, where, the project, the groups frozen at the tap, the state and its times; `project` keeps one project and `after` continues from an answer's id ([ADR-0248](adr/0248-answer-privately.md)) |
+| GET `/v1/private-answers` | The record of Answer privately buttons, newest first, 100 a page: who asked, where, the project, the groups frozen at the tap, the state and its times; `project` keeps one project and `after` continues from an answer's id ([ADR-0249](adr/0249-answer-privately.md)) |
 
 List cursors use `after`; histories use `before`. Learned filters use both
 `scope_kind=conversation|project` and `scope_id`. Sharing rules configure preparation;
@@ -101,9 +101,9 @@ the removed `sharing_enabled`, `sharing_mode` or `share_into`, is refused with
 `instructions`, `expected_revision`, `operation_id`.
 
 A project shares no knowledge between its groups: a group answer uses only that
-group ([ADR-0246](adr/0246-projects-replace-the-share-box.md)); its groups share
+group ([ADR-0247](adr/0247-projects-replace-the-share-box.md)); its groups share
 only the tasks set on the whole project
-([ADR-0247](adr/0247-tasks-follow-data-access.md)). Every sharing rule is
+([ADR-0248](adr/0248-tasks-follow-data-access.md)). Every sharing rule is
 the owner's own. A rule with more than 100 sources is refused with 400
 `invalid_sharing_sources`, and a change that would give a group more than ten
 enabled filtered rules, counted over its General chat and topics, is refused

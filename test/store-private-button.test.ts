@@ -13,7 +13,7 @@ import {privateAnswerId,type PrivateAnswer} from '../src/stores/private-answers.
 import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
 import {GP1,GP2,GP3,GP4,OWNER,P1,P2,groupsPolicy,seedGroups} from './fixture-groups.js';
 
-// The Answer privately button end to end in storage (ADR-0248): offered under the owner's own answer in a group whose
+// The Answer privately button end to end in storage (ADR-0249): offered under the owner's own answer in a group whose
 // project serves another group, tapped by the owner only, then answered in the owner's private chat after /start.
 test('Answer privately is offered under the owner’s group answer, tapped only by the owner and answered once after /start',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{

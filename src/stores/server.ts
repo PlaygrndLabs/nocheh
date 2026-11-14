@@ -74,7 +74,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       return json(res,200,await s.memory.prepareRequest(body));
     }
-    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0248).
+    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249).
     const parsed=reader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
     assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
@@ -432,7 +432,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         await s.turns.assertAudience(principal);return json(res,200,copy);
       }
       if(path==='/v1/imports/pending') {
-        // An answer reader hears only about imports into the groups of its record, not the owner's (ADR-0248).
+        // An answer reader hears only about imports into the groups of its record, not the owner's (ADR-0249).
         if(principal.answer!==undefined)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
         const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});

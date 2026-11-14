@@ -172,7 +172,7 @@ export class KnowledgeManagementRepository {
    entities:{entities:entityPage.entities.slice(0,10),next:entityPage.entities.length>10?entityPage.entities[9]!.id:entityPage.next},
    ...(space?{assignment:await this.s.projects.effective(space),sharing_rules:rules.slice(0,10),sharing_next:rules.length>10?rules[9].id:null}:{}),
    delegations:delegationPage.delegations.slice(0,10),delegations_next:delegationPage.delegations.length>10?delegationPage.delegations[9]!.id:delegationPage.next,
-   // Organizing by itself only creates projects; moving a group or topic into or out of one always asks the owner (ADR-0246).
+   // Organizing by itself only creates projects; moving a group or topic into or out of one always asks the owner (ADR-0247).
    automatic_operations:['create_project'],review_required:['project_moves','identity_links','corrections','sharing','fact_access','project_edits']});
  }
 
@@ -256,7 +256,7 @@ export class KnowledgeManagementRepository {
   const undoMoves=row.state==='applied'&&row.kind==='organization'?(row.result?.assignments??[]).map((change:any)=>({space_id:change.after.space_id,
    mode:change.before?.mode??'inherit',project_id:change.before?.project_id??null})):[];
   // The owner's review and undo name each project a group moves into or out of, with the groups already in it, since
-  // people in two of them can get private answers that combine them (ADR-0246).
+  // people in two of them can get private answers that combine them (ADR-0247).
   // A project the proposal itself creates is named too, with no group in it yet, whenever the proposal puts a group in it.
   const created=proposal.kind==='organization'?proposal.creates.filter(c=>proposal.assignments.some(a=>a.project_key===c.key))
    .map(c=>({id:'new:'+c.key,name:c.name,groups:[] as string[]})):[];
@@ -305,7 +305,7 @@ export class KnowledgeManagementRepository {
 
  private async matchDelegation(proposal:OrganizationProposal,input:{source:SourceReference;space:string;origin:string;binding:GuardBinding},db?:pg.PoolClient,required?:{id:string;revision:number}):Promise<OrganizationDelegation|null>{
   // Organizing by itself never moves a group or topic into or out of a project: every such move waits for the owner's
-  // review, so a delegation only ever creates projects, and turning one on is what lets it (ADR-0246).
+  // review, so a delegation only ever creates projects, and turning one on is what lets it (ADR-0247).
   if(proposal.assignments.length)return null;
   const control=db??this.stores.control;
   const rows=(await control.query('SELECT * FROM organization_delegations WHERE enabled AND (expires_at IS NULL OR expires_at>now()) ORDER BY id')).rows as OrganizationDelegation[];
@@ -335,7 +335,7 @@ export class KnowledgeManagementRepository {
   return null;
  }
 
- /** The project a chat is in now and the one a move puts it in. A topic is always in its group's (ADR-0246). */
+ /** The project a chat is in now and the one a move puts it in. A topic is always in its group's (ADR-0247). */
  private async moveProjects(move:{space_id:string;mode:string;project_id:string|null},db:Pick<pg.PoolClient,'query'>):Promise<{now:string|null;next:string|null}>{
   const parent=parentSpace(move.space_id),rows=(await db.query('SELECT space_id,project_id,mode FROM project_assignments WHERE space_id=$1 OR space_id=$2',[move.space_id,parent])).rows;
   const own=rows.find(r=>r.space_id===move.space_id),group=parent?rows.find(r=>r.space_id===parent&&r.mode==='assigned')?.project_id??null:null;
@@ -344,7 +344,7 @@ export class KnowledgeManagementRepository {
  }
 
  /** Each existing project these moves put a group into or take one out of: its name and the served groups in it other
-  * than the moved ones, as projectGroups decides (ADR-0246). A project the proposal creates has none yet. */
+  * than the moved ones, as projectGroups decides (ADR-0247). A project the proposal creates has none yet. */
  private async projectGroups(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string;groups:string[]}[]>{
   const ids=new Set<string>(),moved=new Set(moves.map(move=>parentSpace(move.space_id)??move.space_id));
   for(const move of moves){const {now,next}=await this.moveProjects(move,db);if(next!==now)for(const project of [now,next])if(project)ids.add(project);}
@@ -355,7 +355,7 @@ export class KnowledgeManagementRepository {
 
  /** The projects with tasks set on the whole project that these moves bring a chat into from another project, or from
   * none. A group sees those tasks, archived and in the trash too, besides its own; never another group's (ADR-0243,
-  * ADR-0247). The owner's review says so. */
+  * ADR-0248). The owner's review says so. */
  private async taskProjects(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string}[]>{
   const ids=new Set<string>();
   for(const move of moves){const {now,next}=await this.moveProjects(move,db);if(next&&next!==now)ids.add(next);}

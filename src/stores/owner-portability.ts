@@ -56,7 +56,7 @@ function parse(input:unknown):{record:OwnerRecord;definition:Table} {
 
 /**
  * A record exported before projects stopped sharing between their groups, converted as starting the stores converts
- * the rows they hold (ADR-0246): a rule a project's share box kept is not brought at all (null), never as the owner's
+ * the rows they hold (ADR-0247): a rule a project's share box kept is not brought at all (null), never as the owner's
  * own; an owner's rule and a chat's project lose the share box's fields; and a topic's own project choice becomes
  * "follows its group". Any other record, or one already in the current form, is returned as it is.
  */
@@ -111,7 +111,7 @@ export class OwnerPortabilityRepository {
       for(const {record,definition} of parsed) {
         // A setting nobody changed on the old installation has nothing to bring.
         if(definition.singleton&&record.row.revision===0){unchanged++;continue;}
-        // A record from before projects stopped sharing comes back as the stores convert their own rows (ADR-0246).
+        // A record from before projects stopped sharing comes back as the stores convert their own rows (ADR-0247).
         const retired=retire(record.table,record.row);
         if(!retired){unchanged++;continue;}
         const columns=await this.names(record.table),present=Object.keys(retired);

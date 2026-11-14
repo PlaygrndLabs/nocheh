@@ -209,7 +209,7 @@ export class LearnedMemoryRepository {
     if(!row||row.retired||row.imported&&!principal.admin)throw new HttpError(404,'learned_memory_not_found');
     if(!principal.admin&&principal.answer!==undefined) {
       // An answer reader reads what was learned in the groups frozen in its record and in its project, when that project
-      // is still active (ADR-0248); without its record, nothing.
+      // is still active (ADR-0249); without its record, nothing.
       const reads=principal.reads;
       if(!reads||row.scope_kind==='conversation'&&!inReadSet(reads,row.scope_id))throw new HttpError(404,'learned_memory_not_found');
       if(row.scope_kind==='project'&&(reads.project!==row.scope_id||

@@ -42,7 +42,7 @@ const conversationOrderWaitMs=120000;
 const observeMs=1000;
 /** Context changes after which a finished turn's reply is not sent: the binding or audience moved on, so it runs again. */
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
-/** A private answer whose record closed (expired, refused or its groups changed) is withdrawn like a retired source (ADR-0248). */
+/** A private answer whose record closed (expired, refused or its groups changed) is withdrawn like a retired source (ADR-0249). */
 const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed'];
 /**
  * Who sent a group message and when, as one line for the model. Names come
@@ -88,7 +88,7 @@ export function groupAddressing(original:any,botId:string):{direct:boolean;handl
   return {direct,handles:[...handles].sort().slice(0,20)};
 }
 
-/** The record a `/start <id>` in the owner's private chat opens, from the captured original text, or null (ADR-0248).
+/** The record a `/start <id>` in the owner's private chat opens, from the captured original text, or null (ADR-0249).
  * Only that exact form opens one; a plain /start, or one with anything else, is an ordinary message. */
 export function privateStart(original:any):string|null {
   const text=original?.message?.text;
@@ -161,7 +161,7 @@ export class TelegramDispatchRepository {
     return this.observation(await this.row(row.event_id));
   }
   /**
-   * A turn that ended for good without its reply (ADR-0248). A private answer's claimed record closes, so a later tap
+   * A turn that ended for good without its reply (ADR-0249). A private answer's claimed record closes, so a later tap
    * or /start says why rather than "already answered"; when the record itself closed (its hour passed, or its project or
    * groups changed), the private chat gets that short notice instead of the answer, once. A group reply that never went
    * out takes its untapped button's record with it.
@@ -232,7 +232,7 @@ export class TelegramDispatchRepository {
   }
   /**
    * The Answer privately button under the owner's own answer in a group or topic whose project has another group Nocheh
-   * serves (ADR-0248). Never under a fixed reply, an empty reply, a private answer or anyone else's question; a follow-up,
+   * serves (ADR-0249). Never under a fixed reply, an empty reply, a private answer or anyone else's question; a follow-up,
    * a job's report and a scheduled run are not message turns and never get one. Its record is offered once per question,
    * so a retried reply carries the same button; when it cannot be offered, the reply goes without it.
    */
@@ -408,7 +408,7 @@ export class TelegramDispatchRepository {
   /**
    * What a turn's message and its album parts hold for the model: their text in order (an album's caption usually sits
    * on one part), voice transcripts, files with their extracted text, and the derivatives these came from. Without
-   * `originals`, as in a private answer, a photo is never sent as an image: the turn gets text only (ADR-0248).
+   * `originals`, as in a private answer, a photo is never sent as an image: the turn gets text only (ADR-0249).
    */
   private async contents(album:[string,Awaited<ReturnType<SourceRepository['read']>>][],binding:GuardBinding,originals:boolean) {
     const transcripts:string[]=[],files:any[]=[],parents:DerivativeReference[]=[];let tooLarge=0;
@@ -471,7 +471,7 @@ export class TelegramDispatchRepository {
     return {frame:fillTemplate(template,{group,groups:[...names.values()].join(', ')}).slice(0,4000),group};
   }
   /**
-   * A /start <id> in the owner's private chat (ADR-0248). The record is claimed for this very message: only by the asker,
+   * A /start <id> in the owner's private chat (ADR-0249). The record is claimed for this very message: only by the asker,
    * only in the asker's own private chat, once, and only while its project still holds the asking group. The turn then
    * runs under the answer's pass, which reads the groups frozen at the tap: the question's own text, transcripts and
    * extracted file text (never an original file), the question's speaker line and the asking group's recent messages,
@@ -536,7 +536,7 @@ export class TelegramDispatchRepository {
     const parts=others.length?await this.albumParts(source,space,others):[];
     if(!parts)return observation('waiting','admission',0,Date.now()+1000,'prerequisite');
     // A /start <id> in the owner's private chat opens a private answer: its whole turn is built under that answer's own
-    // pass, never as the owner (ADR-0248). One that cannot be answered gets a fixed reply in the owner's own turn.
+    // pass, never as the owner (ADR-0249). One that cannot be answered gets a fixed reply in the owner's own turn.
     const start=scope.owner?privateStart(payload):null;let refusal:string|null=null;
     if(start) {
       const answer=await this.answer(source,original,payload,space,start,attempt);

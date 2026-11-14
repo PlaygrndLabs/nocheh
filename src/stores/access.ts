@@ -32,7 +32,7 @@ export class SourceAccessRepository {
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
     if(!['telegram','browser'].includes(source.channel))return false;
     // An answer reader reads the groups frozen in its record, and of its own private chat only its own turn's message
-    // (the /start that opened it): never the rest of that chat, and nothing without its record (ADR-0248).
+    // (the /start that opened it): never the rest of that chat, and nothing without its record (ADR-0249).
     const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
     if(answer&&!reads)return false;
     const own=answer&&reference.id===principal.turnEvent&&source.scope===principal.scope;
@@ -69,14 +69,14 @@ export class SourceAccessRepository {
   }
   /** The conversations a scoped principal recalls; null for the owner and administration, which read everything.
    * For an answer reader, the asking group or topic (its read set's home): what its shared and granted context is for
-   * (ADR-0248). An answer reader whose read set was not bound reads nothing. */
+   * (ADR-0249). An answer reader whose read set was not bound reads nothing. */
   recall(principal:Reader):RecallScope|null {
     if(principal.admin||principal.scope===null)return null;
     if(principal.answer!==undefined){if(!principal.reads)throw new HttpError(409,'private_answer_closed');return recallScope(principal.reads.home,this.policy().topic_memory);}
     return recallScope(principal.space??principal.scope,this.policy().topic_memory);
   }
   /** The conversations a scoped principal reads, as a read set; null for the owner and administration. An answer
-   * reader reads the groups frozen in its record; anyone else its recall scope (ADR-0248). */
+   * reader reads the groups frozen in its record; anyone else its recall scope (ADR-0249). */
   reads(principal:Reader):ReadSet|null {
     if(principal.admin||principal.scope===null)return null;
     if(principal.answer!==undefined){if(!principal.reads)throw new HttpError(409,'private_answer_closed');return principal.reads;}
