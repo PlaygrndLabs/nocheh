@@ -12,6 +12,8 @@ import {byteBudget,jobDeadlines,jobTokens,reportParts} from '../src/stores/backg
 import {brokerServer} from '../src/security/broker.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {installChatsForTest} from '../src/chats.js';
+import {families} from './fixture-families.js';
 
 test('a background job is started with one call, approved on its card, runs as one run in its own session and reports to its chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -305,6 +307,68 @@ test('a background job is started with one call, approved on its card, runs as o
     const report=(await stores.control.query('SELECT a.* FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1',[mine.id])).rows[0];
     assert.deepEqual([report?.destination,report?.scope,report?.state],['123','123','approved'],'the report goes to the owner\'s private chat');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, from the request to the run (ADR-0250)',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  // The group's Telegram id is what the archive and TELEGRAM_GROUP_IDS hold; its Nocheh id is a digest (the second family).
+  const family=families[1]!,raw='-2'+String(Date.now()).slice(-12),chat=family.id(raw),key='background-digest:'+Date.now();
+  assert.notEqual(chat,raw);
+  const restore=installChatsForTest(family.directory([raw],{owner:'123',served:[raw]}));
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-digest-'));
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],group_access:{[raw]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+    runtime:async(operation)=>{
+      if(operation==='guard.detect')return {literals:[]};
+      if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5,request:0}};
+      if(operation==='run.resume')return {state:'not_found'};
+      if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
+      return {state:'done'};
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  let sent=100;
+  const message=async(label:string,from=9,text='Please find what is still open')=>{
+    const payload={message:{message_id:++sent,date:1700000000,chat:{id:Number(raw),type:'supergroup'},from:{id:from,first_name:'Member'},text}};
+    const event:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:raw,source_id:label,revision:'1',occurred_at:null,text,payload};
+    const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
+  };
+  const actor=async(source:string):Promise<Reader>=>{
+    const binding=await s.guards.state();return {admin:false,scope:chat,space:chat,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+  };
+  const authority=async()=>({owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0].epoch)});
+  const job=async(id:string)=>(await stores.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    const settings=await s.jobs.settings();
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:1,revision:settings.revision});
+    for(let index=0;index<3;index++)await message('history-'+index,8,'Earlier message '+index);
+    // The turn's chat is the group's Nocheh id, never the archive's Telegram id: the job is saved under it.
+    const ask=await message('ask');
+    assert.equal((await s.turns.binding(await actor(ask.id))).scope,chat,'a turn names its chat by its Nocheh id');
+    const proposed=await s.jobs.start(await actor(ask.id),{title:'Open tasks',instruction:'Find every task that is still open.'});
+    assert.equal(proposed.state,'proposed');assert.equal(proposed.approver,'requester');
+    const saved=await job(proposed.id);
+    assert.deepEqual([saved.scope,saved.space_id,saved.target,saved.requester],[chat,chat,chat,'9']);
+    // The member's daily limit counts this chat's jobs, and the group's list shows them.
+    await assert.rejects(s.jobs.start(await actor((await message('again')).id),{title:'Again',instruction:'Again.'}),{code:'job_limit_reached'});
+    assert.ok((await s.jobs.list(await actor((await message('list')).id))).jobs.some(item=>item.id===proposed.id),'the group lists its own job');
+    // Approved by the person who asked, whose access TELEGRAM_GROUP_ACCESS keeps under the Telegram id; the run is
+    // served by the chat's row and its profile is the job's.
+    await s.jobs.decide('9',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message('approve'));
+    // The test before this one leaves jobs in their slots; they end, so this one starts now.
+    await stores.control.query("UPDATE background_jobs SET state='stopped' WHERE state IN ('running','reporting') AND id<>$1",[proposed.id]);
+    assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'waiting');
+    const begun=(await stores.control.query('SELECT event_id FROM background_runs WHERE job_id=$1',[proposed.id])).rows[0].event_id;
+    const context:any=await s.jobs.runs.context({event_id:begun,owner_epoch:(await authority()).epoch});
+    await s.jobs.runs.claim({...context,actor:context.actor});
+    assert.equal((await job(proposed.id)).state,'running');
+    const run:Reader={admin:false,scope:chat,space:chat,turnEvent:begun,logical_profile:'job-'+proposed.id.slice(0,24)};
+    assert.equal(await s.jobs.runs.deliveryAllowed(run),true,'a running run passes the turn policy check');
+    // The member stops their own job from the same chat.
+    assert.equal((await s.jobs.stop(await actor((await message('stop')).id),{id:proposed.id})).state,'stopped');
+  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('the byte budget follows the cheapest prompt rate',()=>{

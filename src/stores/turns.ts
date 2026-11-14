@@ -84,7 +84,11 @@ export class RuntimeTurnRepository implements BrokerStorage {
       return principal.space!;
     }
     if(!space||space!==principal.space)throw new HttpError(403,'turn_source_denied');
-    return source.scope;
+    // The turn's chat as Nocheh names it (ADR-0250): the group or private chat of its space, never the archive's raw
+    // Telegram id, which a chat first seen after step 2b, or upgraded since, does not share. What the turn records
+    // (jobs, actions, proposals) and what is checked against it later (served groups, group access, a job's chat) is
+    // then always the chat's own id.
+    return parentSpace(space)??space;
   }
   async binding(principal:Reader):Promise<TurnBinding> {
     if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');
