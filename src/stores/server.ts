@@ -1,6 +1,6 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
-import {admin,reader} from '../access.js';
+import {admin,currentReader} from '../access.js';
 import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
 import {servedChats} from '../chats.js';
 import {telegramAddress} from '../frontdoor/telegram.js';
@@ -83,8 +83,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       return json(res,200,await s.memory.prepareRequest(body));
     }
-    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249).
-    const parsed=reader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
+    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249). A
+    // pass naming a chat another process recorded a moment ago (a new topic's first turn) is read again once this
+    // process's directory has looked again, as the broker does (ADR-0250).
+    const parsed=await currentReader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
     assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
