@@ -261,6 +261,26 @@ class ConfigurationTests(unittest.TestCase):
                             ('NOCHEH_LOG_MAX_FILES','0'),('NOCHEH_LOG_MAX_FILES','1000'),('NOCHEH_LOG_MAX_FILES','')]:
                 with self.assertRaises(ValueError,msg=key+'='+bad):validate({**values,key:bad})
 
+    def test_the_database_viewer_asks_for_its_own_login_on_the_default_network(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        viewer=compose['pgweb-archive']
+        # The login comes from the environment, never the command line, and pgweb asks for it on every page.
+        self.assertEqual({key:viewer['environment'][key] for key in ('PGWEB_AUTH_USER','PGWEB_AUTH_PASS')},
+                         {'PGWEB_AUTH_USER':'owner','PGWEB_AUTH_PASS':'${NOCHEH_VIEWER_WEB_PASSWORD:-}'})
+        self.assertFalse([part for part in viewer['command']+viewer['entrypoint'] if 'auth' in part.lower() and 'PGWEB_AUTH_PASS' not in part])
+        self.assertEqual(viewer['entrypoint'][:2],['/bin/sh','-c']);self.assertIn('[ -z "$$PGWEB_AUTH_PASS" ]',viewer['entrypoint'][2])
+        self.assertIn('exec /usr/bin/pgweb "$$@"',viewer['entrypoint'][2])
+        self.assertIn('--readonly',viewer['command']);self.assertIn('--lock-session',viewer['command'])
+        # Healthy only while it answers 401 without the login.
+        self.assertEqual(viewer['healthcheck']['test'][0],'CMD-SHELL');self.assertRegex(viewer['healthcheck']['test'][1],r'%\{http_code\}.*" = 401$')
+        # It keeps its restart policy and stays on the default network, with its port on loopback only.
+        self.assertEqual(viewer['restart'],'unless-stopped');self.assertNotIn('networks',viewer)
+        self.assertEqual(viewer['ports'],['127.0.0.1:${NOCHEH_VIEWER_PORT:-8782}:8081'])
+        # The mini app and the dashboard read the same test-servers setting.
+        self.assertEqual(compose['nocheh-miniapp']['environment']['TELEGRAM_TEST_ENVIRONMENT'],'${TELEGRAM_TEST_ENVIRONMENT:-}')
+
     def test_owner_sets_parallel_runs_and_replies_and_replies_never_exceed_runs(self):
         import yaml
         from tools.operations.installation.configuration import ROOT,validate

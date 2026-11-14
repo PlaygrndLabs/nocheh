@@ -349,6 +349,9 @@ def main(command,state,rest):
                 return json.loads(raw)
             except Exception as error: return {'error':type(error).__name__}
         result['hermes']=health('hermes',8781)
+        # Reports on the Hermes page's script rules, before they are enforced (ADR-0251).
+        from tools.operations.installation.dashboard import script_reports
+        result['hermes_page_script_reports']=script_reports(state)
         # The Telegram state comes from the bot itself; Hermes no longer talks to Telegram.
         result['telegram']=health('nocheh-telegram',8784)
     elif command=='backup':

@@ -191,6 +191,21 @@ class MiniAppSettingsTests(unittest.TestCase):
             # The bot label names only a bot this workspace polls (ADR-0245).
             self.assertEqual(environment['NOCHEH_POLLED_BOT_ID'], '5550001' if environment.get('TELEGRAM_ENABLED') == 'true' else '')
 
+    def test_the_dashboard_checks_phone_sign_ins_with_the_bot_id_and_owner_never_the_token(self):
+        import os
+        from tools.runtime.management import dispatch
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state); self.telegram(state)
+            with patch.dict(os.environ, {'NOCHEH_STATE_DIR': str(state)}):
+                checked = dispatch({'operation': 'mini_app.launch_check'})
+                self.assertEqual(checked, {'bot_id': '5550001', 'owner_id': '4242', 'test_environment': False})
+                self.assertNotIn('A' * 35, json.dumps(checked))
+                # Read from .env each time, so a changed bot or owner counts at once.
+                values = load(state); values.update(TELEGRAM_BOT_TOKEN='5550002:' + 'B' * 35, TELEGRAM_TEST_ENVIRONMENT='true')
+                write_env(env_path(state), values)
+                self.assertEqual(dispatch({'operation': 'mini_app.launch_check'}),
+                                 {'bot_id': '5550002', 'owner_id': '4242', 'test_environment': True})
+
     def test_apply_starts_the_mini_app_and_puts_it_on_the_owners_menu_button(self):
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder); initialize(state); revision = self.telegram(state, TELEGRAM_BOT_NAMES='Nocheh,نوچه')

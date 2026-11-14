@@ -78,6 +78,10 @@ def dispatch(body):
         query = urlencode({key:request[key] for key in ('profile', 'job') if request.get(key)})
         path = ('/api/nocheh/preferences' if request.get('profile') and not request.get('job') else '/api/nocheh/policy') + '?' + query
         return call(state, path, request if body.get('write') else None, 'PUT' if body.get('write') else 'GET')
+    if operation == 'mini_app.launch_check':
+        # What the dashboard checks a phone's Telegram launch data with: the bot's public ID, never its token.
+        from tools.operations.installation.mini_app import launch_check
+        return launch_check(load(state))
     if operation == 'native.connection':
         from tools.operations.installation.configuration import native_endpoint
         host,port=native_endpoint(state)

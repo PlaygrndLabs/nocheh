@@ -1,17 +1,44 @@
-"""Provision the optional local pgweb browser with a PostgreSQL read-only role."""
+"""Provision the optional local pgweb browser with a PostgreSQL read-only role and its own web login."""
 import secrets
 import subprocess
 
 from tools.operations.installation.configuration import load, write_env, env_path, compose_environment
 
+# The viewer's web login (ADR-0251). The password lives only in the ignored .env, never in a command line.
+WEB_USER = 'owner'
+
+
+def generated(values, key):
+    """Keeps a generated 64-character hex password, or makes one; hex stays literal in SQL, URLs and .env."""
+    password = values.get(key) or secrets.token_hex(32)
+    if len(password) != 64 or any(c not in '0123456789abcdef' for c in password):
+        raise ValueError(key + ' must be 64 lowercase hex characters')
+    return password
+
+
+def web_login(state):
+    """The viewer's web password, made and saved once. Returns it and whether it is new."""
+    values = load(state)
+    password = generated(values, 'NOCHEH_VIEWER_WEB_PASSWORD')
+    new = values.get('NOCHEH_VIEWER_WEB_PASSWORD') != password
+    if new:
+        values['NOCHEH_VIEWER_WEB_PASSWORD'] = password
+        write_env(env_path(state), values)
+    return password, new
+
+
+def show_login(env, password):
+    print('Read-only archive browser: http://127.0.0.1:' + env['NOCHEH_VIEWER_PORT'])
+    print('  It asks for a login once; your browser can save it.')
+    print('  User: ' + WEB_USER)
+    print('  Password: ' + password)
+
 
 def start(state, command, root):
     values = load(state)
-    password = values.get('NOCHEH_VIEWER_PASSWORD') or secrets.token_hex(32)
-    # Generated hex keeps the credential literal in both SQL and the database URL.
-    if len(password) != 64 or any(c not in '0123456789abcdef' for c in password):
-        raise ValueError('NOCHEH_VIEWER_PASSWORD must be 64 lowercase hex characters')
+    password = generated(values, 'NOCHEH_VIEWER_PASSWORD')
     values['NOCHEH_VIEWER_PASSWORD'] = password
+    values['NOCHEH_VIEWER_WEB_PASSWORD'] = generated(values, 'NOCHEH_VIEWER_WEB_PASSWORD')
     write_env(env_path(state), values)
     env = compose_environment(state)
     result = subprocess.call(command + ['up', '-d', '--wait', 'nocheh-db'], cwd=root, env=env)
@@ -39,5 +66,29 @@ ALTER ROLE nocheh_viewer SET statement_timeout = '15s';
     result = subprocess.call(command + ['--profile', 'tools', 'up', '-d', '--wait',
         '--no-deps', 'pgweb-archive'], cwd=root, env=env)
     if result == 0:
-        print('Read-only archive browser: http://127.0.0.1:' + env['NOCHEH_VIEWER_PORT'])
+        show_login(env, values['NOCHEH_VIEWER_WEB_PASSWORD'])
+    return result
+
+
+def refresh(state, command, root):
+    """After `up`, a viewer still running from before it had a login starts again with one (ADR-0251). It keeps
+    running: Compose recreates it only when its settings changed. A stopped viewer stays stopped."""
+    try:
+        env = compose_environment(state)
+        running = subprocess.run(command + ['--profile', 'tools', 'ps', '--status', 'running', '--quiet', 'pgweb-archive'],
+                                 cwd=root, env=env, capture_output=True, text=True)
+    except (OSError, ValueError):
+        print('Could not check whether the database viewer runs. If it does, run ./bin/nocheh db to give it its login.')
+        return 1
+    if running.returncode or not running.stdout.strip():
+        return 0
+    password, new = web_login(state)
+    env = compose_environment(state)
+    result = subprocess.call(command + ['--profile', 'tools', 'up', '-d', '--wait', '--no-deps', 'pgweb-archive'],
+                             cwd=root, env=env)
+    if result:
+        print('The database viewer could not restart with its login. Run ./bin/nocheh db to start it again.')
+    elif new:
+        print('The database viewer now asks for a login.')
+        show_login(env, password)
     return result

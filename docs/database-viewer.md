@@ -26,17 +26,25 @@ dashboard, API, or CLI commands so revision, authorization, invalidation, and
 provenance rules still apply.
 
 Run `./bin/nocheh db`, then open the address it prints: <http://127.0.0.1:8782> for
-the `personal` workspace, two above its `NOCHEH_PORT` for another workspace.
+the `personal` workspace, two above its `NOCHEH_PORT` for another workspace. The
+viewer asks for a login once, which the browser can save: the user `owner` and the
+password `db` prints each time.
 This starts the pinned pgweb image from the optional Compose `tools` profile.
 It opens the `nocheh` database, which holds the archive only on a legacy combined
 installation; browse the separate stores under **Databases**. It does not restart the assistant.
-`./bin/nocheh down` also stops the viewer; run `db` to start it again.
+`./bin/nocheh down` also stops the viewer; run `db` to start it again. It comes
+back by itself after Docker restarts, as before. `./bin/nocheh up` gives a viewer
+still running from before it had a login its login, and prints it; after
+`make dev`, run `db` once instead.
 
-The owner can inspect all archive scopes here. The HTTP port is loopback-only;
-there is no separate web login. Do not publish this port. The dedicated
+The owner can inspect all archive scopes here. The HTTP port is loopback-only,
+and pgweb asks for its own web login on every page, so a web page on another site
+cannot read it through that port. Do not publish this port. The viewer never
+starts without its login, and it reports healthy only while it asks for it. The dedicated
 `nocheh_viewer` PostgreSQL role has read access, with no source-write privileges.
 pgweb also runs in read-only mode with connection switching and SSH disabled.
-Its generated password lives in the ignored `.env` as `NOCHEH_VIEWER_PASSWORD`.
+Its generated password lives in the ignored `.env` as `NOCHEH_VIEWER_PASSWORD`, and
+the web login's as `NOCHEH_VIEWER_WEB_PASSWORD`; neither is on a command line.
 Hermes receives neither this credential nor this interface.
 
 Click a table to inspect rows/structure, or use Query:

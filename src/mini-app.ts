@@ -82,10 +82,10 @@ function send(target:DashboardTarget,method:string,path:string,headers:Record<st
  */
 export class DashboardClient {
   constructor(readonly target:DashboardTarget){}
-  call(method:string,path:string,body?:Buffer,phone?:string) {
+  call(method:string,path:string,body?:Buffer,phone?:string,launch?:string) {
     // A phone call always names a session, even an empty one, so the dashboard answers it as a phone.
     return send(this.target,method,'/api/nocheh'+path,{...(phone!==undefined?{'x-nocheh-mini-session':phone||'none'}:{}),
-      ...(body?{'content-type':'application/json'}:{})},body);
+      ...(launch!==undefined?{'x-telegram-init-data':launch}:{}),...(body?{'content-type':'application/json'}:{})},body);
   }
 }
 
@@ -100,8 +100,8 @@ export type MiniAppOptions={check:Omit<LaunchCheck,'now'>;dashboard:DashboardCli
 /** The phone sign-in routes of the dashboard, which holds the owner's password and every session. */
 class MiniAppSessions {
   constructor(private dashboard:DashboardClient) {}
-  private async lock(path:string,body:unknown) {
-    const result=await this.dashboard.call('POST','/mini-app/'+path,Buffer.from(JSON.stringify(body)));
+  private async lock(path:string,body:unknown,launch?:string) {
+    const result=await this.dashboard.call('POST','/mini-app/'+path,Buffer.from(JSON.stringify(body)),undefined,launch);
     let value:Record<string,unknown>={};try{value=JSON.parse(result.body.toString('utf8')) as Record<string,unknown>;}catch{}
     if(result.status>=500||!value||typeof value!=='object')throw new HttpError(503,'dashboard_unavailable');
     return {status:result.status,value};
@@ -111,7 +111,8 @@ class MiniAppSessions {
     if(status!==200||!['signed_in','signed_out','no_password'].includes(String(value.state)))throw new HttpError(503,'dashboard_unavailable');
     return String(value.state);
   }
-  signIn(password:unknown) {return this.lock('sign-in',{password});}
+  /** The launch data goes along, so the dashboard counts wrong passwords per Telegram account (ADR-0251). */
+  signIn(password:unknown,launch:string) {return this.lock('sign-in',{password},launch);}
   async signOut(token:string) {await this.lock('sign-out',{token});}
 }
 const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; "+
@@ -147,7 +148,7 @@ async function handle(options:MiniAppOptions,sessions:MiniAppSessions,req:Incomi
     if(path==='/api/mini/session')return json(res,200,{state:await sessions.state(token)});
     if(path==='/api/mini/sign-out'){await sessions.signOut(token);return json(res,200,{ok:true});}
     let password:unknown;try{password=(JSON.parse((await readBody(req,4096)).toString('utf8')) as {password?:unknown})?.password;}catch(error){if(error instanceof HttpError)throw error;throw new HttpError(400,'invalid_json');}
-    const {status,value}=await sessions.signIn(password);
+    const {status,value}=await sessions.signIn(password,String(req.headers['x-telegram-init-data']??''));
     const pick=(key:string)=>value[key]!==undefined?{[key]:value[key]}:{};
     return json(res,status,{...pick('token'),...pick('error'),...pick('until'),...pick('tries_left')});
   }

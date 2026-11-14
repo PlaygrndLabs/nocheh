@@ -35,6 +35,13 @@ def bot_id(token):
     return match.group(1) if match else ''
 
 
+def launch_check(values):
+    """What the dashboard checks a phone's mini app sign-in with, read from .env each time (ADR-0251): the bot's
+    public ID, the owner's Telegram ID and whether the bot is on Telegram's test servers. Never the bot token."""
+    return {'bot_id': bot_id(values.get('TELEGRAM_BOT_TOKEN', '')), 'owner_id': values.get('TELEGRAM_OWNER_ID', ''),
+            'test_environment': values.get('TELEGRAM_TEST_ENVIRONMENT') == 'true'}
+
+
 def tunnel_id(token):
     """The tunnel a Cloudflare tunnel token runs: its "t" field. Another token shape compares by a digest of itself."""
     if not token: return ''

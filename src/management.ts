@@ -8,14 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { HttpError, json, object, readJson, string } from './http.js';
 import {DOWNLOAD_COOKIE,OwnerSessions,SESSION_COOKIE,SESSION_COOKIE_AGE,csrfFor} from './dashboard-auth.js';
 import type {Duplex} from 'node:stream';
-import {proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
+import {CSP_REPORT_PATH,proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
 import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
 import {ManagementMaintenance} from './management-maintenance.js';
 import {DashboardLiveUpdates} from './dashboard-live.js';
 import {OwnerLock} from './owner-lock.js';
-import {miniAppRoute} from './mini-app.js';
+import {miniAppRoute,verifyLaunch,ed25519,TELEGRAM_KEYS} from './mini-app.js';
+import {MAX_REPORT_BYTES,ScriptReportLog} from './csp-reports.js';
 import {githubReturn} from './github-return.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -188,6 +189,19 @@ export async function startManagement() {
   if (token.length < 32) throw new Error('dashboard_token_missing');
   const lock=new OwnerLock(join(STATE,'admin/owner-lock.json'));
   const sessions=new OwnerSessions(lock);
+  const scriptReports=new ScriptReportLog(join(STATE,'admin/dashboard/csp-reports.json'));
+  /**
+   * The phone's Telegram account, from launch data the mini app passed on and the dashboard checks again with
+   * the bot and owner in .env, read each time. Its wrong passwords count apart from the browser's (ADR-0251).
+   */
+  async function phonePerson(req:IncomingMessage):Promise<`phone:${string}`> {
+    const launch=String(req.headers['x-telegram-init-data']??'');
+    if(!launch||launch.length>8192)throw new HttpError(401,'telegram_launch_required');
+    const telegram=object(await python({operation:'mini_app.launch_check'}));
+    const {user_id}=verifyLaunch(launch,{botId:String(telegram.bot_id??''),ownerId:String(telegram.owner_id??''),
+      key:ed25519(telegram.test_environment===true?TELEGRAM_KEYS.test:TELEGRAM_KEYS.production)});
+    return `phone:${user_id}`;
+  }
   const archiveConnection=object(await python({operation:'archive.connection'}));
   const sockets=new Set<Duplex>();
   const live=new DashboardLiveUpdates();
@@ -225,7 +239,9 @@ export async function startManagement() {
   function checkOrigin(req:IncomingMessage,opened=false) {
     const authority = `127.0.0.1:${PORT}`;
     if (![authority, `localhost:${PORT}`].includes(req.headers.host ?? '')) throw new HttpError(403, 'invalid_host');
-    if(req.headers.origin&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
+    // A page served with no-referrer may send its script-rule reports with `Origin: null`; they are only counted.
+    const report=req.method==='POST'&&req.headers.origin==='null'&&(req.url??'').split('?')[0]===CSP_REPORT_PATH;
+    if(req.headers.origin&&!report&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
     if(!opened&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
   /** The dashboard page opened in a tab from another site, as Notion's and GitHub's sign-ins do when they send the browser back. */
@@ -281,9 +297,17 @@ export async function startManagement() {
         res.setHeader('set-cookie',sessionCookie(session));return {ok:true};
       });
       // The mini app service signs phones in and checks them here; it holds no credential of its own.
-      if(route==='/mini-app/sign-in'&&req.method==='POST')return passwordAnswer(res,async()=>lock.signIn(object(await readJson(req,4096)).password,'phone'));
+      if(route==='/mini-app/sign-in'&&req.method==='POST')return passwordAnswer(res,async()=>{
+        const person=await phonePerson(req);
+        return lock.signIn(object(await readJson(req,4096)).password,person);
+      });
       if(route==='/mini-app/check'&&req.method==='POST')return json(res,200,{state:await sessions.state(String(object(await readJson(req,4096)).token??''),'phone')});
       if(route==='/mini-app/sign-out'&&req.method==='POST'){await lock.signOut(object(await readJson(req,4096)).token);sessions.forget();return json(res,200,{ok:true});}
+      // The browser's reports on the Hermes page's script rules come without a session; they are only counted.
+      if(route==='/csp-report'&&req.method==='POST'){
+        await scriptReports.record(await readJson(req,MAX_REPORT_BYTES));
+        res.writeHead(204,{'cache-control':'no-store'});res.end();return;
+      }
       const caller=await authorized(req,route,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
       const legacy=caller==='token';
       // Session cookie is accepted only by streaming download routes, never by settings or mutations.
@@ -377,6 +401,8 @@ export async function startManagement() {
         // The new session has a new CSRF value; the page keeps using it.
         sessions.forget();res.setHeader('set-cookie',sessionCookie(session));return {...await lock.status(session),csrf:csrfFor(session)};
       });
+      // `./bin/nocheh dashboard --clear-pause`, with the installation token, ends every sign-in pause.
+      if(caller==='token'&&route==='/owner-lock/clear-pause'&&req.method==='POST')return json(res,200,await lock.clearPauses());
       if(caller==='browser'&&route==='/owner-lock/sign-out-others'&&req.method==='POST'){
         await lock.signOutOthers(sessions.token(req));sessions.forget();return json(res,200,await lock.status(sessions.token(req)));
       }
@@ -520,7 +546,7 @@ export async function startManagement() {
       // A signed-out browser signs in on the dashboard first.
       if(!session){res.writeHead(303,{location:'/'});res.end();return;}
       const connection=object(await python({operation:'native.connection'}));
-      proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf,String(connection.host??'127.0.0.1'));return;
+      proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf,String(connection.host??'127.0.0.1'),page);return;
     }
     throw new HttpError(404,'not_found');
   })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,
@@ -579,7 +605,7 @@ export async function startManagement() {
     // Closing its transport does not cancel admitted owner writes or lifecycle jobs.
     const admitted=maintenance.drain();
     const drainConnections=setTimeout(()=>server.closeAllConnections(),1000);drainConnections.unref();
-    server.close(()=>{clearTimeout(drainConnections);void Promise.allSettled([admitted,...runningTasks]).then(()=>process.exit(0));});
+    server.close(()=>{clearTimeout(drainConnections);void Promise.allSettled([admitted,...runningTasks,scriptReports.save()]).then(()=>process.exit(0));});
     server.closeIdleConnections();
   };
   process.on('SIGTERM', stop); process.on('SIGINT', stop);
