@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import type {IncomingMessage} from 'node:http';
 import {answerId,reader,scopeToken,turnToken} from '../src/access.js';
-import {GP1,GP1_TOPIC,OWNER} from './fixture-groups.js';
+import {GP1,GP1_TOPIC,OWNER,fixtureDirectory} from './fixture-groups.js';
+import {installChatsForTest} from '../src/chats.js';
+
+// A pass's space must be its chat or one of that chat's topics, as the chat directory holds them (ADR-0250).
+installChatsForTest(fixtureDirectory());
 
 const secret='synthetic-service-token-only-for-tests',event='e'.repeat(64),answer='a'.repeat(32),later=()=>Date.now()+60000;
 const request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;

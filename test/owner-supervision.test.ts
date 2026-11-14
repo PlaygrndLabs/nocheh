@@ -2,6 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {digest} from '../src/archive.js';
 import {OwnerSupervisionRepository,type OwnerSupervisionDependencies} from '../src/stores/owner-supervision.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
+
+// The chats these tests name, as the seeder makes their rows (ADR-0250): what a topic is comes from its row.
+installChatsForTest(legacyDirectory([...Array.from({length:125},(_,index)=>String(-1000-index)),'-1000/topic/7','-1000/topic/99','-9999'],{owner:'42',served:['-1000']}));
 
 const owner={admin:true,scope:null},date='2026-10-03T00:00:00.000Z';
 function repository(query:(store:string,sql:string,params:unknown[])=>any) {

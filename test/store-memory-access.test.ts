@@ -10,6 +10,8 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
 
 test('fact grants authorize exact destinations while relationships only create reject-once suggestions',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -18,6 +20,7 @@ test('fact grants authorize exact destinations while relationships only create r
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-access-'));
   const key='memory-access:'+Date.now(),group='-'+Date.now(),otherGroup=String(Number(group)-1),owner:Reader={admin:true,scope:null};
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group]};
+  const restore=installChatsForTest(legacyDirectory([group,otherGroup,group+'/topic/7','123/topic/5','456'],{owner:'123',served:policy.group_ids}));
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async operation=>operation==='guard.detect'?{literals:[]}:{state:'done'},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const capture=async(scope:string,index:number,text:string)=>{const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(index),revision:'1',occurred_at:null,text,
@@ -124,7 +127,7 @@ test('fact grants authorize exact destinations while relationships only create r
     assert.deepEqual(await contains(),plain,'two groups in one project share nothing');
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.default_grant_mode,'one_time');
     assert.equal((await services.memoryAccess.settings(owner,group)).effective.request_ttl_seconds,86400);
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('canary: what the owner says about a member in the private chat never reaches a group',
@@ -134,6 +137,7 @@ test('canary: what the owner says about a member in the private chat never reach
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-canary-'));
   const key='memory-canary:'+Date.now(),group='-'+Date.now(),owner:Reader={admin:true,scope:null},mark='zephyrquill';
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group]};
+  const restore=installChatsForTest(legacyDirectory([group],{owner:'123',served:policy.group_ids}));
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async operation=>operation==='guard.detect'?{literals:[]}:{state:'done'},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const capture=async(scope:string,index:number,text:string)=>{const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(index),revision:'1',occurred_at:null,text,
@@ -158,5 +162,5 @@ test('canary: what the owner says about a member in the private chat never reach
     await assert.rejects(services.entities.inspect(actor,bob),{code:'entity_not_found'});
     const audience=await services.entities.audience(owner,fact.id);
     assert.deepEqual([audience.owner_private,audience.private_sources,audience.readers],[true,['123'],null],'only the owner can read it');
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

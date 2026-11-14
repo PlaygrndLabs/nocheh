@@ -6,6 +6,8 @@ import {initializeStoreDatabases,connectStores} from '../src/stores/connections.
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {ProjectRepository,SharingPolicyRepository} from '../src/stores/projects.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
 const owner={admin:true,scope:null};
 test('owner project inheritance, explicit sharing and revocation are separate, versioned and idempotent',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -15,6 +17,7 @@ test('owner project inheritance, explicit sharing and revocation are separate, v
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
   const guards=new GuardRepository(stores,new ArchiveRepository(stores.archive)),key='projects:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),topic=group+'/topic/17';
+  const restore=installChatsForTest(legacyDirectory([group,second,topic,second+'/topic/18'],{served:[group,second]}));
   try {
     const input={name:'Synthetic project',description:'Two conversations',state:'active',expected_revision:0,operation_id:key+':new'};
     await assert.rejects(projects.save({admin:false,scope:group},input),{code:'owner_required'});
@@ -49,7 +52,7 @@ test('owner project inheritance, explicit sharing and revocation are separate, v
     assert.ok((await projects.list(owner)).projects.some(p=>p.id===project.id));
     assert.ok((await projects.assignments(owner)).assignments.some(p=>p.space_id===topic));
     assert.ok((await sharing.list(owner)).rules.some(r=>r.id===rule.id&&!r.enabled));
-  } finally {await stores.close();}
+  } finally {restore();await stores.close();}
 });
 
 test('an owner rule never reads from or shares into a private chat, and an older or imported one is skipped',
@@ -60,6 +63,7 @@ test('an owner rule never reads from or shares into a private chat, and an older
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
   const key='private-rules:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),third=String(Number(group)-2),privateChat=String(Date.now());
+  const restore=installChatsForTest(legacyDirectory([group,second,third,privateChat+'/topic/5',group+'/topic/3',group+'/topic/5'],{served:[group,second,third]}));
   try {
     const rule={name:'Synthetic rule',enabled:true,mode:'approved',instructions:'',expected_revision:0};
     for(const space of [privateChat,privateChat+'/topic/5','desktop:personal_chat:9']) {
@@ -103,7 +107,7 @@ test('an owner rule never reads from or shares into a private chat, and an older
     assert.deepEqual([effective.own_assignment?.mode,effective.own_assignment?.project_id],['assigned',project.id],'the row is shown, so the owner can clear it');
     await projects.assign(owner,{space_id:privateChat,mode:'none',expected_revision:effective.own_assignment!.revision,operation_id:key+':clear'});
     assert.equal((await projects.effective(privateChat)).own_assignment?.mode,'none');
-  } finally {await stores.close();}
+  } finally {restore();await stores.close();}
 });
 
 test('a project never shares between its groups, lists only its served groups, and a topic always follows its group',
@@ -114,6 +118,7 @@ test('a project never shares between its groups, lists only its served groups, a
   await initializeStoreDatabases(config,passwords);
   const key='project-groups:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),third=String(Number(group)-2),unserved=String(Number(group)-3);
   const topic=group+'/topic/17',privateChat=String(Date.now());let n=0;
+  const restore=installChatsForTest(legacyDirectory([group,second,third,unserved,topic,privateChat,...Array.from({length:10},(_,i)=>group+'/topic/'+(30+i)),group+'/topic/99'],{served:[group,second,third]}));
   const op=(label:string)=>key+':'+label+':'+(++n);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control,()=>[group,second,third,privateChat,topic]),sharing=new SharingPolicyRepository(stores.control);
   const assign=async(space:string,mode:'assigned'|'none'|'inherit',project:string|null=null)=>projects.assign(owner,{space_id:space,mode,
@@ -180,5 +185,5 @@ test('a project never shares between its groups, lists only its served groups, a
       {code:'invalid_sharing_sources'},'a rule reads at most 100 chats');
     await stores.control.query('UPDATE sharing_rules SET enabled=false WHERE id=ANY($1::text[])',[fillers]);
     assert.equal((await sharing.save(owner,{...eleventh,operation_id:op('room')})).enabled,true,'with room again it turns on');
-  } finally {await stores.close();}
+  } finally {restore();await stores.close();}
 });

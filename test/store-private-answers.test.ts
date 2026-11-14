@@ -16,7 +16,8 @@ import {runtimeProfile} from '../src/stores/runtime-profile.js';
 import {PrivateAnswerRepository,privateAnswerId,privateAnswerStates,privateAnswerTimes,
   type PrivateAnswer,type PrivateAnswerOffer,type PrivateAnswerOutcome,type PrivateAnswerStart,type PrivateAnswerTap} from '../src/stores/private-answers.js';
 import {fixtureServices} from './fixture-brain.js';
-import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,P1_GROUPS,P2,UNSERVED,groupsPolicy,seedGroups} from './fixture-groups.js';
+import {BOB_CHAT,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,NG1,NG1_TOPIC,NG2,NG_GROUP_IDS,OWNER,P1,P1_GROUPS,P2,UNSERVED,groupsPolicy,seedChats,seedGroups} from './fixture-groups.js';
+import {accountIdFor} from '../src/chats.js';
 
 const secret='synthetic-service-token-only-for-tests',owner:Reader={admin:true,scope:null};
 const question=(n:number)=>digest('fixture:question:'+n);
@@ -25,7 +26,9 @@ const fixtureDatabase=async()=>{
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
-  return {config,passwords,stores:connectStores(config,passwords)};
+  // The fixture chats' rows: what each chat is comes from them, in the store as in the directory (ADR-0250).
+  const stores=connectStores(config,passwords);await seedChats(stores.control);
+  return {config,passwords,stores};
 };
 
 test('an answer id is fixed by its question and the service token',()=>{
@@ -264,9 +267,9 @@ test('a private answer is offered, tapped, started, bound, answered and expired 
 
     // A member's record reads nothing until membership checks come (step 4).
     await stores.control.query(`INSERT INTO private_answers(id,question_event,from_chat_id,project_id,member_id,asker_account_id,read_chats,reply_chat_id,
-      state,press_event,start_event,pressed_at,expires_at) VALUES($1,$2,$3,$4,'m1','456',$5,'456','pressed',$6,$7,now(),now()+interval '1 hour')`,
-      [id(10),asked(10),GP1,P1,[GP1,GP2,GP3],digest('fixture:press:10'),startOf(10)]);
-    await assert.rejects(answers.bind(pass(10,{scope:'456',space:'456'})),{code:'private_answer_closed'});
+      state,press_event,start_event,pressed_at,expires_at) VALUES($1,$2,$3,$4,'m1','456',$5,$8,'pressed',$6,$7,now(),now()+interval '1 hour')`,
+      [id(10),asked(10),GP1,P1,[GP1,GP2,GP3],digest('fixture:press:10'),startOf(10),BOB_CHAT]);
+    await assert.rejects(answers.bind(pass(10,{scope:BOB_CHAT,space:BOB_CHAT})),{code:'private_answer_closed'});
 
     // Stale rows expire on the database's clock, tap or /start or not: an unused button after a day, a tap without /start
     // after ten minutes, an unanswered claim after an hour. Answered and refused rows stay as they are; no row is deleted.
@@ -499,4 +502,35 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
     await assert.rejects(s.access.bindReads(pass),{code:'private_answer_closed'});
     assert.equal(await s.privateAnswers.expire(),1);
   } finally {await stores.control.query('DELETE FROM private_answers');await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('chats first seen after step 2b keep their Nocheh ids in the record, and what each is comes from its chats row (ADR-0250)',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const {stores}=await fixtureDatabase(),P3=digest('fixture:project:P3');
+  const policy=groupsPolicy({group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS]}),answers=new PrivateAnswerRepository(stores.control,()=>policy);
+  try {
+    // NG1 (a forum first seen after step 2b) and NG2 (a group Telegram upgraded) are P3's groups.
+    await stores.control.query("INSERT INTO projects(id,name,description,state,revision) VALUES($1,'P3','','active',1) ON CONFLICT(id) DO NOTHING",[P3]);
+    await stores.control.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) SELECT space,$1,'assigned',1 FROM unnest($2::text[]) space
+      ON CONFLICT(space_id) DO NOTHING`,[P3,[NG1,NG2]]);
+    assert.deepEqual(await answers.offerable(NG1_TOPIC),{project_id:P3,groups:[NG1,NG2].sort()},'a digest topic follows its group');
+    for(const space of [BOB_CHAT,'f'.repeat(64)])assert.equal(await answers.offerable(space),null,space);
+    const offered=await answers.offer({id:privateAnswerId(secret,question(70)),question_event:question(70),from_chat_id:NG1_TOPIC,project_id:P3,asker_account_id:OWNER});
+    assert.deepEqual([offered.from_chat_id,offered.asker_account_id,offered.state],[NG1_TOPIC,accountIdFor('telegram',OWNER),'offered'],'the asker is kept as a chat_accounts id');
+    const tapped=await answers.press(offered.id,{account_id:OWNER,press_event:question(71),space:NG1});
+    assert.equal(tapped.ok,true);assert.deepEqual(tapped.answer!.read_chats,[NG1,NG2].sort());
+    // The database decides from the chats rows too: Bob's private chat, a topic and an id with no row are never a place or a
+    // frozen group, and a group is never the reply chat.
+    for(const [why,sql,value] of [['Bob\'s chat as the place','from_chat_id=$2',BOB_CHAT],['a chat with no row as the place','from_chat_id=$2','f'.repeat(64)],
+      ['Bob\'s chat in the frozen groups','read_chats=$2',[NG1,BOB_CHAT]],['a topic in the frozen groups','read_chats=$2',[NG1,NG1_TOPIC]],
+      ['a chat with no row in the frozen groups','read_chats=$2',[NG1,'f'.repeat(64)]],['a group as the reply chat','reply_chat_id=$2',NG2]] as const)
+      await assert.rejects(stores.control.query(`UPDATE private_answers SET ${sql} WHERE id=$1`,[offered.id,value]),{code:'23514'},why);
+    await assert.rejects(answers.claim(offered.id,{account_id:OWNER,start_event:question(72),reply_chat_id:NG1}),{code:'invalid_private_answer'});
+    assert.equal((await answers.claim(offered.id,{account_id:OWNER,start_event:question(72),reply_chat_id:BOB_CHAT})).ok,false,'only in the asker\'s own chat');
+    const claimed=await answers.claim(offered.id,{account_id:OWNER,start_event:question(72),reply_chat_id:OWNER});
+    assert.equal(claimed.ok,true);assert.equal(claimed.answer!.reply_chat_id,OWNER);
+  } finally {
+    await stores.control.query('DELETE FROM private_answers');await stores.control.query('DELETE FROM project_assignments WHERE project_id=$1',[P3]);
+    await stores.control.query('DELETE FROM projects WHERE id=$1',[P3]);await stores.close();
+  }
 });

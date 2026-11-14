@@ -2,14 +2,18 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {HttpError,object} from '../http.js';
 import {parentSpace,validateSpace} from '../spaces.js';
+import {chatIdSql,chats} from '../chats.js';
 
-/** The owner's tool switches per chat: one row for every chat ('*'), a chat, or a topic. NULL inherits. */
+/** The owner's tool switches per chat: one row for every chat ('*'), a chat, or a topic, by its Nocheh chat id
+ * (ADR-0250; a value stored before step 2b is its chat's id unchanged, so every OFF stays OFF). NULL inherits. */
 export const chatToolSchema=`
 CREATE TABLE IF NOT EXISTS chat_tool_settings (
- space_id text PRIMARY KEY CHECK(space_id='*' OR space_id ~ '^-?[1-9][0-9]{0,18}(/topic/[1-9][0-9]{0,15})?$'),
+ space_id text PRIMARY KEY,
  shell boolean,browser boolean,mcp boolean,
  revision integer NOT NULL DEFAULT 1 CHECK(revision>0),updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE chat_tool_settings DROP CONSTRAINT IF EXISTS chat_tool_settings_space_id_check;
+ALTER TABLE chat_tool_settings ADD CONSTRAINT chat_tool_settings_space_id_check CHECK(space_id='*' OR ${chatIdSql('space_id')});
 `;
 /** Commands, page reads and outside tool calls; a Notion call is an outside tool call. */
 export type ChatTool='shell'|'browser'|'mcp';
@@ -17,15 +21,16 @@ export const chatTools:readonly ChatTool[]=['shell','browser','mcp'];
 /** Where an effective value comes from: built in, the row for every chat, the chat's own row, or the topic's. */
 export type ToolOrigin='default'|'every_chat'|'chat'|'topic';
 export type ChatToolSettings={space:string;revision:number;own:Record<ChatTool,boolean|null>;values:Record<ChatTool,boolean>;origins:Record<ChatTool,ToolOrigin>};
-const SPACE=/^-?[1-9][0-9]{0,18}(?:\/topic\/[1-9][0-9]{0,15})?$/;
 
-/** The space whose switches apply: the owner's private chat and its topics are all the owner's chat. */
+/** The space whose switches apply: the owner's private chat (`owner`, ownerChat(policy)) and its topics are all the
+ * owner's chat. A topic is found by its row (ADR-0250). */
 export function toolSpace(space:string,owner:string|null):string {
   return owner&&(parentSpace(space)??space)===owner?owner:space;
 }
 function settingSpace(value:unknown,owner:string|null):string {
   if(value==='*')return '*';
-  const space=validateSpace(value);if(!SPACE.test(space))throw new HttpError(400,'invalid_space');
+  // Only a chat the chat directory holds has switches of its own.
+  const space=validateSpace(value);if(!chats().get(space))throw new HttpError(400,'invalid_space');
   return toolSpace(space,owner);
 }
 
@@ -42,15 +47,18 @@ export async function chatToolSettings(db:Pick<pg.PoolClient,'query'>,space:stri
   for(const tool of chatTools) {
     const found=ordered.find(row=>row[tool]!==null);
     result.own[tool]=own?.[tool]??null;result.values[tool]=found?found[tool]:true;
-    result.origins[tool]=!found?'default':found.space_id==='*'?'every_chat':found.space_id.includes('/topic/')?'topic':'chat';
+    result.origins[tool]=!found?'default':found.space_id==='*'?'every_chat':chats().kind(found.space_id)==='topic'?'topic':'chat';
   }
   return result;
 }
 
-/** Whether an operation of this kind may be asked for or run in this space now. A Notion call is kind mcp. */
+/** Whether an operation of this kind may be asked for or run in this space now. A Notion call is kind mcp. `owner` is
+ * the owner's private chat. A space with no chat row runs nothing: a topic must be found under its chat to inherit that
+ * chat's switches, so one the directory does not hold is refused rather than read as ON (ADR-0250, fail closed). */
 export async function chatToolAllowed(db:Pick<pg.PoolClient,'query'>,kind:string,space:string,owner:string|null,lock=false):Promise<boolean> {
   if(!chatTools.includes(kind as ChatTool))return false;
-  return (await chatToolSettings(db,toolSpace(space,owner),lock)).values[kind as ChatTool];
+  const own=toolSpace(space,owner);if(!chats().get(own))return false;
+  return (await chatToolSettings(db,own,lock)).values[kind as ChatTool];
 }
 
 /** The owner edits the switches for every chat, one chat, or one topic; each row has its own revision. */

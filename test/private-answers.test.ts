@@ -15,7 +15,11 @@ import {assertPrivateAnswerRoute,privateAnswerRoute,privateAnswerTools} from '..
 import {storageServer} from '../src/stores/server.js';
 import {runtimeProfile} from '../src/stores/runtime-profile.js';
 import {readSet,readSetGroups} from '../src/spaces.js';
-import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,groupsPolicy} from './fixture-groups.js';
+import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,fixtureDirectory,groupsPolicy} from './fixture-groups.js';
+import {installChatsForTest} from '../src/chats.js';
+
+// The fixture chats, as the seeder makes their rows (ADR-0250); groupsPolicy() installs the same directory again.
+installChatsForTest(fixtureDirectory());
 
 const secret='synthetic-service-token-only-for-tests',start='e'.repeat(64),answer='a'.repeat(32),hex='b'.repeat(64);
 const reads=readSet({home:GP1_TOPIC,whole:[GP1,GP2,GP3],project:P1});
@@ -49,7 +53,8 @@ test('an answer reader reaches read routes only, at storage and at the broker al
   assert.deepEqual([...privateAnswerTools].sort(),['archive_page','archive_read','archive_search','memory_search','tasks']);
   for(const name of privateAnswerTools)assert.ok(mcpTools.some(tool=>tool.name===name),name);
   assert.deepEqual(readSetGroups(reads),[GP1,GP2,GP3]);
-  assert.deepEqual(readSetGroups(readSet({home:GP4,exact:[GP2+'/topic/7',GP4],whole:[GP3]})),[GP2,GP3,GP4]);
+  assert.deepEqual(readSetGroups(readSet({home:GP4,exact:[GP1_TOPIC,GP4],whole:[GP3]})),[GP1,GP3,GP4]);
+  assert.deepEqual(readSetGroups(readSet({home:GP4,exact:[GP2+'/topic/7'],whole:[GP3]})),[GP3],'a topic with no chat row reads nothing');
 });
 
 test('storage binds an answer pass to its record on every request and refuses every write and post route',async()=>{

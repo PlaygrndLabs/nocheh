@@ -5,7 +5,9 @@ import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inspectRequest} from '../guard.js';
 import {engineErrors,engineId,engineSummary,type EngineWrite,type MemoryEngine} from '../memory/engine.js';
-import {parentSpace,readSetParam,readSetSql,recallCondition,validateSpace} from '../spaces.js';
+import {archiveScopes,groupWithTopics,parentSpace,readSetParam,readSetSql,recallCondition,servedGroups,validateSpace} from '../spaces.js';
+import {ownerChat} from '../assistant-policy.js';
+import {chats} from '../chats.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
@@ -40,11 +42,13 @@ export class NativeMemoryRepository {
   private get protocol(){return this.engine.protocol;}
   private get control(){return this.contexts.access.stores.control;}
   private get guards(){return this.contexts.guards;}
-  private get owner(){return this.contexts.access.policy().owner_id;}
+  /** The owner's private chat (ADR-0250), whose memory is the owner audience. */
+  private get owner(){return ownerChat(this.contexts.access.policy());}
   private audienceOf(space:string){return space===this.owner?'owner':space;}
   private principalAudience(principal:Reader){return principal.scope===null?'owner':principal.space??principal.scope;}
   /** The group whose every conversation a scoped principal recalls when its topics share memory. */
-  private recallGroup(principal:Reader){return principal.admin?null:this.contexts.access.recall(principal)?.group??null;}
+  /** The ids of the reader's group and its topics when its topics share memory (groupWithTopics); null otherwise. */
+  private recallGroup(principal:Reader){return groupWithTopics(principal.admin?null:this.contexts.access.recall(principal)?.group??null);}
 
   async status() {
     const binding=await this.guards.state(),connection=(await this.control.query('SELECT * FROM memory_engine_connection WHERE singleton')).rows[0];
@@ -519,27 +523,30 @@ export class NativeMemoryRepository {
     const workspace=await this.workspace(await this.guards.state());if(!workspace)throw new HttpError(409,'memory_workspace_missing');
     await this.current(workspace.id);return workspace.id as string;
   }
-  /** Chosen chats as memory audiences: the owner's private chat is the owner audience, and a group includes its topics. */
+  /** Chosen chats as memory audiences: the owner's private chat is the owner audience, and a chat includes the topics
+   * it has rows for (ADR-0250). */
   private chosen(spaces:unknown):string[]|null {
     if(spaces===null||spaces===undefined)return null;
     if(!Array.isArray(spaces)||spaces.length<1||spaces.length>100)throw new HttpError(400,'invalid_memory_scope');
-    const owner=this.owner;return [...new Set(spaces.map(space=>{const value=validateSpace(space);return value===owner?'owner':value;}))];
+    const owner=this.owner;
+    return [...new Set(spaces.flatMap(space=>{const value=validateSpace(space);return value===owner?['owner']:[value,...chats().expand([value])];}))];
   }
   private async scope(workspace:string,audiences:string[]|null) {
     return (await this.control.query(`SELECT count(DISTINCT s.session_id) FILTER (WHERE s.kind='conversation')::int AS conversations,
       count(DISTINCT s.session_id)::int AS sessions,count(DISTINCT r.source_reference->>'id') FILTER (WHERE r.projection_reference IS NULL)::int AS messages,
       count(DISTINCT r.projection_reference->>'id')::int AS interpretations,coalesce(array_agg(DISTINCT s.session_id),'{}') AS ids
       FROM memory_sessions s LEFT JOIN memory_ingestion_receipts r ON r.session_id=s.session_id AND r.retired_at IS NULL
-      WHERE s.workspace=$1 AND ($2::text[] IS NULL OR s.audience=ANY($2::text[]) OR split_part(s.audience,'/topic/',1)=ANY($2::text[]))`,
+      WHERE s.workspace=$1 AND ($2::text[] IS NULL OR s.audience=ANY($2::text[]))`,
       [workspace,audiences])).rows[0] as {conversations:number;sessions:number;messages:number;interpretations:number;ids:string[]};
   }
   /** What each way of re-running long-term memory would do, so the owner can weigh its cost first. */
   async rebuildEstimate(principal:Reader,spaces:string[]) {
     admin(principal);
     const audiences=this.chosen(spaces.length?spaces:null),workspace=await this.workspace(await this.guards.state());
-    const policy=this.contexts.access.policy(),chats=[policy.owner_id,...policy.group_ids].filter((value):value is string=>!!value);
+    // The served chats' originals, under every id each has had (ADR-0250): the owner's private chat and the served groups.
+    const owner=this.owner,scopes=archiveScopes([...(owner?[owner]:[]),...servedGroups()]);
     const saved=(await this.contexts.access.stores.archive.query(`SELECT count(*)::int AS count FROM events WHERE origin='live' AND scope=ANY($1::text[])
-      AND kind=ANY('{telegram_update,telegram_delivered_message,browser_input,browser_delivered_message}'::text[])`,[chats])).rows[0].count as number;
+      AND kind=ANY('{telegram_update,telegram_delivered_message,browser_input,browser_delivered_message}'::text[])`,[scopes])).rows[0].count as number;
     let failed:number|null=null;
     if(workspace&&this.engine.failedLearning)try{failed=await this.engine.failedLearning(workspace.id);}catch{}
     const {ids:_ids,...relearn}=workspace?await this.scope(workspace.id,audiences):{ids:[],conversations:0,sessions:0,messages:0,interpretations:0};
@@ -706,7 +713,7 @@ export class NativeMemoryRepository {
       .map(output=>output.content.toString() as string);
     if(texts.length)await this.prepared.allow(current.principal,texts);
   }
-  private async connectedPeers(current:Current,audience:string,principal:Reader,query='',turnSource?:string,group:string|null=null) {
+  private async connectedPeers(current:Current,audience:string,principal:Reader,query='',turnSource?:string,group:readonly string[]|null=null) {
     let connected=query.trim()?await this.contexts.entities.connected(principal,query,12):{entities:[],partial:false,ambiguities:[]};
     const clarification=principal.scope===null&&connected.ambiguities.length?
       `Please clarify which ${connected.ambiguities.map(item=>item.name).join(', ')} identity you mean.`:undefined;
@@ -727,7 +734,7 @@ export class NativeMemoryRepository {
         SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_array_length(r.source_references)>0 THEN r.source_references
           ELSE jsonb_build_array(r.source_reference) END) evidence(value)
         WHERE evidence.value->>'id'<>$3
-      ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null,audience,group])).rows.map(row=>String(row.peer_id)));
+      ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null,audience,group===null?null:[...group]])).rows.map(row=>String(row.peer_id)));
     return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial,clarification:undefined};
   }
   /** Read the engine's context for the current conversation and its speaker, guarded once per distinct result.

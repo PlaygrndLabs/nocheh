@@ -11,7 +11,8 @@ import {privateAnswerLines} from '../src/prompts.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {privateAnswerId,type PrivateAnswer} from '../src/stores/private-answers.js';
 import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
-import {GP1,GP2,GP3,GP4,OWNER,P1,P2,groupsPolicy,seedGroups} from './fixture-groups.js';
+import {GP1,GP2,GP3,GP4,OWNER,P1,P2,groupsPolicy,seedChats,seedGroups} from './fixture-groups.js';
+import {accountIdFor} from '../src/chats.js';
 
 // The Answer privately button end to end in storage (ADR-0249): offered under the owner's own answer in a group whose
 // project serves another group, tapped by the owner only, then answered in the owner's private chat after /start.
@@ -21,6 +22,7 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-private-button-')),base=Date.now(),token=digest('private-button:'+base);
+  await seedChats(stores.control);
   const policy=groupsPolicy({group_access:{[GP1]:{granted:['9'],denied:[]}}});
   const started:any[]=[],replies:any[]=[],answers:any[]=[],refusals:any[]=[],notices:any[]=[];let serial=base,link=true;
   // What the next brain turn returns, when not an ordinary done reply; a running turn is observed done later.
@@ -86,7 +88,7 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     assert.deepEqual(replyTo(asked).button,{text:'🔒 Answer privately',data:'np'+id},'the button sits under the owner’s own answer');
     assert.equal(Buffer.byteLength(replyTo(asked).button.data),34,'within Telegram’s 64 bytes of callback data');
     assert.deepEqual((({from_chat_id,project_id,asker_account_id,state,read_chats})=>({from_chat_id,project_id,asker_account_id,state,read_chats}))(await row(id)),
-      {from_chat_id:GP1,project_id:P1,asker_account_id:OWNER,state:'offered',read_chats:null});
+      {from_chat_id:GP1,project_id:P1,asker_account_id:accountIdFor('telegram',OWNER),state:'offered',read_chats:null},'the asker is kept as a chat_accounts id (ADR-0250)');
     assert.equal((await services.privateAnswers.offer({id,question_event:asked,from_chat_id:GP1,project_id:P1,asker_account_id:OWNER})).id,id,
       'a retried reply offers the same button');
 
