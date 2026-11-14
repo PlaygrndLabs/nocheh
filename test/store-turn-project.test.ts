@@ -9,14 +9,18 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {AudienceRepository} from '../src/stores/audience.js';
 import {ProjectRepository} from '../src/stores/projects.js';
+import {installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 
 test('a turn in a chat of an active project carries that project, so the turn gets its role and skills',
-  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async t=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},check=new pg.Pool(config);
   try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),key='turn-project:'+Date.now(),group='-100'+Date.now(),owner={admin:true,scope:null};
+  // The chats as Part A's seeder leaves a served group stored before step 2b and its topics (ADR-0250).
+  t.after(installChatsForTest(seededDirectory(()=>({owner_id:'123',group_ids:[group]}))));
   const audience=new AudienceRepository(new GuardRepository(stores,new ArchiveRepository(stores.archive))),projects=new ProjectRepository(stores.control);
   const claims=async(space:string)=>{
     const token=await audience.turn('synthetic-secret',{scope:space.split('/topic/')[0]!,space},digest(key+space),Date.now()+60000);

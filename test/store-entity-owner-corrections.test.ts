@@ -10,6 +10,8 @@ import {SourceAccessRepository} from '../src/stores/access.js';
 import {ProjectRepository} from '../src/stores/projects.js';
 import {EntityRepository} from '../src/stores/entities.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
+import {installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 
 test('owner entity decisions survive automatic identity and claim refresh',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async t=>{
@@ -18,6 +20,8 @@ test('owner entity decisions survive automatic identity and claim refresh',
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive);
   const guards=new GuardRepository(stores,archive),stamp=Date.now(),group='-'+stamp,owner:Reader={admin:true,scope:null};let sequence=0;
   const policy:AssistantPolicy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
+  // The chats as Part A's seeder leaves a group stored before step 2b (ADR-0250).
+  t.after(installChatsForTest(seededDirectory(()=>policy)));
   const entities=new EntityRepository(stores,access,new ProjectRepository(stores.control));
   const capture=async(actor:number,name:string)=>{
     const index=++sequence,event:Envelope={version:1,key:`owner-entity:${stamp}:${index}`,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:group,
