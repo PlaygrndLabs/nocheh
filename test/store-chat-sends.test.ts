@@ -10,29 +10,41 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {ChatSendRepository,chatSend,journalRetentionDays,type ChatSend} from '../src/stores/chat-sends.js';
+import {CaptureCoordinator} from '../src/stores/capture.js';
+import {ChatRepository,startChatDirectory} from '../src/stores/chats.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
 
-const record=(fields:Partial<ChatSend>={}):ChatSend=>({version:1,key:'send:telegram:4242:'+randomUUID().replace(/-/g,''),channel:'telegram',account:'4242',
-  at:new Date().toISOString(),kind:'reply',method:'sendMessage',chat:'-1001234',topic:null,message_id:7,detail:null,state:'sent',status:200,
+const record=(fields:Partial<ChatSend>={}):ChatSend=>({version:2,key:'send:telegram:4242:'+randomUUID().replace(/-/g,''),channel:'telegram',account:'4242',
+  at:new Date().toISOString(),kind:'reply',method:'sendMessage',chat:'-1001234',thread:null,message_id:'7',detail:null,state:'sent',status:200,
   error_code:null,reference:'telegram:4242:update:1',ms:120,...fields});
 
 test('a send record has a closed, content-free shape',()=>{
   const valid=record();
   assert.deepEqual(chatSend(valid),valid);
   assert.deepEqual(chatSend(JSON.parse(canonical(valid))),valid,'canonical JSON reads back the same');
-  const {account,topic,detail,...required}=valid;void account;void topic;void detail;
-  assert.equal(chatSend({...required,account:'4242'})?.topic,null,'an absent nullable field reads as null');
+  const {account,thread,detail,...required}=valid;void account;void thread;void detail;
+  assert.equal(chatSend({...required,account:'4242'})?.thread,null,'an absent nullable field reads as null');
+  // A record older front doors wrote names the topic and message as numbers; it reads as version 2, with text ids.
+  const {thread:_thread,...older}=valid;
+  assert.deepEqual(chatSend({...older,version:1,topic:7,message_id:7}),{...valid,thread:'7',message_id:'7'});
+  assert.equal(chatSend({...older,version:1,topic:'7',message_id:7}),null,'version 1 numbers stay numbers');
+  // An app other than Telegram names its chat, thread and message its own way (ADR-0250).
+  const slack=record({channel:'slack',key:'send:slack:T0EXAMPLE:'+'b'.repeat(32),account:'T0EXAMPLE',chat:'C0EXAMPLE1',
+    thread:'1700000000.000200',message_id:'1700000000.000300'});
+  assert.deepEqual(chatSend(slack),slack);
   const reaction=record({kind:'reaction',method:'setMessageReaction',detail:'👀',reference:null});
   assert.equal(chatSend(reaction)?.detail,'👀');assert.equal(chatSend({...reaction,detail:'clear'})?.detail,'clear');
   const failed=record({state:'failed',status:400,error_code:'reaction_not_allowed'});assert.ok(chatSend(failed));
   for(const [why,value] of Object.entries({
     'a text field':{...valid,text:'Synthetic message text'},'an unknown field':{...valid,description:'Bad Request: chat not found'},
-    'a missing state':(({state,...rest})=>{void state;return rest;})(valid),'another version':{...valid,version:2},
+    'a missing state':(({state,...rest})=>{void state;return rest;})(valid),'another version':{...valid,version:3},
     'a key of another account':{...valid,key:'send:telegram:999:'+'a'.repeat(32)},'a key with text':{...valid,key:'send:telegram:4242:hello'},
     'a key of another channel':{...valid,key:'send:slack:4242:'+'a'.repeat(32)},'an upper-case channel':{...valid,channel:'Telegram'},
     'a time without milliseconds':{...valid,at:'2026-11-11T18:45:35Z'},'an impossible time':{...valid,at:'2026-02-30T18:45:35.000Z'},
     'a local time':{...valid,at:'2026-11-11T18:45:35.123+01:00'},'an unknown kind':{...valid,kind:'message'},'typing, which is never recorded':{...valid,kind:'typing',method:'sendChatAction',reference:null},'an unknown state':{...valid,state:'done'},
     'a method with spaces':{...valid,method:'send message'},'a chat name':{...valid,chat:'Team chat'},'a numeric chat':{...valid,chat:-1001234},
-    'a fractional message id':{...valid,message_id:1.5},'a string topic':{...valid,topic:'7'},'detail on a reply':{...valid,detail:'👀'},
+    'a numeric message id':{...valid,message_id:7},'a topic field in version 2':{...valid,topic:7},'a thread with spaces':{...valid,thread:'7 8'},
+    'detail on a reply':{...valid,detail:'👀'},
     'a reaction with words':{...reaction,detail:'looks good'},'a long reaction':{...reaction,detail:'👀'.repeat(17)},
     'a sent record with a code':{...valid,error_code:'rejected'},'an error description':{...failed,error_code:'Bad Request: chat not found'},
     'a status past 999':{...valid,status:1000},'a string status':{...valid,status:'200'},'a reference with text':{...valid,reference:'notice: your task is due'},
@@ -48,7 +60,9 @@ test('send records drain once from the spool, list newest first with chat names,
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-chat-sends-')),spool=join(root,'spool','sends');
-  const sends=new ChatSendRepository(stores.control,stores.archive),owner:Reader={admin:true,scope:null};
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[]},chats=new ChatRepository(stores,()=>policy);
+  const sends=new ChatSendRepository(stores.control,chats),owner:Reader={admin:true,scope:null};
+  await startChatDirectory(stores.control,()=>policy);
   const write=async(value:unknown,name=digest((value as ChatSend).key)+'.json')=>{await mkdir(spool,{recursive:true});await writeFile(join(spool,name),canonical(value));return name;};
   const count=async()=>(await stores.control.query('SELECT count(*)::int AS count FROM chat_sends')).rows[0].count as number;
   try {
@@ -56,7 +70,7 @@ test('send records drain once from the spool, list newest first with chat names,
     assert.deepEqual(await sends.summary(),{window_hours:24,sent:0,failed:0,uncertain:0,not_sent:0,problems:0,problem_kinds:{},last_problem_at:null,latest_problems:[]});
 
     // Drain: valid records enter once; anything that can never become valid is removed without a row.
-    const first=record(),second=record({kind:'reaction',method:'setMessageReaction',detail:'👍',reference:null,message_id:9});
+    const first=record(),second=record({kind:'reaction',method:'setMessageReaction',detail:'👍',reference:null,message_id:'9'});
     const firstName=await write(first);await write(second);
     await write({...record(),text:'Synthetic message text'});await write(record(),'0'.repeat(64)+'.json');
     await writeFile(join(spool,'f'.repeat(64)+'.json'),'{not json');await writeFile(join(spool,'.pending.tmp'),'{}');
@@ -72,7 +86,7 @@ test('send records drain once from the spool, list newest first with chat names,
     const down=new Proxy(stores.control,{get(target,key){
       const value=Reflect.get(target,key);return key==='query'?async()=>{throw Error('fixture database outage');}:typeof value==='function'?value.bind(target):value;
     }});
-    const waiting=record({state:'uncertain',status:0,error_code:'timed_out'}),waitingName=await write(waiting);await write({...record(),version:2});
+    const waiting=record({state:'uncertain',status:0,error_code:'timed_out'}),waitingName=await write(waiting);await write({...record(),version:3});
     await assert.rejects(new ChatSendRepository(down).drain(root),/fixture database outage/);
     assert.deepEqual((await readdir(spool)).sort(),['.pending.tmp',waitingName]);
     assert.deepEqual(await sends.drain(root),{recorded:1,rejected:0});assert.equal(await count(),3);
@@ -82,7 +96,7 @@ test('send records drain once from the spool, list newest first with chat names,
     const now=Date.now(),ago=(minutes:number)=>new Date(now-minutes*60000).toISOString(),group='-100'+(now%1000000000),other='-100'+(now%1000000000+1);
     const rows=[
       record({at:ago(60*24*30),state:'failed',status:403,error_code:'bot_blocked',chat:'123'}),
-      record({at:ago(50),chat:group}),record({at:ago(40),chat:group,topic:7}),
+      record({at:ago(50),chat:group}),record({at:ago(40),chat:group,thread:'7'}),
       record({at:ago(30),kind:'reaction',method:'setMessageReaction',detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed',chat:group,reference:null}),
       record({at:ago(25),kind:'card_update',method:'editMessageText',state:'failed',status:400,error_code:'message_not_modified',chat:other}),
       record({at:ago(20),kind:'button_answer',method:'answerCallbackQuery',state:'failed',status:400,error_code:'button_answer_expired',chat:null,message_id:null}),
@@ -93,19 +107,24 @@ test('send records drain once from the spool, list newest first with chat names,
     for(const value of rows)await write(value);
     assert.deepEqual(await sends.drain(root,4),{recorded:4,rejected:0},'one pass takes at most its limit');
     assert.deepEqual(await sends.drain(root),{recorded:rows.length-4,rejected:0});
-    // Names: a refreshed title, and a captured message's title wins over it; a chat Nocheh never saw stays unnamed.
-    await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title) VALUES($1,'available','supergroup','Refreshed name'),
-      ($2,'available','supergroup','Other group')`,[group,other]);
-    const event:Envelope={version:1,key:'chat-sends:'+now,origin:'live',kind:'telegram_update',bot_id:'4242',scope:group,source_id:'1',revision:'1',occurred_at:null,
-      text:'Synthetic',payload:{update_id:1,message:{message_id:1,date:1,chat:{id:Number(group),type:'supergroup',title:'Captured name'},from:{id:123},text:'Synthetic'}}};
-    await new ArchiveRepository(stores.archive).capture(event);
+    // Names come from the chat records: a captured message's title, or the owner's refresh; a chat Nocheh never saw
+    // stays unnamed. Each send names its Nocheh chat, found by the chat's Telegram id (ADR-0250).
+    const capture=new CaptureCoordinator(new ArchiveRepository(stores.archive),stores.control,undefined,chats);
+    for(const [scope,title,id] of [[group,'Captured name',1],[other,'Other group',2]] as const) {
+      const event:Envelope={version:1,key:'chat-sends:'+now+':'+id,origin:'live',kind:'telegram_update',bot_id:'4242',scope,source_id:String(id),revision:'1',occurred_at:null,
+        text:'Synthetic',payload:{update_id:id,message:{message_id:'1',date:1,chat:{id:Number(scope),type:'supergroup',title},from:{id:123},text:'Synthetic'}}};
+      await capture.capture(event);
+    }
+    const ids=new Map((await stores.control.query('SELECT external_id,chat_id FROM chat_ids WHERE external_id=ANY($1::text[])',[[group,other]])).rows.map(row=>[row.external_id,row.chat_id]));
+    assert.equal(ids.size,2);
     const summary=await sends.summary(new Date(now));
     assert.deepEqual({...summary,latest_problems:undefined},{window_hours:24,sent:2,failed:3,uncertain:2,not_sent:1,problems:2,
       problem_kinds:{reply:1,setup:1},last_problem_at:ago(5),latest_problems:undefined});
     assert.deepEqual(summary.latest_problems.map(row=>[row.kind,row.error_code,row.chat_title]),
       [['setup','server_error',null],['reply','timed_out','Other group']]);
     const reply=summary.latest_problems[1]!;
-    assert.deepEqual(Object.keys(reply),['id','at','channel','kind','method','chat','chat_title','topic','message_id','detail','state','status','error_code','reference','ms','problem','recovered']);
+    assert.deepEqual(Object.keys(reply),['id','at','channel','kind','method','chat','chat_id','chat_title','thread','topic','message_id','detail','state','status','error_code','reference','ms','problem','recovered']);
+    assert.equal(reply.chat_id,ids.get(other),'a send drained before the chat was recorded gets its chat when listed');
     assert.equal(typeof reply.id,'string');assert.equal(reply.problem,true);assert.equal(reply.recovered,false);assert.equal(reply.at,ago(10));
     assert.equal(JSON.stringify(summary).includes('Synthetic'),false,'no message content reaches Health');
     // The newest problem of any age, even with none in the last day.
@@ -117,9 +136,15 @@ test('send records drain once from the spool, list newest first with chat names,
     for(;;){const page=await sends.list(owner,{limit:4,before});all.push(...page.records);if(!page.next)break;assert.equal(page.records.length,4);before=page.next;}
     assert.deepEqual(all.map(row=>row.at),[...rows].map(row=>row.at).sort().reverse());
     assert.equal(new Set(all.map(row=>row.id)).size,rows.length);
-    assert.equal(all.find(row=>row.topic===7)?.chat_title,'Captured name');
+    const inTopic=all.find(row=>row.thread==='7');
+    assert.deepEqual([inTopic?.topic,inTopic?.chat_title,inTopic?.chat_id],[7,'Captured name',ids.get(group)],'a topic with no row is its chat');
     const reaction=all.find(row=>row.kind==='reaction');
-    assert.deepEqual([reaction.detail,reaction.message_id,reaction.chat_title,reaction.problem],['👀',7,'Captured name',false]);
+    assert.deepEqual([reaction.detail,reaction.message_id,reaction.chat_title,reaction.problem],['👀','7','Captured name',false]);
+    // A send drained once its chat is recorded holds the chat in its row.
+    const known=record({at:ago(1),chat:group,thread:'7'});await write(known);
+    assert.deepEqual(await sends.drain(root),{recorded:1,rejected:0});
+    assert.equal((await stores.control.query('SELECT chat_id,topic,message_id FROM chat_sends WHERE record_key=$1',[known.key])).rows[0].chat_id,ids.get(group));
+    await stores.control.query('DELETE FROM chat_sends WHERE record_key=$1',[known.key]);
     assert.deepEqual(all.filter(row=>row.problem).map(row=>row.error_code),['server_error','timed_out','bot_blocked']);
     const problems=await sends.list(owner,{filter:'problems'});
     assert.deepEqual(problems.records.map(row=>row.error_code),['server_error','timed_out','bot_blocked']);assert.equal(problems.next,null);
@@ -145,15 +170,15 @@ test('send records drain once from the spool, list newest first with chat names,
     await stores.control.query('DELETE FROM chat_sends');
     const retries=[
       record({at:ago(9),state:'failed',status:400,error_code:'formatting_rejected',reference:'telegram:4242:update:20',message_id:null}),
-      record({at:ago(9),reference:'telegram:4242:update:20',message_id:21}),
+      record({at:ago(9),reference:'telegram:4242:update:20',message_id:'21'}),
       record({at:ago(8),state:'failed',status:429,error_code:'rate_limited',reference:'notice:'+'a'.repeat(64),chat:'123',message_id:null}),
-      record({at:ago(8),reference:'notice:'+'a'.repeat(64),chat:'123',message_id:22}),
+      record({at:ago(8),reference:'notice:'+'a'.repeat(64),chat:'123',message_id:'22'}),
       record({at:ago(7),state:'uncertain',status:0,error_code:'timed_out',reference:'telegram:4242:update:30',message_id:null}),
-      record({at:ago(7),reference:'telegram:4242:update:30:retry:1',message_id:23}),
+      record({at:ago(7),reference:'telegram:4242:update:30:retry:1',message_id:'23'}),
       record({at:ago(6),state:'failed',status:400,error_code:'chat_not_found',reference:'telegram:4242:update:40',message_id:null}),
-      record({at:ago(6),reference:'telegram:4242:update:41',message_id:24}),
+      record({at:ago(6),reference:'telegram:4242:update:41',message_id:'24'}),
       record({at:ago(90),state:'failed',status:400,error_code:'message_not_found',reference:'telegram:4242:update:50',message_id:null}),
-      record({at:ago(60),reference:'telegram:4242:update:50',message_id:25}),
+      record({at:ago(60),reference:'telegram:4242:update:50',message_id:'25'}),
     ];
     for(const value of retries)await write(value);
     assert.deepEqual(await sends.drain(root),{recorded:retries.length,rejected:0});
