@@ -31,7 +31,8 @@ FOLLOW_SECONDS = 7 * 86400
 MAX_FOLLOWED = 50
 # What each kind of problem needs to read before it may count as cleared.
 SOURCES = {'application': 'application', 'service': 'services', 'models': 'routes', 'work_unchecked': 'work', 'workers': 'work',
-           'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram'}
+           'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram',
+           'backup': 'backups', 'backup_unreadable': 'backups', 'backup_skipped': 'backups', 'offsite': 'backups', 'offsite_skipped': 'backups'}
 # Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
 OWN_SENDS = ('notice', 'notice_update')
 # Background work families, as System › Work names them.
@@ -72,6 +73,12 @@ CAUSES = {
     'rebuilt_restart_limit_exceeded': 'the run restarted too often and stopped',
 }
 CAUSE = re.compile(r'([a-z][a-z0-9_]{0,47})(?::([1-5][0-9]{2}))?')
+# Why a backup did not finish, by its fixed code; never a file name, which a command may choose (ADR-0251).
+BACKUP_REASONS = {
+    'backup_unsupported_link': 'a file link outside a command workspace', 'backup_disk_full': 'the disk filled up',
+    'backup_interrupted': 'it was stopped before it finished', 'backup_failed': 'see System › Backups',
+}
+OFFSITE_REASONS = {'offsite_low_disk': 'not enough free disk space'}
 TELEGRAM_REASONS = {
     'telegram_network_error': 'it couldn’t reach Telegram', 'telegram_polling_conflict': 'another copy of the bot was running',
     'invalid_token': 'Telegram refused the bot token', 'missing_credentials': 'no bot token is set',
@@ -152,6 +159,15 @@ def problems(monitoring, usage_rows, today):
     # Nocheh's GitHub app: its key never expires, so only a refused one gives a notice.
     if (monitoring.get('github') or {}).get('reconnect'):
         add('github', 1, 'github', reason='reconnect')
+    # Each count grows with every backup or copy that did not happen, so each one is news again.
+    backups = monitoring.get('backups')
+    if isinstance(backups, dict) and not backups.get('unavailable'):
+        count = lambda name: backups.get(name) if type(backups.get(name)) is int and backups[name] > 0 else 0
+        add('backup', count('failed'), 'backup', reason=backups.get('reason'))
+        add('backup_unreadable', count('unreadable'), 'backup_unreadable')
+        add('backup_skipped', count('skipped_days'), 'backup_skipped')
+        add('offsite', count('offsite_failed'), 'offsite', reason=backups.get('offsite_reason'))
+        add('offsite_skipped', count('offsite_skipped'), 'offsite_skipped')
     return found
 
 
@@ -232,6 +248,27 @@ def text(problem, new):
         return f"Telegram stopped working at {problem['at'][:16].replace('T', ' ')} UTC: {reason}."
     if kind == 'github':
         return 'GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Settings › Connections.'
+    if kind == 'backup':
+        reason = BACKUP_REASONS.get(problem.get('reason'), BACKUP_REASONS['backup_failed'])
+        if count == 1:
+            return f'The last backup didn’t finish ({reason}). Older backups are kept.'
+        return f'Backups stopped: the last {count} didn’t finish ({reason}). Older backups are kept.'
+    if kind == 'backup_unreadable':
+        return (f"The newest backup left out {_plural(count, 'file or folder', 'files or folders')} that a command made "
+                'unreadable in its workspace. See System › Backups.')
+    if kind == 'backup_skipped':
+        if count == 1:
+            return 'Today’s automatic backup was skipped: not enough free disk space.'
+        return f'Automatic backups were skipped {count} days in a row: not enough free disk space.'
+    if kind == 'offsite':
+        reason = OFFSITE_REASONS.get(problem.get('reason'), 'see System › Backups')
+        if count == 1:
+            return f'The off-site copy of the newest backup failed ({reason}).'
+        return f'The last {count} off-site copies failed ({reason}).'
+    if kind == 'offsite_skipped':
+        if count == 1:
+            return 'The off-site copy of the newest backup was skipped: not enough free disk space.'
+        return f'The off-site copies of the last {count} backups were skipped: not enough free disk space.'
     parts = []
     if problem['failed']:
         reasons = why(problem)
@@ -311,6 +348,9 @@ def readable(monitoring):
     github = monitoring.get('github')
     if isinstance(github, dict) and not github.get('unavailable'):
         found.add('github')
+    backups = monitoring.get('backups')
+    if isinstance(backups, dict) and not backups.get('unavailable'):
+        found.add('backups')
     if ((monitoring.get('runtime') or {}).get('status') or {}).get('telegram') == 'connected':
         found.add('telegram')
     return found

@@ -90,13 +90,15 @@ def dispatch(body):
         return api_call(path,body.get('body'),'memory_operation_unavailable')
     if operation == 'operations.list':
         from tools.operations.installation.admin_operations import backups
-        from tools.operations.installation.backup_schedule import status
+        from tools.operations.installation.backup_schedule import status, health
         from tools.operations.installation import offsite
         from tools.operations.installation.configuration import load as load_settings
-        schedule=status(state);automatic=set(schedule.pop('automatic'));remote=offsite.status(state,load_settings(state))
+        values=load_settings(state)
+        schedule=status(state);automatic=set(schedule.pop('automatic'));remote=offsite.status(state,values)
         sent=remote.pop('sent')
+        # With the entry a failed backup names, escaped, which only this page shows (ADR-0251).
         return {'backups':[{**row,'automatic':row['id'] in automatic,'offsite':any(row['id'] in key for key in sent)} for row in backups(state)],
-                'schedule':schedule,'offsite':remote}
+                'schedule':schedule,'offsite':remote,'health':health(state,values,details=True)}
     if operation == 'backups.due':
         from tools.operations.installation.backup_schedule import due
         return due(state)

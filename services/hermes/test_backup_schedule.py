@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from collections import namedtuple
@@ -94,6 +95,66 @@ class BackupScheduleTests(unittest.TestCase):
 
     def test_rejects_unsafe_job_ids(self):
         with self.assertRaises(ValueError): backup_schedule.started(self.state, '../elsewhere')
+
+
+
+    def test_unfinished_backup_folders_are_swept_once_no_backup_can_still_write_them(self):
+        now = at('2026-10-28T12:00:00'); root = self.state / 'admin/backups'; root.mkdir(parents=True)
+        old, young = root / '.backup-old', root / '.backup-young'
+        for stage, age in ((old, timedelta(hours=13)), (young, timedelta(hours=1))):
+            (stage / 'archive.dump').parent.mkdir(); (stage / 'archive.dump').write_bytes(b'partial')
+            moment = (now - age).timestamp(); os.utime(stage, (moment, moment))
+        elsewhere = Path(self.folder.name) / 'elsewhere'; elsewhere.mkdir(); (elsewhere / 'kept').write_text('kept')
+        (root / '.backup-linked').symlink_to(elsewhere)
+        os.utime(root / '.backup-linked', (0, 0), follow_symlinks=False)
+        backup_schedule.due(self.state, now)
+        self.assertFalse(old.exists()); self.assertTrue(young.is_dir())
+        self.assertTrue((root / '.backup-linked').is_symlink()); self.assertTrue((elsewhere / 'kept').is_file())
+
+    def test_backups_that_did_not_finish_are_counted_until_one_does(self):
+        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        start = at('2026-10-28T04:00:00')
+        self.assertEqual(backup_schedule.health(self.state, values, start)['failed'], 0)
+        backup_schedule.record_backup(self.state, 'running', start)
+        backup_schedule.record_backup(self.state, 'failed', start, error='backup_unsupported_link', path='hermes/a\u202eb')
+        found = backup_schedule.health(self.state, values, start, details=True)
+        self.assertEqual((found['failed'], found['reason']), (1, 'backup_unsupported_link'))
+        # Direction and invisible characters in a name a command chose reach the page escaped, and never the notice.
+        self.assertEqual(found['path'], 'hermes/a\\u202eb')
+        self.assertNotIn('path', backup_schedule.health(self.state, values, start))
+        self.assertNotIn('a\u202eb', (self.state / backup_schedule.HEALTH).read_text())
+        # A backup still running is not a failure; one that never recorded its end is, once the grace period is over.
+        backup_schedule.record_backup(self.state, 'running', start + timedelta(days=1))
+        self.assertEqual(backup_schedule.health(self.state, values, start + timedelta(days=1, hours=1))['failed'], 1)
+        stale = backup_schedule.health(self.state, values, start + timedelta(days=1, hours=13))
+        self.assertEqual((stale['failed'], stale['reason']), (2, 'backup_interrupted'))
+        backup_schedule.record_backup(self.state, 'running', start + timedelta(days=2))
+        backup_schedule.record_backup(self.state, 'failed', start + timedelta(days=2), error='backup_disk_full')
+        self.assertEqual(backup_schedule.health(self.state, values, start + timedelta(days=2))['failed'], 3)
+        backup_schedule.record_backup(self.state, 'running', start + timedelta(days=3))
+        backup_schedule.record_backup(self.state, 'complete', start + timedelta(days=3), unreadable=['hermes/profiles/x/workspace/y'])
+        done = backup_schedule.health(self.state, values, start + timedelta(days=3))
+        self.assertEqual((done['failed'], done['reason'], done['unreadable']), (0, None, 1))
+
+    def test_low_disk_skips_count_each_day_and_status_warns_without_a_backups_folder(self):
+        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        self.disk.stop()
+        try:
+            status = backup_schedule.status(self.state, at('2026-10-27T12:00:00'))
+            self.assertIn(status['low_disk'], (True, False))
+            self.assertFalse((self.state / 'admin/backups').exists(), 'looking never makes the folder')
+        finally: self.disk.start()
+        backup_schedule.due(self.state, at('2026-10-27T12:00:00'))
+        low = Usage(0, 0, 100 * 1024 ** 2)
+        with patch('tools.operations.installation.backup_schedule.shutil.disk_usage', return_value=low):
+            for moment in ('2026-10-28T05:00:00', '2026-10-28T09:00:00', '2026-10-29T05:00:00'):
+                backup_schedule.due(self.state, at(moment))
+            self.assertEqual(backup_schedule.health(self.state, values, at('2026-10-29T05:00:00'))['skipped_days'], 2)
+            self.assertTrue(backup_schedule.status(self.state, at('2026-10-29T05:00:00'))['low_disk'])
+        self.assertEqual(backup_schedule.health(self.state, {**values, 'NOCHEH_BACKUP_SCHEDULE': 'off'})['skipped_days'], 0)
+        backup_schedule.started(self.state, JOBS[0], at('2026-10-29T06:00:00'))
+        self.assertEqual(backup_schedule.health(self.state, values, at('2026-10-29T06:00:00'))['skipped_days'], 0)
+        self.assertFalse(backup_schedule.status(self.state, at('2026-10-29T06:00:00'))['low_disk'])
 
 
 if __name__ == '__main__':

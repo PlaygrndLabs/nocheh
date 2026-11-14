@@ -73,5 +73,13 @@ def run(state,action,job,options=None):
         args+=['restore',str(snapshot),'--state',str(state/'admin/restores'/job),'--project','nocheh-restore-'+job,'--port',str(port)]
     else:raise ValueError('operation_denied')
     process=subprocess.run(args,env=environment,cwd=ROOT,capture_output=True,text=True)
-    if process.returncode:raise ValueError('operation_failed')
+    if process.returncode:raise ValueError(failure(process.stdout))
     return json.loads(process.stdout)
+
+
+def failure(output):
+    """A backup's fixed failure code, such as backup_unsupported_link, for the dashboard to name; any other
+    failure stays operation_failed, so the command's own output never reaches it."""
+    try:code=json.loads((output or '').strip().splitlines()[-1]).get('error')
+    except (ValueError,IndexError,AttributeError):code=None
+    return code if isinstance(code,str) and re.fullmatch(r'backup_[a-z_]{1,40}',code) else 'operation_failed'

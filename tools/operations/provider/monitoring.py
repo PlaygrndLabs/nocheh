@@ -49,6 +49,7 @@ def status(state):
     result['routes']=attempt(lambda:routes(config))
     result['model_problems']=attempt(lambda:model_problems(state))
     result['github']=attempt(lambda:github_flags(state))
+    result['backups']=attempt(lambda:backup_health(state,config))
     result['keys']=internal_keys(config)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
@@ -69,6 +70,12 @@ def github_flags(state):
     """Whether Nocheh's GitHub app is connected or GitHub refused it: the app's file only, never its key."""
     from tools.operations.connections import github
     return github.flags(state)
+
+
+def backup_health(state,config):
+    """Backups and off-site copies that did not happen, as counts and codes; never a file name (ADR-0251)."""
+    from tools.operations.installation.backup_schedule import health
+    return health(state,config)
 
 
 def routes(config):
