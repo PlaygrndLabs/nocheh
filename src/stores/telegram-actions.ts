@@ -189,10 +189,11 @@ export class TelegramActionRepository {
     const original=await this.access.archive.verify(source);
     if(original.origin!=='live'||original.channel!=='telegram')throw new HttpError(403,'external_effect_requires_live_turn');
     const requester=await this.requester(source.id,original.scope),groups=requester?this.allowedGroups(requester):[];
-    // A group's name once the owner has refreshed it and Telegram answered, as before step 2b: its chat row's name
-    // (ADR-0250; the old refresh table is only the seeder's now).
-    const titles=new Map((await this.stores.control.query(`SELECT c.id,c.title FROM chats c JOIN chat_details d ON d.chat_id=c.id
-      WHERE c.id=ANY($1::text[]) AND d.refreshed_state='available' AND c.title IS NOT NULL`,[groups])).rows.map(row=>[row.id as string,row.title as string]));
+    // A group's name once the owner has refreshed it and Telegram answered, as before step 2b: the name that refresh
+    // answered, never one a later update shows (ADR-0250; the old refresh table is only the seeder's now).
+    const titles=new Map((await this.stores.control.query(`SELECT chat_id,refreshed_title FROM chat_details
+      WHERE chat_id=ANY($1::text[]) AND refreshed_state='available' AND refreshed_title IS NOT NULL`,[groups])).rows
+      .map(row=>[row.chat_id as string,row.refreshed_title as string]));
     return {groups:groups.map(group=>({destination:group,name:titles.get(group)??null,current:group===principal.scope})),
       note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. A message to this same group is posted without approval; a message to another group is shown to the owner to approve first.'};
   }

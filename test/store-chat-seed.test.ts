@@ -79,8 +79,10 @@ test('the seeder gives every stored chat value its row, only inserts, changes no
     assert.deepEqual(shape(configured),['group',null,null,null,null,null,'active','seeded'],'TELEGRAM_GROUP_IDS is served');
     assert.equal(shape(upgraded)?.[6],'removed','a group Telegram upgraded before step 2b stays, removed');
     // The owner's last refresh still shows in the directory.
-    assert.deepEqual((await stores.control.query('SELECT chat_id,refreshed_state,refreshed_to FROM chat_details WHERE chat_id=ANY($1::text[])',[[group,upgraded]])).rows
-      .map(row=>[row.chat_id,row.refreshed_state,row.refreshed_to]).sort(),[[group,'available',null],[upgraded,'migrated','-100'+(base+4)]].sort());
+    // ...with the name and username it answered, which keep naming runtime profiles and destinations whatever later updates show.
+    assert.deepEqual((await stores.control.query('SELECT chat_id,refreshed_state,refreshed_to,refreshed_title,refreshed_username FROM chat_details WHERE chat_id=ANY($1::text[])',[[group,upgraded]])).rows
+      .map(row=>[row.chat_id,row.refreshed_state,row.refreshed_to,row.refreshed_title,row.refreshed_username]).sort(),
+      [[group,'available',null,'Refreshed title','p1group'],[upgraded,'migrated','-100'+(base+4),null,null]].sort());
     assert.deepEqual((await stores.control.query(`SELECT external_id,chat_id,state FROM chat_ids WHERE external_id=ANY($1::text[])`,[ids])).rows
       .map(row=>[row.external_id,row.chat_id,row.state]).sort(),[group,privateChat,archived,alice,configured,upgraded].sort().map(id=>[id,id,'current']));
     assert.equal(Number((await stores.control.query('SELECT count(*) FROM chats WHERE id=ANY($1::text[])',[notChats])).rows[0].count),0,'values that name no chat get no row');

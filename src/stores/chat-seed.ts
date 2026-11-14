@@ -92,8 +92,8 @@ interface Planned {
   title:string|null;title_source:'observed'|'refreshed'|'owner'|null;app_type:string|null;is_forum:boolean;
   /** The last name Telegram showed, kept beside an owner's topic name. */
   observed:string|null;username:string|null;seen_at:Date|null;closed:boolean|null;migrated:boolean;
-  /** The owner's last Telegram refresh of the chat, as the directory showed it. */
-  refreshed?:{state:string;to:string|null;at:Date}|null;
+  /** The owner's last Telegram refresh of the chat, as the directory showed it, with the name and username it answered. */
+  refreshed?:{state:string;to:string|null;at:Date;title:string|null;username:string|null}|null;
 }
 interface Presentation {chat:{value:Record<string,any>;seq:number;titled:boolean}|null;seen_at:Date|null;name:{value:string;seq:number}|null;closed:{value:boolean;seq:number}|null}
 const clean=(value:unknown,length=256):string|null=>typeof value==='string'&&value.trim()?value.replace(/\s+/g,' ').trim().slice(0,length):null;
@@ -154,7 +154,9 @@ export class ChatSeeder {
       const chat=legacyChat(row.chat_id);if(!chat||chat.kind==='topic')continue;
       this.value(row.chat_id);const planned=this.plan.get(chat.external)!;
       const to=typeof row.migrate_to_chat_id==='string'&&/^[A-Za-z0-9._:-]{1,128}$/.test(row.migrate_to_chat_id)?row.migrate_to_chat_id:null;
-      planned.refreshed={state:row.state,to,at:row.observed_at};
+      const available=row.state==='available';
+      planned.refreshed={state:row.state,to,at:row.observed_at,title:available?clean(row.title):null,
+        username:available?clean(row.username,64)?.replace(/^@+/,'')||null:null};
       if(row.state==='migrated')planned.migrated=true;
       if(row.state!=='available')continue;
       if(!planned.title&&clean(row.title)){planned.title=clean(row.title);planned.title_source='refreshed';}
@@ -295,9 +297,10 @@ export class ChatSeeder {
 
 async function details(db:Pick<pg.PoolClient,'query'>,chat:Planned) {
   if(!chat.seen_at&&!chat.username&&chat.closed===null&&!chat.observed&&!chat.refreshed)return;
-  await db.query(`INSERT INTO chat_details(chat_id,username,observed_title,seen_at,closed,refreshed_state,refreshed_to,refreshed_at)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
-    [chat.id,chat.username,chat.observed,chat.seen_at,chat.kind==='topic'?chat.closed:null,chat.refreshed?.state??null,chat.refreshed?.to??null,chat.refreshed?.at??null]);
+  await db.query(`INSERT INTO chat_details(chat_id,username,observed_title,seen_at,closed,refreshed_state,refreshed_to,refreshed_title,refreshed_username,refreshed_at)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
+    [chat.id,chat.username,chat.observed,chat.seen_at,chat.kind==='topic'?chat.closed:null,chat.refreshed?.state??null,chat.refreshed?.to??null,
+      chat.refreshed?.title??null,chat.refreshed?.username??null,chat.refreshed?.at??null]);
 }
 
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms).unref());

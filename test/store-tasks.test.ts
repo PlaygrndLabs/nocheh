@@ -632,6 +632,8 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     for(const change of [{reminders:['2030-01-03T09:00']},{repeat:{every:1,unit:'week',from:'due'}}])
       assert.equal((await s.tasks.chatUpdate(chat,made.id,{expected_revision:started.revision,...change})).state,'proposed');
     const before=cards.length;
+    // A title a later update showed does not rename a group on a card: the owner's last refresh does, as before step 2b.
+    await stores.control.query(`UPDATE chats SET title='Launch crew',title_source='observed' WHERE id=$1`,[group]);
     const rename=await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:started.revision,title:'Book the hall',priority:0}));
     assert.equal(rename.state,'proposed');
     assert.equal(last('card').text,`📋 Change a task in the list of “Launch”\n${seenIn}\n\nTask: Book the venue\nTitle: Book the hall\nPriority: No priority`);

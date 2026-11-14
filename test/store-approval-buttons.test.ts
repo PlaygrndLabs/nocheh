@@ -90,6 +90,9 @@ test('allowed members post freely in their own group; everything else waits for 
     await chatRowForTest(stores.control,other,{title:'Design team',is_forum:true});
     assert.deepEqual((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups,
       [{destination:group,name:null,current:true},{destination:other,name:'Design team',current:false}],'only the groups where the person asking is allowed');
+    // A later update renaming the group does not rename it here until the owner refreshes again, as before step 2b.
+    await stores.control.query(`UPDATE chats SET title='Design',title_source='observed' WHERE id=$1`,[other]);
+    assert.equal((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups[1]!.name,'Design team');
     await assert.rejects(s.telegramActions.destinations(owner),{status:403});
     const ownerTurn=await message('owner-in-group',{},123);
     assert.equal((await s.telegramActions.destinations(await actor(ownerTurn.id,group))).groups.length,4,'the owner is allowed in every group');

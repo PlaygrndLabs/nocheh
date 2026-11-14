@@ -55,10 +55,12 @@ export class RuntimeProfileRepository {
   /** Readable names for the owner's chat and each group. The name is only how the dashboard finds a
    * profile; the chat link stays its logical_profile, so a renamed group keeps its profile. */
   private async labels(owner:string,groups:string[],taken:Set<string>):Promise<Map<string,Label>>{
-    // A group is named once the owner has refreshed it and Telegram answered, as before step 2b: by its chat row's name
-    // and public username (ADR-0250; the old refresh table is only the seeder's now). A group never refreshed keeps its code.
-    const seen=new Map((await this.control.query(`SELECT c.id,c.title,d.username FROM chats c JOIN chat_details d ON d.chat_id=c.id
-      WHERE c.id=ANY($1::text[]) AND d.refreshed_state='available'`,[groups])).rows.map(row=>[row.id as string,{title:row.title as string|null,username:row.username as string|null}]));
+    // A group is named once the owner has refreshed it and Telegram answered, as before step 2b: by the name and public
+    // username that refresh answered, never one a later update shows (ADR-0250; the old refresh table is only the
+    // seeder's now). A group never refreshed keeps its code.
+    const seen=new Map((await this.control.query(`SELECT chat_id,refreshed_title,refreshed_username FROM chat_details
+      WHERE chat_id=ANY($1::text[]) AND refreshed_state='available'`,[groups])).rows
+      .map(row=>[row.chat_id as string,{title:row.refreshed_title as string|null,username:row.refreshed_username as string|null}]));
     const labels=new Map<string,Label>([[owner,{name:'private-chat',display_name:'Private chat'}]]);taken.add('private-chat');
     for(const group of groups){if(group===owner)continue;
       const chat=seen.get(group),code=digest(group),readable=slug(chat?.title)||slug(chat?.username);

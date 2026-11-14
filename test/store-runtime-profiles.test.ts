@@ -36,6 +36,12 @@ test('native profile configuration retains stable preference identities while re
     assert.deepEqual([group.name,group.display_name,group.logical_profile],[name,'Garden Club','nocheh-'+digest('-456').slice(0,24)]);
     assert.equal((await s.runtimeProfiles.resolve(owner,{profile:name})).native_profile,group.native_profile);
     assert.equal((await s.runtimeProfiles.resolve(owner,{profile:'nocheh-'+digest('-456').slice(0,24)})).name,name,'the chat link still finds it');
+    // Someone renames the group and a message shows the new name: the label stays the one the refresh answered, as before
+    // step 2b, until the owner refreshes again.
+    await stores.control.query(`UPDATE chats SET title='Garden',title_source='observed' WHERE id='-456'`);
+    await stores.control.query(`UPDATE chat_details SET username='garden_renamed' WHERE chat_id='-456'`);
+    assert.deepEqual([(await listed('-456')).name,(await listed('-456')).display_name],[name,'Garden Club'],'a later update never renames a profile');
+    assert.equal((await s.runtimeProfiles.resolve(owner,{profile:name})).scope,'-456');
     // These two chat IDs share their first six code characters, so the later one in the list takes a longer code.
     const older='-1000000002195',newer='-1000000006370',longer='group-garden-club-'+digest(newer).slice(0,12);assert.equal(code(older),code(newer));
     groups.push(older,newer);for(const twin of [older,newer])await observe(twin,'Garden Club',null);

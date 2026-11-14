@@ -13,7 +13,9 @@ import type {CapturedSource} from './archive.js';
  *   captured message in the chat (in a topic, in that topic), closed whether a topic's latest open or close message
  *   closed it, username the chat's public name, observed_title the last name an update showed (kept beside a topic
  *   name the owner gave, which it never replaces), and refreshed_* the owner's last explicit refresh from the app
- *   (refreshed_to: the id Telegram moved a group to). seq, seq_bot and seq_at are the update that last set the title,
+ *   (refreshed_to: the id Telegram moved a group to; refreshed_title and refreshed_username: the name and public
+ *   username it answered with, which name runtime profiles and send destinations as before step 2b, whatever later
+ *   updates show). seq, seq_bot and seq_at are the update that last set the title,
  *   closed or username (its update_id, the bot that took it in and when it was taken in), so an older update, or the
  *   capture replay, never undoes a newer one (see newerUpdate).
  * - chat_seed_state: how far the seeder (chat-seed.ts) and the membership backfill have read the archive.
@@ -31,6 +33,8 @@ CREATE TABLE IF NOT EXISTS chat_details (
  seq_at timestamptz,
  refreshed_state text CHECK(refreshed_state IS NULL OR refreshed_state IN ('available','migrated','not_member','not_found')),
  refreshed_to text CHECK(refreshed_to IS NULL OR refreshed_to ~ '^[A-Za-z0-9._:-]{1,128}$'),
+ refreshed_title text CHECK(refreshed_title IS NULL OR length(refreshed_title)<=256),
+ refreshed_username text CHECK(refreshed_username IS NULL OR length(refreshed_username)<=64),
  refreshed_at timestamptz
 );
 CREATE TABLE IF NOT EXISTS chat_seed_state (

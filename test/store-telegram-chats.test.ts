@@ -57,6 +57,11 @@ test('an explicit owner refresh names selected groups from Telegram, follows an 
     const find=(id:string)=>all.find(item=>item.space_id===chat(id));
     assert.equal(find(silent)?.name,'Quiet group','a group with no captured message is named by the refresh');
     assert.equal(find(observed)?.name,'Captured title','a captured name stays preferred');
+    // The refresh's own answer is kept beside it: what runtime profiles and destinations are named by, as before step 2b.
+    const answered=async(id:string)=>(await stores.control.query('SELECT refreshed_title,refreshed_username FROM chat_details WHERE chat_id=$1',[chat(id)])).rows[0];
+    assert.deepEqual({...await answered(observed)},{refreshed_title:'Telegram title',refreshed_username:null});
+    assert.deepEqual({...await answered(moved)},{refreshed_title:'Telegram title',refreshed_username:'upgraded_group'});
+    assert.deepEqual({...await answered(missing)},{refreshed_title:null,refreshed_username:null},'an unavailable answer names nothing');
     assert.deepEqual(find(moved)?.app_ids,[{app:'telegram',external:upgraded,state:'current'},{app:'telegram',external:moved,state:'old'}],
       'the new id becomes current and the old one stays');
     assert.equal(find(moved)?.name,'Telegram title');assert.equal(find(moved)?.state,'active','an upgrade never changes whether a chat is served');

@@ -75,8 +75,12 @@ export async function chatRowForTest(control:Pick<pg.Pool,'connect'>,id:string,n
       [id,connection,value.kind,value.parent_id,value.topic_key]);
     await db.query(`UPDATE chats SET title=$2,title_source=CASE WHEN $2::text IS NULL THEN NULL ELSE $3 END,is_forum=$4,updated_at=now() WHERE id=$1`,
       [id,names.title??null,names.title_source??'refreshed',names.is_forum===true]);
-    await db.query(`INSERT INTO chat_details(chat_id,username,refreshed_state,refreshed_at) VALUES($1,$2,$3,CASE WHEN $3::text IS NULL THEN NULL ELSE now() END)
-      ON CONFLICT(chat_id) DO UPDATE SET username=excluded.username,refreshed_state=excluded.refreshed_state,refreshed_at=excluded.refreshed_at`,
-      [id,names.username??null,names.refreshed===false?null:'available']);
+    // A refresh keeps the name and username it answered apart from the ones later updates show.
+    const refreshed=names.refreshed!==false;
+    await db.query(`INSERT INTO chat_details(chat_id,username,refreshed_state,refreshed_title,refreshed_username,refreshed_at)
+      VALUES($1,$2,$3,$4,$5,CASE WHEN $3::text IS NULL THEN NULL ELSE now() END)
+      ON CONFLICT(chat_id) DO UPDATE SET username=excluded.username,refreshed_state=excluded.refreshed_state,refreshed_title=excluded.refreshed_title,
+        refreshed_username=excluded.refreshed_username,refreshed_at=excluded.refreshed_at`,
+      [id,names.username??null,refreshed?'available':null,refreshed?names.title??null:null,refreshed?names.username??null:null]);
   } finally{db.release();}
 }

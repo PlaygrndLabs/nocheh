@@ -85,9 +85,13 @@ export class TelegramChatRepository {
           title_source=CASE WHEN title_source='observed' AND title IS NOT NULL OR $2::text IS NULL THEN title_source ELSE 'refreshed' END,
           app_type=coalesce($3,app_type),is_forum=$4,updated_at=now() WHERE id=$1`,[chat,title,type&&appTypes.has(type)?type:null,isForum]);
       }
-      const saved=(await db.query(`INSERT INTO chat_details(chat_id,username,refreshed_state,refreshed_to,refreshed_at) VALUES($1,$2,$3,$4,now())
+      // The name and username Telegram answered are kept apart from the ones later updates show: they name runtime
+      // profiles and send destinations until the owner refreshes again, as before step 2b.
+      const saved=(await db.query(`INSERT INTO chat_details(chat_id,username,refreshed_state,refreshed_to,refreshed_title,refreshed_username,refreshed_at)
+        VALUES($1,$2,$3,$4,$5,$2,now())
         ON CONFLICT(chat_id) DO UPDATE SET username=CASE WHEN $3='available' THEN excluded.username ELSE chat_details.username END,
-          refreshed_state=$3,refreshed_to=$4,refreshed_at=now() RETURNING refreshed_at`,[chat,username,state,moved])).rows[0];
+          refreshed_state=$3,refreshed_to=$4,refreshed_title=$5,refreshed_username=$2,refreshed_at=now() RETURNING refreshed_at`,
+        [chat,username,state,moved,title])).rows[0];
       await db.query('COMMIT');
       return {row:{chat_id:chat,external,state,chat_type:type,title,username,is_forum:isForum,migrate_to_chat_id:moved,observed_at:saved.refreshed_at.toISOString()},follow};
     } catch(error){await db.query('ROLLBACK');throw error;}

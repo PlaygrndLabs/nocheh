@@ -129,8 +129,7 @@ export class ActionCommandRepository {
       task:prompts['telegram.approval_task']??approvalTask,line:approvalLines(prompts['telegram.approval_texts'])};
   }
   /** A group's name, public username, topic flag and latest message, from its captured messages under every Telegram id it
-   *  has had, else its chat row and details (what captured updates and the owner's refreshes recorded); and its Telegram
-   *  id now, for links (ADR-0250). */
+   *  has had, else the owner's last refresh, else its chat row and details; and its Telegram id now, for links (ADR-0250). */
   private async chat(chat:string) {
     const external=telegramAddress(chat)?.chat_id??null,scopes=telegramScopes(chat);
     const facts={title:null as string|null,username:null as string|null,forum:null as boolean|null,message:null as string|null,external};
@@ -144,9 +143,13 @@ export class ActionCommandRepository {
       // A message links only into the chat it is in now.
       if(String(message.chat.id)===external&&/^[1-9][0-9]{0,15}$/.test(String(message.message_id)))facts.message??=String(message.message_id);
     }
-    const row=(await this.access.stores.control.query(`SELECT c.title,c.is_forum,d.username FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id
-      WHERE c.id=$1`,[chat])).rows[0];
-    facts.title??=clean(row?.title);facts.username??=clean(row?.username,32);if(typeof row?.is_forum==='boolean')facts.forum??=row.is_forum;
+    // Then the owner's last refresh, as before step 2b, then the chat row.
+    const row=(await this.access.stores.control.query(`SELECT c.title,c.is_forum,d.username,
+        CASE WHEN d.refreshed_state='available' THEN d.refreshed_title END AS refreshed_title,
+        CASE WHEN d.refreshed_state='available' THEN d.refreshed_username END AS refreshed_username
+      FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id WHERE c.id=$1`,[chat])).rows[0];
+    facts.title??=clean(row?.refreshed_title)??clean(row?.title);facts.username??=clean(row?.refreshed_username,32)??clean(row?.username,32);
+    if(typeof row?.is_forum==='boolean')facts.forum??=row.is_forum;
     return facts;
   }
   /** A topic's name from its creation or latest edit, else its topic row's: the name the owner gave it, or the one Telegram
