@@ -72,6 +72,7 @@ TITLES = {
     'menu_shown_to_nobody': 'Nobody sees a command menu', 'stranger_in_private_gets_one_reply': 'A stranger in private: one fixed reply, nothing else',
     'owner_private_card_and_approve': 'Approval card in private chat, Approve button',
     'owner_private_card_reject': 'Approval card, Reject button', 'tool_card_reads_in_words': 'A tool\'s approval card reads in words, not JSON',
+    'forwarded_messages_are_not_the_owners_words': 'A forwarded message reads as shared information, and a forwarded command never runs',
     'same_group_post_goes_right_away': 'Post in your own group needs no approval',
     'member_cross_group_card_in_origin': 'Member reviews their own message to another group',
     'owner_reviews_when_member_not_allowed_there': 'You review a member\'s message to a group they are not in',
