@@ -26,9 +26,12 @@ OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, 
 # A third served group, so two groups can share a project while GROUP stays in none (project_groups_stay_apart).
 THIRD_GROUP = -10044
 # Groups Nocheh first sees after step 2b, so their Nocheh ids are digests (ADR-0250). NEW_GROUP (NG1) is turned on with
-# the 2b-1 switch and joins P1; UPGRADED_GROUP is a basic group Telegram upgrades to UPGRADED_SUPERGROUP.
+# the 2b-1 switch and joins P1; UPGRADED_GROUP is a basic group Telegram upgrades to UPGRADED_SUPERGROUP, which Nocheh
+# learns from Telegram's service messages; REFRESHED_GROUP is one whose upgrade the owner's refresh finds. No other
+# scenario posts in either upgraded group.
 NEW_GROUP, NEW_TOPIC = -10045, 5
 UPGRADED_GROUP, UPGRADED_SUPERGROUP = -4046, -10047
+REFRESHED_GROUP, REFRESHED_SUPERGROUP = -4048, -10049
 MENTION = '@synthetic_fixture_bot'
 # The fixed, editable reply for people the owner has not allowed (src/prompts.ts).
 NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this group.'
@@ -771,7 +774,8 @@ class Scenarios:
 
     def telegram_refresh_names(self):
         # A refresh that finds a group upgraded now moves the chat onto its new Telegram id (ADR-0250); later scenarios
-        # still post in OTHER_GROUP by its id, so the upgrade is product_scenarios.supergroup_upgrade_keeps_history's.
+        # still post in OTHER_GROUP by its id, so a refresh that finds an upgrade is checked on a group no other scenario
+        # posts in, in product_scenarios.supergroup_upgrade_keeps_history.
         self.f.control({'chats': [{'id': GROUP, 'type': 'supergroup', 'title': 'Synthetic Forum Refreshed', 'is_forum': True},
                                   {'id': OTHER_GROUP, 'type': 'supergroup', 'title': 'Synthetic Forum '+str(OTHER_GROUP), 'is_forum': True}]})
         before = len(self.f.sent())

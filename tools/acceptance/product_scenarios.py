@@ -26,7 +26,8 @@ from tools.acceptance import canaries
 from tools.acceptance.github_mock import key_line
 from tools.acceptance.telegram_rehearsal import wait_telegram_connected
 from tools.acceptance.telegram_scenarios import (GROUP, NEW_GROUP, NEW_TOPIC, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP, UNSELECTED_GROUP,
-                                                UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed, Scenarios, isolated_turns, synthetic_pdf)
+                                                REFRESHED_GROUP, REFRESHED_SUPERGROUP, UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed, Scenarios,
+                                                isolated_turns, synthetic_pdf)
 from tools.paths import ROOT
 
 # 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
@@ -684,12 +685,13 @@ class ProductScenarios(Scenarios):
 
     def project_groups_stay_apart(self):
         # Groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1), THIRD_GROUP (GP2) and NEW_GROUP (NG1, a
-        # group first seen after step 2b, with a digest id, ADR-0250) join a new project; GROUP (GP4) stays in none. Each group, and the owner's private chat, holds its own mark next to one
-        # shared search word. A group answer reads only its own group: the owner's question in GP1 finds GP1's mark and
-        # its task, never GP2's mark, task, count or tag. Under the owner's answer there sits Answer privately; a member's
-        # tap gets the only-asker popup and runs nothing; the owner's tap opens the private chat with /start <id>, and
-        # that answer reads GP1 and GP2, never GP4 or the owner's private chat. Every send it took is recorded. A
-        # PROBEMARK sits in an unaddressed message just before the question, which both answers get with the group's recent
+        # group first seen after step 2b, with a digest id, ADR-0250) join a new project; GROUP (GP4) stays in none. Each
+        # group, and the owner's private chat, holds its own mark next to one shared search word. A group answer reads only
+        # its own group: the owner's question in GP1 finds GP1's mark and its task, never GP2's mark, task, count or tag,
+        # and the same question in NG1 finds NG1's mark and neither group's task. Under the owner's answer there sits Answer
+        # privately; a member's tap gets the only-asker popup and runs nothing; the owner's tap opens the private chat with
+        # /start <id>, and that answer reads GP1, GP2 and NG1, never GP4 or the owner's private chat. Every send it took is
+        # recorded. A PROBEMARK sits in an unaddressed message just before the question, which both answers get with the group's recent
         # messages, so a model request holding it next to a private mark counts as a leak. It stays out of the question:
         # the question holds the search word, so search results, and the private answer the owner's chat keeps beside its
         # private mark, would hold it too. The private mark is saved for private_canaries_never_left_the_owner.
@@ -745,6 +747,24 @@ class ProductScenarios(Scenarios):
             self.gate('group_task_view_shows_its_own_task', gp1_task in listed, result=listed[:300])
             self.gate('group_task_view_never_shows_another_groups_task', gp2_task not in listed and gp2_tag not in listed
                       and (tasks.get('counts') or {}).get('open') == 1, counts=tasks.get('counts'), result=listed[:300])
+            # 2b. NG1, the group with a digest id whose archive is read through its Telegram ids (ADR-0250), reads only
+            # itself too: its own mark, never GP1's, GP2's or GP4's marks or tasks, though it shares their project.
+            _, new_text = self.turn(self.f.message(NEW_GROUP, 'What do we have on crates? '+tools), NEW_GROUP, chunked=True)
+            new_search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
+            new_listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
+            try:
+                new_tasks = json.loads(new_listed)
+            except ValueError:
+                new_tasks = {}
+            others = {gp1: 'GP1', gp2: 'GP2', gp4: 'GP4', private: 'private', gp1_task: 'GP1 task', gp2_task: 'GP2 task',
+                      gp1_tag: 'GP1 tag', gp2_tag: 'GP2 tag'}
+            new_seen = new_text+'\n'+new_search+'\n'+new_listed
+            self.gate('new_id_group_search_finds_its_own_mark', ng1 in new_search, result=new_search[:300])
+            # Its open count is the open tasks it lists, so no other group's task hides in a number.
+            own_open = [task for task in new_tasks.get('tasks') or [] if task.get('state') == 'open' and not task.get('parent_id')]
+            self.gate('new_id_group_answer_uses_only_that_group', not canaries.found(new_seen, others)
+                      and (new_tasks.get('counts') or {}).get('open') == len(own_open),
+                      found=canaries.found(new_seen, others), counts=new_tasks.get('counts'), listed=len(own_open))
             buttons = self.buttons(reply)
             self.gate('answer_privately_under_the_owners_answer', len(buttons) == 1 and re.fullmatch(r'np[a-f0-9]{32}', buttons[0]['callback_data'] or '')
                       and buttons[0]['text'] == '\U0001f512 Answer privately' and not any(self.buttons(row) for row in group_replies[:-1]),
@@ -894,18 +914,22 @@ class ProductScenarios(Scenarios):
         # Telegram upgrades a basic group to a supergroup: the supergroup has a new Telegram id, and Telegram says so in
         # both chats (migrate_to_chat_id, migrate_from_chat_id). Nocheh keeps one chat (ADR-0250): the new id joins the old
         # one, so the group keeps its id, its project, its task and its switch, which still lists the old id only, and a
-        # search in the supergroup finds what was said before the upgrade.
+        # search in the supergroup finds what was said before the upgrade. An upgrade the owner's refresh finds instead
+        # (Telegram answers with migrate_to_chat_id) moves a group onto its new id the same way, at once.
         number = str(self.f.ids())
         mark, word = 'BEFOREUPGRADE'+number, 'UPGRADEWORD'+number
         basic = {'id': UPGRADED_GROUP, 'type': 'group', 'title': 'Synthetic Garden'}
         supergroup = {'id': UPGRADED_SUPERGROUP, 'type': 'supergroup', 'title': 'Synthetic Garden'}
+        orchard = {'id': REFRESHED_GROUP, 'type': 'group', 'title': 'Synthetic Orchard'}
         sender = {'id': OWNER, 'is_bot': False, 'first_name': 'Synthetic '+str(OWNER)}
         project = assignment = failed = None
         try:
             self.turn(self.f.message(UPGRADED_GROUP, 'Hello before Nocheh is on here', extra={'chat': basic}), UPGRADED_GROUP, expect_reply=False)
-            chat = self.f.chat(UPGRADED_GROUP)
-            self.current['recreated'] = self.serve_groups(UPGRADED_GROUP)
-            self.wait('basic_group_served', lambda: self.served(UPGRADED_GROUP), 180)
+            self.turn(self.f.message(REFRESHED_GROUP, 'Hello before Nocheh is on here', extra={'chat': orchard}), REFRESHED_GROUP, expect_reply=False)
+            chat, refreshed = self.f.chat(UPGRADED_GROUP), self.f.chat(REFRESHED_GROUP)
+            # One restart turns both on: a refresh asks Telegram only about the groups Nocheh serves.
+            self.current['recreated'] = self.serve_groups(UPGRADED_GROUP, REFRESHED_GROUP)
+            self.wait('basic_group_served', lambda: self.served(UPGRADED_GROUP) and self.served(REFRESHED_GROUP), 180)
             self.turn(self.f.message(UPGRADED_GROUP, 'Seeds for the swap '+word+' '+mark, extra={'chat': basic}), UPGRADED_GROUP)
             project = self.f.app('/v1/projects', {'name': 'Garden P3', 'description': '', 'state': 'active', 'expected_revision': 0,
                                                   'operation_id': 'scenario-upgrade-project-'+number})
@@ -945,6 +969,28 @@ class ProductScenarios(Scenarios):
             self.gate('search_finds_messages_from_before', mark in search, result=search[:300])
             listed = self.task_tool({'action': 'list', 'state': 'all'}, chat=UPGRADED_SUPERGROUP)
             self.gate('keeps_its_task', mark in json.dumps(listed, ensure_ascii=False), result=str(listed)[:300])
+            # The owner's refresh finds the other group upgraded: Telegram answers its old id with the new one. Nocheh
+            # moves the chat onto the new id at once, keeps the old one, and asks again under the new id. The groups
+            # the refresh also asks about are answered as they are.
+            self.f.control({'chats': [{'id': REFRESHED_GROUP, 'type': 'group', 'migrate_to_chat_id': REFRESHED_SUPERGROUP},
+                                      {'id': REFRESHED_SUPERGROUP, 'type': 'supergroup', 'title': 'Synthetic Orchard'},
+                                      *({'id': group, 'type': 'supergroup', 'title': 'Synthetic Forum '+str(group)}
+                                        for group in (THIRD_GROUP, NEW_GROUP, UPGRADED_SUPERGROUP))]})
+            before = len(self.f.sent())
+            rows = [row for row in self.f.app('/v1/telegram/chats/refresh', {})['chats'] if row.get('chat_id') == refreshed]
+            self.gate('refresh_reports_the_upgrade', any(row.get('external') == str(REFRESHED_GROUP) and row.get('state') == 'migrated'
+                                                         and row.get('migrate_to_chat_id') == str(REFRESHED_SUPERGROUP) for row in rows), rows=rows)
+            self.gate('refresh_asks_again_under_the_new_id', any(row.get('external') == str(REFRESHED_SUPERGROUP) and row.get('state') == 'available'
+                                                                 for row in rows), rows=rows)
+            self.gate('refresh_sends_nothing', len(self.f.sent()) == before)
+            item = self.f.chat_item(REFRESHED_SUPERGROUP)
+            labels = [(label.get('external'), label.get('state')) for label in item.get('app_ids') or []]
+            self.gate('refresh_keeps_one_chat_with_both_telegram_ids', item.get('space_id') == refreshed
+                      and (str(REFRESHED_SUPERGROUP), 'current') in labels and (str(REFRESHED_GROUP), 'old') in labels,
+                      space=item.get('space_id') == refreshed, labels=labels)
+            # Still on by its old id, and the owner's list shows Telegram's last answer, under the new id: nothing to fix.
+            self.gate('refreshed_group_still_on', item.get('state') == 'active', state=item.get('state'))
+            self.gate('directory_shows_the_refresh', (item.get('telegram') or {}).get('state') == 'available', telegram=item.get('telegram'))
         except Exception as error:
             failed = error
             raise
