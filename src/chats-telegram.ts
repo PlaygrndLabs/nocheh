@@ -4,6 +4,7 @@
  * values Nocheh stored before step 2b. Every other module asks the chat directory (src/chats.ts) what a chat is; it
  * never decides private, group or topic, parent or topic from the shape of an id.
  */
+import {HttpError} from './http.js';
 
 /** A Telegram chat id as the Bot API writes it: negative for groups and channels, positive for private chats. */
 const telegramChat='-?[1-9][0-9]{0,18}';
@@ -12,6 +13,8 @@ const telegramAccount='[1-9][0-9]{0,18}';
 /** A forum topic's thread id. */
 const telegramThread='[1-9][0-9]{0,15}';
 const chatPattern=new RegExp(`^${telegramChat}$`),accountPattern=new RegExp(`^${telegramAccount}$`);
+/** A Telegram user id as an SQL regex source, for a CHECK that still admits a value an older row holds. */
+export const telegramAccountSource=telegramAccount;
 export const isTelegramChat=(value:unknown):value is string=>typeof value==='string'&&chatPattern.test(value);
 export const isTelegramAccount=(value:unknown):value is string=>typeof value==='string'&&accountPattern.test(value);
 
@@ -45,6 +48,17 @@ export function legacyChat(value:unknown):LegacyChat|null {
   const external=match[1]!,topic=match[2]??null,chat_kind=external.startsWith('-')?'group' as const:'private' as const;
   return topic===null?{id:value,kind:chat_kind,external,topic_key:null,parent_id:null,chat_kind}:
     {id:value,kind:'topic',external,topic_key:topic,parent_id:external,chat_kind};
+}
+
+/**
+ * A chat value in the frozen old shape, the inverse of legacyChat: a Telegram chat id, or it followed by one of its
+ * topics. Only the legacy storage layout's event spaces are built this way (spaces.ts eventSpace); a chat first seen
+ * after step 2b gets its id from chatIdFor, and every live reader asks the chat directory.
+ */
+export function legacyChatValue(external:string,topic?:unknown):string {
+  if(topic===undefined||topic===null)return external;
+  if(!chatPattern.test(external)||!Number.isSafeInteger(topic)||Number(topic)<=0)throw new HttpError(400,'invalid_topic');
+  return `${external}/topic/${topic}`;
 }
 
 /**
