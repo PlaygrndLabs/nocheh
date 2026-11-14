@@ -107,6 +107,36 @@ test('owner data travels with its types, and nothing imported acts by itself',
       [{space_id:'-10042',project_id:project,mode:'assigned'},{space_id:'-10042/topic/7',project_id:null,mode:'inherit'}]);
     // Any other column a store no longer has is still refused.
     await assert.rejects(to.restore(owner,[sealed('project_assignments',['-10073'],{space_id:'-10073',project_id:null,mode:'none',revision:1,unknown:true})]),/invalid_owner_record_fields/);
+
+    // Chats (ADR-0250): every chat a record names has its row here, keeping its id, off until this installation serves it.
+    const chatRows=async(pool:pg.Pool)=>(await pool.query('SELECT id,kind,parent_id,topic_key,title,title_source,state FROM chats')).rows
+      .sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
+    assert.deepEqual((await chatRows(target)).map(row=>[row.id,row.kind,row.parent_id,row.state]),
+      [['-10042','group',null,'off'],['-10042/topic/7','topic','-10042','off'],['-10073','group',null,'off']]);
+    assert.deepEqual((await target.query('SELECT external_id,chat_id,state FROM chat_ids')).rows.map(row=>[row.external_id,row.chat_id,row.state]).sort(),
+      [['-10042','-10042','current'],['-10073','-10073','current']]);
+    // A topic name exported before step 2b names its topic, already here or not, and comes again unchanged.
+    const registration=(topic:number,name:string)=>sealed('telegram_topic_registrations',['-10042',String(topic)],
+      {chat_id:'-10042',topic_id:topic,name,created_at:'2026-10-01T00:00:00Z',updated_at:'2026-10-01T00:00:00Z'});
+    const named=await to.restore(owner,[registration(7,'Seed beds'),registration(9,'Watering')]);
+    assert.deepEqual([named.added,named.unchanged,named.kept],[2,0,0]);
+    assert.deepEqual((await chatRows(target)).filter(row=>row.kind==='topic').map(row=>[row.id,row.title,row.title_source]),
+      [['-10042/topic/7','Seed beds','owner'],['-10042/topic/9','Watering','owner']]);
+    const again=await to.restore(owner,[registration(7,'Seed beds'),registration(9,'Watering')]);
+    assert.deepEqual([again.added,again.unchanged,again.kept],[0,2,0]);
+    assert.equal((await to.restore(owner,[registration(9,'Another name')])).kept,1,'the owner\'s name here stays');
+    // An export carries the chats and their app ids, parents first; importing it elsewhere gives the same chats, off.
+    await target.query(`UPDATE chats SET state='active' WHERE id='-10042'`);
+    const chatRecords:OwnerRecord[]=[];
+    for(const table of ['chats','chat_ids']){let after:string|null=null;do{const page=await to.page(owner,table,after,2);chatRecords.push(...page.records);after=page.next;}while(after);}
+    assert.deepEqual(chatRecords.map(record=>record.table+':'+record.key.join('/')),['chats:group/-10042','chats:group/-10073','chats:topic/-10042/topic/7',
+      'chats:topic/-10042/topic/9','chat_ids:'+chatRecords.find(record=>record.table==='chat_ids')!.key[0]+'/-10042','chat_ids:'+chatRecords.find(record=>record.table==='chat_ids')!.key[0]+'/-10073']);
+    assert.equal(chatRecords[0]!.row.state,'active');
+    const moved=await from.restore(owner,chatRecords);assert.equal(moved.added,chatRecords.length);
+    assert.deepEqual((await chatRows(source)).map(row=>[row.id,row.title,row.state]),
+      [['-10042',null,'off'],['-10042/topic/7','Seed beds','off'],['-10042/topic/9','Watering','off'],['-10073',null,'off']]);
+    let same=0;for(const record of chatRecords)same+=(await from.restore(owner,[record])).unchanged;
+    assert.equal(same,chatRecords.length,'a second import changes nothing');
   } finally {
     for(const pool of [...pools,...app])await pool.end();
     for(const schema of schemas)await setup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);

@@ -12,7 +12,11 @@ import uuid
 from tools.operations.installation import configuration
 from tools.acceptance import reset_protocol, reset_quiescence
 
-FORMAT = 'nocheh-reset-configuration-v1'
+# Version 2 (ADR-0250) carries the chats and their app ids, so every value names the same chat after the reset. A
+# version 1 snapshot, taken before step 2b, still validates and restores: its values name chats in the old way.
+FORMAT = 'nocheh-reset-configuration-v2'
+FORMATS = ('nocheh-reset-configuration-v1', FORMAT)
+CHAT_TABLES = ('chats', 'chat_ids')
 ROW_LIMIT = 10000
 LEGACY_PRIVACY = ('Do not disclose personal relationships, health, finances, identity details, credentials, '
                   'private plans, or information about other people. Release only relevant non-personal '
@@ -34,10 +38,11 @@ ORIGINAL = {
                  ('id', 'name', 'description', 'state')),
     # A topic always follows its group's project (ADR-0247). A store the stores have not started at this version can
     # still hold a topic's own choice; starting them turns it into "follows its group", so it is read that way here.
-    'project_assignments': ("SELECT space_id,"
-                            "CASE WHEN space_id LIKE '%/topic/%' THEN NULL ELSE project_id END AS project_id,"
-                            "CASE WHEN space_id LIKE '%/topic/%' THEN 'inherit' ELSE mode END AS mode "
-                            "FROM project_assignments ORDER BY space_id",
+    # Whether a row names a topic is its chat's row (ADR-0250).
+    'project_assignments': ("SELECT a.space_id,"
+                            "CASE WHEN t.id IS NOT NULL THEN NULL ELSE a.project_id END AS project_id,"
+                            "CASE WHEN t.id IS NOT NULL THEN 'inherit' ELSE a.mode END AS mode "
+                            "FROM project_assignments a LEFT JOIN chats t ON t.id=a.space_id AND t.kind='topic' ORDER BY a.space_id",
                             ('space_id', 'project_id', 'mode')),
     # Only the owner's rules. A store the stores have not started at this version still holds the rules a project's
     # share box kept; they are deleted at that start, never kept as the owner's (ADR-0247), so they are left out here.
@@ -50,24 +55,89 @@ ORIGINAL = {
     'chat_tool_settings': ('SELECT space_id,shell,browser,mcp FROM chat_tool_settings ORDER BY space_id',
                            ('space_id', 'shell', 'browser', 'mcp')),
     'runtime_profiles': ("SELECT id,name,owner_id FROM runtime_profiles WHERE state='active' ORDER BY id", ('id', 'name', 'owner_id')),
+    # Every chat with its app ids (ADR-0250): what each value names. A name only when the owner gave it (a topic's);
+    # names Telegram showed are content and are seen again after the reset.
+    'chats': ("SELECT c.id,n.app,c.kind,c.parent_id,c.topic_key,c.app_type,"
+              "CASE WHEN c.title_source='owner' THEN c.title END AS title,"
+              "CASE WHEN c.title_source='owner' THEN 'owner' END AS title_source,c.is_forum,c.state "
+              "FROM chats c JOIN chat_connections n ON n.id=c.connection_id ORDER BY c.id",
+              ('id', 'app', 'kind', 'parent_id', 'topic_key', 'app_type', 'title', 'title_source', 'is_forum', 'state')),
+    'chat_ids': ("SELECT n.app,i.external_id,i.chat_id,i.state,i.reason FROM chat_ids i "
+                 "JOIN chat_connections n ON n.id=i.connection_id ORDER BY n.app,i.external_id",
+                 ('app', 'external_id', 'chat_id', 'state', 'reason')),
 }
 
 
-def group_space(value):
-    """A group or one of its topics, the only chats that share (ADR-0242); anything else counts as private."""
-    return isinstance(value, str) and re.fullmatch(r'-[1-9][0-9]{0,18}(/topic/[1-9][0-9]{0,15})?', value) is not None
+# Chat values stored before step 2b, in the legacy layout or a version 1 snapshot: a Telegram chat id, or it and one
+# of its topics. They are read once here, to convert them; the stores read them only in their seeder (ADR-0250).
+LEGACY_SPACE = re.compile(r'(-?[1-9][0-9]{0,18})(?:/topic/([1-9][0-9]{0,15}))?')
 
 
-def catalog(layout):
+def legacy_group_space(value):
+    """In the legacy layout, a group or one of its topics (a negative chat id); anything else counts as private."""
+    match = LEGACY_SPACE.fullmatch(value) if isinstance(value, str) else None
+    return match is not None and match.group(1).startswith('-')
+
+
+def legacy_chats(values, served=()):
+    """The chats rows and app ids that values stored before step 2b name, as the stores' seeder makes them: each value
+    stays its chat's id. A value that names no chat ('*', 'desktop:…', anything else) gets none, so it counts as
+    private. `served` holds the Telegram ids the setup serves."""
+    chats, ids = {}, {}
+    for value in values:
+        match = LEGACY_SPACE.fullmatch(value) if isinstance(value, str) else None
+        if not match: continue
+        external, key = match.group(1), match.group(2)
+        state = 'active' if external in served else 'off'
+        chats.setdefault(external, {'id': external, 'app': 'telegram', 'kind': 'group' if external.startswith('-') else 'private',
+                                    'parent_id': None, 'topic_key': None, 'app_type': None, 'title': None, 'title_source': None,
+                                    'is_forum': False, 'state': state})
+        ids.setdefault(external, {'app': 'telegram', 'external_id': external, 'chat_id': external, 'state': 'current', 'reason': None})
+        if key: chats.setdefault(value, {**chats[external], 'id': value, 'kind': 'topic', 'parent_id': external, 'topic_key': key})
+    return sorted(chats.values(), key=lambda row: row['id']), sorted(ids.values(), key=lambda row: row['external_id'])
+
+
+class Chats:
+    """The snapshot's chats (ADR-0250): what each value names. A value with no row counts as private."""
+    def __init__(self, rows):
+        self.rows = {row['id']: row for row in rows}
+
+    def kind(self, value):
+        row = self.rows.get(value) if isinstance(value, str) else None
+        return row['kind'] if row else None
+
+    def group_space(self, value):
+        """A group or one of its topics, the only chats that share (ADR-0242)."""
+        row = self.rows.get(value) if isinstance(value, str) else None
+        if row and row['kind'] == 'topic': row = self.rows.get(row['parent_id'])
+        return bool(row) and row['kind'] == 'group'
+
+
+def _chats(values):
+    """The snapshot's chats rows, checked: each topic's chat is a row, and each app id names a row."""
+    chats = values['chats']
+    if (len({row['id'] for row in chats}) != len(chats) or
+            any(not isinstance(row['id'], str) or row['kind'] not in ('private', 'group', 'topic') or
+                (row['kind'] == 'topic') != (row['parent_id'] is not None) for row in chats)):
+        raise ValueError('reset_configuration_chats_invalid')
+    known = Chats(chats)
+    if (any(row['kind'] == 'topic' and known.kind(row['parent_id']) not in ('private', 'group') for row in chats) or
+            any(known.kind(row['chat_id']) not in ('private', 'group') for row in values['chat_ids'])):
+        raise ValueError('reset_configuration_chats_invalid')
+    return known
+
+
+def catalog(layout, format=FORMAT):
     if layout not in ('legacy', 'original-only-v1'):
         raise ValueError('reset_configuration_layout_invalid')
-    return {**COMMON, **(LEGACY if layout == 'legacy' else ORIGINAL)}
+    tables = {**COMMON, **(LEGACY if layout == 'legacy' else ORIGINAL)}
+    return {name: value for name, value in tables.items() if format == FORMAT or name not in CHAT_TABLES}
 
 
 def validate(snapshot):
-    if not isinstance(snapshot, dict) or set(snapshot) != {'format', 'layout', 'configuration'} or snapshot['format'] != FORMAT:
+    if not isinstance(snapshot, dict) or set(snapshot) != {'format', 'layout', 'configuration'} or snapshot['format'] not in FORMATS:
         raise ValueError('reset_configuration_invalid')
-    expected = catalog(snapshot['layout'])
+    expected = catalog(snapshot['layout'], snapshot['format'])
     values = snapshot['configuration']
     if not isinstance(values, dict) or set(values) != set(expected):
         raise ValueError('reset_configuration_fields_invalid')
@@ -96,17 +166,22 @@ def validate(snapshot):
         runtime = values['runtime_configuration']
         if len(runtime) > 1 or any(row['name'] != 'assistant' or not isinstance(row['document'], dict) for row in runtime):
             raise ValueError('reset_runtime_configuration_requires_transfer')
+        if snapshot['format'] == FORMAT:
+            chats = _chats(values)
+        else:
+            chats = Chats(legacy_chats([row['space_id'] for row in values['project_assignments']] +
+                                       [space for row in values['sharing_rules'] if isinstance(row['sources'], list)
+                                        for space in [*row['sources'], row['destination']]])[0])
         # A private chat never joins a project or a sharing rule (ADR-0242). The restore refuses such a row, so a
         # reset stops here, before anything is erased, until the owner removes the private chat from it.
         if any(not isinstance(row['sources'], list) for row in values['sharing_rules']):
             raise ValueError('reset_configuration_fields_invalid')
-        if (any(row['mode'] == 'assigned' and not group_space(row['space_id']) for row in values['project_assignments']) or
-                any(not all(group_space(space) for space in [*row['sources'], row['destination']]) for row in values['sharing_rules'])):
+        if (any(row['mode'] == 'assigned' and not chats.group_space(row['space_id']) for row in values['project_assignments']) or
+                any(not all(chats.group_space(space) for space in [*row['sources'], row['destination']]) for row in values['sharing_rules'])):
             raise ValueError('reset_configuration_private_chat_requires_review')
         # A topic always follows its group's project (ADR-0247). The snapshot reads every topic row that way, so only a
         # hand-edited snapshot can hold another choice; the restore refuses it the same way.
-        if any(isinstance(row['space_id'], str) and '/topic/' in row['space_id'] and row['mode'] != 'inherit'
-               for row in values['project_assignments']):
+        if any(chats.kind(row['space_id']) == 'topic' and row['mode'] != 'inherit' for row in values['project_assignments']):
             raise ValueError('reset_configuration_topic_follows_group')
     if len(reset_protocol.canonical(snapshot)) > reset_protocol.LIMIT:
         raise ValueError('reset_configuration_limit')
@@ -119,6 +194,8 @@ def snapshot(query, layout):
     There are no archive/derived reads, old configuration revisions, event
     grants, pending effects, prepared contexts or released sharing content.
     """
+    # The chats tables are there once the stores started at this version (ADR-0250); before that the read fails, and
+    # the reset stops before anything is erased.
     fields = []
     for name, (sql, _) in catalog(layout).items():
         fields.append("'" + name + "', (SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) FROM (" +
@@ -132,8 +209,7 @@ def snapshot(query, layout):
 
 def _space(value):
     if (not isinstance(value, str) or not value.strip() or len(value.encode()) > 256 or
-            any(ord(character) < 32 for character in value) or
-            '/topic/' in value and not re.fullmatch(r'-?\d+/topic/[1-9]\d{0,15}', value)):
+            any(ord(character) < 32 for character in value) or '/' in value and not LEGACY_SPACE.fullmatch(value)):
         raise ValueError('reset_legacy_space_invalid')
     return value
 
@@ -164,11 +240,11 @@ def _legacy_rules(rows):
         sources = sorted({_space(source) for source in raw_sources})
         if destination in sources:
             raise ValueError('reset_legacy_space_requires_review')
-        sources = [source for source in sources if group_space(source)]
+        sources = [source for source in sources if legacy_group_space(source)]
         instructions = values.get('privacy_instructions', LEGACY_PRIVACY)
         if not isinstance(instructions, str) or len(instructions.encode()) > 4000:
             raise ValueError('reset_legacy_space_invalid')
-        if not group_space(destination):
+        if not legacy_group_space(destination):
             continue
         identifier = hashlib.sha256(reset_protocol.canonical(
             ['legacy-space-policy-v1', destination])).hexdigest()
@@ -212,6 +288,10 @@ def original_only(snapshot_value, values, preferences, reset_id):
                                     'default_grant_mode': 'one_time'}],
         'chat_tool_settings': [],
         'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id'])}}
+    # Each chat the converted setup names keeps its old value as its id (ADR-0250).
+    rules = converted['configuration']['sharing_rules']
+    converted['configuration']['chats'], converted['configuration']['chat_ids'] = legacy_chats(
+        [*groups, owner, *(space for row in rules for space in [*row['sources'], row['destination']])], served={*groups, owner})
     return validate(converted)
 
 

@@ -12,6 +12,21 @@ from tools.acceptance import reset_protocol
 from tools.acceptance import reset_quiescence
 
 
+def chat(id, kind, parent=None, state='off'):
+    """A chats row as the snapshot reads it (ADR-0250); a topic's key is the end of its old value or a fixture key."""
+    return {'id': id, 'app': 'telegram', 'kind': kind, 'parent_id': parent, 'topic_key': id.rsplit('/', 1)[-1] if parent else None,
+            'app_type': None, 'title': None, 'title_source': None, 'is_forum': False, 'state': state}
+
+
+# Old-shaped chats (values stored before step 2b) and one chat first seen later, with a digest id.
+CHATS = [chat('-1001', 'group'), chat('-1002', 'group'), chat('123', 'private'), chat('123/topic/5', 'topic', '123'),
+         chat('-1001/topic/7', 'topic', '-1001'), chat('e' * 64, 'group'), chat('f' * 64, 'topic', 'e' * 64)]
+CHAT_IDS = [{'app': 'telegram', 'external_id': '-1001', 'chat_id': '-1001', 'state': 'current', 'reason': None},
+            {'app': 'telegram', 'external_id': '-1002', 'chat_id': '-1002', 'state': 'current', 'reason': None},
+            {'app': 'telegram', 'external_id': '123', 'chat_id': '123', 'state': 'current', 'reason': None},
+            {'app': 'telegram', 'external_id': '-1003', 'chat_id': 'e' * 64, 'state': 'current', 'reason': None}]
+
+
 class ResetConfigurationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
@@ -21,6 +36,7 @@ class ResetConfigurationTests(unittest.TestCase):
                            installation_generation=[{'generation': '11111111-1111-4111-8111-111111111111'}],
                            guard_mode=[{'mode': 'on'}])
         self.values['projects'] = [{'id': 'a' * 64, 'name': 'Saved project', 'description': 'Private configuration', 'state': 'active'}]
+        self.values['chats'] = copy.deepcopy(CHATS); self.values['chat_ids'] = copy.deepcopy(CHAT_IDS)
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False, 'content_copied': False,
             'blockers': [], 'containers': [], 'volumes': [], 'installation': {'root': str(self.state.parent), 'state': str(self.state),
             'state_anchor': reset_inventory.entry(self.state, 'retain_root', 'fixture'), 'memory_state': str(self.state / 'honcho'),
@@ -79,6 +95,12 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
         self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')
         self.assertTrue(all(set(row) == {'id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions'} for row in rules.values()))
+        # Each chat the setup names keeps its old value as its id, served as the setup says (ADR-0250).
+        self.assertEqual([(row['id'], row['kind'], row['state']) for row in converted['chats']],
+                         [('-10', 'group', 'active'), ('-20', 'group', 'active'), ('-30', 'group', 'active'), ('-40', 'group', 'off'),
+                          ('-50', 'group', 'off'), ('42', 'private', 'active')])
+        self.assertEqual({row['external_id']: row['chat_id'] for row in converted['chat_ids']}, {row['id']: row['id'] for row in converted['chats']})
+        self.assertEqual(result['format'], 'nocheh-reset-configuration-v2')
         self.assertEqual(configuration.original_only(source, values, preferences, reset_id), result)
         values['TELEGRAM_GROUP_ACCESS'] = '{"-10":{"granted":["77"],"denied":["88"]}}'
         preserved = configuration.original_only(source, values, preferences, reset_id)
@@ -156,8 +178,52 @@ class ResetConfigurationTests(unittest.TestCase):
         query = Mock(return_value=json.dumps(self.values))
         configuration.snapshot(query, 'original-only-v1')
         sql = query.call_args.args[1]
-        self.assertIn("SELECT space_id,CASE WHEN space_id LIKE '%/topic/%' THEN NULL ELSE project_id END AS project_id,"
-                      "CASE WHEN space_id LIKE '%/topic/%' THEN 'inherit' ELSE mode END AS mode FROM project_assignments", sql)
+        self.assertIn("SELECT a.space_id,CASE WHEN t.id IS NOT NULL THEN NULL ELSE a.project_id END AS project_id,"
+                      "CASE WHEN t.id IS NOT NULL THEN 'inherit' ELSE a.mode END AS mode "
+                      "FROM project_assignments a LEFT JOIN chats t ON t.id=a.space_id AND t.kind='topic'", sql)
+
+    def test_a_version_1_snapshot_still_validates_by_its_old_values(self):
+        # A snapshot taken before step 2b carries no chats; its values name chats in the old way, read once here.
+        values = {name: rows for name, rows in self.values.items() if name not in ('chats', 'chat_ids')}
+        values['project_assignments'] = [{'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned'},
+                                         {'space_id': '-1001/topic/7', 'project_id': None, 'mode': 'inherit'}]
+        old = {'format': 'nocheh-reset-configuration-v1', 'layout': 'original-only-v1', 'configuration': values}
+        self.assertEqual(configuration.validate(copy.deepcopy(old)), old)
+        for space, mode, error in (('123', 'assigned', 'private_chat_requires_review'), ('-1001/topic/7', 'assigned', 'topic_follows_group')):
+            broken = copy.deepcopy(old); broken['configuration']['project_assignments'] = [{'space_id': space, 'project_id': 'a' * 64, 'mode': mode}]
+            with self.subTest(space=space), self.assertRaisesRegex(ValueError, error):
+                configuration.validate(broken)
+        with self.assertRaisesRegex(ValueError, 'fields_invalid'):
+            configuration.validate({**old, 'configuration': {**values, 'chats': []}})
+
+    def test_the_snapshot_carries_each_chat_and_decides_kinds_from_its_rows(self):
+        # Version 2 carries the chats and their app ids (ADR-0250): a digest id is a group or topic by its row, and an id
+        # with no row counts as private, however it looks.
+        query = Mock(return_value=json.dumps(self.values))
+        result = configuration.snapshot(query, 'original-only-v1')
+        self.assertEqual(result['format'], 'nocheh-reset-configuration-v2')
+        sql = query.call_args.args[1]
+        self.assertIn("CASE WHEN c.title_source='owner' THEN c.title END AS title", sql, 'only names the owner gave travel')
+        self.assertIn('FROM chat_ids i JOIN chat_connections n', sql)
+        rule = {'id': 'b' * 64, 'name': 'Saved share', 'sources': ['f' * 64], 'destination': 'e' * 64, 'enabled': True,
+                'mode': 'approved', 'instructions': ''}
+        values = copy.deepcopy(self.values); values['sharing_rules'] = [rule]
+        values['project_assignments'] = [{'space_id': 'e' * 64, 'project_id': 'a' * 64, 'mode': 'assigned'},
+                                         {'space_id': 'f' * 64, 'project_id': None, 'mode': 'inherit'}]
+        self.assertEqual(configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')['configuration'], values)
+        values['project_assignments'][1] = {'space_id': 'f' * 64, 'project_id': 'a' * 64, 'mode': 'assigned'}
+        with self.assertRaisesRegex(ValueError, 'topic_follows_group'):
+            configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
+        values = copy.deepcopy(self.values); values['sharing_rules'] = [{**rule, 'sources': ['d' * 64]}]
+        with self.assertRaisesRegex(ValueError, 'private_chat_requires_review'):
+            configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
+        for broken in ('orphan_topic', 'orphan_id', 'duplicate'):
+            values = copy.deepcopy(self.values)
+            if broken == 'orphan_topic': values['chats'].append(chat('c' * 64, 'topic', 'd' * 64))
+            if broken == 'orphan_id': values['chat_ids'].append({**CHAT_IDS[0], 'external_id': '-1004', 'chat_id': 'd' * 64})
+            if broken == 'duplicate': values['chats'].append(CHATS[0])
+            with self.subTest(broken=broken), self.assertRaisesRegex(ValueError, 'chats_invalid'):
+                configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
         self.assertEqual(sql.count('FROM project_assignments'), 1)
 
     def test_unknown_fields_and_missing_critical_configuration_fail_closed(self):
