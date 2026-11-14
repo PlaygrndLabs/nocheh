@@ -142,7 +142,7 @@ class Administration:
         from .policy_config import document
         policy = document(policy_root(path))
         original = read(path / 'config.yaml')
-        effective, _ = inherited_config(path, original, policy=policy)
+        effective, _ = inherited_config(path, original, policy=policy, served=self.policy.current())
         native = _normalize_config_for_web(_deep_merge(DEFAULT_CONFIG, resolved(effective, self.model)))
         def redact(value):
             if isinstance(value, dict):
@@ -389,7 +389,7 @@ class Administration:
                             elif old.get(key) != value: changes[dotted] = value
                     diff(current, incoming)
                     if set(changes) - PREFERENCES.keys(): raise ValueError('setting_managed_by_nocheh')
-                    saved = configure_profile(home, self.model, changes, expected)
+                    saved = configure_profile(home, self.model, changes, expected, served=self.policy.current())
                     extra['etag'] = '"' + saved['revision'] + '"'
                     result = {'ok': True, 'revision': saved['revision']}
                 elif path == '/api/nocheh/policy' and method in ('GET', 'PUT'):
@@ -398,8 +398,9 @@ class Administration:
                     result = (save(self.root, body.get('changes'), body.get('revision'), job) if method == 'PUT'
                               else view(self.root, read(home / 'config.yaml') if query.get('profile') else {}, job))
                 elif path == '/api/nocheh/preferences' and method in ('GET', 'PUT'):
-                    result = (configure_profile(home, self.model, body.get('changes'), body.get('revision')) if method == 'PUT'
-                              else inspect_profile(home, self.model))
+                    served = self.policy.current()
+                    result = (configure_profile(home, self.model, body.get('changes'), body.get('revision'), served=served) if method == 'PUT'
+                              else inspect_profile(home, self.model, served))
                 elif path == '/api/model/options' and method == 'GET':
                     result = {'model': self.model, 'provider': 'openai', 'providers': [
                         {'name':'Nocheh Settings › Models', 'slug':'openai', 'models':[self.model],

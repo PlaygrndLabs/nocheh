@@ -84,7 +84,9 @@ def dispatch(root, model, policy, body):
         return {'scope': scope, **persona.view(path)}
     path = profile_path(root, body.get('scope'), policy,body.get('profile') if action=='memory' else None)
     if action == 'preferences':
-        result = configure_profile(path, model, body['changes'], body.get('revision')) if 'changes' in body else inspect_profile(path, model)
+        served = policy.current()
+        result = (configure_profile(path, model, body['changes'], body.get('revision'), served=served) if 'changes' in body
+                  else inspect_profile(path, model, served))
         return {'scope': body['scope'], **result}
     if action != 'memory': raise ValueError('unknown_management_action')
     memories = []

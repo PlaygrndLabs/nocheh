@@ -108,7 +108,7 @@ def policy_root(profile):
     return Path(os.environ.get("NOCHEH_RUNTIME_HOME", profile.parent.parent if profile.parent.name == "profiles" else profile))
 
 
-def inherited_config(profile, config, job=None, policy=None, chat=None):
+def inherited_config(profile, config, job=None, policy=None, chat=None, served=None):
     from .policy_config import effective
     result = json.loads(json.dumps(config))
     # Audience revisions retire memory/history, while the logical scope retains
@@ -119,8 +119,9 @@ def inherited_config(profile, config, job=None, policy=None, chat=None):
         if binding.get('revision',0)>0 and binding.get('owner') is False:
             from .scopes import Scopes
             base=policy_root(profile)/'profiles'/Scopes.profile(binding['space'])/'config.yaml'
-            # A topic inherits its chat's: the chat the turn names, else the one its marker keeps (ADR-0250).
-            chat=chat or binding.get('chat')
+            # A topic inherits its chat's: the chat the turn names, else the one its marker keeps, else (a marker written
+            # before step 2b keeps none) the one the served list puts it in (ADR-0250).
+            chat=chat or binding.get('chat') or (served.chat_of(binding.get('space')) if served is not None else None)
             parent=policy_root(profile)/'profiles'/Scopes.profile(chat)/'config.yaml' if isinstance(chat,str) and chat else None
             source=base if base.is_file() or parent is None else parent
             if source.is_file():logical=read(source)
@@ -136,18 +137,18 @@ def profile_revision(config, policy):
     return revision({"config": config, "policy": policy})
 
 
-def inspect_profile(profile, model):
+def inspect_profile(profile, model, served=None):
     from .policy_config import document
     policy = document(policy_root(profile))
     original = read(Path(profile) / 'config.yaml')
-    inherited, origins = inherited_config(profile, original, policy=policy)
+    inherited, origins = inherited_config(profile, original, policy=policy, served=served)
     result = resolved(inherited, model)
     return {'origins': origins, 'revision': profile_revision(original, policy), 'values': preferences(result), 'schema': PREFERENCES,
             'source': 'Hermes profile config.yaml', 'takes_effect': 'next turn',
             'managed': MANAGED}
 
 
-def configure_profile(profile, model, changes=None, expected=None, chat=None):
+def configure_profile(profile, model, changes=None, expected=None, chat=None, served=None):
     profile = Path(profile); profile.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = profile / 'config.yaml'
     from .policy_config import document
@@ -170,7 +171,7 @@ def configure_profile(profile, model, changes=None, expected=None, chat=None):
                 else:
                     original.setdefault(section, {})[field] = value; inherited.discard(key)
             original.setdefault('nocheh', {})['inherited_preferences'] = sorted(inherited)
-        inherited, origins = inherited_config(profile, original, policy=policy, chat=chat)
+        inherited, origins = inherited_config(profile, original, policy=policy, chat=chat, served=served)
         result = resolved(inherited, model)
         if not path.exists() or result != read(path): atomic_yaml(path, result)
         return {'origins': origins, 'revision': profile_revision(result, policy), 'values': preferences(result), 'schema': PREFERENCES,
