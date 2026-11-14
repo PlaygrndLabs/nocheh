@@ -16,6 +16,14 @@ test('a forward is read from Telegram\'s own fields: whose words it carries, nev
   assert.deepEqual(forwardOrigin({from,forward_sender_name:'Hidden one',forward_date:1}),{from:'hidden',name:'Hidden one'});
   assert.deepEqual(forwardOrigin({from,is_automatic_forward:true}),{from:'channel',name:null});
   assert.deepEqual(forwardOrigin({from,via_bot:{id:9,username:'made_up_bot'}}),{from:'bot',name:'made_up_bot'});
+  assert.deepEqual(forwardOrigin({from,via_bot:{id:9,username:'made_up_bot'},forward_origin:{type:'user',sender_user:{id:5},date:1}}),{from:'bot',name:'made_up_bot'},
+    'an earlier message sent through an inline bot is still the bot\'s words');
+  assert.deepEqual(forwardOrigin({from,via_bot:{id:9,username:'made_up_bot'}},{via_bot:{id:9,username:'[hidden]'}}),{from:'bot',name:null},'its name comes from the guarded copy');
+  // A name is cut by whole characters, never in the middle of an emoji, and loses quote and bracket look-alikes.
+  const cut=forwardOrigin({from,forward_origin:{type:'chat',sender_chat:{id:-200,title:'x'.repeat(63)+'\u{1f600}\u{1f600}'},date:1}})!;
+  assert.equal(cut.name,'x'.repeat(63)+'\u{1f600}');
+  assert.ok(!/[\ud800-\udfff]/u.test(forwardLine(cut,true)!),'no half of a character');
+  assert.deepEqual(forwardOrigin({from,forward_origin:{type:'channel',chat:{id:-100,title:'News\u2033 \uff3bx\uff3d \u301fy\u301e'},date:1}}),{from:'channel',name:'News x y'});
   // Names come from the guarded copy, which the secret check has read; whose words they are comes from the original.
   assert.deepEqual(forwardOrigin({from,forward_origin:{type:'user',sender_user:{id:7,first_name:'Real'},date:1}},{forward_origin:{type:'user',sender_user:{id:5,first_name:'Prepared'}}}),
     {from:'person',name:'Prepared'});

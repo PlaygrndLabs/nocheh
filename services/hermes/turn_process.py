@@ -8,6 +8,7 @@ import re
 import signal
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from services.durable import canonical
 
@@ -55,23 +56,44 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             await asyncio.to_thread((profile/'.foreground').touch)
 
 
-# A line of message text that looks like this module's own group frame, a private answer's first line, a forwarded
-# message's line, or the owner tag of a speaker line.
-FRAME=re.compile(r'^([ \t]*)\[(?=(?:Group message from|Recent messages in this group|End of recent messages|Private answer|Forwarded))',re.M|re.I)
+# The words that open this module's own group frame, a private answer's first line, a forwarded message's line, or
+# the owner tag of a speaker line, as frame() compares them.
+FRAME_WORDS=('groupmessagefrom','recentmessagesinthisgroup','endofrecentmessages','privateanswer','forwarded','theowner')
 OWNER_TAG=re.compile(r'\[the owner\]',re.I)
 
 
+def frame(text,start):
+    """Whether the text from `start` reads as one of FRAME_WORDS: compared in its compatibility form, without case,
+    and without the spaces, invisible characters and marks a reader would not notice between the letters. It reads
+    only as far as the text could still be one of them."""
+    letters=''
+    for char in text[start:start+120]:
+        for part in unicodedata.normalize('NFKC',char):
+            if unicodedata.category(part)[0] in 'CZ' or unicodedata.category(part)=='Mn':continue
+            letters+=part.casefold()
+            if letters.startswith(FRAME_WORDS):return True
+            if not any(word.startswith(letters) for word in FRAME_WORDS):return False
+    return False
+
+
+# Every opening bracket but the plain parenthesis: all of Unicode's opening punctuation is in its first plane.
+OPENING=re.compile('['+''.join(re.escape(chr(c)) for c in range(0x10000) if unicodedata.category(chr(c))=='Ps' and chr(c)!='(')+']')
+
+
 def unframed(text):
-    """Group message text as the model reads it: a look-alike speaker or recent-messages line, or an owner tag,
-    is shown as plain text, so only the line Nocheh puts before a message names its sender (ADR-0222)."""
-    return OWNER_TAG.sub('(the owner)',FRAME.sub(r'\1(',text))
+    """Group or forwarded message text as the model reads it: an opening bracket of any kind that starts something
+    reading like Nocheh's own speaker, recent-messages, private-answer or forwarded line, or an owner tag, wherever it
+    stands, is shown as a plain parenthesis, so only the lines Nocheh puts before a message say who wrote it and where
+    it came from (ADR-0222, ADR-0250). Persian half-spaces and other text stay as typed."""
+    text=OWNER_TAG.sub('(the owner)',text)
+    return OPENING.sub(lambda match:'(' if frame(text,match.end()) else match.group(),text)
 
 
 def forwarded(value):
     """A forwarded message's line, which Nocheh writes from Telegram's own forward fields (ADR-0250), or '' when it is
     absent or malformed."""
     ok=(isinstance(value,str) and value.startswith('[Forwarded: ') and value.endswith(']') and len(value)<=600
-        and not any(ord(c)<32 or ord(c)==127 or c in '\u2028\u2029' for c in value))
+        and not any(ord(c)<32 or ord(c)==127 or c in '\u2028\u2029' or 0xd800<=ord(c)<=0xdfff for c in value))
     return value if ok else ''
 
 
@@ -84,7 +106,9 @@ def recent_group(value):
         if (not isinstance(speaker,str) or not speaker.startswith('[Group message from ') or not speaker.endswith(']')
                 or len(speaker)>200 or '\n' in speaker or not isinstance(item.get('text'),str) or len(item['text'])>1000
                 or not isinstance(item.get('id'),str) or not re.fullmatch(r'[a-f0-9]{64}',item['id'])):return ''
-        lines.append(speaker+' (source nocheh:event:'+item['id']+')\n'+unframed(item['text']))
+        forward=forwarded(item.get('forwarded'))
+        if 'forwarded' in item and not forward:return ''
+        lines.append(speaker+' (source nocheh:event:'+item['id']+')\n'+(forward+'\n' if forward else '')+unframed(item['text']))
     lines.append('[End of recent messages]')
     return '\n\n'.join(lines)
 

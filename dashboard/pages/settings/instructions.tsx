@@ -78,7 +78,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'telegram.approval_action',
     title: 'Approval card for a tool',
-    hint: 'The same card for shell, browser and online tool actions. {kind} says what it does, such as “Notion · create pages”, {summary} the assistant’s own short line about it, {origin} where it was asked, {arguments} exactly what it will run, field by field, with long text in a quote that opens on a tap. With a summary, {arguments} folds into one quote that opens on a tap, unless it is a command.',
+    hint: 'The same card for shell, browser and online tool actions. {kind} says what it does, such as “Notion · create pages”, {summary} the assistant’s own short line about it, which Nocheh always starts with its “AI says:” line, {origin} where it was asked, {arguments} exactly what it will run, field by field, with long text in a quote that opens on a tap. With a summary, {arguments} folds into one quote that opens on a tap, unless it is a command. A web address and another server’s input of at most 300 characters always stay open, a longer address shows its start and how many more characters it carries, and a card for another server’s tool always says how many characters of input it sends and to which site.',
   },
   {
     key: 'telegram.approval_task',
@@ -88,7 +88,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'telegram.approval_texts',
     title: 'Approval buttons and results',
-    hint: 'One “name: text” line each for the buttons, the note above a site’s or command’s “where asked” buttons that says the rule covers everyone allowed in that chat or topic (rule_note), the result added to a decided card and its {reason}, the name of a job or schedule that asked, the names of a command, a web page and a tool list (the lines starting with kind), the heading of a tool’s folded details (details), the card that lists a job’s changes (the lines starting with list), a project task’s card and its results (the lines starting with task), and the short notices after a press. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for the buttons, the note above a site’s or command’s “where asked” buttons that says the rule covers everyone allowed in that chat or topic (rule_note), the result added to a decided card and its {reason}, the name of a job or schedule that asked, the names of a command, a web page and a tool list (the lines starting with kind), the heading of a tool’s folded details (details), the label before the assistant’s summary (ai_says), the line under a long web address with its {count} (long_address), the line saying how many characters of input another server’s tool gets, with {count} and {site} (sends), the card that lists a job’s changes (the lines starting with list), a project task’s card and its results (the lines starting with task), and the short notices after a press. A line you remove keeps its default.',
   },
   {
     key: 'telegram.action_continued',
@@ -158,7 +158,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'background.card',
     title: 'Background job card',
-    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit}, {minutes_limit}, {checked}, {unpriced}, {notion}, {box}, {repo}, {machine} and {steps} are filled in. {cost_limit} is missing on a model without a price, and {unpriced} then says only the time limit applies; {notion} says what the job may do in your Notion without asking; {box} says that it runs in a sealed box; {repo} names the GitHub copy it reads; {machine} names the machine it works on and {steps} lists its plan. A line whose value is missing is left out; a card without {unpriced}, {notion}, {box}, {repo}, {machine} or {steps} still shows that line, at its end.',
+    hint: 'The Approve and Reject card for a job. {instruction} is what the person asked; {title}, {size}, {minutes}, {cost}, {cost_limit}, {minutes_limit}, {checked}, {unpriced}, {notion}, {box}, {repo}, {machine} and {steps} are filled in. {cost_limit} is missing on a model without a price, and {unpriced} then says only the time limit applies; {notion} says what the job may do in your Notion without asking; {box} says that it runs in a sealed box; {repo} names the GitHub copy it reads; {machine} names the machine it works on and {steps} lists its plan; {origin} names the group and topic a job was asked in when the card is in another chat. Hidden characters in a job’s title, instruction and plan show as [U+XXXX] where they stand. A line whose value is missing is left out; a card without {origin}, {unpriced}, {notion}, {box}, {repo}, {machine} or {steps} still shows that line, at its end.',
   },
   {
     key: 'background.texts',

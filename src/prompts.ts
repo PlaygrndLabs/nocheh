@@ -98,7 +98,7 @@ export const approvalTexts=[
   'reason_stopped: the job was stopped.','reason_sandbox: the tool sandbox is not installed on this computer. Run ./bin/nocheh up, or start make dev again, to install it.','reason_other: see the dashboard Inbox.',
   'from_job: the job “{title}”','from_schedule: a scheduled task','from_schedule_in: a scheduled task in {chat}',
   'kind_shell: Run a command','kind_browser: Open a web page','kind_tools: list its tools','details: Exact details','ai_says: AI says:',
-  'long_address: ⚠️ The address also carries {count} more characters, which can hold data.','sends: 📤 Sends {count} characters to {site}',
+  'long_address: ⚠️ The address also carries {count} more characters, which can hold data.','sends: 📤 Sends {count} characters of input to {site}',
   'list: 📋 The job “{title}” asks to make these changes ({count}).','list_part: Card {part} of {parts}.','list_note: Approve or Reject covers exactly the changes on this card.',
   'list_long: {count} more cannot be shown on a card. Review them in the dashboard Inbox.','list_inbox: 📋 The job “{title}” asks to make changes that cannot be shown on a card ({count}). Review them in the dashboard Inbox.','list_done: ✅ Approved and done: all {count} changes.',
   'list_some: ⚠️ Approved: {done} of {count} changes were made. See the dashboard Inbox for the rest.',

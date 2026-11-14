@@ -103,10 +103,12 @@ export function visible(text:string,lines=false):string {
  * characters without splitting one written out. Null when nothing is left. */
 export function cardName(value:unknown,length=64):string|null {
   if(typeof value!=='string')return null;
-  const line=value.replace(controls,'').replace(/\s+/g,' ').trim().replace(/[\u201c\u201d\u201e\u201f\u2033\u301d\u301e\uff02]/g,'"');
+  const line=value.replace(controls,'').replace(/\s+/g,' ').trim().replace(/[\u201c-\u201f\u2033\u2036\u02ee\u275d\u275e\u301d-\u301f\uff02\u05f4]/g,'"');
   if(!line)return null;
   const shown=Array.from(visible(line));
-  return shown.length<=length?shown.join(''):shown.slice(0,length-1).join('').replace(/\[(?:U(?:\+[0-9A-F]{0,5})?)?$/,'').trimEnd()+'…';
+  // A cut can split an emoji whose joiners or tags stayed only because it was whole: those go with the cut.
+  return shown.length<=length?shown.join(''):shown.slice(0,length-1).join('').replace(/\[(?:U(?:\+[0-9A-F]{0,6})?)?$/,'')
+    .replace(new RegExp(unseenClass+'+$','u'),'').trimEnd()+'…';
 }
 /** Characters with no honest use in a job's title, instruction or plan: direction overrides and isolates, which make
  * text read in another order than it is written, and tag characters outside a flag emoji. */
@@ -359,20 +361,32 @@ export function operationText(kind:string,args:Record<string,any>,names:Operatio
     return length(body)>wordsLimit||[...body.matchAll(marked)].length>wordsEntities?json:body;
   };
   const fold=(text:string)=>'\u0004'+heading(plain(names.details))+'\n'+text+'\u0005',code=(text:string)=>/\u0001p\u0002/.test(text);
-  // A web address is the whole of what a page read sends, so it shows open while it is short. A long one shows its
-  // start and how much more it carries, and the whole of it folds below.
-  if(kind==='browser'&&!twins&&typeof args.url==='string') {
-    const body=shown(false);if(length(body)>wordsLimit)return null;
-    if(length(body)<=addressLimit)return {title,summary,body};
-    const start=Array.from(body).slice(0,addressStart).join(''),more=Array.from(body).length-addressStart;
-    return {title,summary,body:start+'…\n'+fillTemplate(plain(names.long_address),{count:more.toLocaleString('en-US')})+'\n'+fold(body)};
+  // A web address is all that a page read or a list of another server's tools sends, and part of what a call to one
+  // sends, so it shows open while it is short. A long one shows its start and how many more characters it carries,
+  // and folds whole below.
+  const address=(url:string)=>{
+    const text=location(url),chars=Array.from(text);
+    return chars.length<=addressLimit?{open:text,folded:''}:{folded:text,
+      open:chars.slice(0,addressStart).join('')+'…\n'+fillTemplate(plain(names.long_address),{count:(chars.length-addressStart).toLocaleString('en-US')})};
+  };
+  const server=kind==='mcp'&&typeof args.connection!=='string'&&typeof args.url==='string';
+  if(!twins&&typeof args.url==='string'&&(kind==='browser'||server&&args.operation==='list')) {
+    const {open,folded}=address(args.url),body=open+(folded?'\n'+fold(folded):'');
+    return length(body)>wordsLimit?null:{title,summary,body};
   }
-  // Another server's tool gets its whole input: how much of it, and to which site, shows open. A short input shows
-  // open too; a long one folds below a summary, as other cards do.
-  if(kind==='mcp'&&!twins&&typeof args.connection!=='string'&&typeof args.url==='string'&&args.operation!=='list') {
-    const sends=fillTemplate(plain(names.sends),{count:Array.from(canonical(args.input??null)).length.toLocaleString('en-US'),site:site(args.url)||location(args.url)});
-    const open=shown(false);if(!summary||length(open)<=addressLimit||code(open))return length(open)>wordsLimit?null:{title,summary,body:sends+'\n\n'+open};
-    const body=shown(true);return length(body)>wordsLimit?null:{title,summary,body:sends+'\n\n'+fold(body)};
+  // A call to another server's tool gets its whole input: how much of it, and to which site, shows open in Nocheh's
+  // own words, above the address. A short input shows open too; a long one folds below a summary, as on other cards.
+  // Input with look-alike keys, or too long or finely split to read in words, shows open as its exact JSON.
+  if(server&&args.operation!=='list') {
+    const input=Array.from(canonical(args.input??null)).length;
+    const sends=fillTemplate(plain(names.sends),{count:input.toLocaleString('en-US'),site:site(args.url)||location(args.url)});
+    const exactly=()=>length(json)>wordsLimit?null:{title,summary,body:sends+'\n\n'+json};
+    const readable=(folded:boolean)=>{const text=fields(args.input,folded);return length(text)>wordsLimit||[...text.matchAll(marked)].length>wordsEntities?null:text;};
+    const open=twins?null:readable(false);if(open===null)return exactly();
+    const shut=!!summary&&input>addressLimit&&!code(open),text=shut?readable(true):open;if(text===null)return exactly();
+    const {open:start,folded}=address(args.url as string),below=[folded,shut?text:''].filter(Boolean).join('\n\n');
+    const body=[sends,start,shut?'':text].filter(Boolean).join('\n\n')+(below?'\n'+fold(below):'');
+    return length(body)>wordsLimit?null:{title,summary,body};
   }
   const body=shown(!!summary);if(length(body)>wordsLimit)return null;
   return {title,summary,body:summary&&body&&!code(body)?fold(body):body};

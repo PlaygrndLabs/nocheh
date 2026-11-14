@@ -28,7 +28,7 @@ test('a tool card says what it does and shows every field in words, long text in
   assert.equal(card('mcp',{connection:'notion',tool:'notion-move-pages',input:{new_parent:{page_id:'p2'},page_or_database_ids:['a','b, c']}}).text,
     '⚙️ Notion · move pages\n\nnew_parent › page_id: p2\npage_or_database_ids:\n1. a\n2. b, c');
   assert.equal(card('mcp',{url:'https://mcp.example.test/mcp',tool:'search_docs',input:{query:'made-up',limit:5,exact:false,empty:'',none:null}}).text,
-    '⚙️ mcp.example.test · search_docs\n\n📤 Sends 66 characters to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nquery: made-up\nlimit: 5\nexact: false\nempty: ""\nnone: null',
+    '⚙️ mcp.example.test · search_docs\n\n📤 Sends 66 characters of input to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nquery: made-up\nlimit: 5\nexact: false\nempty: ""\nnone: null',
     'another server is named by its address, shown in full, its tool by its exact name, and how much it is sent shows first');
   assert.equal(card('mcp',{connection:'notion',operation:'list'}).text,'⚙️ Notion · list its tools');
   const shell=card('shell',{command:'printf ok'});
@@ -237,17 +237,28 @@ test('a web card shows its address open, and a long one shows its start, how muc
 
 test('another server\'s tool says how much it sends and to which site, and folds a long input below',()=>{
   const short=operationText('mcp',{url:'https://mcp.example.test/mcp',tool:'search',input:{query:'made-up'}},words,'Search the docs.')!;
-  assert.equal(linked(short.body).text,'📤 Sends 19 characters to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nquery: made-up','a short input shows open, even with a summary');
+  assert.equal(linked(short.body).text,'📤 Sends 19 characters of input to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nquery: made-up','a short input shows open, even with a summary');
   const notes='A made-up note. '.repeat(30);
   const long=linked(operationCard(approvalAction,operationText('mcp',{url:'https://mcp.example.test/mcp',tool:'save',input:{notes}},words,'Save the notes.')!,null));
-  assert.ok(long.text.startsWith('⚙️ mcp.example.test · save\n📝 AI says: Save the notes.\n\n📤 Sends '+(notes.length+12)+' characters to mcp.example.test\n\nExact details\n'),long.text);
-  assert.deepEqual(spans(long,'expandable_blockquote').length,1,'a long input folds below a summary');
+  assert.equal(long.text,'⚙️ mcp.example.test · save\n📝 AI says: Save the notes.\n\n📤 Sends '+(notes.length+12)+' characters of input to mcp.example.test\n\n'+
+    'https://mcp.example.test/mcp\nExact details\nnotes:\n  '+notes.trim());
+  assert.deepEqual(spans(long,'expandable_blockquote'),['Exact details\nnotes:\n  '+notes.trim()],'a long input folds below a summary, and the address stays open');
   const plainCard=linked(operationCard(approvalAction,operationText('mcp',{url:'https://mcp.example.test/mcp',tool:'save',input:{notes}},words)!,null));
-  assert.ok(plainCard.text.startsWith('⚙️ mcp.example.test · save\n\n📤 Sends '+(notes.length+12)+' characters to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nnotes:'),plainCard.text);
+  assert.ok(plainCard.text.startsWith('⚙️ mcp.example.test · save\n\n📤 Sends '+(notes.length+12)+' characters of input to mcp.example.test\n\nhttps://mcp.example.test/mcp\n\nnotes:'),plainCard.text);
   assert.deepEqual(spans(plainCard,'expandable_blockquote'),[notes.trim()],'without a summary the fields show open, with the long text in its own quote');
-  // Notion keeps its own card, and listing tools sends nothing.
+  // An address that carries data shows its start and how much more it carries, open, even when the input is short.
+  const url='https://mcp.example.test/mcp?d='+'a1b2c3d4'.repeat(40);
+  const carried=linked(operationText('mcp',{url,tool:'ping',input:{}},words,'Check the server.')!.body);
+  assert.equal(carried.text,'📤 Sends 2 characters of input to mcp.example.test\n\n'+url.slice(0,120)+'…\n⚠️ The address also carries '+(url.length-120)+
+    ' more characters, which can hold data.\n\n{}\nExact details\n'+url);
+  // Look-alike keys show the exact JSON, still under the line.
+  const twins=operationText('mcp',{url:'https://mcp.example.test/mcp',tool:'save',input:{page:'a','p\u0430ge':'b'}},words,'Save it.')!;
+  assert.match(twins.body,/^📤 Sends \d+ characters of input to mcp\.example\.test\n\n\u0001p\u0002/);
+  // Notion keeps its own card. Listing tools sends no input, and its address shows as a web read's does.
   assert.doesNotMatch(operationText('mcp',{connection:'notion',tool:'notion-update-page',input:{page_id:'p1'}},words)!.body,/📤/);
   assert.doesNotMatch(operationText('mcp',{url:'https://mcp.example.test/mcp',operation:'list'},words)!.body,/📤/);
+  const list=linked(operationText('mcp',{url,operation:'list'},words,'List its tools.')!.body);
+  assert.ok(list.text.startsWith(url.slice(0,120)+'…\n⚠️ The address also carries '),list.text);
 });
 
 test('a name or job text shows each hidden character where it stands, and keeps Persian half-spaces and emoji',()=>{
@@ -258,6 +269,10 @@ test('a name or job text shows each hidden character where it stands, and keeps 
   assert.equal(visible('a\tb\nc\u200b',true),'a\tb\nc[U+200B]','line breaks and tabs stay in a multi-line text');
   assert.equal(cardName('  The “Family”\u200b  group '),'The "Family"[U+200B] group','curly quotes cannot close the card\'s quotes');
   assert.equal(cardName('x'.repeat(62)+'\u200b'),'x'.repeat(62)+'…','a written-out character is never cut in half');
+  assert.equal(cardName('x'.repeat(54)+'\u{100000}y'),'x'.repeat(54)+'…','nor one written with six digits');
+  assert.equal(cardName('x'.repeat(58)+'\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}'),'x'.repeat(58)+'\u{1f3f4}…','a cut flag leaves no hidden tags');
+  assert.equal(cardName('x'.repeat(61)+'\u{1f469}\u200d\u{1f469}\u200d\u{1f467}'),'x'.repeat(61)+'\u{1f469}…','nor a hidden joiner');
+  assert.equal(cardName('A \u275eB\u301f \uff02C'),'A "B" "C','quote look-alikes are plain too');
   assert.equal(cardName(' \u0001 '),null);assert.equal(cardName(7),null);
   assert.equal(reordering('Build \u202esite'),true);assert.equal(reordering('Fix \u2066it\u2069'),true);
   assert.equal(reordering('Go 🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}'),false,'a flag\'s tag characters are part of it');

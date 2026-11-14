@@ -7,12 +7,15 @@
 export type Forward={from:'own'|'person'|'hidden'|'chat'|'channel'|'bot';name:string|null};
 
 const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
-/** A name for one frame line: no brackets, quotes or control, format or separator characters, so it cannot end the line
- * or start another that looks like Nocheh's own, and at most 64 characters. Never a numeric Telegram ID. */
+/** A name for one frame line: no brackets, quotes or their look-alikes, and no control, format, separator, private-use
+ * or lone surrogate characters, so it cannot end the line or start another that looks like Nocheh's own, and at most
+ * 64 characters, never cutting one in half. Never a numeric Telegram ID. */
+const unframing=/[\[\]\uff3b\uff3d"\u201c-\u201f\u2033\u2036\u02ee\u275d\u275e\u301d-\u301f\uff02\u05f4\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}]+/gu;
+const cut=(text:string)=>Array.from(text).slice(0,64).join('').trim();
 export function frameName(value:unknown):string {
-  return typeof value==='string'?value.replace(/[\[\]"“”\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu,' ').replace(/\s+/g,' ').trim().slice(0,64).trim():'';
+  return typeof value==='string'?cut(value.replace(unframing,' ').replace(/\s+/g,' ').trim()):'';
 }
-const person=(user:any)=>[frameName(user?.first_name),frameName(user?.last_name)].filter(Boolean).join(' ').slice(0,64).trim()||null;
+const person=(user:any)=>cut([frameName(user?.first_name),frameName(user?.last_name)].filter(Boolean).join(' '))||null;
 const handle=(user:any)=>typeof user?.username==='string'&&/^[A-Za-z0-9_]{1,32}$/.test(user.username)?user.username as string:null;
 
 /** The reply to a forwarded /approve, /deny or other owner command: it is never run, and every held message is answered. */
@@ -23,21 +26,23 @@ export const forwardedCommand='Forwarded commands are ignored. Type it or use th
 export function forwardOrigin(message:unknown,names?:unknown):Forward|null {
   const original=record(message);if(!original)return null;
   const shown=record(names)??original,sender=String(original.from?.id??'');
+  // A message sent through an inline bot is that bot's words, even when the sender forwards it again later.
+  const bot:Forward|null=record(original.via_bot)?{from:'bot',name:handle(record(shown.via_bot)??original.via_bot)}:null;
+  const own:Forward=bot??{from:'own',name:null};
   const origin=record(original.forward_origin),named=record(shown.forward_origin)??origin;
   if(origin) {
-    if(origin.type==='user')return String(origin.sender_user?.id??'')===sender&&sender?{from:'own',name:null}:{from:'person',name:person(named?.sender_user)};
+    if(origin.type==='user')return String(origin.sender_user?.id??'')===sender&&sender?own:{from:'person',name:person(named?.sender_user)};
     if(origin.type==='hidden_user')return {from:'hidden',name:frameName(named?.sender_user_name)||null};
     if(origin.type==='channel')return {from:'channel',name:frameName(named?.chat?.title)||null};
     if(origin.type==='chat')return {from:'chat',name:frameName(named?.sender_chat?.title)||null};
     return {from:'hidden',name:null};
   }
   // Telegram's older forward fields, which some clients and imports still carry.
-  if(record(original.forward_from))return String(original.forward_from.id??'')===sender&&sender?{from:'own',name:null}:{from:'person',name:person(shown.forward_from??original.forward_from)};
+  if(record(original.forward_from))return String(original.forward_from.id??'')===sender&&sender?own:{from:'person',name:person(shown.forward_from??original.forward_from)};
   if(record(original.forward_from_chat))return {from:original.forward_from_chat.type==='channel'?'channel':'chat',name:frameName((shown.forward_from_chat??original.forward_from_chat).title)||null};
   if(typeof original.forward_sender_name==='string')return {from:'hidden',name:frameName(shown.forward_sender_name)||null};
   if(original.forward_date!==undefined||original.is_automatic_forward===true)return {from:'channel',name:null};
-  if(record(original.via_bot))return {from:'bot',name:handle(original.via_bot)};
-  return null;
+  return bot;
 }
 
 /** The fixed line the assistant reads before a forwarded message's text: where it came from, in Nocheh's own words, and

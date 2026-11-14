@@ -331,7 +331,7 @@ export class TelegramDispatchRepository {
    * Each is the guarded copy this conversation may read, labeled with its speaker,
    * and cites its source so retiring it withholds the turn that carried it.
    */
-  private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string}[]> {
+  private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string;forwarded?:string}[]> {
     const own=(await this.archive.pool.query('SELECT scope,received_at FROM events WHERE id=$1',[source.id])).rows[0];
     if(!own)return [];
     const rows=(await this.archive.pool.query(`SELECT id,payload FROM events WHERE scope=$1 AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
@@ -340,7 +340,7 @@ export class TelegramDispatchRepository {
     if(!rows.length)return [];
     const states=new Map((await this.control.query('SELECT event_id,state,error_code FROM dispatches WHERE event_id=ANY($1::text[])',
       [rows.map(row=>row.id)])).rows.map(row=>[row.event_id as string,row]));
-    const recent:{id:string;speaker:string;text:string}[]=[];
+    const recent:{id:string;speaker:string;text:string;forwarded?:string}[]=[];
     for(const row of rows) {
       // Members who may not talk to Nocheh are still part of the conversation. Album parts went with
       // their album's turn; any other outcome is the last turn, already in Hermes' history.
@@ -350,7 +350,10 @@ export class TelegramDispatchRepository {
       try {
         if(await this.access.space((await this.archive.captured(row.id)).reference)!==space)continue;
         const guarded=await this.sources.read(principal,row.id),text=typeof guarded.event.text==='string'&&guarded.event.text?guarded.event.text.slice(0,1000):'[A message without text]';
-        const speaker=speakerLine(JSON.parse(row.payload.toString()),guarded.event.payload,this.access.policy().owner_id);if(speaker)recent.push({id:row.id,speaker,text});
+        const original=JSON.parse(row.payload.toString()),speaker=speakerLine(original,guarded.event.payload,this.access.policy().owner_id);
+        // A forward among them says where it came from too, as the message a turn answers does (ADR-0250).
+        const forwarded=forwardLine(forwardOrigin(original?.message,guarded.event.payload?.message),false);
+        if(speaker)recent.push({id:row.id,speaker,text,...(forwarded?{forwarded}:{})});
       } catch {continue;}
       if(recent.length===20)break;
     }

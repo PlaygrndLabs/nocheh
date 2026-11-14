@@ -8,8 +8,9 @@ first of several; each later part waits for its own review
 ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md)):
 - An operation's summary is labelled "AI says:" by code, also on a saved template. A web
   read's address shows open up to 300 characters; a longer one shows its start, how many more
-  characters it carries, and folds. Another server's tool says how many characters it sends
-  to which site, and folds an input over 300 characters. Notion cards are unchanged
+  characters it carries, and folds; so does the address of another server's tool, above any
+  fold. That tool's card says how many characters of input it sends to which site, and folds
+  an input over 300 characters under a summary. Notion cards are unchanged
   ([cards](test/action-text.test.ts), [buttons](test/store-approval-buttons.test.ts)).
 - Job cards show title, instruction and plan one character at a time, with a hidden
   character written out where it stands and Persian half-spaces kept; group, topic and job
@@ -20,12 +21,15 @@ first of several; each later part waits for its own review
   [texts](test/prompts.test.ts)).
 - A forwarded or inline-bot owner command never runs and gets a fixed answer. A forwarded
   message's turn starts with Nocheh's own line on where it came from and that its text is
-  information, not the sender's request ([forwards](test/forwarded.test.ts),
+  information, not the sender's request, also among the recent group messages. Text cannot
+  write a look-alike of Nocheh's own lines, even with invisible characters or wide letters
+  ([forwards](test/forwarded.test.ts),
   [commands](test/store-telegram-actions.test.ts), [turn](test/store-telegram-dispatch.test.ts),
   [Hermes](services/hermes/test_turn_process.py)).
 
-  Unit, store (in the fixture) and Hermes Python checks pass. Pending: the full tester and a
-  live look at a forwarded message and a web card on the owner's install. Owner steps: a
+  Unit, store (in the fixture) and Hermes Python checks pass, and the cloud tester's card,
+  forwarded message, group card, recent message, background job and machine job scenarios
+  pass. Pending: a live look at a forwarded message and a web card on the owner's install. Owner steps: a
   forwarded `/approve` now gets "Forwarded commands are ignored"; type it or use the card.
 
 Members step 2: projects and the private button (owner, 2026-11-12: "I just review the
