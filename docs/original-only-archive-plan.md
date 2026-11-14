@@ -597,6 +597,16 @@ source, supply active rows from the control profile repository instead. Unknown
 or ambiguous legacy names require an explicit mapping before reset. Do not infer
 administrative authority from restored filesystem markers.
 
+The snapshot (`nocheh-runtime-preferences-v2`) keys each profile by its chat's
+Nocheh id and records which chats it covers: the owner's private chat, each
+served group with every Telegram id it has had, and each topic with its chat.
+`tools.acceptance.reset_preservation` reads them from the frozen configuration
+snapshot's `chats` and `chat_ids` rows, so a chat first seen after step 2b and a
+group Telegram upgraded keep their preferences. A snapshot taken before step 2b
+(`v1`) still restores; only for it, and for a configuration snapshot without
+chat rows, are topic spaces read from their stored form
+([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)).
+
 The coordinator must hold maintenance exclusion, snapshot the control catalog,
 retain the configuration-only manifest durably, and call `verify_source` before
 deletion. Recheck the catalog independently. Submit `profile_commands` through the

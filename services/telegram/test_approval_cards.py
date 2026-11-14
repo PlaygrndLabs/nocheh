@@ -41,7 +41,8 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             previews_off(link_preview_options);edits.append((chat_id,message_id,text,reply_markup,links(entities)));return True
         links=lambda entities:[(entity.type,entity.offset,entity.length,entity.url) for entity in entities or []]
         async def answer_callback_query(query,text=None,url=None):answers.append((query,text)+((url,) if url is not None else ()));return True
-        value=TelegramService(Policy(True,'123',list(groups),access or {}),'123456:synthetic',root/'spool',root/'state')
+        # The served list: the owner's chat and each group, with topic 17 of each (old-shaped ids, as before step 2b).
+        value=TelegramService(Policy.of(True,'123',list(groups),access or {},topics=[(group+'/topic/17',group,'17') for group in groups]),'123456:synthetic',root/'spool',root/'state')
         value.status='connected';value.action_lock=asyncio.Lock()
         value.bot=SimpleNamespace(send_message=send_message,edit_message_text=edit_message_text,answer_callback_query=answer_callback_query)
         return value

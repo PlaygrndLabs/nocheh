@@ -215,12 +215,32 @@ def _post_shutdown_rebound(journal, preflight):
     return rebound
 
 
+def _chats(configuration, owner, groups):
+    """The chats whose preferences a reset keeps, by their Nocheh ids (ADR-0250), from the configuration snapshot's chat
+    records: the owner's private chat, each served group with every Telegram id it has had, and their topics. None for
+    a snapshot without them (the legacy layout, or one taken before step 2b): there each value is its own chat's id."""
+    rows, ids = configuration.get('chats'), configuration.get('chat_ids')
+    if rows is None or ids is None or not owner:
+        return None
+    named = {row['external_id']: row['chat_id'] for row in ids if row['app'] == 'telegram'}
+    served = {named.get(group, group) for group in groups}
+    kinds = {row['id']: row['kind'] for row in rows}
+    if kinds.get(named.get(owner, owner)) not in (None, 'private') or any(kinds.get(chat) not in (None, 'group') for chat in served):
+        raise ValueError('reset_preferences_scope_changed')
+    return {'owner': named.get(owner, owner),
+            'groups': {chat: sorted({external for external, named_chat in named.items() if named_chat == chat} | ({chat} if chat in groups else set()))
+                       for chat in sorted(served)},
+            'topics': {row['id']: row['parent_id'] for row in sorted(rows, key=lambda row: row['id'])
+                       if row['kind'] == 'topic' and row['parent_id'] in served}}
+
+
 def _policy(values, snapshot):
     configuration.validate(values)
     groups = sorted(set(value.strip() for value in values['TELEGRAM_GROUP_IDS'].split(',') if value.strip()))
     document = {'enabled': values['TELEGRAM_ENABLED'] == 'true',
                 'owner_id': values['TELEGRAM_OWNER_ID'] or None, 'group_ids': groups}
-    policy = SimpleNamespace(owner=document['owner_id'], groups=document['group_ids'])
+    policy = SimpleNamespace(owner=document['owner_id'], groups=document['group_ids'],
+                             chats=_chats(snapshot['configuration'], document['owner_id'], document['group_ids']))
     if not policy.owner:
         raise ValueError('reset_owner_configuration_missing')
     if snapshot['layout'] == 'original-only-v1':
@@ -269,7 +289,8 @@ def _preference_receipt(journal, preflight, policy, config_receipt):
             receipt.get('snapshot_sha256') != reset_protocol.fingerprint(receipt.get('snapshot'))):
         raise ValueError('reset_preferences_changed')
     preference_transfer.validate_snapshot(receipt['snapshot'])
-    if (receipt['snapshot']['owner'] != policy.owner or receipt['snapshot']['groups'] != sorted(set(policy.groups))):
+    if (receipt['snapshot']['owner'] != policy.owner or receipt['snapshot']['groups'] != sorted(set(policy.groups)) or
+            policy.chats is not None and receipt['snapshot'].get('chats') != policy.chats):
         raise ValueError('reset_preferences_scope_changed')
     preference_transfer.verify_source(native, receipt['snapshot'])
     return receipt

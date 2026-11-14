@@ -6,8 +6,15 @@ from .scopes import Scopes
 from .profile_config import configure_profile, inspect_profile
 
 
+def allowed_chats(policy):
+    """The owner's private chat and every served group, by their Nocheh chat ids, as the app's served list has them
+    (ADR-0250)."""
+    served = policy.current()
+    return [chat for chat in [served.owner_chat, *served.groups()] if chat]
+
+
 def profile_path(root, chat, policy, selected=None):
-    if selected and chat in [policy.owner, *policy.groups] and selected == Scopes.profile(chat):
+    if selected and chat in allowed_chats(policy) and selected == Scopes.profile(chat):
         selected = None  # Canonical profiles can be inspected before their first turn.
     if selected:
         from .native_memory import registered_profiles
@@ -20,8 +27,7 @@ def profile_path(root, chat, policy, selected=None):
         metadata=json.loads(marker.read_text()) if marker.exists() else {}
         if metadata.get('space')!=chat and path.name!=Scopes.profile(chat) and path.name!=chat:raise ValueError('profile_scope_denied')
         return path
-    allowed = [policy.owner, *policy.groups]
-    if not isinstance(chat, str) or chat not in allowed: raise ValueError('profile_scope_denied')
+    if not isinstance(chat, str) or chat not in allowed_chats(policy): raise ValueError('profile_scope_denied')
     root = Path(root).resolve()
     path = root / 'profiles' / Scopes.profile(chat)
     if path.is_symlink() or not path.resolve().is_relative_to(root): raise ValueError('profile_path_denied')
@@ -45,9 +51,10 @@ def answer_receipt(path):
 def dispatch(root, model, policy, body):
     action = body.get('action')
     if action == 'profiles':
+        owner = policy.current().owner_chat
         profiles=[{'scope': chat, 'profile': Scopes.profile(chat),
-                 'owner': chat == policy.owner, 'exists': profile_path(root, chat, policy).exists()}
-                for chat in [policy.owner, *policy.groups] if chat]
+                 'owner': chat == owner, 'exists': profile_path(root, chat, policy).exists()}
+                for chat in allowed_chats(policy)]
         from .native_memory import registered_profiles
         import json
         historical={p['profile']:p for p in profiles}
@@ -77,7 +84,9 @@ def dispatch(root, model, policy, body):
         return {'scope': scope, **persona.view(path)}
     path = profile_path(root, body.get('scope'), policy,body.get('profile') if action=='memory' else None)
     if action == 'preferences':
-        result = configure_profile(path, model, body['changes'], body.get('revision')) if 'changes' in body else inspect_profile(path, model)
+        served = policy.current()
+        result = (configure_profile(path, model, body['changes'], body.get('revision'), served=served) if 'changes' in body
+                  else inspect_profile(path, model, served))
         return {'scope': body['scope'], **result}
     if action != 'memory': raise ValueError('unknown_management_action')
     memories = []

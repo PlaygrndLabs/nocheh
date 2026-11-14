@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .assistant_gateway import native_turn
 from services.durable import canonical,digest
-from .scopes import Scopes
+from .scopes import Scope,Scopes
 from .subscription import resolve_credentials
 
 
@@ -22,13 +22,14 @@ async def main():
     secret=environment_secret('SERVICE_TOKEN')
     model=os.environ.get('NOCHEH_MODEL','claude-sonnet-5-5')
     root=Path(os.environ['HERMES_HOME'])/'synthetic-assistant-rehearsal'
-    scopes=Scopes({'enabled':True,'owner_id':'9000000000123','group_ids':['-9000000000020','-9000000000030']})
+
     def archive(event):
         request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/ingest',data=canonical(event),headers={'Authorization':'Bearer '+secret,'Content-Type':'application/json'})
         with urllib.request.urlopen(request,timeout=20) as response:return json.load(response)['id']
     async def turn(chat,label,prompt):
         update={'update_id':label,'message':{'message_id':label,'chat':{'id':chat,'type':'group'},'from':{'id':9000000000123,'is_bot':False},'text':prompt}}
-        scope=scopes.resolve(update,str(chat));key='synthetic:assistant:'+str(chat)+':'+label
+        # The owner writing in a synthetic group, whose chat id is its Telegram id as for chats stored before step 2b.
+        scope=Scope(str(chat),'9000000000123',False,Scopes.profile(str(chat)),str(chat));key='synthetic:assistant:'+str(chat)+':'+label
         event_id=archive({'version':1,'key':key,'origin':'import','kind':'telegram_update','bot_id':'synthetic-assistant','scope':str(chat),'source_id':label,'revision':'0','occurred_at':None,'text':prompt,'payload':update})
         body=base64.urlsafe_b64encode(canonical({'scope':str(chat),'event_id':event_id,'expires':time.time()*1000+600000,'audience':'nocheh-assistant'})).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')

@@ -8,13 +8,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from .review_worker import start,observe
+from .scopes import Scopes
 
 
 class ReviewHandoffTests(unittest.TestCase):
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.addCleanup(self.directory.cleanup)
         self.root=Path(self.directory.name);self.profile=self.root/'profiles'/('nocheh-'+'c'*24)
-        self.profile.mkdir(parents=True);self.policy=SimpleNamespace(owner='42')
+        self.profile.mkdir(parents=True);self.policy=Scopes({'enabled':True,'owner_id':'42','group_ids':[]})
         self.body={'id':'a'*64,'scope':'42','content':'synthetic protected input','archive_credential':'synthetic credential'}
         self.prepare=patch('services.hermes.review_worker.review_profile',return_value=self.profile)
         self.prepare.start();self.addCleanup(self.prepare.stop)

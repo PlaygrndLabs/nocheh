@@ -65,7 +65,7 @@ class RuntimeProfileTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
         self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.root), 'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'})
         self.env.start(); self.control = ControlFixture()
-        self.policy = Scopes({'enabled': True, 'owner_id': '42', 'group_ids': ['-10']})
+        self.policy = Scopes({'enabled': True, 'owner_id': '42', 'group_ids': ['-10'], 'topics': [['-10/topic/7', '-10', '7']]})
         self.catalog = ProfileCatalog(self.root, self.policy, 'fixture', self.control.request)
         self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, 'fixture', True, profile_catalog=self.catalog)
         self.client = TestClient(self.app, base_url='http://127.0.0.1')

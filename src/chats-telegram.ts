@@ -102,3 +102,41 @@ export function desktopTopicId(scope:string,body:Record<string,any>):number|unde
   if(!desktopChannelTypes.has(chat.type)||!/^[1-9][0-9]{0,15}$/.test(String(chat.id))||scope!=='-100'+chat.id)return undefined;
   return Number.isSafeInteger(topic)&&topic>0?topic:undefined;
 }
+
+/**
+ * A t.me address of a chat, a topic or a message, from the chat's current Telegram id (`external`): by the chat's public
+ * username, or else a private supergroup's t.me/c address, which works only for its members and needs a topic or a
+ * message. Null where Telegram has none, such as a basic group. `path` holds Telegram's own topic and message numbers.
+ */
+export function telegramLink(external:string|null|undefined,username:string|null,path:(string|null|undefined)[]):string|null {
+  const parts=path.filter((part):part is string=>!!part&&/^[1-9][0-9]{0,15}$/.test(part));
+  if(username&&/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username))return ['https://t.me/'+username,...parts].join('/');
+  const internal=typeof external==='string'?/^-100([1-9][0-9]{0,15})$/.exec(external)?.[1]:undefined;
+  return internal&&parts.length?['https://t.me/c/'+internal,...parts].join('/'):null;
+}
+
+/** The two questions a destination asks of the chat directory (src/chats.ts), so this adapter needs nothing else of it. */
+export interface DestinationDirectory {
+  get(id:string):unknown;
+  resolve(app:'telegram',external:string,topic?:string|number|null):string|null;
+}
+/**
+ * The chat a send names, as the model or the owner writes it: a chat id the directory knows; a t.me/c link to a group,
+ * one of its topics or a message in it; or a Telegram chat id, with `/topic/<n>` for a topic as it was written before
+ * step 2b. Every form ends as a chat id the directory holds; anything it does not know is null, so the send is refused
+ * (ADR-0242, ADR-0250).
+ */
+export function telegramDestination(value:unknown,directory:DestinationDirectory):string|null {
+  if(typeof value!=='string'||!value.trim()||value.length>200)return null;
+  const text=value.trim();
+  if(directory.get(text))return text;
+  const link=parseTelegramLink(text);
+  if(link) {
+    const chat=directory.resolve('telegram',link.external);if(!chat)return null;
+    // t.me/c/<chat>/<topic>/<message>; with one number it is a topic of a forum, or a message in a group without topics.
+    if(link.parts.length===2)return directory.resolve('telegram',link.external,link.parts[0]);
+    return link.parts.length?directory.resolve('telegram',link.external,link.parts[0])??chat:chat;
+  }
+  const old=legacyChat(text);
+  return old?directory.resolve('telegram',old.external,old.topic_key):null;
+}

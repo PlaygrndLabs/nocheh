@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from .environment import secret as environment_secret
-from .scopes import Scopes
+from .scopes import Scope,Scopes
 from .turn_process import run_process
 from .subscription import SubscriptionCredentials
 
@@ -50,7 +50,7 @@ async def main():
         binding=call('/v1/security/binding',credential=credential,url='http://nocheh-security:8786')
         record('provider_context_preserved',binding['model_context_length']>0 and binding['model']==runtime['model'])
         report['model']=binding['model'];report['model_context_length']=binding['model_context_length']
-        scope=Scopes({'enabled':True,'owner_id':owner,'group_ids':[]}).resolve({'message':{'chat':{'id':int(owner),'type':'private'},'from':{'id':int(owner)}}},owner)
+        scope=Scope(owner,owner,True,Scopes.profile(owner),owner)
         text='Read nocheh:event:'+event+' using the archive read tool. Reply with only the exact sentence from its text. This is a synthetic acceptance check; do not change memories or request external effects.'
         body={'channel':'browser','event_id':event,'text':text,'archive_credential':credential,'guard_mode':status['guard']['mode']}
         result=await run_process(Path(os.environ['HERMES_HOME']),scope,body,runtime['model'],SubscriptionCredentials(runtime['api_key'],runtime['base_url'],runtime['provider'],runtime['api_mode']),'security-acceptance-'+run)

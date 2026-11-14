@@ -23,22 +23,8 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   // topics, send records, owner records and reset snapshots read chats rows (src/stores/chats.ts).
   // Part B: reads and rules on chat rows. Every site is gone: spaces, recall, read sets, tool switches, private answers,
   // tasks, memory and archive reads ask the chat directory (src/chats.ts).
-  // Part C: turns, sends and the two front doors
-  ['services/hermes/managed_async.py','C',1,'a space split to its chat'],
-  ['services/hermes/native_admin.py','C',1,'a space split to its chat'],
-  ['services/hermes/preference_transfer.py','C',7,'topic and group patterns; owner and groups from env'],
-  ['services/hermes/profile_config.py','C',1,'a space split to its chat'],
-  ['services/hermes/runtime_profiles.py','C',2,'topic pattern and topic test'],
-  ['services/hermes/scopes.py','C',4,'owner, groups and access from env; space built as chat/topic'],
-  ['services/telegram/checks.py','C',2,'space built and split as chat/topic'],
-  ['services/telegram/gateway.py','C',5,'destination parsing, chat/topic outbound checks, the owner\'s chat taken as the owner id'],
-  ['services/telegram/settings.py','C',3,'owner, groups and access from env'],
-  ['src/access.ts','C',1,'an answer pass\'s scope must look like a Telegram private chat'],
-  ['src/actions.ts','C',1,'a destination must be a Telegram number'],
-  ['src/mcp/tools.ts','C',1,'the action_request destination text teaches CHAT_ID/topic/THREAD_ID'],
-  ['src/stores/action-commands.ts','C',9,'chat/topic splits and the t.me link'],
-  ['src/stores/telegram-actions.ts','C',6,'destination pattern, splits and the destinations note'],
-  ['src/stores/telegram-reply.ts','C',1,'a reply\'s topic split off its space'],
+  // Part C: turns, sends and the two front doors. Every site is gone: passes, dispatch, destinations, runtime profiles and
+  // the two Python services ask the chat directory or the served list (src/frontdoor/telegram.ts, services/chats.py).
   // Part D: dashboard, docs and the full tester
   ['dashboard/lib/chats-model.ts','D',6,'isSpaceId, parentOf, topicNumber, groupSpace and inferKind'],
   ['dashboard/pages/chats/chat-picker.tsx','D',1,'whole groups by topic test'],
@@ -72,6 +58,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['tools/operations/installation/configuration.py','adapter',3,'installer checks of TELEGRAM_OWNER_ID, TELEGRAM_GROUP_IDS and access'],
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],
   ['tools/operations/security/group_access.py','adapter',1,'a Telegram user id typed by the owner'],
+  ['services/hermes/preference_transfer.py','legacy',1,'a legacy-layout reset, or a preferences snapshot from before step 2b: its topic spaces read once'],
   ['src/honcho.ts','legacy',1,'legacy layout audience by sign'],
   ['tools/acceptance/reset_configuration.py','legacy',1,'chat values of the legacy layout and of a version 1 reset snapshot, read once to convert them'],
   ['tools/operations/installation/store_recovery.py','unrelated',1,'a PostgreSQL sequence value'],

@@ -15,7 +15,11 @@ from .policy_config import effective, validate
 from .profile_config import PREFERENCES, atomic_yaml, resolved
 from .scopes import Scopes
 
-FORMAT = 'nocheh-runtime-preferences-v1'
+# Version 2 (ADR-0250) names the chats it keeps preferences for by their Nocheh ids, with each served group's Telegram
+# ids, so a chat first seen after step 2b (a digest id) and a group Telegram upgraded keep theirs. A version 1 snapshot,
+# taken before step 2b, still validates and restores: its values name chats in the old way.
+FORMAT = 'nocheh-runtime-preferences-v2'
+FORMATS = ('nocheh-runtime-preferences-v1', FORMAT)
 NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 CUSTOM = re.compile(r'profile-[a-f0-9]{48}')
 SOURCE = re.compile(r'(nocheh-policy.yaml|profiles/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}/(config.yaml|space.json|nocheh-owner-profile.json))')
@@ -108,11 +112,51 @@ def _overrides(config):
     return _values(result)
 
 
+def _id(value):
+    """A chat or Telegram id: opaque, printable, bounded. Never parsed."""
+    if not isinstance(value, str) or not 0 < len(value) <= 200 or any(ord(c) < 33 or ord(c) == 127 for c in value):
+        raise ValueError('invalid_preference_scope')
+    return value
+
+
+def _legacy_chats(owner, groups, spaces):
+    """The chats of an installation that never ran step 2b, or of a version 1 snapshot (ADR-0250): every value is its
+    chat's id, and a served group's topic is named after its group. Read once, here, to find which spaces are topics."""
+    topics = {}
+    for space in spaces:
+        match = LEGACY_TOPIC.fullmatch(space) if isinstance(space, str) else None
+        if match and match.group(1) in groups: topics[space] = match.group(1)
+    return {'owner': owner, 'groups': {group: [group] for group in sorted(set(groups))}, 'topics': dict(sorted(topics.items()))}
+
+
+LEGACY_TOPIC = re.compile(r'(-\d{1,19})/topic/[1-9]\d{0,18}')
+
+
+def _chats(value, owner, groups):
+    """The chats a snapshot keeps preferences for, checked: the owner's private chat, each served group with the Telegram
+    ids it has had (every served Telegram id among them), and the served groups' topics."""
+    if not isinstance(value, dict) or set(value) != {'owner', 'groups', 'topics'} or not isinstance(value['groups'], dict) or \
+            not isinstance(value['topics'], dict) or len(value['groups']) > 1000 or len(value['topics']) > 10000:
+        raise ValueError('invalid_preference_scope')
+    chat, served, topics = _id(value['owner']), value['groups'], value['topics']
+    for group, externals in served.items():
+        if (_id(group) == chat or not isinstance(externals, list) or not externals or len(externals) > 100 or
+                externals != sorted(set(externals)) or any(not _id(external) for external in externals)):
+            raise ValueError('invalid_preference_scope')
+    if (any(_id(topic) in served or topic == chat or parent not in served for topic, parent in topics.items()) or
+            not set(groups).issubset({external for externals in served.values() for external in externals})):
+        raise ValueError('invalid_preference_scope')
+    return value
+
+
 def capture(root, policy, catalog=None):
     """Read only allowed preferences; catalog=None selects legacy owner markers.
 
     For an original-only source, supply active control runtime_profiles rows.
     The caller must fence changes to both the filesystem and that catalog.
+    `policy.owner` and `policy.groups` are the Telegram ids the setup names; `policy.chats`, when the configuration
+    snapshot has chat records, the chats they name by their Nocheh ids ({'owner', 'groups': {chat: [Telegram ids]},
+    'topics': {topic: chat}}), else None for a source whose values name their chats in the old way (ADR-0250).
     """
     if not isinstance(policy.owner, str) or not policy.owner:
         raise ValueError('owner_required')
@@ -130,8 +174,8 @@ def capture(root, policy, catalog=None):
         return value
 
     global_values = _values(read('nocheh-policy.yaml').get('global', {}))
-    spaces = set([policy.owner, *policy.groups])
-    custom = []
+    groups = sorted(set(policy.groups))
+    custom, markers = [], []
     if catalog is not None:
         if not isinstance(catalog, list) or len(catalog) > 100:
             raise ValueError('invalid_profile_catalog')
@@ -142,11 +186,7 @@ def capture(root, policy, catalog=None):
                 raise ValueError('invalid_profile_catalog')
             custom.append((row['id'], row['id'], _label(row.get('name'))))
     for name in inventory:
-        binding = read(f'profiles/{name}/space.json', 'json')
-        space = binding.get('space')
-        if isinstance(space, str) and re.fullmatch(r'-\d{1,19}/topic/[1-9]\d{0,18}', space):
-            if space.split('/topic/')[0] in policy.groups:
-                spaces.add(space)
+        markers.append(read(f'profiles/{name}/space.json', 'json').get('space'))
         if catalog is None:
             marker = read(f'profiles/{name}/nocheh-owner-profile.json', 'json')
             if marker:
@@ -155,19 +195,23 @@ def capture(root, policy, catalog=None):
                 label = _label(name)
                 identity = 'profile-' + hashlib.sha256(('preserved-profile:' + policy.owner + ':' + label).encode()).hexdigest()[:48]
                 custom.append((name, identity, label))
+    # Each chat's preferences live in the profile its Nocheh id names (Scopes.profile), the old value for a chat stored
+    # before step 2b, so an upgraded group and a chat first seen later keep theirs.
+    given = getattr(policy, 'chats', None)
+    chats = _chats(given if given is not None else _legacy_chats(policy.owner, groups, markers), policy.owner, groups)
     profiles = []
-    for space in sorted(spaces):
+    for space in sorted({chats['owner'], *chats['groups'], *chats['topics']}):
         identity = Scopes.profile(space)
         relative = f'profiles/{identity}/config.yaml'
         config = read(relative)
         # Absence means that a topic inherits its parent chat's preferences.
-        if '/topic/' in space and files[relative] is None:
+        if space in chats['topics'] and files[relative] is None:
             continue
         profiles.append({'id': identity, 'space': space, 'name': None, 'overrides': _overrides(config)})
     for directory, identity, label in sorted(custom):
-        profiles.append({'id': identity, 'space': policy.owner, 'name': label,
+        profiles.append({'id': identity, 'space': chats['owner'], 'name': label,
                          'overrides': _overrides(read(f'profiles/{directory}/config.yaml'))})
-    snapshot = {'format': FORMAT, 'owner': policy.owner, 'groups': sorted(set(policy.groups)),
+    snapshot = {'format': FORMAT, 'owner': policy.owner, 'groups': groups, 'chats': chats,
                 'global': global_values, 'profiles': profiles, 'source_files': files,
                 'source_inventory': inventory}
     validate_snapshot(snapshot)
@@ -177,17 +221,20 @@ def capture(root, policy, catalog=None):
 
 def validate_snapshot(snapshot):
     required = {'format', 'owner', 'groups', 'global', 'profiles', 'source_files', 'source_inventory'}
-    if not isinstance(snapshot, dict) or set(snapshot) != required or snapshot['format'] != FORMAT:
+    if (not isinstance(snapshot, dict) or snapshot.get('format') not in FORMATS or
+            set(snapshot) != (required if snapshot['format'] != FORMAT else required | {'chats'})):
         raise ValueError('invalid_preference_snapshot')
     owner, groups = snapshot['owner'], snapshot['groups']
-    if (not isinstance(owner, str) or not re.fullmatch(r'[1-9]\d{0,18}', owner) or
-            not isinstance(groups, list) or any(not isinstance(g, str) or not re.fullmatch(r'-\d{1,19}', g) for g in groups) or
+    if (not isinstance(groups, list) or len(groups) > 1000 or any(not _id(g) for g in [_id(owner), *groups]) or
             groups != sorted(set(groups))):
         raise ValueError('invalid_preference_scope')
     _values(snapshot['global'])
     profiles = snapshot['profiles']
     if not isinstance(profiles, list) or len(profiles) > 10100:
         raise ValueError('invalid_preference_profiles')
+    chats = _chats(snapshot['chats'] if snapshot['format'] == FORMAT else _legacy_chats(
+        owner, groups, [row.get('space') for row in profiles if isinstance(row, dict)]), owner, groups)
+    allowed = {chats['owner'], *chats['groups'], *chats['topics']}
     identities, names, spaces = set(), set(), set()
     for row in profiles:
         if not isinstance(row, dict) or set(row) != {'id', 'space', 'name', 'overrides'}:
@@ -197,18 +244,16 @@ def validate_snapshot(snapshot):
             raise ValueError('invalid_preference_profile')
         if row['name'] is not None:
             label = _label(row['name'])
-            if not CUSTOM.fullmatch(identity) or space != owner or label in names:
+            if not CUSTOM.fullmatch(identity) or space != chats['owner'] or label in names:
                 raise ValueError('invalid_preference_profile')
             names.add(label)
         else:
-            chat = space.split('/topic/')[0]
-            if (chat not in [owner, *groups] or identity != Scopes.profile(space) or
-                    space != chat and (chat == owner or not re.fullmatch(r'-\d{1,19}/topic/[1-9]\d{0,18}', space))):
+            if space not in allowed or space in spaces or identity != Scopes.profile(space):
                 raise ValueError('invalid_preference_scope')
             spaces.add(space)
         identities.add(identity)
         _values(row['overrides'])
-    if len(names) > 100 or not set([owner, *groups]).issubset(spaces):
+    if len(names) > 100 or not {chats['owner'], *chats['groups']}.issubset(spaces):
         raise ValueError('invalid_preference_profiles')
     files, inventory = snapshot['source_files'], snapshot['source_inventory']
     if (not isinstance(inventory, list) or len(inventory) > 10000 or

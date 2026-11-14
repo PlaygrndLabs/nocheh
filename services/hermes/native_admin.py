@@ -65,23 +65,26 @@ class Administration:
     def binding(self,name):
         if self.profile_catalog:
             return self.profile_catalog.validate(self.profile_catalog.resolve(name))
-        if not self.policy.owner:raise ValueError('owner_profile_unavailable')
-        if not name or name in ('default','current'):name=Scopes.profile(self.policy.owner)
+        # The owner's private chat and the served groups by their Nocheh chat ids, from the app's served list (ADR-0250).
+        served=self.policy.current();owner,account=served.owner_chat,served.owner_user() or ''
+        if not owner:raise ValueError('owner_profile_unavailable')
+        if not name or name in ('default','current'):name=Scopes.profile(owner)
         path=self.root/'profiles'/name
-        if name==Scopes.profile(self.policy.owner):return Scope(self.policy.owner,self.policy.owner,True,name,self.policy.owner)
-        if (path/'nocheh-owner-profile.json').is_file():return Scope(self.policy.owner,self.policy.owner,True,name,self.policy.owner)
-        current_revision=self.revision_reader(self.policy.owner) if self.revision_reader else 0
-        for chat in self.policy.groups:
+        if name==Scopes.profile(owner):return Scope(owner,account,True,name,owner)
+        if (path/'nocheh-owner-profile.json').is_file():return Scope(owner,account,True,name,owner)
+        current_revision=self.revision_reader(owner) if self.revision_reader else 0
+        groups=served.groups()
+        for chat in groups:
             revision=current_revision
             current=Scopes.profile(chat+':policy:'+str(revision)) if revision else Scopes.profile(chat)
-            if name in (Scopes.profile(chat),current):return Scope(chat,self.policy.owner,False,current,chat,revision)
+            if name in (Scopes.profile(chat),current):return Scope(chat,account,False,current,chat,revision)
         marker=path/'space.json'
         if marker.is_file() and not marker.is_symlink():
-            value=json.loads(marker.read_text());space=value.get('space','');chat=space.split('/topic/')[0];revision=value.get('revision')
-            if chat in self.policy.groups and value.get('owner') is False and type(revision) is int and revision>0 and name==Scopes.profile(space+':policy:'+str(revision)):
+            value=json.loads(marker.read_text());space=value.get('space','');chat=served.chat_of(space);revision=value.get('revision')
+            if chat in groups and value.get('owner') is False and type(revision) is int and revision>0 and name==Scopes.profile(space+':policy:'+str(revision)):
                 if self.revision_reader and revision!=current_revision:raise ValueError('profile_policy_changed')
-                return Scope(chat,self.policy.owner,False,name,space,revision)
-        if (path/'nocheh-owner-profile.json').is_file():return Scope(self.policy.owner,self.policy.owner,True,name,self.policy.owner)
+                return Scope(chat,account,False,name,space,revision)
+        if (path/'nocheh-owner-profile.json').is_file():return Scope(owner,account,True,name,owner)
         raise ValueError('profile_scope_denied')
 
     def preference_home(self,name,home):
@@ -92,8 +95,9 @@ class Administration:
 
     def profile(self, name):
         if not name or name in ('default', 'current'):
-            if not self.policy.owner: raise ValueError('owner_profile_unavailable')
-            name = Scopes.profile(self.policy.owner)
+            owner = self.policy.current().owner_chat
+            if not owner: raise ValueError('owner_profile_unavailable')
+            name = Scopes.profile(owner)
         if not NAME.fullmatch(name): raise ValueError('profile_scope_denied')
         path = self.root / 'profiles' / name
         if path.is_symlink() or not path.resolve().is_relative_to(self.root / 'profiles'):
@@ -115,7 +119,8 @@ class Administration:
                     'display_name': label, 'description_auto': False,
                     'scope': 'owner' if entry['owner'] else 'group', 'exists': path.exists()})
             return {'profiles': result}
-        names = [Scopes.profile(chat) for chat in [self.policy.owner, *self.policy.groups] if chat]
+        served = self.policy.current(); default = Scopes.profile(served.owner_chat) if served.owner_chat else ''
+        names = [Scopes.profile(chat) for chat in [served.owner_chat, *served.groups()] if chat]
         parent = self.root / 'profiles'
         if parent.exists():
             names += [p.name for p in parent.iterdir() if not p.is_symlink() and (p / 'nocheh-owner-profile.json').is_file() and p.name not in names]
@@ -123,8 +128,8 @@ class Administration:
         for name in names:
             name, path = self.profile(name)
             managed = name.startswith('nocheh-')
-            owner = name == (Scopes.profile(self.policy.owner) if self.policy.owner else '') or not managed
-            result.append({'name': name, 'path': str(path), 'is_default': name == (Scopes.profile(self.policy.owner) if self.policy.owner else ''),
+            owner = name == default or not managed
+            result.append({'name': name, 'path': str(path), 'is_default': name == default,
                            'model': self.model, 'provider': 'openai', 'has_env': False,
                            'skill_count': 0, 'gateway_running': False, 'has_alias': False,
                            'description': 'Owner private' if owner else 'Managed Telegram group',
@@ -137,7 +142,7 @@ class Administration:
         from .policy_config import document
         policy = document(policy_root(path))
         original = read(path / 'config.yaml')
-        effective, _ = inherited_config(path, original, policy=policy)
+        effective, _ = inherited_config(path, original, policy=policy, served=self.policy.current())
         native = _normalize_config_for_web(_deep_merge(DEFAULT_CONFIG, resolved(effective, self.model)))
         def redact(value):
             if isinstance(value, dict):
@@ -384,7 +389,7 @@ class Administration:
                             elif old.get(key) != value: changes[dotted] = value
                     diff(current, incoming)
                     if set(changes) - PREFERENCES.keys(): raise ValueError('setting_managed_by_nocheh')
-                    saved = configure_profile(home, self.model, changes, expected)
+                    saved = configure_profile(home, self.model, changes, expected, served=self.policy.current())
                     extra['etag'] = '"' + saved['revision'] + '"'
                     result = {'ok': True, 'revision': saved['revision']}
                 elif path == '/api/nocheh/policy' and method in ('GET', 'PUT'):
@@ -393,8 +398,9 @@ class Administration:
                     result = (save(self.root, body.get('changes'), body.get('revision'), job) if method == 'PUT'
                               else view(self.root, read(home / 'config.yaml') if query.get('profile') else {}, job))
                 elif path == '/api/nocheh/preferences' and method in ('GET', 'PUT'):
-                    result = (configure_profile(home, self.model, body.get('changes'), body.get('revision')) if method == 'PUT'
-                              else inspect_profile(home, self.model))
+                    served = self.policy.current()
+                    result = (configure_profile(home, self.model, body.get('changes'), body.get('revision'), served=served) if method == 'PUT'
+                              else inspect_profile(home, self.model, served))
                 elif path == '/api/model/options' and method == 'GET':
                     result = {'model': self.model, 'provider': 'openai', 'providers': [
                         {'name':'Nocheh Settings › Models', 'slug':'openai', 'models':[self.model],

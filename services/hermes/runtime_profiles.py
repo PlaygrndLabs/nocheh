@@ -47,11 +47,12 @@ class ProfileCatalog:
 
     def validate(self, entry):
         try:
+            # The owner's private chat, or a served group or one of its topics, as the app's served list has them (ADR-0250).
             chat, space, owner = entry['scope'], entry['space'], entry['owner']
-            if (type(owner) is not bool or owner != (chat == self.policy.owner) or
-                chat != self.policy.owner and chat not in self.policy.groups or
-                not isinstance(space, str) or space != chat and
-                (owner or not re.fullmatch(re.escape(chat) + r'/topic/[1-9]\d*', space))):
+            served = self.policy.current(None, 5.0, lambda served: served.chat_of(space) is not None)
+            if (type(owner) is not bool or not served.owner_chat or owner != (chat == served.owner_chat) or
+                chat != served.owner_chat and served.group(chat) != chat or
+                not isinstance(space, str) or served.chat_of(space) != chat or space != chat and owner):
                 raise ValueError()
             logical, preference = entry['logical_profile'], entry['preference_profile']
             default = Scopes.profile(space)
@@ -59,7 +60,7 @@ class ProfileCatalog:
                 raise ValueError()
             if preference != logical or type(entry['policy_revision']) is not int or entry['policy_revision'] < 1:
                 raise ValueError()
-            bound = Scopes.apply_revision(Scope(chat, self.policy.owner, owner, default, space, entry['policy_revision']),
+            bound = Scopes.apply_revision(Scope(chat, served.owner_user() or '', owner, default, space, entry['policy_revision']),
                 {'revision': entry['policy_revision'], 'guard_epoch': entry['guard_epoch'],
                  'generation': entry['generation'], 'logical_profile': logical})
             if bound.profile != entry['native_profile']: raise ValueError()
@@ -78,7 +79,7 @@ class ProfileCatalog:
             # resolve it against current policy and the current native identity.
             if marker.is_file() and not marker.is_symlink() and marker.stat().st_size <= 4096:
                 space = json.loads(marker.read_text()).get('space')
-                if isinstance(space, str) and '/topic/' in space: body['space'] = space
+                if isinstance(space, str) and self.policy.current().parent(space): body['space'] = space
         entry = self.request('/v1/runtime/profiles/resolve', body)
         self.validate(entry)
         return entry

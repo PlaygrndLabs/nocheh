@@ -279,7 +279,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             profile=Path(folder)
             with (profile/'.turn.lock').open('a') as lock,patch('services.hermes.review_worker.prepare_profile',return_value=profile),patch('services.hermes.review_worker._review') as child:
                 fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                result=review(profile,SimpleNamespace(owner='42'),'model',None,self.review_body())
+                result=review(profile,Scopes({'enabled':True,'owner_id':'42','group_ids':[]}),'model',None,self.review_body())
                 self.assertEqual(result,{'state':'waiting','error_code':'profile_busy'});child.assert_not_called()
 
     async def test_review_requires_verified_review_capability_before_opening_profile(self):
@@ -288,7 +288,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         with patch('services.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):
             for operation in (review,start):
                 for body in (ordinary,forged):
-                    with self.assertRaises(ValueError):operation(Path('/unused'),SimpleNamespace(owner='42'),'model',None,body)
+                    with self.assertRaises(ValueError):operation(Path('/unused'),Scopes({'enabled':True,'owner_id':'42','group_ids':[]}),'model',None,body)
 
     async def test_already_cancelled_never_starts_a_child(self):
         cancel=threading.Event();cancel.set()
@@ -304,8 +304,8 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             with patch('services.hermes.review_worker.prepare_profile',return_value=profile),patch('services.hermes.review_worker._review',return_value={'state':'done'}) as child:
                 now=activity.stat().st_mtime
                 with patch('services.hermes.review_worker.time.time',return_value=now+30):
-                    self.assertEqual(review(profile,SimpleNamespace(owner='42'),'model',None,body),{'state':'waiting','error_code':'profile_busy'})
+                    self.assertEqual(review(profile,Scopes({'enabled':True,'owner_id':'42','group_ids':[]}),'model',None,body),{'state':'waiting','error_code':'profile_busy'})
                     child.assert_not_called()
                 with patch('services.hermes.review_worker.time.time',return_value=now+61):
-                    self.assertEqual(review(profile,SimpleNamespace(owner='42'),'model',None,body),{'state':'done'})
+                    self.assertEqual(review(profile,Scopes({'enabled':True,'owner_id':'42','group_ids':[]}),'model',None,body),{'state':'done'})
                     self.assertIs(child.call_args.args[-1],body)

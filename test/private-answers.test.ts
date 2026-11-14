@@ -15,10 +15,11 @@ import {assertPrivateAnswerRoute,privateAnswerRoute,privateAnswerTools} from '..
 import {storageServer} from '../src/stores/server.js';
 import {runtimeProfile} from '../src/stores/runtime-profile.js';
 import {readSet,readSetGroups} from '../src/spaces.js';
-import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,fixtureDirectory,groupsPolicy} from './fixture-groups.js';
 import {installChatsForTest} from '../src/chats.js';
+import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,fixtureDirectory,groupsPolicy} from './fixture-groups.js';
 
-// The fixture chats, as the seeder makes their rows (ADR-0250); groupsPolicy() installs the same directory again.
+// The fixture chats, the owner's private chat among them, as the seeder makes their rows (ADR-0250): an answer pass reads
+// only in that chat; groupsPolicy() installs the same directory again.
 installChatsForTest(fixtureDirectory());
 
 const secret='synthetic-service-token-only-for-tests',start='e'.repeat(64),answer='a'.repeat(32),hex='b'.repeat(64);

@@ -190,7 +190,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         other = InlineKeyboardMarkup([[InlineKeyboardButton('Answer privately', callback_data='np' + 'b' * 32)]])
         request = instrument_request(Request((200, b'{"ok":true,"result":{"message_id":8,"text":"synthetic"}}')), self.capture)
         reply = {'chat_id': -20, 'text': 'synthetic'}
-        plain, keyed = outbound_check(-20, '-20', lambda: True), outbound_check(-20, '-20', lambda: True, markup=button)
+        plain, keyed = outbound_check(-20, None, lambda: True), outbound_check(-20, None, lambda: True, markup=button)
         for check, markup in ((plain, button), (keyed, other), (keyed, {'inline_keyboard': [[{'text': 'x', 'url': 'https://example.com'}]]})):
             with self.subTest(markup=markup), self.assertRaisesRegex(Held, 'audience_changed'):
                 await self.send(request, 'sendMessage', {**reply, 'reply_markup': getattr(markup, 'to_dict', lambda: markup)()},

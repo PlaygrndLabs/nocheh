@@ -2,6 +2,7 @@ import {digest} from '../archive.js';
 import type {TurnReceipt} from '../brain/brain.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {TurnInput} from './telegram-turn.js';
+import {telegramTarget} from '../frontdoor/telegram.js';
 
 /**
  * Nocheh's own bot answers a Telegram turn (ADR-0235). The brain only returns the reply; Nocheh shows typing and the
@@ -13,13 +14,14 @@ export type ReplyFinish='answered'|'failed'|'clear';
 /** One id per turn attempt for its presence and its reply in the bot. */
 export const deliveryId=(event:string,attempt:number|string)=>digest(event+':'+attempt);
 
-/** The asking message, its chat and its topic, from the routed payload and the turn's space. */
+/** The asking message, from the routed payload, in the turn's chat and topic where Telegram has them now: the front
+ * door's translation of the turn's space, the same the turn pass is bound to (ADR-0250). A space with no chat row is
+ * never sent to. */
 export function replyTarget(input:TurnInput,attempt:number|string,credential:string) {
-  const message=(input.body.payload as {message?:{message_id?:unknown;chat?:{id?:unknown}}})?.message??{},space=input.principal.space??'';
-  const topic=space.includes('/topic/')?Number(space.split('/topic/')[1]):undefined;
+  const message=(input.body.payload as {message?:{message_id?:unknown}})?.message??{},target=telegramTarget(input.principal.space);
   const event=input.principal.turnEvent??String(input.body.event_id);
-  return {id:deliveryId(event,attempt),event_id:event,attempt,chat_id:String(message.chat?.id),message_id:String(message.message_id),
-    ...(topic?{topic}:{}),archive_credential:credential};
+  return {id:deliveryId(event,attempt),event_id:event,attempt,chat_id:target.chat_id,message_id:String(message.message_id),
+    ...(target.topic!==undefined?{topic:target.topic}:{}),archive_credential:credential};
 }
 
 /** Whether the bot is connected to Telegram, so a turn's reply can be sent. A brain turn starts only then, as a reply

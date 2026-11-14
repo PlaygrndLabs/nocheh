@@ -8,6 +8,8 @@ import {digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {chatIdFor,installChatsForTest} from '../src/chats.js';
+import {GP1,GP1_TOPIC,GP2,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,OWNER,UNSERVED,fixtureDirectory} from './fixture-groups.js';
 
 test('native profile configuration retains stable preference identities while revoking old execution generations',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -69,4 +71,33 @@ test('native profile configuration retains stable preference identities while re
     await s.runtimeProfiles.save(owner,{id:replacement.id,name:renamed.name,state:'retired',expected_revision:1,operation_id:key+':cleanup'});
     assert.equal((await stores.archive.query('SELECT count(*) FROM events')).rows[0].count,count,'configuration changes create no archive sources');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('runtime profiles come from the chat directory: old chats keep their names, new and upgraded ones are named by their chat ids',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  // The strict fixture directory (ADR-0250): GP1 stored before step 2b, NG1 first seen after it, NG2 upgraded since
+  // (its old Telegram id is its chat id's source). Nothing is made up for an id the directory does not hold.
+  const restore=installChatsForTest(fixtureDirectory([GP1,NG1_TG,NG2_TG]));
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-profiles-strict-')),owner={admin:true,scope:null};
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,NG1_TG,NG2_TG]}),
+    runtime:async()=>{throw Error('no runtime calls');},memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
+  const named=(space:string)=>'nocheh-'+digest(space).slice(0,24);
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    const managed=(await s.runtimeProfiles.list(owner)).profiles.filter(p=>p.managed);
+    assert.deepEqual(managed.map(p=>[p.scope,p.logical_profile]),[[OWNER,named(OWNER)],[GP1,named(GP1)],[NG1,named(NG1)],[NG2,named(NG2)]],
+      'the owner\'s chat and GP1 keep the names they had; NG1 and NG2 are named by their chat ids');
+    assert.ok(!managed.some(p=>[named(NG1_TG),named(NG2_TG),named(NG2_OLD_TG)].includes(p.logical_profile??'')),'never by a Telegram id');
+    assert.ok(!managed.some(p=>[GP2,UNSERVED].includes(p.scope)),'only served chats');
+    for(const [space,chat] of [[GP1_TOPIC,GP1],[NG1_TOPIC,NG1]] as const) {
+      const topic=await s.runtimeProfiles.resolve(owner,{profile:named(space),space});
+      assert.deepEqual([topic.scope,topic.space,topic.owner,topic.logical_profile],[chat,space,false,named(space)]);
+    }
+    // A topic the directory does not hold, or one of an unserved group, is refused: never made up from its id's shape.
+    for(const space of [GP1+'/topic/99',UNSERVED+'/topic/1',chatIdFor('telegram',NG1_TG,'8')])
+      await assert.rejects(s.runtimeProfiles.resolve(owner,{profile:named(space),space}),{code:'profile_scope_denied'},space);
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

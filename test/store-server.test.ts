@@ -212,8 +212,8 @@ test('separated application captures through control outages, exposes owner repo
     await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'},401,credential);
     await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'},403);
     await connected.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[proposal.id]);
-    assert.equal((await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'})).valid,true);
-    await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'different message'},403);
+    assert.equal((await request('/internal/actions/authorize',{id:proposal.id,destination:'123',chat_id:'123',text:'Synthetic approval preview'})).valid,true);
+    await request('/internal/actions/authorize',{id:proposal.id,destination:'123',chat_id:'123',text:'different message'},403);
     assert.equal((await request('/v1/exports/sources?limit=1')).format,'nocheh-sources-v1');
     assert.ok(Array.isArray((await request('/v1/workflows?limit=1')).workflows));
     assert.ok(Array.isArray((await request('/v1/workflows/health')).workers));

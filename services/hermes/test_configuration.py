@@ -102,7 +102,8 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_environment_policy_and_explicit_empty_secret(self):
         with patch.dict(os.environ,{'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':'-10, -20','TELEGRAM_BOT_TOKEN':'','TELEGRAM_BOT_TOKEN_FILE':'/does/not/exist'},clear=True):
-            self.assertEqual(telegram_policy(),{'enabled':True,'owner_id':'42','group_ids':['-10','-20'],'group_access':{}})
+            # The owner and the served groups come from the app's served list (ADR-0250), never from the environment.
+            self.assertEqual(telegram_policy(),{'enabled':True,'group_access':{}})
             self.assertEqual(secret('TELEGRAM_BOT_TOKEN',required=False),'')
             with self.assertRaises(ValueError): secret('TELEGRAM_BOT_TOKEN')
 

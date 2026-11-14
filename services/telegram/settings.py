@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 
 
@@ -45,30 +44,48 @@ def archive_url():
 
 
 class Policy:
-    """Who the bot serves: the owner's private chat and the allowed groups, with each group's member access."""
-    def __init__(self, enabled, owner, groups, group_access):
+    """Who the bot serves (ADR-0250). Whether it is on and each group's member access come from its environment; the
+    owner, the owner's private chat and the served groups come from the app's served list (services/chats.py), by
+    their Telegram ids now and before. A list that cannot be read serves nothing."""
+    def __init__(self, enabled, group_access, served=None):
         if not isinstance(enabled, bool): raise ValueError('invalid_assistant_policy')
-        if owner is not None and (not isinstance(owner, str) or not re.fullmatch(r'[1-9]\d{0,18}', owner)): raise ValueError('invalid_owner')
-        if not isinstance(groups, list) or any(not isinstance(g, str) or not re.fullmatch(r'-\d{1,19}', g) for g in groups):
-            raise ValueError('invalid_groups')
-        if enabled and not owner: raise ValueError('owner_required')
+        # Keyed by any Telegram id a group has had; a key that names no served group grants nothing.
         if not isinstance(group_access, dict) or len(group_access) > 100: raise ValueError('invalid_group_access')
         for group, entry in group_access.items():
-            if group not in groups or not isinstance(entry, dict) or set(entry) != {'granted', 'denied'}: raise ValueError('invalid_group_access')
+            if not isinstance(group, str) or not 0 < len(group) <= 32 or not isinstance(entry, dict) or set(entry) != {'granted', 'denied'}:
+                raise ValueError('invalid_group_access')
             for users in entry.values():
-                if (not isinstance(users, list) or len(users) > 1000 or
-                        any(not isinstance(user, str) or not re.fullmatch(r'[1-9]\d{0,18}', user) or user == owner for user in users)):
-                    raise ValueError('invalid_group_access')
-        self.enabled, self.owner, self.groups, self.group_access = enabled, owner, groups, group_access
+                if not isinstance(users, list) or len(users) > 1000 or any(not telegram_user(user) for user in users): raise ValueError('invalid_group_access')
+        from services.chats import Fixed, Served, ServedList
+        self.enabled, self.group_access = enabled, group_access
+        self.served = Fixed(served) if isinstance(served, Served) else served or ServedList(archive_url, lambda: secret('SERVICE_TOKEN'))
 
     @classmethod
     def load(cls):
         enabled = os.environ.get('TELEGRAM_ENABLED', 'false')
         if enabled not in ('true', 'false'): raise ValueError('Invalid TELEGRAM_ENABLED')
-        return cls(enabled == 'true', os.environ.get('TELEGRAM_OWNER_ID') or None,
-                   [v.strip() for v in os.environ.get('TELEGRAM_GROUP_IDS', '').split(',') if v.strip()],
-                   json.loads(os.environ.get('TELEGRAM_GROUP_ACCESS', '{}')))
+        return cls(enabled == 'true', json.loads(os.environ.get('TELEGRAM_GROUP_ACCESS', '{}')))
 
-    def allowed_chat(self, chat):
-        """The owner's private chat or an allowed group."""
-        return bool(self.owner) and str(chat) == self.owner or str(chat) in self.groups
+    @classmethod
+    def of(cls, enabled, owner, groups, group_access, topics=(), old=None):
+        """Tests only: a fixed served list where the owner's chat and each group keep their Telegram id as their chat id,
+        as chats stored before step 2b do; `groups` may also hold (chat id, Telegram id) pairs."""
+        from services.chats import Served
+        return cls(enabled, group_access, Served.of(owner, groups=groups, topics=topics, old=old))
+
+    def current(self, epoch=None, max_age=5.0, holds=None):
+        """The served list as the app has it now: read again when older than `max_age` seconds, when a pass carries a
+        newer guard epoch than it was read at, or when it does not hold what `holds` asks for (a topic or Telegram id the
+        app recorded since)."""
+        return self.served.get(epoch, max_age, holds)
+
+    def access(self, served, group, user):
+        """Whether `user` may talk to Nocheh in the served group `group` (a Nocheh chat id): granted and not denied, under any
+        Telegram id the group has had, so an upgrade keeps who may talk there."""
+        entries = [self.group_access.get(external, {}) for external in served.app_ids(group)]
+        return any(user in entry.get('granted', []) for entry in entries) and not any(user in entry.get('denied', []) for entry in entries)
+
+
+def telegram_user(value):
+    """A Telegram user id as the Bot API writes it: a positive number with no leading zero."""
+    return isinstance(value, str) and value.isascii() and value.isdigit() and 0 < len(value) <= 19 and value[0] != '0'
