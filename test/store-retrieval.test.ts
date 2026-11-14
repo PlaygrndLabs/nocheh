@@ -170,5 +170,15 @@ test('a chat first seen after step 2b is read under every Telegram id it has had
     for(const space of [NG1,NG1_TOPIC])await assert.rejects(sources.read(await principal(NG1,space),unrowed.id),{code:'source_not_found'},space);
     assert.equal(await access.space(unrowed),null,'a topic with no row is no space');
     assert.equal(await access.space(topic),NG1_TOPIC);assert.equal(await access.space(before),NG2);
+    // A Telegram id with no chats row at all: no seeded fixture fills it in, so this is the real miss. It is no chat,
+    // and a turn that names it, by its Telegram id or as itself, reads nothing of it (fails closed).
+    const stray='-1003000000001',lost=await capture(stray,{text:'Stray driftmoor'});
+    assert.equal(await access.space(lost),null,'an id with no row is no space');
+    const strayReader=await principal(stray);
+    await assert.rejects(sources.read(strayReader,lost.id),{code:'source_not_found'});
+    assert.deepEqual(await sources.search(strayReader,'driftmoor'),[]);
+    assert.deepEqual((await sources.page(strayReader,{chat:stray,from:'',to:'',after:'',count:50})).items,[]);
+    assert.equal((await sources.size(strayReader,{chat:stray,from:'',to:''})).records,0);
+    assert.deepEqual(await sources.search(ng2,'driftmoor'),[],'nor does any chat that has a row');
   } finally {restore();await guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
 });
