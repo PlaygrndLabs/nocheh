@@ -5,7 +5,7 @@ import type {AssistantPolicy} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import {groupSpace,readSet,servedGroups} from '../spaces.js';
 import {accountIdFor,chatIdListSql,chatIdSql,chats} from '../chats.js';
-import {isTelegramAccount,telegramAccountSource} from '../chats-telegram.js';
+import {isTelegramAccount,legacyShapeSql,telegramAccountSource} from '../chats-telegram.js';
 import {projectGroups,projectGroupsSql} from './project-groups.js';
 
 /**
@@ -49,17 +49,24 @@ ALTER TABLE private_answers ADD CONSTRAINT private_answers_read_chats_check CHEC
 ALTER TABLE private_answers DROP CONSTRAINT IF EXISTS private_answers_reply_chat_id_check;
 ALTER TABLE private_answers ADD CONSTRAINT private_answers_reply_chat_id_check CHECK(${chatIdSql('reply_chat_id')});
 -- What each chat is comes from its chats row, never from its id (ADR-0250): the asking place is a group or one of a
--- group's topics, every frozen chat is a group itself, and the reply chat is a private chat. A chat with no row is
--- refused like a private one (ADR-0242). Checked whenever those columns are written, as their CHECKs were.
+-- group's topics, every frozen chat is a group itself, and the reply chat is a private chat. This release never writes
+-- a chat with no row (it refuses one first). A value no row names is judged by step 2's CHECKs on its frozen old shape
+-- (legacyShapeSql), so a release from before step 2b, redeployed, goes on writing its rows (2b-1 is undone by
+-- redeploying), and a digest with no row is refused. Checked whenever those columns are written, as their CHECKs were.
 CREATE OR REPLACE FUNCTION private_answers_chat_kinds() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
- IF NOT EXISTS(SELECT 1 FROM chats c LEFT JOIN chats g ON g.id=c.parent_id WHERE c.id=NEW.from_chat_id AND (c.kind='group' OR c.kind='topic' AND g.kind='group')) THEN
+ IF NOT (CASE WHEN EXISTS(SELECT 1 FROM chats WHERE id=NEW.from_chat_id)
+   THEN EXISTS(SELECT 1 FROM chats c LEFT JOIN chats g ON g.id=c.parent_id WHERE c.id=NEW.from_chat_id AND (c.kind='group' OR c.kind='topic' AND g.kind='group'))
+   ELSE coalesce(${legacyShapeSql('NEW.from_chat_id','group_space')},false) END) THEN
   RAISE EXCEPTION 'private_answers: the asking place must be a group or one of its topics' USING ERRCODE='check_violation';
  END IF;
- IF NEW.read_chats IS NOT NULL AND EXISTS(SELECT 1 FROM unnest(NEW.read_chats) frozen(id) WHERE NOT EXISTS(SELECT 1 FROM chats c WHERE c.id=frozen.id AND c.kind='group')) THEN
+ IF NEW.read_chats IS NOT NULL AND EXISTS(SELECT 1 FROM unnest(NEW.read_chats) frozen(id) LEFT JOIN chats c ON c.id=frozen.id
+   WHERE NOT (CASE WHEN c.id IS NULL THEN coalesce(${legacyShapeSql('frozen.id','group')},false) ELSE c.kind='group' END)) THEN
   RAISE EXCEPTION 'private_answers: every frozen chat must be a group' USING ERRCODE='check_violation';
  END IF;
- IF NEW.reply_chat_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM chats c WHERE c.id=NEW.reply_chat_id AND c.kind='private') THEN
+ IF NEW.reply_chat_id IS NOT NULL AND NOT (CASE WHEN EXISTS(SELECT 1 FROM chats WHERE id=NEW.reply_chat_id)
+   THEN EXISTS(SELECT 1 FROM chats c WHERE c.id=NEW.reply_chat_id AND c.kind='private')
+   ELSE coalesce(${legacyShapeSql('NEW.reply_chat_id','private')},false) END) THEN
   RAISE EXCEPTION 'private_answers: the reply chat must be a private chat' USING ERRCODE='check_violation';
  END IF;
  RETURN NEW;

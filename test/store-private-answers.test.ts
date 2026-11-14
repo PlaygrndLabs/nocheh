@@ -534,3 +534,40 @@ test('chats first seen after step 2b keep their Nocheh ids in the record, and wh
     await stores.control.query('DELETE FROM projects WHERE id=$1',[P3]);await stores.close();
   }
 });
+
+test('a release from before step 2b, redeployed, keeps writing its rows, and a row it wrote still taps, claims and binds (ADR-0250)',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const {stores}=await fixtureDatabase(),policy=groupsPolicy(),answers=new PrivateAnswerRepository(stores.control,()=>policy);
+  // A group the owner added after rolling back has no chats row; its Telegram id is old-shaped. Bob's raw id has none either.
+  const later='-1009000000001',insert=(n:number,fields:Record<string,unknown>)=>{
+    const row={id:privateAnswerId(secret,question(n)),question_event:question(n),from_chat_id:later,project_id:P1,asker_account_id:OWNER,...fields};
+    const keys=Object.keys(row);
+    return stores.control.query(`INSERT INTO private_answers(${keys.join(',')},expires_at) VALUES(${keys.map((_,i)=>'$'+(i+1)).join(',')},now()+interval '10 minutes')`,Object.values(row));
+  };
+  try {
+    await seedGroups(stores.control);
+    // What that release writes: raw Telegram ids, the asker by their Telegram user id. The database judges a value with no
+    // chats row by step 2's rules on its old shape, so these go in.
+    await insert(80,{});
+    await insert(81,{from_chat_id:later+'/topic/3',state:'pressed',read_chats:[later,GP2],press_event:question(181),start_event:question(182),reply_chat_id:'777'});
+    // ...and step 2's refusals still hold for such values, as for a digest with no row.
+    for(const [why,fields] of Object.entries({
+      'a private chat with no row as the place':{from_chat_id:'777'},'a private topic with no row as the place':{from_chat_id:'777/topic/5'},
+      'a digest with no row as the place':{from_chat_id:'e'.repeat(64)},'a topic with no row in the frozen groups':{read_chats:[GP2,later+'/topic/3']},
+      'a private chat with no row in the frozen groups':{read_chats:[GP2,'777']},'a group with no row as the reply chat':{reply_chat_id:later},
+      'a digest with no row as the reply chat':{reply_chat_id:'e'.repeat(64)},
+    }))await assert.rejects(insert(83,fields),{code:'23514'},why);
+
+    // A row written before step 2b (or after a rollback) names its asker by Telegram user id; it still taps, claims and binds.
+    await insert(84,{from_chat_id:GP1});
+    assert.equal((await answers.press(privateAnswerId(secret,question(84)),{account_id:'456',press_event:question(185),space:GP1})).ok,false,'only the asker');
+    const pressed=await answers.press(privateAnswerId(secret,question(84)),{account_id:OWNER,press_event:question(185),space:GP1});
+    assert.equal(pressed.ok,true);assert.deepEqual(pressed.answer!.read_chats,[...P1_GROUPS]);assert.equal(pressed.answer!.asker_account_id,OWNER,'the row keeps its raw asker');
+    const claimed=await answers.claim(privateAnswerId(secret,question(84)),{account_id:OWNER,start_event:question(186),reply_chat_id:OWNER});
+    assert.equal(claimed.ok,true);
+    const bound=await answers.bind({admin:false,scope:OWNER,space:OWNER,answer:privateAnswerId(secret,question(84)),turnEvent:question(186)});
+    assert.deepEqual(bound.reads,readSet({home:GP1,whole:[...P1_GROUPS],project:P1}),'the owner\'s old row reads every group frozen at its tap');
+  } finally {
+    await stores.control.query('DELETE FROM private_answers');await stores.close();
+  }
+});
