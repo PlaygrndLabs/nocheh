@@ -366,8 +366,9 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
     assert.equal((await job(proposed.id)).state,'running');
     const run:Reader={admin:false,scope:chat,space:chat,turnEvent:begun,logical_profile:'job-'+proposed.id.slice(0,24)};
     assert.equal(await s.jobs.runs.deliveryAllowed(run),true,'a running run passes the turn policy check');
-    // The member stops their own job from the same chat.
-    assert.equal((await s.jobs.stop(await actor((await message('stop')).id),{id:proposed.id})).state,'stopped');
+    // The member stops their own running job from the same chat: the run is asked to end.
+    assert.equal((await s.jobs.stop(await actor((await message('stop')).id),{id:proposed.id})).state,'stopping');
+    assert.equal((await job(proposed.id)).cancel_requested,true);
   } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

@@ -180,8 +180,9 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   queries.length=0;
   assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
   // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0250).
-  const frozen=['-100','-100/topic/3','-200'];
-  assert.deepEqual(readSessions,[[workspace,frozen,1000]]);
+  // The read set reaches the provenance query whole, and SQL takes its ids only as marked read set entries.
+  const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);
+  assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);
   assert.deepEqual(queries.map(params=>params.at(-1)),[frozen,frozen,frozen]);
   assert.equal((await memory.context(answer)).limited_memory,true);
   assert.equal((await memory.recall(answer,'invoice')).limited_memory,true);
