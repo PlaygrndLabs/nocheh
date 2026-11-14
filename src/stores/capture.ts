@@ -103,6 +103,15 @@ export async function drainSourceSpool(coordinator:CaptureCoordinator,root:strin
       captured.push({name,value,sources,generated:classified.generated});
     } catch(error) {failures.push({name,code:error instanceof HttpError?error.code:'capture_commit_failed'});}
   }
+  // Telegram updates are handed off in their update order, whatever order their files were read in: a group's upgrade
+  // message is then recorded before the new supergroup's other messages, so it stays one chat (ADR-0250).
+  const update=(item:typeof captured[number])=>{
+    const order=item.sources.length===1&&item.sources[0]!.kind==='telegram_update'?Number(item.sources[0]!.reference.revision):NaN;
+    return Number.isSafeInteger(order)?order:null;
+  };
+  const positions=captured.flatMap((item,index)=>update(item)===null?[]:[index]);
+  const ordered=positions.map(index=>captured[index]!).sort((a,b)=>update(a)!-update(b)!);
+  positions.forEach((index,at)=>{captured[index]=ordered[at]!;});
   // Commit the entire bounded archive batch before touching control. A control
   // outage cannot delay later originals in this batch behind failed handoffs.
   for(const {name,value,sources,generated} of captured) {
