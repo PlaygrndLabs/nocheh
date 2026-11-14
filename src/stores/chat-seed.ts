@@ -2,13 +2,15 @@ import type pg from 'pg';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {accountIdFor,chatIdFor,type ChatState} from '../chats.js';
 import {legacyChat,legacyChatValue} from '../chats-telegram.js';
-import {bumpChatRevision,ensureConnection,startChatDirectory,type ChatRepository} from './chats.js';
+import {bumpChatRevision,ensureConnection,namePrivateChats,startChatDirectory,type ChatRepository} from './chats.js';
 
 /*
  * The chat seeder (ADR-0250). Every chat value Nocheh stored before step 2b stays, unchanged, as that chat's Nocheh id:
- * the seeder gives each one a chats row (and a chat_ids row for its Telegram id), and only inserts. It never updates
- * or deletes a row anywhere, so running it again changes nothing, and the archive is only read. legacyChat() (the
- * Telegram adapter) is the only reader of the old format (a Telegram chat id, optionally with one of its topics).
+ * the seeder gives each one a chats row (and a chat_ids row for its Telegram id), and only inserts. The one value it
+ * fills in on a row already there is a private chat's person where the row names none (a chat a reset restored or an
+ * owner record brought; namePrivateChats). It never changes a value already set and never deletes a row anywhere, so
+ * running it again changes nothing, and the archive is only read. legacyChat() (the Telegram adapter) is the only
+ * reader of the old format (a Telegram chat id, optionally with one of its topics).
  *
  * It reads every place a chat value is stored: the columns below, the archive's events.scope and the topics its
  * observations name, TELEGRAM_OWNER_ID and TELEGRAM_GROUP_IDS, and the two Telegram tables step 2b-1 keeps read-only
@@ -270,7 +272,9 @@ export class ChatSeeder {
         await details(db,chat);
         rows.set(chat.id,{kind:'topic',state:base.state});topicKeys.add(parent+'\n'+chat.key);topics++;
       }
-      if(chats+topics)await bumpChatRevision(db);
+      // A private chat a reset restored or an owner record brought names no person yet: its Telegram id does.
+      const named=await namePrivateChats(db);
+      if(chats+topics+named)await bumpChatRevision(db);
       if(upTo!==null)await db.query(`UPDATE chat_seed_state SET archive_sequence=greatest(archive_sequence,$1),seeded_at=coalesce(seeded_at,now()) WHERE singleton`,[upTo]);
       await db.query('COMMIT');
     } catch(error){await db.query('ROLLBACK');throw error;}

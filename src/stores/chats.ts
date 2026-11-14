@@ -74,6 +74,24 @@ export async function ensureAccount(db:Db,connection:string,person:Pick<Telegram
     [id,person.display_name??null,person.username??null]);
   return id;
 }
+/**
+ * Names the person of each Telegram private chat whose row names none: a chat a reset restored or an owner record
+ * brought, which carry no account (ADR-0250). A Telegram private chat's id is its person's user id, so its current id
+ * names the person, as when Nocheh first records the chat. `chat` limits this to one chat. A person another private
+ * chat already names keeps that one. Returns how many chats it named.
+ */
+export async function namePrivateChats(db:Db,chat?:string):Promise<number> {
+  const rows=(await db.query(`SELECT c.id,i.connection_id,i.external_id FROM chats c JOIN chat_connections n ON n.id=c.connection_id AND n.app='telegram'
+    JOIN chat_ids i ON i.chat_id=c.id AND i.state='current' WHERE c.kind='private' AND c.account_id IS NULL AND ($1::text IS NULL OR c.id=$1)
+    ORDER BY c.id`,[chat??null])).rows;
+  let named=0;
+  for(const row of rows) {
+    const account=await ensureAccount(db,row.connection_id,{external:row.external_id});
+    named+=(await db.query(`UPDATE chats SET account_id=$2,updated_at=now() WHERE id=$1 AND account_id IS NULL
+      AND NOT EXISTS(SELECT 1 FROM chats o WHERE o.kind='private' AND o.account_id=$2)`,[row.id,account])).rowCount??0;
+  }
+  return named;
+}
 /** The 2b-1 bridge (ADR-0250): a group is served when any of its Telegram ids, current or old, is in TELEGRAM_GROUP_IDS,
  * and the owner's private chat is served. Step 2b-2 moves this decision onto chats.state itself. */
 const servedState=(policy:Pick<AssistantPolicy,'group_ids'|'owner_id'>,kind:'private'|'group',externals:readonly string[]):ChatState=>
@@ -172,6 +190,8 @@ export class ChatRepository {
     let chat=await chatOfApp(db,connection,source.scope);
     if(!chat&&facts.chat){chat=await this.create(db,connection,facts.chat,policy,imported);changed=true;}
     if(!chat){if(changed)await bumpChatRevision(db);return changed;}
+    // A private chat a reset restored or an owner record brought names no person until this installation's bot hears from it.
+    if(live&&!imported&&chat.kind==='private'&&chat.current)changed=await namePrivateChats(db,chat.id)>0||changed;
     const seen=facts.message?event.received_at as Date:null;
     if(facts.chat&&chat.current)changed=await present(db,chat.id,order,{title:facts.chat.title,app_type:facts.chat.app_type,is_forum:facts.chat.is_forum,username:facts.chat.username,seen_at:seen})||changed;
     else if(seen)await present(db,chat.id,null,{seen_at:seen});

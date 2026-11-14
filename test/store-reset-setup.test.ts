@@ -9,7 +9,8 @@ import {resetSetupSnapshot,restoreResetSetup} from '../src/stores/reset-setup.js
 import {verifyResetBaseline} from '../src/stores/reset-baseline.js';
 import {chatRows,sortedChats} from '../src/stores/reset-setup.js';
 import {ChatSeeder} from '../src/stores/chat-seed.js';
-import {chatIdFor} from '../src/chats.js';
+import {accountIdFor,chatDirectory,chatIdFor} from '../src/chats.js';
+import {loadChatSnapshot} from '../src/stores/chats.js';
 import {NG2,NG2_OLD_TG,NG2_TG} from './fixture-groups.js';
 
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000};
@@ -148,7 +149,16 @@ test('a version 2 snapshot restores its chats and app ids exactly, and decides w
     assert.deepEqual(again,first);assert.equal(first.chats,chats.length);
     assert.deepEqual(await chatRows(stores.control),sortedChats({chats:chats as any,chat_ids:chatIds as any}),'every chat keeps its id, its app ids and the owner\'s names');
     await verifyResetBaseline(stores,input);
-    // The app's start then finds every value already has its row.
+    // The app's start then finds every value already has its row...
+    const people=async()=>(await stores.control.query(`SELECT id,account_id FROM chats WHERE kind='private'`)).rows.map(row=>[row.id,row.account_id]).sort();
+    assert.deepEqual(await people(),[['123',null],[bob,null]].sort(),'a snapshot carries no person');
     assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001',NG2_TG]}).seed(),{chats:0,topics:0});
+    // ...and names each restored private chat's person by its Telegram id, so the owner's and a member's private chat are
+    // theirs again: Answer privately claims only in the asker's own private chat, found by its person (ADR-0249).
+    assert.deepEqual(await people(),[['123',accountIdFor('telegram','123')],[bob,accountIdFor('telegram','456')]].sort());
+    const directory=chatDirectory(await loadChatSnapshot(stores.control,{owner_id:'123'}));
+    assert.equal(directory.get(bob)?.account_id,accountIdFor('telegram','456'));assert.equal(directory.ownerChat(),'123');
+    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001',NG2_TG]}).seed(),{chats:0,topics:0});
+    assert.deepEqual(await people(),[['123',accountIdFor('telegram','123')],[bob,accountIdFor('telegram','456')]].sort(),'a second start changes nothing');
   } finally {await drop();}
 });

@@ -268,6 +268,26 @@ test('an imported archive keeps its chats\' old ids, so the derivatives and owne
     const {directory}=await repository.listing();
     assert.equal(directory.resolve('telegram',other),other);assert.equal(directory.resolve('telegram',served,'7'),topic);
     assert.equal(directory.kind(topic),'topic');assert.equal(directory.groupOf(topic),served);
+    // An owner record brings a member's private chat naming no person. Imported history does not name it; this
+    // installation's bot hearing from the chat does, so Answer privately finds the member's own chat again (ADR-0249).
+    const member=String(base%1000000000*10+3),memberChat=chatIdFor('telegram',member);
+    await portability.restore(owner,[sealed('chats',['private',memberChat],{id:memberChat,connection_id:connection,kind:'private',app_type:'private',
+      title:null,title_source:null,is_forum:false,state:'off'}),
+      sealed('chat_ids',[connection,member],{connection_id:connection,external_id:member,chat_id:memberChat,state:'current',reason:null,changed_at:'2026-01-01T00:00:00Z'})]);
+    const person=async()=>(await stores.control.query('SELECT account_id FROM chats WHERE id=$1',[memberChat])).rows[0].account_id;
+    const said=(key:string,n:number)=>({version:1,key:`${key}:${base}`,origin:'live',kind:'telegram_update',bot_id:'777',scope:member,source_id:String(n),revision:'1',
+      occurred_at:null,text:null,payload:{update_id:n,message:{message_id:n,date:1,chat:{id:Number(member),type:'private',first_name:'Bob'},
+        from:{id:Number(member),first_name:'Bob'},text:'/start'}}}) as Envelope;
+    assert.equal(await person(),null,'an owner record names no person');
+    const old=await archive.capture(said('member-imported',4),{received_at:'2025-06-01T00:00:00Z',manifests:[]});
+    await stores.control.query(`INSERT INTO source_intakes(event_id,source_revision,input_hash,transport,state) VALUES($1,$2,$3,'import','ready')`,
+      [old.source.reference.id,old.source.reference.revision,old.source.reference.input_hash]);
+    await coordinator.handoff(old.source);
+    assert.equal(await person(),null,'nor does imported history');
+    const revision=Number((await stores.control.query('SELECT revision FROM chat_directory_state WHERE singleton')).rows[0].revision);
+    await coordinator.capture(said('member-live',5));
+    assert.equal(await person(),accountIdFor('telegram',member),'the bot hearing from the chat names its person');
+    assert.ok(Number((await stores.control.query('SELECT revision FROM chat_directory_state WHERE singleton')).rows[0].revision)>revision,'and the directory reloads');
   }finally{await stores.close();}
 });
 
