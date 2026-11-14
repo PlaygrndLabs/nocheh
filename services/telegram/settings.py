@@ -73,10 +73,11 @@ class Policy:
         from services.chats import Served
         return cls(enabled, group_access, Served.of(owner, groups=groups, topics=topics, old=old))
 
-    def current(self, epoch=None, max_age=5.0):
-        """The served list as the app has it now: read again when older than `max_age` seconds, or when a pass carries a
-        newer guard epoch than it was read at."""
-        return self.served.get(epoch, max_age)
+    def current(self, epoch=None, max_age=5.0, holds=None):
+        """The served list as the app has it now: read again when older than `max_age` seconds, when a pass carries a
+        newer guard epoch than it was read at, or when it does not hold what `holds` asks for (a topic or Telegram id the
+        app recorded since)."""
+        return self.served.get(epoch, max_age, holds)
 
     def access(self, served, group, user):
         """Whether `user` may talk to Nocheh in the served group `group` (a Nocheh chat id): granted and not denied, under any

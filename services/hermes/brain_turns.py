@@ -129,7 +129,8 @@ class BrainTurns:
     async def _turn(self,body,progress,cancelled):
         # Group addressing and the delivery check are Nocheh's; the turn itself rechecks its space policy. Its chat, space
         # and app binding come from its pass, read here only to know whose turn it is and verified in full next (ADR-0250).
-        scope=self.scopes.resolve(body,Scopes.claims(body['archive_credential'])) if self.scopes.enabled else None
+        # Off the event loop: reading the served list may wait on the app (ADR-0250), and other turns keep running meanwhile.
+        scope=await asyncio.to_thread(self.scopes.resolve,body,Scopes.claims(body['archive_credential'])) if self.scopes.enabled else None
         if scope is None:return {'state':'suppressed'}
         claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
         # A private answer runs as the owner's private chat but never as the owner: its own scoped profile, the project's

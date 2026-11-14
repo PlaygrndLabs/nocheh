@@ -2,9 +2,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import type {IncomingMessage} from 'node:http';
-import {answerId,reader,scopeToken,turnToken} from '../src/access.js';
-import {installChatsForTest} from '../src/chats.js';
-import {BOB_CHAT,GP1,GP1_TOPIC,GP2,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,OWNER,fixtureDirectory} from './fixture-groups.js';
+import {answerId,currentReader,reader,scopeToken,turnToken} from '../src/access.js';
+import {chatDirectory,chatIdFor,chats,installChats,installChatsForTest,setChatLoader} from '../src/chats.js';
+import {BOB_CHAT,GP1,GP1_TOPIC,GP2,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,OWNER,fixtureChats,fixtureDirectory} from './fixture-groups.js';
 
 // Both fixture families, as the chat directory knows them: reader() asks it what a space and a scope are (ADR-0250).
 installChatsForTest(fixtureDirectory());
@@ -72,4 +72,33 @@ test('an answer pass reads only as the owner\'s private chat row, never another 
   assert.equal(reader(request(turnToken(secret,OWNER,later(),event,{space:OWNER,revision:1,answer})),secret).answer,answer);
   for(const scope of [BOB_CHAT,GP1,NG1,'777'])
     assert.throws(()=>reader(request(signed('turn',{scope,event_id:event,space:scope,revision:1,answer})),secret),{code:'invalid_scope_token'},scope);
+});
+
+test('a pass for a topic another process recorded a moment ago is read once the directory has looked again',async()=>{
+  // The app records NG1's new topic 9 and mints its pass; this process (the security service) still holds the
+  // directory it loaded before. A plain read refuses; a server that can wait asks its loader to look again first.
+  const fresh=chatIdFor('telegram',NG1_TG,'9'),before=fixtureChats(),after={...before,chats:[...before.chats,
+    {id:fresh,app:'telegram' as const,kind:'topic' as const,parent_id:NG1,topic_key:'9',state:'active' as const,title:null,is_forum:false,account_id:null,app_type:null}]};
+  const restore=installChatsForTest(chatDirectory(before));let looked=0;
+  try {
+    const pass=turnToken(secret,NG1,later(),event,{space:fresh,revision:1});
+    assert.throws(()=>reader(request(pass),secret),{code:'invalid_scope_token'});
+    // Without a loader to wait for, it is refused as before.
+    await assert.rejects(currentReader(request(pass),secret),{code:'invalid_scope_token'});
+    setChatLoader({epoch(){},miss(){},current:async()=>{looked++;installChats(chatDirectory(after));}});
+    assert.equal((await currentReader(request(pass),secret)).space,fresh);
+    assert.equal(looked,1);
+    // Known chats never wait, and a space the reloaded directory still puts elsewhere, or does not know, is refused.
+    assert.equal((await currentReader(request(turnToken(secret,GP1,later(),event,{space:GP1_TOPIC,revision:1})),secret)).space,GP1_TOPIC);
+    assert.equal(looked,1);
+    await assert.rejects(currentReader(request(signed('turn',{scope:GP2,event_id:event,space:fresh,revision:1})),secret),{code:'invalid_scope_token'});
+    assert.equal(looked,1,'a known space in another chat is no miss');
+    setChatLoader({epoch(){},miss(){},current:async()=>{looked++;}});
+    await assert.rejects(currentReader(request(signed('turn',{scope:NG1,event_id:event,space:chatIdFor('telegram',NG1_TG,'10'),revision:1})),secret),{code:'invalid_scope_token'});
+    assert.equal(looked,2);
+    // A forged pass never reaches the directory.
+    await assert.rejects(currentReader(request(pass.slice(0,-2)+'xx'),secret),{code:'invalid_scope_token'});
+    assert.equal(looked,2);
+    assert.ok(chats().get(fresh));
+  } finally {setChatLoader(null);restore();}
 });

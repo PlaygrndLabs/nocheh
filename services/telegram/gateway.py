@@ -409,7 +409,8 @@ class TelegramService:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         chat,topic=str(body.get('chat_id','')),str(body.get('topic') or '')
         # The owner's private chat, or a served group and one of its topics, where each is in Telegram now (ADR-0250).
-        served=await asyncio.to_thread(self.policy.current)
+        known=lambda served:chat==served.owner_external() or served.resolve(chat,topic or None) is not None
+        served=await asyncio.to_thread(self.policy.current,None,5.0,known)
         owner=bool(chat) and chat==served.owner_external()
         group=None if owner else served.group(served.resolve(chat))
         if (not owner and (group is None or served.address(group)[0]!=chat) or
@@ -517,7 +518,7 @@ class TelegramService:
         chat,user,message,topic=(str(body.get(key) or '') for key in ('chat_id','user_id','message_id','topic'))
         personal=body.get('private') is True
         # A served group where it is in Telegram now, by the app's served list (ADR-0250).
-        served=await asyncio.to_thread(self.policy.current)
+        served=await asyncio.to_thread(self.policy.current,None,5.0,None if personal else lambda served:served.resolve(chat) is not None)
         group=None if personal else served.group(served.resolve(chat))
         if (not HEX.fullmatch(str(body.get('event_id',''))) or (chat!=user or topic if personal else group is None or served.address(group)[0]!=chat) or
                 not re.fullmatch(r'[1-9]\d{0,18}',user) or not re.fullmatch(r'[1-9]\d{0,18}',message) or topic and not re.fullmatch(r'[1-9]\d{0,15}',topic)):

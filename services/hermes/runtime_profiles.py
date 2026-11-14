@@ -48,8 +48,8 @@ class ProfileCatalog:
     def validate(self, entry):
         try:
             # The owner's private chat, or a served group or one of its topics, as the app's served list has them (ADR-0250).
-            served = self.policy.current()
             chat, space, owner = entry['scope'], entry['space'], entry['owner']
+            served = self.policy.current(None, 5.0, lambda served: served.chat_of(space) is not None)
             if (type(owner) is not bool or not served.owner_chat or owner != (chat == served.owner_chat) or
                 chat != served.owner_chat and served.group(chat) != chat or
                 not isinstance(space, str) or served.chat_of(space) != chat or space != chat and owner):

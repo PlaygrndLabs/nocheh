@@ -299,6 +299,39 @@ class ServiceTests(unittest.TestCase):
                 self.service.reply(body)
         self.assertEqual(len(self.sent()), 2)
 
+    def test_a_topic_recorded_after_the_list_was_read_is_answered_on_its_first_turn(self):
+        # A new forum topic moves no guard epoch (ADR-0250): the list held since before it was recorded is read again (at
+        # most once a second) when a pass names a space it does not hold, instead of refusing until the list ages out.
+        from services.chats import Served, ServedList
+        before = served_policy().current()
+        after = Served.of(OWNER, groups=[GROUP, (NEW, NEW_TG)], topics=[*TOPICS, ('e' * 64, NEW, '11')], old={NEW: [NEW_OLD]})
+        reads, now = [], [0.0]
+        class Response:
+            def __init__(self, served): self.served = served
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, _size):
+                return json.dumps({'epoch': self.served.epoch, 'owner_chat': self.served.owner_chat, 'owner_account': self.served.owner_account,
+                                   'chats': list(self.served.chats.values())}).encode()
+        def opener(request, timeout):
+            reads.append(request.full_url)
+            return Response(before if len(reads) == 1 else after)
+        self.service.policy = Policy(True, {}, ServedList('http://app.test', SECRET, opener=opener, clock=lambda: now[0]))
+        self.assertEqual(self.service.reply(self.turn(40, NEW_TG, scope=NEW, space=NEW, text='before'))['state'], 'done')
+        now[0] = 2.0
+        self.assertEqual(self.service.reply(self.turn(41, NEW_TG, 11, scope=NEW, space='e' * 64, text='first in topic'))['state'], 'done')
+        self.assertEqual(len(reads), 2)
+        self.assertEqual((self.sent()[-1]['chat_id'], self.sent()[-1]['message_thread_id']), (NEW_TG, '11'))
+        # One the app does not hold is still refused, and the list is not read again within a second.
+        for number in (42, 43):
+            with self.assertRaises(ValueError):
+                self.service.reply(self.turn(number, NEW_TG, 12, scope=NEW, space='f' * 64, text='x'))
+        self.assertEqual(len(reads), 2)
+        now[0] = 3.5
+        with self.assertRaises(ValueError):
+            self.service.reply(self.turn(44, NEW_TG, 12, scope=NEW, space='f' * 64, text='x'))
+        self.assertEqual(len(reads), 3)
+
     def test_a_failed_served_list_serves_nothing(self):
         from services.chats import ServedList
         failing = ServedList('http://127.0.0.1:9', SECRET, opener=lambda *_args, **_kw: (_ for _ in ()).throw(OSError('down')))

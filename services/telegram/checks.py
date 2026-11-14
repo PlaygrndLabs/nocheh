@@ -191,7 +191,8 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
         scope,space,answer=claims.get('scope'),claims.get('space'),claims.get('answer')
         if not isinstance(space,str) or type(claims.get('revision')) is not int or claims['revision']<1:raise ValueError()
         epoch=claims.get('guard_epoch')
-        served=policy.current(epoch if type(epoch) is int else None,60.0)
+        # A topic first used a moment ago, or a group's new Telegram id, is only in a list read after the app recorded it.
+        served=policy.current(epoch if type(epoch) is int else None,60.0,lambda served:served.binding(space)==claims['app'])
         if served.binding(space)!=claims['app']:raise ValueError()
         if answer is not None:
             if not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer) or not served.owner_chat or scope!=served.owner_chat or space!=scope:raise ValueError()

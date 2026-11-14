@@ -253,8 +253,10 @@ export function chatDirectory(snapshot:ChatSnapshot,options:{onMiss?:(id:string)
 }
 
 /** What the store's loader does when told to: reload after a newer guard epoch, or after a miss when the directory's
- * revision has moved (at most every few seconds). Installed by Part A in the app and the security service. */
-export interface ChatLoader {epoch(epoch:number):void;miss():void}
+ * revision has moved (at most every few seconds). Installed by Part A in the app and the security service. `current`
+ * resolves once the loader has looked again, reloading first when rows were added or the guard epoch moved: a caller
+ * that can wait (a pass whose topic was recorded a moment ago by another process) asks it before refusing. */
+export interface ChatLoader {epoch(epoch:number):void;miss():void;current?():Promise<unknown>}
 let installed:ChatDirectory=chatDirectory({chats:[],ids:[],owner_chat:null});
 let loader:ChatLoader|null=null;
 /** The process's chat directory. Before anything is installed it knows no chat, so everything fails closed. */
@@ -269,6 +271,13 @@ export function setChatLoader(next:ChatLoader|null):void {loader=next;}
 export function refreshChatsOnEpoch(epoch:number):void {if(Number.isSafeInteger(epoch)&&epoch>installed.epoch)loader?.epoch(epoch);}
 /** Called on a lookup miss: the loader reloads if the directory revision moved. */
 export function refreshChatsOnMiss():void {loader?.miss();}
+/** After a lookup miss a caller can wait for: resolves once the loader has looked again, true when it installed another
+ * directory (so the lookup is worth trying once more). Without a loader, or one that cannot be waited for, false. */
+export async function chatsAfterMiss():Promise<boolean> {
+  const before=installed;
+  if(!loader?.current)return false;
+  await loader.current();return installed!==before;
+}
 /** Tests only: installs `source` with no loader and returns the function that puts the previous directory back. */
 export function installChatsForTest(source:ChatDirectory|ChatSnapshot):()=>void {
   const previous=installed,previousLoader=loader;

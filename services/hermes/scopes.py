@@ -95,10 +95,11 @@ class Scopes:
         from .environment import secret
         self.served=Fixed(served) if isinstance(served,Served) else served or ServedList(None,lambda:secret('SERVICE_TOKEN'))
 
-    def current(self,epoch=None,max_age=5.0):
-        """The served list as the app has it now: read again when older than `max_age` seconds, or when a pass carries a
-        newer guard epoch than it was read at."""
-        return self.served.get(epoch,max_age)
+    def current(self,epoch=None,max_age=5.0,holds=None):
+        """The served list as the app has it now: read again when older than `max_age` seconds, when a pass carries a
+        newer guard epoch than it was read at, or when it does not hold what `holds` asks for (a topic or Telegram id the
+        app recorded since)."""
+        return self.served.get(epoch,max_age,holds)
 
     def access(self,served,group,user):
         """Whether `user` may talk to Nocheh in the served group `group` (a Nocheh chat id): granted and not denied, under any
@@ -186,7 +187,8 @@ class Scopes:
                 claims.get('space')!=space or claims.get('scope') not in (None,nocheh)):
             raise ValueError('archive_capability_scope_mismatch')
         epoch=claims.get('guard_epoch')
-        served=self.current(epoch if type(epoch) is int else None,60.0)
+        # A topic first used a moment ago, or a group's new Telegram id, is only in a list read after the app recorded it.
+        served=self.current(epoch if type(epoch) is int else None,60.0,lambda served:served.resolve(external,topic)==space)
         # A list that cannot be read is no answer: the turn fails, to be tried again, rather than be dropped as unserved.
         if not served.available:raise RuntimeError('served_chats_unavailable')
         owner=claims.get('scope') is None or claims.get('answer') is not None

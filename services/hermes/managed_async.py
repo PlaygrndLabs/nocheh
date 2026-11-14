@@ -160,7 +160,8 @@ class ManagedAsync:
                 # capability, never from a caller's filesystem/profile lookup.
                 # The chat is the owner's private chat or a served group, and the space is that chat or one of its
                 # topics, as the app's served list has them (ADR-0250).
-                served=self.admin.policy.current();chat=context['scope'];space=context['space'];name=context['profile']
+                chat=context['scope'];space=context['space'];name=context['profile']
+                served=self.admin.policy.current(None,5.0,lambda served:served.chat_of(space) is not None)
                 if not served.owner_chat or chat!=served.owner_chat and served.group(chat)!=chat or served.chat_of(space)!=chat:
                     raise ValueError('profile_scope_denied')
                 scope=Scope(chat,served.owner_user() or '',chat==served.owner_chat,name,space,context['revision'],logical_profile=name)

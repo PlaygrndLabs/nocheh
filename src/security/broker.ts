@@ -2,7 +2,7 @@ import {createServer,type IncomingMessage,type ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
-import {reader,assertAudience,type Reader} from '../access.js';
+import {currentReader,assertAudience,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,json,readJson,object} from '../http.js';
 import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
@@ -139,7 +139,8 @@ export function brokerServer(options:BrokerOptions) {
       await options.assertReady?.();return json(res,200,await box.live());
     }
     // An answer reader is bound to its record on every call, or refused without one, and reaches read routes only (ADR-0249).
-    const parsed=reader(req,options.token);
+    // A pass for a topic the app recorded a moment ago is read once this service's chat directory has looked again (ADR-0250).
+    const parsed=await currentReader(req,options.token);
     if(parsed.answer!==undefined&&!options.storage?.bindReads)throw new HttpError(409,'private_answer_closed');
     const principal=parsed.answer!==undefined?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
     assertPrivateAnswerRoute(principal,req.method,path);

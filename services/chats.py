@@ -15,7 +15,9 @@ import time
 import urllib.request
 
 KINDS = ('private', 'group', 'topic')
-STATES = ('active', 'off', 'left', 'removed')
+# Every state the app may list (src/chat-wire.ts chatStates). Only 'active' is served, and a topic follows its chat's
+# state, whatever its own row holds.
+STATES = ('active', 'off', 'pending', 'left', 'removed', 'could_not_leave', 'archived')
 
 
 def _text(value, limit=200):
@@ -175,8 +177,10 @@ class Served:
 class ServedList:
     """A process's served list: read on first use, again when it is older than the caller allows, and again (at most once
     a second) while a pass carries a newer guard epoch than the list was read at, since every served change moves the
-    epoch. A read that fails holds nothing, so nothing is served until a read succeeds; it is tried again at most once a
-    second."""
+    epoch. A chat or topic the app recorded after the list was read (a new forum topic, a group's new Telegram id) moves
+    no epoch: a caller that needs one names it with `holds`, and a list that does not hold it is read again (at most once
+    a second) before the caller decides. A read that fails holds nothing, so nothing is served until a read succeeds; it
+    is tried again at most once a second."""
 
     def __init__(self, url=None, token=None, opener=None, clock=time.monotonic):
         self._url, self._token, self._open, self._clock = url, token, opener or urllib.request.urlopen, clock
@@ -189,11 +193,14 @@ class ServedList:
         with self._open(request, timeout=10) as response:
             return Served(json.loads(response.read(8 * 1024 * 1024)))
 
-    def get(self, epoch=None, max_age=5.0):
+    def get(self, epoch=None, max_age=5.0, holds=None):
+        """The list, read again when it is too old, when `epoch` is newer than it was read at, or when `holds` (a test of
+        the list: does it hold the chat this caller needs?) fails on it."""
         with self._lock:
             now = self._clock()
             newer = type(epoch) is int and self._value is not None and epoch > self._value.epoch and now - self._read_at >= 1.0
-            if self._value is not None and now - self._read_at <= max_age and not newer: return self._value
+            missing = holds is not None and self._value is not None and now - self._read_at >= 1.0 and not holds(self._value)
+            if self._value is not None and now - self._read_at <= max_age and not newer and not missing: return self._value
             if self._failed_at is not None and now - self._failed_at < 1.0: return Served.empty(False)
             try:
                 self._value, self._read_at, self._failed_at = self._fetch(), now, None
@@ -209,5 +216,5 @@ class Fixed:
     def __init__(self, served):
         self.value = served
 
-    def get(self, epoch=None, max_age=5.0):
+    def get(self, epoch=None, max_age=5.0, holds=None):
         return self.value

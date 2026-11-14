@@ -146,6 +146,62 @@ class ScopeTests(unittest.TestCase):
         with patch.dict(os.environ,{'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'123','TELEGRAM_GROUP_IDS':'-20'},clear=True):
             self.assertIsInstance(Scopes.load(None).served,ServedList)
 
+    def test_a_topic_recorded_after_the_list_was_read_is_served_on_its_first_turn(self):
+        # A new forum topic, or a group's new Telegram id, moves no guard epoch (ADR-0250): the turn's pass names a space
+        # the list read a moment ago does not hold, so the list is read again (at most once a second) before deciding.
+        from services.chats import ServedList
+        topic=('d'*64,'-20','77')
+        lists=[Served.of('123',groups=['-20']),Served.of('123',groups=['-20'],topics=[topic])]
+        reads,now=[],[0.0]
+        class Response:
+            def __init__(self,value):self.value=value
+            def __enter__(self):return self
+            def __exit__(self,*_):return False
+            def read(self,_size):return json.dumps(self.value).encode()
+        def opener(request,timeout):
+            reads.append(request.full_url);served=lists[min(len(reads)-1,1)]
+            return Response({'epoch':served.epoch,'owner_chat':served.owner_chat,'owner_account':served.owner_account,
+                             'chats':[{key:value for key,value in row.items()} for row in served.chats.values()]})
+        scopes=Scopes({'enabled':True,'group_access':{}},ServedList('http://app.test','synthetic-token',opener,clock=lambda:now[0]))
+        self.assertEqual(self.resolve(self.update(-20,123),'-20',scopes).space,'-20')
+        self.assertEqual(len(reads),1)
+        message=self.update(-20,123,'supergroup');message['message'].update(message_thread_id=77,is_topic_message=True)
+        body,claims=turn(message,scopes,'-20')
+        body.update(space='d'*64,app={'app':'telegram','chat':'-20','topic':'77'})
+        claims.update(space='d'*64,app=body['app'])
+        # Within a second of the last read the list is not read again, so the topic is still unknown: refused, retried.
+        with self.assertRaises(ValueError):scopes.resolve(body,claims)
+        self.assertEqual(len(reads),1)
+        now[0]=1.5
+        bound=scopes.resolve(body,claims)
+        self.assertEqual((bound.chat_id,bound.space,bound.app),('-20','d'*64,('telegram','-20','77')))
+        self.assertEqual(len(reads),2)
+        # A topic the app does not hold is still refused, and the list is read again at most once a second.
+        other=self.update(-20,123,'supergroup');other['message'].update(message_thread_id=78,is_topic_message=True)
+        body,claims=turn(other,scopes,'-20')
+        body.update(space='e'*64,app={'app':'telegram','chat':'-20','topic':'78'});claims.update(space='e'*64,app=body['app'])
+        for _ in range(3):
+            with self.assertRaises(ValueError):scopes.resolve(body,claims)
+        self.assertEqual(len(reads),2)
+
+    def test_the_served_list_takes_every_chat_state_and_a_topic_follows_its_chat(self):
+        # Every state the app may list (src/chat-wire.ts chatStates); only an active chat is served, whatever its topics hold.
+        wire=(Path(__file__).resolve().parents[2]/'src'/'chat-wire.ts').read_text()
+        import re
+        from services import chats
+        listed=re.search(r"export const chatStates=\[([^\]]*)\]",wire).group(1)
+        self.assertEqual(chats.STATES,tuple(re.findall(r"'([a-z_]+)'",listed)))
+        rows=[{'id':'-20','app':'telegram','kind':'group','parent_id':None,'topic_key':None,'state':'active','app_ids':[{'external':'-20','state':'current'}]},
+              {'id':'f'*64,'app':'telegram','kind':'topic','parent_id':'-20','topic_key':'9','state':'pending','app_ids':[]},
+              *({'id':state,'app':'telegram','kind':'group','parent_id':None,'topic_key':None,'state':state,'app_ids':[{'external':'-'+str(i+40),'state':'current'}]}
+                for i,state in enumerate(chats.STATES) if state!='active')]
+        served=Served({'epoch':3,'owner_chat':None,'owner_account':None,'chats':rows})
+        self.assertTrue(served.available)
+        self.assertEqual(served.groups(),['-20'])
+        self.assertEqual((served.group('f'*64),served.resolve('-20','9')),('-20','f'*64))
+        for state in chats.STATES[1:]:self.assertFalse(served.served(state),state)
+        with self.assertRaises(ValueError):Served({'epoch':3,'owner_chat':None,'owner_account':None,'chats':[{**rows[0],'state':'unknown'}]})
+
     def test_a_telegram_turn_is_bound_to_where_its_chat_is_and_a_job_is_not(self):
         secret='synthetic-service-token';event='a'*64
         def signed(claims):
