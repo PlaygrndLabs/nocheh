@@ -16,8 +16,6 @@ import type {CapturedSource} from './archive.js';
  *   (refreshed_to: the id Telegram moved a group to). seq, seq_bot and seq_at are the update that last set the title,
  *   closed or username (its update_id, the bot that took it in and when it was taken in), so an older update, or the
  *   capture replay, never undoes a newer one (see newerUpdate).
- * - chat_memberships.seen_bot: the bot that took in the update a membership was last set by, next to its seen_seq and
- *   checked_at, ordered the same way.
  * - chat_seed_state: how far the seeder (chat-seed.ts) and the membership backfill have read the archive.
  * Each is created only if missing, and nothing here rewrites a row.
  */
@@ -35,7 +33,6 @@ CREATE TABLE IF NOT EXISTS chat_details (
  refreshed_to text CHECK(refreshed_to IS NULL OR refreshed_to ~ '^[A-Za-z0-9._:-]{1,128}$'),
  refreshed_at timestamptz
 );
-ALTER TABLE chat_memberships ADD COLUMN IF NOT EXISTS seen_bot text CHECK(seen_bot IS NULL OR seen_bot ~ '^[A-Za-z0-9._:-]{1,128}$');
 CREATE TABLE IF NOT EXISTS chat_seed_state (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  archive_sequence bigint NOT NULL DEFAULT 0 CHECK(archive_sequence>=0),

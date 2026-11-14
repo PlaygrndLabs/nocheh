@@ -22,7 +22,8 @@ const appId=(column:string)=>`${column} ~ '^[A-Za-z0-9._:-]{1,128}$'`;
  * - chat_ids: each app id a chat has had, current or old (a group Telegram upgraded keeps its old id here). A topic has
  *   none of its own.
  * - chat_memberships: who is in a group (topics share their group's rows). since is when the current state began;
- *   seen_seq is the last update applied, so an older update never undoes a newer one.
+ *   seen_seq and seen_bot are the last update applied and the bot that took it in, so an older update never undoes a
+ *   newer one (src/stores/chats.ts newerUpdate).
  * - chat_directory_state: a revision bumped whenever a chat or chat id is added, so the directory snapshot can tell it
  *   is stale.
  */
@@ -96,6 +97,7 @@ CREATE TABLE IF NOT EXISTS chat_memberships (
  source text NOT NULL CHECK(source IN ('listed','event','message','owner')),
  since timestamptz NOT NULL DEFAULT now(),checked_at timestamptz,
  seen_seq numeric CHECK(seen_seq IS NULL OR seen_seq>=0),
+ seen_bot text CHECK(seen_bot IS NULL OR ${appId('seen_bot')}),
  PRIMARY KEY(chat_id,account_id)
 );
 CREATE INDEX IF NOT EXISTS chat_memberships_account ON chat_memberships(account_id,state);
