@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {admin,reader} from '../access.js';
 import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
 import {servedChats} from '../chats.js';
+import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
@@ -121,7 +122,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const prompts=await ownerPrompts(s.stores.control),labels=labeledLines(problemButtons,prompts['system.problem_buttons']);
       const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map((line,index)=>'• '+line+(resolved?.[index]?'\n✅ '+resolved[index]:'')).join('\n')}).slice(0,4000);
       const buttons=[...(open?[{text:labels.open!.slice(0,40),[String(open.kind)]:open.url}]:[]),...(retry?[{text:labels.retry!.slice(0,40),callback:retryButton}]:[])];
-      return json(res,200,await call('telegram.notice',{id,chat_id:owner,text,...(buttons.length?{buttons}:{}),...(edit?{edit:true}:{})},30000));
+      // Sent where the owner's private chat is in Telegram now; a chat the directory does not know yet is not sent to.
+      const target=telegramAddress(owner);
+      if(!target)return json(res,200,{state:'not_started',error_code:'chat_not_found'});
+      return json(res,200,await call('telegram.notice',{id,...target,text,...(buttons.length?{buttons}:{}),...(edit?{edit:true}:{})},30000));
     }
     if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
       admin(principal);

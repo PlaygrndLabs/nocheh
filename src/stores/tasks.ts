@@ -6,6 +6,7 @@ import {fillTemplate,ownerPrompts,taskReminder} from '../prompts.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
 import {groupChatId,groupSpace,groupSpaces,groupWithTopics,inReadSet,readSet,readSetOf,readSetParam,readSetSql,recallScope,validateSpace,type ReadSet} from '../spaces.js';
+import {telegramTarget} from '../frontdoor/telegram.js';
 import {chats as directory} from '../chats.js';
 import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
@@ -1124,7 +1125,8 @@ export class TaskRepository {
       const when=item.due_on?new Date(item.due_on+'T12:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})+(item.due_time?', '+item.due_time:''):null;
       const text=fillTemplate(template,{title:item.title,due:when,list:item.project,notes:item.notes?item.notes.slice(0,500):null}).slice(0,4000);
       let result:Record<string,unknown>;
-      try{result=await this.delivery.call('telegram.notice',{id:item.id,chat_id:owner,text},30000);}catch{return handled;}
+      // The owner's private chat where it is in Telegram now (ADR-0250); a chat the directory does not know yet waits.
+      try{result=await this.delivery.call('telegram.notice',{id:item.id,...telegramTarget(owner),text},30000);}catch{return handled;}
       // Telegram not connected yet: try again on a later pass. An unclear send is never repeated.
       if(result.state==='not_started'){await this.control.query(`UPDATE owner_task_reminders SET state='pending' WHERE id=$1`,[item.id]);return handled;}
       await this.control.query(`UPDATE owner_task_reminders SET state=$2,sent_at=now() WHERE id=$1`,[item.id,result.state==='done'?'sent':'uncertain']);
