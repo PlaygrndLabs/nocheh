@@ -1,0 +1,97 @@
+/**
+ * Where each note or past conversation that the owner's recall of Hermes's own notes finds comes from (ADR-0251), in
+ * Nocheh's fixed words: the owner's private chat, a group or topic by its name, or a private answer by where it was
+ * asked, the same name that answer's first line gave it (ADR-0249). Hermes says whose profile a hit is in; Nocheh names
+ * it here, and the raw chat ID never goes on. Only the owner recalls across chats, and the owner can already list every
+ * chat by name, so a label shows nothing new; it only stops a group's note from reading as the owner's own.
+ */
+import type pg from 'pg';
+import {graphGroupLabel} from '../graph-labels.js';
+import {groupChatId,parentSpace} from '../spaces.js';
+
+type Pools={archive:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>};
+/** What Hermes says about the profile a hit is in. */
+export type RecallWhere={space?:unknown;owner?:unknown;answer?:unknown;answer_group?:unknown};
+
+/** The label words, in one place. A private answer is told apart before the owner's own chat, since its profile names
+ *  the owner's private chat but is never the owner's; anything Nocheh cannot name never gets the owner's label. */
+export const recallPlaceWords={owner:'Your private chat',answer:'Private answer asked in {group}',answerUnknown:'A private answer',
+  group:'A Telegram group',topic:'a topic',unknown:'A chat Nocheh can’t name'} as const;
+
+// Control, format, separator, private-use and lone surrogate characters could end a label or hide text inside it. The
+// joiners and directional marks that Persian and Arabic names need (U+200C to U+200F) stay.
+const hidden=/[\p{Cc}\p{Cs}\p{Co}\p{Zl}\p{Zp}]|(?![\u200c-\u200f])\p{Cf}/gu;
+// Brackets, quotes and their look-alikes, so a name cannot close its own quotes or pass for Nocheh's own marks.
+const framing=/[[\]\uff3b\uff3d"\u201c-\u201f\u2033\u2036\u02ee\u275d\u275e\u301d-\u301f\uff02\u05f4]/gu;
+const tidy=(text:string,size:number)=>Array.from(text.replace(hidden,' ').replace(/\s+/g,' ').trim()).slice(0,size).join('').trim();
+/** A chat or topic name for a label: at most 64 characters, without the characters above. */
+export const placeName=(value:unknown):string=>typeof value==='string'?tidy(value.replace(framing,' '),64):'';
+
+/** The label for one hit. `names` holds each group's and topic's name by its ID, from recallNames. */
+export function recallPlace(where:RecallWhere,names:ReadonlyMap<string,string>):string {
+  if(where.answer===true) {
+    // The receipt keeps the answer's first-line wording, quotes included; only brackets and hidden characters go.
+    const group=typeof where.answer_group==='string'?tidy(where.answer_group.replace(/[[\]]/g,' '),300):'';
+    return group?recallPlaceWords.answer.replace('{group}',()=>group):recallPlaceWords.answerUnknown;
+  }
+  if(where.owner===true)return recallPlaceWords.owner;
+  const space=typeof where.space==='string'?where.space:'',chat=parentSpace(space)??space;
+  if(!groupChatId(chat))return recallPlaceWords.unknown;
+  const group=names.get(chat),title=group?`“${group}”`:recallPlaceWords.group;
+  return chat===space?title:title+' › '+(names.get(space)||recallPlaceWords.topic);
+}
+
+/**
+ * The names of the groups and topics among `spaces`, from what Nocheh already saved: a group's from its latest captured
+ * message, else from the owner's last Telegram refresh; a topic's from its latest creation, edit or reply to its first
+ * message among the group's recent messages, else from the name the owner gave it. A failed lookup leaves names out, so
+ * a hit is labelled by its kind and recall never fails over a name.
+ */
+export async function recallNames(stores:Pools,spaces:string[]):Promise<Map<string,string>> {
+  const names=new Map<string,string>(),known=spaces.filter(space=>groupChatId(parentSpace(space)??space));
+  const groups=[...new Set(known.map(space=>parentSpace(space)??space))],topics=[...new Set(known.filter(space=>parentSpace(space)))];
+  if(!groups.length)return names;
+  const set=(id:string,value:unknown)=>{const name=placeName(value);if(name)names.set(id,name);};
+  try {
+    for(const row of (await stores.control.query(`SELECT chat_id,title FROM telegram_chat_observations WHERE state='available' AND title IS NOT NULL
+      AND chat_id=ANY($1::text[])`,[groups])).rows)set(String(row.chat_id),row.title);
+    for(const row of (await stores.control.query('SELECT chat_id,topic_id,name FROM telegram_topic_registrations WHERE chat_id=ANY($1::text[])',[groups])).rows)
+      set(row.chat_id+'/topic/'+row.topic_id,row.name);
+  }catch{}
+  try {
+    // A captured message names its group as the chat list does; it wins over an older refresh.
+    for(const row of (await stores.archive.query(`SELECT c.scope,e.payload FROM unnest($1::text[]) AS c(scope) CROSS JOIN LATERAL (
+      SELECT payload FROM events WHERE scope=c.scope AND channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
+        AND CASE WHEN pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb')
+          THEN convert_from(payload,'UTF8')::jsonb ?| ARRAY['message','edited_message','channel_post','edited_channel_post'] ELSE false END
+      ORDER BY received_at DESC,id DESC LIMIT 1) e`,[groups])).rows)set(String(row.scope),graphGroupLabel(row.payload,String(row.scope)));
+  }catch{}
+  if(topics.length)try {
+    // Only the group's latest 500 messages are read; a topic named nowhere there keeps the owner's name or none.
+    const pairs=topics.map(space=>space.split('/topic/') as [string,string]);
+    for(const row of (await stores.archive.query(`SELECT c.chat,c.topic,t.name FROM unnest($1::text[],$2::text[]) AS c(chat,topic) CROSS JOIN LATERAL (
+      SELECT name FROM (SELECT received_at,id,m ? 'forum_topic_edited' AS edited,coalesce(m#>>'{forum_topic_edited,name}',m#>>'{forum_topic_created,name}',
+          CASE WHEN m#>>'{reply_to_message,message_id}'=c.topic THEN m#>>'{reply_to_message,forum_topic_created,name}' END) AS name
+        FROM (SELECT received_at,id,coalesce(p->'message',p->'edited_message',p) AS m FROM (
+          SELECT received_at,id,CASE WHEN pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb') THEN convert_from(payload,'UTF8')::jsonb ELSE '{}'::jsonb END AS p
+          FROM events WHERE scope=c.chat AND channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
+          ORDER BY received_at DESC,id DESC LIMIT 500) recent) messages
+        WHERE m->>'message_thread_id'=c.topic) named
+      WHERE name IS NOT NULL ORDER BY edited DESC,received_at DESC,id DESC LIMIT 1) t`,[pairs.map(pair=>pair[0]),pairs.map(pair=>pair[1])])).rows)
+      set(row.chat+'/topic/'+row.topic,row.name);
+  }catch{}
+  return names;
+}
+
+/** Recall's result with each hit's place in words in place of what Hermes said about its profile. */
+export async function withRecallPlaces(stores:Pools,result:unknown):Promise<unknown> {
+  const value=result as {hits?:unknown};
+  if(!value||typeof value!=='object'||!Array.isArray(value.hits))return result;
+  const hits=value.hits.filter((hit):hit is Record<string,unknown>=>!!hit&&typeof hit==='object'&&!Array.isArray(hit));
+  const spaces=hits.filter(hit=>hit.answer!==true&&hit.owner!==true&&typeof hit.space==='string').map(hit=>hit.space as string);
+  const names=await recallNames(stores,spaces);
+  return {...value,hits:hits.map(hit=>{
+    const {space,owner,answer,answer_group,...rest}=hit;
+    return {profile:rest.profile,place:recallPlace({space,owner,answer,answer_group},names),...rest};
+  })};
+}

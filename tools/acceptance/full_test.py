@@ -79,7 +79,7 @@ TITLES = {
     'owner_from_group_to_own_private_chat': 'From a group to your private chat, no approval',
     'owner_from_group_to_other_group': 'From one group to another, card in your private chat',
     'hidden_message_keeps_the_chat': 'Hide and unhide keep the conversation',
-    'native_notes_reach_later_turns': 'A saved note reaches the chat\'s later messages', 'reaction_keeps_group_name': 'A reaction keeps the group name',
+    'native_notes_reach_later_turns': 'A saved note reaches the chat\'s later messages, and recall names the chat it came from', 'reaction_keeps_group_name': 'A reaction keeps the group name',
     'learning_reaches_honcho': 'Learning reaches Honcho', 'private_chat_stays_out_of_groups': 'Your private chat, notes, tasks, jobs and role never reach a group', 
     'project_groups_stay_apart': 'Groups of one project stay apart; Answer privately reads them all for you', 'inbox_never_asks_about_the_owner': 'Inbox: one card per new person, none for you',
     'import_with_topics_files_and_learning': 'Telegram import with topics, files and learning',
