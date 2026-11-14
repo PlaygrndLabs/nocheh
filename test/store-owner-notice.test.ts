@@ -8,6 +8,8 @@ import type {Settings} from '../src/config.js';
 import {storageServer} from '../src/stores/server.js';
 import type {StorageServices} from '../src/stores/services.js';
 import {ActionCommandRepository} from '../src/stores/action-commands.js';
+import {installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 
 test('a problem notice goes to the owner’s private chat in the owner’s wording, and only the owner’s services may send one',async()=>{
   const dataDir=await mkdtemp(join(tmpdir(),'nocheh-owner-notice-'));
@@ -57,6 +59,8 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
 
 test('Retry failed under a problem notice retries only on the owner’s press in their private chat',async()=>{
   const answers:any[]=[],queries:string[]=[];let press:any={id:'q1',data:'nr',from:{id:42},message:{chat:{id:42}}};
+  // The owner's private chat, as the directory knows it (ADR-0250).
+  const restore=installChatsForTest(seededDirectory(()=>({owner_id:'42',group_ids:[]})));
   const access={policy:()=>({owner_id:'42'}),archive:{verify:async()=>({kind:'telegram_update',origin:'live'})},
     stores:{archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify({callback_query:press}))}]})},
       control:{query:async(sql:string)=>{queries.push(sql);return sql.includes('owner_prompts')?{rows:[{texts:{}}]}:{rows:[]};}}}};
@@ -69,4 +73,5 @@ test('Retry failed under a problem notice retries only on the owner’s press in
   assert.equal(await actions.callback(source),true);
   assert.equal(answers[1][1].text,'Only the owner can do this.');
   assert.ok(!queries.some(sql=>sql.includes('workflow_observations')),'anyone else’s press retries nothing');
+  restore();
 });

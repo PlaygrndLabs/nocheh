@@ -61,13 +61,13 @@ test('allowed members post freely in their own group; everything else waits for 
     topicMemory='topic';
     const shut=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Another topic'}));
     assert.equal(shut.state,'proposed','with separate topic memory another topic is reviewed like another group');
-    assert.deepEqual([last('card').chat_id,last('card').topic],[group,'17'],'by the person who asked, under their request');
+    assert.deepEqual([last('card').chat_id,last('card').topic],[group,17],'by the person who asked, under their request');
     topicMemory='group';
     const across=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:other+'/topic/4',text:'For the other group'}));
     assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for a review');
     // The person who asked, allowed in both groups, reviews it under their request in their own group and topic.
     const reviewCard=last('card');
-    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text,reviewCard.links],[group,'17','📨 Send to a Telegram group › a topic\n\nFor the other group',[]],
+    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text,reviewCard.links],[group,17,'📨 Send to a Telegram group › a topic\n\nFor the other group',[]],
       'no "Asked in" line on a card in the chat where it was asked');
     // The card is the answer: it replies to the request, and Nocheh adds nothing of its own.
     assert.equal(reviewCard.reply_to,String((await stores.archive.query('SELECT payload FROM events WHERE id=$1',[topic.id])).rows[0].payload.toString().match(/"message_id":(\d+)/)[1]));

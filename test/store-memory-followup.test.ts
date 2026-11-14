@@ -200,9 +200,9 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
     await t.test('the physical delivery check rejects a fact changed after action admission',async()=>{
       const f=await fixture();await f.approve();const request=await f.saved(),action=await f.services.telegramActions.inspect(owner,request.followup_action_id);
       await stores.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[action.id]);
-      assert.deepEqual(await f.services.telegramActions.authorizeDelivery({id:action.id,...action.arguments}),{valid:true});
+      assert.deepEqual(await f.services.telegramActions.authorizeDelivery({id:action.id,...action.arguments,chat_id:action.arguments.destination}),{valid:true});
       await f.reviseFact();
-      await assert.rejects(f.services.telegramActions.authorizeDelivery({id:action.id,...action.arguments}),{code:'action_delivery_denied'});
+      await assert.rejects(f.services.telegramActions.authorizeDelivery({id:action.id,...action.arguments,chat_id:action.arguments.destination}),{code:'action_delivery_denied'});
       assert.equal(f.sent.length,0);
     });
     await t.test('an old committed approval can recover its missing handoff on exact replay',async()=>{
