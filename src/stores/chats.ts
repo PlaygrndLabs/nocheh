@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {accountIdFor,chatDirectory,chatIdFor,chats,connectionIdFor,installChats,setChatLoader,topicKey,type ChatApp,type ChatDirectory,
   type ChatIdRow,type ChatLoader,type ChatRow,type ChatState} from '../chats.js';
-import {isTelegramChat} from '../chats-telegram.js';
+import {isTelegramChat,legacyChat,legacyChatValue} from '../chats-telegram.js';
 import {telegramUpdateFacts,type TelegramChatFacts,type TelegramPerson} from '../chats-telegram-updates.js';
 import {HttpError} from '../http.js';
 import type {CapturedSource} from './archive.js';
@@ -13,10 +13,13 @@ import type {CapturedSource} from './archive.js';
  *   captured message in the chat (in a topic, in that topic), closed whether a topic's latest open or close message
  *   closed it, username the chat's public name, observed_title the last name an update showed (kept beside a topic
  *   name the owner gave, which it never replaces), and refreshed_* the owner's last explicit refresh from the app
- *   (refreshed_to: the id Telegram moved a group to). seq is the update that last set the title, closed or username,
- *   so an older update, or the capture replay, never undoes a newer one.
+ *   (refreshed_to: the id Telegram moved a group to). seq, seq_bot and seq_at are the update that last set the title,
+ *   closed or username (its update_id, the bot that took it in and when it was taken in), so an older update, or the
+ *   capture replay, never undoes a newer one (see newerUpdate).
+ * - chat_memberships.seen_bot: the bot that took in the update a membership was last set by, next to its seen_seq and
+ *   checked_at, ordered the same way.
  * - chat_seed_state: how far the seeder (chat-seed.ts) and the membership backfill have read the archive.
- * Both are created only if missing, and nothing here rewrites a row.
+ * Each is created only if missing, and nothing here rewrites a row.
  */
 export const chatRecordSchema=`
 CREATE TABLE IF NOT EXISTS chat_details (
@@ -26,10 +29,13 @@ CREATE TABLE IF NOT EXISTS chat_details (
  seen_at timestamptz,
  closed boolean,
  seq numeric CHECK(seq IS NULL OR seq>=0),
+ seq_bot text CHECK(seq_bot IS NULL OR seq_bot ~ '^[A-Za-z0-9._:-]{1,128}$'),
+ seq_at timestamptz,
  refreshed_state text CHECK(refreshed_state IS NULL OR refreshed_state IN ('available','migrated','not_member','not_found')),
  refreshed_to text CHECK(refreshed_to IS NULL OR refreshed_to ~ '^[A-Za-z0-9._:-]{1,128}$'),
  refreshed_at timestamptz
 );
+ALTER TABLE chat_memberships ADD COLUMN IF NOT EXISTS seen_bot text CHECK(seen_bot IS NULL OR seen_bot ~ '^[A-Za-z0-9._:-]{1,128}$');
 CREATE TABLE IF NOT EXISTS chat_seed_state (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  archive_sequence bigint NOT NULL DEFAULT 0 CHECK(archive_sequence>=0),
@@ -76,24 +82,46 @@ export async function ensureAccount(db:Db,connection:string,person:Pick<Telegram
 const servedState=(policy:Pick<AssistantPolicy,'group_ids'|'owner_id'>,kind:'private'|'group',externals:readonly string[]):ChatState=>
   kind==='group'?externals.some(id=>policy.group_ids.includes(id))?'active':'off':externals.includes(policy.owner_id??'')?'active':'off';
 
-/** Writes the presentation an update carries, unless a later update already did. */
-async function present(db:Db,chat:string,seq:number|null,values:{title?:string|null;app_type?:string|null;is_forum?:boolean|null;username?:string|null;closed?:boolean|null;seen_at?:Date|null}) {
+/**
+ * One update's place in a chat's history: Telegram's update_id, the bot that took it in, and when Nocheh took it in.
+ * Update ids only count up within one bot, and Telegram picks the next one at random after a week without updates.
+ */
+export interface UpdateOrder {seq:number;bot:string|null;at:Date}
+/**
+ * SQL: whether the update in `next` (an INSERT's excluded row) is newer than the one `old` was last set by. Within one
+ * bot the update_id decides, unless the two were taken in more than a week apart (Telegram may have restarted its
+ * count), when the later one is newer; an update from another bot (the owner replaced the bot, or an imported archive)
+ * is newer only if it was taken in later. A row no update set yet takes any update; the same update again changes
+ * nothing.
+ */
+export const newerUpdate=(old:string,next:string,[seq,bot,at]:readonly [string,string,string])=>`(${old}.${seq} IS NULL OR ${old}.${at} IS NULL OR
+  CASE WHEN ${old}.${bot} IS DISTINCT FROM ${next}.${bot} THEN ${next}.${at}>${old}.${at}
+    ELSE ${next}.${at}>${old}.${at}+interval '7 days' OR ${next}.${at}>=${old}.${at}-interval '7 days' AND ${old}.${seq}<${next}.${seq} END)`;
+
+/**
+ * Writes the presentation an update carries, unless a later update already did. Returns whether the chat row the
+ * directory loads changed (its name, its app's word for it or whether it has topics), so the directory reloads.
+ */
+async function present(db:Db,chat:string,order:UpdateOrder|null,values:{title?:string|null;app_type?:string|null;is_forum?:boolean|null;username?:string|null;closed?:boolean|null;seen_at?:Date|null}):Promise<boolean> {
   if(values.seen_at)await db.query(`INSERT INTO chat_details(chat_id,seen_at) VALUES($1,$2) ON CONFLICT(chat_id) DO UPDATE
     SET seen_at=greatest(chat_details.seen_at,excluded.seen_at) WHERE chat_details.seen_at IS NULL OR chat_details.seen_at<excluded.seen_at`,[chat,values.seen_at]);
-  if(seq===null)return;
-  const newer=(await db.query(`INSERT INTO chat_details(chat_id,seq) VALUES($1,$2) ON CONFLICT(chat_id) DO UPDATE SET seq=excluded.seq
-    WHERE chat_details.seq IS NULL OR chat_details.seq<excluded.seq RETURNING chat_id`,[chat,seq])).rowCount;
-  if(!newer)return;
+  if(order===null)return false;
+  const newer=(await db.query(`INSERT INTO chat_details(chat_id,seq,seq_bot,seq_at) VALUES($1,$2,$3,$4) ON CONFLICT(chat_id) DO UPDATE
+    SET seq=excluded.seq,seq_bot=excluded.seq_bot,seq_at=excluded.seq_at WHERE ${newerUpdate('chat_details','excluded',['seq','seq_bot','seq_at'])} RETURNING chat_id`,
+    [chat,order.seq,order.bot,order.at])).rowCount;
+  if(!newer)return false;
+  let changed=0;
   // An owner's own topic name is never replaced by one Telegram shows; that one is kept, for when the owner removes theirs.
   if(values.title) {
     await db.query('UPDATE chat_details SET observed_title=$2 WHERE chat_id=$1 AND observed_title IS DISTINCT FROM $2',[chat,values.title]);
-    await db.query(`UPDATE chats SET title=$2,title_source='observed',updated_at=now() WHERE id=$1 AND title IS DISTINCT FROM $2
-      AND title_source IS DISTINCT FROM 'owner'`,[chat,values.title]);
+    changed+=(await db.query(`UPDATE chats SET title=$2,title_source='observed',updated_at=now() WHERE id=$1 AND title IS DISTINCT FROM $2
+      AND title_source IS DISTINCT FROM 'owner'`,[chat,values.title])).rowCount??0;
   }
-  if(values.app_type||typeof values.is_forum==='boolean')await db.query(`UPDATE chats SET app_type=coalesce($2,app_type),is_forum=coalesce($3,is_forum),updated_at=now()
-    WHERE id=$1 AND (app_type IS DISTINCT FROM coalesce($2,app_type) OR is_forum IS DISTINCT FROM coalesce($3,is_forum))`,[chat,values.app_type??null,values.is_forum??null]);
+  if(values.app_type||typeof values.is_forum==='boolean')changed+=(await db.query(`UPDATE chats SET app_type=coalesce($2,app_type),is_forum=coalesce($3,is_forum),updated_at=now()
+    WHERE id=$1 AND (app_type IS DISTINCT FROM coalesce($2,app_type) OR is_forum IS DISTINCT FROM coalesce($3,is_forum))`,[chat,values.app_type??null,values.is_forum??null])).rowCount??0;
   if(values.username!==undefined&&values.username!==null||typeof values.closed==='boolean')await db.query(`UPDATE chat_details SET username=coalesce($2,username),closed=coalesce($3,closed)
     WHERE chat_id=$1`,[chat,values.username??null,values.closed??null]);
+  return changed>0;
 }
 
 /**
@@ -107,13 +135,14 @@ export class ChatRepository {
   /**
    * Records what a captured Telegram original says, in the capture's own control transaction (next to the reaction
    * state). A failure here never fails the capture: it is rolled back alone, and the seeder finds the chat later.
-   * Returns whether a chat or chat id was added, so the caller can reload the directory once the capture commits.
+   * Returns whether a chat or chat id was added, or a chat's name or kind of app chat changed, so the caller can reload
+   * the directory once the capture commits.
    */
-  async capture(db:pg.PoolClient,source:CapturedSource):Promise<boolean> {
+  async capture(db:pg.PoolClient,source:CapturedSource,transport:'capture'|'import'='capture'):Promise<boolean> {
     if(source.channel!=='telegram'||!recordedKinds.has(source.kind)||!isTelegramChat(source.scope))return false;
     await db.query('SAVEPOINT chat_records');
     try {
-      const changed=await this.record(db,source);
+      const changed=await this.record(db,source,transport);
       await db.query('RELEASE SAVEPOINT chat_records');
       return changed;
     } catch(error) {
@@ -123,24 +152,31 @@ export class ChatRepository {
     }
   }
 
-  private async record(db:Db,source:CapturedSource):Promise<boolean> {
+  /**
+   * `transport` is how the original came in: taken in live ('capture'), or brought in by the owner from another
+   * installation ('import', with the origin it had there). Only a live capture names this installation's bot. An
+   * imported chat Nocheh has no row for is the owner's own history from before: it gets the id its old stored value
+   * had, as the seeder gives one, so the derivatives and owner records imported with it name it (ADR-0250).
+   */
+  private async record(db:Db,source:CapturedSource,transport:'capture'|'import'):Promise<boolean> {
     const event=(await this.stores.archive.query(`SELECT e.payload,e.received_at,e.bot_id,(SELECT o.metadata->'audience'->>'topic_id' FROM source_observations o
       WHERE o.event_id=e.id AND o.metadata->'audience'->>'topic_state'='known' AND o.metadata->'audience'->>'chat_id'=e.scope LIMIT 1) AS topic
       FROM events e WHERE e.id=$1`,[source.reference.id])).rows[0];
     if(!event)return false;
     let payload:unknown={};try{payload=JSON.parse(Buffer.from(event.payload).toString('utf8'));}catch{}
     const facts=telegramUpdateFacts(payload,source.scope),live=source.origin==='live'&&source.kind==='telegram_update';
-    const seq=live?facts.update_id:null,policy=this.policy();
-    const connection=await ensureConnection(db,'telegram',live&&typeof event.bot_id==='string'&&appId.test(event.bot_id)?event.bot_id:null);
+    const bot=typeof event.bot_id==='string'&&appId.test(event.bot_id)?event.bot_id:null,imported=transport==='import';
+    const order:UpdateOrder|null=live&&facts.update_id!==null?{seq:facts.update_id,bot,at:event.received_at as Date}:null,policy=this.policy();
+    const connection=await ensureConnection(db,'telegram',live&&!imported?bot:null);
     let changed=false;
     // An upgrade first, so the new id's own messages continue the same chat.
     if(live&&facts.migration)changed=await this.migrate(db,connection,facts.migration.from,facts.migration.to,policy)||changed;
     for(const person of facts.people)await ensureAccount(db,connection,person);
     let chat=await chatOfApp(db,connection,source.scope);
-    if(!chat&&facts.chat){chat=await this.create(db,connection,facts.chat,policy);changed=true;}
+    if(!chat&&facts.chat){chat=await this.create(db,connection,facts.chat,policy,imported);changed=true;}
     if(!chat){if(changed)await bumpChatRevision(db);return changed;}
     const seen=facts.message?event.received_at as Date:null;
-    if(facts.chat&&chat.current)await present(db,chat.id,seq,{title:facts.chat.title,app_type:facts.chat.app_type,is_forum:facts.chat.is_forum,username:facts.chat.username,seen_at:seen});
+    if(facts.chat&&chat.current)changed=await present(db,chat.id,order,{title:facts.chat.title,app_type:facts.chat.app_type,is_forum:facts.chat.is_forum,username:facts.chat.username,seen_at:seen})||changed;
     else if(seen)await present(db,chat.id,null,{seen_at:seen});
     // A forum topic: the archive's own reading of the message first, as every reader of it does.
     const key=typeof event.topic==='string'&&event.topic?event.topic:facts.topic?.key;
@@ -148,22 +184,26 @@ export class ChatRepository {
       let topic:string;try{topic=topicKey(key);}catch{topic='';}
       if(topic) {
         let id=(await db.query('SELECT id FROM chats WHERE parent_id=$1 AND topic_key=$2',[chat.id,topic])).rows[0]?.id as string|undefined;
-        if(!id){id=await this.createTopic(db,connection,chat,source.scope,topic,facts.topic?.key===topic?facts.topic.name:null,'observed');changed=true;}
-        await present(db,id,seq,{title:facts.topic?.key===topic?facts.topic.name:null,closed:facts.topic?.key===topic?facts.topic.closed:null,seen_at:seen});
+        if(!id){id=await this.createTopic(db,connection,chat,source.scope,topic,facts.topic?.key===topic?facts.topic.name:null,'observed',imported);changed=true;}
+        changed=await present(db,id,order,{title:facts.topic?.key===topic?facts.topic.name:null,closed:facts.topic?.key===topic?facts.topic.closed:null,seen_at:seen})||changed;
       }
     }
     // Who is in a group: only from live updates, each applied once and in update order.
-    if(seq!==null&&chat.kind==='group')for(const membership of facts.memberships) {
+    if(order!==null&&chat.kind==='group')for(const membership of facts.memberships) {
       const account=await ensureAccount(db,connection,membership.person);
-      await membershipFrom(db,chat.id,account,membership.state,membership.source,event.received_at as Date,seq);
+      await membershipFrom(db,chat.id,account,membership.state,membership.source,order);
     }
     if(changed)await bumpChatRevision(db);
     return changed;
   }
 
-  /** A chat first seen now: its id is chatIdFor, with no bot in it. A private chat names its person. */
-  private async create(db:Db,connection:string,facts:TelegramChatFacts,policy:AssistantPolicy) {
-    const id=chatIdFor('telegram',facts.external),state=servedState(policy,facts.kind,[facts.external]);
+  /**
+   * A chat first seen now: its id is chatIdFor, with no bot in it; an imported one keeps its old stored value as its id
+   * (see record). A private chat names its person.
+   */
+  private async create(db:Db,connection:string,facts:TelegramChatFacts,policy:AssistantPolicy,imported=false) {
+    const id=imported?legacyChat(facts.external)?.id??chatIdFor('telegram',facts.external):chatIdFor('telegram',facts.external);
+    const state=servedState(policy,facts.kind,[facts.external]);
     const account=facts.kind==='private'?await ensureAccount(db,connection,{external:facts.external,display_name:facts.title}):null;
     await db.query(`INSERT INTO chats(id,connection_id,kind,app_type,account_id,title,title_source,is_forum,state,state_changed_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) ON CONFLICT DO NOTHING`,
@@ -172,9 +212,12 @@ export class ChatRepository {
     return (await chatOfApp(db,connection,facts.external))!;
   }
 
-  /** A topic first seen now, of `parent` (whose app id is `external`). It follows its parent's state. */
-  private async createTopic(db:Db,connection:string,parent:{id:string;state:ChatState},external:string,key:string,title:string|null,source:'observed'|'owner') {
-    const id=chatIdFor('telegram',external,key);
+  /**
+   * A topic first seen now, of `parent` (whose app id is `external`). It follows its parent's state. An imported topic
+   * of a chat that keeps its old stored value as its id keeps its old value too (see record).
+   */
+  private async createTopic(db:Db,connection:string,parent:{id:string;state:ChatState},external:string,key:string,title:string|null,source:'observed'|'owner',imported=false) {
+    const id=imported&&parent.id===external?legacyChatValue(external,Number(key)):chatIdFor('telegram',external,key);
     await db.query(`INSERT INTO chats(id,connection_id,kind,parent_id,topic_key,title,title_source,state) VALUES($1,$2,'topic',$3,$4,$5,$6,$7)
       ON CONFLICT DO NOTHING`,[id,connection,parent.id,key,title,title?source:source==='owner'?'owner':null,parent.state]);
     return (await db.query('SELECT id FROM chats WHERE parent_id=$1 AND topic_key=$2',[parent.id,key])).rows[0].id as string;
@@ -237,8 +280,8 @@ export class ChatRepository {
 
   /**
    * Memberships from the archive, for updates taken in before chats recorded them: one batch of live Telegram
-   * updates at a time, in capture order, resumable from chat_seed_state. Each is applied by its update_id, so its
-   * order does not matter and a replay changes nothing. Returns how many updates it read; 0 when it has caught up
+   * updates at a time, in capture order, resumable from chat_seed_state. Each is applied in its own place in the chat's
+   * history (newerUpdate), so the order they are read in does not matter and a replay changes nothing. Returns how many updates it read; 0 when it has caught up
    * with the seeder.
    */
   async backfill(limit=500):Promise<number> {
@@ -247,7 +290,7 @@ export class ChatRepository {
       await db.query('BEGIN');
       const state=(await db.query('SELECT archive_sequence,members_sequence FROM chat_seed_state WHERE singleton FOR UPDATE')).rows[0];
       if(!state||Number(state.members_sequence)>=Number(state.archive_sequence)){await db.query('COMMIT');return 0;}
-      const rows=(await this.stores.archive.query(`SELECT capture_sequence,scope,payload,received_at FROM events
+      const rows=(await this.stores.archive.query(`SELECT capture_sequence,scope,payload,received_at,bot_id FROM events
         WHERE capture_sequence>$1 AND capture_sequence<=$2 AND channel='telegram' AND origin='live' AND kind='telegram_update'
         ORDER BY capture_sequence LIMIT $3`,[state.members_sequence,state.archive_sequence,limit])).rows;
       const connection=await ensureConnection(db);
@@ -257,8 +300,9 @@ export class ChatRepository {
         const facts=telegramUpdateFacts(payload,row.scope);
         if(facts.update_id===null||!facts.memberships.length)continue;
         const chat=await chatOfApp(db,connection,row.scope);if(chat?.kind!=='group')continue;
+        const order={seq:facts.update_id,bot:typeof row.bot_id==='string'&&appId.test(row.bot_id)?row.bot_id:null,at:row.received_at as Date};
         for(const membership of facts.memberships)
-          await membershipFrom(db,chat.id,await ensureAccount(db,connection,membership.person),membership.state,membership.source,row.received_at,facts.update_id);
+          await membershipFrom(db,chat.id,await ensureAccount(db,connection,membership.person),membership.state,membership.source,order);
       }
       const next=rows.length===limit?rows.at(-1)!.capture_sequence:state.archive_sequence;
       await db.query('UPDATE chat_seed_state SET members_sequence=$1 WHERE singleton',[next]);
@@ -302,11 +346,12 @@ export function chatLabel(chat:{kind:string;title?:string|null;app_type?:string|
 export interface ChatListing {title_source:string|null;username:string|null;seen_at:Date|null;closed:boolean|null;
   refreshed:{state:string;to:string|null;at:Date}|null}
 
-async function membershipFrom(db:Db,chat:string,account:string,state:'in'|'left',source:'message'|'event',at:Date,seq:number) {
-  await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source,since,checked_at,seen_seq) VALUES($1,$2,$3,$4,$5,$5,$6)
+/** Who is in a group, as one update says, unless a newer update already said otherwise (newerUpdate). */
+async function membershipFrom(db:Db,chat:string,account:string,state:'in'|'left',source:'message'|'event',order:UpdateOrder) {
+  await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source,since,checked_at,seen_seq,seen_bot) VALUES($1,$2,$3,$4,$5,$5,$6,$7)
     ON CONFLICT(chat_id,account_id) DO UPDATE SET state=excluded.state,source=excluded.source,checked_at=excluded.checked_at,seen_seq=excluded.seen_seq,
-      since=CASE WHEN chat_memberships.state=excluded.state THEN chat_memberships.since ELSE excluded.since END
-    WHERE chat_memberships.seen_seq IS NULL OR chat_memberships.seen_seq<excluded.seen_seq`,[chat,account,state,source,at,seq]);
+      seen_bot=excluded.seen_bot,since=CASE WHEN chat_memberships.state=excluded.state THEN chat_memberships.since ELSE excluded.since END
+    WHERE ${newerUpdate('chat_memberships','excluded',['seen_seq','seen_bot','checked_at'])}`,[chat,account,state,source,order.at,order.seq,order.bot]);
 }
 
 /**

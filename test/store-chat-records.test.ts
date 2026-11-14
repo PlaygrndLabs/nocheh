@@ -9,6 +9,14 @@ import {CaptureCoordinator} from '../src/stores/capture.js';
 import {ChatDirectoryLoader,ChatRepository,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,GP2,GP_GROUP_IDS,NG1,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,OWNER,UNSERVED,seedChats} from './fixture-groups.js';
+import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {canonical} from '../src/archive.js';
+import {legacyChatValue} from '../src/chats-telegram.js';
+import {drainSourceSpool} from '../src/stores/capture.js';
+import {ChatSeeder} from '../src/stores/chat-seed.js';
+import {OwnerPortabilityRepository,type OwnerRecord} from '../src/stores/owner-portability.js';
 
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000};
 async function open():Promise<StorePools> {
@@ -172,4 +180,118 @@ test('the process directory reloads after a capture, a newer epoch and a miss, a
     await new Promise(resolve=>setTimeout(resolve,1100));
     chats().get('-100'+(base+3));assert.equal(counting.checks,2);
   }finally{setChatLoader(loader);await stores.close();}
+});
+
+test('memberships and names follow each bot\'s own update order, a new bot, a week\'s gap and imported history',fixture,async()=>{
+  const stores=await open(),base=Date.now(),group='-100'+base,update=(n:number)=>base*100+n;
+  const [carol,dave]=[1,2].map(n=>String(base%1000000000*10+n)) as [string,string];
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[group]},repository=new ChatRepository(stores,()=>policy);
+  const archive=new ArchiveRepository(stores.archive),coordinator=new CaptureCoordinator(archive,stores.control,undefined,repository);
+  const chat={id:Number(group),type:'supergroup',title:'Ordered group'};
+  const envelope=(n:number,bot:string,id:number,payload:Record<string,unknown>)=>({version:1,key:`order:${base}:${n}`,origin:'live',kind:'telegram_update',bot_id:bot,
+    scope:group,source_id:String(n),revision:String(id),occurred_at:null,text:null,payload:{update_id:id,...payload}}) as Envelope;
+  const member=(who:string,status:string,title='Ordered group')=>({chat_member:{chat:{...chat,title},from:{id:7},date:1,
+    old_chat_member:{status:'member',user:{id:Number(who)}},new_chat_member:{status,user:{id:Number(who)}}}});
+  const id=chatIdFor('telegram',group),state=async(who:string)=>(await stores.control.query('SELECT state FROM chat_memberships WHERE chat_id=$1 AND account_id=$2',
+    [id,accountIdFor('telegram',who)])).rows[0]?.state,title=async()=>(await stores.control.query('SELECT title FROM chats WHERE id=$1',[id])).rows[0].title;
+  try {
+    await coordinator.capture(envelope(1,'777',update(50),member(carol,'member')));
+    await coordinator.capture(envelope(2,'777',update(51),member(dave,'member')));
+    assert.deepEqual([await state(carol),await state(dave)],['in','in']);
+    // The owner replaces the bot: the new bot's update ids start far lower, and its updates are still the newer ones.
+    await coordinator.capture(envelope(3,'888',5,member(carol,'left','Renamed by the new bot')));
+    assert.deepEqual([await state(carol),await state(dave)],['left','in']);assert.equal(await title(),'Renamed by the new bot');
+    // Within one bot an older update taken in later changes nothing, as before.
+    await coordinator.capture(envelope(4,'888',4,member(carol,'member','Older name')));
+    assert.equal(await state(carol),'left');assert.equal(await title(),'Renamed by the new bot');
+    // The membership backfill reads by the same rule: reading the whole archive again changes nothing.
+    const before=await records(stores.control,[id]),last=(await stores.archive.query('SELECT max(capture_sequence) AS last FROM events')).rows[0].last;
+    await stores.control.query('UPDATE chat_seed_state SET members_sequence=0,archive_sequence=$1 WHERE singleton',[last]);
+    while(await repository.backfill(500));
+    assert.deepEqual(await records(stores.control,[id]),before);
+    // A week with no updates: Telegram may start the bot's count anywhere, and the later update is the newer one.
+    await stores.control.query(`UPDATE chat_memberships SET checked_at=checked_at-interval '8 days' WHERE chat_id=$1`,[id]);
+    await stores.control.query(`UPDATE chat_details SET seq_at=seq_at-interval '8 days' WHERE chat_id=$1`,[id]);
+    await coordinator.capture(envelope(5,'888',2,member(carol,'member','Named after a quiet week')));
+    assert.equal(await state(carol),'in');assert.equal(await title(),'Named after a quiet week');
+    // History imported from another installation, taken in there long ago by its own bot with higher ids, never
+    // overrides what this installation saw since, and never names this installation's bot.
+    const old=await archive.capture(envelope(6,'999',update(90),member(carol,'left','An old imported name')),{received_at:'2020-01-01T00:00:00Z',manifests:[]});
+    await stores.control.query(`INSERT INTO source_intakes(event_id,source_revision,input_hash,transport,state) VALUES($1,$2,$3,'import','ready')`,
+      [old.source.reference.id,old.source.reference.revision,old.source.reference.input_hash]);
+    await coordinator.handoff(old.source);
+    assert.equal(await state(carol),'in');assert.equal(await title(),'Named after a quiet week');
+    assert.equal((await stores.control.query(`SELECT account FROM chat_connections WHERE app='telegram'`)).rows[0].account,'888');
+  }finally{await stores.close();}
+});
+
+test('an imported archive keeps its chats\' old ids, so the derivatives and owner records imported after it find them',fixture,async()=>{
+  const stores=await open(),base=Date.now(),served='-100'+base,other='-100'+(base+1),later='-100'+(base+2);
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[served]},repository=new ChatRepository(stores,()=>policy);
+  const archive=new ArchiveRepository(stores.archive),coordinator=new CaptureCoordinator(archive,stores.control,undefined,repository);
+  const portability=new OwnerPortabilityRepository(stores),owner={admin:true,scope:null};
+  const sealed=(table:string,key:string[],row:Record<string,unknown>):OwnerRecord=>({format:'nocheh-owner-record-v1',table,key,row,sha256:digest(canonical({table,key,row}))});
+  const imported=async(n:number,scope:string,message:Record<string,unknown>)=>{
+    const result=await archive.capture({version:1,key:`imported:${base}:${n}`,origin:'live',kind:'telegram_update',bot_id:'source-bot',scope,source_id:String(n),revision:String(n),
+      occurred_at:null,text:null,payload:{update_id:n,message:{message_id:n,date:1,from:{id:7,first_name:'Alice'},chat:{id:Number(scope),type:'supergroup',title:'Imported'},...message}}} as Envelope,
+      {received_at:'2025-06-01T00:00:00Z',manifests:[]});
+    await stores.control.query(`INSERT INTO source_intakes(event_id,source_revision,input_hash,transport,state) VALUES($1,$2,$3,'import','ready')`,
+      [result.source.reference.id,result.source.reference.revision,result.source.reference.input_hash]);
+    await coordinator.handoff(result.source);
+  };
+  const appIds=async(external:string)=>(await stores.control.query('SELECT chat_id,state FROM chat_ids WHERE external_id=$1',[external])).rows;
+  try {
+    // A new installation's first start gives the served group its row.
+    await new ChatSeeder(stores,policy).values([served]);
+    const connection=(await stores.control.query(`SELECT id FROM chat_connections WHERE app='telegram'`)).rows[0].id as string;
+    const account=(await stores.control.query(`SELECT account FROM chat_connections WHERE id=$1`,[connection])).rows[0].account;
+    // A package exported after step 2b names a chat first seen there by its digest id: its chat records come first.
+    const digestChat=chatIdFor('telegram',later);
+    await portability.restore(owner,[sealed('chats',['group',digestChat],{id:digestChat,connection_id:connection,kind:'group',title:null,title_source:null,is_forum:false,state:'active'}),
+      sealed('chat_ids',[connection,later],{connection_id:connection,external_id:later,chat_id:digestChat,state:'current',reason:null,changed_at:'2026-01-01T00:00:00Z'})]);
+    // Then the archive: the served group's topic 7, a group this installation does not serve, and the later chat.
+    await imported(1,served,{message_thread_id:7,is_topic_message:true,forum_topic_created:{name:'Imported topic'}});
+    await imported(2,other,{text:'hi'});
+    await imported(3,later,{text:'hi'});
+    const topic=legacyChatValue(served,7);
+    assert.deepEqual(await appIds(other),[{chat_id:other,state:'current'}],'an imported chat keeps the value it was stored under');
+    assert.equal((await stores.control.query('SELECT id FROM chats WHERE parent_id=$1 AND topic_key=$2',[served,'7'])).rows[0]?.id,topic);
+    assert.deepEqual(await appIds(later),[{chat_id:digestChat,state:'current'}],'a chat the package\'s records name keeps that id');
+    assert.equal(Number((await stores.control.query('SELECT count(*) FROM chats WHERE id=$1',[later])).rows[0].count),0);
+    assert.equal((await stores.control.query(`SELECT account FROM chat_connections WHERE id=$1`,[connection])).rows[0].account,account,'an import never names this installation\'s bot');
+    // The derivatives and owner records that follow name the same chats, and seeding them adds nothing.
+    const rows=Number((await stores.control.query('SELECT count(*) FROM chats')).rows[0].count);
+    const restored=await portability.restore(owner,[sealed('project_assignments',[other],{space_id:other,project_id:null,mode:'none',revision:1}),
+      sealed('chat_tool_settings',[topic],{space_id:topic,shell:false,browser:null,mcp:null,revision:1})]);
+    assert.equal(restored.added,2);
+    assert.equal(Number((await stores.control.query('SELECT count(*) FROM chats')).rows[0].count),rows);
+    const {directory}=await repository.listing();
+    assert.equal(directory.resolve('telegram',other),other);assert.equal(directory.resolve('telegram',served,'7'),topic);
+    assert.equal(directory.kind(topic),'topic');assert.equal(directory.groupOf(topic),served);
+  }finally{await stores.close();}
+});
+
+test('the spool hands Telegram updates off in update order, so an upgrade read after the new group\'s messages keeps one chat',fixture,async()=>{
+  const stores=await open(),base=Date.now(),old='-4'+String(base).slice(-12),next='-100'+(base+7),root=await mkdtemp(join(tmpdir(),'nocheh-chat-spool-'));
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[old]},repository=new ChatRepository(stores,()=>policy);
+  const coordinator=new CaptureCoordinator(new ArchiveRepository(stores.archive),stores.control,undefined,repository);
+  const envelope=(n:number,nonce:number,scope:string,message:Record<string,unknown>):Envelope=>({version:1,key:`telegram:777:update:${base}${n}:${nonce}`,origin:'live',
+    kind:'telegram_update',bot_id:'777',scope,source_id:String(n),revision:String(base*10+n),occurred_at:null,text:null,
+    payload:{update_id:base*10+n,message:{message_id:n,date:n,from:{id:7},...message}}});
+  try {
+    await coordinator.capture(envelope(1,0,old,{chat:{id:Number(old),type:'group',title:'Basic'},text:'hi'}));
+    // Three updates of one batch, written so the new group's ordinary message is read first.
+    const files=[envelope(2,0,old,{chat:{id:Number(old),type:'group',title:'Basic'},migrate_to_chat_id:Number(next)}),
+      envelope(3,0,next,{chat:{id:Number(next),type:'supergroup',title:'Basic'},migrate_from_chat_id:Number(old)})];
+    const names=files.map(file=>digest(file.key));
+    let nonce=0,member=envelope(4,nonce,next,{chat:{id:Number(next),type:'supergroup',title:'Basic'},text:'first in the new group'});
+    while(!names.every(name=>digest(member.key)<name))member=envelope(4,++nonce,next,{chat:{id:Number(next),type:'supergroup',title:'Basic'},text:'first in the new group'});
+    const pending=join(root,'spool','pending');await mkdir(pending,{recursive:true});
+    for(const file of [...files,member])await writeFile(join(pending,digest(file.key)+'.json'),canonical(file));
+    await drainSourceSpool(coordinator,root);
+    const id=chatIdFor('telegram',old);
+    assert.deepEqual((await stores.control.query('SELECT external_id,chat_id,state FROM chat_ids WHERE external_id=ANY($1::text[]) ORDER BY external_id',[[old,next]])).rows
+      .map(row=>[row.external_id,row.chat_id,row.state]).sort(),[[next,id,'current'],[old,id,'old']].sort());
+    assert.equal(Number((await stores.control.query('SELECT count(*) FROM chats WHERE id=$1',[chatIdFor('telegram',next)])).rows[0].count),0,'no second chat');
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

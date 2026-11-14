@@ -33,8 +33,9 @@ export class CaptureCoordinator {
     if(previous.source_revision!==source.reference.revision||previous.payload_hash!==source.reference.input_hash)
       throw new HttpError(409,'capture_handoff_conflict');
     if(intake.transport==='capture'&&source.origin==='live')await this.reactions.capture(client,source.reference);
-    // The chats, chat ids, people and memberships the original shows (ADR-0250); a replay changes nothing.
-    const recorded=await this.chats?.capture(client,source)??false;
+    // The chats, chat ids, people and memberships the original shows (ADR-0250); a replay changes nothing. An imported
+    // original is recorded as the owner's history, never as this installation's bot.
+    const recorded=await this.chats?.capture(client,source,intake.transport==='import'?'import':'capture')??false;
     // Wire batches retain exact transport evidence; their individual updates
     // already enter preparation. Do not spend a detector call on every polling
     // envelope ahead of the actual conversation. Explicit owner preparation
