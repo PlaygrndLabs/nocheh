@@ -1,7 +1,10 @@
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {parentSpace,validateSpace} from '../spaces.js';
+import {validateSpace} from '../spaces.js';
+import {ownerChat} from '../assistant-policy.js';
+import {chats} from '../chats.js';
+import {telegramScopes} from '../frontdoor/telegram.js';
 import type {SourceAccessRepository} from './access.js';
 import type {GuardBinding} from './guards.js';
 import {OwnerCommands} from './owner-commands.js';
@@ -29,10 +32,20 @@ type Label={name:string;display_name:string};
 export class RuntimeProfileRepository {
   constructor(readonly access:SourceAccessRepository){}
   private get control(){return this.access.stores.control;}
+  /** The owner's account, which owns the named profiles. */
   private owner(){const id=this.access.policy().owner_id;if(!id)throw new HttpError(409,'owner_profile_unavailable');return id;}
+  /** The owner's private chat, whose profile is the default (ADR-0250: its chat id, not the owner's account). */
+  private ownerChat(){const id=ownerChat(this.access.policy());if(!id)throw new HttpError(409,'owner_profile_unavailable');return id;}
+  /** The served groups, by chat id, in the order the policy names them, then any other the directory serves. */
+  private groups():string[] {
+    const directory=chats(),group=(id:string|null):id is string=>!!id&&directory.kind(id)==='group'&&directory.served(id);
+    return [...new Set([...this.access.policy().group_ids.map(id=>directory.resolve('telegram',id)).filter(group),
+      ...directory.all().map(chat=>chat.id).filter(group)])];
+  }
   private entry(space:string,binding:GuardBinding,custom?:any,label?:Label){
-    const owner=this.owner(),chat=parentSpace(space)??space;
-    if(chat!==owner&&!this.access.policy().group_ids.includes(chat))throw new HttpError(403,'profile_scope_denied');
+    // A profile's name and session are made from its chat id, unchanged for a chat stored before step 2b (ADR-0250).
+    const owner=this.ownerChat(),directory=chats(),chat=directory.parentOf(space)??space;
+    if(chat!==owner&&!(directory.kind(chat)==='group'&&directory.served(chat)))throw new HttpError(403,'profile_scope_denied');
     const audience:Reader={admin:false,scope:chat===owner?null:chat,space,revision:binding.epoch};
     const principal:Reader={...audience,logical_profile:custom?.id??defaultLogicalProfile(audience)};
     return {name:custom?.name??label?.name??'nocheh-'+digest(space).slice(0,24),display_name:custom?'':label?.display_name??'',logical_profile:principal.logical_profile,
@@ -43,8 +56,13 @@ export class RuntimeProfileRepository {
   /** Readable names for the owner's chat and each group. The name is only how the dashboard finds a
    * profile; the chat link stays its logical_profile, so a renamed group keeps its profile. */
   private async labels(owner:string,groups:string[],taken:Set<string>):Promise<Map<string,Label>>{
-    const seen=new Map((await this.control.query("SELECT chat_id,title,username FROM telegram_chat_observations WHERE state='available' AND chat_id=ANY($1)",[groups])).rows
-      .map(row=>[row.chat_id as string,row]));
+    // A group's name is its chat row's title, else the owner's last refresh under any Telegram id it has had.
+    const ids=new Map(groups.map(group=>[group,telegramScopes(group)]));
+    const rows=(await this.control.query("SELECT chat_id,title,username FROM telegram_chat_observations WHERE state='available' AND chat_id=ANY($1)",
+      [[...ids.values()].flat()])).rows;
+    const seen=new Map(groups.map(group=>{const own=ids.get(group)!,found=rows.filter(row=>own.includes(String(row.chat_id)));
+      const title=chats().get(group)?.title??found.find(row=>row.title)?.title??null;
+      return [group,{title,username:found.find(row=>row.username)?.username??null}];}));
     const labels=new Map<string,Label>([[owner,{name:'private-chat',display_name:'Private chat'}]]);taken.add('private-chat');
     for(const group of groups){if(group===owner)continue;
       const chat=seen.get(group),code=digest(group),readable=slug(chat?.title)||slug(chat?.username);
@@ -54,13 +72,13 @@ export class RuntimeProfileRepository {
       labels.set(group,{name:label,display_name:chat?.title||(chat?.username?'@'+chat.username:'')});}
     return labels;
   }
-  async list(principal:Reader){admin(principal);const owner=this.owner(),binding=await this.access.guards.state();
+  async list(principal:Reader){admin(principal);const owner=this.owner(),chat=this.ownerChat(),binding=await this.access.guards.state();
     const rows=(await this.control.query("SELECT * FROM runtime_profiles WHERE owner_id=$1 AND state='active' ORDER BY name LIMIT 101",[owner])).rows;
     if(rows.length>100)throw new HttpError(409,'profile_limit');
-    const spaces=[...new Set([owner,...this.access.policy().group_ids])];
-    const labels=await this.labels(owner,spaces,new Set(rows.map(row=>String(row.name).toLowerCase())));
+    const spaces=[...new Set([chat,...this.groups()])];
+    const labels=await this.labels(chat,spaces,new Set(rows.map(row=>String(row.name).toLowerCase())));
     const profiles=spaces.map(space=>this.entry(space,binding,undefined,labels.get(space)));
-    profiles.push(...rows.map(row=>this.entry(owner,binding,row)));await this.access.guards.assertCurrent(binding);
+    profiles.push(...rows.map(row=>this.entry(chat,binding,row)));await this.access.guards.assertCurrent(binding);
     return {profiles,revision:binding.epoch,generation:binding.generation};
   }
   async resolve(principal:Reader,input:unknown){admin(principal);const body=object(input),selected=string(body.profile??'',64);
@@ -70,7 +88,7 @@ export class RuntimeProfileRepository {
     if(alias){if(body.space!==undefined&&body.space!==alias.space)throw new HttpError(403,'profile_scope_denied');return alias;}
     // An explicit topic binding remains exactly that topic. It grants no parent
     // access; each source is independently checked by the archive repository.
-    if(body.space!==undefined){const space=validateSpace(body.space);if(!parentSpace(space))throw new HttpError(403,'profile_scope_denied');
+    if(body.space!==undefined){const space=validateSpace(body.space);if(!chats().parentOf(space))throw new HttpError(403,'profile_scope_denied');
       const binding=await this.access.guards.state(),entry=this.entry(space,binding);
       if([entry.name,entry.logical_profile,entry.native_profile].includes(selected)){await this.access.guards.assertCurrent(binding);return entry;}}
     throw new HttpError(404,'profile_not_found');
