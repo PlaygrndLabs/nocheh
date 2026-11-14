@@ -8,7 +8,7 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {MemoryProvenanceRepository} from '../src/stores/memory-provenance.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import type {Reader} from '../src/access.js';
-import {readSet,readSetParam} from '../src/spaces.js';
+import {readSet,readSetParam,readSetSql} from '../src/spaces.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
 import {installChatsForTest} from '../src/chats.js';
 import {GP1,GP1_TOPIC,GP2,GP4,GP_GROUP_IDS,NG1,NG1_TOPIC,OWNER,P1,fixtureChats,groupsPolicy,legacyChats} from './fixture-groups.js';
@@ -100,15 +100,23 @@ test('a private answer searches Honcho only through the sessions and receipts of
     }
 
     const frozen=readSet({home:GP1,whole:[GP1,GP2],project:P1}),readable=[GP1,GP1_TOPIC,GP2,GP2+'/topic/9'];
-    assert.deepEqual((await provenance.readSetSessions(workspace,readSetParam(frozen))).sort(),readable.map(session).sort(),
+    assert.deepEqual((await provenance.readSetSessions(workspace,frozen)).sort(),readable.map(session).sort(),
       'the sessions of every group of the set and of their topics: never GP4, the owner, a private chat or an import');
-    assert.deepEqual(await provenance.readSetSessions(workspace,readSetParam(readSet({home:GP1_TOPIC,exact:[GP1_TOPIC]}))),[session(GP1_TOPIC)],
+    assert.deepEqual(await provenance.readSetSessions(workspace,readSet({home:GP1_TOPIC,exact:[GP1_TOPIC]})),[session(GP1_TOPIC)],
       'an exact topic reads only itself');
-    assert.deepEqual(await provenance.readSetSessions(workspace,readSetParam(frozen),2),(await provenance.readSetSessions(workspace,readSetParam(frozen))).slice(0,2));
+    assert.deepEqual(await provenance.readSetSessions(workspace,frozen,2),(await provenance.readSetSessions(workspace,frozen)).slice(0,2));
+    // A read set made by hand, with private chats, imports and patterns in it, still reads only its groups.
     for(const forged of [['owner'],[OWNER],[OWNER+'/*'],['owner/*'],[OWNER+'/topic/5'],['desktop:private_supergroup:1234567890'],['*'],[]])
-      assert.deepEqual(await provenance.readSetSessions(workspace,forged),[],'no parameter opens a private chat or an import: '+JSON.stringify(forged));
-    assert.deepEqual(await provenance.readSetSessions(workspace,[OWNER,'owner',GP4]),[session(GP4)],'a group bound by hand with private chats reads only the group');
-    assert.deepEqual((await provenance.readSetSessions(workspace,readSetParam(readSet({home:NG1_TOPIC,whole:[NG1]})))).sort(),[NG1,NG1_TOPIC].map(session).sort(),
+      assert.deepEqual(await provenance.readSetSessions(workspace,{home:OWNER,exact:forged,whole:forged,project:null}),[],'no set opens a private chat or an import: '+JSON.stringify(forged));
+    assert.deepEqual(await provenance.readSetSessions(workspace,{home:OWNER,exact:[OWNER,'owner',GP4],whole:[OWNER],project:null}),[session(GP4)],
+      'a group in a set made by hand with private chats reads only the group');
+    // The SQL itself reads only what readSetParam marked: a list of ids bound by hand, the owner's chat or a group, reads
+    // no session at all (ADR-0242).
+    const bound=async(param:string[])=>(await stores.control.query(`SELECT s.session_id FROM memory_sessions s WHERE s.workspace=$1 AND ${readSetSql('s.audience',2)}`,
+      [workspace,param])).rows.map(row=>String(row.session_id));
+    assert.deepEqual(await bound([OWNER,'owner',GP1,GP4]),[],'a list by hand reads nothing');
+    assert.deepEqual(await bound(readSetParam(readSet({home:GP4,exact:[GP4]}))),[session(GP4)]);
+    assert.deepEqual((await provenance.readSetSessions(workspace,readSet({home:NG1_TOPIC,whole:[NG1]}))).sort(),[NG1,NG1_TOPIC].map(session).sort(),
       'a digest group reads its topic rows');
 
     // The search itself: Honcho is asked within those sessions, and a hit counts only with a done, current receipt of the set.

@@ -131,19 +131,26 @@ export const inReadSet=(set:ReadSet,space:string|null|undefined):boolean=>
 export const readSetGroups=(set:ReadSet):string[]=>
   [...new Set([...set.whole,...set.exact.map(space=>chats().groupOf(space)??'')])].filter(groupChatId).sort();
 /**
- * A read set as one SQL `text[]` parameter for readSetSql: the ids it reads, each `exact` conversation as itself and
- * each `whole` group with every topic it has a row for. Only groups and their topics are written, whatever the set
- * holds, so no parameter can open a private chat.
+ * The ids a read set reads: each `exact` conversation as itself and each `whole` group with every topic it has a row
+ * for. Only groups and their topics are written, whatever the set holds, so no list can name a private chat.
  */
-export const readSetParam=(set:ReadSet):string[]=>
+export const readSetIds=(set:ReadSet):string[]=>
   [...new Set([...set.exact.filter(space=>groupSpace(space)),...chats().expand(set.whole.filter(groupChatId)).filter(groupSpace)])].sort();
+/** The mark readSetParam puts before every id it writes. readSetSql reads only marked entries, so a list of ids made by
+ * hand, which skipped readSetIds' filter, matches nothing in SQL: the database never opens a private chat because a
+ * caller bound the wrong list (ADR-0242). */
+const readMark='read:';
+/** A read set as one SQL `text[]` parameter for readSetSql: readSetIds, each id marked. */
+export const readSetParam=(set:ReadSet):string[]=>readSetIds(set).map(id=>readMark+id);
 /**
  * SQL test that `column` names a conversation of a read set bound as ONE `text[]` parameter holding readSetParam(set):
- * `param` is its position (2 for `$2`) or its literal placeholder. An empty parameter matches nothing.
+ * `param` is its position (2 for `$2`) or its literal placeholder. Only the parameter's marked entries count, so an
+ * empty parameter, or one not made by readSetParam, matches nothing.
  */
 export const readSetSql=(column:string,param:number|string)=>{
   if(typeof param==='number'?!Number.isSafeInteger(param)||param<1:!param.trim())throw Error('invalid_read_set_parameter');
-  return `${column}=ANY(${typeof param==='number'?'$'+param:param}::text[])`;
+  return `${column}=ANY(ARRAY(SELECT substr(entry,${readMark.length+1}) FROM unnest(${typeof param==='number'?'$'+param:param}::text[]) entry `+
+    `WHERE left(entry,${readMark.length})='${readMark}'))`;
 };
 
 /**

@@ -69,11 +69,14 @@ test('a read set selects in SQL exactly what inReadSet reads',{skip:process.env.
     assert.deepEqual(await select(readSetOf(recallScope(NG1_TOPIC,'topic'))),[NG1_TOPIC],'a digest topic alone');
     for(const space of [OWNER,'456',BOB_CHAT,'desktop:personal_chat:9','system',chatIdFor('telegram','-1009999999999')])
       assert.deepEqual(await select(readSetOf(recallScope(space))),[],space);
-    // The parameter is exact ids: a pattern written into it matches nothing, and a set made by hand with private chats,
-    // unknown ids and patterns in it still never puts one in the parameter (ADR-0242).
-    assert.deepEqual(await select(['%','*','/*',GP1+'/*/*',GP4+'/topic/1']),[GP4+'/topic/1']);
+    // The parameter is marked exact ids: a pattern written into it matches nothing, and a parameter made by hand, which
+    // skipped readSetParam, matches nothing at all, the owner's chat, Bob's and a group alike (ADR-0242).
+    assert.deepEqual(await select(['read:%','read:*','read:/*','read:'+GP1+'/*/*','read:'+GP4+'/topic/1']),[GP4+'/topic/1']);
+    assert.deepEqual(await select([OWNER,OWNER+'/topic/5','456',BOB_CHAT,'system',GP1,GP4+'/topic/1']),[],'a list by hand opens nothing');
+    assert.deepEqual(await select(['read',':'+OWNER,'READ:'+OWNER,' read:'+OWNER]),[],'only the exact mark counts');
+    // A set made by hand with private chats, unknown ids and patterns in it still never puts one in the parameter.
     const forged={home:GP4,exact:[OWNER,OWNER+'/topic/5','456',BOB_CHAT,'system','desktop:personal_chat:9',GP1+'/*',GP4+'/topic/1'],whole:[OWNER,BOB_CHAT,'%',UNSERVED+'/topic/1'],project:null};
-    assert.deepEqual(readSetParam(forged),[GP4+'/topic/1']);
+    assert.deepEqual(readSetParam(forged),['read:'+GP4+'/topic/1']);
     assert.deepEqual(await select(forged),[GP4+'/topic/1']);
     assert.deepEqual(await select([]),[]);
     const named=(await db.query(`SELECT s FROM unnest($2::text[]) s WHERE ${readSetSql('s','$1')} ORDER BY s COLLATE "C"`,[readSetParam(frozen),[GP2+'/topic/7',GP4,OWNER]])).rows;

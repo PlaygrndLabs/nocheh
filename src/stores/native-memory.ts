@@ -895,8 +895,8 @@ export class NativeMemoryRepository {
     const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
     const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
     // An answer reader searches the sessions of every group frozen in its record, and no other (ADR-0249).
-    const reads=!principal.admin&&principal.answer!==undefined?readSetParam(this.contexts.access.reads(principal)!):null;
-    const sessions=reads?await this.provenance.readSetSessions(id,reads,1000):audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
+    const set=!principal.admin&&principal.answer!==undefined?this.contexts.access.reads(principal)!:null,reads=set?readSetParam(set):null;
+    const sessions=set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};
     // The question is checked for secrets before it reaches the engine, as a recall question is.
     const question=await this.prepared.prepare(actor,query,this.detect);

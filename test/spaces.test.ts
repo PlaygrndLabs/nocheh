@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {eventSpace,validateOverrides,spacePolicy,saveSpace,recallScope,inRecall,recallCondition,groupSpace,groupSpaces,groupWithTopics,
-  servedGroups,servedGroup,parentSpace,readSet,readSetOf,inReadSet,readSetGroups,readSetParam,readSetSql,sourceChat,observedChat,
+  servedGroups,servedGroup,parentSpace,readSet,readSetOf,inReadSet,readSetGroups,readSetIds,readSetParam,readSetSql,sourceChat,observedChat,
   archiveScopes} from '../src/spaces.js';
 import {chatDirectory,chatIdFor,installChatsForTest,type ChatDirectory} from '../src/chats.js';
 import {BOB,BOB_CHAT,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,P1,UNSERVED,
@@ -116,7 +116,7 @@ test('a read set equals the recall scope it is made from, for groups and topics 
   // A private chat's recall scope reads itself through inRecall, but a read set never holds it.
   for(const space of privateChats.filter(Boolean)) {
     const set=readSetOf(recallScope(space));
-    assert.deepEqual([set.exact,set.whole],[[],[]],space);assert.equal(inReadSet(set,space),false,space);assert.deepEqual(readSetParam(set),[],space);
+    assert.deepEqual([set.exact,set.whole],[[],[]],space);assert.equal(inReadSet(set,space),false,space);assert.deepEqual(readSetIds(set),[],space);
   }
 }));
 
@@ -127,13 +127,14 @@ test('a read set holds only groups and topics, whatever it is made from',()=>wit
   assert.ok(Object.isFrozen(set)&&Object.isFrozen(set.exact)&&Object.isFrozen(set.whole));
   for(const space of [GP1,GP1_TOPIC,GP1_NEW_TOPIC,GP2,GP3,NG1_TOPIC,NG2])assert.equal(inReadSet(set,space),true,space);
   for(const space of [NG1,GP4,...privateChats,null,undefined])assert.equal(inReadSet(set,space),false,String(space));
-  assert.deepEqual(readSetParam(set),[GP1,GP1_TOPIC,GP1_NEW_TOPIC,GP2,GP3,NG1_TOPIC,NG2].sort());
+  assert.deepEqual(readSetIds(set),[GP1,GP1_TOPIC,GP1_NEW_TOPIC,GP2,GP3,NG1_TOPIC,NG2].sort());
+  assert.deepEqual(readSetParam(set),readSetIds(set).map(id=>'read:'+id),'the SQL parameter marks every id');
   assert.deepEqual(readSetGroups(set),[GP1,GP2,GP3,NG1,NG2].sort());
   // A set built by hand with private chats in it still never reads or binds one.
   const forged={home:OWNER,exact:[OWNER,BOB_CHAT,'desktop:personal_chat:9',GP2],whole:[OWNER,'system','-20',GP1_TOPIC,GP3],project:null};
   for(const space of [OWNER,BOB_CHAT,'desktop:personal_chat:9','system','-20'])assert.equal(inReadSet(forged,space),false,space);
   assert.ok(inReadSet(forged,GP2)&&inReadSet(forged,GP3));assert.equal(inReadSet(forged,GP1_TOPIC),false,'a topic is never a whole group');
-  assert.deepEqual(readSetParam(forged),[GP2,GP3]);
+  assert.deepEqual(readSetIds(forged),[GP2,GP3]);
   assert.deepEqual(readSetGroups(forged),[GP2,GP3]);
   assert.deepEqual(readSet({home:OWNER}),{home:OWNER,exact:[],whole:[],project:null});
   assert.throws(()=>readSet({home:''}),{code:'invalid_space'});
@@ -141,12 +142,13 @@ test('a read set holds only groups and topics, whatever it is made from',()=>wit
 }));
 
 test('a read set binds as one text array parameter of chat ids that never holds a private chat',()=>withChats(everything(),()=>{
-  assert.equal(readSetSql('s.audience',2),'s.audience=ANY($2::text[])');
-  assert.equal(readSetSql('s.audience','$7'),'s.audience=ANY($7::text[])');
+  // Only the entries readSetParam marked count: a list of ids made by hand matches nothing (ADR-0242).
+  assert.equal(readSetSql('s.audience',2),"s.audience=ANY(ARRAY(SELECT substr(entry,6) FROM unnest($2::text[]) entry WHERE left(entry,5)='read:'))");
+  assert.equal(readSetSql('s.audience','$7'),"s.audience=ANY(ARRAY(SELECT substr(entry,6) FROM unnest($7::text[]) entry WHERE left(entry,5)='read:'))");
   for(const param of [0,-1,1.5,'',' '])assert.throws(()=>readSetSql('audience',param),/invalid_read_set_parameter/);
   // The SQL id lists the stores bind: groups and their topics only, never the owner's chat, Bob's chat or an unknown id.
   const lists={groupSpaces:groupSpaces(),servedGroups:servedGroups(),gp1:groupWithTopics(GP1)!,ng1:groupWithTopics(NG1)!,
-    param:readSetParam(readSet({home:GP1,exact:privateChats,whole:[...privateChats,GP1,NG1]}))};
+    param:readSetIds(readSet({home:GP1,exact:privateChats,whole:[...privateChats,GP1,NG1]}))};
   for(const [name,list] of Object.entries(lists)) {
     assert.ok(list.length>0,name);
     for(const id of privateChats)assert.ok(!list.includes(id),`${name} holds ${id}`);
@@ -191,7 +193,7 @@ test('archive reads expand a chat to every Telegram id it has had, current and o
 test('the old-shaped family alone keeps every answer it gave before step 2b',()=>withChats(fixtureDirectory(),()=>{
   assert.deepEqual(servedGroups(),[GP1,GP2,GP3,GP4]);
   assert.equal(groupSpace(NG1),true,'an unserved digest group is still a group');assert.equal(servedGroup(NG1),false);
-  assert.deepEqual(readSetParam(readSetOf(recallScope(GP1_TOPIC),P1)),[GP1,GP1_TOPIC]);
+  assert.deepEqual(readSetIds(readSetOf(recallScope(GP1_TOPIC),P1)),[GP1,GP1_TOPIC]);
   assert.deepEqual(archiveScopes([GP1_TOPIC]),[GP1]);
 }));
 
