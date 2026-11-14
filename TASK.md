@@ -386,6 +386,16 @@ checks now reuse the process's open connections to the provider
 ([check](services/hermes/test_subscription_detector.py)). Pending: a failed secret
 check on a running installation that names its cause.
 
+Secret check on Haiku 5.5 (owner, 2026-11-13: "pick Haiku model for secret check", "pick
+as default"): a secret check on Anthropic that names no model uses `claude-haiku-5-5`, and
+Settings › Models shows it as "Default (claude-haiku-5-5)"; on other providers it follows
+the main model ([ADR-0246](docs/adr/0246-the-secret-check-on-anthropic-defaults-to-haiku-5-5.md),
+[check](services/hermes/test_provider_routes.py)). Through the production call path on
+Anthropic's API, on 29 synthetic cases, five rounds each, it passed 145 of 145 like
+`claude-sonnet-5`, with no missed secret, extra value or refusal, a 1.2-second median
+against 1.56 seconds and about a twentieth of the cost. The owner's installation has
+chosen it since 2026-11-08.
+
 Stuck notes review (2026-11-08): on the owner's installation one Hermes native notes
 review failed once without changing notes, came due again two minutes later under a
 newer epoch, and its workflow closed as superseded; nothing asked for it again, so it
@@ -2128,7 +2138,9 @@ calls, so the secret check stays on `claude-sonnet-5`. A larger rerun (five
 rounds, 70 calls per model) confirmed it: `claude-sonnet-5` 70 of 70 with a
 2.55-second median and 3.13-second p90; `claude-sonnet-5-5` 69 of 70, 3.07 and
 4.73 seconds; `claude-haiku-5-5` 55 of 70 and `claude-haiku-4-5-20251001` 61 of
-70, every failure an unreadable reply.
+70, every failure an unreadable reply. Since then the check asks Anthropic's own API for
+a strict JSON schema, and there on 2026-11-13 `claude-haiku-5-5` passed every check; it is
+now the secret check's default on Anthropic (see Secret check on Haiku 5.5 above).
 
 Simulator run on main after the Honcho session, storage and timing merges
 (October 10, fresh synthetic installation, deterministic inference): the

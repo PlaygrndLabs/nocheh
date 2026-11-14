@@ -87,7 +87,7 @@ function modelRoutes() {
   const name=(id:string)=>({openai:'OpenAI',anthropic:'Anthropic'} as Record<string,string>)[id]??customs.find(c=>c.id===id)?.name??id;
   const parts=[['reply','Replies (Hermes)','REPLY'],['memory','Memory (Honcho)','MEMORY'],['guard','Secret check','GUARD']].map(([part,label,key])=>{
     const provider=setting(`NOCHEH_${key}_PROVIDER`)||setting('NOCHEH_PROVIDER');
-    return {part,label,provider,provider_name:provider?name(provider):'',model:provider?setting(`NOCHEH_${key}_MODEL`)||setting('NOCHEH_MODEL'):'',configured:!!provider};
+    return {part,label,provider,provider_name:provider?name(provider):'',model:provider?setting(`NOCHEH_${key}_MODEL`)||(part==='guard'&&provider==='anthropic'?'claude-haiku-5-5':'')||setting('NOCHEH_MODEL'):'',configured:!!provider};
   });
   const embedding=setting('NOCHEH_EMBEDDING_PROVIDER')||'openai';
   return [...parts,{part:'embedding',label:'Memory search',provider:embedding,provider_name:name(embedding),model:setting('NOCHEH_EMBEDDING_MODEL'),configured:true}];
@@ -108,7 +108,7 @@ const settingsView=(mode:string)=>({revision:settingsRevision,apply_state:applyi
     transcription:[{model:'gpt-transcribe',usd_per_minute:0.0045},{model:'gpt-4o-transcribe',usd_per_minute:0.006},{model:'gpt-4o-mini-transcribe',usd_per_minute:0.003},{model:'whisper-1',usd_per_minute:0.006}]},
    providers:{list:[{id:'openai',name:'OpenAI',kind:'openai',url:'https://api.openai.com/v1',has_key:mode!=='fresh'||!!settingsChanges.OPENAI_API_KEY},{id:'anthropic',name:'Anthropic',kind:'anthropic',url:'https://api.anthropic.com/v1',has_key:false},
      ...JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).map((p:any)=>({...p,kind:'custom',has_key:true}))],
-    parts:[{id:'reply',label:'Replies (Hermes)',provider_setting:'NOCHEH_REPLY_PROVIDER',model_setting:'NOCHEH_REPLY_MODEL'},{id:'memory',label:'Memory (Honcho)',provider_setting:'NOCHEH_MEMORY_PROVIDER',model_setting:'NOCHEH_MEMORY_MODEL'},{id:'guard',label:'Secret check',provider_setting:'NOCHEH_GUARD_PROVIDER',model_setting:'NOCHEH_GUARD_MODEL'}]}});
+    parts:[{id:'reply',label:'Replies (Hermes)',provider_setting:'NOCHEH_REPLY_PROVIDER',model_setting:'NOCHEH_REPLY_MODEL'},{id:'memory',label:'Memory (Honcho)',provider_setting:'NOCHEH_MEMORY_PROVIDER',model_setting:'NOCHEH_MEMORY_MODEL'},{id:'guard',label:'Secret check',provider_setting:'NOCHEH_GUARD_PROVIDER',model_setting:'NOCHEH_GUARD_MODEL',defaults:{anthropic:'claude-haiku-5-5'}}]}});
 const personas:Record<string,{role:string;skills:{name:string;description:string;body:string}[];revision:string}>={
   default:{role:'',skills:[{name:'weekly-menu',description:'When someone asks what to cook this week.',body:'Suggest five dinners from what is in the fridge.'}],revision:'persona-1'}};
 const persona=(scope:string)=>({scope,...(personas[scope]??={role:'',skills:[],revision:'persona-1'})});

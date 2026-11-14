@@ -72,7 +72,8 @@ def provider_view(values):
     rows = [{**row, 'has_key': bool(
         (values.get(provider_routes.PRESETS[row['id']]['key']) if row['id'] in provider_routes.PRESETS else stored.get(row['id'])) or '')}
             for row in known.values()]
-    parts = [{'id': part, 'label': label, 'provider_setting': provider, 'model_setting': model}
+    parts = [{'id': part, 'label': label, 'provider_setting': provider, 'model_setting': model,
+              'defaults': provider_routes.PART_DEFAULTS.get(part, {})}
              for part, (label, provider, model) in provider_routes.PARTS.items()]
     return {'list': rows, 'parts': parts}
 

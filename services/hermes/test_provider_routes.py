@@ -58,9 +58,31 @@ class ProviderRouteTests(unittest.TestCase):
         selected = routes.routes(values)
         self.assertEqual((selected['reply'].provider, selected['reply'].url, selected['reply'].model),
                          ('gateway', GATEWAY['url'], 'claude-sonnet-5-5'))
-        self.assertEqual(selected['guard'].key, 'synthetic-gateway-key')
+        # On a provider without a default of its own, the secret check follows the main model.
+        self.assertEqual((selected['guard'].key, selected['guard'].model), ('synthetic-gateway-key', 'claude-sonnet-5-5'))
         self.assertEqual((selected['memory'].url, selected['memory'].model, selected['memory'].key),
                          ('https://api.openai.com/v1', 'gpt-5.6-sol', 'synthetic-openai-key'))
+
+    def test_the_secret_check_on_anthropic_defaults_to_its_small_model(self):
+        values = load(self.state)
+        values.update(NOCHEH_PROVIDER='anthropic', NOCHEH_MODEL='claude-sonnet-5-5', ANTHROPIC_API_KEY='synthetic-anthropic-key',
+                      NOCHEH_PROVIDERS=json.dumps([GATEWAY]), NOCHEH_PROVIDER_KEYS='{"gateway":"synthetic-gateway-key"}')
+        routes.validate(values)
+        guard = lambda **change: routes.route({**values, **change}, 'guard').model
+        self.assertEqual(guard(), 'claude-haiku-5-5')
+        self.assertEqual(routes.route(values, 'reply').model, 'claude-sonnet-5-5')
+        # A model the owner names wins; a secret check moved to another provider follows the main model again.
+        self.assertEqual(guard(NOCHEH_GUARD_MODEL='claude-sonnet-5'), 'claude-sonnet-5')
+        self.assertEqual(guard(NOCHEH_GUARD_PROVIDER='gateway'), 'claude-sonnet-5-5')
+        self.assertEqual(guard(NOCHEH_PROVIDER='gateway', NOCHEH_GUARD_PROVIDER='anthropic'), 'claude-haiku-5-5')
+        from tools.operations.installation.configuration import write_env, env_path
+        write_env(env_path(self.state), values)
+        env = compose_environment(self.state)
+        self.assertEqual((env['NOCHEH_GUARD_ROUTE_URL'], env['NOCHEH_GUARD_ROUTE_MODEL']), ('https://api.anthropic.com/v1', 'claude-haiku-5-5'))
+        self.assertEqual(env['NOCHEH_REPLY_ROUTE_MODEL'], 'claude-sonnet-5-5')
+        # Settings › Models shows the default as the empty choice's label.
+        parts = {part['id']: part for part in view(self.state)['providers']['parts']}
+        self.assertEqual((parts['guard']['defaults'], parts['reply']['defaults']), ({'anthropic': 'claude-haiku-5-5'}, {}))
 
     def test_invalid_providers_and_missing_keys_are_refused(self):
         values = load(self.state)
