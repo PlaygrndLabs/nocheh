@@ -8,8 +8,8 @@ import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
-import {assistantPolicy,conversationScope,groupAccessFor,outsideChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
-import {installChatsForTest} from '../src/chats.js';
+import {assistantPolicy,conversationScope,groupAccessFor,outsideChat,settleTelegramChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
+import {installChats,installChatsForTest,setChatLoader} from '../src/chats.js';
 import {BOB,BOB_CHAT,GP1,GP_GROUP_IDS,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureDirectory,policyDirectory} from './fixture-groups.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {dispatchCommitted,storedTranscripts} from '../src/assistant.js';
@@ -76,6 +76,25 @@ test('a chat is answered by its chat row: digest chats, upgraded groups and acce
     assert.equal(outsideChat(unserved,live(NG1_TG)),true,'an unserved digest group');
     assert.equal(BOB_CHAT.length,64);
   }finally{installChatsForTest(policyDirectory(policy,['456','-99']));}
+});
+
+test('a chat recorded a moment ago is looked up again before its message is judged outside or its turn refused',async()=>{
+  // '-40' is served and was recorded by a capture that committed, but this process has not loaded it yet.
+  const served={...policy,group_ids:[...policy.group_ids,'-40']},later=policyDirectory(served,['456','-99']);
+  const restore=installChatsForTest(policyDirectory(policy,['456','-99']));let looked=0;
+  setChatLoader({epoch(){},miss(){},current:async()=>{looked++;installChats(later);return later;}});
+  try {
+    const live=(scope:string)=>({origin:'live',channel:'telegram',kind:'telegram_update',scope});
+    assert.equal(outsideChat(served,live('-40')),true,'unknown to this process: outside, if judged now');
+    assert.equal(conversationScope(served,update(-40,123),'-40'),null);
+    await settleTelegramChat(live('-40'));
+    assert.equal(looked,1);assert.equal(outsideChat(served,live('-40')),false);assert.equal(conversationScope(served,update(-40,123),'-40')?.chat_id,'-40');
+    // A chat this process holds, and an original that names no chat, are not looked up again.
+    await settleTelegramChat(live('-40'));await settleTelegramChat(live('system'));await settleTelegramChat({channel:'browser',scope:'-41'});
+    assert.equal(looked,1);
+    // A chat still unknown after the second look stays outside (fail closed).
+    await settleTelegramChat(live('-41'));assert.equal(looked,2);assert.equal(outsideChat(served,live('-41')),true);
+  }finally{setChatLoader(null);restore();}
 });
 
 test('the owner listed as a person allowed or denied in a group stops the services from starting',async()=>{

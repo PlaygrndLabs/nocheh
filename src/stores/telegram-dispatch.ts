@@ -1,7 +1,7 @@
 import {albumMembers,albumSettleMs} from './albums.js';
 import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope,ownerChat} from '../assistant-policy.js';
+import {conversationScope,ownerChat,settleTelegramChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {appBindingOf,telegramChat,telegramScopes,telegramTarget} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
@@ -531,6 +531,8 @@ export class TelegramDispatchRepository {
   }
   private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation|'not_addressed'> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
+    // A refusal is final, so a chat this process has not loaded yet (recorded a moment ago) is looked up again first.
+    await settleTelegramChat({channel:'telegram',scope:String(original.scope)});
     const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
     if(!scope) {
       await this.refuse(source.id,original.source_key,original.scope,payload);

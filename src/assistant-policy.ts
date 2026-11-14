@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { HttpError, object } from './http.js';
-import { chats, isChatId } from './chats.js';
+import { chats, chatsAfterMiss, isChatId } from './chats.js';
 import { isTelegramChat } from './chats-telegram.js';
 
 export interface GroupAccess {granted:string[];denied:string[]}
@@ -101,6 +101,17 @@ export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel
   if(!isTelegramChat(source.scope))return false;
   const directory=chats(),id=directory.resolve('telegram',source.scope);
   return id===null||!(id===ownerChat(policy)&&directory.kind(id)==='private'||directory.kind(id)==='group'&&directory.served(id));
+}
+
+/**
+ * For a decision that cannot be taken back (a turn refused, a message left unprepared): when this process's chat
+ * directory does not hold the Telegram chat a live original came from, waits until the loader has looked again
+ * (ADR-0250). The capture that recorded the chat, a served group's new id after an upgrade, commits before its
+ * workflows run, but this process may not have reloaded yet. A chat still unknown afterwards stays unknown, so the
+ * caller fails closed as before.
+ */
+export async function settleTelegramChat(source:{channel:string;scope:string}):Promise<void> {
+  if(source.channel==='telegram'&&isTelegramChat(source.scope)&&chats().resolve('telegram',source.scope)===null)await chatsAfterMiss();
 }
 
 /** Final Telegram send authorization uses the captured original, never a prepared representation. An answer reader's
