@@ -1,7 +1,9 @@
 import {albumMembers,albumSettleMs} from './albums.js';
 import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope} from '../assistant-policy.js';
+import {conversationScope,ownerChat} from '../assistant-policy.js';
+import {chats} from '../chats.js';
+import {appBindingOf,telegramChat,telegramScopes,telegramTarget} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {Brain,TurnReceipt} from '../brain/brain.js';
@@ -20,7 +22,7 @@ import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
 import {fillTemplate,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
-import {parentSpace,readSetGroups} from '../spaces.js';
+import {readSetGroups} from '../spaces.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
 import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply,type ReplyButton} from './telegram-reply.js';
@@ -175,10 +177,11 @@ export class TelegramDispatchRepository {
     try{const {reads:_given,...bare}=principal;open=canonical((await this.access.bindReads(bare)).reads??null)===canonical(principal.reads??null);}
     catch(error){if(!(error instanceof HttpError)||error.code!=='private_answer_closed')throw error;open=false;}
     const row=await this.answers.undelivered(principal.answer,event,open?'not_delivered':'changed');
-    if(open||!row||!(row.state==='expired'||row.state==='refused'&&row.refusal_code==='changed')||!policy.enabled||!policy.owner_id)return;
+    const owner=ownerChat(policy);
+    if(open||!row||!(row.state==='expired'||row.state==='refused'&&row.refusal_code==='changed')||!policy.enabled||!owner)return;
     const texts=privateAnswerLines((await ownerPrompts(this.control))['telegram.private_answer_texts']);
     // The notice's id is the record's, so the bot sends it at most once however often this runs.
-    await this.call('telegram.notice',{id:digest('private-answer-closed:'+row.id),chat_id:policy.owner_id,
+    await this.call('telegram.notice',{id:digest('private-answer-closed:'+row.id),...telegramTarget(owner),
       text:row.state==='expired'?texts.expired:texts.changed},30000);
   }
   private async receive(row:any,result:Record<string,unknown>,delay=observeMs) {
@@ -265,8 +268,8 @@ export class TelegramDispatchRepository {
     const own=(await this.archive.pool.query(`SELECT scope,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE id=$1`,[row.event_id])).rows[0];
     if(!own||!/^\d{1,19}$/.test(String(own.update_id)))return false;
     return (await this.archive.pool.query(`SELECT 1 FROM (SELECT convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events
-      WHERE id=ANY($1::text[]) AND scope=$2) earlier WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$3::numeric LIMIT 1`,
-      [running,own.scope,own.update_id])).rowCount!>0;
+      WHERE id=ANY($1::text[]) AND scope=ANY($2::text[])) earlier WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$3::numeric LIMIT 1`,
+      [running,this.scopes(input.principal.space,own.scope),own.update_id])).rowCount!>0;
   }
   private async input(reference:DerivativeReference):Promise<Input> {
     const row=(await this.derived.pool.query('SELECT content,content_hash FROM derived_artifacts WHERE id=$1',[reference.id])).rows[0];
@@ -287,9 +290,9 @@ export class TelegramDispatchRepository {
     const own=(await this.archive.pool.query(`SELECT scope,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE id=$1`,[source.id])).rows[0];
     if(!own||!/^\d{1,19}$/.test(String(own.update_id)))return false;
     const earlier=(await this.archive.pool.query(`SELECT id FROM (SELECT id,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events
-      WHERE scope=$1 AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live' AND received_at>now()-interval '10 minutes') recent
+      WHERE scope=ANY($1::text[]) AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live' AND received_at>now()-interval '10 minutes') recent
       WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$3::numeric ORDER BY update_id::numeric DESC LIMIT 20`,
-      [own.scope,source.id,own.update_id])).rows.map(row=>row.id as string);
+      [this.scopes(space,own.scope),source.id,own.update_id])).rows.map(row=>row.id as string);
     if(!earlier.length)return false;
     const started=new Set((await this.control.query(`SELECT event_id FROM dispatches WHERE event_id=ANY($1::text[])
       AND state NOT IN ('pending','failed')`,[earlier])).rows.map(row=>row.event_id as string));
@@ -308,10 +311,10 @@ export class TelegramDispatchRepository {
     const own=(await this.archive.pool.query(`SELECT scope,convert_from(payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events WHERE id=$1`,[source.id])).rows[0];
     if(!own||!/^\d{1,19}$/.test(String(own.update_id)))return 0;
     const earlier=(await this.archive.pool.query(`SELECT id FROM (SELECT e.id,convert_from(e.payload,'UTF8')::jsonb->>'update_id' AS update_id FROM events e
-      WHERE e.scope=$1 AND e.id<>$2 AND e.channel='telegram' AND e.kind='telegram_update' AND e.origin='live' AND e.received_at>now()-interval '1 day'
+      WHERE e.scope=ANY($1::text[]) AND e.id<>$2 AND e.channel='telegram' AND e.kind='telegram_update' AND e.origin='live' AND e.received_at>now()-interval '1 day'
       AND EXISTS(SELECT 1 FROM artifacts a WHERE a.event_id=e.id AND a.kind IN ('voice','audio','video_note'))) recent
       WHERE update_id ~ '^[0-9]{1,19}$' AND update_id::numeric<$3::numeric ORDER BY update_id::numeric DESC LIMIT 20`,
-      [own.scope,source.id,own.update_id])).rows.map(row=>row.id as string);
+      [this.scopes(space,own.scope),source.id,own.update_id])).rows.map(row=>row.id as string);
     if(!earlier.length)return 0;
     const started=new Set((await this.control.query(`SELECT event_id FROM dispatches WHERE event_id=ANY($1::text[])
       AND state NOT IN ('pending','failed')`,[earlier])).rows.map(row=>row.event_id as string));
@@ -333,9 +336,10 @@ export class TelegramDispatchRepository {
   private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string}[]> {
     const own=(await this.archive.pool.query('SELECT scope,received_at FROM events WHERE id=$1',[source.id])).rows[0];
     if(!own)return [];
-    const rows=(await this.archive.pool.query(`SELECT id,payload FROM events WHERE scope=$1 AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
+    // Under every Telegram id the chat has had, so a group Telegram upgraded keeps the lines from before (ADR-0250).
+    const rows=(await this.archive.pool.query(`SELECT id,payload FROM events WHERE scope=ANY($1::text[]) AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
       AND received_at<=$3 AND received_at>$3::timestamptz-interval '12 hours' AND convert_from(payload,'UTF8')::jsonb ? 'message'
-      ORDER BY received_at DESC,id DESC LIMIT 100`,[own.scope,source.id,own.received_at])).rows;
+      ORDER BY received_at DESC,id DESC LIMIT 100`,[this.scopes(space,own.scope),source.id,own.received_at])).rows;
     if(!rows.length)return [];
     const states=new Map((await this.control.query('SELECT event_id,state,error_code FROM dispatches WHERE event_id=ANY($1::text[])',
       [rows.map(row=>row.id)])).rows.map(row=>[row.event_id as string,row]));
@@ -439,16 +443,21 @@ export class TelegramDispatchRepository {
     else payload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[id])).rows[0].payload.toString());
     return payload?.message??payload?.edited_message??payload??null;
   }
+  /** The chat a chat or topic belongs to (a topic's parent), asked of the directory. */
+  private chatOf(space:string):string {return chats().parentOf(space)??space;}
+  /** The archive scopes that hold a chat's originals: every Telegram id it has had, and `own`, the scope at hand. */
+  private scopes(space:string|undefined,own:string):string[] {return telegramScopes(space?this.chatOf(space):null,own);}
   /** A group's name, from the guarded copy of its latest archived message that the answer may read, else a fixed name;
    * never its numeric ID or a name its secret check would hide. */
   private async groupName(chat:string,principal:Reader,binding:GuardBinding):Promise<string> {
-    const rows=(await this.archive.pool.query(`SELECT id FROM events WHERE scope=$1 AND channel='telegram'
-      AND kind IN ('telegram_update','telegram_delivered_message') ORDER BY received_at DESC,id DESC LIMIT 20`,[chat])).rows;
+    const scopes=telegramScopes(chat);if(!scopes.length)return 'a Telegram group';
+    const rows=(await this.archive.pool.query(`SELECT id FROM events WHERE scope=ANY($1::text[]) AND channel='telegram'
+      AND kind IN ('telegram_update','telegram_delivered_message') ORDER BY received_at DESC,id DESC LIMIT 20`,[scopes])).rows;
     for(const row of rows) {
       try {
         if(!await this.access.canRead(principal,(await this.archive.captured(row.id)).reference,binding))continue;
         const message=await this.representation(row.id,binding);
-        if(String(message?.chat?.id)===chat&&placeName(message.chat.title))return '“'+placeName(message.chat.title)+'”';
+        if(scopes.includes(String(message?.chat?.id))&&placeName(message.chat.title))return '“'+placeName(message.chat.title)+'”';
       }catch(error){if(error instanceof HttpError)continue;throw error;}
     }
     return 'a Telegram group';
@@ -457,7 +466,7 @@ export class TelegramDispatchRepository {
    * Group and topic names come from guarded copies, as in the speaker line. `group` is where it was asked, as that line
    * names it, which the answer's runtime profile keeps so the owner's notes can tell answers apart. */
   private async answerFrame(row:PrivateAnswer,principal:Reader,binding:GuardBinding):Promise<{frame:string;group:string}> {
-    const home=parentSpace(row.from_chat_id)??row.from_chat_id;
+    const home=this.chatOf(row.from_chat_id);
     let topic:string|null=null;
     if(row.from_chat_id!==home) {
       let name='';
@@ -478,12 +487,12 @@ export class TelegramDispatchRepository {
    * after a first line that says where it was asked and what it may read. A /start that cannot be answered returns the
    * owner's fixed reply for it instead, and no model runs.
    */
-  private async answer(source:SourceReference,original:{source_key:string;scope:string},payload:any,space:string,id:string,attempt:number):
+  private async answer(source:SourceReference,original:{source_key:string;scope:string},payload:any,chat:string,space:string,id:string,attempt:number):
     Promise<string|{reference:DerivativeReference;input:Input}> {
     const texts=privateAnswerLines((await ownerPrompts(this.control))['telegram.private_answer_texts']);
     if(!this.answers)return texts.changed;
     let claimed:PrivateAnswerOutcome;
-    try{claimed=await this.answers.claim(id,{account_id:String(payload?.message?.from?.id??''),start_event:source.id,reply_chat_id:String(original.scope)});}
+    try{claimed=await this.answers.claim(id,{account_id:String(payload?.message?.from?.id??''),start_event:source.id,reply_chat_id:chat});}
     catch(error){if(error instanceof HttpError&&error.status===400)return texts.not_yours;throw error;}
     if(!claimed.ok)return texts[claimed.code];
     const row=claimed.answer,binding=await this.guards.state();
@@ -491,7 +500,7 @@ export class TelegramDispatchRepository {
     const close=async()=>(await this.answers!.undelivered(row.id,source.id,'changed'))?.state==='expired'?texts.expired:texts.changed;
     let principal:Reader;
     try {
-      principal=await this.access.bindReads({admin:false,scope:String(original.scope),space,turnEvent:source.id,answer:row.id,
+      principal=await this.access.bindReads({admin:false,scope:chat,space,turnEvent:source.id,answer:row.id,
         generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch});
     }catch(error){if(error instanceof HttpError&&error.code==='private_answer_closed')return await close();throw error;}
     await this.turns.binding(principal);
@@ -509,7 +518,8 @@ export class TelegramDispatchRepository {
     const questionPayload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[row.question_event])).rows[0].payload.toString());
     const speaker=speakerLine(questionPayload,question.event.payload,this.access.policy().owner_id),recent=await this.recentGroup(asked,row.from_chat_id,principal);
     const privateAnswer={...await this.answerFrame(row,principal,binding),question_event:row.question_event};
-    const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
+    const app=appBindingOf(space);
+    const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,chat,space,...(app?{app}:{}),
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:null,guard_mode:binding.mode,
       private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{})};
     const input={binding,principal,body};
@@ -529,7 +539,10 @@ export class TelegramDispatchRepository {
       const sender=payload?.message?.from,refused=!!sender?.id&&sender.is_bot!==true&&String(sender.id)!==this.access.policy().owner_id;
       return observation('skipped','admission',0,Date.now(),refused?'not_allowed':null);
     }
-    const space=await this.access.space(source);if(!space)return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
+    // The Nocheh chat the update came from, and the chat or topic it was said in (ADR-0250): asked of the directory, never
+    // read out of an id. Until the directory knows both, and the topic is the chat's own, the turn waits for it.
+    const chat=telegramChat(String(original.scope)),space=await this.access.space(source);
+    if(!space||!chat||space!==chat&&chats().parentOf(space)!==chat)return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
     const ready=await this.preparation.status(source.id);if(ready.state!=='completed')return ['retryable_failed','failed'].includes(ready.state)?ready:
       observation('waiting',ready.stage,0,ready.next_attempt,ready.waiting_reason);
     if(await this.heldByEarlier(source,space))return observation('waiting','admission',0,Date.now()+2000,'prerequisite');
@@ -539,11 +552,11 @@ export class TelegramDispatchRepository {
     // pass, never as the owner (ADR-0249). One that cannot be answered gets a fixed reply in the owner's own turn.
     const start=scope.owner?privateStart(payload):null;let refusal:string|null=null;
     if(start) {
-      const answer=await this.answer(source,original,payload,space,start,attempt);
+      const answer=await this.answer(source,original,payload,chat,space,start,attempt);
       if(typeof answer!=='string')return answer;
       refusal=answer;
     }
-    const binding=await this.guards.state(),principal:Reader={admin:false,scope:scope.owner?null:scope.chat_id,space,turnEvent:source.id,
+    const binding=await this.guards.state(),principal:Reader={admin:false,scope:scope.owner?null:chat,space,turnEvent:source.id,
       generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
     await this.turns.binding(principal);
     const selected=await this.sources.read(principal,source.id);
@@ -568,7 +581,8 @@ export class TelegramDispatchRepository {
     const reply=refusal??await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
     const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
-    const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,
+    const app=appBindingOf(space);
+    const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,chat,space,...(app?{app}:{}),
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
       ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,recent_group:recent});await currentTurn(this,input);
