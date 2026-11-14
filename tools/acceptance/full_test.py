@@ -58,6 +58,7 @@ TITLES = {
     'schedule_fires_and_waits_for_review': 'Scheduled job waits for approval', 'participant_not_permitted': 'Stranger in a group',
     'group_answers_only_when_addressed': 'Groups: answers only when addressed', 'unselected_group': 'Groups not selected stay silent',
     'retirement_hides_fact': 'Hidden message leaves search', 'voice_is_transcribed': 'Voice notes are turned into text',
+    'long_voice_is_cut_for_people_not_allowed': 'A long voice note from someone not allowed is read up to 15 minutes; yours in full',
     'photo_is_read': 'Photos are read once, at their largest size, for their text',
     'owner_directory_lists_conversations': 'Your chat list', 'unparseable_update_does_not_wedge_polling': 'A broken update does not stop Telegram',
     'telegram_refresh_names': 'Group names refresh', 'owner_freedom_keeps_group_cards': 'Setting: your private requests run without approval, except posts to groups',

@@ -68,6 +68,24 @@ def synthetic_pdf(lines):
     out += 'trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n' % (len(objects)+1, xref)
     return out.encode('latin-1')
 
+def synthetic_wav(seconds, rate=64):
+    """A plain square-wave WAV, `seconds` long at a very low rate, so a recording of many minutes stays small enough to
+    hand to the fixture. It is a tone, not silence, so nothing trims it away."""
+    import io
+    import wave
+    out = io.BytesIO()
+    with wave.open(out, 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(1)
+        audio.setframerate(rate)
+        audio.writeframes(bytes([200, 200, 56, 56])*(rate*seconds//4))
+    return out.getvalue()
+
+
+# The note a transcript of only the first 15 minutes ends with (src/stores/reprocessing.ts).
+FIRST_PART = '[Only the first 15 minutes of this recording were transcribed; its original audio is kept.]'
+
+
 class Failed(AssertionError):
     pass
 
@@ -643,12 +661,12 @@ class Scenarios:
                   and not self.replies(before, OWNER), state=row['state'], error=row['error'])
         self.turn(self.f.message(OWNER, 'حالا دوباره در دسترسم'), OWNER)
 
-    def voice(self, content):
+    def voice(self, content, sender=OWNER, chat=OWNER, topic=None, duration=2, mime_type='audio/ogg', extension='.oga'):
         file_id = 'voice-'+str(self.f.ids())
-        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+'.oga',
+        self.f.control({'files': [{'file_id': file_id, 'file_unique_id': 'u'+file_id, 'file_path': 'documents/'+file_id+extension,
                                    'file_size': len(content), 'bytes_base64': base64.b64encode(content).decode()}]})
-        update = self.f.message(OWNER, None, extra={'voice': {'file_id': file_id, 'file_unique_id': 'u'+file_id, 'duration': 2,
-                                                              'mime_type': 'audio/ogg', 'file_size': len(content)}})
+        update = self.f.message(chat, None, sender=sender, topic=topic, extra={'voice': {'file_id': file_id, 'file_unique_id': 'u'+file_id,
+                                'duration': duration, 'mime_type': mime_type, 'file_size': len(content)}})
         self.f.inject(update)
         event_id = self.captured(update)
         expected = hashlib.sha256(content).hexdigest()
@@ -668,6 +686,41 @@ class Scenarios:
         started = time.monotonic()
         self.turn(self.f.message(OWNER, 'یک پیام متنی بعد از ویس'), OWNER)
         self.gate('next_message_not_held', time.monotonic()-started < 90, seconds=round(time.monotonic()-started, 1))
+
+    def transcript(self, event_id):
+        return self.f.query('nocheh_derived', "SELECT convert_from(content,'UTF8') FROM derived_artifacts WHERE kind='transcript' AND event_id='"
+                            + event_id+"' ORDER BY created_at DESC LIMIT 1")
+
+    def transcribed_seconds(self):
+        """The seconds of audio sent to the Voice notes model over the last two days, as the owner's Usage page counts them."""
+        raw = subprocess.run(self.f.command+['exec', '-T', 'nocheh-dashboard', 'python3', '-m', 'tools.runtime.management'],
+                             input=json.dumps({'operation': 'usage.view', 'days': 2}), text=True, capture_output=True, timeout=180)
+        found = json.loads(raw.stdout.strip().splitlines()[-1]) if raw.stdout.strip() else {}
+        rows = (found.get('result') or {}).get('rows')
+        if not isinstance(rows, list):
+            raise Failed('usage_unreadable:'+str(found.get('error')))
+        return sum(row.get('audio_seconds') or 0 for row in rows if row.get('part') == 'transcription')
+
+    def long_voice_is_cut_for_people_not_allowed(self):
+        # A recording from someone the owner has not allowed in a group is transcribed up to its first 15 minutes,
+        # measured by its decoded sound, whatever length Telegram states; its original is kept whole. The owner's own
+        # recording of the same length is transcribed whole (ADR-0251).
+        content = synthetic_wav(16*60)
+        before = self.transcribed_seconds()
+        _, event_id = self.voice(content, sender=PARTICIPANT, chat=GROUP, topic=27, duration=5, mime_type='audio/wav', extension='.wav')
+        self.finished(event_id, seconds=400)
+        text = self.wait('stranger_voice_transcribed', lambda: self.transcript(event_id), 600, 5)
+        self.gate('stranger_voice_first_part_only', 'VOICEMARK77' in text and text.endswith(FIRST_PART), end=text[-120:])
+        spent = self.transcribed_seconds()-before
+        self.gate('at_most_15_minutes_sent', 899 <= spent <= 900.5, seconds=spent)
+        before = self.transcribed_seconds()
+        _, event_id = self.voice(content, duration=5, mime_type='audio/wav', extension='.wav')
+        row = self.finished(event_id, seconds=600)
+        self.gate('owner_voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
+        text = self.wait('owner_voice_transcribed', lambda: self.transcript(event_id), 120)
+        self.gate('owner_voice_whole', 'VOICEMARK77' in text and FIRST_PART not in text, end=text[-120:])
+        spent = self.transcribed_seconds()-before
+        self.gate('owner_recording_sent_whole', spent >= 959, seconds=spent)
 
     def photo_is_read(self):
         # A photo keeps its original bytes and is read once, at its largest size, by Hermes's vision tool with the
@@ -894,7 +947,7 @@ class Scenarios:
 ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
-         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'photo_is_read',
+         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'long_voice_is_cut_for_people_not_allowed', 'photo_is_read',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_keeps_group_cards', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']
 

@@ -74,18 +74,44 @@ const HEARINGS:Record<string,string>={
   failed:'This recording could not be transcribed; its original audio is kept.'};
 // A provider that is busy or unreachable is tried again by the preparation workflow.
 const RETRY=new Set(['rate_limited','provider_error','timed_out']);
+/** A live recording from someone the owner has not allowed is transcribed up to this length (ADR-0251). */
+export const VOICE_LIMIT_SECONDS=900;
+/** The configuration a transcription takes: none, or the length in whole seconds from the start of the recording to transcribe. */
+function firstSeconds(configuration:Record<string,unknown>):number|undefined {
+  const keys=Object.keys(configuration),value=configuration.first_seconds;
+  if(!keys.length)return undefined;
+  if(keys.length!==1||keys[0]!=='first_seconds'||typeof value!=='number'||!Number.isInteger(value)||value<1||value>86400)
+    throw new HttpError(400,'unsupported_transcription_configuration');
+  return value;
+}
+/** The first part of a recording, in words: "15 minutes", "minute", "90 seconds". */
+function opening(seconds:number):{length:string;one:boolean} {
+  const [count,unit]=seconds%60===0?[seconds/60,'minute']:[seconds,'second'];
+  return {length:count===1?unit:`${count} ${unit}s`,one:count===1};
+}
+/** Said after a transcript of only the first part of a recording, and instead of "no speech" when that part had none. */
+const cutNote=(seconds:number)=>{const {length,one}=opening(seconds);
+  return `[Only the first ${length} of this recording ${one?'was':'were'} transcribed; its original audio is kept.]`;};
+const cutSilent=(seconds:number)=>`This recording has no speech in its first ${opening(seconds).length}, the only part transcribed; its original audio is kept.`;
 /** Voice notes, audio files and round videos are transcribed by the runtime's own transcriber
  * (Hermes) with the provider chosen in Settings › Models. Without one, a note keeps the archived
- * status, so its reply never waits, and is transcribed once a provider is chosen. */
+ * status, so its reply never waits, and is transcribed once a provider is chosen. With `first_seconds`,
+ * the runtime transcribes only that much from the start of the decoded audio, never trusting the
+ * recording's stated length, and the transcript says so; the original audio is kept whole. */
 export function voiceTranscription(runtime:RuntimeCall):DerivationEngine {
   return {name:'runtime-voice',version:'1',outputKind:'transcript',async run(bytes,file,configuration){
-    if(Object.keys(configuration).length)throw new HttpError(400,'unsupported_transcription_configuration');
+    const first=firstSeconds(configuration);
     const text=(name:string)=>typeof file.metadata[name]==='string'?file.metadata[name] as string:'';
+    // Telegram's stated length is the sender's to set: a usage hint only, never the limit.
     const duration=file.metadata.duration;
     const result=await runtime('voice.transcribe',{bytes_base64:bytes.toString('base64'),name:text('file_name')||text('relative_path'),
-      mime_type:text('mime_type'),kind:file.kind,...(typeof duration==='number'&&duration>=0?{duration}:{})},660000);
-    if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
+      mime_type:text('mime_type'),kind:file.kind,...(typeof duration==='number'&&duration>=0?{duration}:{}),
+      ...(first===undefined?{}:{first_seconds:first})},660000);
+    // The runtime says whether the recording went on past the part it transcribed.
+    const cut=result.cut===true?first:undefined;
+    if(result.state==='done'&&typeof result.text==='string'&&result.text)return cut===undefined?result.text:`${result.text}\n\n${cutNote(cut)}`;
     if(result.state==='failed'&&RETRY.has(String(result.reason)))throw new HttpError(503,'transcription_unavailable');
+    if(result.state==='silent'&&cut!==undefined)return {kind:'extraction_status',text:cutSilent(cut)};
     return {kind:'extraction_status',text:HEARINGS[String(result.state)]??HEARINGS.failed!};
   }};
 }
