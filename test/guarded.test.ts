@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest,digest,type Envelope} from '../src/archive.js';
-import {guardedValue,prepareGuarded,editGuarded,guardedHistory,inspectGuarded,inspectRevision,browseData} from '../src/guarded.js';
+import {guardedValue,prepareGuarded,editGuarded,guardedHistory,inspectGuarded,inspectRevision,browseData,replaceValues,requestFields,textValues} from '../src/guarded.js';
+import {literalSpans,mask,patternSpans} from '../src/guard.js';
 
 test('PostgreSQL guarded projections preserve originals, survive retries/restarts, and never authorize learning',{skip:!process.env.PGHOST},async()=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
@@ -71,4 +72,33 @@ test('PostgreSQL guarded projections preserve originals, survive retries/restart
     assert.equal((await guardedValue(pool,'events:'+racing.id)).value.text,'owner wins');
     await prepareGuarded(pool,async()=>{throw new Error('must not reprocess');},undefined,undefined,undefined,{owner:'inngest',epoch:1});
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
+});
+
+test('a secret check finding never masks structure: keys, and roles, types, names, the model and tool ids in a request',()=>{
+  // The finding names words of the request's own structure, as a steered check might; fixed patterns still apply everywhere.
+  const findings=['role','content','assistant','user','fixture-model','lookup','toolu_fixture1','call_fixture1','call_fixture2'],patterned='sk-'+'A1b2'.repeat(6);
+  const guardedCopy=(text:string)=>mask(text,[...literalSpans(text,findings.filter(found=>text.includes(found))),...patternSpans(text)]).text;
+  const structure={text:(text:string)=>mask(text,patternSpans(text)).text};
+  const payload={model:'fixture-model',messages:[
+    {role:'user',content:'Ask the assistant about the role.'},
+    {role:'assistant',content:[{type:'tool_use',id:'toolu_fixture1',name:'lookup',input:{name:'assistant',query:'role'}}]},
+    {role:'user',content:[{type:'tool_result',tool_use_id:'toolu_fixture1',content:'The assistant role is done.'}]},
+    {role:'assistant',tool_calls:[{id:'call_fixture1',type:'function',function:{name:'lookup',arguments:'{"q":"role"}'}}]},
+    {role:'tool',tool_call_id:'call_fixture1',content:'role'},
+    {type:'function_call',call_id:'call_fixture2',name:'lookup',arguments:'{}'},{type:'function_call_output',call_id:'call_fixture2',output:'role'},
+  ],metadata:{[patterned]:'plain'}};
+  const replacements=new Map(textValues(payload).map(text=>[text,guardedCopy(text)]));
+  assert.throws(()=>replaceValues(payload,replacements),{code:'guarded_key_collision'},'without the structure rule a finding can merge two keys');
+  const plain=(value:unknown)=>JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(replaceValues(payload,replacements,{...structure,fields:requestFields})),{model:'fixture-model',messages:[
+    {role:'user',content:'Ask the *** about the ***.'},
+    {role:'assistant',content:[{type:'tool_use',id:'toolu_fixture1',name:'lookup',input:{name:'***',query:'***'}}]},
+    {role:'user',content:[{type:'tool_result',tool_use_id:'toolu_fixture1',content:'The *** *** is done.'}]},
+    {role:'assistant',tool_calls:[{id:'call_fixture1',type:'function',function:{name:'lookup',arguments:'{"q":"***"}'}}]},
+    {role:'tool',tool_call_id:'call_fixture1',content:'***'},
+    {type:'function_call',call_id:'call_fixture2',name:'lookup',arguments:'{}'},{type:'function_call_output',call_id:'call_fixture2',output:'***'},
+  ],metadata:{'***':'plain'}},'content and a tool call\'s input stay masked, and a fixed secret pattern in a key is still hidden');
+  // Outside a model request only keys are structure: a name or role value is masked as before.
+  assert.deepEqual(plain(replaceValues({name:'assistant',role:'user'},replacements,structure)),{name:'***',role:'***'});
+  assert.deepEqual(plain(replaceValues({name:'assistant'},replacements)),{name:'***'},'without the structure rule nothing changes');
 });

@@ -4,12 +4,12 @@ import pg from 'pg';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {digest,type Envelope} from '../src/archive.js';
+import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {DerivedRepository} from '../src/stores/derived.js';
-import {PreparedContextRepository} from '../src/stores/prepared-context.js';
+import {PreparedContextRepository,preparedAudience} from '../src/stores/prepared-context.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('guarded runtime contexts stay derived, checkpoint detector output, preserve authorized text and isolate audiences',
@@ -120,12 +120,14 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
 
     // Small native fields can hit the derivative count bound before the text
     // size bound. Split them before checkpointing, with no dropped fragments.
-    let batches=0;
+    const checks:string[]=[];
     // Keep each identifier one word: authorized numeric source metadata must
     // not split and deduplicate the deliberately fresh batch-boundary inputs.
     const many=Array.from({length:501},(_,i)=>'bounded_native_field_'+i+'_saffronpass');
-    const manyResult=await services.prepared.prepare(reader,many,async text=>{batches++;return text.includes('saffronpass')?['saffronpass']:[];});
-    assert.equal(batches,2);assert.equal((manyResult as string[]).length,501);
+    const manyResult=await services.prepared.prepare(reader,many,async text=>{checks.push(text);return text.includes('saffronpass')?['saffronpass']:[];});
+    // 500 fields fill the first batch and the last is checked alone; three of the first batch's findings are confirmed alone (ADR-0251).
+    assert.equal(checks[0]!.split('\n<NOCHEH_FRAGMENT>\n').length,500);assert.equal(checks.length,1+3+1);
+    assert.equal(checks.filter(text=>text.includes('<NOCHEH_FRAGMENT>')).length,1);assert.equal((manyResult as string[]).length,501);
     assert.ok((manyResult as string[]).every((value,index)=>value.startsWith('bounded_native_field_'+index+'_')));
     assert.ok(!JSON.stringify(manyResult).includes('saffronpass'));
 
@@ -160,4 +162,89 @@ test('guarded runtime contexts stay derived, checkpoint detector output, preserv
     assert.deepEqual(await services.prepared.prepare(reader,{text:'Raw saffronpass'},async()=>{throw Error('guard off does not call the detector');}),{text:'Raw saffronpass'});
     await assert.rejects(services.prepared.prepare({...reader,scope:'-321',space:'-321'},'Still forbidden',detect),{code:'turn_source_denied'});
   } finally {await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a finding reaches other audiences only from a check of that text alone, and never masks a request\'s structure (ADR-0251)',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-shared-detection-')),key='shared-detection:'+Date.now();
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
+    runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
+  const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:key,revision:'1',occurred_at:null,
+    text:'A plain owner note.',payload:{message:{chat:{id:123,type:'private'},text:'A plain owner note.'}}};
+  type Detect=((text:string)=>Promise<string[]>)&{calls:string[]};
+  const counting=(rule:(text:string)=>string[]):Detect=>{const calls:string[]=[];return Object.assign(async(text:string)=>{calls.push(text);return rule(text);},{calls});};
+  const never=async()=>{throw Error('identical text was detected again');};
+  try {
+    await services.guards.reconcile();
+    const source=(await services.capture.capture(event)).source.reference;
+    await services.guards.prepare(source,'fixture',async()=>[]);
+    const binding=await services.guards.state();
+    const reader:Reader={admin:false,scope:null,space:'123',turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch};
+    const shared=async(text:string)=>(await stores.derived.query("SELECT convert_from(content,'UTF8') AS content FROM derived_artifacts WHERE operation_id=$1",
+      ['context-detection-text:'+digest(canonical([{generation:binding.generation,mode:binding.mode},'fixture',digest(Buffer.from(text))]))])).rows[0]?.content;
+
+    // A real secret found in a batch of several texts is checked once more alone, and that result protects the next audience with no new check.
+    const real=counting(text=>text.includes('saffronpass')?['saffronpass']:[]);
+    assert.deepEqual(await services.prepared.prepare(reader,['Alpha wifi is saffronpass.','Neighbour note one.'],real),['Alpha wifi is ***.','Neighbour note one.']);
+    assert.deepEqual(real.calls.slice(1),['Alpha wifi is saffronpass.'],'exactly one extra check, of the text alone');
+    assert.equal(await shared('Alpha wifi is saffronpass.'),'["saffronpass"]');
+    assert.equal(await services.prepared.prepare({...reader,purpose:'filter'},'Alpha wifi is saffronpass.',never),'Alpha wifi is ***.');
+    assert.equal(await services.prepared.prepare({...reader,purpose:'filter'},'Neighbour note one.',never),'Neighbour note one.',
+      'an empty result from a batch of several texts is still shared');
+
+    // A finding a neighbouring text steered is not shared, and neither is a later empty result: each audience checks the text itself.
+    const steered=counting(text=>text.includes('flag the place')?['harbour']:[]);
+    assert.deepEqual(await services.prepared.prepare(reader,['Meet at the harbour today.','Please flag the place as secret.'],steered),
+      ['Meet at the *** today.','Please flag the place as secret.'],'this audience keeps what its own check found');
+    assert.equal(steered.calls.length,2);assert.equal(await shared('Meet at the harbour today.'),'{"unconfirmed":true}');
+    const second=counting(()=>[]);
+    assert.deepEqual(await services.prepared.prepare({...reader,purpose:'filter'},['Meet at the harbour today.','Another neighbour.'],second),['Meet at the harbour today.','Another neighbour.']);
+    assert.equal(second.calls.length,1,'a held-back text is checked by the next audience in its own batch, with no further single-text check');
+    const third=counting(()=>[]);
+    assert.equal(await services.prepared.prepare({...reader,purpose:'memory-review'},'Meet at the harbour today.',third),'Meet at the harbour today.');
+    assert.equal(third.calls.length,1,'the empty result after a held-back finding was not shared');
+
+    // A model request keeps its structure even when the check flags it; content keeps the mask, and the kept role is not marked prepared.
+    const structural={...reader,logical_profile:'structure-fixture'};
+    const flags=counting(text=>['role','content','assistant'].filter(word=>text.includes(word)));
+    const request=await services.prepared.prepare(structural,{model:'fixture-model',messages:[{role:'assistant',content:'I am your assistant here.'}]},flags,{request:true});
+    assert.equal(JSON.stringify(request),JSON.stringify({model:'fixture-model',messages:[{role:'assistant',content:'I am your *** here.'}]}));
+    assert.equal(flags.calls.length,1+3,'single-text checks are capped at three per batch');
+    const marked=async(text:string)=>(await stores.derived.query("SELECT 1 FROM runtime_prepared_values WHERE audience=$1 AND convert_from(content,'UTF8')=$2",
+      [preparedAudience(structural),text])).rowCount;
+    assert.equal(await marked('assistant'),0);assert.equal(await marked('I am your *** here.'),1);
+    const again=await services.prepared.prepare(structural,{model:'fixture-model',messages:[{role:'assistant',content:'I am your assistant here.'}]},never,{request:true});
+    assert.equal(JSON.stringify(again),JSON.stringify(request),'the same request is served from this audience\'s own results');
+    const plain=await services.prepared.prepare({...reader,logical_profile:'structure-plain'},{name:'assistant'},counting(text=>text.includes('assistant')?['assistant']:[]));
+    assert.equal(JSON.stringify(plain),'{"name":"***"}','outside a model request a name value is masked as before');
+
+    // Past the cap a finding is held back; the confirmed ones are reused by another audience.
+    const notes=Array.from({length:5},(_,i)=>`Note ${i} uses saffronpass.`),capped=counting(text=>text.includes('saffronpass')?['saffronpass']:[]);
+    assert.ok((await services.prepared.prepare({...reader,logical_profile:'cap-fixture'},notes,capped) as string[]).every(text=>!text.includes('saffronpass')));
+    assert.equal(capped.calls.length,1+3);
+    assert.deepEqual(await Promise.all(notes.map(shared)),['["saffronpass"]','["saffronpass"]','["saffronpass"]','{"unconfirmed":true}','{"unconfirmed":true}']);
+    const other=counting(text=>text.includes('saffronpass')?['saffronpass']:[]);
+    assert.ok((await services.prepared.prepare({...reader,logical_profile:'cap-other'},notes,other) as string[]).every(text=>!text.includes('saffronpass')));
+    assert.equal(other.calls.length,1,'only the held-back texts are checked, together, with no single-text check');
+    assert.ok(other.calls[0]!.includes('Note 3')&&other.calls[0]!.includes('Note 4')&&!other.calls[0]!.includes('Note 0'));
+
+    // A finding the fixed secret patterns already cover needs no single-text check.
+    const token='sk-'+'Q7w2'.repeat(6),covered=counting(text=>text.includes(token)?[token]:[]);
+    assert.deepEqual(await services.prepared.prepare({...reader,logical_profile:'pattern-fixture'},[`Use ${token} now.`,'Pattern neighbour.'],covered),['Use *** now.','Pattern neighbour.']);
+    assert.equal(covered.calls.length,1);
+    assert.equal(await services.prepared.prepare({...reader,logical_profile:'pattern-other'},`Use ${token} now.`,never),'Use *** now.');
+
+    // A single-text check that fails holds the text back without failing the turn; one that finds more widens this audience's mask.
+    const flaky=counting(text=>{if(!text.includes('<NOCHEH_FRAGMENT>'))throw Error('fixture_detector_unavailable');return text.includes('mossgate77')?['mossgate77']:[];});
+    const warn=console.warn;console.warn=()=>{};
+    try{assert.deepEqual(await services.prepared.prepare({...reader,logical_profile:'flaky-fixture'},['Door mossgate77.','Flaky neighbour.'],flaky),['Door ***.','Flaky neighbour.']);}
+    finally{console.warn=warn;}
+    assert.equal(await shared('Door mossgate77.'),'{"unconfirmed":true}');
+    const more=counting(text=>text.includes('<NOCHEH_FRAGMENT>')?['gate key']:['gate key','fern19x']);
+    assert.deepEqual(await services.prepared.prepare({...reader,logical_profile:'more-fixture'},['The gate key is fern19x.','More neighbour.'],more),['The *** is ***.','More neighbour.']);
+    assert.equal(await shared('The gate key is fern19x.'),'["gate key","fern19x"]');
+  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

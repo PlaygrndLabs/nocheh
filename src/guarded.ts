@@ -62,19 +62,30 @@ export function textValues(value:unknown):string[] {
   if(value!==null && typeof value==='object')return Object.entries(value).flatMap(([k,v])=>[k,...textValues(v)]);
   return [];
 }
-export function replaceValues(value:unknown,replacements:Map<string,string>):unknown {
-  if(typeof value==='string')return replacements.get(value)??value;
-  if(Array.isArray(value))return value.map(v=>replaceValues(v,replacements));
-  if(value!==null && typeof value==='object') {
-    const out:Record<string,unknown>=Object.create(null);
-    for(const [key,item] of Object.entries(value)) {
-      const changed=replacements.get(key)??key;
-      if(Object.hasOwn(out,changed))throw new HttpError(422,'guarded_key_collision');
-      out[changed]=replaceValues(item,replacements);
+/** String fields whose values are a model request's structure, not its content: who speaks, a block's type, a tool's or
+ *  speaker's name, the model, and the ids a provider gives a tool call and its result (ADR-0251). */
+export const requestFields:ReadonlySet<string>=new Set(['role','type','name','model','id','tool_use_id','tool_call_id','call_id']);
+/** How a payload's structure is written instead of its guarded copy: every object key, and the string values of `fields`
+ *  outside a tool call's `input` arguments, which hold data like any other text (the same rule as inspectRequest). */
+export interface Structure {text:(value:string)=>string;fields?:ReadonlySet<string>}
+
+export function replaceValues(value:unknown,replacements:Map<string,string>,structure?:Structure):unknown {
+  const replace=(value:unknown,literal:boolean):unknown=>{
+    if(typeof value==='string')return replacements.get(value)??value;
+    if(Array.isArray(value))return value.map(v=>replace(v,literal));
+    if(value!==null && typeof value==='object') {
+      const record=value as Record<string,unknown>,out:Record<string,unknown>=Object.create(null);
+      for(const [key,item] of Object.entries(record)) {
+        const changed=structure?structure.text(key):replacements.get(key)??key;
+        if(Object.hasOwn(out,changed))throw new HttpError(422,'guarded_key_collision');
+        out[changed]=typeof item==='string'&&!literal&&structure?.fields?.has(key)?structure.text(item):
+          replace(item,literal||(record.type==='tool_use'&&key==='input'));
+      }
+      return out;
     }
-    return out;
-  }
-  return value;
+    return value;
+  };
+  return replace(value,false);
 }
 
 async function sourceInput(client:pg.PoolClient,source:{kind:string;source_id:string}) {
