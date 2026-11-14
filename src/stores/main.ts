@@ -12,13 +12,18 @@ import {startStorageCapture} from './worker.js';
 import {startStorageWorkflows} from './workflow-service.js';
 import {hostTransport} from '../workflows/host-transport.js';
 import {restoredInactive} from './lifecycle.js';
+import {servedPolicy} from './chats.js';
+import {startChatRecords} from './chat-seed.js';
 
 // Turns and service calls that run a built-in instruction text carry the owner's replacements. Telegram calls go to
 // Nocheh's own bot (ADR-0235), the other helper services to the Hermes service.
 const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token})),call=withPrompts(runtimeCall(adapter),pools.api.control);
+// Chats are served as the chat directory holds them (ADR-0250); in step 2b-1 the bridge sets that from the environment.
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
-  policy:()=>config.assistant,runtime:call,brain:brainWithPrompts(brain(config),pools.api.control),memoryEngine:memoryEngine(config)};
+  policy:servedPolicy(()=>config.assistant),runtime:call,brain:brainWithPrompts(brain(config),pools.api.control),memoryEngine:memoryEngine(config)};
 const services=storageServices(pools.api,options),workflowServices=storageServices(pools.workflow,options);
+// Every chat already stored gets its row and the directory loads before anything captures or runs.
+const stopChatRecords=await startChatRecords(pools.api,services.chats,()=>config.assistant);
 const capture=startStorageCapture(services,config),workflows=startStorageWorkflows(workflowServices,config,call);
 const transport=process.env.INNGEST_SIGNING_KEY?hostTransport(process.env.INNGEST_SIGNING_KEY,undefined,undefined,()=>!restoredInactive(config.dataDir)):undefined;
 const server=storageServer(services,config,call,()=>({...capture.status(),workflows:workflows.state()}),transport,adapter.capabilities);
@@ -29,7 +34,7 @@ server.listen(config.port,config.host,()=>console.log(JSON.stringify({event:'rea
 let stopping=false;
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{
   if(stopping)return;stopping=true;
-  transport?.close();
+  transport?.close();stopChatRecords();
   const closed=new Promise<void>(resolve=>server.close(()=>resolve()));
   void Promise.all([closed,capture.stop(),workflows.close()]).then(()=>pools.close()).catch(()=>{process.exitCode=1;});
 });
