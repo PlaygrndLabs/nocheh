@@ -311,9 +311,9 @@ export async function startChatRecords(stores:{archive:pg.Pool;derived:pg.Pool;c
   const attempts=options.attempts??30,wait=options.wait??2000;
   for(let attempt=1;;attempt++) {
     try {
-      const configured=policy();
+      const configured=policy(),started=Date.now();
       const seeded=await new ChatSeeder(stores,configured).seed(),served=await chats.serve(configured);
-      console.log(JSON.stringify({event:'chat_records_ready',chats:seeded.chats,topics:seeded.topics,served_changes:served}));
+      console.log(JSON.stringify({event:'chat_records_ready',chats:seeded.chats,topics:seeded.topics,served_changes:served,ms:Date.now()-started}));
       break;
     } catch(error) {
       failure('chat_records_start_failed',error);
