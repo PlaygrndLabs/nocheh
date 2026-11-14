@@ -130,17 +130,38 @@ export function serializeGroupIds(ids: string[], savedText: string): string {
  */
 export const groupListed = (ids: string[], chat: Chat | null | undefined): boolean =>
   appIds(chat).some(id => ids.includes(id));
-/** Lists a group by its current Telegram id, or drops every Telegram id it has had. */
-export function withGroupListed(ids: string[], chat: Chat, on: boolean): string[] {
+/**
+ * Lists a group by one of its Telegram ids, or drops every Telegram id it has had. A group already listed stays as it
+ * is. Otherwise it is listed by the id the saved list had, so turning it off and back on is no change, else by its
+ * current one.
+ */
+export function withGroupListed(ids: string[], chat: Chat, on: boolean, saved: string[] = []): string[] {
   const own = appIds(chat);
   if (!on) return ids.filter(id => !own.includes(id));
-  const current = currentAppId(chat);
-  return own.some(id => ids.includes(id)) || !current ? ids : [...ids, current];
+  if (own.some(id => ids.includes(id))) return ids;
+  const pick = own.find(id => saved.includes(id)) ?? currentAppId(chat);
+  return pick ? [...ids, pick] : ids;
 }
-/** The TELEGRAM_GROUP_ACCESS key a group's people are kept under: whichever of its Telegram ids has them, else its
- * current one. Null for a chat with no Telegram id. */
-export const accessKey = (access: AccessMap, chat: Chat | null | undefined): string | null =>
-  appIds(chat).find(id => access[id]) ?? currentAppId(chat);
+/**
+ * The TELEGRAM_GROUP_ACCESS key a group's people are kept under. Every key must be listed in TELEGRAM_GROUP_IDS, or the
+ * settings are refused, and an upgraded group may still be listed by its old id only. So: whichever of its Telegram ids
+ * already has people in `access`, else one `listed` (the group ids being saved) has, the one with `saved` people
+ * first, else its current one. Null for a chat with no Telegram id.
+ */
+export function accessKey(
+  access: AccessMap,
+  chat: Chat | null | undefined,
+  listed: string[] = [],
+  saved: AccessMap = {},
+): string | null {
+  const own = appIds(chat);
+  return (
+    own.find(id => access[id]) ??
+    own.find(id => saved[id] && listed.includes(id)) ??
+    own.find(id => listed.includes(id)) ??
+    currentAppId(chat)
+  );
+}
 
 export function parseAccess(text: string): AccessMap {
   try {

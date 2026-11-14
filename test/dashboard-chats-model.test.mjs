@@ -150,9 +150,35 @@ test('until step 2b-2 a group is served by its Telegram IDs in TELEGRAM_GROUP_ID
   assert.deepEqual(withGroupListed(['-4005'], find(UPGRADED), true), ['-4005'], 'already listed');
   assert.deepEqual(withGroupListed(['-10042', '-4005', '-10099'], find(UPGRADED), false), ['-10042']);
   assert.deepEqual(withGroupListed(['-10042'], unknownChat(NEW), true), ['-10042'], 'no Telegram id, nothing added');
+  // Off and back on in one draft lists the group by the id the saved list had, not by a new one.
+  assert.deepEqual(withGroupListed(['-10042'], find(UPGRADED), true, ['-10042', '-4005']), ['-10042', '-4005']);
+  assert.deepEqual(withGroupListed([], find(UPGRADED), true), ['-10099'], 'never listed: its current id');
   assert.equal(accessKey({'-4005': {granted: ['73'], denied: []}}, find(UPGRADED)), '-4005');
   assert.equal(accessKey({}, find(UPGRADED)), '-10099');
   assert.equal(accessKey({}, unknownChat(NEW)), null);
+});
+
+test('a group’s people are kept under a Telegram ID TELEGRAM_GROUP_IDS lists, as the settings require', () => {
+  // An upgraded group still served by its old id only: its first allowed person goes under that id, not the new one.
+  assert.equal(accessKey({}, find(UPGRADED), ['-10042', '-4005']), '-4005');
+  // Listed by both: the id that has saved people is kept.
+  const saved = {'-4005': {granted: ['73'], denied: []}};
+  assert.equal(accessKey({}, find(UPGRADED), ['-10099', '-4005'], saved), '-4005');
+  assert.equal(accessKey({}, find(UPGRADED), ['-10099', '-4005']), '-10099');
+  // Whatever the saved and draft lists hold, a key for an upgraded group is one its listing keeps.
+  const lists = [[], ['-4005'], ['-10099'], ['-4005', '-10099'], ['-10042', '-4005'], ['-10042']];
+  for (const savedIds of lists)
+    for (const draft of lists)
+      for (const people of [{}, saved]) {
+        const ids = withGroupListed(draft, find(UPGRADED), true, savedIds);
+        const key = accessKey({}, find(UPGRADED), ids, people);
+        assert.ok(ids.includes(key), JSON.stringify({savedIds, draft, people, ids, key}));
+      }
+  // The saved people come back under the id the group is listed by after it is turned off and on again.
+  const off = withGroupListed(['-10042', '-4005'], find(UPGRADED), false);
+  const on = withGroupListed(off, find(UPGRADED), true, ['-10042', '-4005']);
+  assert.deepEqual(on, ['-10042', '-4005']);
+  assert.equal(accessKey({}, find(UPGRADED), on, saved), '-4005');
 });
 
 test('a rule keeps the search hits of its sources’ groups, matched by the hit’s chat, never by its raw scope', () => {

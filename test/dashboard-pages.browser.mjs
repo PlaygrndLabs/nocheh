@@ -1731,6 +1731,8 @@ test('a group first seen after the new ids and a group Telegram upgraded open li
 
 test('a group Telegram upgraded stays on by its earlier ID, and an older topic is added by its number or link', async () => {
   // The saved list still names the upgraded group by its earlier Telegram ID, and the new group by its own.
+  const listed = '-10042,-10088,-4005';
+  let savedAccess = '{}';
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});
   const problems = [];
   page.on('pageerror', error => problems.push('page error: ' + error.message));
@@ -1738,7 +1740,10 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
     if (route.request().method() !== 'GET') return route.fallback();
     const response = await route.fetch(),
       view = await response.json();
-    for (const field of view.fields) if (field.key === 'TELEGRAM_GROUP_IDS') field.value = '-10042,-10088,-4005';
+    for (const field of view.fields) {
+      if (field.key === 'TELEGRAM_GROUP_IDS') field.value = listed;
+      if (field.key === 'TELEGRAM_GROUP_ACCESS') field.value = savedAccess;
+    }
     return route.fulfill({response, json: view});
   });
   const topics = [];
@@ -1748,6 +1753,56 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
   });
   await page.goto(origin + '/#chats?chat=' + encodeURIComponent(UPGRADED));
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
+  // Someone allowed there is kept under the Telegram ID the list has, as the settings require (ADR-0250).
+  const saved = [];
+  await page.route(/\/api\/nocheh\/settings$/, route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    saved.push(route.request().postDataJSON().changes);
+    return route.fulfill({status: 200, contentType: 'application/json', body: '{"ok":true}'});
+  });
+  const allow = async id => {
+    await page.getByLabel('Allow someone by Telegram user ID').fill(id);
+    await page.getByRole('button', {name: 'Allow', exact: true}).click();
+    await page.getByRole('radiogroup', {name: 'Can Unknown person talk to Nocheh'}).first().waitFor();
+  };
+  const save = async () => {
+    const response = page.waitForResponse(
+      response => response.url().endsWith('/api/nocheh/settings') && response.request().method() === 'POST',
+    );
+    await page.getByRole('region', {name: 'Save changes'}).getByRole('button', {name: 'Save'}).click();
+    await response;
+    const changes = saved.at(-1) ?? {};
+    const ids = String(changes.TELEGRAM_GROUP_IDS ?? listed).split(',');
+    const access = JSON.parse(changes.TELEGRAM_GROUP_ACCESS ?? '{}');
+    assert.ok(
+      Object.keys(access).every(key => ids.includes(key)),
+      'every access key is a listed group id: ' + JSON.stringify(changes),
+    );
+    return access;
+  };
+  await allow('555');
+  assert.deepEqual(await save(), {'-4005': {granted: ['555'], denied: []}});
+  // With people saved under the earlier ID, turning the group off and on again in one draft is no change, and
+  // someone allowed next joins them there.
+  savedAccess = JSON.stringify({'-4005': {granted: ['555'], denied: []}});
+  await page.reload();
+  await page.getByRole('radiogroup', {name: 'Can Unknown person talk to Nocheh'}).waitFor();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).click();
+  await page
+    .getByRole('dialog', {name: 'Turn Nocheh off in this group?'})
+    .getByRole('button', {name: 'Turn off'})
+    .click();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).click();
+  const join = page.getByRole('dialog', {name: 'Which project does this group join?'});
+  await join.locator('#join-project').selectOption({label: 'None'});
+  await join.getByRole('button', {name: 'Turn on'}).click();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
+  await page
+    .getByRole('radiogroup', {name: 'Can Unknown person talk to Nocheh'})
+    .getByRole('radio', {name: 'Allowed', checked: true})
+    .waitFor();
+  await allow('556');
+  assert.deepEqual(await save(), {'-4005': {granted: ['555', '556'], denied: []}});
   await page.goto(origin + '/#chats?chat=' + encodeURIComponent(NEW_GROUP));
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Topics', exact: true})});
   await card.getByRole('link', {name: 'Meteor watch'}).waitFor();

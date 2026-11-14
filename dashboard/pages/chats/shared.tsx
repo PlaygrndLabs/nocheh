@@ -70,21 +70,21 @@ export function useTelegram() {
     savedRule: (chat: Chat | null | undefined) => ruleOf(savedAccess, chat),
     /** Turning a group off also drops who was allowed there; turning it back on restores the saved list. */
     setGroup(chat: Chat, on: boolean) {
+      const ids = withGroupListed(groupIds, chat, on, savedGroupIds);
       const next = {...access};
       if (on) {
-        const key = accessKey(savedAccess, chat);
-        if (key && savedAccess[key] && !appIds(chat).some(id => next[id])) next[key] = savedAccess[key]!;
+        // The saved people come back under an id the group is listed by now, as the settings require.
+        const from = accessKey(savedAccess, chat);
+        const to = accessKey({}, chat, ids, savedAccess);
+        if (from && to && savedAccess[from] && !appIds(chat).some(id => next[id])) next[to] = savedAccess[from]!;
       } else for (const id of appIds(chat)) delete next[id];
       settings.setMany({
-        TELEGRAM_GROUP_IDS: serializeGroupIds(
-          withGroupListed(groupIds, chat, on),
-          settings.saved('TELEGRAM_GROUP_IDS'),
-        ),
+        TELEGRAM_GROUP_IDS: serializeGroupIds(ids, settings.saved('TELEGRAM_GROUP_IDS')),
         TELEGRAM_GROUP_ACCESS: writeAccess(next),
       });
     },
     setPerson(chat: Chat, id: string, allow: boolean) {
-      const key = accessKey(access, chat) ?? accessKey(savedAccess, chat);
+      const key = accessKey(access, chat, groupIds, savedAccess);
       if (!key) return;
       settings.set('TELEGRAM_GROUP_ACCESS', writeAccess(withPersonDecision(access, savedAccess, key, id, allow)));
     },
