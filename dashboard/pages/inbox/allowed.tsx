@@ -2,6 +2,7 @@
 import {useState} from 'react';
 import {ShieldCheck} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {Badge, Button, Card, CardHeader, Details, Empty, LoadError, LoadingRows, Notice} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {
@@ -70,6 +71,7 @@ export function Allowed() {
 function PermissionRow({permission: p, disabled}: {permission: Permission; disabled?: boolean}) {
   const {toast, confirm} = useFeedback();
   const chat = useChatNames();
+  const chats = useChatDirectory(60000);
   const command = useCommand();
   const [done, setDone] = useState(false);
   const active = isActive(p) && !done;
@@ -108,7 +110,7 @@ function PermissionRow({permission: p, disabled}: {permission: Permission; disab
         <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
           <span>
             In {chat(p.scope)}
-            {p.grain === 'chat' && p.space_id?.includes('/topic/') ? ', in one topic' : ''}
+            {p.grain === 'chat' && chats.find(p.space_id)?.kind === 'topic' ? ', in one topic' : ''}
           </span>
           {p.grain === 'chat' && <Badge>Chat rule</Badge>}
           {active && <Badge tone="good">{p.remaining === 1 ? '1 use left' : `${p.remaining} uses left`}</Badge>}

@@ -34,30 +34,32 @@ const choices: {value: Choice; label: string}[] = [
 const choiceOf = (value: boolean | null): Choice => (value === null ? 'default' : value ? 'on' : 'off');
 const valueOf = (choice: Choice): boolean | null => (choice === 'default' ? null : choice === 'on');
 
-/** Where a switch's default comes from, seen from `space`. */
-export function toolOrigin(origin: Origin, space: string): string {
+/** Where a switch's default comes from, seen from a topic or another chat. */
+export function toolOrigin(origin: Origin, topic: boolean): string {
   if (origin === 'every_chat') return 'set for every chat';
-  if (origin === 'chat') return space.includes('/topic/') ? 'set for the group' : 'set for this chat';
+  if (origin === 'chat') return topic ? 'set for the group' : 'set for this chat';
   if (origin === 'topic') return 'set for this topic';
   return 'built in';
 }
 
-/** The space a switch falls back to: a topic's group, a chat's every-chat row, nothing for every chat. */
-export const toolParent = (space: string): string | null =>
-  space === '*' ? null : space.includes('/topic/') ? space.split('/topic/')[0]! : '*';
-
+/**
+ * `parent` is what the switches fall back to: a topic's group, '*' (every chat) for a chat, and nothing for '*'
+ * itself. The caller knows it from the chat directory (ADR-0250).
+ */
 export function ToolSwitches({
   space,
+  parent: parentSpace = null,
   title,
   description,
   where,
 }: {
   space: string;
+  parent?: string | null;
   title: string;
   description: string;
   where: string;
 }) {
-  const parentSpace = toolParent(space);
+  const topic = !!parentSpace && parentSpace !== '*';
   const own = useResource<ChatTools>('/chat-tools?space=' + encodeURIComponent(space));
   const parent = useResource<ChatTools>(parentSpace ? '/chat-tools?space=' + encodeURIComponent(parentSpace) : null);
   const data = own.data && own.data.space === space ? own.data : null;
@@ -110,7 +112,7 @@ export function ToolSwitches({
           toolNames.map(([tool, name, hint]) => {
             const draft = changes[tool];
             const fallback = inherited ? inherited.values[tool] : true;
-            const from = inherited ? toolOrigin(inherited.origins[tool], space) : 'built in';
+            const from = inherited ? toolOrigin(inherited.origins[tool], topic) : 'built in';
             return (
               <SettingRow key={tool} title={name} description={hint}>
                 <div className="space-y-1.5">

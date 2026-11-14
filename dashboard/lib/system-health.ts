@@ -47,10 +47,15 @@ export type ChatSend = {
   channel: string;
   kind: string;
   method: string;
+  /** The app's own chat id, as the send went out: a label. */
   chat: string | null;
   chat_title: string | null;
-  topic: number | null;
-  message_id: number | null;
+  /** The Nocheh chat (or topic) the send went to, when Nocheh knows it (ADR-0250): the one to link to. */
+  chat_id?: string | null;
+  /** The topic in the app: a Telegram thread id, or a Slack thread. */
+  topic?: number | string | null;
+  thread?: string | null;
+  message_id: number | string | null;
   detail: string | null;
   state: string;
   status: number;

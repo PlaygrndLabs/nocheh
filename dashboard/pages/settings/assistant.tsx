@@ -5,6 +5,8 @@ import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
 import {refreshResources, useResource} from '../../lib/resource';
 import {cn} from '../../lib/utils';
+import {useChatDirectory} from '../../lib/chat-directory';
+import {chatName, unknownChat} from '../../lib/chats-model';
 import {Badge, Button, Card, CardHeader, Field, Input, LoadError, LoadingRows, Select} from '../../ui/core';
 import {RoleAndSkills} from '../chats/role-skills';
 import {ToolSwitches} from '../chats/tools';
@@ -110,7 +112,7 @@ type Prefs = {
 
 function Limits() {
   const profiles = useResource<any>('/memory/profiles');
-  const conversations = useResource<any>('/conversations?limit=100');
+  const chats = useChatDirectory();
   const [scope, setScope] = useState('');
   const path = scope ? '/memory/preferences?scope=' + encodeURIComponent(scope) : '/policy';
   const prefs = useResource<Prefs>(path);
@@ -120,10 +122,9 @@ function Limits() {
     setChanges({});
     setRevision(null);
   }, [scope]);
-  const chatName = (id: string, owner: boolean) =>
-    owner
-      ? 'Your private chat'
-      : (conversations.data?.items ?? []).find((c: any) => c.space_id === id)?.name || 'Chat ' + id;
+  // Named from the chat directory; a chat it doesn't know is never named by its id (ADR-0250).
+  const chatLabel = (id: string, owner: boolean) =>
+    owner ? 'Your private chat' : chatName(chats.find(id) ?? unknownChat(id));
   const data = prefs.data && (!scope || prefs.data.scope === scope) ? prefs.data : null;
   const edit = (key: string, value: any) => {
     setRevision(current => current ?? data?.revision ?? null);
@@ -136,7 +137,7 @@ function Limits() {
     });
   };
   const where = scope
-    ? chatName(scope, (profiles.data?.profiles ?? []).find((p: any) => p.scope === scope)?.owner)
+    ? chatLabel(scope, (profiles.data?.profiles ?? []).find((p: any) => p.scope === scope)?.owner)
     : 'every chat';
   useDraftSource({
     id: 'assistant-limits:' + (scope || 'global'),
@@ -172,7 +173,7 @@ function Limits() {
             <option value="">Defaults for every chat</option>
             {(profiles.data?.profiles ?? []).map((p: any) => (
               <option key={p.scope} value={p.scope}>
-                {chatName(p.scope, p.owner)}
+                {chatLabel(p.scope, p.owner)}
               </option>
             ))}
           </Select>

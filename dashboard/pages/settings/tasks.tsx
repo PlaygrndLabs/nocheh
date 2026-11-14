@@ -8,7 +8,8 @@ import {ArrowDown, ArrowUp, Plus, Trash2, X} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
 import {refreshResources, useResource} from '../../lib/resource';
-import {chatName, type Directory} from '../../lib/chats-model';
+import {chatName} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {Button, Card, CardHeader, Dot, Input, LoadError, LoadingRows, Select, type Tone} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {errorWords} from '../memory/shared';
@@ -84,11 +85,12 @@ export function TaskSettingsPanel() {
   const saved = useResource<Saved>('/tasks/settings');
   // The lists and chats a shared column would reach, named before the owner shares it.
   const lists = useResource<TaskPage>('/tasks?limit=1');
-  const chats = useResource<Directory>('/conversations?limit=100', 60000);
+  const chats = useChatDirectory(60000);
   const feedback = useFeedback();
   const groupName = (space: string) => {
-    const chat = chats.data?.items.find(row => row.space_id === space);
-    if (!chat) return space.includes('/topic/') ? 'a topic' : 'a group';
+    // What a chat is comes from the chat directory, never from its id (ADR-0250).
+    const chat = chats.find(space);
+    if (!chat) return 'a group';
     return chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
   };
   const [draft, setDraft] = useState<TaskSettings | null>(null);

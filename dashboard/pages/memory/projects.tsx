@@ -26,7 +26,6 @@ import {
   type Tone,
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
-import {groupSpace} from '../../lib/chats-model';
 import {ChatPicker} from '../chats/chat-picker';
 import {JoinNotes} from '../chats/project';
 import {leaveTasksText, moveTasksText, relatedGroupsHint} from '../chats/rule-dialog';
@@ -109,9 +108,7 @@ export function Projects() {
   // A private chat is in no project, even one an older setting still names (ADR-0242).
   const chatCount = (id: string) => {
     const spaces = new Set([...chats.items.map(chat => chat.space_id), ...own.map(row => row.space_id)]);
-    return [...spaces].filter(
-      space => groupSpace(space) && projectOf(space, space.match(/^(.+)\/topic\/\d+$/)?.[1]) === id,
-    ).length;
+    return [...spaces].filter(space => chats.isGroup(space) && projectOf(space, chats.parentOf(space)) === id).length;
   };
 
   return (
@@ -450,7 +447,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
       ) : (
         <ul className="divide-y divide-line rounded-lg border border-line">
           {members.map(chat => {
-            const topic = !!chat.parent_space || chat.space_id.includes('/topic/');
+            const topic = !!chat.parent_space || chats.find(chat.space_id)?.kind === 'topic';
             return (
               <li key={chat.space_id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
                 <span className="min-w-0 flex-1">
@@ -569,6 +566,7 @@ function delegationState(item: Delegation): {label: string; tone: Tone} {
 function AutoOrganize() {
   const feedback = useFeedback();
   const command = useCommand();
+  const chats = useChats();
   const delegations = useResource<{delegations: Delegation[]; next: string | null}>(
     '/organization/delegations?after=',
     30000,
@@ -629,7 +627,7 @@ function AutoOrganize() {
                         {item.scopes.length === 1 ? '1 chat' : `${item.scopes.length} chats`}
                         {item.expires_at ? ' · until ' + new Date(item.expires_at).toLocaleDateString() : ''}
                       </span>
-                      {item.scopes.some(scope => !groupSpace(scope)) && (
+                      {item.scopes.some(scope => !chats.isGroup(scope)) && (
                         <span className="mt-0.5 block text-xs text-warn">
                           Covers a private chat. Nocheh skips it; edit to remove it.
                         </span>
@@ -682,9 +680,12 @@ function AutoOrganize() {
 function DelegationDialog({item, onClose}: {item: Delegation | null; onClose: () => void}) {
   const feedback = useFeedback();
   const command = useCommand();
+  const chats = useChats();
   const [name, setName] = useState(item?.name ?? 'Organize my chats');
-  // One saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
-  const [scopes, setScopes] = useState<string[]>((item?.scopes ?? []).filter(groupSpace));
+  // One saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242). What a chat is comes
+  // from the chat directory, so a chat it doesn't know yet counts as private too.
+  const [chosen, setScopes] = useState<string[]>(item?.scopes ?? []);
+  const scopes = chosen.filter(chats.isGroup);
   // A new permission starts off; turning it on is what lets Nocheh create projects (ADR-0247).
   const [enabled, setEnabled] = useState(item?.enabled ?? false);
   const [until, setUntil] = useState(item?.expires_at && !item.expired ? item.expires_at.slice(0, 10) : '');

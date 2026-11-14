@@ -2,7 +2,8 @@
 import {useState} from 'react';
 import {Pencil, Search} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
-import {chatFromId, chatName, formatDate, type Directory} from '../../lib/chats-model';
+import {chatName, formatDate, sourceHits, unknownChat} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {Badge, Button, Details, Field, Input, Notice, Spinner, Textarea} from '../../ui/core';
 import {Drawer, useFeedback} from '../../ui/overlay';
 import {modeText, ruleBody, type Rule} from './rule-dialog';
@@ -30,12 +31,20 @@ type Release = {
   expires_at: string | null;
   created_at: string;
 };
-type Hit = {id: string; scope?: string; text?: string; occurred_at?: string; content_types?: string[]};
+/** A search hit. `scope` is the archive's raw chat id; `chat_id` is the hit's Nocheh chat (ADR-0250), the one to
+ * compare with a rule's chats. */
+type Hit = {
+  id: string;
+  scope?: string;
+  chat_id?: string | null;
+  text?: string;
+  occurred_at?: string;
+  content_types?: string[];
+};
 
-function useNames(owner?: string) {
-  const directory = useResource<Directory>('/conversations?limit=100');
-  return (space: string) =>
-    chatName(directory.data?.items.find(item => item.space_id === space) ?? chatFromId(space), owner);
+function useNames() {
+  const chats = useChatDirectory();
+  return (space: string) => chatName(chats.find(space) ?? unknownChat(space));
 }
 
 export function RuleDrawer({
@@ -44,16 +53,14 @@ export function RuleDrawer({
   open,
   onOpenChange,
   onEdit,
-  owner,
 }: {
   rule: Rule | null;
   missing: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onEdit: (rule: Rule) => void;
-  owner?: string;
 }) {
-  const name = useNames(owner);
+  const name = useNames();
   const action = useAction();
   return (
     <Drawer
@@ -210,8 +217,8 @@ function ShareForm({rule, onCancel, onPrepared}: {rule: Rule; onCancel: () => vo
   const [text, setText] = useState('');
   const action = useAction();
   const search = useResource<Hit[]>(query ? '/search?limit=40&q=' + encodeURIComponent(query) : null);
-  const groups = new Set(rule.sources.map(space => space.split('/topic/')[0]));
-  const hits = (Array.isArray(search.data) ? search.data : []).filter(hit => !hit.scope || groups.has(hit.scope));
+  const chats = useChatDirectory();
+  const hits = sourceHits(Array.isArray(search.data) ? search.data : [], rule.sources, chats.find);
   const toggle = (hit: Hit) =>
     setChosen(current =>
       current.some(item => item.id === hit.id) ? current.filter(item => item.id !== hit.id) : [...current, hit],

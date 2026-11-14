@@ -2,7 +2,8 @@
 import {useState} from 'react';
 import {Button, Field, Input, Segmented, Switch, Textarea} from '../../ui/core';
 import {Dialog} from '../../ui/overlay';
-import {chatName, groupSpace, parentOf} from '../../lib/chats-model';
+import {chatName} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {ChatPicker} from './chat-picker';
 import {ActionError, useAction, useChat} from './shared';
 
@@ -86,28 +87,28 @@ export function RuleDialog({
   rule,
   open,
   onOpenChange,
-  owner,
   presetDestination,
 }: {
   rule: Rule | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  owner?: string;
   presetDestination?: string;
 }) {
+  const chats = useChatDirectory();
   const [name, setName] = useState(rule?.name ?? '');
-  // A rule saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242).
-  const [sources, setSources] = useState<string[]>((rule?.sources ?? []).filter(groupSpace));
-  const [destination, setDestination] = useState(
-    rule ? (groupSpace(rule.destination) ? rule.destination : '') : (presetDestination ?? ''),
-  );
+  // A rule saved earlier may still name a private chat; editing it leaves that chat out (ADR-0242). What a chat is
+  // comes from the chat directory, so a chat it doesn't know yet counts as private too.
+  const [chosenSources, setSources] = useState<string[]>(rule?.sources ?? []);
+  const [chosenDestination, setDestination] = useState(rule ? rule.destination : (presetDestination ?? ''));
+  const sources = chosenSources.filter(chats.isGroup);
+  const destination = chats.isGroup(chosenDestination) ? chosenDestination : '';
   const [mode, setMode] = useState<Rule['mode']>(rule?.mode ?? 'approved');
   const [instructions, setInstructions] = useState(rule?.instructions ?? '');
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const action = useAction();
   const ready = name.trim() && sources.length && destination;
   // A rule into a topic is named by its group, which is who sees it.
-  const target = useChat(parentOf(destination) ?? destination);
+  const target = useChat(chats.parentOf(destination) ?? destination);
 
   const save = async () => {
     const result = await action.run(
@@ -124,7 +125,7 @@ export function RuleDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={rule ? 'Edit sharing rule' : 'New sharing rule'}
-      description={ruleAudienceText(destination && groupSpace(destination) ? chatName(target) : null)}
+      description={ruleAudienceText(destination ? chatName(target) : null)}
       className="max-w-xl"
       footer={
         <>
@@ -151,7 +152,6 @@ export function RuleDialog({
           value={sources}
           onChange={setSources}
           multiple
-          owner={owner}
           exclude={destination ? [destination] : []}
           groupsOnly
           hint="Only these exact groups or topics. Private chats never share."
@@ -160,7 +160,6 @@ export function RuleDialog({
           label="Into this chat"
           value={destination ? [destination] : []}
           onChange={ids => setDestination(ids[0] ?? '')}
-          owner={owner}
           exclude={sources}
           groupsOnly
           hint="Groups and topics only. Private chats never share."

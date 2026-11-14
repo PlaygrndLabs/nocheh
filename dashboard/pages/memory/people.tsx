@@ -7,7 +7,6 @@ import {ChevronRight, Pencil, Search, Share2, UserRound} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
 import {refreshResources, useResource} from '../../lib/resource';
-import {groupSpace, parentOf} from '../../lib/chats-model';
 import {
   Badge,
   Button,
@@ -468,24 +467,14 @@ type Audience = {
   readers: {space: string; group: string | null} | null;
 };
 
-/** The owner's ID, for naming their own chat. */
-function useOwnerId() {
-  const settings = useResource<{fields?: {key: string; value: unknown}[]}>('/settings');
-  return String(settings.data?.fields?.find(field => field.key === 'TELEGRAM_OWNER_ID')?.value ?? '');
-}
-
-/** Plain names for the chats a fact came from, with the owner's own chat as "your private chat". */
+/** Plain names for the chats a fact came from, with the owner's own chat (or one of its topics) as "your private
+ * chat". */
 function useSourceNames() {
   const chats = useChats();
-  const owner = useOwnerId();
   return (spaces: (string | null)[]) =>
     spaces
       .map(space =>
-        !space
-          ? 'a chat Nocheh can’t place'
-          : owner && (parentOf(space) ?? space) === owner
-            ? 'your private chat'
-            : chats.name(space),
+        !space ? 'a chat Nocheh can’t place' : chats.find(space)?.owner ? 'your private chat' : chats.name(space),
       )
       .join(', ');
 }
@@ -624,8 +613,8 @@ function ShareForm({claim, onDone}: {claim: Claim; onDone: () => void}) {
   const id = 'share-' + claim.id.slice(0, 8);
   const tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
   // Only a group or topic can be shared into. Every member of a group can read all of its topics, so the whole group sees it.
-  const groups = chats.items.filter(chat => groupSpace(chat.space_id));
-  const seers = destination ? (parentOf(destination) ?? destination) : '';
+  const groups = chats.items.filter(chat => chats.isGroup(chat.space_id));
+  const seers = destination ? (chats.parentOf(destination) ?? destination) : '';
   const confirm = !!audience.data?.confirm_required;
   return (
     <form

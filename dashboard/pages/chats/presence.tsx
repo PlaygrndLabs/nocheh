@@ -2,13 +2,15 @@
 import {useState} from 'react';
 import {useFeedback} from '../../ui/overlay';
 import {Card, CardBody, CardHeader, Notice, Switch} from '../../ui/core';
-import {chatName, type Chat} from '../../lib/chats-model';
+import {chatName, currentAppId, type Chat} from '../../lib/chats-model';
 import {JoinNotes, JoinProjectDialog, useJoinQuestion} from './project';
 import {chatHref, telegramSettingsHref, Unsaved, useChatNames, type Telegram} from './shared';
 
 function telegramProblem(chat: Chat): string | null {
   const state = chat.telegram?.state;
-  if (state === 'migrated')
+  // A group Telegram upgraded once Nocheh had its own chat ids goes on as the same chat under its new Telegram id.
+  const followed = !!chat.telegram?.migrate_to_chat_id && chat.telegram.migrate_to_chat_id === currentAppId(chat);
+  if (state === 'migrated' && !followed)
     return `Telegram moved this group to a new ID${
       chat.telegram?.migrate_to_chat_id ? ` (${chat.telegram.migrate_to_chat_id})` : ''
     }. Turn Nocheh on in the new group instead.`;
@@ -35,7 +37,7 @@ export function NochehHere({chat, parent, telegram}: {chat: Chat; parent: Chat |
   const problem = telegramProblem(chat.kind === 'topic' && parent ? parent : chat);
 
   if (chat.kind === 'private') {
-    const owner = chat.space_id === telegram.owner;
+    const owner = chat.owner === true;
     return (
       <Card>
         <CardHeader title="Nocheh here" />
@@ -50,7 +52,7 @@ export function NochehHere({chat, parent, telegram}: {chat: Chat; parent: Chat |
 
   if (chat.kind === 'topic') {
     const group = chat.parent_space ?? '';
-    const on = telegram.isOn(group);
+    const on = telegram.isOn(parent ?? chat);
     return (
       <Card>
         <CardHeader title="Nocheh here" />
@@ -80,7 +82,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
   const {confirm} = useFeedback();
   const names = useChatNames();
   const group = chat.space_id;
-  const on = telegram.isOn(group);
+  const on = telegram.isOn(chat);
   const join = useJoinQuestion(group);
   const [asking, setAsking] = useState(false);
   const change = async (next: boolean) => {
@@ -98,7 +100,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
       }))
     )
       return;
-    const rule = telegram.rule(group);
+    const rule = telegram.rule(chat);
     if (!next && (rule.granted.length || rule.denied.length)) {
       const ok = await confirm({
         title: 'Turn Nocheh off in this group?',
@@ -108,7 +110,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
       });
       if (!ok) return;
     }
-    telegram.setGroup(group, next);
+    telegram.setGroup(chat, next);
   };
   return (
     <Card>
@@ -121,7 +123,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
               <label htmlFor="group-on" className="text-sm font-medium">
                 {on ? 'On in this group' : 'Off in this group'}
               </label>
-              <Unsaved show={telegram.onChanged(group)} />
+              <Unsaved show={telegram.onChanged(chat)} />
             </div>
             <p className="mt-0.5 text-[13px] text-muted">
               {on ? 'You can always talk to it here.' : 'Turn on to let Nocheh answer here.'}
@@ -130,7 +132,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
           <Switch
             id="group-on"
             checked={on}
-            disabled={!telegram.loaded || telegram.busy || (!on && !join.settled)}
+            disabled={!telegram.loaded || telegram.busy || (!on && (!join.settled || !currentAppId(chat)))}
             onChange={value => void change(value)}
             label="Nocheh in this group"
           />
@@ -145,7 +147,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
           open
           onDone={answered => {
             setAsking(false);
-            if (answered) telegram.setGroup(group, true);
+            if (answered) telegram.setGroup(chat, true);
           }}
         />
       )}

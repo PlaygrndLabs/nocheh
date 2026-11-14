@@ -4,7 +4,8 @@ import {ArrowRight, Plus, Share2} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
 import {useParam} from '../../lib/navigation';
-import {chatFromId, chatName, type Directory} from '../../lib/chats-model';
+import {chatName, unknownChat} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {
   Badge,
   Button,
@@ -27,12 +28,11 @@ import {DefaultSuggestions} from './suggestions';
 export function SharingView({telegram}: {telegram: Telegram}) {
   const [pages, setPages] = useState<string[]>(['']);
   const rules = useResource<{rules: Rule[]; next: string | null}>('/sharing/rules?after=' + pages.at(-1));
-  const directory = useResource<Directory>('/conversations?limit=100');
+  const chats = useChatDirectory();
   const [editing, setEditing] = useState<Rule | 'new' | null>(null);
   const open = useParam('rule');
   const action = useAction();
-  const name = (space: string) =>
-    chatName(directory.data?.items.find(item => item.space_id === space) ?? chatFromId(space), telegram.owner);
+  const name = (space: string) => chatName(chats.find(space) ?? unknownChat(space));
   const list = rules.data?.rules ?? [];
   const openRule = open ? (list.find(rule => rule.id === open) ?? null) : null;
 
@@ -155,7 +155,6 @@ export function SharingView({telegram}: {telegram: Telegram}) {
         <RuleDialog
           key={editing === 'new' ? 'new' : editing.id + ':' + editing.revision}
           rule={editing === 'new' ? null : editing}
-          owner={telegram.owner}
           open
           onOpenChange={next => !next && setEditing(null)}
         />
@@ -164,7 +163,6 @@ export function SharingView({telegram}: {telegram: Telegram}) {
         rule={openRule}
         missing={!!rules.data && !openRule}
         open={!!open}
-        owner={telegram.owner}
         onOpenChange={next => !next && setParams({rule: null})}
         onEdit={rule => setEditing(rule)}
       />

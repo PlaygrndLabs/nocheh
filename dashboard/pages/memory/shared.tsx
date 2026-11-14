@@ -1,7 +1,8 @@
 /** Small pieces shared by the Memory tabs: saving, plain error words, chat names and evidence links. */
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {apiPost} from '../../lib/api';
-import {privateChatErrors} from '../../lib/chats-model';
+import {currentAppId, privateChatErrors, type Chat} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
 import {refreshResources, useResource} from '../../lib/resource';
 import {cn} from '../../lib/utils';
 
@@ -105,36 +106,38 @@ export function useCommand() {
   return {busy, error, run, clear: () => setError('')};
 }
 
-export type Conversation = {
-  space_id: string;
-  name: string | null;
-  kind: string;
-  parent_space?: string | null;
-  parent_name?: string | null;
-};
+export type Conversation = Chat;
 
-/** Chat names by their id, for showing a chat instead of a number. */
+/**
+ * Chat names by their id, for showing a chat instead of a number, and what each chat is, from the chat directory
+ * (ADR-0250): never from the id.
+ */
 export function useChats() {
-  const {data, error, loading} = useResource<{items: Conversation[]}>('/conversations?limit=100', 60000);
-  const items = data?.items ?? [];
+  const chats = useChatDirectory(60000);
   const name = (space: string | null | undefined): string => {
     if (!space) return 'Unknown chat';
-    const row = items.find(item => item.space_id === space);
-    if (row) return chatName(row);
-    const topic = space.match(/^(.+)\/topic\/(\d+)$/);
-    if (topic) {
-      const parent = items.find(item => item.space_id === topic[1]);
-      return (parent ? chatName(parent) : 'Group') + ' › topic ' + topic[2];
-    }
-    return 'Chat ' + space;
+    const row = chats.find(space);
+    return row ? chatName(row) : 'Unknown chat';
   };
-  return {items, name, error, loading};
+  return {
+    items: chats.items,
+    name,
+    find: chats.find,
+    isGroup: chats.isGroup,
+    parentOf: chats.parentOf,
+    error: chats.directory.error,
+    loading: chats.directory.loading,
+  };
 }
 
 export function chatName(row: Conversation): string {
   const own = row.name?.trim();
   if (row.kind === 'topic') return (row.parent_name?.trim() || 'Group') + ' › ' + (own || 'topic');
-  return own || (row.kind === 'private' ? 'Private chat' : 'Group') + ' ' + row.space_id;
+  const label = currentAppId(row);
+  return (
+    own ||
+    (row.kind === 'private' ? 'Private chat' : row.kind === 'group' ? 'Group' : 'Chat') + (label ? ' ' + label : '')
+  );
 }
 
 /** Links to the original messages a fact came from. */
