@@ -10,7 +10,8 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import type {Reader} from '../src/access.js';
 import {readSet,readSetParam} from '../src/spaces.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
-import {GP1,GP1_TOPIC,GP2,GP4,OWNER,P1,groupsPolicy} from './fixture-groups.js';
+import {installChatsForTest} from '../src/chats.js';
+import {GP1,GP1_TOPIC,GP2,GP4,GP_GROUP_IDS,NG1,NG1_TOPIC,OWNER,P1,fixtureChats,groupsPolicy,legacyChats} from './fixture-groups.js';
 
 test('Honcho ancestry maps only verified ingestion receipts and current authorized workspaces to original evidence',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -73,7 +74,11 @@ test('a private answer searches Honcho only through the sessions and receipts of
   const provenance=new MemoryProvenanceRepository(stores,archive,guards,honchoEngine(async()=>{throw Error('unused');}));
   // One conversation session per place with a completed write: the asking group, its topic, another group of the project and
   // its topic, a group in no project, the owner (audience 'owner'), the owner's chat named as itself and an import.
-  const places=[GP1,GP1_TOPIC,GP2,GP2+'/topic/9',GP4,GP4+'/topic/9','owner',OWNER,OWNER+'/topic/5','desktop:private_supergroup:1234567890'];
+  const places=[GP1,GP1_TOPIC,GP2,GP2+'/topic/9',GP4,GP4+'/topic/9','owner',OWNER,OWNER+'/topic/5','desktop:private_supergroup:1234567890',NG1,NG1_TOPIC];
+  // Both fixture families, plus the topics of GP1, GP2 and GP4 above as the seeder makes their rows (ADR-0250).
+  const policy=groupsPolicy(),base=fixtureChats(),known=new Set(base.chats.map(chat=>chat.id));
+  const extra=legacyChats([GP2+'/topic/9',GP4+'/topic/9',GP2+'/topic/11',GP1+'/topic/12',OWNER+'/topic/5'],{served:GP_GROUP_IDS});
+  const restore=installChatsForTest({...base,chats:[...base.chats,...extra.chats.filter(chat=>!known.has(chat.id))],ids:[...base.ids,...extra.ids.filter(row=>!known.has(row.chat_id))]});
   const session=(place:string)=>digest(key+':session:'+place),receipt=(place:string,n=0)=>digest(key+':receipt:'+place+':'+n);
   const remote=(place:string,n=0)=>digest(place+':'+n).slice(0,21),source=(place:string)=>({store:'archive',kind:'event',id:digest(key+':event:'+place),revision:'1',input_hash:digest(place)});
   const write=(place:string,n:number,state:string,retired=false)=>stores.control.query(`INSERT INTO memory_ingestion_receipts(id,generation,source_reference,guard_source_id,prepared_id,
@@ -102,11 +107,14 @@ test('a private answer searches Honcho only through the sessions and receipts of
     assert.deepEqual(await provenance.readSetSessions(workspace,readSetParam(frozen),2),(await provenance.readSetSessions(workspace,readSetParam(frozen))).slice(0,2));
     for(const forged of [['owner'],[OWNER],[OWNER+'/*'],['owner/*'],[OWNER+'/topic/5'],['desktop:private_supergroup:1234567890'],['*'],[]])
       assert.deepEqual(await provenance.readSetSessions(workspace,forged),[],'no parameter opens a private chat or an import: '+JSON.stringify(forged));
+    assert.deepEqual(await provenance.readSetSessions(workspace,[OWNER,'owner',GP4]),[session(GP4)],'a group bound by hand with private chats reads only the group');
+    assert.deepEqual((await provenance.readSetSessions(workspace,readSetParam(readSet({home:NG1_TOPIC,whole:[NG1]})))).sort(),[NG1,NG1_TOPIC].map(session).sort(),
+      'a digest group reads its topic rows');
 
     // The search itself: Honcho is asked within those sessions, and a hit counts only with a done, current receipt of the set.
     const asked:any[]=[];
     const hits=[...places,pending,retired].map(place=>({id:remote(place),metadata:{nocheh_receipt:receipt(place)}}));
-    const contexts={access:{stores,policy:()=>groupsPolicy(),recall:()=>null,reads:(principal:Reader)=>principal.reads},guards};
+    const contexts={access:{stores,policy:()=>policy,recall:()=>null,reads:(principal:Reader)=>principal.reads},guards};
     const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,allow:async()=>{}};
     const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,provenance,honchoEngine(async(_path:string,body:any)=>{asked.push(body);return hits;}),async()=>[]);
     Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
@@ -120,6 +128,6 @@ test('a private answer searches Honcho only through the sessions and receipts of
     await stores.control.query('DELETE FROM memory_ingestion_receipts WHERE generation=$1',[workspace]);
     await stores.control.query('DELETE FROM memory_sessions WHERE workspace=$1',[workspace]);
     await stores.control.query('DELETE FROM memory_generations WHERE id=$1',[workspace]);
-    await stores.close();
+    restore();await stores.close();
   }
 });
