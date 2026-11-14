@@ -7,9 +7,14 @@ import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} f
 import {storeSchemas} from '../src/stores/schema.js';
 import {resetSetupSnapshot,restoreResetSetup} from '../src/stores/reset-setup.js';
 import {verifyResetBaseline} from '../src/stores/reset-baseline.js';
+import {chatRows,sortedChats} from '../src/stores/reset-setup.js';
+import {ChatSeeder} from '../src/stores/chat-seed.js';
+import {chatIdFor} from '../src/chats.js';
+import {NG2,NG2_OLD_TG,NG2_TG} from './fixture-groups.js';
 
-test('reset setup restores only current configuration under a new generation and replays exactly',
-  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000};
+/** Empty stores in a schema of their own, with the grants the services have. */
+async function freshStores() {
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
@@ -26,7 +31,15 @@ test('reset setup restores only current configuration under a new generation and
       else await db.query(`GRANT UPDATE,DELETE ON ALL TABLES IN SCHEMA ${schema} TO nocheh_control`);
     } finally {await db.end();}
   }
-  const stores=connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords),profile='profile-'+'c'.repeat(48);
+  const stores=connectStores({...config,options:'-c search_path='+schema+',pg_catalog'},passwords);
+  return {config,schema,stores,drop:async()=>{
+    await stores.close();
+    for(const name of storeNames){const db=new pg.Client({...config,database:'nocheh_'+name});await db.connect();try{await db.query(`DROP SCHEMA ${schema} CASCADE`);}finally{await db.end();}}
+  }};
+}
+
+test('reset setup restores only current configuration under a new generation and replays exactly',fixture,async()=>{
+  const {config,schema,stores,drop}=await freshStores(),profile='profile-'+'c'.repeat(48);
   const snapshot={format:'nocheh-reset-configuration-v1',layout:'original-only-v1',configuration:{
     security_policy:[{document:{version:1,rules:[{id:'fixture-deny-shell',kind:'shell',outcome:'deny'}]}}],
     installation_generation:[{generation:'11111111-1111-4111-8111-111111111111'}],guard_mode:[{mode:'off'}],
@@ -95,8 +108,47 @@ test('reset setup restores only current configuration under a new generation and
     await assert.rejects(verifyResetBaseline(stores,input),/not_empty/);
     await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'foreign','active',1)",['d'.repeat(64)]);
     await assert.rejects(restoreResetSetup(stores,input),/target_changed/);
-  } finally {
-    await stores.close();
-    for(const name of storeNames){const db=new pg.Client({...config,database:'nocheh_'+name});await db.connect();try{await db.query(`DROP SCHEMA ${schema} CASCADE`);}finally{await db.end();}}
-  }
+    // A version 1 snapshot, taken before step 2b, names chats by their old values: it restores none, and the seeder
+    // gives each value its row, with the same id, when the app starts (ADR-0250).
+    assert.deepEqual(await chatRows(stores.control),{chats:[],chat_ids:[]});
+    await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001','-1002']}).seed();
+    assert.deepEqual((await chatRows(stores.control)).chats.map(row=>[row.id,row.kind,row.parent_id,row.state]),
+      [['-1001','group',null,'active'],['-1001/topic/3','topic','-1001','active'],['-1002','group',null,'active'],['123','private',null,'active']]);
+  } finally {await drop();}
+});
+
+test('a version 2 snapshot restores its chats and app ids exactly, and decides what each value is from them',fixture,async()=>{
+  const {stores,drop}=await freshStores(),project='a'.repeat(64),topic='-1001/topic/3',bob=chatIdFor('telegram','456');
+  // Both families: an old-shaped group and its topic keep their Telegram values; NG2 has a digest id, an old and a current Telegram id.
+  const chat=(id:string,kind:'group'|'topic'|'private',extra:Record<string,unknown>={})=>({id,app:'telegram',kind,parent_id:null,topic_key:null,
+    app_type:kind==='topic'?null:kind==='private'?'private':'supergroup',title:null,title_source:null,is_forum:false,state:'active',...extra});
+  const chats=[chat('-1001','group',{is_forum:true}),chat(topic,'topic',{parent_id:'-1001',topic_key:'3',title:'Seeds',title_source:'owner'}),chat(NG2,'group'),
+    chat('123','private'),chat(bob,'private',{state:'off'})];
+  const chatIds=[{app:'telegram',external_id:'-1001',chat_id:'-1001',state:'current',reason:null},{app:'telegram',external_id:NG2_OLD_TG,chat_id:NG2,state:'old',reason:'migrated'},
+    {app:'telegram',external_id:NG2_TG,chat_id:NG2,state:'current',reason:null},{app:'telegram',external_id:'123',chat_id:'123',state:'current',reason:null},
+    {app:'telegram',external_id:'456',chat_id:bob,state:'current',reason:null}];
+  const snapshot={format:'nocheh-reset-configuration-v2',layout:'original-only-v1',configuration:{
+    security_policy:[{document:{version:1,rules:[]}}],installation_generation:[{generation:'11111111-1111-4111-8111-111111111111'}],guard_mode:[{mode:'off'}],
+    runtime_configuration:[{name:'assistant',document:{enabled:true,owner_id:'123',group_ids:['-1001',NG2_TG]}}],
+    projects:[{id:project,name:'Saved project',description:'',state:'active'}],
+    project_assignments:[{space_id:'-1001',project_id:project,mode:'assigned'},{space_id:topic,project_id:null,mode:'inherit'},{space_id:NG2,project_id:project,mode:'assigned'}],
+    sharing_rules:[{id:'b'.repeat(64),name:'Saved share',sources:['-1001'],destination:NG2,enabled:true,mode:'approved',instructions:''}],
+    memory_access_settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time'}],
+    chat_tool_settings:[{space_id:'-1001',shell:false,browser:null,mcp:null}],runtime_profiles:[],chats,chat_ids:chatIds}};
+  const input={snapshot,generation:'22222222-2222-4222-8222-222222222222',reset_id:'44444444-4444-4444-8444-444444444444',profile_commands:[]};
+  try {
+    assert.deepEqual(resetSetupSnapshot(snapshot),snapshot);
+    // A digest id is a group only because its row says so; a private chat never joins a project or a rule, whatever its id looks like.
+    const forged=[{sharing_rules:[{...snapshot.configuration.sharing_rules[0]!,destination:bob}]},
+      {project_assignments:[{space_id:bob,project_id:project,mode:'assigned'}]},
+      {project_assignments:[{space_id:chatIdFor('telegram','-1002000000009'),project_id:project,mode:'assigned'}]},
+      {chats:chats.filter(row=>row.id!==NG2)},{chats:chats.map(row=>row.id===topic?{...row,title_source:'observed'}:row)}];
+    for(const change of forged)assert.throws(()=>resetSetupSnapshot({...snapshot,configuration:{...snapshot.configuration,...change}}),/snapshot_invalid/,JSON.stringify(change));
+    const first=await restoreResetSetup(stores,input),again=await restoreResetSetup(stores,input);
+    assert.deepEqual(again,first);assert.equal(first.chats,chats.length);
+    assert.deepEqual(await chatRows(stores.control),sortedChats({chats:chats as any,chat_ids:chatIds as any}),'every chat keeps its id, its app ids and the owner\'s names');
+    await verifyResetBaseline(stores,input);
+    // The app's start then finds every value already has its row.
+    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001',NG2_TG]}).seed(),{chats:0,topics:0});
+  } finally {await drop();}
 });

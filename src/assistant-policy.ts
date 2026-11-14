@@ -1,10 +1,21 @@
 import { readFileSync } from 'node:fs';
 import { HttpError, object } from './http.js';
+import { isChatId } from './chats.js';
 
 export interface GroupAccess {granted:string[];denied:string[]}
 /** Whether every topic of a group shares one memory ('group', the default) or each topic keeps its own ('topic'). */
 export type TopicMemory='group'|'topic';
-export interface AssistantPolicy {enabled:boolean;owner_id:string|null;group_ids:string[];group_access?:Record<string,GroupAccess>;topic_memory?:TopicMemory}
+export interface AssistantPolicy {enabled:boolean;
+  /** The owner's account: the owner's Telegram user id. Compared only with a sender (who sent, pressed or asked). */
+  owner_id:string|null;
+  /** Raw Telegram ids (current and old) of the served groups, for comparing archive originals only. A Nocheh chat is
+   * served when the chat directory says so (chats().served), never by finding its id here (ADR-0250). */
+  group_ids:string[];group_access?:Record<string,GroupAccess>;topic_memory?:TopicMemory;
+  /** The owner's private chat, a Nocheh chat id: where the owner talks to Nocheh, separate from the owner's account.
+   * Absent in a policy written before step 2b, where the owner's private chat is the chat named by owner_id. */
+  owner_chat?:string|null}
+/** The owner's private chat (ADR-0250): policy.owner_chat, or for a policy without one the chat owner_id names. */
+export const ownerChat=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):string|null=>policy.owner_chat===undefined?policy.owner_id:policy.owner_chat;
 export function groupAccess(value:unknown,groups:string[],owner:string|null):Record<string,GroupAccess> {
   const input=object(value),result:Record<string,GroupAccess>={};
   if(Object.keys(input).length>100)throw new Error('Invalid TELEGRAM_GROUP_ACCESS');
@@ -32,9 +43,13 @@ export function assistantPolicy(path?:string):AssistantPolicy {
   if (typeof value.enabled!=='boolean' || (value.owner_id!==null && (typeof value.owner_id!=='string' || !/^[1-9]\d{0,18}$/.test(value.owner_id))) ||
       !Array.isArray(value.group_ids) || value.group_ids.some(v=>typeof v!=='string' || !/^-\d{1,19}$/.test(v)) ||
       (value.enabled && !value.owner_id) || !['group','topic',undefined].includes(value.topic_memory as string|undefined)) throw new Error('Invalid assistant policy');
+  // Step 2b-1 seeds the owner's private chat under the id it always had: the owner's Telegram user id.
+  const ownerChatId=(value as Record<string,unknown>).owner_chat===undefined?value.owner_id as string|null:(value as Record<string,unknown>).owner_chat;
+  if(ownerChatId!==null&&!isChatId(ownerChatId)||ownerChatId===null&&value.owner_id!==null)throw new Error('Invalid assistant policy');
   const groups=[...new Set(value.group_ids as string[])];
   return {enabled:value.enabled,owner_id:value.owner_id as string|null,group_ids:groups,
-    group_access:groupAccess(value.group_access??{},groups,value.owner_id as string|null),topic_memory:(value.topic_memory as TopicMemory|undefined)??'group'};
+    group_access:groupAccess(value.group_access??{},groups,value.owner_id as string|null),topic_memory:(value.topic_memory as TopicMemory|undefined)??'group',
+    owner_chat:ownerChatId as string|null};
 }
 export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:string):{owner:boolean;chat_id:string;user_id:string}|null {
   if (!policy.enabled) return null;

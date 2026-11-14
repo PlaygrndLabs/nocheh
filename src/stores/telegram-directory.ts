@@ -1,60 +1,34 @@
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
-import {graphGroupLabel} from '../graph-labels.js';
 
-type Row={scope:string;user_id?:string;payload:Buffer};
-type Person={id:string;name:string|null;username:string|null};
-type Group={id:string;name:string|null;users:Person[]};
+type Person={id:string;name:string|null;username:string|null;state:'in'|'left'};
+/** A group: its Nocheh chat id, its current Telegram id, its name, and the people Nocheh saw in it. */
+type Group={id:string;external:string|null;name:string|null;users:Person[]};
+const GROUPS=100,PEOPLE=5000;
 
-const record=(value:unknown):Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
-const clean=(value:unknown)=>typeof value==='string'?value.replace(/\s+/g,' ').trim().slice(0,200):'';
-const numeric=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)?String(value):typeof value==='string'&&/^[1-9]\d{0,18}$/.test(value)?value:'';
-const body=(payload:Buffer)=>{try{return record(JSON.parse(payload.toString()));}catch{return {};}};
-const message=(value:Record<string,unknown>)=>record(value.message??value.edited_message??value.channel_post??value.edited_channel_post);
-
-/** Names come only from captured Telegram originals. An ID remains the authority. */
-function person(value:unknown,id:string):Person|null {
-  const actor=record(value);
-  if(numeric(actor.id)!==id||actor.is_bot===true)return null;
-  const name=[clean(actor.first_name),clean(actor.last_name)].filter(Boolean).join(' ')||null;
-  const username=clean(actor.username).replace(/^@+/, '')||null;
-  return {id,name,username:username?'@'+username:null};
-}
-
-export async function telegramDirectory(archive:pg.Pool,principal:Reader,refreshed=new Map<string,{title:string|null}>()):Promise<{groups:Group[];truncated:boolean}> {
+/**
+ * The people in the owner's groups (ADR-0250), from the chat records capture keeps: each group's people and bots
+ * are chat_accounts, and who is in or left a group is chat_memberships (a person who wrote there, joined, or Telegram
+ * said is a member). Bots, anonymous admins and chats posting as themselves are never people here. Names come only from
+ * Telegram updates; an id remains the authority, and no message text is read.
+ */
+export async function telegramDirectory(control:pg.Pool,principal:Reader):Promise<{groups:Group[];truncated:boolean}> {
   admin(principal);
-  const groupRows=(await archive.query<Row>(`SELECT DISTINCT ON (e.scope) e.scope,e.payload FROM events e
-    WHERE e.channel='telegram' AND e.origin='live' AND e.kind='telegram_update'
-      AND e.scope ~ '^-[1-9][0-9]{0,18}$'
-      AND convert_from(e.payload,'UTF8')::jsonb ?| ARRAY['message','edited_message','channel_post','edited_channel_post']
-    ORDER BY e.scope,e.received_at DESC,e.id DESC LIMIT 101`)).rows;
-  const groups=groupRows.slice(0,100).map(row=>({id:row.scope,name:graphGroupLabel(row.payload,row.scope)??refreshed.get(row.scope)?.title??null,users:[] as Person[]}));
-  if(!groups.length)return {groups,truncated:groupRows.length>100};
+  // A group appears once Nocheh saw a message there or anyone in it, as when it was read from the archive.
+  const groupRows=(await control.query(`SELECT c.id,c.title,d.username,i.external_id FROM chats c
+    JOIN chat_connections n ON n.id=c.connection_id AND n.app='telegram'
+    LEFT JOIN chat_ids i ON i.chat_id=c.id AND i.state='current' LEFT JOIN chat_details d ON d.chat_id=c.id
+    WHERE c.kind='group' AND (d.seen_at IS NOT NULL OR EXISTS(SELECT 1 FROM chat_memberships m WHERE m.chat_id=c.id))
+    ORDER BY c.id LIMIT ${GROUPS+1}`)).rows;
+  const groups:Group[]=groupRows.slice(0,GROUPS).map(row=>({id:row.id,external:row.external_id??null,
+    name:row.title??(row.username?'@'+row.username:null),users:[]}));
+  if(!groups.length)return {groups,truncated:groupRows.length>GROUPS};
+  const people=(await control.query(`SELECT m.chat_id,m.state,a.external_id,a.display_name,a.username FROM chat_memberships m
+    JOIN chat_accounts a ON a.id=m.account_id WHERE a.kind='human' AND m.chat_id=ANY($1::text[])
+    ORDER BY m.chat_id,a.external_id LIMIT ${PEOPLE+1}`,[groups.map(group=>group.id)])).rows;
   const byGroup=new Map(groups.map(group=>[group.id,group]));
-  const authors=(await archive.query<Row>(`SELECT DISTINCT ON (e.scope,o.external_id) e.scope,o.external_id AS user_id,e.payload
-    FROM source_relations r JOIN source_objects o ON o.id=r.target_id JOIN events e ON e.id=r.event_id
-    WHERE r.kind='authored_by' AND o.platform='telegram' AND o.namespace='bot-api' AND o.kind='actor'
-      AND o.external_id ~ '^[1-9][0-9]{0,18}$' AND e.channel='telegram' AND e.origin='live' AND e.kind='telegram_update'
-      AND e.scope=ANY($1::text[])
-    ORDER BY e.scope,o.external_id,e.received_at DESC,e.id DESC LIMIT 5001`,[groups.map(group=>group.id)])).rows;
-  const users=new Map(groups.map(group=>[group.id,new Map<string,Person>()]));
-  for(const row of authors.slice(0,5000)) {
-    const id=row.user_id??'',actor=message(body(row.payload)).from,found=person(actor,id);
-    if(found)users.get(row.scope)?.set(id,found);
-  }
-  const arrivals=(await archive.query<Row>(`SELECT e.scope,e.payload FROM events e WHERE e.channel='telegram'
-    AND e.origin='live' AND e.kind='telegram_update' AND e.scope=ANY($1::text[])
-    AND (convert_from(e.payload,'UTF8')::jsonb #> '{message,new_chat_members}') IS NOT NULL
-    ORDER BY e.received_at DESC,e.id DESC LIMIT 1001`,[groups.map(group=>group.id)])).rows;
-  for(const row of arrivals.slice(0,1000)) {
-    const members=message(body(row.payload)).new_chat_members;
-    if(!Array.isArray(members))continue;
-    const known=users.get(row.scope);if(!known)continue;
-    for(const value of members.slice(0,100)) {
-      const id=numeric(record(value).id),found=id?person(value,id):null;
-      if(found&&!known.has(id))known.set(id,found);
-    }
-  }
-  for(const group of groups)group.users=[...users.get(group.id)!.values()].sort((a,b)=>(a.name??a.username??a.id).localeCompare(b.name??b.username??b.id));
-  return {groups,truncated:groupRows.length>100||authors.length>5000||arrivals.length>1000};
+  for(const row of people.slice(0,PEOPLE))byGroup.get(row.chat_id)?.users.push({id:row.external_id,name:row.display_name??null,
+    username:row.username?'@'+row.username:null,state:row.state});
+  for(const group of groups)group.users.sort((a,b)=>(a.name??a.username??a.id).localeCompare(b.name??b.username??b.id));
+  return {groups,truncated:groupRows.length>GROUPS||people.length>PEOPLE};
 }

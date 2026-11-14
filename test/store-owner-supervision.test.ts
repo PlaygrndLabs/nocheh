@@ -6,21 +6,30 @@ import {initializeStoreDatabases,connectStores} from '../src/stores/connections.
 import {fixtureServices} from './fixture-brain.js';
 import {OwnerSupervisionRepository} from '../src/stores/owner-supervision.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {chatIdFor} from '../src/chats.js';
+import type {ConversationDirectoryItem} from '../src/stores/owner-supervision.js';
+import {legacyChats,seedChats} from './fixture-groups.js';
 
 test('stored owner directory and decisions span every page without turning reads into reconciliation',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
     const config={host:process.env.PGHOST!,port:Number(process.env.PGPORT??5432),user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
     const admin=new pg.Pool(config);try{assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
     const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
-    await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),key='supervision:'+Date.now(),group='-'+Date.now(),second=String(Number(group)-1),owner={admin:true,scope:null};
+    await initializeStoreDatabases(config,passwords);const base=Date.now(),stores=connectStores(config,passwords),key='supervision:'+base,group='-'+base,second=String(Number(group)-1),owner={admin:true,scope:null};
     let detectorCalls=0;
     const services=fixtureServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,second]}),
       runtime:async(operation)=>{assert.equal(operation,'guard.detect');detectorCalls++;return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('read projection must not call Honcho');})});
     const view=new OwnerSupervisionRepository({...services,knowledge:{proposal:async()=>{throw Error('not used');}}});
+    // Both chat id families (ADR-0250): the two groups and topic 19 were stored before step 2b and keep their Telegram
+    // values as their ids; topic 21 and a third group are first seen now and get digest ids.
+    const topic19=group+'/topic/19',topic21=chatIdFor('telegram',group,'21');
+    const all=async()=>{const items:ConversationDirectoryItem[]=[];let after='';
+      for(;;){const page=await view.conversations(owner,{limit:100,after});items.push(...page.items);if(!page.next_cursor)return items;after=page.next_cursor;}};
     try {
+      await seedChats(stores.control,legacyChats([group,topic19,second],{owner:'123',served:[group,second]}));
       const capture=async(scope:string,index:number,extra:Record<string,unknown>={})=>{
         const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope,source_id:String(index),revision:'1',occurred_at:null,text:'PRIVATE_FIXTURE_BODY',
-          payload:{message:{message_id:index,date:1,chat:{id:Number(scope),type:'supergroup',title:'Repeated synthetic name'},from:{id:123,first_name:'Owner'},text:'PRIVATE_FIXTURE_BODY',...extra}}};
+          payload:{update_id:base*100+index,message:{message_id:index,date:1,chat:{id:Number(scope),type:'supergroup',title:'Repeated synthetic name'},from:{id:123,first_name:'Owner'},text:'PRIVATE_FIXTURE_BODY',...extra}}};
         return (await services.capture.capture(event)).source.reference;
       };
       const source=await capture(group,1);await capture(second,2);await capture(group,3,{message_thread_id:19,is_topic_message:true,forum_topic_created:{name:'Synthetic named topic'}});await capture(group,4,{message_thread_id:19,is_topic_message:true});
@@ -40,9 +49,15 @@ test('stored owner directory and decisions span every page without turning reads
       await stores.control.query("UPDATE memory_entity_suggestions SET status='rejected',revision=revision+1 WHERE id=$1",[selected]);
       const changed=await view.decision(owner,'entity',selected);assert.equal(changed.state,'rejected');assert.equal(changed.revision,2);
       assert.equal((await view.decisions(owner,{kind:'entity',limit:100})).total,first.total-1);
-      const directory=await view.conversations(owner,{q:group,limit:100}),topic=directory.items.find(item=>item.space_id===group+'/topic/19');
+      const directory=await view.conversations(owner,{q:group,limit:100}),topic=directory.items.find(item=>item.space_id===topic19);
       assert.equal(topic?.name,'Synthetic named topic','later ordinary messages retain the observed topic name');
-      assert.equal(directory.items.find(item=>item.space_id===group+'/topic/21')?.name,'Root reply topic','an ordinary topic message names its topic through its root reply');
+      const listed=await all(),newTopic=listed.find(item=>item.space_id===topic21);
+      assert.equal(newTopic?.name,'Root reply topic','an ordinary topic message names its topic through its root reply');
+      // An old-shaped topic and one first seen now carry the same fields from the directory.
+      const fields=(item:ConversationDirectoryItem|undefined)=>item&&{kind:item.kind,parent_space:item.parent_space,parent_name:item.parent_name,
+        app_ids:item.app_ids,state:item.state,is_forum:item.is_forum,owner:item.owner};
+      assert.deepEqual(fields(newTopic),fields(topic));assert.deepEqual([topic?.topic_key,newTopic?.topic_key],['19','21']);
+      assert.deepEqual(topic?.app_ids,[{app:'telegram',external:group,state:'current'}]);assert.equal(topic?.state,'active');
       await services.capture.capture({version:1,key:key+':delivered',origin:'live',kind:'telegram_delivered_message',bot_id:key,scope:second,source_id:'99',revision:'1',occurred_at:null,text:'Reply',
         payload:{message:{message_id:99,date:2,chat:{id:Number(second),type:'supergroup'},from:{id:1,is_bot:true},text:'Reply'}}});
       await services.capture.capture({version:1,key:key+':reaction',origin:'live',kind:'telegram_update',bot_id:key,scope:second,source_id:'reaction',revision:'1',occurred_at:null,text:null,
@@ -52,9 +67,19 @@ test('stored owner directory and decisions span every page without turning reads
       assert.equal(topic?.parent_name,'Repeated synthetic name');assert.equal(topic?.kind,'topic');
       assert.equal((await view.conversations(owner,{q:'Repeated synthetic name'})).items.filter(item=>[group,second].includes(item.space_id)).length,2);
       assert.ok(!JSON.stringify(directory).includes('PRIVATE_FIXTURE_BODY'));
-      const unrepresentable=(await view.conversations(owner,{q:unrepresentableScope})).items.find(item=>item.space_id===unrepresentableScope);
-      assert.ok(unrepresentable,'source JSON that PostgreSQL cannot convert to jsonb retains its exact directory identity');assert.equal(unrepresentable.name,null);
-      const before=await services.guards.state(),context=await view.context(owner,group+'/topic/19'),after=await services.guards.state();
+      const unrepresentable=(await all()).find(item=>item.space_id===chatIdFor('telegram',unrepresentableScope));
+      assert.ok(unrepresentable,'source JSON that PostgreSQL cannot convert to jsonb still records its chat');
+      assert.equal(unrepresentable.name,'Repeated synthetic name');
+      const oldGroup=(await all()).find(item=>item.space_id===group)!;
+      assert.deepEqual([unrepresentable.kind,unrepresentable.parent_space,unrepresentable.topic_key,unrepresentable.owner,unrepresentable.app_ids],
+        ['group',null,null,false,[{app:'telegram',external:unrepresentableScope,state:'current'}]]);
+      assert.deepEqual([oldGroup.kind,oldGroup.parent_space,oldGroup.topic_key,oldGroup.owner,oldGroup.app_ids],['group',null,null,false,[{app:'telegram',external:group,state:'current'}]]);
+      assert.equal(unrepresentable.state,'off','a chat first seen now is served only as TELEGRAM_GROUP_IDS says');
+      // A topic first seen now is read as its group's topic, as an old-shaped one is.
+      const newContext=await view.context(owner,topic21);
+      assert.equal(newContext.conversation.kind,'topic');assert.equal(newContext.conversation.parent_space,group);
+      assert.equal(newContext.conversation.parent_name,'Repeated synthetic name');
+      const before=await services.guards.state(),context=await view.context(owner,topic19),after=await services.guards.state();
       assert.deepEqual(after,before,'read projections never invalidate the current memory generation');
       assert.deepEqual(context.knowledge_access.sharing_rules,[]);assert.equal(context.organization.effective.project,null);
       const project=await services.projects.save(owner,{name:key+':project',description:'Synthetic project',state:'active',expected_revision:0,operation_id:key+':project'});
@@ -63,13 +88,13 @@ test('stored owner directory and decisions span every page without turning reads
       const claim=await services.entities.publishClaim({subject_id:entity.id,predicate:'milestone',content:'Synthetic milestone is ready',attribution:'reported',uncertainty:'supported',evidence:[source]},await services.guards.state(),key+':claim');
       const projectView=await view.projectContext(owner,project.id),fact=projectView.knowledge.items.find(item=>item.id===claim.id);
       assert.equal(fact?.type,'claim');assert.equal(fact?.content,'Synthetic milestone is ready');assert.deepEqual(fact?.evidence,[source]);
-      assert.equal(projectView.knowledge.total,1);assert.ok(projectView.conversations.some(item=>item.space_id===group+'/topic/19'&&item.effective.inherited));
-      assert.deepEqual((await view.context(owner,group+'/topic/19')).knowledge_access.sharing_rules,[],'inherited project context never becomes sharing authority');
+      assert.equal(projectView.knowledge.total,1);assert.ok(projectView.conversations.some(item=>item.space_id===topic19&&item.effective.inherited));
+      assert.deepEqual((await view.context(owner,topic19)).knowledge_access.sharing_rules,[],'inherited project context never becomes sharing authority');
       assert.equal(detectorCalls,0,'directory, decisions and context do not call the runtime');
 
       // A project shares nothing between its groups: a group's context lists no rule unless the owner wrote it (ADR-0247).
       await services.projects.assign(owner,{space_id:second,project_id:project.id,mode:'assigned',expected_revision:0,operation_id:key+':assign-second'});
-      for(const space of [second,group,group+'/topic/19']){
+      for(const space of [second,group,topic19]){
         const shown=await view.context(owner,space);
         assert.deepEqual(shown.knowledge_access.sharing_rules,[],space);assert.match(shown.knowledge_access.note,/a project grants no access in a group/);
         assert.match(shown.organization.note,/never moves a group or topic into or out of a project by itself/);

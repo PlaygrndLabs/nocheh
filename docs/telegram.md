@@ -143,8 +143,11 @@ sent), the HTTP status, a reason code such as `bot_blocked` or
 `reaction_not_allowed`, the dispatch key it ran under and how long it took. It
 never holds text, buttons, links, the token or Telegram's own error wording.
 Records go to `spool/sends`, and `nocheh-app` moves them into the control
-database's `chat_sends` table. They are not journal entries, archive messages
-or delivery receipts, and nothing reads them to decide a send.
+database's `chat_sends` table, adding the Nocheh chat the Telegram chat and
+topic belong to ([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)). A record names
+the topic by its thread as text, so a record from another chat app fits the same
+shape. They are not journal entries, archive messages or delivery receipts, and
+nothing reads them to decide a send.
 
 **System › Sent to apps** lists them, newest first, with a Problems filter.
 Failed and uncertain sends of the last day show on Health and in the owner's

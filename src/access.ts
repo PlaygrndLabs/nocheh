@@ -5,6 +5,7 @@ import type pg from 'pg';
 import {policyRevision,validateSpace,parentSpace,type ReadSet} from './spaces.js';
 import {guardState} from './guarded.js';
 import {activeBrain} from './brain/brains.js';
+import {chatApps,type AppBinding} from './chat-wire.js';
 
 export interface Reader {readonly scope:string|null; readonly admin:boolean;readonly turnEvent?:string;readonly space?:string;readonly revision?:number;readonly guard_epoch?:number;readonly generation?:string;readonly logical_profile?:string;readonly purpose?:'assistant'|'memory-review'|'filter';readonly brain?:string;
   /** The "Answer privately" record this turn answers (32 hex, ADR-0249). Signed in a turn pass, and only in one whose
@@ -12,7 +13,10 @@ export interface Reader {readonly scope:string|null; readonly admin:boolean;read
   readonly answer?:string;
   /** The conversations an answer reader may read, resolved on the server from the frozen record for every request.
    * Never taken from a pass: a pass that names one is refused. Absent means the reader's own recall scope. */
-  readonly reads?:ReadSet}
+  readonly reads?:ReadSet;
+  /** The app a turn pass is bound to (ADR-0250): its chat's current app id and topic. Signed only in a turn pass and
+   * checked by the front door that receives the turn; storage does not require it, so job passes carry none. */
+  readonly app?:AppBinding}
 /** The id of an "Answer privately" record: also the button's data after `np` and the private chat's /start parameter. */
 export const answerId=/^[a-f0-9]{32}$/;
 const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length && timingSafeEqual(x,y);};
@@ -23,9 +27,18 @@ export function scopeToken(secret:string,scope:string|null,expires:number,bindin
 /** The brain a turn's pass is for: the one plugged into the brain socket (ADR-0234). The pass names it so its effects can be told apart (ADR-0233). */
 export const defaultBrain=activeBrain;
 const brainName=/^[a-z][a-z0-9-]{0,31}$/;
-export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;brain?:string;answer?:string}):string {
+export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;brain?:string;answer?:string;app?:AppBinding}):string {
   const body=Buffer.from(JSON.stringify({scope,expires,event_id:eventId,audience:'nocheh-assistant',brain:defaultBrain,...policy})).toString('base64url');
   return `turn.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
+}
+const appText=/^[A-Za-z0-9._:-]{1,128}$/,appTopic=/^[A-Za-z0-9._-]{1,64}$/;
+/** A turn pass's app binding, exactly {app, chat, topic}; anything else refuses the pass. */
+export function appBinding(value:unknown):AppBinding {
+  const claim=object(value);
+  if(Object.keys(claim).sort().join()!=='app,chat,topic'||!(chatApps as readonly unknown[]).includes(claim.app)||
+    typeof claim.chat!=='string'||!appText.test(claim.chat)||claim.topic!==null&&(typeof claim.topic!=='string'||!appTopic.test(claim.topic)))
+    throw new HttpError(400,'invalid_app_binding');
+  return {app:claim.app as AppBinding['app'],chat:claim.chat,topic:claim.topic as string|null};
 }
 export function reader(req:IncomingMessage,secret:string,now=Date.now()):Reader {
   if (!req.headers.authorization?.startsWith('Bearer ')) throw new HttpError(401,'unauthorized');
@@ -56,7 +69,9 @@ export function reader(req:IncomingMessage,secret:string,now=Date.now()):Reader 
       !/^[1-9][0-9]{0,18}$/.test(scope)||!('space' in policy)||policy.space!==scope))throw Error();
     // What an answer may read comes from its record on the server, never from the pass.
     if(claims.reads!==undefined)throw Error();
-    return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.brain===undefined?{}:{brain:claims.brain as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string})};
+    const app=claims.app===undefined?undefined:appBinding(claims.app);
+    if(app!==undefined&&prefix!=='turn')throw Error();
+    return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.brain===undefined?{}:{brain:claims.brain as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app})};
   } catch { throw new HttpError(401,'invalid_scope_token'); }
 }
 export function admin(principal:Reader):void { if (!principal.admin) throw new HttpError(403,'owner_required'); }

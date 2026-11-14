@@ -66,15 +66,22 @@ def validate_owner(directory):
     return manifest
 
 
-def import_owner(api, directory):
+# The chats and their app ids (ADR-0250): a portable import brings them before the archive, so each imported
+# original finds the chat its package names and every later record means the same chat here.
+CHAT_TABLES = ('chats', 'chat_ids')
+
+
+def import_owner(api, directory, only=None):
     """Table by table, in the order the destination gives. A task whose parent task
-    has not arrived yet waits for the next pass; a pass with no progress stops."""
+    has not arrived yet waits for the next pass; a pass with no progress stops.
+    `only` limits the import to those tables (a record sent again changes nothing)."""
     directory = Path(directory); manifest = validate_owner(directory)
     available = _tables(api.call('/v1/exports/owner-data/tables'))
     if any(table not in available for table in manifest['tables']): raise ValueError('owner_format_unsupported')
     totals = {'added': 0, 'unchanged': 0, 'kept': 0}
     with (directory / 'records.ndjson').open('rb') as source:
         for table in available:
+            if only is not None and table not in only: continue
             waiting = []
             source.seek(0)
             for line in source:

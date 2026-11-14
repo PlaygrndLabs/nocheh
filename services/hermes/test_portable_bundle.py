@@ -15,13 +15,16 @@ class API:
         self.guard={'format':'nocheh-derivative-record-v1','type':'guard_sources','key':'events:'+self.record['id'],'value':{'id':'events:'+self.record['id'],'kind':'events','source_id':self.record['id'],'event_id':self.record['id'],'active_revision':1},'sha256':'d'*64}
         task={'id':'e'*64,'title':'Send the garden plan','tags':['home'],'due_on':'2026-12-01','position':1.5}
         self.task={'format':'nocheh-owner-record-v1','table':'owner_tasks','key':[task['id']],'row':task,'sha256':digest(canonical({'table':'owner_tasks','key':[task['id']],'row':task}))}
+        chat={'id':'f'*64,'kind':'group','state':'active'}
+        self.chat={'format':'nocheh-owner-record-v1','table':'chats','key':['group',chat['id']],'row':chat,'sha256':digest(canonical({'table':'chats','key':['group',chat['id']],'row':chat}))}
         self.derived={'format':'nocheh-derivative-record-v1','type':'guard_revisions','key':value['id'],'value':value,'sha256':digest(canonical({'type':'guard_revisions','key':value['id'],'value':value}))}
     def call(self,path,body=None,binary=False):
         if path.startswith('/v1/exports/sources?'):return {'format':'nocheh-sources-v1','records':[self.record],'next':None}
         if path.endswith('/bytes') and body is None:return self.bytes
         if path.endswith('/types'):return {'format':'nocheh-derivatives-v1','types':['guard_sources','guard_revisions']}
         if path.startswith('/v1/exports/derivatives?'):return {'format':'nocheh-derivatives-v1','records':[self.guard if 'type=guard_sources' in path else self.derived],'next':None}
-        if path=='/v1/exports/owner-data/tables':return {'format':'nocheh-owner-data-v1','tables':['owner_task_settings','owner_tasks']}
+        if path=='/v1/exports/owner-data/tables':return {'format':'nocheh-owner-data-v1','tables':['chats','owner_task_settings','owner_tasks']}
+        if path.startswith('/v1/exports/owner-data?table=chats'):return {'format':'nocheh-owner-data-v1','table':'chats','records':[self.chat],'next':None}
         if path.startswith('/v1/exports/owner-data?'):return {'format':'nocheh-owner-data-v1','table':'owner_tasks','records':[self.task],'next':None} if 'table=owner_tasks' in path else {'format':'nocheh-owner-data-v1','table':'owner_task_settings','records':[],'next':None}
         if path.startswith('/v1/exports/derivative-history?'):return {'format':'nocheh-derivative-history-v1','records':[],'next':None}
         if self.fail and path=='/v1/imports/derivatives':self.fail=False;raise RuntimeError('lost derivative acknowledgment')
@@ -73,7 +76,11 @@ class PortableBundleTests(unittest.TestCase):
             self.assertIn(('/v1/imports/sources',api.record),api.calls)
             self.assertIn(('/v1/imports/derivatives',{'records':[api.derived]}),api.calls)
             self.assertIn(('/v1/imports/owner-data',{'records':[api.task]}),api.calls)
-            self.assertEqual(manifest['owner']['records'],1)
+            self.assertEqual(manifest['owner']['records'],2)
+            # The package's chats come before its archive, so each original finds the chat the package names.
+            first=next(index for index,(path,_) in enumerate(api.calls) if path=='/v1/imports/sources')
+            self.assertEqual(api.calls[first-1],('/v1/imports/owner-data',{'records':[api.chat]}))
+            self.assertLess(api.calls.index(('/v1/imports/owner-data',{'records':[api.chat]})),api.calls.index(('/v1/imports/sources',api.record)))
             self.assertIn('morning',(root/'inactive/native'/profile/'cron/jobs.json').read_text())
             # User changes to staged native notes must survive a later replay.
             (root/'inactive/native'/profile/'memories/USER.md').write_text('Owner correction')

@@ -9,14 +9,16 @@ import {captureEvidence,GeneratedCaptureRepository} from './generated-capture.js
 import type {Envelope} from '../archive.js';
 import {requestWorkflow} from '../workflows/store.js';
 import {ReactionStateRepository} from './reaction-state.js';
+import {reloadChats,type ChatRepository} from './chats.js';
 
 export class CaptureCoordinator {
   readonly reactions:ReactionStateRepository;
-  constructor(readonly archive:ArchiveRepository,readonly control:pg.Pool,readonly generated?:GeneratedCaptureRepository){
+  constructor(readonly archive:ArchiveRepository,readonly control:pg.Pool,readonly generated?:GeneratedCaptureRepository,readonly chats?:ChatRepository){
     this.reactions=new ReactionStateRepository(archive,control);
   }
 
-  private async request(client:pg.PoolClient,source:CapturedSource):Promise<void> {
+  /** Returns whether a chat or chat id was recorded, so the directory reloads once the transaction commits. */
+  private async request(client:pg.PoolClient,source:CapturedSource):Promise<boolean> {
     await client.query(`INSERT INTO source_intakes(event_id,source_revision,input_hash,transport,state) VALUES($1,$2,$3,$4,'ready') ON CONFLICT DO NOTHING`,
       [source.reference.id,source.reference.revision,source.reference.input_hash,source.origin==='import'?'import':'capture']);
     const intake=(await client.query('SELECT * FROM source_intakes WHERE event_id=$1',[source.reference.id])).rows[0];
@@ -31,6 +33,9 @@ export class CaptureCoordinator {
     if(previous.source_revision!==source.reference.revision||previous.payload_hash!==source.reference.input_hash)
       throw new HttpError(409,'capture_handoff_conflict');
     if(intake.transport==='capture'&&source.origin==='live')await this.reactions.capture(client,source.reference);
+    // The chats, chat ids, people and memberships the original shows (ADR-0250); a replay changes nothing. An imported
+    // original is recorded as the owner's history, never as this installation's bot.
+    const recorded=await this.chats?.capture(client,source,intake.transport==='import'?'import':'capture')??false;
     // Wire batches retain exact transport evidence; their individual updates
     // already enter preparation. Do not spend a detector call on every polling
     // envelope ahead of the actual conversation. Explicit owner preparation
@@ -42,16 +47,18 @@ export class CaptureCoordinator {
     }
     for(const id of source.artifact_ids)await client.query(`INSERT INTO attachment_retrievals(artifact_id,event_id)
       VALUES($1,$2) ON CONFLICT DO NOTHING`,[id,source.reference.id]);
+    return recorded;
   }
 
   async handoff(source:CapturedSource):Promise<void> {
-    const client=await this.control.connect();
+    const client=await this.control.connect();let recorded=false;
     try {
       await client.query('BEGIN');
-      await this.request(client,source);
+      recorded=await this.request(client,source);
       await client.query('COMMIT');
     } catch(error) {await client.query('ROLLBACK');throw error;}
     finally {client.release();}
+    if(recorded)await reloadChats();
   }
 
   async capture(value:unknown):Promise<{source:CapturedSource;duplicate:boolean}> {
@@ -61,16 +68,18 @@ export class CaptureCoordinator {
 
   /** Repeated full sweeps handle sequence allocation/commit reordering too. */
   async reconcile(limit=100):Promise<number> {
-    const client=await this.control.connect();
+    const client=await this.control.connect();let recorded=false,count=0;
     try {
       await client.query('BEGIN');
       const cursor=(await client.query('SELECT after_sequence FROM capture_reconciliation WHERE singleton FOR UPDATE')).rows[0];
       const sources=await this.archive.page(String(cursor.after_sequence),limit);
-      for(const source of sources)await this.request(client,source);
+      for(const source of sources)recorded=await this.request(client,source)||recorded;
       await client.query('UPDATE capture_reconciliation SET after_sequence=$1 WHERE singleton',[sources.at(-1)?.sequence??'0']);
-      await client.query('COMMIT');return sources.length;
+      await client.query('COMMIT');count=sources.length;
     } catch(error) {await client.query('ROLLBACK');throw error;}
     finally {client.release();}
+    if(recorded)await reloadChats();
+    return count;
   }
 }
 
@@ -95,6 +104,15 @@ export async function drainSourceSpool(coordinator:CaptureCoordinator,root:strin
       captured.push({name,value,sources,generated:classified.generated});
     } catch(error) {failures.push({name,code:error instanceof HttpError?error.code:'capture_commit_failed'});}
   }
+  // Telegram updates are handed off in their update order, whatever order their files were read in: a group's upgrade
+  // message is then recorded before the new supergroup's other messages, so it stays one chat (ADR-0250).
+  const update=(item:typeof captured[number])=>{
+    const order=item.sources.length===1&&item.sources[0]!.kind==='telegram_update'?Number(item.sources[0]!.reference.revision):NaN;
+    return Number.isSafeInteger(order)?order:null;
+  };
+  const positions=captured.flatMap((item,index)=>update(item)===null?[]:[index]);
+  const ordered=positions.map(index=>captured[index]!).sort((a,b)=>update(a)!-update(b)!);
+  positions.forEach((index,at)=>{captured[index]=ordered[at]!;});
   // Commit the entire bounded archive batch before touching control. A control
   // outage cannot delay later originals in this batch behind failed handoffs.
   for(const {name,value,sources,generated} of captured) {

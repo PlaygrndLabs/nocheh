@@ -39,6 +39,12 @@ class OwnerTransferTests(unittest.TestCase):
             self.assertEqual(result,{'added':3,'unchanged':0,'kept':0,'automatic_activation':False})
             self.assertEqual(api.calls[:3],['0'*64,'a'*64,'0'*64])
 
+    def test_only_named_tables_are_imported(self):
+        with tempfile.TemporaryDirectory() as folder:
+            api=API(self.rows);export_owner(api,Path(folder)/'owner')
+            self.assertEqual(import_owner(api,Path(folder)/'owner',only=('sharing_rules',))['added'],1)
+            self.assertEqual(api.calls,['rule-1'])
+
     def test_missing_parent_stops_instead_of_looping(self):
         with tempfile.TemporaryDirectory() as folder:
             export_owner(API(self.rows),Path(folder)/'owner')

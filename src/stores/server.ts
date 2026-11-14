@@ -1,7 +1,8 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 import {admin,reader} from '../access.js';
-import {outsideChat,telegramDeliveryAllowed} from '../assistant-policy.js';
+import {telegramDeliveryAllowed} from '../assistant-policy.js';
+import {servedChats} from '../chats.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
@@ -33,6 +34,7 @@ import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
+import {currentChats} from './chats.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
@@ -55,6 +57,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/internal/actions/authorize') {
       authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
+    }
+    if(req.method==='GET'&&path==='/internal/chats') {
+      // What the Python services may act for (ADR-0250): the served chats with their topics, and the owner's private
+      // chat apart from the owner's account.
+      authorize(req,config.token);const owner=s.access.policy().owner_id;
+      return json(res,200,servedChats(await currentChats(),owner?{app:'telegram',external:owner}:null));
     }
     if(req.method==='POST'&&path==='/internal/sources/retired') {
       // Hermes withholds retired turns from its own native history before each turn.
@@ -178,14 +186,15 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const reader={admin:true,scope:null},view=ownerView[1]!,policy=s.access.policy();
       // Chats with people Nocheh doesn't serve are named by those people; the turn never sees them.
       if(view==='telegram-identities') {
-        const found=await telegramDirectory(s.stores.archive,reader,await s.telegramChats.observations());
-        return json(res,200,{...found,groups:found.groups.filter(group=>!outsideChat(policy,{origin:'live',channel:'telegram',kind:'telegram_update',scope:group.id}))});
+        // As before, a group Nocheh does not serve is left out; the directory decides, so an unknown chat is left out too.
+        const found=await telegramDirectory(s.stores.control,reader),directory=await currentChats(),all=!policy.enabled||!policy.owner_id;
+        return json(res,200,{...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
       }
       if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
         limit:limit(url.searchParams.get('limit'),50,100)},await s.supervision.outsiders(policy)));
       if(view==='conversation-context') {
         const space=url.searchParams.get('space')??'';
-        if((await s.supervision.outsiders(policy)).has(space.split('/topic/')[0]!))throw new HttpError(404,'conversation_not_found');
+        if(await s.supervision.outsider(policy,space))throw new HttpError(404,'conversation_not_found');
       }
       if(view==='people')return json(res,200,await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
         after:url.searchParams.get('after')??'',state:'active'}));
@@ -415,7 +424,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.reviews.controlJob(principal,string(body.id,64),{action:body.action,expected_revision:body.expected_revision}));
     }
     if(req.method==='GET') {
-      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.archive,principal,await s.telegramChats.observations()));
+      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.control,principal));
       if(path==='/v1/search') {
         const mode=url.searchParams.get('mode')??'text';
         if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);

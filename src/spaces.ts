@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import { HttpError, object, string } from './http.js';
+import { desktopTopicId, telegramTopicId } from './chats-telegram.js';
 
 export const spaceSchema = `
 CREATE TABLE IF NOT EXISTS memory_policy_state (singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton), revision integer NOT NULL DEFAULT 1);
@@ -14,16 +15,8 @@ CREATE INDEX IF NOT EXISTS memory_shares_destination ON memory_shares(destinatio
 export type SpaceMode = 'isolated' | 'approved' | 'filtered';
 export interface SpacePreferences {mode:SpaceMode; sources:string[]; privacy_instructions:string}
 export const defaults:SpacePreferences = {mode:'approved', sources:[], privacy_instructions:'Do not disclose personal relationships, health, finances, identity details, credentials, private plans, or information about other people. Release only relevant non-personal knowledge. When uncertain, omit it.'};
-/**
- * The forum topic a Telegram message belongs to. Bot API also sets message_thread_id on a reply
- * chain in an ordinary supergroup (the chain's first message); that is not a topic, and Telegram
- * rejects it as a delivery destination. Same rule as the Hermes adapter's routable thread id.
- */
-export function telegramTopicId(message:Record<string,any>):unknown {
-  const chat=message.chat&&typeof message.chat==='object'?message.chat:{},raw=message.message_thread_id;
-  if(raw===undefined||raw===null)return undefined;
-  return (chat.type==='group'||chat.type==='supergroup')&&chat.is_forum===true||message.is_topic_message===true?raw:undefined;
-}
+// The Telegram adapter owns Telegram's own formats (ADR-0250); these stay importable from here.
+export {telegramTopicId,desktopChannelTypes,desktopTopicId} from './chats-telegram.js';
 export function spaceId(scope:string, topic?:unknown):string {
   if (topic===undefined || topic===null) return scope;
   if (!/^-?\d+$/.test(scope) || !Number.isSafeInteger(topic) || Number(topic)<=0) throw new HttpError(400,'invalid_topic');
@@ -42,15 +35,6 @@ export function eventSpace(scope:string, payload:unknown, channel='telegram'):st
   const desktop=desktopTopicId(scope,body);
   if(desktop!==undefined)return spaceId(scope,desktop);
   return message ? spaceId(scope,telegramTopicId(object(message))) : scope;
-}
-// Telegram Desktop names a supergroup or channel by its bare id; the Bot API prefixes it with -100.
-export const desktopChannelTypes=new Set(['private_supergroup','public_supergroup','private_channel','public_channel']);
-/** The forum topic the importer worked out for a Desktop export message, only once the export is
- * mapped to its own live supergroup, where topic ids are the live ones. */
-export function desktopTopicId(scope:string,body:Record<string,any>):number|undefined {
-  const chat=body.chat&&typeof body.chat==='object'?body.chat:{},topic=body.topic_id;
-  if(!desktopChannelTypes.has(chat.type)||!/^[1-9][0-9]{0,15}$/.test(String(chat.id))||scope!=='-100'+chat.id)return undefined;
-  return Number.isSafeInteger(topic)&&topic>0?topic:undefined;
 }
 
 export async function backfillSpaces(db:pg.PoolClient) {
