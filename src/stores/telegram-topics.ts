@@ -89,7 +89,8 @@ export class TelegramTopicRepository {
       await db.query('COMMIT');
     } catch(error){await db.query('ROLLBACK');throw error;}
     finally{db.release();}
-    if(added)await reloadChats();
+    // This process's directory shows the owner's name at once (cards and lists show it; a name decides nothing).
+    await reloadChats();
     return result;
   }
 }
