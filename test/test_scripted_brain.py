@@ -43,8 +43,9 @@ class ScriptedBrainTests(unittest.TestCase):
                         and 'fact PRIVFACT91' in final['content'])
         owner=self.brain.respond(request(message('user','[[owner:conversations]]'),tools=('mcp__nocheh__owner_read',)))
         self.assertEqual(owner,{'tool':'mcp__nocheh__owner_read','arguments':{'view':'conversations'}})
-        action=self.brain.respond(request(message('user','[[action:-10042/topic/7|exact text]]')))
-        self.assertEqual(action['arguments'],{'destination':'-10042/topic/7','text':'exact text'})
+        # A destination is a chat id from the destinations list, opaque to the brain (ADR-0250).
+        action=self.brain.respond(request(message('user','[[action:'+'c3'*32+'|exact text]]')))
+        self.assertEqual(action['arguments'],{'destination':'c3'*32,'text':'exact text'})
 
     def test_a_private_answer_follows_the_directives_of_its_framed_question(self):
         # A private answer's message is Nocheh's first line, the question's speaker line and the group question (ADR-0249).

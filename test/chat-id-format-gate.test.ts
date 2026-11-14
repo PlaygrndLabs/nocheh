@@ -62,9 +62,6 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/stores/action-commands.ts','C',9,'chat/topic splits and the t.me link'],
   ['src/stores/telegram-actions.ts','C',6,'destination pattern, splits and the destinations note'],
   ['src/stores/telegram-reply.ts','C',1,'a reply\'s topic split off its space'],
-  // Part D: dashboard, docs and the full tester
-  ['tools/acceptance/product_scenarios.py','D',2,'a topic destination and rule built as chat/topic'],
-  ['tools/acceptance/telegram_scenarios.py','D',7,'topic destinations and directory keys built as chat/topic'],
   // The Telegram adapter's legitimate reads of Telegram's own formats
   ['dashboard/lib/chats-model.ts','adapter',1,'validUserId: a Telegram user id typed for group access'],
   ['dashboard/lib/messages-format.ts','adapter',1,'a Desktop export matched to its group by the -100 id'],
