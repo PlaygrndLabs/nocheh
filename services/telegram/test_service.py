@@ -24,6 +24,18 @@ from tools.acceptance.telegram_mock import TelegramMock, TOKEN
 SECRET = 's' * 32
 OWNER, GROUP = '123', '-10042'
 BOT_ID = TOKEN.split(':')[0]
+# A group first seen after step 2b has a digest chat id; NEW_TG is its Telegram id now and NEW_OLD the one before an upgrade.
+NEW, NEW_TG, NEW_OLD = 'b' * 64, '-10077', '-77'
+# The served list as the app gives it: the owner's chat, GROUP with its General topic and topic 7 (old-shaped ids), NEW.
+TOPICS = [(GROUP + '/topic/1', GROUP, '1'), (GROUP + '/topic/7', GROUP, '7'), ('c' * 64, NEW, '5')]
+
+
+def served_policy(enabled=True, access=None):
+    return Policy.of(enabled, OWNER, [GROUP, (NEW, NEW_TG)], access or {}, topics=TOPICS, old={NEW: [NEW_OLD]})
+
+
+def binding(chat, topic=None):
+    return {'app': 'telegram', 'chat': chat, 'topic': None if topic is None else str(topic)}
 
 
 def credential(event_id, scope=None, space=None, expires=None, **extra):
@@ -62,21 +74,23 @@ class ServiceTests(unittest.TestCase):
             request = lambda: HTTPXRequest(httpx_kwargs={'transport': httpx.ASGITransport(app=app)})
             return Bot(TOKEN, base_url='http://telegram.mock/bot', base_file_url='http://telegram.mock/file/bot',
                        request=instrument_request(request(), capture), get_updates_request=instrument_request(request(), capture, polling=True))
-        self.policy = Policy(True, OWNER, [GROUP], {})
+        self.policy = served_policy()
         self.service = TelegramService(self.policy, TOKEN, self.root / 'spool', self.root / 'state', bot_factory=bot)
         self.service.start()
         self.addCleanup(self.service.stop)
         wait(lambda: self.service.status == 'connected' and self.service.sender is not None)
         self.service.sender.pace = 0
 
-    def turn(self, number, chat=OWNER, topic=None, **extra):
+    def turn(self, number, chat=OWNER, topic=None, scope=None, space=None, **extra):
+        """A turn's body as storage sends it: the Telegram chat and topic now, and a pass for the Nocheh scope and space."""
         source = f'telegram:{BOT_ID}:update:{number}'
         event = digest(source)
         group = chat != OWNER
-        space = chat + ('/topic/' + str(topic) if topic else '') if group else None
+        scope = scope or (chat if group else None)
+        space = space or (chat + ('/topic/' + str(topic) if topic else '') if group else OWNER)
         return {'id': digest(event + ':1'), 'event_id': event, 'attempt': 1, 'dispatch_key': source, 'chat_id': chat,
-                'topic': topic, 'reply_to': '77', 'message_id': '77', 'session_id': 'session-1', 'notify': False,
-                'archive_credential': credential(event, chat if group else None, space), **extra}
+                'topic': None if topic is None else str(topic), 'reply_to': '77', 'message_id': '77', 'session_id': 'session-1', 'notify': False,
+                'archive_credential': credential(event, scope, space, app=binding(chat, topic)), **extra}
 
     def inject(self, updates):
         # The fake Telegram runs on the service's loop; its state file and wake-up are not thread-safe.
@@ -163,7 +177,9 @@ class ServiceTests(unittest.TestCase):
 
     def test_reply_is_bound_to_its_credential_and_bot(self):
         body = self.turn(10, text='x')
-        for change in ({'chat_id': '999'}, {'archive_credential': credential(body['event_id'], GROUP, GROUP)},
+        for change in ({'chat_id': '999'}, {'archive_credential': credential(body['event_id'], GROUP, GROUP, app=binding(GROUP))},
+                       {'archive_credential': credential(body['event_id'], None, OWNER)},
+                       {'archive_credential': credential(body['event_id'], None, OWNER, app=binding(GROUP))},
                        {'dispatch_key': 'telegram:1:update:10'}, {'id': '0' * 64}, {'topic': 7}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.service.reply({**body, **change})
@@ -210,15 +226,17 @@ class ServiceTests(unittest.TestCase):
         answer = 'a' * 32
         body = self.turn(23, text='Private answer')
         event = body['event_id']
-        self.assertEqual(self.service.reply({**body, 'archive_credential': credential(event, OWNER, OWNER, answer=answer)})['state'], 'done')
+        app = binding(OWNER)
+        self.assertEqual(self.service.reply({**body, 'archive_credential': credential(event, OWNER, OWNER, answer=answer, app=app)})['state'], 'done')
         group = self.turn(24, GROUP, text='x')
-        for why, change in {'as the owner': {'archive_credential': credential(event, None, OWNER, answer=answer)},
-                            'a malformed record': {'archive_credential': credential(event, OWNER, OWNER, answer='A' * 32)},
-                            'a plain pass scoped to the owner\'s chat': {'archive_credential': credential(event, OWNER, OWNER)}}.items():
+        for why, change in {'as the owner': {'archive_credential': credential(event, None, OWNER, answer=answer, app=app)},
+                            'a malformed record': {'archive_credential': credential(event, OWNER, OWNER, answer='A' * 32, app=app)},
+                            'a plain pass scoped to the owner\'s chat': {'archive_credential': credential(event, OWNER, OWNER, app=app)},
+                            'a pass with no app binding': {'archive_credential': credential(event, OWNER, OWNER, answer=answer)}}.items():
             with self.subTest(why), self.assertRaises(ValueError):
                 self.service.reply({**body, 'id': digest(event + ':2'), 'attempt': 2, **change})
         with self.assertRaises(ValueError):
-            self.service.reply({**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, answer=answer)})
+            self.service.reply({**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, answer=answer, app=binding(GROUP))})
         self.assertEqual(len(self.sent()), 1)
 
     def test_presence_shows_typing_and_eyes_then_thumbs_up(self):
@@ -264,8 +282,33 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.service.reply(self.turn(16, text='  ')), {'state': 'suppressed', 'error_code': 'intentional_silence'})
         self.assertEqual(self.sent(), [])
 
+    def test_a_group_first_seen_after_step_2b_is_answered_where_it_is_now(self):
+        # Its pass names the chat by its digest id; the bot sends to the Telegram id the chat has now, in its topic.
+        topic = self.turn(30, NEW_TG, 5, scope=NEW, space='c' * 64, text='new topic')
+        self.assertEqual(self.service.reply(topic)['state'], 'done')
+        self.assertEqual(self.service.reply(self.turn(31, NEW_TG, scope=NEW, space=NEW, text='new group'))['state'], 'done')
+        first, second = self.sent()
+        self.assertEqual((first['chat_id'], first['message_thread_id'], second['chat_id']), (NEW_TG, '5', NEW_TG))
+        refused = {'its old Telegram id': self.turn(32, NEW_OLD, scope=NEW, space=NEW, text='x'),
+                   'a topic of another chat': self.turn(33, NEW_TG, 7, scope=NEW, space=GROUP + '/topic/7', text='x'),
+                   'a space outside its scope': self.turn(34, GROUP, scope=NEW, space=GROUP, text='x'),
+                   'a topic with no row': self.turn(35, NEW_TG, 9, scope=NEW, space='d' * 64, text='x'),
+                   'an unserved chat': self.turn(36, '-10099', text='x')}
+        for why, body in refused.items():
+            with self.subTest(why), self.assertRaises(ValueError):
+                self.service.reply(body)
+        self.assertEqual(len(self.sent()), 2)
+
+    def test_a_failed_served_list_serves_nothing(self):
+        from services.chats import ServedList
+        failing = ServedList('http://127.0.0.1:9', SECRET, opener=lambda *_args, **_kw: (_ for _ in ()).throw(OSError('down')))
+        self.service.policy = Policy(True, {}, failing)
+        with self.assertRaises(ValueError):
+            self.service.reply(self.turn(37, text='x'))
+        self.assertEqual(self.sent(), [])
+
     def test_approved_action_notifies_and_answers_once(self):
-        body = {'id': 'a' * 64, 'destination': GROUP + '/topic/7', 'text': 'Team update'}
+        body = {'id': 'a' * 64, 'destination': GROUP + '/topic/7', 'chat_id': GROUP, 'topic': '7', 'text': 'Team update'}
         self.assertEqual(self.service.action(body), {'state': 'done'})
         self.assertEqual(self.service.action(body), {'state': 'done'})
         (parameters,) = self.sent()
@@ -273,6 +316,10 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn('disable_notification', parameters)
         self.allowed = False
         self.assertEqual(self.service.action({**body, 'id': 'b' * 64}), {'state': 'denied'})
+        # A send names its Telegram chat and topic itself; one without them is refused before anything is recorded.
+        for change in ({'chat_id': None}, {'chat_id': 'x'}, {'topic': 'seven'}, {'destination': ''}):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'invalid_action'):
+                self.service.action({**body, 'id': 'c' * 64, **change})
 
     def test_restart_marks_unfinished_sends_ambiguous(self):
         receipts = self.root / 'spool/dispatch'
@@ -282,22 +329,57 @@ class ServiceTests(unittest.TestCase):
 
 
 class PolicyTests(unittest.TestCase):
-    def test_the_owner_is_never_a_person_allowed_or_denied_in_a_group(self):
-        for side in ('granted', 'denied'):
-            access = {GROUP: {'granted': [], 'denied': [], side: [OWNER]}}
-            with self.assertRaisesRegex(ValueError, 'invalid_group_access'): Policy(True, OWNER, [GROUP], access)
-        self.assertEqual(Policy(True, OWNER, [GROUP], {GROUP: {'granted': ['456'], 'denied': []}}).group_access[GROUP]['granted'], ['456'])
+    def test_group_access_holds_under_any_id_a_group_has_had(self):
+        for bad in ({GROUP: {'granted': ['x'], 'denied': []}}, {GROUP: {'granted': ['0456'], 'denied': []}}, {GROUP: {'granted': []}}, {'': {'granted': [], 'denied': []}}):
+            with self.assertRaisesRegex(ValueError, 'invalid_group_access'): served_policy(access=bad)
+        policy = served_policy(access={NEW_OLD: {'granted': ['456', '789'], 'denied': []}, NEW_TG: {'granted': [], 'denied': ['789']}})
+        served = policy.current()
+        # Granted before the upgrade still counts; a denial under any id wins.
+        self.assertTrue(policy.access(served, NEW, '456'))
+        self.assertFalse(policy.access(served, NEW, '789'))
+        self.assertFalse(policy.access(served, GROUP, '456'))
+
+    def test_the_served_list_is_read_again_on_a_newer_epoch_and_fails_closed(self):
+        from services.chats import Served, ServedList
+        reads, now = [], [0.0]
+        class Response:
+            def __init__(self, payload): self.payload = payload
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, _size): return json.dumps(self.payload).encode()
+        def opener(request, timeout):
+            reads.append(request.full_url)
+            if len(reads) == 3: raise OSError('down')
+            return Response({'epoch': len(reads), 'owner_chat': OWNER, 'owner_account': {'app': 'telegram', 'external': OWNER},
+                             'chats': [{'id': OWNER, 'app': 'telegram', 'kind': 'private', 'parent_id': None, 'topic_key': None, 'state': 'active',
+                                        'app_ids': [{'external': OWNER, 'state': 'current'}]}]})
+        listed = ServedList('http://app.test', SECRET, opener=opener, clock=lambda: now[0])
+        self.assertEqual(listed.get().owner_external(), OWNER)
+        self.assertEqual(reads, ['http://app.test/internal/chats'])
+        self.assertEqual(listed.get(epoch=1).epoch, 1, 'the same epoch reads nothing again')
+        now[0] = 1.5
+        self.assertEqual(listed.get(epoch=2).epoch, 2, 'a newer epoch reads the list again')
+        now[0] = 9.0
+        self.assertIsNone(listed.get().owner_external(), 'a failed read serves nothing')
+        now[0] = 9.5
+        self.assertEqual(len(reads), 3, 'a failed read is tried again at most once a second')
+        self.assertIsNone(listed.get().owner_external())
+        now[0] = 10.5
+        self.assertEqual(listed.get().epoch, 4)
+        for bad in ({'chats': [{'id': 'x'}]}, {'epoch': -1}, {'chats': [{'id': 't', 'app': 'telegram', 'kind': 'topic', 'parent_id': 'missing', 'topic_key': '1',
+                                                                      'state': 'active', 'app_ids': []}]}):
+            with self.assertRaises(ValueError): Served(bad)
 
 
 class DisabledTests(unittest.TestCase):
     def test_disabled_service_polls_and_sends_nothing(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'SERVICE_TOKEN': SECRET}):
-            service = TelegramService(Policy(False, None, [], {}), TOKEN, Path(directory) / 'spool', Path(directory) / 'state')
+            service = TelegramService(Policy.of(False, None, [], {}), TOKEN, Path(directory) / 'spool', Path(directory) / 'state')
             service.start()
             self.assertEqual(service.health()['state'], 'disabled')
             self.assertEqual(service.identify(), {'state': 'disabled'})
             self.assertIsNone(service.loop)
-            missing = TelegramService(Policy(True, OWNER, [], {}), '', Path(directory) / 'spool', Path(directory) / 'state')
+            missing = TelegramService(Policy.of(True, OWNER, [], {}), '', Path(directory) / 'spool', Path(directory) / 'state')
             self.assertEqual(missing.health()['state'], 'credentials_missing')
 
 

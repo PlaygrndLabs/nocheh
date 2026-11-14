@@ -21,7 +21,7 @@ from services.durable import canonical, digest, immutable_file
 from . import settings
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK
 from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, delivery_failure,
-                     no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, space_of, verify_turn_credential)
+                     no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
 
 # Telegram shows "typing…" for about five seconds per chat action, so presence renews it a little sooner.
 TYPING_INTERVAL = 4.0
@@ -36,8 +36,10 @@ ERROR_NAME = re.compile(r'[A-Za-z_]{1,64}')
 
 
 def topic_of(value):
-    """A forum topic id or None; 1 is the forum's General topic."""
+    """A forum topic id or None; 1 is the forum's General topic. Storage sends Telegram's thread id, the number its topic
+    key names (ADR-0250); the key as text is taken too."""
     if value is None or value == '': return None
+    if isinstance(value, str) and value.isascii() and value.isdigit() and value[0] != '0' and len(value) <= 16: value = int(value)
     if type(value) is not int or not 0 < value <= 9007199254740991: raise ValueError('invalid_topic')
     return value
 
@@ -174,23 +176,22 @@ class TelegramService:
     # ── presence: typing and the working reaction ───────────────────────────────────────────────
 
     def _turn(self, body):
-        """The chat, topic and answered message of a turn, checked against the policy and the turn credential."""
+        """The chat, topic and answered message of a turn, checked against its turn credential and the served list."""
         event, attempt = body.get('event_id'), body.get('attempt')
         if not isinstance(event, str) or not HEX.fullmatch(event) or not isinstance(attempt, (int, str)) or isinstance(attempt, bool):
             raise ValueError('invalid_turn')
         if not HEX.fullmatch(str(body.get('id', ''))) or body['id'] != digest(event + ':' + str(attempt)): raise ValueError('invalid_turn')
         chat, message = str(body.get('chat_id') or ''), str(body.get('message_id') or body.get('reply_to') or '')
-        if not CHAT.fullmatch(chat) or not MESSAGE.fullmatch(message) or not self.policy.allowed_chat(chat): raise ValueError('invalid_turn')
+        if not CHAT.fullmatch(chat) or not MESSAGE.fullmatch(message) or not self.policy.enabled: raise ValueError('invalid_turn')
         topic = topic_of(body.get('topic'))
-        owner = chat == self.policy.owner
-        if owner and topic is not None: raise ValueError('invalid_turn')
         credential = body.get('archive_credential')
         if not isinstance(credential, str): raise ValueError('invalid_turn')
-        verify_turn_credential(credential, event, chat, space_of(chat, topic), owner)
-        return chat, topic, message, credential
+        # The pass's app binding names this chat and topic, and the served list agrees its space is there now (ADR-0250).
+        _, served = verify_turn_credential(credential, event, chat, topic, self.policy)
+        return chat, topic, message, credential, served
 
     def presence(self, body):
-        chat, topic, message, credential = self._turn(body)
+        chat, topic, message, credential, _ = self._turn(body)
         finish = body.get('finish')
         if finish not in (None, 'answered', 'failed', 'clear'): raise ValueError('invalid_presence')
         if finish is not None:
@@ -213,7 +214,7 @@ class TelegramService:
         return {'state': 'shown'}
 
     async def _typing(self, presence):
-        token = OUTBOUND_CHECK.set(outbound_check(presence.chat, space_of(presence.chat, presence.topic),
+        token = OUTBOUND_CHECK.set(outbound_check(presence.chat, presence.topic,
                                                   lambda: check_delivery_policy(presence.credential), presence.stopped))
         try:
             while not presence.stopped.is_set():
@@ -268,7 +269,7 @@ class TelegramService:
             flag = self.cancels.get(key)
             if flag is not None and self.loop: self.loop.call_soon_threadsafe(flag.set)
             return self._observe(key)
-        chat, topic, message, credential = self._turn(body)
+        chat, topic, message, credential, served = self._turn(body)
         dispatch, text, session = body.get('dispatch_key'), body.get('text'), body.get('session_id')
         bot = re.escape(self.bot_id or 'none')
         match = re.fullmatch(r'(telegram:' + bot + r':update:(\d{1,19}))(?::continuation:[a-f0-9]{64})?', dispatch) if isinstance(dispatch, str) else None
@@ -277,7 +278,7 @@ class TelegramService:
                 or not isinstance(body.get('notify', False), bool) or not isinstance(body.get('presence', False), bool)):
             raise ValueError('invalid_reply')
         # Answer privately, the one button a reply may carry: only in a group and only this turn's own (ADR-0249).
-        markup = answer_button(body.get('button'), chat, body['event_id'], self.policy.owner)
+        markup = answer_button(body.get('button'), chat, body['event_id'], served.owner_external())
         if self.loop is None:
             return dict(NOT_TRANSMITTED)
         future = asyncio.run_coroutine_threadsafe(self._reply(key, body, chat, topic, message, credential, markup), self.loop)
@@ -317,7 +318,7 @@ class TelegramService:
         await asyncio.to_thread(immutable_file, self.receipts, name + '.intent', canonical({'event_id': body['event_id'], 'attempt': body['attempt']}))
         requests, cancelled = [], self.cancels[key]
         dispatch = DISPATCH_KEY.set(body['dispatch_key'])
-        check = OUTBOUND_CHECK.set(outbound_check(chat, space_of(chat, topic), lambda: check_delivery_policy(credential), cancelled, requests, markup))
+        check = OUTBOUND_CHECK.set(outbound_check(chat, topic, lambda: check_delivery_policy(credential), cancelled, requests, markup))
         started, sending = int(time.time() * 1000), perf_counter()
         try:
             # The archive keeps the reply as the brain gave it, whatever Telegram later does with it.
@@ -361,11 +362,13 @@ class TelegramService:
         return self.call(self.send_action(body))
 
     async def send_action(self, body):
-        destination = re.fullmatch(r'(-?[1-9]\d{0,18})(?:/topic/([1-9]\d{0,15}))?', str(body.get('destination', '')))
-        if (not HEX.fullmatch(str(body.get('id', ''))) or not destination or not isinstance(body.get('text'), str)
-                or not 0 < len(body['text'].encode('utf-16-le')) // 2 <= 12000): raise ValueError('invalid_action')
-        chat_id, topic = destination.groups()
-        if topic and int(topic) > 9007199254740991: raise ValueError('invalid_action')
+        # Storage names the destination by its chat id and gives the Telegram chat and topic it is at now (ADR-0250); the
+        # app checks both again before the send (check_action_policy).
+        chat_id, destination = str(body.get('chat_id') or ''), body.get('destination')
+        if (not HEX.fullmatch(str(body.get('id', ''))) or not CHAT.fullmatch(chat_id) or not isinstance(destination, str) or not 0 < len(destination) <= 200
+                or not isinstance(body.get('text'), str) or not 0 < len(body['text'].encode('utf-16-le')) // 2 <= 12000): raise ValueError('invalid_action')
+        try: topic = topic_of(body.get('topic'))
+        except ValueError: raise ValueError('invalid_action') from None
         name = 'action-' + body['id']
         async with self.action_lock:
             receipt = self.receipts / (name + '.result')
@@ -380,10 +383,10 @@ class TelegramService:
                 return result
             await asyncio.to_thread(immutable_file, self.receipts, name + '.intent', canonical({'action_id': body['id']}))
             token = DISPATCH_KEY.set('action:' + body['id'])
-            check = OUTBOUND_CHECK.set(outbound_check(chat_id, body['destination'], lambda: check_action_policy(body)))
+            check = OUTBOUND_CHECK.set(outbound_check(chat_id, topic, lambda: check_action_policy(body)))
             try:
                 # Any failure is reported as possibly sent: the caller reconciles rather than sending twice.
-                result = {'state': 'done' if await self.sender.send(chat_id, body['text'], topic=int(topic) if topic else None, notify=True) else 'ambiguous'}
+                result = {'state': 'done' if await self.sender.send(chat_id, body['text'], topic=topic, notify=True) else 'ambiguous'}
             except Exception:
                 result = {'state': 'ambiguous'}
             finally:
@@ -405,8 +408,12 @@ class TelegramService:
         """
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         chat,topic=str(body.get('chat_id','')),str(body.get('topic') or '')
-        owner=bool(self.policy.owner) and chat==str(self.policy.owner) and re.fullmatch(r'[1-9]\d{0,18}',chat)
-        if not owner and chat not in (self.policy.groups or []) or topic and (owner or not re.fullmatch(r'[1-9]\d{0,15}',topic)):raise ValueError('approval_chat_not_allowed')
+        # The owner's private chat, or a served group and one of its topics, where each is in Telegram now (ADR-0250).
+        served=await asyncio.to_thread(self.policy.current)
+        owner=bool(chat) and chat==served.owner_external()
+        group=None if owner else served.group(served.resolve(chat))
+        if (not owner and (group is None or served.address(group)[0]!=chat) or
+                topic and (owner or not re.fullmatch(r'[1-9]\d{0,15}',topic) or served.resolve(chat,topic) is None)):raise ValueError('approval_chat_not_allowed')
         text=body.get('text')
         if not isinstance(text,str) or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_approval')
         entities=approval_links(body.get('links'),len(text.encode('utf-16-le'))//2)
@@ -436,7 +443,7 @@ class TelegramService:
                 if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
                 await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id'],'chat_id':chat}))
                 token=DISPATCH_KEY.set('approval:'+body['id'])
-                check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True,markup=keyboard))
+                check=OUTBOUND_CHECK.set(outbound_check(chat,topic,lambda:True,markup=keyboard))
                 try:
                     # In the chat where it was asked, the card is the reply to the request.
                     # Links are entities over plain text, so no default formatting applies.
@@ -509,15 +516,16 @@ class TelegramService:
         about the chat is sent. Nocheh's core has already decided the message addressed the bot."""
         chat,user,message,topic=(str(body.get(key) or '') for key in ('chat_id','user_id','message_id','topic'))
         personal=body.get('private') is True
-        if (not HEX.fullmatch(str(body.get('event_id',''))) or (chat!=user or topic if personal else chat not in (self.policy.groups or [])) or
+        # A served group where it is in Telegram now, by the app's served list (ADR-0250).
+        served=await asyncio.to_thread(self.policy.current)
+        group=None if personal else served.group(served.resolve(chat))
+        if (not HEX.fullmatch(str(body.get('event_id',''))) or (chat!=user or topic if personal else group is None or served.address(group)[0]!=chat) or
                 not re.fullmatch(r'[1-9]\d{0,18}',user) or not re.fullmatch(r'[1-9]\d{0,18}',message) or topic and not re.fullmatch(r'[1-9]\d{0,15}',topic)):
             raise ValueError('invalid_refusal')
         reply=body.get('reply')
         if not isinstance(reply,str) or not reply.strip() or len(reply)>1000:raise ValueError('invalid_refusal')
-        if user==str(self.policy.owner):return {'state':'skipped'}
-        if not personal:
-            access=(self.policy.group_access or {}).get(chat,{})
-            if user in access.get('granted',[]) and user not in access.get('denied',[]):return {'state':'skipped'}
+        if user==served.owner_user():return {'state':'skipped'}
+        if not personal and self.policy.access(served,group,user):return {'state':'skipped'}
         if not self.connected():return {'state':'not_started','error_code':'telegram_not_connected'}
         # One private reply a day: a stranger who keeps writing can't make the bot keep answering.
         name='refusal-private-'+user+'-'+datetime.now(timezone.utc).strftime('%Y%m%d') if personal else 'refusal-'+body['event_id']
@@ -527,7 +535,7 @@ class TelegramService:
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id']}))
             token=DISPATCH_KEY.set('refusal:'+body['event_id'])
-            check=OUTBOUND_CHECK.set(outbound_check(chat,chat+('/topic/'+topic if topic else ''),lambda:True))
+            check=OUTBOUND_CHECK.set(outbound_check(chat,topic,lambda:True))
             try:
                 await self.bot.send_message(int(chat),reply,message_thread_id=int(topic) if topic else None,
                                             reply_to_message_id=int(message),allow_sending_without_reply=True,link_preview_options=no_preview())
@@ -545,8 +553,9 @@ class TelegramService:
         the text is the owner's template filled in by storage, sent at most once.
         With edit, a notice this service sent is edited in place instead, such as to mark a cleared problem."""
         chat=str(body.get('chat_id') or '')
-        if not HEX.fullmatch(str(body.get('id',''))) or not self.policy.owner or chat!=str(self.policy.owner) or not re.fullmatch(r'[1-9]\d{0,18}',chat):
-            raise ValueError('notice_chat_not_allowed')
+        # Only the owner's private chat, where it is in Telegram now (ADR-0250).
+        owner=(await asyncio.to_thread(self.policy.current)).owner_external()
+        if not HEX.fullmatch(str(body.get('id',''))) or not owner or chat!=owner:raise ValueError('notice_chat_not_allowed')
         text=body.get('text')
         if not isinstance(text,str) or not text.strip() or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_notice')
         markup=notice_buttons(body.get('buttons'))
@@ -560,7 +569,7 @@ class TelegramService:
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'notice_id':body['id']}))
             token=DISPATCH_KEY.set('notice:'+body['id'])
-            check=OUTBOUND_CHECK.set(outbound_check(chat,chat,lambda:True,markup=markup))
+            check=OUTBOUND_CHECK.set(outbound_check(chat,None,lambda:True,markup=markup))
             sent=None
             try:
                 from telegram.error import BadRequest
