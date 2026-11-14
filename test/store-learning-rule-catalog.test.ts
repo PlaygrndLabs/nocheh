@@ -13,9 +13,11 @@ import {SelectionRepository} from '../src/stores/selections.js';
 import {LearnedMemoryRepository} from '../src/stores/learned.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {LearningContextRepository} from '../src/stores/learning-context.js';
+import {installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 
 test('a chat with more than 100 learned rules keeps learning with the owner\'s and the newest rules',
- {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async t=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
@@ -23,6 +25,8 @@ test('a chat with more than 100 learned rules keeps learning with the owner\'s a
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive),guards=new GuardRepository(stores,archive);
   const key='rule-catalog:'+Date.now(),group=String(-Date.now()),space=group+'/topic/17';
   const policy:AssistantPolicy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
+  // The chats as Part A's seeder leaves a group stored before step 2b and its topics (ADR-0250).
+  t.after(installChatsForTest(seededDirectory(()=>policy)));
   const learned=new LearnedMemoryRepository(stores,archive,derived,guards),projects=new ProjectRepository(stores.control),selections=new SelectionRepository(stores,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,new EntityRepository(stores,access,projects));
   const detect=async()=>[];

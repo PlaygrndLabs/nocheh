@@ -1,6 +1,8 @@
 import type pg from 'pg';
 import { HttpError, object, string } from './http.js';
-import { desktopTopicId, telegramTopicId } from './chats-telegram.js';
+import { chats, isChatId } from './chats.js';
+import { desktopTopicId, legacyChatValue, telegramTopicId } from './chats-telegram.js';
+import type { ObservedAudience } from './observed-source.js';
 
 export const spaceSchema = `
 CREATE TABLE IF NOT EXISTS memory_policy_state (singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton), revision integer NOT NULL DEFAULT 1);
@@ -17,11 +19,11 @@ export interface SpacePreferences {mode:SpaceMode; sources:string[]; privacy_ins
 export const defaults:SpacePreferences = {mode:'approved', sources:[], privacy_instructions:'Do not disclose personal relationships, health, finances, identity details, credentials, private plans, or information about other people. Release only relevant non-personal knowledge. When uncertain, omit it.'};
 // The Telegram adapter owns Telegram's own formats (ADR-0250); these stay importable from here.
 export {telegramTopicId,desktopChannelTypes,desktopTopicId} from './chats-telegram.js';
-export function spaceId(scope:string, topic?:unknown):string {
-  if (topic===undefined || topic===null) return scope;
-  if (!/^-?\d+$/.test(scope) || !Number.isSafeInteger(topic) || Number(topic)<=0) throw new HttpError(400,'invalid_topic');
-  return `${scope}/topic/${topic}`;
-}
+/**
+ * The space of a captured event, for the legacy storage layout only, which refuses to start (database.ts): a Telegram
+ * event's chat value in the frozen old shape, as the Telegram adapter builds it, or a browser or scheduler event's own
+ * space. Live code places an event with sourceChat and observedChat below, through the chat directory.
+ */
 export function eventSpace(scope:string, payload:unknown, channel='telegram'):string {
   if(channel==='browser'||channel==='scheduler') {
     const space=object(payload).space;
@@ -33,8 +35,8 @@ export function eventSpace(scope:string, payload:unknown, channel='telegram'):st
   if(channel!=='telegram')return scope;
   const body=object(payload), message=body.message ?? body.edited_message ?? body.channel_post ?? body.edited_channel_post;
   const desktop=desktopTopicId(scope,body);
-  if(desktop!==undefined)return spaceId(scope,desktop);
-  return message ? spaceId(scope,telegramTopicId(object(message))) : scope;
+  if(desktop!==undefined)return legacyChatValue(scope,desktop);
+  return message ? legacyChatValue(scope,telegramTopicId(object(message))) : scope;
 }
 
 export async function backfillSpaces(db:pg.PoolClient) {
@@ -47,41 +49,52 @@ export async function backfillSpaces(db:pg.PoolClient) {
     await db.query('INSERT INTO event_spaces(event_id,space_id) SELECT * FROM unnest($1::text[],$2::text[]) ON CONFLICT DO NOTHING',[rows.map(row=>row.id),spaces]);
   }
 }
+/**
+ * A conversation value as given: a Nocheh chat id, or a name that is no chat ('owner', '*', 'system', 'desktop:*').
+ * Its size and characters are checked, and a value with a slash must be a well-formed chat id (isChatId, the one shared
+ * check), as no name has one; what it is, and whether it is one at all, comes from the chat directory (ADR-0250), so an
+ * id the directory does not know is private and reads nothing.
+ */
 export function validateSpace(id:unknown):string {
   const value=string(id,256);
-  if(!value.trim() || /[\x00-\x1f]/.test(value) || (value.includes('/topic/') && !/^-?\d+\/topic\/[1-9]\d{0,15}$/.test(value))) throw new HttpError(400,'invalid_space');
+  if(!value.trim() || /[\x00-\x1f]/.test(value) || value.includes('/')&&!isChatId(value)) throw new HttpError(400,'invalid_space');
   return value;
 }
-export function parentSpace(id:string):string|null {return id.includes('/topic/')?id.split('/topic/')[0]!:null;}
-/** A Telegram group's chat ID, as Telegram writes it: negative, with no leading zero (private chats are positive;
- * assistant-policy.ts). A group or topic is this ID, or it followed by one of its topics. Every test of whether a
- * conversation is a group uses these, in code and in SQL, so they always agree. */
-const groupChat='-[1-9][0-9]{0,18}',groupTopic='/topic/[1-9][0-9]{0,15}';
-const groupChatPattern=new RegExp(`^${groupChat}$`),groupSpacePattern=new RegExp(`^${groupChat}(${groupTopic})?$`);
-export const groupChatId=(id:string)=>groupChatPattern.test(id);
+/** A topic's chat, from its row; null for a group, a private chat and an id with no row. */
+export function parentSpace(id:string):string|null {return chats().parentOf(id);}
+/** Whether the chat directory holds `id` as a group itself, not one of its topics (ADR-0250). */
+export const groupChatId=(id:string)=>chats().kind(id)==='group';
 /**
  * Whether a conversation is a group or one of its topics, the only conversations that may share or be shared
- * with. Everything else counts as private and fails closed: the owner's private chat and its topics, any other
- * private chat, `desktop:*` imports, `system`, and an unknown conversation (null) (ADR-0242).
+ * with, as the chat directory holds them (ADR-0250). Everything else counts as private and fails closed: the owner's
+ * private chat and its topics, any other private chat, `desktop:*` imports, `system`, and any id with no chat row,
+ * however it looks (ADR-0242).
  */
-export const groupSpace=(space:string|null|undefined):space is string=>!!space&&groupSpacePattern.test(space);
-/** SQL test that `column` names a group or one of its topics, exactly as groupSpace decides it. */
-export const groupSpaceSql=(column:string)=>`${column} ~ '^${groupChat}(${groupTopic})?$'`;
-/** SQL test that `column` names a group itself, not one of its topics, exactly as groupChatId decides it. */
-export const groupChatSql=(column:string)=>`${column} ~ '^${groupChat}$'`;
+export const groupSpace=(space:string|null|undefined):space is string=>chats().isGroup(space);
+/** Every group and topic of a group the chat directory holds: the SQL id list for "a.space_id is a group or one of
+ * its topics" (`a.space_id=ANY($n::text[])`), served or not. */
+export const groupSpaces=():string[]=>chats().all().filter(chat=>chats().isGroup(chat.id)).map(chat=>chat.id);
+/** The groups Nocheh serves, as the chat directory holds them (in step 2b-1 the bridge sets them from
+ * TELEGRAM_GROUP_IDS): groups themselves, never topics or private chats. */
+export const servedGroups=():string[]=>chats().all().filter(chat=>chat.kind==='group'&&chats().served(chat.id)).map(chat=>chat.id);
+/** Whether `id` is a group Nocheh serves (one of servedGroups()). */
+export const servedGroup=(id:string|null|undefined):boolean=>chats().kind(id)==='group'&&chats().served(id);
 /** The conversations a group or topic turn recalls: its own, or, when the group's topics share
  * memory, the group's base conversation and every one of its topics. Owner turns read everything.
  * The single-conversation form that ReadSet generalizes; inRecall and recallCondition keep their
  * meaning for the callers that still use them. */
 export interface RecallScope {space:string;group:string|null}
 export function recallScope(space:string,topicMemory:'group'|'topic'='group'):RecallScope {
-  const chat=parentSpace(space)??space;
-  return {space,group:topicMemory==='group'&&groupChatId(chat)?chat:null};
+  return {space,group:topicMemory==='group'?chats().groupOf(space):null};
 }
-export const inRecall=(scope:RecallScope,space:string)=>space===scope.space||scope.group!==null&&(parentSpace(space)??space)===scope.group;
-/** SQL test that `column` names a conversation of the recall scope bound as `space` and `group`. */
+export const inRecall=(scope:RecallScope,space:string)=>space===scope.space||scope.group!==null&&chats().groupOf(space)===scope.group;
+/** A group and every topic it has a row for, as one SQL id list; null for no group. The `group` parameter of
+ * recallCondition. */
+export const groupWithTopics=(group:string|null):string[]|null=>group===null?null:chats().expand([group]).filter(id=>chats().groupOf(id)===group);
+/** SQL test that `column` names a conversation of a recall scope: the scope's own conversation bound as `space`, or one
+ * of the ids of its group bound as `group`, a `text[]` holding groupWithTopics(scope.group) (null: no group). */
 export const recallCondition=(column:string,space:string,group:string)=>
-  `(${column}=${space} OR (${group}::text IS NOT NULL AND (${column}=${group} OR starts_with(${column},${group}||'/topic/'))))`;
+  `(${column}=${space} OR ${column}=ANY(${group}::text[]))`;
 
 /**
  * The conversations a scoped reader may read (ADR-0249). A group or topic turn reads its own recall scope; an
@@ -92,8 +105,8 @@ export const recallCondition=(column:string,space:string,group:string)=>
  * - `whole`: groups read with every one of their topics.
  * - `project`: the project the reads belong to, or null.
  * A read set never holds anything but a group or one of its topics: the owner's private chat and its topics, any
- * other private chat, `desktop:*` imports, `system` and an unknown conversation are left out wherever a set is made,
- * and inReadSet and readSetSql never match one even in a set built by hand (ADR-0242, fail closed).
+ * other private chat, `desktop:*` imports, `system` and an id with no chat row are left out wherever a set is made,
+ * and inReadSet and readSetParam never match one even in a set built by hand (ADR-0242, fail closed).
  */
 export interface ReadSet {readonly home:string;readonly exact:readonly string[];readonly whole:readonly string[];readonly project:string|null}
 /** The one way to make a read set: drops every conversation groupSpace refuses, every `whole` entry that is not a
@@ -102,7 +115,7 @@ export function readSet(input:{home:string;exact?:Iterable<string>;whole?:Iterab
   const project=input.project??null;
   if(project!==null&&!/^[a-f0-9]{64}$/.test(project))throw new HttpError(400,'invalid_project_id');
   const whole=[...new Set(input.whole??[])].filter(groupChatId).sort();
-  const exact=[...new Set(input.exact??[])].filter(space=>groupSpace(space)&&!whole.includes(parentSpace(space)??space)).sort();
+  const exact=[...new Set(input.exact??[])].filter(space=>groupSpace(space)&&!whole.includes(chats().groupOf(space)!)).sort();
   return Object.freeze({home:validateSpace(input.home),exact:Object.freeze(exact),whole:Object.freeze(whole),project});
 }
 /** A group or topic turn's recall scope as a read set: the whole group when its topics share memory, else just its
@@ -112,27 +125,66 @@ export function readSetOf(scope:RecallScope,project:string|null=null):ReadSet {
 }
 /** Whether a read set reads `space`: one of its `exact` conversations, or a `whole` group or one of its topics. */
 export const inReadSet=(set:ReadSet,space:string|null|undefined):boolean=>
-  groupSpace(space)&&(set.exact.includes(space)||set.whole.includes(parentSpace(space)??space));
-/** The groups whose chats a read set reads from: each `whole` group and the group of each `exact` conversation. A
- * group's archive records carry the group's chat ID, so a read of the archive starts from these and narrows by space. */
+  groupSpace(space)&&(set.exact.includes(space)||set.whole.includes(chats().groupOf(space)!));
+/** The groups whose chats a read set reads from: each `whole` group and the group of each `exact` conversation. Read
+ * the archive with their archiveScopes, then narrow by each original's observed chat. */
 export const readSetGroups=(set:ReadSet):string[]=>
-  [...new Set([...set.whole,...set.exact.map(space=>parentSpace(space)??space)])].filter(groupChatId).sort();
+  [...new Set([...set.whole,...set.exact.map(space=>chats().groupOf(space)??'')])].filter(groupChatId).sort();
 /**
- * A read set as one SQL `text[]` parameter for readSetSql: each `exact` conversation as itself, and each `whole`
- * group as the group followed by `/*`. Only groups and topics are written, whatever the set holds.
+ * The ids a read set reads: each `exact` conversation as itself and each `whole` group with every topic it has a row
+ * for. Only groups and their topics are written, whatever the set holds, so no list can name a private chat.
  */
-export const readSetParam=(set:ReadSet):string[]=>[...set.exact.filter(groupSpace),...set.whole.filter(groupChatId).map(group=>group+'/*')];
+export const readSetIds=(set:ReadSet):string[]=>
+  [...new Set([...set.exact.filter(space=>groupSpace(space)),...chats().expand(set.whole.filter(groupChatId)).filter(groupSpace)])].sort();
+/** The mark readSetParam puts before every id it writes. readSetSql reads only marked entries, so a list of ids made by
+ * hand, which skipped readSetIds' filter, matches nothing in SQL: the database never opens a private chat because a
+ * caller bound the wrong list (ADR-0242). */
+const readMark='read:';
+/** A read set as one SQL `text[]` parameter for readSetSql: readSetIds, each id marked. */
+export const readSetParam=(set:ReadSet):string[]=>readSetIds(set).map(id=>readMark+id);
 /**
  * SQL test that `column` names a conversation of a read set bound as ONE `text[]` parameter holding readSetParam(set):
- * `param` is its position (2 for `$2`) or its literal placeholder. The column matches an exact entry, or its group
- * (the part before `/topic/`) followed by `/*` matches a whole entry. A column that is not a group or topic never
- * matches, so no parameter can open a private chat; an empty parameter matches nothing.
+ * `param` is its position (2 for `$2`) or its literal placeholder. Only the parameter's marked entries count, so an
+ * empty parameter, or one not made by readSetParam, matches nothing.
  */
 export const readSetSql=(column:string,param:number|string)=>{
   if(typeof param==='number'?!Number.isSafeInteger(param)||param<1:!param.trim())throw Error('invalid_read_set_parameter');
-  const value=`${typeof param==='number'?'$'+param:param}::text[]`;
-  return `(${groupSpaceSql(column)} AND (${column}=ANY(${value}) OR split_part(${column},'/topic/',1)||'/*'=ANY(${value})))`;
+  return `${column}=ANY(ARRAY(SELECT substr(entry,${readMark.length+1}) FROM unnest(${typeof param==='number'?'$'+param:param}::text[]) entry `+
+    `WHERE left(entry,${readMark.length})='${readMark}'))`;
 };
+
+/**
+ * The Nocheh chat an archive original belongs to (ADR-0250): a Telegram original's chat by its raw id, current or
+ * old, through chat_ids; a browser or scheduler original's scope is the chat's own id. Null when no chat row names it,
+ * which reads nothing.
+ */
+export function sourceChat(source:{channel:string;scope:string}):string|null {
+  if(source.channel==='telegram')return chats().resolve('telegram',source.scope);
+  if(source.channel==='browser'||source.channel==='scheduler')return chats().get(source.scope)?.id??null;
+  return null;
+}
+/**
+ * The Nocheh chat or topic of an original's observed audience (its {chat_id, topic_state, topic_id}): on Telegram the
+ * raw chat id and thread id, through chat_ids and the topic's row; on the browser and the scheduler the chat's own id
+ * and its topic key. Null when the topic is unknown or no row names it: a missing topic row reads nothing.
+ */
+export function observedChat(channel:string,observed:ObservedAudience|null|undefined):string|null {
+  if(!observed||observed.topic_state==='unknown')return null;
+  const topic=observed.topic_state==='known'?observed.topic_id??null:null;
+  if(observed.topic_state==='known'&&topic===null)return null;
+  if(channel==='telegram')return chats().resolve('telegram',observed.chat_id,topic);
+  if(channel!=='browser'&&channel!=='scheduler')return null;
+  const chat=chats().get(observed.chat_id);
+  return !chat||chat.kind==='topic'?null:topic===null?chat.id:chats().topicOf(chat.id,topic);
+}
+/** The events.scope values the archive holds a chat's originals under: for each known chat (a topic counting as its
+ * chat), its own id (browser and scheduler originals) and every app id it has had, current and old. Ids with no row
+ * give none. */
+export function archiveScopes(ids:Iterable<string>):string[] {
+  const out=new Set<string>();
+  for(const id of ids){const chat=chats().get(id);if(!chat)continue;const base=chat.parent_id??chat.id;out.add(base);for(const raw of chats().rawScopes([base]))out.add(raw);}
+  return [...out].sort();
+}
 export function validateOverrides(input:unknown):Partial<SpacePreferences> {
   const body=object(input), result:Partial<SpacePreferences>={};
   for(const key of Object.keys(body)) if(!['mode','sources','privacy_instructions'].includes(key))throw new HttpError(400,'unknown_space_preference');

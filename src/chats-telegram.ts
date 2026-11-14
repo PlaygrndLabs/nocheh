@@ -24,6 +24,17 @@ export const isTelegramAccount=(value:unknown):value is string=>typeof value==='
  * pattern source is part of the shared chat id check (chatIdPattern, chatIdSql) and must never change.
  */
 export const legacyChatSource=`${telegramChat}(?:/topic/${telegramThread})?`;
+/**
+ * SQL test that a text `expression` is, in the frozen old shape, a group ('group'), a group or one of its topics
+ * ('group_space') or a private chat ('private'): the CHECKs a release before step 2b put on the values it writes. Only
+ * for a store rule judging a value that no chats row names, so that such a release, redeployed, keeps writing its rows
+ * (ADR-0250: 2b-1 is undone by redeploying). Everything Nocheh writes now has a row and is judged by it.
+ */
+export function legacyShapeSql(expression:string,kind:'group'|'group_space'|'private'):string {
+  if(!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(expression))throw Error('invalid_sql_expression');
+  const group=`-${telegramAccount}`;
+  return `${expression} ~ '^${kind==='private'?telegramAccount:kind==='group'?group:`${group}(?:/topic/${telegramThread})?`}$'`;
+}
 const legacyPattern=new RegExp(`^(${telegramChat})(?:/topic/(${telegramThread}))?$`);
 
 /** What an old stored chat value names. A topic's parent is its chat's own old value. */

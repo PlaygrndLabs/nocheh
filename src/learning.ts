@@ -8,6 +8,7 @@ import {allowPrepared} from './prepared-context.js';
 import {turnToken} from './access.js';
 import {policyRevision} from './spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
+import {ownerChat} from './assistant-policy.js';
 
 export const learningSchema=`
 CREATE TABLE IF NOT EXISTS memory_learning_sources (event_id text PRIMARY KEY REFERENCES events(id), reason text NOT NULL, batch text, prepared boolean NOT NULL DEFAULT false, approved_at timestamptz NOT NULL DEFAULT now());
@@ -88,7 +89,7 @@ export async function runReviewJobs(pool:pg.Pool,config:Settings,brain:Brain,job
     const job=rows[0];if(!job)return;
     await client.query("UPDATE memory_review_jobs SET state='running',attempts=attempts+1,next_attempt=now()+interval '5 minutes',updated_at=now() WHERE id=$1",[job.id]);
     try{
-      const policy={space:config.assistant.owner_id,revision:await policyRevision(pool),guard_epoch:guard.epoch};
+      const policy={space:ownerChat(config.assistant)!,revision:await policyRevision(pool),guard_epoch:guard.epoch};
       await allowPrepared(pool,{admin:false,scope:null,turnEvent:job.event_id,...policy},{text:job.content});
       const result=await brainOperation(brain,'reviewNotes')({id:digest(job.id+':'+job.generation),scope:config.assistant.owner_id,content:job.content,event_id:job.event_id,
         guard_mode:guard.mode,archive_credential:turnToken(config.token,null,Date.now()+600000,job.event_id,{...policy,purpose:'memory-review'})});

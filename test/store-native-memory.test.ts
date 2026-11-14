@@ -12,6 +12,11 @@ import {storageGuardService} from '../src/stores/guard-service.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
 import {HttpError} from '../src/http.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
+
+/** The chats the recall and search cases below name, as the seeder makes their rows (ADR-0250). */
+const recallChats=()=>legacyDirectory(['-100','-100/topic/3','-200'],{owner:'123',served:['-100','-200']});
 
 test('reply context reads Honcho on arrival, limits other audiences to their own session and reuses identical guarded results',async()=>{
   const workspace=digest('installation-workspace'),groupSession=digest('group-session'),ownerSession=digest('owner-session');
@@ -70,7 +75,8 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   assert.ok(prepared>=3);
 });
 
-test('recall asks every connected peer side by side, keeps each inside the group\'s sessions and their order',async()=>{
+test('recall asks every connected peer side by side, keeps each inside the group\'s sessions and their order',async t=>{
+  t.after(installChatsForTest(recallChats()));
   const workspace=digest('recall-workspace'),root={store:'archive',kind:'event',id:digest('recall-root'),revision:'1',input_hash:digest('recall-root-hash')};
   const groupSessions=[digest('group-session-a'),digest('group-session-b')],peers=['person_a','person_b','project_c'];
   const asked:{peer:string;body:any}[]=[],waiting:(()=>void)[]=[];let recorded='';
@@ -82,7 +88,7 @@ test('recall asks every connected peer side by side, keeps each inside the group
   const binding={generation:'fixture',epoch:1,mode:'on'};
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
   const provenance={sessions:async(id:string,audience:string,_limit:number,group:string|null)=>{
-    assert.equal(id,workspace);assert.equal(audience,'-100');assert.equal(group,'-100','a group recall spans every topic of its group');return groupSessions;}};
+    assert.equal(id,workspace);assert.equal(audience,'-100');assert.deepEqual(group,['-100','-100/topic/3'],'a group recall spans every topic of its group');return groupSessions;}};
   const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,honchoEngine(async(path:string,body:any)=>{
     const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;asked.push({peer,body});
     // Hold every answer until all peers were asked, then release the first peer last.
@@ -100,7 +106,8 @@ test('recall asks every connected peer side by side, keeps each inside the group
   assert.equal(result.sources.at(-1).text,recorded);
 });
 
-test('recall asks Honcho for evidence and points the agent at the archived messages behind the conclusions it read',async()=>{
+test('recall asks Honcho for evidence and points the agent at the archived messages behind the conclusions it read',async t=>{
+  t.after(installChatsForTest(recallChats()));
   const workspace=digest('evidence-workspace'),root={store:'archive',kind:'event',id:digest('evidence-root'),revision:'1',input_hash:digest('evidence-root-hash')};
   const sessions=[digest('evidence-session')],first='A'.repeat(21),second='B'.repeat(21);
   const archived={store:'archive',kind:'event',id:digest('evidence-message'),revision:'1',input_hash:digest('evidence-message-hash')};
@@ -139,7 +146,8 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   assert.ok(fallback.sources.at(-1).limitations.includes('evidence_unavailable'));
 });
 
-test('search by meaning asks Honcho within the audience\'s learned sessions and returns only the archived messages behind its hits',async()=>{
+test('search by meaning asks Honcho within the audience\'s learned sessions and returns only the archived messages behind its hits',async t=>{
+  t.after(installChatsForTest(recallChats()));
   const workspace=digest('search-workspace'),sessions=[digest('search-session')],ref=(name:string)=>({store:'archive',kind:'event',id:digest(name),revision:'1',input_hash:digest(name+'-hash')});
   const receipts:Record<string,unknown>={[digest('receipt-a')]:{source_reference:ref('first'),source_references:[]},
     [digest('receipt-c')]:{source_reference:ref('first'),source_references:[ref('first'),ref('second')]}};
@@ -160,8 +168,10 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
   assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
-  assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3','-100',null],[workspace,'B'.repeat(21),'-100/topic/3','-100',null],
-    [workspace,'C'.repeat(21),'-100/topic/3','-100',null]],'a hit counts only with its own receipt, in this audience or its group');
+  // The group is bound as its id and its topics' ids, from the chat rows (ADR-0250).
+  const topics=['-100','-100/topic/3'];
+  assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3',topics,null],[workspace,'B'.repeat(21),'-100/topic/3',topics,null],
+    [workspace,'C'.repeat(21),'-100/topic/3',topics,null]],'a hit counts only with its own receipt, in this audience or its group');
   assert.deepEqual(readSessions,[],'a group reader searches its own sessions');
   // An answer reader searches the sessions of the groups frozen in its record, and a hit counts only with a receipt of one
   // of them; Honcho's context and recall stay closed to it: plain search only (ADR-0249).
@@ -169,8 +179,11 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
   queries.length=0;
   assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
-  assert.deepEqual(readSessions,[[workspace,['-100/*','-200/*'],1000]]);
-  assert.deepEqual(queries.map(params=>params.at(-1)),[['-100/*','-200/*'],['-100/*','-200/*'],['-100/*','-200/*']]);
+  // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0250).
+  // The read set reaches the provenance query whole, and SQL takes its ids only as marked read set entries.
+  const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);
+  assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);
+  assert.deepEqual(queries.map(params=>params.at(-1)),[frozen,frozen,frozen]);
   assert.equal((await memory.context(answer)).limited_memory,true);
   assert.equal((await memory.recall(answer,'invoice')).limited_memory,true);
   bodies.splice(1);

@@ -9,7 +9,8 @@ import {OwnerCommands} from './owner-commands.js';
 import type {Project,ProjectRepository} from './projects.js';
 import type {PreparedLearningContext} from './learning-context.js';
 import {resultItems,withoutNulls,type LearningRejection} from '../interpretations.js';
-import {groupSpace,parentSpace,readSetGroups} from '../spaces.js';
+import {archiveScopes,groupSpace,parentSpace,readSetGroups} from '../spaces.js';
+import {ownerChat} from '../assistant-policy.js';
 
 const protocol='nocheh-connected-entities-v1';
 export type EntityKind='person'|'project';
@@ -523,7 +524,7 @@ export class EntityRepository {
       JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[claim])).rows[0];
     if(!row)throw new HttpError(404,'entity_claim_not_found');
     const spaces=await this.access.evidenceSpaces(row.evidence as SourceReference[]);
-    const sources=[...new Set(spaces)],owner=this.access.policy().owner_id,topicMemory=this.access.policy().topic_memory??'group';
+    const sources=[...new Set(spaces)],owner=ownerChat(this.access.policy()),topicMemory=this.access.policy().topic_memory??'group';
     const private_sources=[...new Set(spaces.filter((space):space is string=>space!==null&&!groupSpace(space)))].sort();
     const owner_private=!!owner&&spaces.some(space=>space!==null&&(parentSpace(space)??space)===owner);
     const confirm_required=!spaces.length||spaces.some(space=>!groupSpace(space));
@@ -547,7 +548,7 @@ export class EntityRepository {
     const chats=answer?reads?readSetGroups(reads):[]:[principal.scope];
     const ids=(await this.stores.control.query("SELECT source_object_id FROM memory_entity_bindings WHERE entity_id=$1 AND state IN ('exact','confirmed') AND source_object_id IS NOT NULL",[entity.id])).rows.map(r=>r.source_object_id);
     if(ids.length&&chats.length&&(await this.stores.archive.query(`SELECT 1 FROM source_relations r JOIN events e ON e.id=r.event_id
-      WHERE r.target_id=ANY($1::text[]) AND r.kind='authored_by' AND e.scope=ANY($2::text[]) LIMIT 1`,[ids,chats])).rowCount)return true;
+      WHERE r.target_id=ANY($1::text[]) AND r.kind='authored_by' AND e.scope=ANY($2::text[]) LIMIT 1`,[ids,archiveScopes(chats)])).rowCount)return true;
     const claims=(await this.stores.derived.query(`SELECT v.evidence FROM entity_claims e JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision
       WHERE NOT v.retired AND (e.subject_entity_id=$1 OR e.object_entity_id=$1) ORDER BY e.id LIMIT 101`,[entity.id])).rows;
     const binding=await this.access.guards.state();

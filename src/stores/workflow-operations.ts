@@ -9,7 +9,7 @@ import type {GuardBinding} from './guards.js';
 import {nativeReconcileLimit} from './native-review.js';
 import {terminalLearningCodes} from './learning-engine.js';
 import {advanceReactionEpoch} from './reaction-state.js';
-import {outsideChat} from '../assistant-policy.js';
+import {outsideChat,ownerChat} from '../assistant-policy.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
 const superseded=new Set(['native_review_missing','learning_job_missing','guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','memory_receipt_missing']);
@@ -259,7 +259,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(kind==='source'||kind==='ingest')return fenced('honcho',authority,async()=>{
         const ready=await sourceReady(id);if('state' in ready)return ready;
         const queued=await s.memory.queueSource(ready.source.reference);if(!queued.length)return observation('skipped','sync',0,Date.now(),'consent_required');
-        const space=await s.access.space(ready.source.reference),audience=space===s.access.policy().owner_id?'owner':space;
+        const space=await s.access.space(ready.source.reference),audience=space===ownerChat(s.access.policy())?'owner':space;
         const selected=queued.find(value=>value.audience===audience);if(!selected)return observation('failed','sync');
         // Learning waits for this source's own sessions, not for the whole workspace.
         if(!await s.memory.settled(selected.receipts))return waiting('sync','prerequisite');

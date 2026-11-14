@@ -5,7 +5,8 @@ import {HttpError,object,string} from '../http.js';
 import {fillTemplate,ownerPrompts,taskReminder} from '../prompts.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
-import {groupChatId,groupSpace,groupSpaceSql,inReadSet,parentSpace,readSet,readSetOf,readSetParam,readSetSql,recallScope,validateSpace,type ReadSet} from '../spaces.js';
+import {groupChatId,groupSpace,groupSpaces,groupWithTopics,inReadSet,readSet,readSetOf,readSetParam,readSetSql,recallScope,validateSpace,type ReadSet} from '../spaces.js';
+import {chats as directory} from '../chats.js';
 import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
 export const taskSchema=`
@@ -160,11 +161,12 @@ type View={project:string;shared:Set<string>;reach:ReadSet|null}|null;
 type Held={held:{project:string;group:string|null;chats:string[];joining:boolean;preview:Record<string,unknown>;family:string|null;revision:number|null}};
 const states=['open','done','dropped'];
 const hex=/^[a-f0-9]{64}$/;
-/** The chats that see a project's list: the groups and topics assigned to it. Anything that is not clearly a group (a
- * negative Telegram chat ID) or a topic of one counts as private and is left out, by the same test as groupSpace, so the
- * chats a card names are the chats that read the list (ADR-0243). */
-const projectChats=(project:string)=>`(SELECT coalesce(array_agg(a.space_id ORDER BY a.space_id),'{}'::text[]) FROM project_assignments a
-  WHERE a.project_id=${project} AND a.mode='assigned' AND ${groupSpaceSql('a.space_id')})`;
+/** The chats that see a project's list: the groups and topics assigned to it. `groups` is the placeholder of a `text[]`
+ * holding groupSpaces(), so anything the chat directory does not hold as a group or a topic of one counts as private
+ * and is left out, by the same test as groupSpace, and the chats a card names are the chats that read the list
+ * (ADR-0243, ADR-0250). */
+const projectChats=(project:string,groups:string)=>`(SELECT coalesce(array_agg(a.space_id ORDER BY a.space_id),'{}'::text[]) FROM project_assignments a
+  WHERE a.project_id=${project} AND a.mode='assigned' AND a.space_id=ANY(${groups}::text[]))`;
 /**
  * Fields a change asked in the owner's private chat may set on a task in a project's list without a card: its status,
  * priority, start and due days and times, archive and trash, and the list it is already in. This is the recommended
@@ -325,12 +327,13 @@ export async function moveGroupTasks(db:Pick<pg.PoolClient,'query'>,group:string
   by:{actor:TaskActor;origin:'dashboard'|'chat'}={actor:{kind:'owner'},origin:'dashboard'}):Promise<number> {
   if(!groupChatId(group)||!from||!to||from===to)return 0;
   // Each task with the group it ends up in: the group of the task at the top of its family. The family takes only
-  // this group's and its topics' tasks and the project's own.
-  const ours=(alias:string)=>`(${alias}group_id IS NULL OR ${alias}group_id=$1 OR starts_with(${alias}group_id,$1||'/topic/'))`;
+  // this group's and its topics' tasks and the project's own; its topics are the topic rows the chat directory holds
+  // for it (ADR-0250), bound as $1.
+  const ours=(alias:string)=>`(${alias}group_id IS NULL OR ${alias}group_id=ANY($1::text[]))`;
   const family=(await db.query(`WITH RECURSIVE down AS (
-      SELECT id,group_id AS home FROM owner_tasks WHERE project_id=$2 AND parent_id IS NULL AND (group_id=$1 OR starts_with(group_id,$1||'/topic/'))
+      SELECT id,group_id AS home FROM owner_tasks WHERE project_id=$2 AND parent_id IS NULL AND group_id=ANY($1::text[])
       UNION SELECT t.id,down.home FROM owner_tasks t JOIN down ON t.parent_id=down.id WHERE ${ours('t.')})
-    SELECT o.id,o.group_id,down.home FROM owner_tasks o JOIN down ON down.id=o.id ORDER BY o.id FOR UPDATE OF o`,[group,from])).rows;
+    SELECT o.id,o.group_id,down.home FROM owner_tasks o JOIN down ON down.id=o.id ORDER BY o.id FOR UPDATE OF o`,[groupWithTopics(group),from])).rows;
   if(!family.length)return 0;
   const moved=family.map(task=>task.id as string);
   const left=(await db.query(`SELECT id FROM owner_tasks WHERE parent_id=ANY($1::text[]) AND NOT id=ANY($1::text[]) ORDER BY id FOR UPDATE`,[moved])).rows.map(task=>task.id as string);
@@ -679,7 +682,7 @@ export class TaskRepository {
     // A project's chat finds tasks only by a group or topic it reaches, as it sees no other group on them.
     if(input.group){const space=validateSpace(input.group);
       if(view&&!seesGroup(view.reach,space))filters.push('false');
-      else {const chat=p(space);filters.push(`(group_id=${chat}::text OR starts_with(group_id,${chat}::text||'/topic/'))`);}}
+      else filters.push(`group_id=ANY(${p([...new Set([space,...directory().expand([space])])])}::text[])`);}
     if(input.person)filters.push(`EXISTS (SELECT 1 FROM owner_task_people x WHERE x.task_id=owner_tasks.id AND x.entity_id=${p(ids([input.person],'invalid_task_people')[0])}::text)`);
     if(input.status){if(!settings.statuses.some(item=>item.id===input.status))throw new HttpError(400,'invalid_task_status');filters.push(`status_id=${p(input.status)}::text`);}
     if(input.priority){const level=Number(input.priority);if(!Number.isSafeInteger(level)||level<0||level>4)throw new HttpError(400,'invalid_task_priority');filters.push(`priority=${p(level)}::int`);}
@@ -718,8 +721,8 @@ export class TaskRepository {
     const scopes=view?(await this.control.query(`SELECT p.id,p.name,${open} FROM projects p LEFT JOIN owner_tasks t ON ${seesSql('t.','p.id','$2')} WHERE p.id=$1 GROUP BY p.id,p.name`,
       [view.project,reachParam(view.reach)])).rows
       :(await this.control.query(`SELECT 'personal' AS id,NULL AS name,${open},'{}'::text[] AS chats FROM (SELECT 1) one LEFT JOIN owner_tasks t ON t.project_id IS NULL
-      UNION ALL SELECT * FROM (SELECT p.id,p.name,${open},${projectChats('p.id')} AS chats FROM projects p
-        LEFT JOIN owner_tasks t ON t.project_id=p.id WHERE p.state='active' OR t.id IS NOT NULL GROUP BY p.id,p.name ORDER BY lower(p.name),p.id) listed`)).rows;
+      UNION ALL SELECT * FROM (SELECT p.id,p.name,${open},${projectChats('p.id','$1')} AS chats FROM projects p
+        LEFT JOIN owner_tasks t ON t.project_id=p.id WHERE p.state='active' OR t.id IS NOT NULL GROUP BY p.id,p.name ORDER BY lower(p.name),p.id) listed`,[groupSpaces()])).rows;
     // Tags in use in this list, each once whatever its case, spelled as most recently written; a project's chat learns
     // only the tags of the tasks it sees.
     const tagged=(await this.control.query(`SELECT (array_agg(t ORDER BY updated_at DESC))[1] AS name,count(*) FILTER (WHERE state='open')::int AS open
@@ -1209,7 +1212,7 @@ export class TaskRepository {
     const memory=this.topicMemory(),named=chats.filter(groupSpace);
     if(group!==null)return groupSpace(group)?readSetOf(recallScope(group,memory),project):null;
     if(!named.length)return null;
-    return readSet({home:named[0]!,project,...(memory==='group'?{whole:named.map(chat=>parentSpace(chat)??chat)}:{exact:named})});
+    return readSet({home:named[0]!,project,...(memory==='group'?{whole:named.map(chat=>directory().groupOf(chat)!)}:{exact:named})});
   }
   /**
    * A task as the chats of `audience` would see it, with its related tasks they see and the title of the task it sits
@@ -1250,9 +1253,9 @@ export class TaskRepository {
    * group that is not clearly a group sees nothing (ADR-0242).
    */
   private async audienceOf(db:Pick<pg.Pool,'query'>,project:string,group:string|null):Promise<string[]> {
-    if(group===null)return (await db.query(`SELECT ${projectChats('$1')} AS chats`,[project])).rows[0].chats;
-    const chat=parentSpace(group)??group;
-    if(!groupSpace(group)||!groupChatId(chat))return [];
+    if(group===null)return (await db.query(`SELECT ${projectChats('$1','$2')} AS chats`,[project,groupSpaces()])).rows[0].chats;
+    const chat=directory().groupOf(group);
+    if(chat===null)return [];
     const assigned=(await db.query(`SELECT 1 FROM project_assignments WHERE space_id=$1 AND mode='assigned' AND project_id=$2`,[chat,project])).rows.length>0;
     return assigned?[this.topicMemory()==='topic'?group:chat]:[];
   }

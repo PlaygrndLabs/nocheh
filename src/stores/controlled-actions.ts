@@ -20,6 +20,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
 import type {OperationReference} from './operations.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
+import {ownerChat,ownerIds} from '../assistant-policy.js';
 
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
@@ -82,7 +83,7 @@ export class ControlledActionRepository {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
     if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
     const body=exact(value,['kind','arguments','summary']),raw=actionArguments(body.kind,body.arguments),note=summaryOf(body.summary);
-    const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=this.access.policy().owner_id??null;
+    const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=ownerChat(this.access.policy());
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
     // Its switch is the chat's, never the asking turn's: a job or a scheduled task follows the chat it belongs to.
     if(!await chatToolAllowed(this.control,body.kind as string,principal.space!,owner))throw new HttpError(403,'tool_disabled_by_owner');
@@ -137,7 +138,7 @@ export class ControlledActionRepository {
       // no autonomy: every change it asks for waits for a card (ADR-0207), and
       // neither does a follow-up turn, which no owner request started (ADR-0212).
       const connected='connection' in args,live=source.store==='archive'&&!followUp,fresh=!turn.job||!await relaunchedRun(db,source.id);
-      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,this.access.policy().owner_id,source,turn,true):live):null;
+      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,ownerIds(this.access.policy()),source,turn,true):live):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')

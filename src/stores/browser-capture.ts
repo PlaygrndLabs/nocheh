@@ -3,9 +3,11 @@ import {admin,type Reader} from '../access.js';
 import {canonical,digest,envelope,type Envelope} from '../archive.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {validateSpace,parentSpace} from '../spaces.js';
+import {parentSpace,servedGroup,validateSpace} from '../spaces.js';
 import {immutableFile,storeBytes} from '../storage.js';
 import type {OriginalManifest} from './archive.js';
+import {ownerChat} from '../assistant-policy.js';
+import {chats} from '../chats.js';
 
 const identity=(value:unknown)=>{const result=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(result))throw new HttpError(400,'invalid_run_identity');return result;};
 /** Manifests are part of the original browser submission and commit with it. */
@@ -28,7 +30,7 @@ export class BrowserCaptureRepository {
   constructor(readonly root:string,readonly policy:()=>AssistantPolicy){}
   async capture(principal:Reader,value:unknown) {
     admin(principal);const body=object(value),policy=this.policy(),scope=string(body.scope,64);
-    if(!policy.owner_id||scope!==policy.owner_id&&!policy.group_ids.includes(scope))throw new HttpError(403,'run_scope_denied');
+    const owner=ownerChat(policy);if(!policy.owner_id||!owner||scope!==owner&&!servedGroup(scope))throw new HttpError(403,'run_scope_denied');
     const id=identity(body.id),conversation=identity(body.conversation),profile=identity(body.profile),space=validateSpace(body.space??scope),revision=body.revision??0;
     if(profile.length>64||(parentSpace(space)??space)!==scope||!Number.isSafeInteger(revision)||Number(revision)<0)throw new HttpError(400,'invalid_run_audience');
     const text=string(body.text,100000),display=string(body.display??text,200000),submission=body.submission??'composer';
@@ -47,7 +49,7 @@ export class BrowserCaptureRepository {
       source:{version:1,adapter:'nocheh.browser',adapter_version:'2',
         object:{platform:'browser',namespace:canonical([scope,profile,conversation]),kind:'message',external_id:id},operation:'create',completeness:'full',
         relations:[{kind:'contained_in',target:{platform:'browser',namespace:canonical([scope,profile]),kind:'conversation',external_id:conversation}}],
-        metadata:{audience:{chat_id:scope,topic_state:space===scope?'none':'known',...(space===scope?{}:{topic_id:space.split('/topic/')[1]})}},
+        metadata:{audience:{chat_id:scope,topic_state:space===scope?'none':'known',...(space===scope?{}:{topic_id:chats().get(space)!.topic_key!})}},
         provenance:{capture:'owner_browser_submission'}}});
     // Validate all input before writing, then persist every file before publishing
     // the spool record. Replay can reconstruct its complete archive transaction.

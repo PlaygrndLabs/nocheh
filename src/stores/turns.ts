@@ -10,6 +10,7 @@ import type {PreparedContextRepository} from './prepared-context.js';
 import type {GuardBinding} from './guards.js';
 import {albumMembers} from './albums.js';
 import {defaultLogicalProfile,runtimeProfile} from './runtime-profile.js';
+import {ownerChat} from '../assistant-policy.js';
 
 export const runtimeTurnSchema=`
 CREATE TABLE IF NOT EXISTS runtime_turns (
@@ -75,7 +76,7 @@ export class RuntimeTurnRepository implements BrokerStorage {
       return parentSpace(row.scope)??row.scope;
     }
     const source=await this.access.archive.verify(reference),space=await this.access.space(reference);
-    if(principal.scope===null&&principal.purpose==='memory-review'&&principal.space===this.access.policy().owner_id) {
+    if(principal.scope===null&&principal.purpose==='memory-review'&&principal.space===ownerChat(this.access.policy())) {
       const binding=await this.assertAudience(principal);
       if(!await this.access.canLearn(reference,binding))throw new HttpError(403,'learning_consent_required');
       // An owner-only native review learns permitted evidence into the owner's
@@ -83,7 +84,11 @@ export class RuntimeTurnRepository implements BrokerStorage {
       return principal.space!;
     }
     if(!space||space!==principal.space)throw new HttpError(403,'turn_source_denied');
-    return source.scope;
+    // The turn's chat as Nocheh names it (ADR-0250): the group or private chat of its space, never the archive's raw
+    // Telegram id, which a chat first seen after step 2b, or upgraded since, does not share. What the turn records
+    // (jobs, actions, proposals) and what is checked against it later (served groups, group access, a job's chat) is
+    // then always the chat's own id.
+    return parentSpace(space)??space;
   }
   async binding(principal:Reader):Promise<TurnBinding> {
     if(principal.admin||!principal.turnEvent||!principal.space||principal.guard_epoch===undefined)throw new HttpError(403,'scoped_turn_required');

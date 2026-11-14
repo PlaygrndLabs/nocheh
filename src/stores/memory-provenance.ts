@@ -1,5 +1,5 @@
 import {HttpError} from '../http.js';
-import {readSetSql,recallCondition} from '../spaces.js';
+import {readSetParam,readSetSql,recallCondition,type ReadSet} from '../spaces.js';
 import {engineId,engineUnsupported,type MemoryEngine} from '../memory/engine.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
@@ -20,18 +20,20 @@ export class MemoryProvenanceRepository {
     if(!found)throw new HttpError(409,'memory_context_retired');
   }
   /** Sessions an audience may read: its own sessions with completed writes, newest first.
-   * With `group`, the sessions of that group's base conversation and every one of its topics. */
-  async sessions(workspace:string,audience:string,limit=1000,group:string|null=null):Promise<string[]> {
+   * With `group` (groupWithTopics of the reader's group), the sessions of that group's base conversation and every one
+   * of its topics. */
+  async sessions(workspace:string,audience:string,limit=1000,group:readonly string[]|null=null):Promise<string[]> {
     return (await this.stores.control.query(`SELECT s.session_id FROM memory_sessions s WHERE s.workspace=$1 AND ${recallCondition('s.audience','$2','$4')}
       AND EXISTS(SELECT 1 FROM memory_ingestion_receipts r WHERE r.session_id=s.session_id AND r.retired_at IS NULL AND r.state='done')
-      ORDER BY s.updated_at DESC,s.session_id LIMIT $3`,[workspace,audience,limit,group])).rows.map(row=>String(row.session_id));
+      ORDER BY s.updated_at DESC,s.session_id LIMIT $3`,[workspace,audience,limit,group===null?null:[...group]])).rows.map(row=>String(row.session_id));
   }
-  /** Sessions a read set may read (ADR-0249), bound as readSetParam: those of every conversation of the set with completed
-   * writes, newest first. Never the owner's sessions or a private chat's, whatever the parameter holds. */
-  async readSetSessions(workspace:string,reads:readonly string[],limit=1000):Promise<string[]> {
+  /** Sessions a read set may read (ADR-0249): those of every conversation of the set with completed writes, newest
+   * first. Never the owner's sessions or a private chat's, whatever the set holds: only the groups and topics the chat
+   * directory holds are bound (readSetParam, ADR-0250). */
+  async readSetSessions(workspace:string,reads:ReadSet,limit=1000):Promise<string[]> {
     return (await this.stores.control.query(`SELECT s.session_id FROM memory_sessions s WHERE s.workspace=$1 AND ${readSetSql('s.audience',2)}
       AND EXISTS(SELECT 1 FROM memory_ingestion_receipts r WHERE r.session_id=s.session_id AND r.retired_at IS NULL AND r.state='done')
-      ORDER BY s.updated_at DESC,s.session_id LIMIT $3`,[workspace,[...reads],limit])).rows.map(row=>String(row.session_id));
+      ORDER BY s.updated_at DESC,s.session_id LIMIT $3`,[workspace,readSetParam(reads),limit])).rows.map(row=>String(row.session_id));
   }
   /** Owner reads span the space (null). Any other audience reads only its own sessions and fails closed. */
   async chatScope(workspace:string,audience:string):Promise<string[]|null> {

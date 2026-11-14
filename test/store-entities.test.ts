@@ -9,6 +9,8 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {ProjectRepository} from '../src/stores/projects.js';
 import {EntityRepository,attributedSpeaker} from '../src/stores/entities.js';
+import {installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 
 test('direct entity claims can omit the trusted speaker ID without weakening attribution',()=>{
   const trusted=digest('trusted-speaker'),other=digest('other-speaker');
@@ -82,14 +84,17 @@ test('the owner and other known authors are never suggested again as new people'
 });
 
 test('people and projects keep stable identity, attributed evidence, connected recall paths and audience privacy',
- {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async t=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},check=new pg.Pool(config);
   try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),guards=new GuardRepository(stores,archive);
   const stamp=String(Date.now()),atlasGroup='-'+stamp,privateGroup='-'+String(Number(stamp)+1),userBase=Number(stamp.slice(-7))*10,owner:Reader={admin:true,scope:null};
-  const access=new SourceAccessRepository(stores,archive,guards,()=>({enabled:true,owner_id:'42',group_ids:[atlasGroup,privateGroup]}));
+  const policy=()=>({enabled:true,owner_id:'42',group_ids:[atlasGroup,privateGroup]});
+  // The chats as Part A's seeder leaves groups stored before step 2b (ADR-0250).
+  t.after(installChatsForTest(seededDirectory(policy)));
+  const access=new SourceAccessRepository(stores,archive,guards,policy);
   const projects=new ProjectRepository(stores.control),entities=new EntityRepository(stores,access,projects);
   const capture=async(label:string,user:number,text:string,group=atlasGroup)=>{
     const envelope:Envelope={version:1,key:`entities:${stamp}:${label}`,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:group,

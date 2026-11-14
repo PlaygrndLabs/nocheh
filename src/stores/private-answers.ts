@@ -3,27 +3,28 @@ import {createHmac} from 'node:crypto';
 import {admin,answerId,type Reader} from '../access.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
-import {groupChatId,groupSpace,groupSpaceSql,parentSpace,readSet} from '../spaces.js';
+import {groupSpace,readSet,servedGroups} from '../spaces.js';
+import {accountIdFor,chatIdListSql,chatIdSql,chats} from '../chats.js';
+import {isTelegramAccount,legacyShapeSql,telegramAccountSource} from '../chats-telegram.js';
 import {projectGroups,projectGroupsSql} from './project-groups.js';
 
 /**
  * One row per "Answer privately" button Nocheh offered (ADR-0249): who asked, where, in which project, which groups
  * the answer may read and what became of it. The groups (`read_chats`, whole groups) are frozen when the button is
- * tapped, so a later change can't widen an old answer. Columns are named like the Members data design and hold raw
- * Telegram IDs until chats, members and accounts get their own IDs; `member_id` null is the owner. Rows are the
- * record: expiry changes their state and never deletes them.
+ * tapped, so a later change can't widen an old answer. Columns are named like the Members data design. Chats are
+ * Nocheh chat ids (ADR-0250); the asker is a chat_accounts id, or the Telegram user id a row written before step 2b
+ * holds; `member_id` null is the owner. Rows are the record: expiry changes their state and never deletes them.
  */
 export const privateAnswerSchema=`
 CREATE TABLE IF NOT EXISTS private_answers (
  id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{32}$'),
  question_event text NOT NULL UNIQUE CHECK(question_event ~ '^[a-f0-9]{64}$'),
- from_chat_id text NOT NULL CHECK(${groupSpaceSql('from_chat_id')}),
+ from_chat_id text NOT NULL,
  project_id text NOT NULL CHECK(project_id ~ '^[a-f0-9]{64}$'),
  member_id text,
- asker_account_id text NOT NULL CHECK(asker_account_id ~ '^[1-9][0-9]{0,18}$'),
- read_chats text[] CHECK(read_chats IS NULL OR cardinality(read_chats)>0 AND array_position(read_chats,NULL) IS NULL
-   AND array_to_string(read_chats,',') ~ '^-[1-9][0-9]{0,18}(,-[1-9][0-9]{0,18})*$'),
- reply_chat_id text CHECK(reply_chat_id ~ '^[1-9][0-9]{0,18}$'),
+ asker_account_id text NOT NULL,
+ read_chats text[],
+ reply_chat_id text,
  state text NOT NULL DEFAULT 'offered' CHECK(state IN ('offered','pressed','answered','needs_private_chat','refused','expired')),
  refusal_code text CHECK(refusal_code ~ '^[a-z][a-z0-9_]{0,63}$'),
  press_event text CHECK(press_event ~ '^[a-f0-9]{64}$'),
@@ -36,6 +37,43 @@ CREATE TABLE IF NOT EXISTS private_answers (
  revision integer NOT NULL DEFAULT 1 CHECK(revision>0),
  CHECK(state NOT IN ('pressed','answered') OR read_chats IS NOT NULL)
 );
+-- Chats are Nocheh chat ids and the asker a chat_accounts id (ADR-0250). Every value a row holds already passes:
+-- a stored Telegram value is its chat's id unchanged, and an older row's asker its Telegram user id.
+ALTER TABLE private_answers DROP CONSTRAINT IF EXISTS private_answers_from_chat_id_check;
+ALTER TABLE private_answers ADD CONSTRAINT private_answers_from_chat_id_check CHECK(${chatIdSql('from_chat_id')});
+ALTER TABLE private_answers DROP CONSTRAINT IF EXISTS private_answers_asker_account_id_check;
+ALTER TABLE private_answers ADD CONSTRAINT private_answers_asker_account_id_check CHECK(asker_account_id ~ '^(?:[a-f0-9]{64}|${telegramAccountSource})$');
+ALTER TABLE private_answers DROP CONSTRAINT IF EXISTS private_answers_read_chats_check;
+ALTER TABLE private_answers ADD CONSTRAINT private_answers_read_chats_check CHECK(read_chats IS NULL OR cardinality(read_chats)>0
+  AND array_position(read_chats,NULL) IS NULL AND ${chatIdListSql('read_chats')});
+ALTER TABLE private_answers DROP CONSTRAINT IF EXISTS private_answers_reply_chat_id_check;
+ALTER TABLE private_answers ADD CONSTRAINT private_answers_reply_chat_id_check CHECK(${chatIdSql('reply_chat_id')});
+-- What each chat is comes from its chats row, never from its id (ADR-0250): the asking place is a group or one of a
+-- group's topics, every frozen chat is a group itself, and the reply chat is a private chat. This release never writes
+-- a chat with no row (it refuses one first). A value no row names is judged by step 2's CHECKs on its frozen old shape
+-- (legacyShapeSql), so a release from before step 2b, redeployed, goes on writing its rows (2b-1 is undone by
+-- redeploying), and a digest with no row is refused. Checked whenever those columns are written, as their CHECKs were.
+CREATE OR REPLACE FUNCTION private_answers_chat_kinds() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NOT (CASE WHEN EXISTS(SELECT 1 FROM chats WHERE id=NEW.from_chat_id)
+   THEN EXISTS(SELECT 1 FROM chats c LEFT JOIN chats g ON g.id=c.parent_id WHERE c.id=NEW.from_chat_id AND (c.kind='group' OR c.kind='topic' AND g.kind='group'))
+   ELSE coalesce(${legacyShapeSql('NEW.from_chat_id','group_space')},false) END) THEN
+  RAISE EXCEPTION 'private_answers: the asking place must be a group or one of its topics' USING ERRCODE='check_violation';
+ END IF;
+ IF NEW.read_chats IS NOT NULL AND EXISTS(SELECT 1 FROM unnest(NEW.read_chats) frozen(id) LEFT JOIN chats c ON c.id=frozen.id
+   WHERE NOT (CASE WHEN c.id IS NULL THEN coalesce(${legacyShapeSql('frozen.id','group')},false) ELSE c.kind='group' END)) THEN
+  RAISE EXCEPTION 'private_answers: every frozen chat must be a group' USING ERRCODE='check_violation';
+ END IF;
+ IF NEW.reply_chat_id IS NOT NULL AND NOT (CASE WHEN EXISTS(SELECT 1 FROM chats WHERE id=NEW.reply_chat_id)
+   THEN EXISTS(SELECT 1 FROM chats c WHERE c.id=NEW.reply_chat_id AND c.kind='private')
+   ELSE coalesce(${legacyShapeSql('NEW.reply_chat_id','private')},false) END) THEN
+  RAISE EXCEPTION 'private_answers: the reply chat must be a private chat' USING ERRCODE='check_violation';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS private_answers_chat_kinds ON private_answers;
+CREATE TRIGGER private_answers_chat_kinds BEFORE INSERT OR UPDATE OF from_chat_id,read_chats,reply_chat_id ON private_answers
+ FOR EACH ROW EXECUTE FUNCTION private_answers_chat_kinds();
 CREATE INDEX IF NOT EXISTS private_answers_due ON private_answers(state,expires_at);
 CREATE INDEX IF NOT EXISTS private_answers_asker ON private_answers(asker_account_id,offered_at DESC);
 `;
@@ -51,11 +89,13 @@ export interface PrivateAnswer {id:string;question_event:string;from_chat_id:str
   read_chats:string[]|null;reply_chat_id:string|null;state:PrivateAnswerState;refusal_code:string|null;press_event:string|null;start_event:string|null;
   offered_at:Date;pressed_at:Date|null;answered_at:Date|null;expires_at:Date;send_key:string|null;revision:number}
 /** What the group answer offers: the question's event, the group or topic it was asked in, that place's project and
- * who asked (the raw Telegram user ID; `member_id` null for the owner). */
+ * who asked (their Telegram user id, which the row keeps as a chat_accounts id; `member_id` null for the owner). */
 export interface PrivateAnswerOffer {id:string;question_event:string;from_chat_id:string;project_id:string;asker_account_id:string;member_id?:string|null}
-/** A tap on the button: who tapped, the captured callback event and the group or topic of the tapped message. */
+/** A tap on the button: who tapped (a Telegram user id), the captured callback event and the group or topic of the
+ * tapped message. */
 export interface PrivateAnswerTap {account_id:string;press_event:string;space:string}
-/** The /start message in the asker's private chat: who sent it, its event (the private turn's event) and that chat. */
+/** The /start message in the asker's private chat: who sent it (a Telegram user id), its event (the private turn's
+ * event) and that chat (a Nocheh chat id). */
 export interface PrivateAnswerStart {account_id:string;start_event:string;reply_chat_id:string}
 export type PrivateAnswerOutcome={ok:true;answer:PrivateAnswer}|{ok:false;code:PrivateAnswerRefusal;answer:PrivateAnswer|null};
 
@@ -68,7 +108,16 @@ export function privateAnswerId(secret:string,questionEvent:string):string {
 
 type Database=Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>;
 const closed=()=>new HttpError(409,'private_answer_closed');
-const event=/^[a-f0-9]{64}$/,account=/^[1-9][0-9]{0,18}$/;
+const event=/^[a-f0-9]{64}$/;
+/** The chat_accounts id a row keeps for a Telegram user id. */
+const asker=(telegramUser:string)=>accountIdFor('telegram',telegramUser);
+/** Whether a row's asker is this Telegram user: its chat_accounts id, or the raw id an older row holds. */
+const askedBy=(row:Pick<PrivateAnswer,'asker_account_id'>,telegramUser:string|null)=>
+  !!telegramUser&&isTelegramAccount(telegramUser)&&(row.asker_account_id===asker(telegramUser)||row.asker_account_id===telegramUser);
+/** The group a row was asked in: its own chat's group, from the chat directory; null when no row holds it. */
+const homeGroup=(row:Pick<PrivateAnswer,'from_chat_id'>)=>chats().groupOf(row.from_chat_id);
+/** Whether `chat` is this Telegram user's own private chat with Nocheh, by its row (never by comparing ids). */
+const ownPrivateChat=(chat:string,telegramUser:string)=>{const found=chats().get(chat);return found?.kind==='private'&&found.account_id===asker(telegramUser);};
 /** What a tap, a /start or a refusal tells the caller, with the row as it now stands. */
 const outcome=(row:PrivateAnswer|null,code?:PrivateAnswerRefusal):PrivateAnswerOutcome=>code?{ok:false,code,answer:row}:{ok:true,answer:row!};
 /** What a refused row tells a later tap or /start: an answer that never arrived is as good as expired; anything else changed. */
@@ -90,18 +139,18 @@ export async function bindAnswerReads(db:Database,policy:AssistantPolicy,princip
   const row=(await db.query<PrivateAnswer&{project_groups:string[]}>(`SELECT answer.*,${projectGroupsSql('answer.project_id','$4')} AS project_groups
     FROM private_answers answer JOIN projects p ON p.id=answer.project_id AND p.state='active'
     WHERE answer.id=$1 AND answer.start_event=$2 AND answer.reply_chat_id=$3 AND answer.state IN ('pressed','answered') AND answer.expires_at>now()`,
-    [principal.answer,principal.turnEvent,principal.scope,[...new Set(policy.group_ids)].filter(groupChatId)])).rows[0];
+    [principal.answer,principal.turnEvent,principal.scope,servedGroups()])).rows[0];
   if(!row||!row.read_chats)throw closed();
   const inProject=new Set(row.project_groups);
-  const whole=joinedGroups(policy,row,row.read_chats.filter(group=>inProject.has(group))),home=parentSpace(row.from_chat_id)??row.from_chat_id;
-  if(!whole.includes(home))throw closed();
+  const whole=joinedGroups(policy,row,row.read_chats.filter(group=>inProject.has(group))),home=homeGroup(row);
+  if(home===null||!whole.includes(home))throw closed();
   return {...principal,reads:readSet({home:row.from_chat_id,whole,project:row.project_id})};
 }
 /** The groups of `groups` the asker may read now: served groups only, and for the owner (member_id null) every one of
  * them. A member's groups come in step 4, from their current membership; until then a member reads none. */
 function joinedGroups(policy:AssistantPolicy,row:Pick<PrivateAnswer,'member_id'|'asker_account_id'>,groups:readonly string[]):string[] {
-  const served=groups.filter(group=>groupChatId(group)&&policy.group_ids.includes(group));
-  return row.member_id===null&&row.asker_account_id===policy.owner_id?[...new Set(served)].sort():[];
+  const served=groups.filter(group=>chats().kind(group)==='group'&&chats().served(group));
+  return row.member_id===null&&askedBy(row,policy.owner_id)?[...new Set(served)].sort():[];
 }
 
 export class PrivateAnswerRepository {
@@ -112,12 +161,12 @@ export class PrivateAnswerRepository {
    * Null otherwise, which means no button. A topic follows its group's project.
    */
   async offerable(space:string,db:Database=this.control):Promise<{project_id:string;groups:string[]}|null> {
-    const policy=this.policy(),group=parentSpace(space)??space;
-    if(!policy.enabled||!policy.owner_id||!groupSpace(space)||!groupChatId(group)||!policy.group_ids.includes(group))return null;
+    const policy=this.policy(),group=chats().groupOf(space);
+    if(!policy.enabled||!policy.owner_id||group===null||!chats().served(group))return null;
     const row=(await db.query(`SELECT a.project_id FROM project_assignments a JOIN projects p ON p.id=a.project_id
       WHERE a.space_id=$1 AND a.mode='assigned' AND p.state='active'`,[group])).rows[0];
     if(!row)return null;
-    const groups=await projectGroups(db,row.project_id,policy.group_ids);
+    const groups=await projectGroups(db,row.project_id,servedGroups());
     return groups.includes(group)&&groups.length>1?{project_id:row.project_id,groups}:null;
   }
   /** Records the button under the owner's group answer; repeating it for the same question returns the same row. A new
@@ -126,9 +175,9 @@ export class PrivateAnswerRepository {
   async offer(input:PrivateAnswerOffer):Promise<PrivateAnswer> {
     const member=input.member_id??null;
     if(!answerId.test(input.id)||!event.test(input.question_event)||!groupSpace(input.from_chat_id)||!event.test(input.project_id)||
-      !account.test(input.asker_account_id)||member!==null)throw new HttpError(400,'invalid_private_answer');
+      !isTelegramAccount(input.asker_account_id)||member!==null)throw new HttpError(400,'invalid_private_answer');
     const same=(row:PrivateAnswer|undefined)=>{
-      if(row&&(row.id!==input.id||row.from_chat_id!==input.from_chat_id||row.asker_account_id!==input.asker_account_id||row.member_id!==member))
+      if(row&&(row.id!==input.id||row.from_chat_id!==input.from_chat_id||!askedBy(row,input.asker_account_id)||row.member_id!==member))
         throw new HttpError(409,'private_answer_conflict');
       return row;
     };
@@ -138,7 +187,7 @@ export class PrivateAnswerRepository {
       throw new HttpError(409,'private_answer_unavailable');
     await this.control.query(`INSERT INTO private_answers(id,question_event,from_chat_id,project_id,member_id,asker_account_id,expires_at)
       VALUES($1,$2,$3,$4,$5,$6,now()+make_interval(hours=>$7)) ON CONFLICT DO NOTHING`,
-      [input.id,input.question_event,input.from_chat_id,input.project_id,member,input.asker_account_id,privateAnswerTimes.offerHours]);
+      [input.id,input.question_event,input.from_chat_id,input.project_id,member,asker(input.asker_account_id),privateAnswerTimes.offerHours]);
     const saved=same((await this.control.query<PrivateAnswer>('SELECT * FROM private_answers WHERE question_event=$1',[input.question_event])).rows[0]);
     if(!saved)throw new HttpError(409,'private_answer_conflict');
     return saved;
@@ -167,7 +216,8 @@ export class PrivateAnswerRepository {
     const now=await this.offerable(row.from_chat_id,db);
     if(!now||now.project_id!==row.project_id)return null;
     const groups=joinedGroups(this.policy(),row,now.groups);
-    return groups.length>1&&groups.includes(parentSpace(row.from_chat_id)??row.from_chat_id)?groups:null;
+    const home=homeGroup(row);
+    return home!==null&&groups.length>1&&groups.includes(home)?groups:null;
   }
   /**
    * A tap. Only the asker may tap; anyone else gets only_asker and the row is unchanged. An answered row is used, a
@@ -177,12 +227,13 @@ export class PrivateAnswerRepository {
    * without freezing again.
    */
   async press(id:string,tap:PrivateAnswerTap):Promise<PrivateAnswerOutcome> {
-    if(!account.test(tap.account_id)||!event.test(tap.press_event)||!groupSpace(tap.space))throw new HttpError(400,'invalid_private_answer');
+    if(!isTelegramAccount(tap.account_id)||!event.test(tap.press_event)||!groupSpace(tap.space))throw new HttpError(400,'invalid_private_answer');
     return this.locked(id,async(db,row,stale)=>{
       if(!row)return outcome(null,'expired');
-      if(row.asker_account_id!==tap.account_id)return outcome(row,'only_asker');
+      if(!askedBy(row,tap.account_id))return outcome(row,'only_asker');
       // The button sits under the group answer, so a tap from anywhere else is refused and changes nothing.
-      if((parentSpace(tap.space)??tap.space)!==(parentSpace(row.from_chat_id)??row.from_chat_id))return outcome(row,'changed');
+      const home=homeGroup(row);
+      if(home===null||chats().groupOf(tap.space)!==home)return outcome(row,'changed');
       if(row.state==='answered')return outcome(row,'used');
       if(row.state==='refused')return outcome(row,refusedAs(row));
       if(row.state==='expired')return outcome(row,'expired');
@@ -203,10 +254,11 @@ export class PrivateAnswerRepository {
    * once it was answered or while another /start's answer is on its way, else changed or expired.
    */
   async claim(id:string,start:PrivateAnswerStart):Promise<PrivateAnswerOutcome> {
-    if(!account.test(start.account_id)||!event.test(start.start_event)||!account.test(start.reply_chat_id))throw new HttpError(400,'invalid_private_answer');
+    if(!isTelegramAccount(start.account_id)||!event.test(start.start_event)||typeof start.reply_chat_id!=='string'||!start.reply_chat_id||groupSpace(start.reply_chat_id))throw new HttpError(400,'invalid_private_answer');
     return this.locked(id,async(db,row,stale)=>{
       if(!row)return outcome(null,'expired');
-      if(row.asker_account_id!==start.account_id||start.reply_chat_id!==start.account_id)return outcome(row,'not_yours');
+      // Only the asker, in their own private chat as its row names it (a chat id is never compared with an account).
+      if(!askedBy(row,start.account_id)||!ownPrivateChat(start.reply_chat_id,start.account_id))return outcome(row,'not_yours');
       if(row.state==='refused')return outcome(row,refusedAs(row));
       if(row.state==='answered')return outcome(row,row.start_event===start.start_event&&!stale?undefined:'used');
       // A row never tapped, or expired, has no open /start.
@@ -214,7 +266,8 @@ export class PrivateAnswerRepository {
       if(stale)return this.expired(db,row);
       if(row.start_event!==null)return row.start_event===start.start_event?outcome(row):outcome(row,'used');
       const now=await this.current(db,row),groups=row.read_chats!.filter(group=>now?.includes(group));
-      if(groups.length<2||!groups.includes(parentSpace(row.from_chat_id)??row.from_chat_id))
+      const home=homeGroup(row);
+      if(groups.length<2||home===null||!groups.includes(home))
         return outcome(await this.update(db,row.id,"state='refused',refusal_code='changed'"),'changed');
       return outcome(await this.update(db,row.id,`start_event=$2,reply_chat_id=$3,read_chats=$5,expires_at=now()+make_interval(mins=>$4)`,
         [start.start_event,start.reply_chat_id,privateAnswerTimes.answerMinutes,groups]));

@@ -1,5 +1,6 @@
 import {canonical,digest,type Envelope} from './archive.js';
-import {desktopChannelTypes,desktopTopicId,eventSpace,parentSpace,telegramTopicId} from './spaces.js';
+import {desktopChannelTypes,desktopTopicId,legacyChat,telegramTopicId} from './chats-telegram.js';
+import {eventSpace} from './spaces.js';
 import {legacySource,sourceDescriptor,type SourceDescriptor,type SourceIdentity,type SourceRelation} from './source-model.js';
 
 const record=(v:unknown):Record<string,any>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,any>:{};
@@ -66,8 +67,9 @@ function desktopSource(value:Envelope,base:SourceDescriptor):SourceDescriptor {
   // message there; an unmapped export belongs to no chat, so it has none and is never learned.
   let audience:ObservedAudience|undefined;
   if(/^-?[1-9][0-9]{0,18}$/.test(value.scope)) {
-    const space=eventSpace(value.scope,body),thread=space.includes('/topic/')?space.split('/topic/')[1]:undefined;
-    audience=thread&&parentSpace(space)===value.scope?{chat_id:value.scope,topic_state:'known',topic_id:thread}:{chat_id:value.scope,topic_state:'none'};
+    // The archive's own Telegram values, read by the Telegram adapter: no chat directory is asked at intake.
+    const chat=legacyChat(eventSpace(value.scope,body));
+    audience=chat?.kind==='topic'&&chat.parent_id===value.scope?{chat_id:value.scope,topic_state:'known',topic_id:chat.topic_key!}:{chat_id:value.scope,topic_state:'none'};
   }
   const descriptor:SourceDescriptor={...base,adapter_version:'3',object:live?messageIdentity(live,base.object.external_id):base.object,relations,
     ...(audience?{metadata:{...base.metadata,audience}}:{})};

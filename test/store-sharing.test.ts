@@ -13,6 +13,9 @@ import {fixtureServices} from './fixture-brain.js';
 import {SharingContentRepository} from '../src/stores/sharing.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {chatDirectory,installChatsForTest} from '../src/chats.js';
+import {legacyChats,legacyDirectory,seedChats} from './fixture-groups.js';
+import {families} from './fixture-families.js';
 
 test('sharing publishes exact prepared text with private provenance, revocation and durable filter checkpoints',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -24,6 +27,7 @@ test('sharing publishes exact prepared text with private provenance, revocation 
   let calls=0,mode:'safe'|'citation'|'outside'|'instruction'='safe',duringFilter:(()=>Promise<void>)|null=null;
   const filterInputs:string[]=[];
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other,origin]};
+  const restore=installChatsForTest(legacyDirectory([group,other,origin,group+'/topic/77'],{owner:'123',served:policy.group_ids}));
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};
@@ -164,10 +168,10 @@ test('sharing publishes exact prepared text with private provenance, revocation 
     } finally {services.sharing.covers=covers;}
     await assert.rejects(services.shared.read(await principal(group,destination.id),olderRelease.id),{code:'sharing_source_not_selected'});
     assert.ok(!(await services.shared.context(await principal(group,destination.id),'')).sources.some(item=>item.id===olderRelease.id));
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('a group answer uses only that group: groups in one project share nothing, and only the owner\'s own rule lets another group in',
+for(const family of families)test(`a group answer uses only that group: groups in one project share nothing, and only the owner's own rule lets another group in (${family.name})`,
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
@@ -176,6 +180,8 @@ test('a group answer uses only that group: groups in one project share nothing, 
   const key='project-groups:'+Date.now(),group='-'+Date.now(),other=group+'3',token='synthetic-sharing-token-not-a-real-credential',owner:Reader={admin:true,scope:null};
   const filterInputs:string[]=[];let calls=0;
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
+  // The chats as the seeder makes their rows, old-shaped or digest ids (ADR-0250); the archive keeps Telegram's ids.
+  const id=family.id,restore=installChatsForTest(family.directory([group,other,other+'/topic/5'],{owner:'123',served:policy.group_ids}));
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -201,25 +207,25 @@ test('a group answer uses only that group: groups in one project share nothing, 
     await assert.rejects(request('/v1/projects',{name:key,description:'',state:'active',sharing_enabled:true,expected_revision:0,operation_id:op('box')}),
       {code:'unknown_policy_field'},'the project share box is gone');
     const project=await request('/v1/projects',{name:key,description:'',state:'active',expected_revision:0,operation_id:op('project')});
-    for(const space of [group,other])await request('/v1/projects/assignments',{space_id:space,mode:'assigned',project_id:project.id,
+    for(const space of [id(group),id(other)])await request('/v1/projects/assignments',{space_id:space,mode:'assigned',project_id:project.id,
       expected_revision:(await request('/v1/projects/effective?space='+encodeURIComponent(space))).own_assignment?.revision??0,operation_id:op('assign')});
     let listed:any=null;for(let after='';!listed;){const page=await request('/v1/projects?after='+after);listed=page.projects.find((row:any)=>row.id===project.id);if(!page.next)break;after=page.next;}
-    assert.deepEqual(listed?.groups,[group,other].sort(),'the project lists both groups');
+    assert.deepEqual(listed?.groups,[id(group),id(other)].sort(),'the project lists both groups');
     // The same project gives a group nothing from another of its groups, for the owner too: no rule, no filter, no source.
-    for(const [space,turn] of [[group,here.id],[other,there.id]] as const){
+    for(const [space,turn] of [[id(group),here.id],[id(other),there.id]] as const){
       const context=await services.shared.context(await principal(space,turn),'tidewater');
       assert.deepEqual(context.sources,[],space);
     }
     assert.equal(calls,0,'nothing is ever filtered between the groups of a project');
-    for(const space of [group,other])assert.deepEqual(await services.sharing.forDestination(space,space),[],'no rule is written for a project');
+    for(const space of [id(group),id(other)])assert.deepEqual(await services.sharing.forDestination(space,space),[],'no rule is written for a project');
 
     // The owner's own rule is the one exception, and it reads only the exact chats it names.
-    await request('/v1/sharing/rules',{name:key+':owner',sources:[other],destination:group,enabled:true,mode:'filtered',instructions:'',expected_revision:0,operation_id:op('rule')});
-    const items=(await services.shared.context(await principal(group,here.id),'tidewater')).sources.filter(item=>item.kind==='privacy_filtered_inference');
+    await request('/v1/sharing/rules',{name:key+':owner',sources:[id(other)],destination:id(group),enabled:true,mode:'filtered',instructions:'',expected_revision:0,operation_id:op('rule')});
+    const items=(await services.shared.context(await principal(id(group),here.id),'tidewater')).sources.filter(item=>item.kind==='privacy_filtered_inference');
     assert.equal(items.length,1);assert.equal(calls,1);
     assert.ok(filterInputs.at(-1)!.includes('the other group')&&!filterInputs.at(-1)!.includes('a topic over there'),'never a topic the rule does not name');
-    assert.deepEqual((await services.shared.context(await principal(other,there.id),'tidewater')).sources,[],'nothing flows back the other way');
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+    assert.deepEqual((await services.shared.context(await principal(id(other),there.id),'tidewater')).sources,[],'nothing flows back the other way');
+  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('starting up deletes a project\'s own rules with their texts and the share box columns, keeping the owner\'s rules',
@@ -228,6 +234,10 @@ test('starting up deletes a project\'s own rules with their texts and the share 
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),db=stores.control,key='share-box-cleanup:'+Date.now(),group='-'+Date.now(),other=group+'3';
+  const chats=legacyChats([group,other,group+'/topic/7',other+'/topic/8'],{owner:'123',served:[group,other]});
+  const restore=installChatsForTest(chatDirectory(chats));
+  // The chat records the seeder made: which assignments are topics' comes from them.
+  await seedChats(db,chats);
   const project=digest(key+':project'),projectRule=digest(key+':project-rule'),ownerRule=digest(key+':owner-rule');
   const columns=async()=>(await db.query(`SELECT table_name||'.'||column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND
     (table_name,column_name) IN (('projects','sharing_enabled'),('projects','sharing_mode'),('project_assignments','share_into'),('sharing_rules','project_id')) ORDER BY 1`)).rows.map(row=>row.name);
@@ -270,5 +280,5 @@ test('starting up deletes a project\'s own rules with their texts and the share 
     await initializeStoreDatabases(config,passwords);
     assert.deepEqual(await rows('sharing_rules',[projectRule,ownerRule]),[ownerRule]);
     assert.equal((await db.query("SELECT revision FROM project_assignments WHERE space_id=$1",[group+'/topic/7'])).rows[0].revision,2);
-  } finally {await stores.close();}
+  } finally {restore();await stores.close();}
 });

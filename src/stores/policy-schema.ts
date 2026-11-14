@@ -28,7 +28,14 @@ CREATE INDEX IF NOT EXISTS sharing_rules_destination ON sharing_rules(destinatio
 ALTER TABLE projects DROP COLUMN IF EXISTS sharing_enabled,DROP COLUMN IF EXISTS sharing_mode;
 ALTER TABLE project_assignments DROP COLUMN IF EXISTS share_into;
 -- A topic always follows its group's project (ADR-0247): a topic's own choice saved earlier becomes "follows its group".
-UPDATE project_assignments SET mode='inherit',project_id=NULL,revision=revision+1,updated_at=now() WHERE space_id LIKE '%/topic/%' AND mode<>'inherit';
+-- Which rows are topics comes from their chats rows (ADR-0250), never from the id; the chat records are made later in
+-- the control schema, so a fresh store has neither and skips this.
+DO $$BEGIN
+ IF to_regclass('chats') IS NOT NULL THEN
+  UPDATE project_assignments a SET mode='inherit',project_id=NULL,revision=a.revision+1,updated_at=now()
+   FROM chats c WHERE c.id=a.space_id AND c.kind='topic' AND a.mode<>'inherit';
+ END IF;
+END$$;
 CREATE TABLE IF NOT EXISTS learning_consent (
  event_id text PRIMARY KEY,enabled boolean NOT NULL,reason text NOT NULL,
  revision integer NOT NULL CHECK(revision>0),updated_at timestamptz NOT NULL DEFAULT now()

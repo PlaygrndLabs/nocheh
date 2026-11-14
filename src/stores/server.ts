@@ -1,7 +1,7 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 import {admin,reader} from '../access.js';
-import {telegramDeliveryAllowed} from '../assistant-policy.js';
+import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
 import {servedChats} from '../chats.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
@@ -111,7 +111,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
           resolved.some(note=>note!==null&&(typeof note!=='string'||!note.trim()||note.length>120||/[\r\n]/.test(note))))||
         input.edit!==undefined&&typeof input.edit!=='boolean')
         throw new HttpError(400,'invalid_owner_notice');
-      const owner=s.access.policy().owner_id;
+      // The owner's private chat (ADR-0250), not the owner's account.
+      const policy=s.access.policy(),owner=policy.owner_id?ownerChat(policy):null;
       if(!owner)return json(res,200,{state:'not_started',error_code:'owner_not_set'});
       // Open goes to the mini app's Problems page, or the dashboard; Retry failed is a button press storage handles.
       const open=input.open===undefined||input.open===null?null:object(input.open),retry=input.retry===true;
@@ -443,7 +444,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(path==='/v1/imports/pending') {
         // An answer reader hears only about imports into the groups of its record, not the owner's (ADR-0249).
         if(principal.answer!==undefined)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
-        const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
+        const owner=principal.scope===null||principal.scope===ownerChat(s.access.policy());
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
       }
       if(path==='/v1/graph')return json(res,200,await s.sources.graph(principal,url.searchParams.get('scope')??'*',url.searchParams.get('after')??'',limit(url.searchParams.get('limit')),url.searchParams.get('focus')??''));

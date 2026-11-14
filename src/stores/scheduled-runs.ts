@@ -12,6 +12,7 @@ import {OperationRepository} from './operations.js';
 import {ManagedExecutionRepository,managedEventId,managedIdentity,type ManagedInput} from './managed-execution.js';
 import type {ScheduleRepository} from './schedules.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
+import {ownerChat} from '../assistant-policy.js';
 
 export class ScheduledRunRepository extends ManagedExecutionRepository {
   protected readonly channel='scheduler' as const;
@@ -59,7 +60,7 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
   async deliveryAllowed(principal:Reader):Promise<boolean>{
     const row=principal.turnEvent?await this.row(principal.turnEvent):null;
     if(!row?.admitted||row.space_id!==principal.space||row.logical_profile!==principal.logical_profile||
-      (row.scope===this.access.policy().owner_id?null:row.scope)!==principal.scope)return false;
+      (row.scope===ownerChat(this.access.policy())?null:row.scope)!==principal.scope)return false;
     try{await this.current(row);return true;}catch(error){if(error instanceof HttpError&&error.status<500)return false;throw error;}
   }
   override async cancel(input:unknown){const row=await this.row(managedEventId(object(input).event_id));
