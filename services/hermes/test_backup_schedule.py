@@ -136,6 +136,25 @@ class BackupScheduleTests(unittest.TestCase):
         done = backup_schedule.health(self.state, values, start + timedelta(days=3))
         self.assertEqual((done['failed'], done['reason'], done['unreadable']), (0, None, 1))
 
+    def test_what_the_newest_complete_backup_left_out_stays_told_while_later_ones_fail_or_run(self):
+        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        start = at('2026-11-01T04:00:00'); left_out = ['hermes/profiles/x/workspace/a', 'hermes/profiles/x/workspace/b']
+        backup_schedule.record_backup(self.state, 'running', start)
+        backup_schedule.record_backup(self.state, 'complete', start, unreadable=left_out)
+        backup_schedule.record_backup(self.state, 'running', start + timedelta(days=1))
+        running = backup_schedule.health(self.state, values, start + timedelta(days=1), details=True)
+        self.assertEqual((running['unreadable'], running['unreadable_paths']), (2, left_out))
+        backup_schedule.record_backup(self.state, 'failed', start + timedelta(days=1), error='backup_disk_full')
+        # The newest backup there is still lacks them, so the notice line stays open instead of being marked fixed.
+        failed = backup_schedule.health(self.state, values, start + timedelta(days=1), details=True)
+        self.assertEqual((failed['failed'], failed['unreadable'], failed['unreadable_paths']), (1, 2, left_out))
+        self.assertEqual(backup_schedule.health(self.state, values, start + timedelta(days=2))['unreadable'], 2,
+                         'a backup left running by a restart changes nothing either')
+        backup_schedule.record_backup(self.state, 'running', start + timedelta(days=2))
+        backup_schedule.record_backup(self.state, 'complete', start + timedelta(days=2))
+        done = backup_schedule.health(self.state, values, start + timedelta(days=2), details=True)
+        self.assertEqual((done['failed'], done['unreadable'], done['unreadable_paths']), (0, 0, []))
+
     def test_low_disk_skips_count_each_day_and_status_warns_without_a_backups_folder(self):
         values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
         self.disk.stop()

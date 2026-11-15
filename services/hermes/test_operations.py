@@ -401,8 +401,45 @@ class WorkspaceLinkTests(unittest.TestCase):
         with self.assertRaises(OSError):extract_state(second,target)
         self.assertEqual(list(outside.iterdir()),[])
 
-    def test_the_command_line_prints_only_the_failure_code(self):
-        output=io.StringIO()
-        with patch.object(operations,'backup',side_effect=BackupError('backup_unsupported_link','hermes/private-name')),contextlib.redirect_stdout(output):
+    def test_a_backup_that_cannot_start_is_recorded_and_told(self):
+        state=new_state(self.root)
+        class Busy:
+            def __init__(self,*_):pass
+            @contextlib.contextmanager
+            def maintenance(self):
+                raise RuntimeError('store_maintenance_busy')
+                yield
+        three={'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}
+        with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
+             patch('tools.operations.installation.operations.environment',return_value=three),\
+             patch('tools.operations.installation.store_recovery.StoreRecovery',Busy):
+            with self.assertRaisesRegex(RuntimeError,'store_maintenance_busy'):backup(state,self.root/'backup')
+        found=health(state,NOTHING_SCHEDULED)
+        self.assertEqual((found['failed'],found['reason']),(1,'backup_failed'))
+        self.assertEqual(read_health(state)['state'],'failed')
+        with patch('tools.operations.installation.operations.compose',side_effect=ValueError('missing settings')):
+            with self.assertRaises(ValueError):backup(state,self.root/'backup')
+        self.assertEqual(health(state,NOTHING_SCHEDULED)['failed'],2)
+        missing=self.root/'missing'
+        with patch('tools.operations.installation.operations.compose',side_effect=ValueError('missing settings')):
+            with self.assertRaises(ValueError):backup(missing,self.root/'backup')
+        self.assertFalse(missing.exists(),'no state folder is made for the record')
+        with two_stores([]):backup(state,self.root/'backup')
+        self.assertEqual(health(state,NOTHING_SCHEDULED)['failed'],0)
+
+    def test_the_command_line_prints_only_the_failure_code_and_tells_the_terminal_why(self):
+        output,errors=io.StringIO(),io.StringIO()
+        with patch.object(operations,'backup',side_effect=BackupError('backup_unsupported_link','hermes/private-name‮.txt')),\
+             contextlib.redirect_stdout(output),contextlib.redirect_stderr(errors):
             self.assertEqual(operations.main('backup',self.root,['--output',str(self.root/'out')]),1)
         self.assertEqual(json.loads(output.getvalue()),{'error':'backup_unsupported_link'})
+        self.assertIn('hermes/private-name\\u202e.txt',errors.getvalue(),'the entry, escaped, for the owner at the terminal')
+        self.assertNotIn('‮',errors.getvalue())
+        def failing():
+            try:raise subprocess.CalledProcessError(1,['fixture','pg_dump'])
+            except subprocess.CalledProcessError as error:raise BackupError('backup_failed') from error
+        output,errors=io.StringIO(),io.StringIO()
+        with patch.object(operations,'backup',side_effect=lambda *_:failing()),contextlib.redirect_stdout(output),contextlib.redirect_stderr(errors):
+            self.assertEqual(operations.main('backup',self.root,['--output',str(self.root/'out')]),1)
+        self.assertEqual(output.getvalue().strip().splitlines(),['{"error": "backup_failed"}'])
+        self.assertIn('CalledProcessError',errors.getvalue());self.assertIn('pg_dump',errors.getvalue())

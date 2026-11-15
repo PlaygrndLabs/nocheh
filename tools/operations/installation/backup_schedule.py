@@ -191,9 +191,9 @@ def record_backup(state, outcome, now=None, error=None, path=None, unreadable=()
 
 def health(state, values=None, now=None, details=False):
     """What the owner is told about backups: how many in a row did not finish and why, how many entries a command
-    made unreadable in the newest one, how many days in a row the automatic one was skipped for low disk, and how
-    many off-site copies in a row failed or were skipped. Codes and counts only, never a file name; `details`
-    adds the names for System › Backups."""
+    made unreadable in the newest complete one, how many days in a row the automatic one was skipped for low disk,
+    and how many off-site copies in a row failed or were skipped. Codes and counts only, never a file name;
+    `details` adds the names for System › Backups."""
     now = _now(now); values = load(state) if values is None else values
     record = read_health(state)
     count = lambda value: value if type(value) is int and value > 0 else 0
@@ -203,8 +203,8 @@ def health(state, values=None, now=None, details=False):
         try: stale = now - datetime.fromisoformat(record['started_at']) >= UNFINISHED_GRACE
         except (KeyError, TypeError, ValueError): stale = True
         if stale: failed, reason = failed + 1, 'backup_interrupted'
-    result = {'failed': failed, 'reason': reason if failed else None,
-              'unreadable': count(record.get('unreadable')) if record.get('state') == 'complete' else 0,
+    # From the newest complete backup, also while a later one runs or after it failed: only a complete one replaces it.
+    result = {'failed': failed, 'reason': reason if failed else None, 'unreadable': count(record.get('unreadable')),
               'skipped_days': 0, 'offsite_failed': 0, 'offsite_reason': None, 'offsite_skipped': 0}
     schedule = _read(state) or {}
     if settings(values)['enabled'] and schedule.get('skipped') == 'low_disk':

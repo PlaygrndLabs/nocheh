@@ -9,9 +9,11 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
+import traceback
 import urllib.request
 from datetime import datetime,timezone
 from contextlib import ExitStack
@@ -225,24 +227,33 @@ def source_revision():
 
 
 def backup(state,output,leave_stopped=False):
-    command=compose(state);env=environment(state)
-    if output.exists(): raise ValueError('Backup destination already exists')
-    if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
-        copied_roots=[Path(state)/name for name in ('files','spool','hermes','telegram','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
-        if any(output.resolve().is_relative_to(root.resolve()) for root in copied_roots):
-            raise ValueError('Backup destination would be included in its own snapshot')
-        from tools.operations.installation.store_recovery import StoreRecovery
-        recovery=StoreRecovery(command,env)
-        with recovery.maintenance():return _backup(state,output,leave_stopped,command,env,recovery)
-    return _backup(state,output,leave_stopped,command,env)
+    from tools.operations.installation.backup_schedule import record_backup
+    outcome={'unreadable':[]}
+    try:
+        command=compose(state);env=environment(state)
+        if output.exists(): raise ValueError('Backup destination already exists')
+        if env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1':
+            copied_roots=[Path(state)/name for name in ('files','spool','hermes','telegram','admin/jobs','admin/tools/receipts','admin/dashboard/home')]
+            if any(output.resolve().is_relative_to(root.resolve()) for root in copied_roots):
+                raise ValueError('Backup destination would be included in its own snapshot')
+            from tools.operations.installation.store_recovery import StoreRecovery
+            recovery=StoreRecovery(command,env)
+            with recovery.maintenance():return _backup(state,output,leave_stopped,command,env,outcome,recovery)
+        return _backup(state,output,leave_stopped,command,env,outcome)
+    except BaseException as error:
+        # A backup that could not start, such as one that found the stores' maintenance lock taken, did not
+        # finish either, so the owner is told (ADR-0251). One that started has recorded its own end, and a state
+        # folder that does not exist is never made for the record.
+        if not outcome.get('recorded') and Path(state).is_dir():
+            record_backup(state,'failed',error='backup_failed' if isinstance(error,Exception) else 'backup_interrupted')
+        raise
 
 
-def _backup(state,output,leave_stopped,command,env,recovery=None):
+def _backup(state,output,leave_stopped,command,env,outcome,recovery=None):
     """Makes the backup and records how it ended in admin/backup-health.json, which feeds the owner's notice
     (ADR-0251). That record sits outside the copied roots, so a restored copy never inherits a running backup."""
     from tools.operations.installation.backup_schedule import record_backup
-    record_backup(state,'running')
-    outcome={'unreadable':[]}
+    record_backup(state,'running');outcome['recorded']=True
     try:result=_make(state,output,leave_stopped,command,env,recovery,outcome)
     except BaseException as error:
         if outcome.get('finished'):record_backup(state,'complete',unreadable=outcome['unreadable'])
@@ -554,7 +565,13 @@ def main(command,state,rest):
         args=parser.parse_args(rest)
         try:result=backup(state,args.output.resolve(),args.leave_stopped)
         except BackupError as error:
-            # Only the fixed code: the dashboard names it, and System › Backups shows the entry from the backup's record.
+            # Only the fixed code on stdout: the dashboard names it, and System › Backups shows the entry from the
+            # backup's record. The entry and the cause go to the terminal, escaped like that page shows them, since a
+            # command chooses file names; the dashboard discards stderr.
+            from tools.operations.installation.backup_schedule import shown
+            if error.path:print('Entry: '+shown(error.path),file=sys.stderr)
+            if error.__cause__ is not None:
+                for line in ''.join(traceback.format_exception(error.__cause__)).splitlines():print(shown(line,2000),file=sys.stderr)
             print(json.dumps({'error':error.code}),flush=True);return 1
     else:
         parser.add_argument('snapshot',type=Path);parser.add_argument('--state',type=Path,required=True)
