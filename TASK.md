@@ -115,6 +115,18 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   with every Telegram id it has had, and the dashboard's directory of people keeps that id: a
   group past the chat list's first page is listed once and opens as itself, and a
   `TELEGRAM_GROUP_IDS` entry naming a group by an earlier Telegram id finds that group.
+- Merged with main's fixes that lose nothing
+  ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)), on old-shaped and digest chats: a
+  recalled note names its group and topic from the chat records, the group's title or its newest
+  message under any Telegram id it has had ([recall](test/recall-places.test.ts)); a live
+  recording is judged in the chat the records find, so an allowed person is not cut in a group
+  Telegram upgraded or in a new-id group, and a group the records do not know lets only the owner
+  through ([sender](test/assistant.test.ts), [voice](test/store-voice-transcription.test.ts)); a
+  member job spend notice and its Pause or Resume edit go to the owner's private chat where it is
+  in Telegram now, name each group from the records, and are not sent while the records do not
+  know that chat; only the owner's press there pauses
+  ([spend](test/store-member-job-spend.test.ts)). Hermes's locked-down container still reads
+  `GET /internal/chats` and writes nothing outside its two mounts.
 
   Checks on the integrated branch after merging main: the build; node unit and dashboard tests
   (544: 346 pass, 194 store tests skipped there, and the 4 workflow tests that also fail on

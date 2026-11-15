@@ -19,8 +19,9 @@ rewritten. Amends
 [ADR-0151](0151-chat-role-and-skills-in-hermes-profiles.md),
 [ADR-0230](0230-portable-export-carries-owner-work.md),
 [ADR-0235](0235-nocheh-owns-the-telegram-bot.md),
-[ADR-0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md) and
-[ADR-0250](0250-cards-and-forwards-say-whose-words-they-are.md)
+[ADR-0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md),
+[ADR-0250](0250-cards-and-forwards-say-whose-words-they-are.md) and
+[ADR-0251](0251-fixes-that-lose-nothing.md)
 (see Amendments). Keeps [ADR-0053](0053-original-only-archive.md): the archive
 holds originals only and is never rewritten or indexed by chat. Step 2b-2,
 "Only the owner adds Nocheh" (adoption, leave-and-tell, the Telegram "which
@@ -395,6 +396,17 @@ retired), gets its own record.
   job was asked in that chat or the card goes to the chat it was asked in,
   compared by Nocheh chat ids, and names the group and topic from the chat
   directory, never from how an id is written.
+- ADR-0251: a recalled note's group and topic are named from the chat
+  directory: its title, then the newest archived message under any of the
+  group's Telegram ids, current or old. A live recording is judged in the chat
+  the directory finds: a served group, with access read under every Telegram id
+  it has had; a group the directory does not know lets only the owner through.
+  Member job spend counts the owner by `owner_id`, names each group from the
+  directory, and sends its notices and Pause or Resume edits to the owner's
+  private chat where it is in Telegram now, never to a chat the directory does
+  not know; only the owner's press in that chat pauses or resumes. A phone's
+  sign-in pause stays keyed by its Telegram account id, an adapter entry in the
+  format gate.
 </amendments>
 
 <alternatives>
