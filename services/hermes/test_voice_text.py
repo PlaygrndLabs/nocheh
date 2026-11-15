@@ -246,7 +246,6 @@ class VoiceTextTests(unittest.TestCase):
                 calls = usage.rows('2000-01-01', target)
             day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
             readers = provider_usage.reader_rows(state, day)
-        self.assertEqual(seen['HERMES_DISABLE_LAZY_INSTALLS'], '1')
         self.assertEqual(readers, [{'day': day, 'reader': 'voice', 'done': 1, 'temp_full': 1, 'read_only': 1}])
         self.assertEqual([(row['part'], row['runs'], row['failed']) for row in calls], [('transcription', 1, 0)],
                          'only the transcription that reached the model is a model call')

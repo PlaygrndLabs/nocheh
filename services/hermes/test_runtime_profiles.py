@@ -156,11 +156,7 @@ class RuntimeProfileTests(unittest.TestCase):
     def test_launch_propagates_generation_and_logical_identity_without_credentials(self):
         from .browser_launch import launch
         entry = self.create()
-        with patch.dict(os.environ, {'HERMES_LAZY_INSTALL_TARGET': '/tmp/synthetic-target'}):
-            argv, cwd, env = launch(self.app, profile='research')
-        # A feature missing from the image fails clearly instead of installing itself into the profile (ADR-0251).
-        self.assertEqual(env['HERMES_DISABLE_LAZY_INSTALLS'], '1')
-        self.assertNotIn('HERMES_LAZY_INSTALL_TARGET', env)
+        argv, cwd, env = launch(self.app, profile='research')
         self.assertEqual(env['NOCHEH_STORAGE_LAYOUT'], 'original-only-v1')
         self.assertEqual(env['NOCHEH_BROWSER_LOGICAL_PROFILE'], entry['logical_profile'])
         self.assertEqual(env['NOCHEH_BROWSER_PROFILE'], entry['native_profile'])

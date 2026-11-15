@@ -36,7 +36,9 @@ class ServiceCatalogTests(unittest.TestCase):
         hermes=compose['hermes']
         self.assertEqual((hermes['read_only'],hermes['tmpfs'],hermes['cap_drop'],hermes['security_opt']),
                          (True,['/tmp:size=1g,mode=1777'],['ALL'],['no-new-privileges:true']))
-        self.assertEqual((hermes['environment']['HOME'],hermes['environment']['HERMES_DISABLE_LAZY_INSTALLS']),('/tmp/home','1'))
+        # On-first-use installs stay on: they go to Hermes's own mounted folder, not the read-only image.
+        self.assertEqual(hermes['environment']['HOME'],'/tmp/home')
+        self.assertNotIn('HERMES_DISABLE_LAZY_INSTALLS',hermes['environment'])
         state='${NOCHEH_STATE_DIR:-./data/local}'
         self.assertEqual(hermes['volumes'],[state+'/admin/dashboard/home:/dashboard-state/home',
                                             state+'/hermes:/workspace/data/local/hermes',state+'/reports:/reports',

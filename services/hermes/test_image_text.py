@@ -120,7 +120,6 @@ class ImageTextTests(unittest.TestCase):
                 calls = usage.rows('2000-01-01', target)
             day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
             readers = provider_usage.reader_rows(state, day)
-        self.assertEqual(seen['HERMES_DISABLE_LAZY_INSTALLS'], '1')
         self.assertEqual(readers, [{'day': day, 'reader': 'image', 'done': 0, 'temp_full': 2, 'read_only': 0}])
         self.assertEqual([(row['part'], row['runs'], row['failed']) for row in calls], [('image', 1, 1)],
                          'only the provider’s failure is a model call')

@@ -765,7 +765,7 @@ class Scenarios:
         self.gate('no_new_privileges', any(option.startswith('no-new-privileges') and not option.endswith('false')
                                            for option in host.get('SecurityOpt') or []), options=host.get('SecurityOpt'))
         self.gate('memory_tmp', '/tmp' in (host.get('Tmpfs') or {}) or mounts.get('/tmp', {}).get('Type') == 'tmpfs', tmpfs=host.get('Tmpfs'))
-        self.gate('home_and_lazy_installs_off', environment.get('HOME') == '/tmp/home' and environment.get('HERMES_DISABLE_LAZY_INSTALLS') == '1',
+        self.gate('memory_home', environment.get('HOME') == '/tmp/home',
                   home=environment.get('HOME'))
         self.gate('only_the_folders_it_uses', {'/dashboard-state/home', '/data/spool/brain-turns'} <= set(mounts)
                   and not {'/dashboard-state', '/data/spool'} & set(mounts), mounts=sorted(mounts))

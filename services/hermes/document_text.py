@@ -51,7 +51,7 @@ def extract(body):
     try:
         with tempfile.TemporaryDirectory(prefix='nocheh-document-', ignore_cleanup_errors=True) as home:
             environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
-                           'HOME': home, 'TMPDIR': home, 'HERMES_DISABLE_LAZY_INSTALLS': '1'}
+                           'HOME': home, 'TMPDIR': home}
             try:
                 child = subprocess.run([sys.executable, '-m', 'services.hermes.document_text', json.dumps(hint)], input=data,
                                        capture_output=True, timeout=SECONDS, env=environment, preexec_fn=bounded, check=False)

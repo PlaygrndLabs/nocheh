@@ -63,7 +63,7 @@ def read_image(body):
                 'provider': 'custom', 'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}',
                 'api_mode': 'chat_completions'}}}))
             environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
-                           'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'], 'HERMES_DISABLE_LAZY_INSTALLS': '1',
+                           'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'],
                            **{name: os.environ[name] for name in ('HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy',
                                                                   'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE') if name in os.environ}}
             try:

@@ -628,9 +628,6 @@ services:
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       # Caches only; make dev keeps its mounted home instead (docker-compose.dev.yml).
       HOME: /tmp/home
-      # A feature missing from the image fails clearly instead of installing itself on first use;
-      # `hermes pm install` still installs one on request. The readers and browser chat pass it on.
-      HERMES_DISABLE_LAZY_INSTALLS: '1'
       NOCHEH_DASHBOARD_HOME: /dashboard-state/home
       NOCHEH_BROWSER_CHAT: '1'
       # Chat scopes for routing turns; polling and sending belong to nocheh-telegram.

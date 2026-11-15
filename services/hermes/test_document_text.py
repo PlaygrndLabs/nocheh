@@ -80,15 +80,11 @@ class DocumentTextTests(unittest.TestCase):
             seen.update(options['env'])
             Path(options['env']['TMPDIR'], 'left-by-the-converter').write_bytes(b'x' * 1024)
             raise subprocess.TimeoutExpired('reader', 1)
-        with patch.dict('os.environ', {'HERMES_LAZY_INSTALL_TARGET': '/tmp/synthetic-target'}), \
-                patch.object(document_text.subprocess, 'run', side_effect=run):
+        with patch.object(document_text.subprocess, 'run', side_effect=run):
             self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
         self.assertEqual(seen['HOME'], seen['TMPDIR'])
         self.assertTrue(seen['TMPDIR'].startswith(tempfile.gettempdir()) and Path(seen['TMPDIR']).name.startswith('nocheh-document-'))
         self.assertFalse(Path(seen['TMPDIR']).exists(), 'nothing of the read is left in /tmp')
-        # A feature missing from the image fails clearly instead of installing itself into the reader's folder.
-        self.assertEqual(seen['HERMES_DISABLE_LAZY_INSTALLS'], '1')
-        self.assertNotIn('HERMES_LAZY_INSTALL_TARGET', seen)
 
     def test_a_write_that_found_no_room_or_was_refused_is_counted_once_and_a_broken_file_is_not(self):
         full = OSError(errno.ENOSPC, 'No space left on device')
