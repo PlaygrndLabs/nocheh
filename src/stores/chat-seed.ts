@@ -307,7 +307,11 @@ async function details(db:Pick<pg.PoolClient,'query'>,chat:Planned) {
       chat.refreshed?.title??null,chat.refreshed?.username??null,chat.refreshed?.at??null]);
 }
 
-const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms).unref());
+/**
+ * A wait that does not hold the process open, unless `hold`. The app's start awaits its retries at top level, and a pool
+ * drops a client whose query failed, so between attempts the wait may be all that keeps Node running.
+ */
+const sleep=(ms:number,hold=false)=>new Promise<void>(resolve=>{const timer=setTimeout(resolve,ms);if(!hold)timer.unref();});
 const failure=(event:string,error:unknown)=>console.warn(JSON.stringify({event,code:(error as {code?:string})?.code??'unknown'}));
 
 /**
@@ -329,7 +333,7 @@ export async function startChatRecords(stores:{archive:pg.Pool;derived:pg.Pool;c
     } catch(error) {
       failure('chat_records_start_failed',error);
       if(attempt>=attempts)throw error;
-      await sleep(wait);
+      await sleep(wait,true);
     }
   }
   await startChatDirectory(stores.control,policy);

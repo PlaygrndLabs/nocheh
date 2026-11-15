@@ -157,6 +157,9 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   const connect=async(role:string,database:string,password:string)=>{
     const client=new pg.Client({host:'127.0.0.1',user:role,database,password:secret(password),
       application_name:'nocheh-workflow-retention',options:'-c statement_timeout=60000 -c client_connection_check_interval=1000'});
+    // A dropped session (PostgreSQL restarting after a crash) fails the run in progress; without a listener it would end
+    // this worker, and nothing starts it again until the database container restarts.
+    client.on('error',()=>{});
     await client.connect();return client;
   };
   const run=async(event:string,expire:(clients:pg.Client[])=>Promise<Record<string,number>>,...stores:[string,string,string][])=>{
