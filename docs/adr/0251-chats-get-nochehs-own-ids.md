@@ -18,8 +18,9 @@ rewritten. Amends
 [ADR-0168](0168-superseded-epoch-profiles-are-removed.md),
 [ADR-0151](0151-chat-role-and-skills-in-hermes-profiles.md),
 [ADR-0230](0230-portable-export-carries-owner-work.md),
-[ADR-0235](0235-nocheh-owns-the-telegram-bot.md) and
-[ADR-0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md)
+[ADR-0235](0235-nocheh-owns-the-telegram-bot.md),
+[ADR-0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md) and
+[ADR-0250](0250-cards-and-forwards-say-whose-words-they-are.md)
 (see Amendments). Keeps [ADR-0053](0053-original-only-archive.md): the archive
 holds originals only and is never rewritten or indexed by chat. Step 2b-2,
 "Only the owner adds Nocheh" (adoption, leave-and-tell, the Telegram "which
@@ -316,8 +317,14 @@ retired), gets its own record.
 
 - Conversations, people, topics and the Telegram refresh read `chats`,
   `chat_details`, `chat_accounts` and `chat_memberships`, not the archive or
-  the old Telegram tables. People who left a group are listed as left. A
-  refresh writes a name only where no captured update gave one, keeps its own
+  the old Telegram tables. `GET /v1/telegram/identities` gives each person a
+  group has recorded with their latest standing (`in` or `left`) and `seen`:
+  whether the group's own messages show them, as an author or named in a join
+  message, read from the archive under every Telegram id the group has had and
+  only for which kind of update each is. The dashboard's people list shows, as
+  before step 2b, the people a group's messages show and anyone a rule names;
+  someone whose only record is a member update, such as leaving, is not
+  listed. A refresh writes a name only where no captured update gave one, keeps its own
   answer apart in `chat_details`, never changes whether a chat is served, and,
   when Telegram reports a group migrated to an id that already names another
   chat, keeps the migrated notice and asks nothing more. A topic name the owner gives stays over the one Telegram
@@ -376,6 +383,11 @@ retired), gets its own record.
   chats are served, and where they are in Telegram now, from the app.
 - ADR-0244: the owner's private chat is `policy.owner_chat`, a directory row,
   apart from `owner_id`, the owner's account.
+- ADR-0250: a forwarded message's line says "You" only in the owner's private
+  chat as the directory knows it. A job card leaves out `💬 Asked in` when the
+  job was asked in that chat or the card goes to the chat it was asked in,
+  compared by Nocheh chat ids, and names the group and topic from the chat
+  directory, never from how an id is written.
 </amendments>
 
 <alternatives>
@@ -403,8 +415,7 @@ retired), gets its own record.
 - Small owner-visible changes:
   - Chats: a chat's header reads "Telegram ID -1001000000001" (with the
     earlier id after an upgrade) where it read "ID -1001000000001/topic/7";
-    an id the directory lacks is "Unknown chat"; the people list shows people
-    who left; a topic name the owner gave stays over Telegram's.
+    an id the directory lacks is "Unknown chat"; a topic name the owner gave stays over Telegram's.
   - The chat picker no longer offers "Use the ID …" for a typed id Nocheh has
     not seen, since a Telegram id is no longer a chat id; its placeholder and
     the chat list's say "name or Telegram ID", and its empty text says "No
@@ -474,6 +485,7 @@ retired), gets its own record.
   [seeding](../../test/store-chat-seed.test.ts),
   [directory](../../test/store-owner-supervision.test.ts),
   [refresh](../../test/store-telegram-chats.test.ts),
+  [people](../../test/telegram-directory.test.ts),
   [topics](../../test/store-telegram-topics.test.ts),
   [strangers](../../test/store-strangers.test.ts),
   [sends](../../test/store-chat-sends.test.ts),
@@ -490,6 +502,7 @@ retired), gets its own record.
   the front doors ([front door](../../test/telegram-frontdoor.test.ts),
   [pass checks](../../test/access.test.ts),
   [dispatch](../../test/store-telegram-dispatch.test.ts),
+  [dispatch and forwards on digest chats](../../test/store-telegram-dispatch-chats.test.ts),
   [destinations](../../test/store-telegram-actions.test.ts),
   [runtime profiles](../../test/store-runtime-profiles.test.ts),
   [bot](../../services/telegram/test_service.py),

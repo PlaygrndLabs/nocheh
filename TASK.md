@@ -97,6 +97,20 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   ([dispatch](test/store-telegram-dispatch-chats.test.ts)); an approved operation's follow-up
   names its chat, topic and app binding as a reply's turn does, so it answers again in the chat
   that asked ([continuations](test/store-action-continuations.test.ts)).
+- Merged with main's card and forward fixes
+  ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md)), on old-shaped and
+  digest chats: a forwarded message's line says "You" only in the owner's private chat as the
+  chat records know it, a forwarded owner command is refused there and in a topic of a new-id
+  group, a forward among the recent group messages keeps its line
+  ([dispatch](test/store-telegram-dispatch-chats.test.ts),
+  [button](test/store-private-button.test.ts), [digest button](test/store-private-button-chats.test.ts)),
+  and a job card in the owner's private chat names the group and topic it was asked in from the
+  chat records ([jobs](test/store-background-jobs.test.ts)). A group's people list again shows
+  the people its messages show, as main does, and not someone whose only record is leaving; the
+  owner's people route keeps each person's standing and says whether the group's messages show
+  them, under every Telegram id the group has had ([people](test/telegram-directory.test.ts),
+  [records](test/store-chat-records.test.ts), [directory](test/test_telegram_operations.py),
+  [pages](test/dashboard-pages.browser.mjs)).
 
   Checks on the integrated branch after the review fixes: the build; node unit and dashboard
   tests (538: 341 pass, 193 store tests skipped there, and the 4 workflow tests that also fail on
@@ -141,8 +155,8 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   - Live acceptance on the owner's install after merge, while Nocheh is idle (a turn in
     flight at deploy is refused once, then retried).
   Owner steps: small things you see change. Chats says "Telegram ID" (with the earlier one
-  after Telegram upgrades a group) and "Unknown chat" for a chat Nocheh has no record of; the
-  people list also shows people who left, marked as left; a topic name you gave stays even
+  after Telegram upgrades a group) and "Unknown chat" for a chat Nocheh has no record of; a
+  topic name you gave stays even
   after Telegram shows another, and removing yours brings Telegram's back; the chat picker no
   longer offers "Use the ID" for an id Nocheh has not seen, and searches say "name or Telegram
   ID"; a group's Topics card shows only for a forum or a group with topics already seen;
