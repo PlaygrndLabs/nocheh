@@ -45,6 +45,8 @@ starts without its login, and it reports healthy only while it asks for it. The 
 pgweb also runs in read-only mode with connection switching and SSH disabled.
 Its generated password lives in the ignored `.env` as `NOCHEH_VIEWER_PASSWORD`, and
 the web login's as `NOCHEH_VIEWER_WEB_PASSWORD`; neither is on a command line.
+Both are 64 lowercase hex characters: `db` and `up` refuse any other value and say
+so, and `db` makes a new one once you clear it.
 Hermes receives neither this credential nor this interface.
 
 Click a table to inspect rows/structure, or use Query:

@@ -74,6 +74,34 @@ class DatabaseViewerTests(unittest.TestCase):
                 self.assertEqual(database_viewer.refresh(state, ['docker', 'compose'], Path(folder)), 1)
             self.assertIn('./bin/nocheh db', printed.getvalue())
 
+    def test_up_reports_a_login_it_cannot_make_and_keeps_its_own_result(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); values = initialize(state)
+            values['NOCHEH_VIEWER_WEB_PASSWORD'] = 'my-own-words'; write_env(env_path(state), values)
+            calls = []
+            def call(arguments, **options): calls.append(arguments); return 0
+            def run(arguments, **options):
+                calls.append(arguments); return SimpleNamespace(returncode=0, stdout='0123abcd\n', stderr='')
+            environment = lambda s: {**load(s), 'NOCHEH_VIEWER_PORT': '8782'}
+            with patch.object(database_viewer.subprocess, 'call', side_effect=call), \
+                    patch.object(database_viewer.subprocess, 'run', side_effect=run), \
+                    patch.object(database_viewer, 'compose_environment', side_effect=environment), \
+                    contextlib.redirect_stdout(io.StringIO()) as printed:
+                self.assertEqual(database_viewer.refresh(state, ['docker', 'compose'], Path(folder)), 1)
+            self.assertIn('NOCHEH_VIEWER_WEB_PASSWORD must be 64 lowercase hex characters', printed.getvalue())
+            self.assertIn('./bin/nocheh db', printed.getvalue())
+            self.assertNotIn('my-own-words', printed.getvalue())
+            self.assertEqual(load(state)['NOCHEH_VIEWER_WEB_PASSWORD'], 'my-own-words', '.env is left as the owner wrote it')
+            self.assertFalse(any('up' in arguments for arguments in calls), 'the viewer is not restarted')
+            # A .env it can't save to is reported the same way.
+            values['NOCHEH_VIEWER_WEB_PASSWORD'] = ''; write_env(env_path(state), values)
+            with patch.object(database_viewer.subprocess, 'run', side_effect=run), \
+                    patch.object(database_viewer, 'compose_environment', side_effect=environment), \
+                    patch.object(database_viewer, 'write_env', side_effect=PermissionError('.env')), \
+                    contextlib.redirect_stdout(io.StringIO()) as printed:
+                self.assertEqual(database_viewer.refresh(state, ['docker', 'compose'], Path(folder)), 1)
+            self.assertIn('./bin/nocheh db', printed.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main()

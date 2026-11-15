@@ -82,8 +82,17 @@ def refresh(state, command, root):
         return 1
     if running.returncode or not running.stdout.strip():
         return 0
-    password, new = web_login(state)
-    env = compose_environment(state)
+    # A login it can't make or save is reported like the rest, so up keeps its own result.
+    try:
+        password, new = web_login(state)
+        env = compose_environment(state)
+    except ValueError as error:
+        print('The database viewer still runs without its login: ' + str(error) + ' in .env. '
+              'Clear it there and run ./bin/nocheh db to make one.')
+        return 1
+    except OSError:
+        print('Could not save the database viewer login. Run ./bin/nocheh db to give it its login.')
+        return 1
     result = subprocess.call(command + ['--profile', 'tools', 'up', '-d', '--wait', '--no-deps', 'pgweb-archive'],
                              cwd=root, env=env)
     if result:
