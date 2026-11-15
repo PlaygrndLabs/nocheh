@@ -111,6 +111,47 @@ class StorePostgresEntrypointTests(unittest.TestCase):
             # Each new build provisions once; an unchanged build does not repeat it.
             self.assertEqual(bootstraps(), ['/app/dist/src/stores/bootstrap.js', development, development])
 
+    def test_failed_development_provisioning_is_tried_again(self):
+        # A backup holds the maintenance lock, so provisioning a new build can fail once; its tables must still arrive.
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary); calls = directory / 'calls'; dist = directory / 'dev-dist'
+            dist.mkdir()
+
+            def executable(name, body):
+                path = directory / name
+                path.write_text('#!/bin/sh\n' + body + '\n')
+                path.chmod(0o700)
+
+            executable('docker-entrypoint.sh', 'trap \'exit 0\' TERM; while :; do sleep 0.1; done')
+            executable('pg_isready', 'exit 0')
+            # The development build's provisioning fails the first time it runs, then succeeds.
+            executable('node', 'echo "$1" >> "$CALLS"; case "$1" in "$DEV"*) '
+                               '[ -e "$CALLS.failed" ] && exit 0; touch "$CALLS.failed"; exit 1;; esac; exit 0')
+
+            def bootstraps():
+                return [line for line in (calls.read_text().split() if calls.exists() else []) if line.endswith('bootstrap.js')]
+
+            environment = {**os.environ, 'PATH': str(directory) + os.pathsep + os.environ['PATH'], 'CALLS': str(calls),
+                           'DEV': str(dist), 'POSTGRES_PASSWORD': 'synthetic', 'NOCHEH_DEV_DIST': str(dist)}
+            wrapper = subprocess.Popen(['/bin/sh', str(ENTRYPOINT), 'postgres'], env=environment,
+                                       stderr=subprocess.PIPE, text=True)
+            try:
+                for _ in range(50):
+                    if bootstraps(): break
+                    subprocess.run(['sleep', '0.1'])
+                (dist / '.dev-ready').write_text('1\n')
+                for _ in range(150):
+                    if len(bootstraps()) >= 3: break
+                    subprocess.run(['sleep', '0.1'])
+                subprocess.run(['sleep', '2.5'])
+                wrapper.terminate(); _, errors = wrapper.communicate(timeout=10)
+            finally:
+                if wrapper.poll() is None: wrapper.kill()
+            development = str(dist / 'src/stores/bootstrap.js')
+            # The failed run is tried again for the same build, and a success is not repeated.
+            self.assertEqual(bootstraps(), ['/app/dist/src/stores/bootstrap.js', development, development])
+            self.assertIn('{"event":"development_schema_update_failed","attempt":1}', errors)
+
     def test_restart_provisions_with_the_finished_development_build(self):
         # An older image's schema checks can refuse rows the current code wrote.
         with tempfile.TemporaryDirectory() as temporary:

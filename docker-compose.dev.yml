@@ -63,6 +63,8 @@ services:
       NOCHEH_DEV_HERMES_BASE: ${NOCHEH_DEV_HERMES_BASE:?}
       NOCHEH_DEV_HONCHO_IMAGE: ${NOCHEH_DEV_HONCHO_IMAGE:?}
     entrypoint: [python3, -m, tools.development.dev_reload]
+    # The dashboard keeps node --watch: a restart signals only management.js, which waits for its running jobs (a
+    # backup or Apply restarting the app); restarting its process group would end those jobs.
     command: [--watch, /app/tools, --watch, /app/services/honcho, --, python3, -m, tools.runtime.container_service, dashboard]
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:?}:/dev-source:ro
@@ -82,7 +84,8 @@ services:
         LOCAL_GID: ${NOCHEH_GID:-1000}
     restart: unless-stopped
     entrypoint: [python3, -m, tools.development.dev_reload]
-    command: [--watch, /app/tools, --watch, /app/dist, --, python3, -m, tools.runtime.container_service, executor]
+    # The workflow host restarts once per finished build (dist/.dev-ready), not on each file the build writes.
+    command: [--watch, /app/tools, --watch, /app/dist/.dev-ready, --, python3, -m, tools.runtime.container_service, executor]
     volumes:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/app/tools:ro
       - dev_dist:/app/dist:ro
@@ -107,9 +110,11 @@ services:
       context: ${NOCHEH_DEV_SOURCE_ROOT:?}
     image: ${NOCHEH_DEV_PROJECT:?}:security
     restart: unless-stopped
-    command: [node, --watch, dist/src/security/main.js]
+    # Restarts after each finished build and after any exit of its own (node --watch waited for a file change).
+    command: [node, tools/development/dev-node-run.mjs, dist/src/security/main.js]
     volumes:
       - dev_dist:/app/dist:ro
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools/development:/app/tools/development:ro
     depends_on:
       nocheh-app: {condition: service_healthy}
 
@@ -118,10 +123,11 @@ services:
     image: ${NOCHEH_DEV_PROJECT:?}:security
     build: !reset null
     restart: unless-stopped
-    command: [node, --watch, dist/src/mini-app.js]
+    command: [node, tools/development/dev-node-run.mjs, dist/src/mini-app.js]
     volumes:
       - dev_dist:/app/dist:ro
       - dev_web_dist:/app/dashboard/dist:ro
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools/development:/app/tools/development:ro
   nocheh-tunnel:
     restart: unless-stopped
 

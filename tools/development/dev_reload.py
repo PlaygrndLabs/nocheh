@@ -11,10 +11,14 @@ SUFFIXES = {'.py', '.js', '.mjs', '.json', '.css', '.html'}
 
 
 def snapshot(paths):
+    """Watched files by size and time. A file named as a root is always watched, whatever its suffix (a build's
+    ready marker). Inside a watched folder, generated folders are skipped, judged below that folder only, so a folder
+    that is itself under dist/ can be watched."""
     result = []
     for root in paths:
         for path in root.rglob('*') if root.is_dir() else (root,):
-            if path.suffix not in SUFFIXES or {'node_modules', 'dist', '__pycache__'} & set(path.parts):
+            if path != root and (path.suffix not in SUFFIXES
+                                 or {'node_modules', 'dist', '__pycache__'} & set(path.relative_to(root).parts)):
                 continue
             try:
                 if path.is_file():

@@ -1,12 +1,14 @@
-// Run the app and rebuild generated assets inside its existing Compose service.
+// Run the app and rebuild generated assets inside its existing Compose service. The app starts after the first
+// finished build, restarts after each later one, and starts again if it exits on its own (dev-node-run.mjs).
 import {readdir, stat, writeFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
+import {DevProcess} from './dev-node-run.mjs';
 
 const inputs = ['src', 'test', 'dashboard', 'tools/build/build.mjs',
   'tools/build/build-dashboard.mjs', 'tsconfig.json', 'tsconfig.dashboard.json'];
 const excluded = new Set(['dist', '__pycache__', 'node_modules']);
 let stopping = false;
-let app;
+const app = new DevProcess(['dist/src/main.js'], {name: 'Development app'});
 
 async function snapshot() {
   const files = [];
@@ -37,7 +39,7 @@ function build() {
 
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   stopping = true;
-  app?.kill(signal);
+  void app.stop();
 });
 let previous = '';
 while (!stopping) {
@@ -50,15 +52,8 @@ while (!stopping) {
         await writeFile('dashboard/dist/.dev-revision', revision);
         await writeFile('dist/.dev-ready', revision);
         console.log(`Development assets ready: ${revision.trim()}`);
-        if (!app) {
-          app = spawn('node', ['--watch', 'dist/src/main.js'], {stdio: 'inherit'});
-          app.on('error', error => { console.error(error); app = undefined; });
-          app.on('exit', (code, signal) => {
-            if (!stopping) console.error(`Development app exited (${signal || code}); waiting for a source change.`);
-            app = undefined;
-          });
-        }
-      } else console.error('Development build failed; waiting for a source fix.');
+        await app.restart();
+      } else console.error('Development build failed; the app keeps running the last finished build.');
     }
   } catch (error) { console.error('Development source scan failed:', error); }
   await new Promise(resolve => setTimeout(resolve, 750));

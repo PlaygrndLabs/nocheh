@@ -3,7 +3,7 @@ import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {secret} from '../config.js';
-import {initializeStoreDatabases} from './connections.js';
+import {initializeStoreDatabases,pgCode} from './connections.js';
 import {storageConfiguration} from './config.js';
 import {bootstrapWorkflowDatabase} from '../workflows/bootstrap.js';
 
@@ -31,7 +31,12 @@ export async function bootstrapStores(resetId?:string) {
   }
   finally{await client.end();}
 }
+/** Why setup failed, without values: a SQLSTATE, or one of setup's own error names such as store_maintenance_busy. */
+export function setupFailureCode(error:unknown):string {
+  const message=error instanceof Error?error.message:'';
+  return pgCode(error)??(/^[a-z_]{1,64}$/.test(message)?message:'unknown');
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   try {await bootstrapStores();console.log(JSON.stringify({event:'store_databases_ready',layout:'original-only-v1'}));}
-  catch {console.error(JSON.stringify({event:'store_database_setup_failed'}));process.exitCode=1;}
+  catch(error) {console.error(JSON.stringify({event:'store_database_setup_failed',code:setupFailureCode(error)}));process.exitCode=1;}
 }

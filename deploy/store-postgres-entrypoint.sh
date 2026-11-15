@@ -49,14 +49,28 @@ touch "$ready"
 # Development mounts the app's generated code at NOCHEH_DEV_DIST. Each finished
 # source build can add tables, so store provisioning runs again with that code
 # rather than leaving it to fail against the old schema until an image rebuild.
+# A build counts as applied only once provisioning succeeds: a failed run (a
+# backup holding the maintenance lock, a lock conflict) is tried again, waiting
+# a little longer each time, up to 30 s.
 if [ -n "${NOCHEH_DEV_DIST:-}" ] && [ ! -e /data/spool/.restore-inactive ]; then
   (
+    pending=
+    failures=0
     while :; do
       current=$(cat "$NOCHEH_DEV_DIST/.dev-ready" 2>/dev/null || true)
       if [ -n "$current" ] && [ "$current" != "$applied" ]; then
-        applied=$current
-        PGHOST=127.0.0.1 PGUSER=nocheh PGDATABASE=nocheh PGPASSWORD="$POSTGRES_PASSWORD" \
-          node "$NOCHEH_DEV_DIST/src/stores/bootstrap.js" || echo '{"event":"development_schema_update_failed"}' >&2
+        if [ "$current" != "$pending" ]; then pending=$current; failures=0; fi
+        if PGHOST=127.0.0.1 PGUSER=nocheh PGDATABASE=nocheh PGPASSWORD="$POSTGRES_PASSWORD" \
+          node "$NOCHEH_DEV_DIST/src/stores/bootstrap.js"; then
+          applied=$current
+          failures=0
+        else
+          failures=$((failures + 1))
+          echo "{\"event\":\"development_schema_update_failed\",\"attempt\":$failures}" >&2
+          delay=$((failures * 2))
+          if [ "$delay" -gt 30 ]; then delay=30; fi
+          sleep "$delay"
+        fi
       fi
       sleep 2
     done
