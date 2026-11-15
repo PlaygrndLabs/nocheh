@@ -318,6 +318,46 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual([p for p in problems.problems({**monitoring(), 'github': connected}, [], TODAY) if p['kind'] == 'github'], [],
                          'a connected app gives no notice: its key never expires')
 
+    def test_each_backup_that_does_not_finish_is_news_and_a_finished_one_marks_it_fixed(self):
+        backups = lambda **counts: {**monitoring(), 'backups': {'failed': 0, 'reason': None, 'unreadable': 0, 'skipped_days': 0,
+                                                                  'offsite_failed': 0, 'offsite_reason': None, 'offsite_skipped': 0, **counts}}
+        self.check(NOW, backups())
+        self.check(NOW + 120, backups(failed=1, reason='backup_unsupported_link'))
+        self.assertEqual(self.sent[-1]['problems'],
+                         ['The last backup didn’t finish (a file link outside a command workspace). Older backups are kept.'])
+        self.check(NOW + 240, backups(failed=1, reason='backup_unsupported_link'))
+        self.assertEqual(len(self.sent), 1, 'one notice for one backup')
+        # The next day's backup fails too: news again.
+        self.check(NOW + 86400, backups(failed=2, reason='backup_unsupported_link'))
+        self.assertEqual(self.sent[-1]['problems'],
+                         ['Backups stopped: the last 2 didn’t finish (a file link outside a command workspace). Older backups are kept.'])
+        # Backups that could not be read leave the line open.
+        self.check(NOW + 86520, {**monitoring(), 'backups': {'unavailable': True}})
+        self.assertEqual(self.edits, [])
+        self.check(NOW + 86640, backups())
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Fixed at 12:04 UTC']))
+
+    def test_backup_and_off_site_lines_never_name_a_file(self):
+        found = problems.problems({**monitoring(), 'backups': {'failed': 3, 'reason': 'backup_disk_full', 'unreadable': 2, 'skipped_days': 2,
+                                                               'offsite_failed': 1, 'offsite_reason': 'offsite_low_disk', 'offsite_skipped': 1,
+                                                               'path': 'hermes/private-name'}}, [], TODAY)
+        lines = [problems.text(problem, problem['count']) for problem in found if problem['kind'].startswith(('backup', 'offsite'))]
+        self.assertEqual(lines, [
+            'Backups stopped: the last 3 didn’t finish (the disk filled up). Older backups are kept.',
+            'The newest backup left out 2 files or folders that a command made unreadable in its workspace. See System › Backups.',
+            'Automatic backups were skipped 2 days in a row: not enough free disk space.',
+            'The off-site copy of the newest backup failed (not enough free disk space).',
+            'The off-site copy of the newest backup was skipped: not enough free disk space.'])
+        self.assertNotIn('private-name', ''.join(lines))
+        one = problems.problems({**monitoring(), 'backups': {'failed': 1, 'reason': 'something_new', 'skipped_days': 1, 'offsite_failed': 2,
+                                                             'offsite_reason': 'offsite_storage_AccessDenied', 'offsite_skipped': 3}}, [], TODAY)
+        self.assertEqual([problems.text(problem, problem['count']) for problem in one if problem['kind'].startswith(('backup', 'offsite'))], [
+            'The last backup didn’t finish (see System › Backups). Older backups are kept.',
+            'Today’s automatic backup was skipped: not enough free disk space.',
+            'The last 2 off-site copies failed (see System › Backups).',
+            'The off-site copies of the last 3 backups were skipped: not enough free disk space.'])
+
+
     def test_failed_sends_to_chat_apps_repeat_at_most_once_an_hour_only_when_worse_and_clear_at_zero(self):
         self.check(NOW, sending(reaction=1))
         self.assertEqual(self.sent[-1]['problems'], ['1 send to a chat app failed in the last day.'])

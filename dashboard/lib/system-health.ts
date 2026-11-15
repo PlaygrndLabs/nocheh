@@ -1,7 +1,15 @@
 /** Pure reading of `GET /monitoring`: work counts and the list of things that need a look. */
 import type {Tone} from '../ui/core';
 import {href} from './routes';
-import {count, routeName, sendKinds, serviceName, telegramReason, telegramStates} from './system-format';
+import {
+  count,
+  operationError,
+  routeName,
+  sendKinds,
+  serviceName,
+  telegramReason,
+  telegramStates,
+} from './system-format';
 
 export type WorkCounts = {
   available: boolean;
@@ -108,6 +116,53 @@ const readerWords: Record<string, [string, string, string]> = {
   image: ['image', 'images', 'read'],
   voice: ['recording', 'recordings', 'transcribed'],
 };
+
+/** Backups and off-site copies that didn't happen, from monitoring's counts; each opens System › Backups,
+ * where the Telegram notice's Open button leads too (ADR-0251). */
+export function backupIssues(m: any): Issue[] {
+  const b = m?.backups;
+  if (!b || b.unavailable) return [];
+  const n = (value: unknown) => (typeof value === 'number' && value > 0 ? value : 0);
+  const link = href('system', {view: 'backups'});
+  const list: Issue[] = [];
+  const add = (tone: Tone, text: string, detail: string) => list.push({tone, text, detail, link, action: 'Backups'});
+  const failed = n(b.failed);
+  if (failed)
+    add(
+      'bad',
+      failed === 1 ? 'The last backup didn’t finish' : `The last ${failed} backups didn’t finish`,
+      `${operationError(b.reason ?? 'backup_failed')} Older backups are kept.`,
+    );
+  const unreadable = n(b.unreadable);
+  if (unreadable)
+    add(
+      'warn',
+      `The newest backup left out ${unreadable} ${unreadable === 1 ? 'file or folder' : 'files or folders'}`,
+      'A command made them unreadable in its workspace.',
+    );
+  const skipped = n(b.skipped_days);
+  if (skipped)
+    add(
+      'warn',
+      skipped === 1 ? 'The automatic backup was skipped' : `Automatic backups were skipped ${skipped} days in a row`,
+      'Not enough free disk space.',
+    );
+  const offsite = n(b.offsite_failed);
+  if (offsite)
+    add(
+      'bad',
+      offsite === 1 ? 'The off-site copy failed' : `The last ${offsite} off-site copies failed`,
+      operationError(b.offsite_reason ?? 'offsite_failed'),
+    );
+  const left = n(b.offsite_skipped);
+  if (left)
+    add(
+      'warn',
+      left === 1 ? 'The off-site copy was skipped' : `Off-site copies of ${left} backups were skipped`,
+      'Not enough free disk space.',
+    );
+  return list;
+}
 
 export function issues(m: any): Issue[] {
   if (!m) return [];
@@ -221,5 +276,6 @@ export function issues(m: any): Issue[] {
     });
   const sends = sendIssue(m);
   if (sends) list.push(sends);
+  list.push(...backupIssues(m));
   return list;
 }

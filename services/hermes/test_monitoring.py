@@ -72,6 +72,20 @@ class MonitoringTests(unittest.TestCase):
             secret_file.path(state,'github').unlink()
             self.assertEqual(monitoring.github_flags(state),{'connected':False,'reconnect':False})
 
+    def test_backups_reach_health_as_counts_and_codes_without_names(self):
+        from tools.operations.installation import backup_schedule
+        from tools.operations.installation.configuration import DEFAULTS
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)
+            backup_schedule.record_backup(state,'running')
+            backup_schedule.record_backup(state,'failed',error='backup_unsupported_link',path='hermes/private-name')
+            with patch.object(monitoring,'load',return_value=dict(DEFAULTS)),patch.object(monitoring,'compose',return_value=(['docker'],{})),\
+                 patch.object(monitoring.subprocess,'check_output',return_value=''),patch.object(monitoring.API,'call',side_effect=ConnectionError('down')):
+                result=monitoring.status(state)
+        self.assertEqual((result['backups']['failed'],result['backups']['reason']),(1,'backup_unsupported_link'))
+        self.assertNotIn('private-name',json.dumps(result))
+
+
     def test_partial_outage_retains_model_routes_and_safe_telegram_incident(self):
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);(state/'telegram').mkdir();(state/'hermes').mkdir()

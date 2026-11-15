@@ -53,6 +53,12 @@ try:
     (profile/'MEMORY.md').write_text('Synthetic native notes\r\n');(profile/'USER.md').write_text('Synthetic user notes\n')
     with sqlite3.connect(profile/'state.db') as db:
         db.execute('PRAGMA journal_mode=WAL');db.execute('CREATE TABLE fixture_sessions(id TEXT, text TEXT)');db.execute("INSERT INTO fixture_sessions VALUES('session','Exact native session')")
+    # What an approved command may leave in its workspace: a link out of the state and a FIFO never stop
+    # the backup, and the restore keeps the link without writing through it (ADR-0251).
+    workspace=profile/'workspace';(workspace/'project').mkdir(parents=True)
+    (workspace/'project/notes.txt').write_text('Synthetic workspace upload\n')
+    outside=directory/'outside';outside.mkdir();os.chmod(outside,0o755)
+    (workspace/'outside').symlink_to(outside);(workspace/'current').symlink_to('project');os.mkfifo(workspace/'pipe')
     (source/'spool/pending-fixture.json').write_text('{"synthetic":"pending original"}\n')
     (source/'provider/auth/fixture.json').write_text('{"synthetic":"inactive login"}\n')
     snapshot=directory/'snapshot'
@@ -98,6 +104,9 @@ with urllib.request.urlopen(request,timeout=120) as response:print(response.read
         if not args.management_image:operations.backup(source,snapshot,leave_stopped=True)
         manifest=operations.validate_snapshot(snapshot)
         assert manifest['version']==6 and manifest.get('workflows') and manifest.get('honcho')
+        listed='hermes/profiles/fixture/workspace/'
+        assert manifest['links']=={listed+'outside':str(outside),listed+'current':'project'},manifest['links']
+        assert manifest['skipped_special_files']==[listed+'pipe'],manifest['skipped_special_files']
         assert set(manifest['stores']['databases'])=={'archive','derived','control'}
         # Track the absent, exact target volumes before restore so a later
         # verification failure still cleans up only this fixture's resources.
@@ -113,6 +122,10 @@ with urllib.request.urlopen(request,timeout=120) as response:print(response.read
     assert query(target,'nocheh-db','nocheh_derived',"SELECT count(*) FROM guard_revisions WHERE author='owner'")=='1'
     assert (target/'hermes/profiles/fixture/MEMORY.md').read_bytes()==(profile/'MEMORY.md').read_bytes()
     assert (target/'hermes/profiles/fixture/state.db').read_bytes()==(profile/'state.db').read_bytes()
+    restored_workspace=target/'hermes/profiles/fixture/workspace'
+    assert os.readlink(restored_workspace/'outside')==str(outside) and os.readlink(restored_workspace/'current')=='project'
+    assert (restored_workspace/'project/notes.txt').read_text()=='Synthetic workspace upload\n'
+    assert not os.path.lexists(restored_workspace/'pipe') and list(outside.iterdir())==[] and (outside.stat().st_mode&0o777)==0o755
     for path in (source/'files').rglob('*'):
         if path.is_file():assert (target/path.relative_to(source)).read_bytes()==path.read_bytes()
     assert (target/'provider/auth.restore-pending/fixture.json').is_file()
@@ -125,7 +138,7 @@ with urllib.request.urlopen(request,timeout=120) as response:print(response.read
     report={'passed':True,'format':6,'source_project':projects[source],'restore_project':projects[target],
         'databases':{s:len(d['tables']) for s,d in manifest['stores']['databases'].items()},'native_memory_tables':len(manifest['honcho']['tables']),
         'workflow_tables':len(manifest['workflows']['tables']),'state_files':len(manifest['files']),'guarded_owner_edits_preserved':True,
-        'original_files_exact':True,'native_sessions_and_notes_exact':True,'workflow_redis_recovered':True,'spending_ledger_preserved':True,
+        'original_files_exact':True,'native_sessions_and_notes_exact':True,'workspace_links_kept':True,'workflow_redis_recovered':True,'spending_ledger_preserved':True,
         'runtime_roles_no_login':True,'provider_logins_inactive':True,'only_restored_database_running':True,
         'dashboard_started':bool(args.management_image),'coordinator_survived':bool(args.management_image),'writers_resumed':bool(args.management_image),
         'provider_calls':0,'live_state_changed':False}
