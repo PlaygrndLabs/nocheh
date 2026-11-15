@@ -102,6 +102,13 @@ export function sendIssue(m: any): (Issue & {link: string; action: string}) | nu
   };
 }
 
+/** One file, more files, and what reading one is, for each of Hermes's readers. */
+const readerWords: Record<string, [string, string, string]> = {
+  document: ['file', 'files', 'read'],
+  image: ['image', 'images', 'read'],
+  voice: ['recording', 'recordings', 'transcribed'],
+};
+
 export function issues(m: any): Issue[] {
   if (!m) return [];
   const list: Issue[] = [];
@@ -187,6 +194,22 @@ export function issues(m: any): Issue[] {
       detail: `Model ${row.model}.${row.refused || row.hidden ? ' If it keeps refusing, choose another model for this part.' : ''}`,
       link: href('usage', {days: '1'}),
       action: 'Usage',
+    });
+  }
+  // Files Hermes's readers couldn't read today because a write failed in its locked-down container (ADR-0251).
+  const readers: any[] = Array.isArray(m.reader_problems) ? m.reader_problems : [];
+  for (const row of readers) {
+    const [one, many, verb] = readerWords[row.reader] ?? ['file', 'files', 'read'];
+    list.push({
+      tone: 'warn',
+      text: `${row.label}: ${row.failed} ${row.failed === 1 ? one : many} couldn’t be ${verb} today`,
+      detail:
+        (row.failure === 'temp_full'
+          ? 'Hermes’s temporary space was full. Restarting Hermes empties it.'
+          : 'Hermes’s locked-down container refused a file write.') +
+        ` The originals are kept: Make a new version on a message’s page ${verb === 'read' ? 'reads' : 'transcribes'} one again.`,
+      link: href('messages'),
+      action: 'Messages',
     });
   }
   const spool = m.archive?.archive?.spool_failures;

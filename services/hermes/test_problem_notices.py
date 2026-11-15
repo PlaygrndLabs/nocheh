@@ -28,6 +28,12 @@ def sending(**kinds):
                                         'chat_sends': {'window_hours': 24, 'problems': sum(kinds.values()), 'problem_kinds': kinds}}}
 
 
+def reading(failed, ok=0, reader='document', failure='temp_full', day=TODAY):
+    """Monitoring's rows of files a Hermes reader could not read because a write failed, as reader_problems gives them."""
+    rows = [{'day': day, 'reader': reader, 'label': problems.READERS[reader][0], 'failure': failure, 'failed': failed, 'ok': ok}]
+    return {**monitoring(), 'reader_problems': rows if failed else []}
+
+
 def refusals(failed, refused, hidden=0):
     return [{'day': TODAY, 'part': 'guard', 'label': 'Secret check', 'provider': 'anthropic', 'model': 'synthetic-model',
              'failed': failed, 'refused': refused, 'hidden': hidden}]
@@ -350,6 +356,51 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual(self.edits, [], 'a summary that could not be read clears nothing')
         self.check(NOW + 3820, sending(reply=2))
         self.assertEqual(len(self.sent), 1, 'the same failed sends, after checks that could not read them')
+
+    def test_files_a_reader_could_not_write_repeat_hourly_only_when_more_and_clear_once_one_is_read(self):
+        self.check(NOW, reading(1))
+        line = ('Documents: 1 file couldn’t be read today because Hermes’s temporary space was full. Restarting Hermes empties it. '
+                'The originals are kept: Make a new version on a message’s page reads one again.')
+        self.assertEqual(self.sent[-1]['problems'], [line])
+        self.check(NOW + 600, reading(3))
+        self.assertEqual(len(self.sent), 1, 'more, but within the quiet hour')
+        self.check(NOW + 3700, reading(3))
+        self.assertEqual(self.sent[-1]['problems'], [line.replace('1 file', '3 files')])
+        self.check(NOW + 7400, reading(3))
+        self.assertEqual(len(self.sent), 2, 'no more, so not repeated')
+        self.check(NOW + 7520, reading(3, ok=1))
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Working again since 14:05 UTC']))
+        # A refusal by the locked-down container, and a voice note, say so.
+        found = problems.problems(reading(2, reader='voice', failure='read_only'), [], TODAY)
+        self.assertEqual([problems.text(problem, 2) for problem in found if problem['kind'] == 'reader'], [
+            'Voice notes: 2 recordings couldn’t be transcribed today because Hermes’s locked-down container refused a file write. '
+            'The originals are kept: Make a new version on a message’s page transcribes one again.'])
+
+    def test_a_reader_line_is_only_todays_and_a_new_day_starts_its_own(self):
+        self.assertEqual([p for p in problems.problems(reading(2, day='2026-10-27'), [], TODAY) if p['kind'] == 'reader'], [],
+                         'yesterday’s files are not today’s')
+        self.assertEqual([p for p in problems.problems(reading(2, failure='synthetic'), [], TODAY) if p['kind'] == 'reader'], [],
+                         'a failure Nocheh has no words for is no line')
+        self.check(NOW, reading(2))
+        tomorrow, day = NOW + 86400, '2026-10-29'
+        self.check(tomorrow, reading(1, day=day))
+        self.assertEqual(self.check(tomorrow + 120, reading(1, day=day))['state'], 'nothing_new')
+        self.assertEqual(self.sent[-1]['problems'], [
+            'Documents: 1 file couldn’t be read today because Hermes’s temporary space was full. Restarting Hermes empties it. '
+            'The originals are kept: Make a new version on a message’s page reads one again.'], 'counted from zero again')
+        self.assertEqual(self.edits, [], 'like a model’s calls, yesterday’s line stays as it was')
+        self.check(tomorrow + 240, reading(1, ok=1, day=day))
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Working again since 12:04 UTC']))
+
+    def test_one_file_a_reader_could_not_write_is_one_line_and_not_a_model_call(self):
+        self.check(NOW, reading(1, reader='image'), usage=[])
+        self.assertEqual(self.sent[-1]['problems'], [
+            'Images: 1 image couldn’t be read today because Hermes’s temporary space was full. Restarting Hermes empties it. '
+            'The originals are kept: Make a new version on a message’s page reads one again.'])
+        self.assertNotIn('readers', problems.readable({**monitoring(), 'reader_problems': {'unavailable': True}}))
+        self.check(NOW + 120, {**monitoring(), 'reader_problems': {'unavailable': True}})
+        self.check(NOW + 3800, reading(1, reader='image'))
+        self.assertEqual((len(self.sent), self.edits), (1, []), 'counts that could not be read clear nothing and are not news again')
 
 
 if __name__ == '__main__':

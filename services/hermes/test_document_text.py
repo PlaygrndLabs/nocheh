@@ -1,12 +1,18 @@
 """Documents read by Hermes's own reader for Nocheh's preparation step."""
 import base64
+import errno
+import json
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
-from services.hermes import document_text
+from services.hermes import document_text, usage
+from tools.operations.provider import usage as provider_usage
 
 
 class ExtractionError(Exception):
@@ -64,6 +70,68 @@ class DocumentTextTests(unittest.TestCase):
         with patch.object(document_text, 'LIMIT', 3), patch.object(document_text.subprocess, 'run') as run:
             self.assertEqual(document_text.extract(body), {'state': 'too_large'})
             run.assert_not_called()
+
+    def test_each_read_has_its_own_temporary_folder_removed_after_it_even_after_a_timeout(self):
+        # /tmp is memory in the locked-down container: a hung reader's files must not stay there.
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.pdf'}
+        seen = {}
+
+        def run(command, **options):
+            seen.update(options['env'])
+            Path(options['env']['TMPDIR'], 'left-by-the-converter').write_bytes(b'x' * 1024)
+            raise subprocess.TimeoutExpired('reader', 1)
+        with patch.dict('os.environ', {'HERMES_LAZY_INSTALL_TARGET': '/tmp/synthetic-target'}), \
+                patch.object(document_text.subprocess, 'run', side_effect=run):
+            self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
+        self.assertEqual(seen['HOME'], seen['TMPDIR'])
+        self.assertTrue(seen['TMPDIR'].startswith(tempfile.gettempdir()) and Path(seen['TMPDIR']).name.startswith('nocheh-document-'))
+        self.assertFalse(Path(seen['TMPDIR']).exists(), 'nothing of the read is left in /tmp')
+        # A feature missing from the image fails clearly instead of installing itself into the reader's folder.
+        self.assertEqual(seen['HERMES_DISABLE_LAZY_INSTALLS'], '1')
+        self.assertNotIn('HERMES_LAZY_INSTALL_TARGET', seen)
+
+    def test_a_write_that_found_no_room_or_was_refused_is_counted_once_and_a_broken_file_is_not(self):
+        full = OSError(errno.ENOSPC, 'No space left on device')
+        refused = OSError(errno.EROFS, 'Read-only file system')
+        chained = ExtractionError('OSError: no room')
+        chained.__cause__ = full
+        hint = {'name': 'a.docx', 'mime_type': ''}
+        with patch.dict(sys.modules, {'tools.read_extract': reader(error=chained)}):
+            self.assertEqual(document_text.answer(b'x', hint), {'state': 'unreadable', 'write_failure': 'temp_full'})
+        with patch.dict(sys.modules, {'tools.read_extract': reader(error=refused)}):
+            self.assertEqual(document_text.answer(b'x', hint), {'state': 'unreadable', 'write_failure': 'read_only'})
+        # Only the error's number counts: a file can choose an error's words.
+        with patch.dict(sys.modules, {'tools.read_extract': reader(error=ExtractionError('[Errno 28] No space left on device'))}):
+            self.assertEqual(document_text.answer(b'x', hint), {'state': 'unreadable'})
+        with patch.dict(sys.modules, {'tools.read_extract': reader(error=ValueError('synthetic bug'))}), \
+                self.assertRaises(ValueError):
+            document_text.answer(b'x', hint)
+
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.docx'}
+        child = lambda answer: subprocess.CompletedProcess([], 0, json.dumps(answer).encode(), b'')
+        with tempfile.TemporaryDirectory() as state:
+            target = Path(state) / 'hermes/usage/usage.sqlite'
+            target.parent.mkdir(parents=True)
+            with patch.object(usage, 'DATABASE', target):
+                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'unreadable', 'write_failure': 'temp_full'})):
+                    self.assertEqual(document_text.extract(body), {'state': 'unreadable'}, 'the file gets today’s status')
+                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'unreadable'})), \
+                        patch.object(usage, 'temp_full', return_value=False):
+                    self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
+                # A reader that failed while /tmp has no room for its file failed for want of room, whatever it said.
+                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'unreadable'})), \
+                        patch.object(usage, 'temp_full', return_value=True):
+                    document_text.extract(body)
+                # Its folder could not even be made.
+                with patch.object(document_text.tempfile, 'TemporaryDirectory', side_effect=full), \
+                        patch.object(document_text.subprocess, 'run') as run:
+                    self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
+                    run.assert_not_called()
+                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'done', 'text': 'Synthetic'})):
+                    document_text.extract(body)
+            day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            self.assertEqual(provider_usage.reader_rows(state, day),
+                             [{'day': day, 'reader': 'document', 'done': 1, 'temp_full': 3, 'read_only': 0}])
 
 
 if __name__ == '__main__':

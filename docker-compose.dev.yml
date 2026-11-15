@@ -129,6 +129,8 @@ services:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
     build: !reset null
     restart: unless-stopped
+    # The base service's lockdown (read-only root, memory /tmp) applies here too; only HOME stays the mounted
+    # state folder in place of /tmp/home.
     environment:
       HOME: /workspace/data/local/hermes
     entrypoint: [python, -m, tools.development.dev_reload]

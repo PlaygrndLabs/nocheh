@@ -1,3 +1,4 @@
+import errno
 import sqlite3
 import sys
 import tempfile
@@ -234,6 +235,52 @@ class UsageTests(unittest.TestCase):
             broken.mkdir()
             (broken / 'usage.sqlite').mkdir()
             usage.record('reply', {'calls': 1}, 'm', path=broken / 'usage.sqlite', now=DAY)
+
+    def test_files_a_reader_could_not_write_are_counted_apart_from_model_calls_and_an_older_file_gains_their_table(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'usage/usage.sqlite'
+            path.parent.mkdir()
+            old = sqlite3.connect(str(path))
+            old.execute(usage.SCHEMA)
+            old.commit()
+            old.close()
+            usage.reader_failed('image', 'temp_full', path=path, now=DAY - 401 * 86400)
+            for reader, failure in (('document', 'temp_full'), ('document', 'temp_full'), ('voice', 'read_only'),
+                                    ('document', 'unknown'), ('spreadsheet', 'temp_full')):
+                usage.reader_failed(reader, failure, path=path, now=DAY)
+            usage.reader_done('document', path=path, now=DAY)
+            usage.reader_done('voice', path=path, now=DAY)
+            found = sqlite3.connect(str(path))
+            rows = found.execute('SELECT day,reader,done,temp_full,read_only FROM reader_daily ORDER BY reader').fetchall()
+            found.close()
+            self.assertEqual(rows, [('2026-10-13', 'document', 1, 2, 0), ('2026-10-13', 'voice', 1, 0, 1)],
+                             'an unknown reader or failure is not counted, and old days are dropped')
+            self.assertEqual(usage.rows('2000-01-01', path), [], 'a file a reader could not write is no model call')
+            # Outside a Hermes installation nothing is written, and a broken database is skipped quietly.
+            usage.reader_failed('document', 'temp_full', path=Path(root) / 'missing/usage/usage.sqlite', now=DAY)
+            self.assertFalse((Path(root) / 'missing').exists())
+            (Path(root) / 'broken').mkdir()
+            (Path(root) / 'broken/usage.sqlite').mkdir()
+            usage.reader_done('document', path=Path(root) / 'broken/usage.sqlite', now=DAY)
+
+    def test_a_write_failure_is_known_by_its_error_number_never_by_its_words(self):
+        full = OSError(errno.ENOSPC, 'No space left on device')
+        raised = RuntimeError('the reader failed')
+        raised.__cause__ = full
+        during = ValueError('the reader failed')
+        during.__context__ = OSError(errno.EROFS, 'Read-only file system')
+        looped = RuntimeError('the reader failed')
+        looped.__context__ = looped
+        self.assertEqual([usage.write_failure(error) for error in (full, raised, during, OSError(errno.EDQUOT, 'quota'))],
+                         ['temp_full', 'temp_full', 'read_only', 'temp_full'])
+        for error in (RuntimeError('[Errno 28] No space left on device'), OSError(errno.ENOENT, 'Read-only file system'), looped):
+            self.assertIsNone(usage.write_failure(error), repr(error))
+        room = types.SimpleNamespace(f_bavail=10, f_frsize=1024 * 1024)
+        with patch.object(usage.os, 'statvfs', return_value=room):
+            self.assertFalse(usage.temp_full('/synthetic', 1024 * 1024), '10 MiB free is room for 1 MiB and the margin')
+            self.assertTrue(usage.temp_full('/synthetic', 3 * 1024 * 1024))
+        with patch.object(usage.os, 'statvfs', side_effect=OSError(errno.ENOENT, 'gone')):
+            self.assertFalse(usage.temp_full('/synthetic'), 'a folder that cannot be checked is not taken as full')
 
     def test_record_takes_the_part_provider_from_the_settings_route(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(

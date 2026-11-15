@@ -165,6 +165,35 @@ class ResetAcceptanceTests(unittest.TestCase):
         self.assertEqual(fake.start_calls.count('nocheh-db'), 0)
         self.assertEqual(fake.start_calls.count('nocheh-app'), 2)
 
+    def test_hermes_folders_are_made_after_the_empty_baseline_and_before_its_container(self):
+        import stat
+        fake = FakeDocker(self.root, self.project); seen = []
+
+        def runner(arguments, environment):
+            if 'create' in arguments:
+                seen.append({name: stat.S_IMODE((self.state / name).stat().st_mode) if (self.state / name).is_dir() else None
+                             for name in reset_acceptance.HERMES_FOLDERS})
+            return fake(arguments, environment)
+
+        def verify(*_arguments, **_options):
+            # The baseline wants a spool with only its fence: the folder comes after it.
+            self.assertFalse((self.state / 'spool/brain-turns').exists())
+            return {'phase': 'empty_baseline'}
+        with reset_protocol.locked(self.state) as journal:
+            initialization = self.ready(journal)
+            (self.state / 'admin/dashboard').mkdir(parents=True)
+            (self.state / 'admin/dashboard/home').symlink_to(self.root)
+            with patch.object(reset_acceptance.reset_baseline, 'verify', side_effect=verify), \
+                 patch.object(reset_acceptance.reset_initialization, 'assert_initialized', return_value=initialization):
+                with self.assertRaisesRegex(ValueError, 'path_denied'):
+                    reset_acceptance.activate(journal, self.preflight, runner=runner,
+                        environment=self.environment, command=self.command, timeout=0)
+                self.assertEqual(seen, [], 'nothing is created over a linked folder')
+                (self.state / 'admin/dashboard/home').unlink()
+                reset_acceptance.activate(journal, self.preflight, runner=runner,
+                    environment=self.environment, command=self.command, timeout=0)
+        self.assertEqual(seen, [{'spool/brain-turns': 0o700, 'admin/dashboard/home': 0o700}])
+
     def test_changed_recorded_plan_is_rejected(self):
         fake = FakeDocker(self.root, self.project)
         with reset_protocol.locked(self.state) as journal:

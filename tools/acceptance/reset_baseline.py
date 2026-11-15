@@ -154,11 +154,17 @@ def _verify_private(directory, inventory, allow_missing):
             raise ValueError('reset_baseline_private_artifact_changed')
 
 
+def _empty_folder(path, name):
+    """Hermes's empty brain-turn folder, which any ./bin/nocheh command makes again (ADR-0251), is no content."""
+    return path.name == name and not path.is_symlink() and path.is_dir() and not any(path.iterdir())
+
+
 def _native_files(state, memory, preferences=None, expected_count=None):
     state = Path(state); files = state / 'files'; spool = state / 'spool'; native = state / 'hermes'
     if files.is_symlink() or not files.is_dir() or any(files.iterdir()):
         raise RuntimeError('reset_baseline_original_files_not_empty')
-    if spool.is_symlink() or not spool.is_dir() or sorted(path.name for path in spool.iterdir()) != ['.restore-inactive']:
+    if spool.is_symlink() or not spool.is_dir() or sorted(path.name for path in spool.iterdir()
+                                                          if not _empty_folder(path, 'brain-turns')) != ['.restore-inactive']:
         raise RuntimeError('reset_baseline_spool_not_empty')
     memory = Path(memory)
     if memory.is_symlink() or not memory.is_dir():

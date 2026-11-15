@@ -54,13 +54,15 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             async def spawn(*args,**kwargs):
                 self.env=kwargs['env']
                 return await original(sys.executable,'-c',source,**kwargs)
-            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden','HERMES_DISABLE_LAZY_INSTALLS':'1'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
                 events=[]
                 result=await _run_process(Path(folder),scope or Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
                                                     'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
+                # The locked-down container's lazy-install switch reaches the turn (ADR-0251).
+                self.assertEqual(self.env['HERMES_DISABLE_LAZY_INSTALLS'],'1')
                 return result,events
     async def test_a_private_answer_says_first_where_it_was_asked_and_needs_its_pass(self):
         frame='[Private answer] The question below was asked in “Team”.'
