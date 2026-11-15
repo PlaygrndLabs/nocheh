@@ -159,8 +159,12 @@ nothing reads them to decide a send.
 **System › Sent to apps** lists them, newest first, with a Problems filter.
 Failed and uncertain sends of the last day show on Health and in the owner's
 problem notices. The notices leave out every send of the notice kind (problem
-notices, task reminders, import and inbox messages), so a notice that cannot be
-sent never asks for another. A failed or uncertain try followed within 15
+notices, task reminders and merged reminder messages, the notices that a
+scheduled task's result or a job's report was not sent, import and inbox
+messages), so a notice that cannot be sent never asks for another. A task
+reminder that Telegram refused, or never confirmed after five tries, gets a
+record of its own from the app (`reminder_refused`, `reminder_unconfirmed`), so
+it shows on Health too ([ADR-0255](adr/0255-reminders-say-who-set-them.md)). A failed or uncertain try followed within 15
 minutes by a sent one with the same chat, method and dispatch key, such as a
 plain-text resend or a retry after a rate limit, shows as sent on a retry. It,
 an unchanged edit, an expired button answer and a reaction the chat does not
@@ -226,6 +230,34 @@ who asked when they are allowed in both. Other group messages, imported history
 and transcripts cannot approve or alter settings. Controlled shell, browser and public HTTPS MCP requests also use
 exact proposals and bounded revocable permissions; see ADR-0029. Uncertain
 delivery remains ambiguous; it is not automatically resent.
+
+Nocheh sends only to chats it serves: the owner's private chat and its topics,
+the selected groups and their topics, and the private chats of people the owner
+allowed in those groups. A send to a person's private chat always waits for the
+owner's card. Any other destination, a chat Nocheh has no record of included, is
+refused alike with `destination_not_served`, and the assistant is told the owner
+can serve it on the Chats page. The app checks this when a send is proposed,
+approved and started, and again whenever the bot asks before a message, so a
+chat the owner stops serving gets nothing more; its card then says "Approved,
+but not sent" and why. The card names the kind of chat in fixed words ("group",
+"topic", "private chat with … (a person you allowed in group …)") and quotes
+only the name; a name that reads like another chat's gets its project or the
+short ID the Chats page shows after the name
+([ADR-0254](adr/0254-sends-go-only-to-chats-nocheh-serves.md)).
+
+## Task reminders
+
+A task reminder goes to the owner's private chat at its time. One set by a
+person the owner allowed, or by the owner in a group, starts with a line naming
+who set it and where ("👤 Set by … in …"), and a task someone last wrote or
+closed outside the owner's private chat and the dashboard says so too; a
+person's notes come marked line by line. People's reminders due together in one
+group arrive as one message, at most one message per group every 10 minutes,
+with a line saying how many more are waiting; none is dropped. The owner's own
+arrive at their time, one message each. A message from the owner in a group
+that removes reminders set elsewhere sends the owner one notice. The lines are
+editable in Settings › Assistant under **Reminder lines: who set it and where**
+([ADR-0255](adr/0255-reminders-say-who-set-them.md)).
 
 ## Answer privately
 
