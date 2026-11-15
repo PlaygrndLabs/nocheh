@@ -71,6 +71,8 @@ export async function initializeStoreDatabases(connection:pg.PoolConfig,password
       } catch(error) {await client.query('ROLLBACK');throw error;}
       finally {await client.end();}
     }
-  } catch {throw Error('store_database_setup_failed');}
+  } catch(error) {throw Object.assign(Error('store_database_setup_failed'),{code:pgCode(error)});}
   finally {await admin.end();} // Closing releases the session advisory lock even on error.
 }
+/** A PostgreSQL error code (SQLSTATE) only: never a message, which can quote values. */
+export const pgCode=(error:unknown)=>{const code=(error as {code?:unknown})?.code;return typeof code==='string'&&/^[0-9A-Z]{5}$/.test(code)?code:undefined;};
