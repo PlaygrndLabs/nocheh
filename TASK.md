@@ -30,8 +30,12 @@ request with seven fixes, each built and reviewed on its own
   pauses count per person ([dashboard](test/dashboard-boundary.test.ts),
   [viewer](services/hermes/test_database_viewer.py), [sign-in](test/mini-app.test.ts)).
 
-  RESULTS_LINE Owner steps: run `./bin/nocheh db` once if the database viewer was running;
-  the browser then asks for its login.
+  Unit, dashboard, store (525 in the fixture) and Hermes Python checks pass. The cloud tester's
+  new and affected scenarios pass: the locked-down Hermes, a large upload, documents, photos,
+  voice notes and the 15-minute cut, member job spend, recall labels, secrets, private marks and
+  every dashboard page. Pending: a look on the owner's install after the update. Owner steps:
+  run `./bin/nocheh db` once if the database viewer was running; the browser then asks for its
+  login.
 
 Security fixes, part 1: cards and forwarded messages (owner, 2026-11-14: "all yes", approving
 the fixes of the prompt-injection review with what each one loses). One pull request, the
