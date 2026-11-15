@@ -168,13 +168,29 @@ class VoiceTextTests(unittest.TestCase):
     def test_ffmpeg_cuts_by_decoded_samples_and_keeps_only_the_sound(self):
         def make(*arguments):
             subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', *arguments], check=True, timeout=120)
+
+        def heard(path):
+            # Seconds of sound the provider would hear: the decoded samples counted one by one, at 1 kHz, whatever the
+            # file's timestamps say.
+            samples = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', path,
+                                      '-ac', '1', '-ar', '1000', '-f', 'u8', '-'], capture_output=True, check=True, timeout=120)
+            return len(samples.stdout) / 1000
         with tempfile.TemporaryDirectory() as work:
-            long, round_video, junk = (str(Path(work, name)) for name in ('long.wav', 'round.mp4', 'junk.ogg'))
+            long, stated, round_video, junk = (str(Path(work, name)) for name in ('long.wav', 'stated.mka', 'round.mp4', 'junk.ogg'))
             # Twenty minutes of a quiet tone at a low rate, so the file stays small.
             make('-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=4000:duration=1200', '-ac', '1', '-c:a', 'pcm_u8', long)
-            self.assertTrue(voice_text.cut(long, 900, str(Path(work, 'long.ogg'))))
-            length = voice_text.duration(str(Path(work, 'long.ogg')))
-            self.assertTrue(899.9 <= length <= 900.05, length)
+            # The same twenty minutes, copied with its timestamps scaled down, so the file states about two minutes.
+            make('-itsscale', '0.1', '-i', long, '-c', 'copy', stated)
+            self.assertLess(voice_text.duration(stated), 130, 'the copy states a short length')
+            self.assertGreater(heard(stated), 1199, 'and still holds all twenty minutes of sound')
+            for source in (long, stated):
+                target = str(Path(work, Path(source).stem + '.ogg'))
+                self.assertTrue(voice_text.cut(source, 900, target), source)
+                length = voice_text.duration(target)
+                self.assertTrue(899.9 <= length <= 900.05, (source, length))
+            # What the provider hears from the short-stated copy is fifteen minutes too, never the whole twenty.
+            sound = heard(str(Path(work, 'stated.ogg')))
+            self.assertTrue(899.9 <= sound <= 900.05, sound)
             # A round video: the picture is left out and only the sound is kept.
             make('-f', 'lavfi', '-i', 'testsrc=size=64x64:rate=5:duration=12', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=12',
                  '-c:v', 'mpeg4', '-c:a', 'aac', '-shortest', round_video)
