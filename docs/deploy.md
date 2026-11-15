@@ -66,10 +66,13 @@ running Nocheh project that polls the same bot; other workspaces may keep runnin
 machines, security, Hermes, workflow services, Honcho, and the mini app with its tunnel when set up.
 The existing app container mounts source from the session checkout read-only
 and compiles changed TypeScript, React, CSS, and plugin assets into separate
-generated-code volumes. Node watches generated code, the dashboard reloads when
-its asset revision changes, and Python processes restart automatically on
+generated-code volumes. The app, security and mini app services and the workflow
+host restart once each build finishes, and start again if they exit on their own;
+the dashboard's server restarts when generated code changes and its pages reload
+when their asset revision changes, and Python processes restart automatically on
 mounted source edits. PostgreSQL reruns store provisioning from each finished
-app build, so new tables arrive with the code that reads them. Ordinary source
+app build, and tries a failed run again, so new tables arrive with the code that
+reads them; the app waits for them at start. Ordinary source
 edits, including store schema changes, need no `make dev` rerun or Docker image
 rebuild; `make dev-build` rebuilds images after dependency or Dockerfile edits. `make dev` builds only when its development images are absent. Pinned Hermes
 and Honcho base image revisions are checked before startup; when a pin has moved,
