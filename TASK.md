@@ -168,6 +168,17 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   GP1's archive search returns GP2's mark, which `group_answer_uses_only_that_group` checks;
   `group_members` and `new_id_group_works_end_to_end` pass. After merging main's fix to the
   deleted topic check (#219), `deleted_topic` passes with `group_members` (3 of 3).
+
+  After merging main's fixes that lose nothing, at cc46249, with the services, management,
+  store-postgres and Hermes images rebuilt: one focused run on one fixture of the scenarios that
+  merge or 2b-1 touches, in the tester's default order, `group_members` first and again before the
+  product scenarios. It covers Hermes locked down, the private fact and recall, the PDF, voice, the
+  long voice cut for someone not allowed, the photo read once, the large Files upload through
+  Hermes's bound address, profiles, no refused writes, `deleted_topic`, the forward check, a note's
+  recall naming its chat, the new-id group, the private-chat check, project groups, the supergroup
+  upgrade, member job spend with its notice, pause and Resume, both approved operations' answers,
+  the private-mark sweep and every dashboard page with Hermes's Chat, Sessions and Files pages.
+  25 of 25 pass, the drain check included, with no product fix needed.
   Pending:
   - The full tester's waits for the person card (10 minutes) and the memory rebuild (15 minutes)
     are too short when every scenario runs on one fixture: raise them, or keep running it in
