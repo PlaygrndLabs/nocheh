@@ -137,10 +137,26 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   Rollback on a fixture 2b-1 filled (a new-id group, an upgraded supergroup, their sends), with
   main's images on the same data: main's `group_members` and dashboard pages pass, and System ›
   Sent to apps lists every send record, those 2b-1 wrote included.
+
+  After the merge with main, at 9ac8403, the whole full tester in one run on one fixture:
+  `group_members`, then the tester's default order, which runs `group_members` again before the
+  product scenarios because `granted_participant` replaces the allowed people (91 scenarios,
+  dashboard pages and the drain check). 89 of 92 pass, `forwarded_messages_are_not_the_owners_words`
+  and every privacy gate included. `deleted_topic` fails as on main. `inbox_never_asks_about_the_owner`
+  and `memory_search_model_change_rebuilds_memory` time out only in that run: with every
+  scenario's history on one fixture about 350 Hermes native note reviews queue, the person card
+  came about 16 minutes after its messages (the wait is 10), and the Honcho memory rebuild was
+  still replaying the archive when its 15 minutes ran out. A rerun of those two with
+  `group_members` and the import passes (5 of 5). A second leak proof, a wrong `chat_ids` mapping
+  (GP2's Telegram id recorded as an earlier id of GP1's chat, as a bad upgrade link would leave
+  it, in the services image only): `project_groups_stay_apart` fails at
+  `one_reply_in_exact_conversation`, the reply to GP2's message going to GP1, and on that fixture
+  GP1's archive search returns GP2's mark, which `group_answer_uses_only_that_group` checks;
+  `group_members` and `new_id_group_works_end_to_end` pass.
   Pending:
-  - The full tester again after the merge with main, whose
-    `forwarded_messages_are_not_the_owners_words` now names its destination by its Nocheh chat
-    id.
+  - The full tester's waits for the person card (10 minutes) and the memory rebuild (15 minutes)
+    are too short when every scenario runs on one fixture: raise them, or keep running it in
+    rounds.
   - 2b-2, "Only the owner adds Nocheh": adoption, leave-and-tell, the Telegram "which
     project?" card, and the served set kept in `chats` with `TELEGRAM_GROUP_IDS` retired. It
     waits on the owner's answer about groups Nocheh is already in that the owner never turned
