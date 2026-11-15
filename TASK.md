@@ -112,15 +112,16 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   [records](test/store-chat-records.test.ts), [directory](test/test_telegram_operations.py),
   [pages](test/dashboard-pages.browser.mjs)).
 
-  Checks on the integrated branch after the review fixes: the build; node unit and dashboard
-  tests (538: 341 pass, 193 store tests skipped there, and the 4 workflow tests that also fail on
-  main); all 93 store test files on old-shaped and digest chats (230 pass, 0 fail); Python
-  Telegram (122). Before them, unchanged since: dashboard format; the dashboard browser tests
-  (45: 43 pass, and the 2 settings-apply tests that also fail on main); Python Hermes (920, with
-  the 2 environment errors that also occur on main) and tools (119, 2 skipped). The format gate's allowlist holds only adapter, legacy and unrelated sites.
+  Checks on the integrated branch after merging main: the build; node unit and dashboard tests
+  (544: 346 pass, 194 store tests skipped there, and the 4 workflow tests that also fail on
+  main); all 93 store test files on old-shaped and digest chats (231 pass, 0 fail); dashboard
+  format; the dashboard browser tests (45: 43 pass, and the 2 settings-apply tests that also fail
+  on main); Python Hermes (921, with the 2 environment errors that also occur on main), Telegram
+  (122) and tools (120, 2 skipped). The format gate's allowlist holds only adapter, legacy and
+  unrelated sites.
 
-  After the two full tester fixes, the node unit tests (same counts) and the store test files they
-  touch pass. The whole full tester on the integrated branch (fake Telegram Bot API and model;
+  Before the merge, after the two full tester fixes, the whole full tester on the integrated
+  branch (fake Telegram Bot API and model;
   real Telegram service, Hermes, Honcho and Inngest), in four rounds that each start with
   `group_members`, the private-chat check in the same round as the private-mark sweep: every
   scenario passes, those the two fixes above touch on a rerun after them, except `deleted_topic`,
@@ -133,6 +134,9 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   main's images on the same data: main's `group_members` and dashboard pages pass, and System ›
   Sent to apps lists every send record, those 2b-1 wrote included.
   Pending:
+  - The full tester again after the merge with main, whose
+    `forwarded_messages_are_not_the_owners_words` now names its destination by its Nocheh chat
+    id.
   - 2b-2, "Only the owner adds Nocheh": adoption, leave-and-tell, the Telegram "which
     project?" card, and the served set kept in `chats` with `TELEGRAM_GROUP_IDS` retired. It
     waits on the owner's answer about groups Nocheh is already in that the owner never turned
