@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest,digest,type Envelope} from '../src/archive.js';
-import {guardedValue,prepareGuarded,editGuarded,guardedHistory,inspectGuarded,inspectRevision,browseData} from '../src/guarded.js';
+import {guardedValue,prepareGuarded,prepareValues,editGuarded,guardedHistory,inspectGuarded,inspectRevision,browseData,replaceValues,requestFields,structureOnly,textValues} from '../src/guarded.js';
+import {literalSpans,mask,patternSpans} from '../src/guard.js';
 
 test('PostgreSQL guarded projections preserve originals, survive retries/restarts, and never authorize learning',{skip:!process.env.PGHOST},async()=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
@@ -71,4 +72,55 @@ test('PostgreSQL guarded projections preserve originals, survive retries/restart
     assert.equal((await guardedValue(pool,'events:'+racing.id)).value.text,'owner wins');
     await prepareGuarded(pool,async()=>{throw new Error('must not reprocess');},undefined,undefined,undefined,{owner:'inngest',epoch:1});
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
+});
+
+test('a secret check finding never masks structure: keys, and roles, types, names, the model and tool ids in a request',()=>{
+  // The finding names words of the request's own structure, as a steered check might; fixed patterns still apply everywhere.
+  const findings=['role','content','assistant','user','fixture-model','lookup','toolu_fixture1','call_fixture1','call_fixture2'],patterned='sk-'+'A1b2'.repeat(6);
+  const guardedCopy=(text:string)=>mask(text,[...literalSpans(text,findings.filter(found=>text.includes(found))),...patternSpans(text)]).text;
+  const structure={text:(text:string)=>mask(text,patternSpans(text)).text};
+  const payload={model:'fixture-model',messages:[
+    {role:'user',content:'Ask the assistant about the role.'},
+    {role:'assistant',content:[{type:'tool_use',id:'toolu_fixture1',name:'lookup',input:{name:'assistant',query:'role'}}]},
+    {role:'user',content:[{type:'tool_result',tool_use_id:'toolu_fixture1',content:'The assistant role is done.'}]},
+    {role:'assistant',tool_calls:[{id:'call_fixture1',type:'function',function:{name:'lookup',arguments:'{"q":"role"}'}}]},
+    {role:'tool',tool_call_id:'call_fixture1',content:'role'},
+    {type:'function_call',call_id:'call_fixture2',name:'lookup',arguments:'{}'},{type:'function_call_output',call_id:'call_fixture2',output:'role'},
+  ],metadata:{[patterned]:'plain'}};
+  const replacements=new Map(textValues(payload).map(text=>[text,guardedCopy(text)]));
+  assert.throws(()=>replaceValues(payload,replacements),{code:'guarded_key_collision'},'without the structure rule a finding can merge two keys');
+  const plain=(value:unknown)=>JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(replaceValues(payload,replacements,{...structure,fields:requestFields})),{model:'fixture-model',messages:[
+    {role:'user',content:'Ask the *** about the ***.'},
+    {role:'assistant',content:[{type:'tool_use',id:'toolu_fixture1',name:'lookup',input:{name:'***',query:'***'}}]},
+    {role:'user',content:[{type:'tool_result',tool_use_id:'toolu_fixture1',content:'The *** *** is done.'}]},
+    {role:'assistant',tool_calls:[{id:'call_fixture1',type:'function',function:{name:'lookup',arguments:'{"q":"***"}'}}]},
+    {role:'tool',tool_call_id:'call_fixture1',content:'***'},
+    {type:'function_call',call_id:'call_fixture2',name:'lookup',arguments:'{}'},{type:'function_call_output',call_id:'call_fixture2',output:'***'},
+  ],metadata:{'***':'plain'}},'content and a tool call\'s input stay masked, and a fixed secret pattern in a key is still hidden');
+  // Outside a model request only keys are structure: a name or role value is masked as before.
+  assert.deepEqual(plain(replaceValues({name:'assistant',role:'user'},replacements,structure)),{name:'***',role:'***'});
+  assert.deepEqual(plain(replaceValues({name:'assistant'},replacements)),{name:'***'},'without the structure rule nothing changes');
+});
+
+test('the strings a request carries only as structure are the ones a finding never masks there',()=>{
+  const request={model:'fixture-model',messages:[
+    {role:'user',content:'Which role does the user have?'},
+    {role:'assistant',content:[{type:'tool_use',id:'toolu_fixture1',name:'lookup',input:{name:'user',type:'fixture-model'}}]},
+  ]};
+  // "user" and "fixture-model" are also a tool call's arguments, so they are content there and stay maskable.
+  assert.deepEqual([...structureOnly(request,requestFields)].sort(),
+    ['assistant','content','id','input','lookup','messages','model','name','role','tool_use','toolu_fixture1','type']);
+  assert.deepEqual([...structureOnly(request)].sort(),['content','id','input','messages','model','name','role','type'],'outside a model request only keys are structure');
+  assert.deepEqual([...structureOnly({note:'note'})],[],'a key that is also content is content');
+});
+
+test('a guarded copy keeps its source\'s keys when a finding is part of one, and still hides a fixed secret pattern there',async()=>{
+  // No database: no fragment is saved yet, and every write succeeds.
+  const client={query:async()=>({rows:[]})} as unknown as pg.PoolClient,patterned='sk-'+'C3d4'.repeat(6);
+  const input={text:'Please text me the gate code.',kind:'runtime_context',provenance:{purpose:'assistant',[patterned]:'plain'}};
+  // The finding "text" is part of the source's own `text` key, as a message that steers its own check can make it.
+  const prepared=await prepareValues(client,[{id:'fixture-source',input}],'fixture',async()=>['text']);
+  assert.deepEqual(JSON.parse(JSON.stringify(prepared.get('fixture-source'))),
+    {text:'Please *** me the gate code.',kind:'runtime_con***',provenance:{purpose:'assistant','***':'plain'}});
 });
