@@ -36,7 +36,13 @@ test('owner data travels with its types, and nothing imported acts by itself',
     // The child sorts first by key, so the parent arrives after it.
     await source.query("INSERT INTO owner_tasks(id,title,status_id,origin,parent_id) VALUES($1,'Buy seeds','todo','chat',$2)",[child,parent]);
     await source.query("INSERT INTO owner_task_people(task_id,entity_id,role) VALUES($1,$2,'assignee')",[parent,person]);
-    await source.query("INSERT INTO owner_task_reminders(id,task_id,remind_at,state) VALUES($1,$2,'2020-01-01T00:00:00Z','pending'),($3,$2,'2099-01-01T00:00:00Z','pending')",['c'.repeat(64),parent,'d'.repeat(64)]);
+    await source.query("INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by) VALUES($1,$2,'2020-01-01T00:00:00Z','pending','owner'),($3,$2,'2099-01-01T00:00:00Z','pending','owner')",['c'.repeat(64),parent,'d'.repeat(64)]);
+    // A person's reminder in a merged message being sent, and who last wrote the title (ADR-0255). The merged messages
+    // themselves stay with the installation that sent them.
+    await source.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id,batch_id,tries)
+      VALUES($1,$2,'2099-01-02T00:00:00Z','pending','person',$3,'Mira','-10042/topic/7','-10042',$4,3)`,['e'.repeat(64),parent,'f'.repeat(64),'b'.repeat(64)]);
+    await source.query("INSERT INTO owner_task_writers(task_id,field,by,account_id,name,chat_id,group_id) VALUES($1,'title','person',$2,'Mira','-10042','-10042')",[parent,'f'.repeat(64)]);
+    await source.query("INSERT INTO owner_task_reminder_batches(id,group_id,message) VALUES($1,'-10042','Two reminders')",['b'.repeat(64)]);
     await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard','{\"title\":\"Plan the beds\"}')",[parent]);
     // Twelve history entries: as text, 10 would sort before 2.
     for(let step=2;step<=12;step++)await source.query("INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{\"kind\":\"owner\"}','dashboard',$2)",[parent,JSON.stringify({step})]);
@@ -68,7 +74,14 @@ test('owner data travels with its types, and nothing imported acts by itself',
     assert.equal((await target.query('SELECT role FROM owner_task_people')).rows[0].role,'assignee');
     // Sharing comes back switched off; a missed reminder does not fire late; a future one still does.
     assert.equal((await target.query('SELECT enabled FROM sharing_rules')).rows[0].enabled,false);
-    assert.deepEqual((await target.query('SELECT state FROM owner_task_reminders ORDER BY id')).rows.map(r=>r.state),['skipped','pending']);
+    assert.deepEqual((await target.query('SELECT state FROM owner_task_reminders ORDER BY id')).rows.map(r=>r.state),['skipped','pending','pending']);
+    // A person's reminder keeps who set it and where, but not the name they wrote for themselves, nor this send's id and tries.
+    assert.deepEqual((await target.query('SELECT set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id,batch_id,tries FROM owner_task_reminders WHERE id=$1',['e'.repeat(64)])).rows,
+      [{set_by:'person',set_by_account_id:'f'.repeat(64),set_by_name:null,set_in_chat_id:'-10042/topic/7',set_in_group_id:'-10042',batch_id:null,tries:0}]);
+    assert.deepEqual((await target.query('SELECT task_id,field,by,account_id,name,chat_id,group_id FROM owner_task_writers')).rows,
+      [{task_id:parent,field:'title',by:'person',account_id:'f'.repeat(64),name:null,chat_id:'-10042',group_id:'-10042'}]);
+    assert.ok(!records.some(r=>r.table==='owner_task_reminder_batches'));
+    assert.equal((await target.query('SELECT count(*)::int AS count FROM owner_task_reminder_batches')).rows[0].count,0);
     // A changed setting on the target wins; an untouched one takes the imported value.
     assert.equal((await target.query('SELECT texts FROM owner_prompts')).rows[0].texts.greeting,'Target wording');
     assert.equal(Number((await target.query('SELECT cost_limit_usd FROM background_settings')).rows[0].cost_limit_usd),7.5);
@@ -95,6 +108,10 @@ test('owner data travels with its types, and nothing imported acts by itself',
     // the share box's fields go, a rule a project's share box kept is not brought at all, never as the owner's own, and
     // a topic's own project choice becomes "follows its group".
     const sealed=(table:string,key:string[],row:Record<string,unknown>):OwnerRecord=>({format:'nocheh-owner-record-v1',table,key,row,sha256:digest(canonical({table,key,row}))});
+    // A reminder exported before reminders named who set them was the owner's.
+    const older={id:'5'.repeat(64),task_id:parent,remind_at:'2099-02-01T00:00:00.000Z',state:'pending',sent_at:null,created_at:'2026-11-01T10:00:00.000Z'};
+    await to.restore(owner,[sealed('owner_task_reminders',[older.id],older)]);
+    assert.deepEqual((await target.query('SELECT set_by,state FROM owner_task_reminders WHERE id=$1',[older.id])).rows,[{set_by:'owner',state:'pending'}]);
     const rule={id:'rule-owner',name:'Owner rule',sources:['-10042'],destination:'-10073',enabled:true,mode:'filtered',instructions:'',revision:1,project_id:null};
     const shareBox={...rule,id:'rule-project',name:'Project share box',project_id:project};
     const before=await to.restore(owner,[sealed('sharing_rules',[rule.id],rule),sealed('sharing_rules',[shareBox.id],shareBox),

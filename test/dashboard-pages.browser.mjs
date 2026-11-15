@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {existsSync, rmSync, writeFileSync} from 'node:fs';
 import {chromium} from 'playwright-core';
-import {chatIdFor} from '../dist/src/chats.js';
+import {chatIdFor, chatShortId} from '../dist/src/chats.js';
 
 const port = Number(process.env.NOCHEH_DASHBOARD_PORT || 18900 + Math.floor(Math.random() * 500));
 const origin = `http://127.0.0.1:${port}`;
@@ -492,6 +492,31 @@ test('the private answer’s rules, first line, button and notices are built-in 
   await page.close();
 });
 
+test('the reminder lines are a built-in instruction, and a line that drops a value Nocheh fills in is refused', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  const title = 'Reminder lines: who set it and where';
+  await card.getByText(title, {exact: true}).click();
+  await card.getByText(/at most one message per group every 10 minutes/).waitFor();
+  const box = card.getByRole('textbox', {name: title});
+  const text = await box.inputValue();
+  assert.match(text, /^set_by: 👤 Set by \{who\} in \{place\}$/m);
+  await box.fill(text.replace('set_by: 👤 Set by {who} in {place}', 'set_by: 👤 Set by {who}'));
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await page
+    .getByRole('alert')
+    .filter({hasText: 'A “name: text” line lost a value in braces that Nocheh fills in'})
+    .waitFor();
+  // The edit is kept until the owner puts the value back or discards it.
+  assert.match(await box.inputValue(), /^set_by: 👤 Set by \{who\}$/m);
+  await bar.getByRole('button', {name: 'Discard'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
+  assert.equal(await box.inputValue(), text);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('long-term memory is re-run or replaced only after the owner sees what it would send', async () => {
   const {page, problems} = await open('memory?view=longterm');
   const status = page.locator('section').filter({has: page.getByRole('heading', {name: 'Long-term memory'})});
@@ -715,6 +740,72 @@ test('a task is added, edited, finished and reopened from the Tasks page', async
   await done.waitFor({state: 'detached'});
   await page.getByRole('tab', {name: /^Open/}).click();
   await page.getByRole('listitem').filter({hasText: title}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a reminder a person set says who and where, keeps its exact time and setter, and you keep up to 10 of your own', async () => {
+  const {page, problems} = await open('tasks');
+  const title = 'Water the greenhouse plants';
+  // The task as the owner API gives it, the way the page reads it.
+  const read = id =>
+    page.evaluate(async id => {
+      const headers = {'X-Nocheh-CSRF': window.__NOCHEH_CSRF__ ?? ''};
+      return (await fetch('/api/nocheh/tasks/' + id, {headers})).json();
+    }, id);
+  const listed = await page.evaluate(async () => {
+    const headers = {'X-Nocheh-CSRF': window.__NOCHEH_CSRF__ ?? ''};
+    return (await (await fetch('/api/nocheh/tasks', {headers})).json()).tasks;
+  });
+  const task = listed.find(item => item.title === title);
+  const person = task.reminders.find(item => item.set_by === 'person' && item.state === 'pending');
+  assert.match(person.at, /:30\.000Z$/, 'set to the second');
+  // The server renders who set it and where from the owner's reminder lines; the page has no words of its own for it.
+  assert.match(person.source, /^👤 Set by .*Sam Rivera.*, a person you allowed in group .*Aurora planning/);
+  assert.equal(task.reminders.find(item => item.set_by === 'owner').source, null);
+  const posts = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/nocheh/tasks/' + task.id))
+      posts.push(request.postDataJSON());
+  });
+  await page
+    .getByRole('listitem')
+    .filter({hasText: title})
+    .getByRole('button', {name: `Edit “${title}”`})
+    .click();
+  const dialog = page.getByRole('dialog');
+  // The line shows under the reminder still to come and under the one Telegram refused, which reads Not sent.
+  const setBy = dialog.getByText(/Set by .*Sam Rivera.*a person you allowed in group .*Aurora planning/);
+  await setBy.first().waitFor();
+  assert.equal(await setBy.count(), 2);
+  await dialog.getByText(/^Not sent · /).waitFor();
+  // Nine of the owner's own are set: one more fills the task, and Add turns off.
+  const add = dialog.getByRole('button', {name: 'Add reminder'});
+  assert.equal(await add.isEnabled(), true);
+  await add.click();
+  await dialog.getByText('A task keeps up to 10 reminders of your own. Remove one to add another.').waitFor();
+  assert.equal(await add.isDisabled(), true);
+  await dialog.getByLabel('Reminder 11', {exact: true}).fill('2030-01-04T09:00');
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('status').filter({hasText: 'Task saved.'}).waitFor();
+  // The ones the owner didn't touch go back exactly as stored, the person's to the second; only the new one as typed.
+  const stored = task.reminders.filter(item => item.state === 'pending').map(item => item.at);
+  assert.deepEqual(posts.at(-1).reminders, [...stored, '2030-01-04T09:00']);
+  const saved = await read(task.id);
+  const kept = saved.reminders.find(item => item.at === person.at);
+  assert.deepEqual({set_by: kept.set_by, source: kept.source}, {set_by: 'person', source: person.source});
+  assert.equal(saved.reminders.find(item => item.at === '2030-01-04T09:00:00.000Z').set_by, 'owner');
+  assert.equal(await setBy.count(), 2, 'it still names who set it');
+  // A new time for the person's reminder makes it the owner's eleventh, which the server refuses in plain words.
+  await dialog.getByLabel('Reminder 1', {exact: true}).fill('2030-01-05T09:00');
+  assert.equal(await setBy.count(), 1, 'a reminder the owner changed is the owner’s');
+  await dialog.getByRole('button', {name: 'Save'}).click();
+  await dialog
+    .getByText('A task keeps up to 10 reminders of your own, and one save can add at most 10. Remove one first.')
+    .waitFor();
+  assert.equal((await read(task.id)).reminders.find(item => item.at === person.at).set_by, 'person');
+  await dialog.getByRole('button', {name: 'Discard'}).click();
+  assert.equal(await setBy.count(), 2);
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -1725,6 +1816,35 @@ test('a group first seen after the new ids and a group Telegram upgraded open li
   await page.getByRole('region', {name: 'Save changes'}).getByRole('button', {name: 'Save'}).click();
   await page.waitForResponse(response => response.url().endsWith('/api/nocheh/settings'));
   assert.equal(saved[0]?.TELEGRAM_GROUP_IDS, '-10042,-10088');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a group and a person show the short ID a send card adds after their name, and a person links to their profile', async () => {
+  const {page, problems} = await open('chats');
+  const list = page.getByRole('navigation', {name: 'Chats'});
+  const header = page.locator('main header');
+  // The same short ID as the server's, the one a card adds to a name that reads like another's (ADR-0254).
+  await list
+    .getByRole('link', {name: 'Aurora planning'})
+    .getByText('…' + chatShortId('-10042'), {exact: true})
+    .waitFor();
+  await list.getByRole('link', {name: 'Aurora planning'}).click();
+  await page.getByRole('heading', {name: 'Aurora planning', level: 2}).waitFor();
+  await header.getByText('…' + chatShortId('-10042'), {exact: true}).waitFor();
+  assert.equal(await header.getByRole('link', {name: /^@/}).count(), 0, 'a group has no profile');
+  // A topic is named by its group's on a card, and your own chat needs none.
+  await list.getByRole('link', {name: 'Iceland planning'}).click();
+  await page.getByRole('heading', {name: 'Iceland planning', level: 2}).waitFor();
+  assert.equal(await header.getByText(/^…[0-9a-f]{4}$/).count(), 0);
+  await list.getByRole('link', {name: /^You\b/}).click();
+  await page.getByRole('heading', {name: 'Your private chat', level: 2}).waitFor();
+  assert.equal(await header.getByText(/^…[0-9a-f]{4}$/).count(), 0);
+  // A person's private chat: their short ID, and their public username linked to their Telegram profile.
+  await list.getByRole('link', {name: 'Mira Chen'}).click();
+  await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
+  await header.getByText('…' + chatShortId('73'), {exact: true}).waitFor();
+  assert.equal(await header.getByRole('link', {name: '@mira_chen'}).getAttribute('href'), 'https://t.me/mira_chen');
   assert.deepEqual(problems, []);
   await page.close();
 });

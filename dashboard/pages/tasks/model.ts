@@ -13,6 +13,17 @@ export type Repeat = {
 };
 export type Attachment =
   {kind: 'message'; id: string; url: null; title: string} | {kind: 'link'; id: null; url: string; title: string};
+/**
+ * One reminder as the owner sees it (ADR-0255): whether the owner or a person they allowed set it, and `source`, the
+ * "Set by" line Telegram shows above it, rendered by the server from the owner's reminder lines; null when it was set in
+ * the owner's private chat or the dashboard. 'failed' is one Telegram refused.
+ */
+export type Reminder = {
+  at: string;
+  state: 'pending' | 'sending' | 'sent' | 'uncertain' | 'skipped' | 'failed';
+  set_by: 'owner' | 'person';
+  source: string | null;
+};
 export type Task = {
   id: string;
   title: string;
@@ -39,7 +50,7 @@ export type Task = {
   assignees: Person[];
   subtasks: {open: number; total: number};
   blocked_by: LinkedTask[];
-  reminders: {at: string; state: 'pending' | 'sending' | 'sent' | 'uncertain' | 'skipped'}[];
+  reminders: Reminder[];
   attachments: Attachment[];
   comments: number;
   origin: 'dashboard' | 'chat' | 'repeat';

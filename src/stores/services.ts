@@ -65,6 +65,7 @@ import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
 import {PrivateAnswerRepository} from './private-answers.js';
 import {ChatRepository} from './chats.js';
+import {accountIdFor} from '../chats.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -120,17 +121,21 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
-  // Who wrote the message a group turn answers: the owner, or a person allowed there, by their Telegram name.
-  const sender=async(event:string):Promise<TaskActor>=>{
+  // Who wrote the message a group turn answers: the owner, or a person allowed there, by their Telegram name, with their
+  // account (a chat_accounts id; null for the owner, or when it cannot be told), which a reminder they set keeps (ADR-0255).
+  const sender=async(event:string):Promise<{actor:TaskActor;account:string|null}>=>{
     const row=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
     let from:any=null;try{const payload=JSON.parse(row.payload.toString());from=(payload.message??payload.edited_message)?.from;}catch{}
-    if(from&&String(from.id)===options.policy().owner_id)return {kind:'owner'};
+    if(from&&String(from.id)===options.policy().owner_id)return {actor:{kind:'owner'},account:null};
     const name=[from?.first_name,from?.last_name].filter(part=>typeof part==='string').join(' ').replace(/\s+/g,' ').trim().slice(0,100);
-    return name?{kind:'member',name}:{kind:'member'};
+    let account:string|null=null;try{account=from?.id===undefined||from?.id===null?null:accountIdFor('telegram',String(from.id));}catch{}
+    return {actor:name?{kind:'member',name}:{kind:'member'},account};
   };
   // A group or topic reaches its own group's tasks, with its topics' when they share what they know, and the tasks set
   // on its project itself; a task added there belongs to that group or topic (ADR-0248).
   const topicMemory=()=>options.policy().topic_memory??'group';
+  // Send records for Health; a reminder Telegram refused or never confirmed is recorded here too (ADR-0255).
+  const chatSends=new ChatSendRepository(stores.control,chats);
   const tasks=new TaskRepository(stores.control,async principal=>{
     if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null,actor:{kind:'owner'}};
     const {source}=await knowledge.liveGroupTurn(principal);
@@ -139,12 +144,12 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     if(principal.answer!==undefined){
       const reads=principal.reads,project=reads?.project?(await stores.control.query('SELECT state FROM projects WHERE id=$1',[reads.project])).rows[0]:null;
       if(!reads?.project||project?.state!=='active')throw new HttpError(403,'task_project_required');
-      return {source,project:reads.project,group:null,reach:reads,readOnly:true,actor:await sender(source.reference.id)};
+      return {source,project:reads.project,group:null,reach:reads,readOnly:true,...await sender(source.reference.id)};
     }
     const space=principal.space!,project=(await projects.effective(space)).project;
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
-    return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),actor:await sender(source.reference.id)};
-  },{call:options.runtime,owner:()=>ownerChat(options.policy())},topicMemory);
+    return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),...await sender(source.reference.id)};
+  },{call:options.runtime,owner:()=>ownerChat(options.policy()),policy:options.policy,record:send=>chatSends.recordLocal(send)},topicMemory);
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
@@ -163,7 +168,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
-    chatSends:new ChatSendRepository(stores.control,chats),
+    chatSends,
     privateAnswers,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env),privateAnswers),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),

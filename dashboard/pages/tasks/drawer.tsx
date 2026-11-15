@@ -52,6 +52,7 @@ import {
   type Detail,
   type LinkedTask,
   type Person,
+  type Reminder,
   type Repeat,
   type Scope,
   type Task,
@@ -75,15 +76,44 @@ type Draft = {
   assignees: Person[];
   people: Person[];
   properties: Record<string, unknown>;
-  reminders: string[];
+  reminders: ReminderDraft[];
   blocked_by: LinkedTask[];
   related: LinkedTask[];
   attachments: Attachment[];
 };
 
-/** A reminder's moment as the value of a date-and-time box, in this device's time. */
-function localMoment(iso: string): string {
+/**
+ * A reminder in the form. A stored one keeps its exact moment (`at`, to the second) and who set it until the owner
+ * changes its time, so saving other changes sends it back as it is, never moved and never made the owner's. A new or
+ * changed one is the box's wall-clock time (`value`), which the server reads in the task time zone; it is the owner's.
+ */
+type ReminderDraft = Pick<Reminder, 'set_by' | 'source'> & {at: string | null; value: string};
+
+const newReminder = (value: string): ReminderDraft => ({at: null, value, set_by: 'owner', source: null});
+
+/** A moment as the value of a date-and-time box, in the task time zone, as the server reads a typed time; in this
+ * device's time while the zone isn't known. */
+function zonedMoment(iso: string, zone: string | undefined): string {
   const date = new Date(iso);
+  if (zone)
+    try {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: zone,
+          hourCycle: 'h23',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+          .formatToParts(date)
+          .map(part => [part.type, part.value]),
+      );
+      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+    } catch {
+      // A zone this browser doesn't know falls back to the device's time.
+    }
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
@@ -104,7 +134,9 @@ function draftOf(task: Detail): Draft {
     assignees: task.assignees,
     people: task.people,
     properties: task.properties,
-    reminders: task.reminders.filter(item => item.state === 'pending').map(item => localMoment(item.at)),
+    reminders: task.reminders
+      .filter(item => item.state === 'pending')
+      .map(({at, set_by, source}) => ({at, value: '', set_by, source})),
     blocked_by: task.blocked_by,
     related: task.related,
     attachments: task.attachments,
@@ -164,7 +196,9 @@ function changes(before: Draft, after: Draft, pendingTag: string): Record<string
     if (!same(after.properties[key] ?? null, before.properties[key] ?? null))
       properties[key] = after.properties[key] ?? null;
   if (Object.keys(properties).length) body.properties = properties;
-  if (!same(after.reminders, before.reminders)) body.reminders = after.reminders.filter(Boolean);
+  // A reminder the owner didn't touch goes back as its stored moment; a typed one as the box's time.
+  if (!same(after.reminders, before.reminders))
+    body.reminders = after.reminders.map(item => item.at ?? item.value).filter(Boolean);
   if (!same(ids(after.blocked_by), ids(before.blocked_by))) body.blocked_by = ids(after.blocked_by);
   if (!same(ids(after.related), ids(before.related))) body.related = ids(after.related);
   if (!same(after.attachments, before.attachments))
@@ -707,60 +741,95 @@ function RepeatField({repeat, onRepeat}: {repeat: Repeat | null; onRepeat: (repe
   );
 }
 
+/** Page words for where a reminder stands. */
+const reminderStates: Record<Reminder['state'], string> = {
+  pending: 'Waiting',
+  sending: 'Sending',
+  sent: 'Sent',
+  skipped: 'Not needed',
+  uncertain: 'May not have arrived',
+  failed: 'Not sent',
+};
+
+/** The most reminders of their own the owner keeps on one task; the server refuses more (task_reminder_limit). */
+const OWN_REMINDERS = 10;
+
+/**
+ * The reminders still to come, editable, and those already handled. A reminder someone set anywhere but the owner's
+ * private chat or the dashboard shows the server's "Set by" line under it, as Telegram shows it; changing its time
+ * makes it the owner's.
+ */
 function RemindersField({
   reminders,
   sent,
   onReminders,
   zone,
 }: {
-  reminders: string[];
-  sent: Task['reminders'];
-  onReminders: (value: string[]) => void;
+  reminders: ReminderDraft[];
+  sent: Reminder[];
+  onReminders: (value: ReminderDraft[]) => void;
   zone: string | undefined;
 }) {
+  const own = reminders.filter(item => item.set_by === 'owner').length;
   return (
     <Field
       label="Reminders"
       hint={'Sent to your private chat with Nocheh' + (zone ? `, at times in ${zone.replace(/_/g, ' ')}.` : '.')}
     >
       <div className="space-y-2">
-        {reminders.map((value, index) => (
-          <div key={index} className="flex items-center gap-2">
-            <Bell className="size-4 shrink-0 text-muted" aria-hidden />
-            <Input
-              type="datetime-local"
-              aria-label={'Reminder ' + (index + 1)}
-              value={value}
-              className="w-60"
-              onChange={event => onReminders(reminders.map((item, at) => (at === index ? event.target.value : item)))}
-            />
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={'Remove reminder ' + (index + 1)}
-              onClick={() => onReminders(reminders.filter((_, at) => at !== index))}
-            >
-              <X aria-hidden />
-            </Button>
+        {reminders.map((item, index) => (
+          <div key={index}>
+            <div className="flex items-center gap-2">
+              <Bell className="size-4 shrink-0 text-muted" aria-hidden />
+              <Input
+                type="datetime-local"
+                aria-label={'Reminder ' + (index + 1)}
+                value={item.at ? zonedMoment(item.at, zone) : item.value}
+                className="w-60"
+                onChange={event =>
+                  onReminders(reminders.map((entry, at) => (at === index ? newReminder(event.target.value) : entry)))
+                }
+              />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={'Remove reminder ' + (index + 1)}
+                onClick={() => onReminders(reminders.filter((_, at) => at !== index))}
+              >
+                <X aria-hidden />
+              </Button>
+            </div>
+            {item.source && (
+              <p className="mt-1 pl-6 text-xs text-muted" dir="auto">
+                {item.source}
+              </p>
+            )}
           </div>
         ))}
-        {sent.map(item => (
-          <p key={item.at} className="flex items-center gap-2 text-xs text-muted">
-            <Check className="size-3.5" aria-hidden />
-            {item.state === 'sent'
-              ? 'Sent'
-              : item.state === 'skipped'
-                ? 'Not needed'
-                : item.state === 'uncertain'
-                  ? 'May not have arrived'
-                  : 'Sending'}{' '}
-            · {when(item.at)}
-          </p>
+        {sent.map((item, index) => (
+          <div key={index} className="text-xs text-muted">
+            <p className={cn('flex items-center gap-2', item.state === 'failed' && 'text-bad')}>
+              {item.state === 'failed' ? (
+                <X className="size-3.5" aria-hidden />
+              ) : (
+                <Check className="size-3.5" aria-hidden />
+              )}
+              {reminderStates[item.state]} · {when(item.at)}
+            </p>
+            {item.source && (
+              <p className="mt-0.5 pl-5.5" dir="auto">
+                {item.source}
+              </p>
+            )}
+          </div>
         ))}
-        {reminders.length < 10 && (
-          <Button size="sm" onClick={() => onReminders([...reminders, ''])}>
-            <Plus aria-hidden /> Add reminder
-          </Button>
+        <Button size="sm" disabled={own >= OWN_REMINDERS} onClick={() => onReminders([...reminders, newReminder('')])}>
+          <Plus aria-hidden /> Add reminder
+        </Button>
+        {own >= OWN_REMINDERS && (
+          <p className="text-xs text-muted">
+            A task keeps up to {OWN_REMINDERS} reminders of your own. Remove one to add another.
+          </p>
         )}
       </div>
     </Field>
@@ -1260,6 +1329,7 @@ function describe(changes: Record<string, any>, settings: TaskSettings | undefin
     if (key === 'created') lines.push('Added the task');
     else if (key === 'repeated_from') lines.push('Made as the next one of a repeating task');
     else if (key === 'reminded') lines.push('Sent a reminder');
+    else if (key === 'reminder_failed') lines.push('A reminder could not be sent; see System › Health');
     else if (key === 'state') continue;
     else if (key === 'archived') lines.push(change.to ? 'Archived it' : 'Took it out of the archive');
     else if (key === 'trashed') lines.push(change.to ? 'Moved it to the trash' : 'Restored it from the trash');
