@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {installChatsForTest} from '../src/chats.js';
-import {placeName,recallPlace,withRecallPlaces} from '../src/stores/recall-places.js';
-import {legacyDirectory} from './fixture-groups.js';
+import {placeName,recallNames,recallPlace,withRecallPlaces} from '../src/stores/recall-places.js';
+import {BOB_CHAT,GP1,GP1_TOPIC,GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG1_TOPIC_KEY,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,UNSERVED,fixtureDirectory,legacyDirectory} from './fixture-groups.js';
 
 const none=new Map<string,string>();
 // The chats these hits name, as the seeder makes their rows for values stored before step 2b (ADR-0252).
@@ -62,4 +62,37 @@ test('recall results are labelled from saved names, and a failed lookup only lea
   const failed=await withRecallPlaces({control:broken,archive:broken},{hits:[{profile:'b',space:'-1005/topic/9',owner:false,answer:false,text:'two'}]}) as any;
   assert.deepEqual(failed.hits,[{profile:'b',place:'A Telegram group › a topic',text:'two'}]);
   assert.deepEqual(await withRecallPlaces(stores,{error:'x'}),{error:'x'},'anything but hits passes through');
+});
+
+test('a recalled hit is named by its chat row, never by how its id looks: digest groups, an upgraded group and unknown ids (ADR-0252)',async t=>{
+  t.after(installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS])));
+  const names=new Map([[GP1,'GP one'],[GP1_TOPIC,'Plans'],[NG1,'NG one'],[NG1_TOPIC,'Trips'],[NG2,'NG two']]);
+  assert.equal(recallPlace({space:GP1,owner:false,answer:false},names),'“GP one”');
+  assert.equal(recallPlace({space:GP1_TOPIC,owner:false,answer:false},names),'“GP one” › Plans');
+  assert.equal(recallPlace({space:NG1,owner:false,answer:false},names),'“NG one”','a digest group');
+  assert.equal(recallPlace({space:NG1_TOPIC,owner:false,answer:false},names),'“NG one” › Trips','a digest group\'s topic');
+  assert.equal(recallPlace({space:NG2,owner:false,answer:false},names),'“NG two”','a group Telegram upgraded');
+  assert.equal(recallPlace({space:UNSERVED,owner:false,answer:false},none),'A Telegram group','a group not served is still a group');
+  assert.equal(recallPlace({space:OWNER,owner:true,answer:false},names),'Your private chat');
+  // A Telegram id is no Nocheh chat id, and an id with no row, however it looks, names no group (fail closed).
+  for(const space of [NG1_TG,NG2_TG,NG2_OLD_TG,'-1009999999999','-1009999999999/topic/2',BOB_CHAT,OWNER,'0'.repeat(64)])
+    assert.equal(recallPlace({space,owner:false,answer:false},names),'A chat Nocheh can’t name',space);
+
+  // Names come from the chat rows by Nocheh id, and from the archive under every Telegram id the group has had: the
+  // latest message names NG2 though it was sent under its old id, and NG1's topic is found by its key.
+  const asked:{sql:string;values:unknown[]}[]=[],older=new Date(1700000000000),newer=new Date(1700000100000);
+  const pool=(rows:(sql:string,values:any[])=>any[])=>({query:async(sql:string,values:any[])=>{asked.push({sql,values});return {rows:rows(sql,values)};}}) as any;
+  const message=(id:number,title:string)=>Buffer.from(JSON.stringify({message:{chat:{id,title,type:'supergroup'}}}));
+  const stores={
+    control:pool(()=>[{id:NG1,title:'NG1 row'},{id:NG2,title:'NG2 row'},{id:NG1_TOPIC,title:'Topic row'}]),
+    archive:pool(sql=>sql.includes('forum_topic_created')?[{chat:NG1_TOPIC,name:'Trips',edited:false,received_at:newer,id:'t1'}]:
+      [{chat:NG2,scope:NG2_TG,payload:message(Number(NG2_TG),'NG2 before'),received_at:older,id:'a'},
+       {chat:NG2,scope:NG2_OLD_TG,payload:message(Number(NG2_OLD_TG),'NG2 latest'),received_at:newer,id:'b'}])};
+  const found=await recallNames(stores,[NG1,NG1_TOPIC,NG2,NG1_TG,'-1009999999999',OWNER]);
+  assert.deepEqual(Object.fromEntries(found),{[NG1]:'NG1 row',[NG1_TOPIC]:'Trips',[NG2]:'NG2 latest'});
+  assert.deepEqual(asked[0]!.values,[[NG1,NG2,NG1_TOPIC]],'chat rows are read by Nocheh ids only');
+  const [groups,topics]=[asked[1]!.values,asked[2]!.values];
+  assert.deepEqual(groups,[[NG1,NG2,NG2],[NG1_TG,...[NG2_TG,NG2_OLD_TG].sort()]],'the archive is read by every Telegram id each group has had');
+  assert.deepEqual(topics,[[NG1_TOPIC],[NG1_TG],[NG1_TOPIC_KEY]],'a topic is read in its group\'s Telegram ids by its key');
+  assert.equal(asked.length,3);
 });

@@ -17,7 +17,7 @@ import {CaptureCoordinator} from '../src/stores/capture.js';
 import {SourcePortabilityRepository} from '../src/stores/source-portability.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {installChatsForTest} from '../src/chats.js';
-import {policyDirectory} from './fixture-groups.js';
+import {BOB,GP1,GP_GROUP_IDS,NG1_TG,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureDirectory,policyDirectory} from './fixture-groups.js';
 
 test('voice notes go to the runtime transcriber; a busy provider is retried and other failures become a status', async () => {
   const calls:Record<string,unknown>[]=[];let answer:Record<string,unknown>={state:'done',text:'Synthetic note about the garden club'};
@@ -222,5 +222,23 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
     assert.ok(reading);assert.deepEqual(asked.map(input=>input.first_seconds),[undefined]);
     assert.equal((await stores.derived.query('SELECT convert_from(content,\'UTF8\') AS text FROM derived_artifacts WHERE id=$1',[reading.id])).rows[0].text,
       'Synthetic note: bring the folding chairs');
+
+    // The same rule in the chat the directory finds (ADR-0252): a person allowed in NG2 under the Telegram id it had
+    // before Telegram upgraded it is read whole under its new id too; someone not allowed there, a person allowed only
+    // in another group, and anyone in a group the directory has no row for, even one the policy lists, are cut.
+    const stray='-1009999999999';
+    installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
+    policy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS,stray],
+      group_access:{[NG2_OLD_TG]:{granted:[BOB],denied:[]},[GP1]:{granted:[BOB],denied:[]},[stray]:{granted:[BOB],denied:[]}}};
+    const team=(chat:string)=>({id:Number(chat),type:'supergroup',title:'Synthetic Team'});
+    const cases:[string,string,number,Record<string,unknown>][]=[
+      ['an allowed person in an upgraded group, under its new id',NG2_TG,Number(BOB),{}],
+      ['an allowed person in an upgraded group, under its old id',NG2_OLD_TG,Number(BOB),{}],
+      ['an allowed person in an old-shaped group',GP1,Number(BOB),{}],
+      ['someone not allowed in an upgraded group',NG2_TG,789,cut],
+      ['a person allowed only in other groups, in a digest group',NG1_TG,Number(BOB),cut],
+      ['a group the directory does not know',stray,Number(BOB),cut],
+      ['the owner, wherever they write',stray,Number(OWNER),{}]];
+    for(const [label,chat,from,expected] of cases)assert.deepEqual((await live({chat:team(chat),from:person(from)})).configuration,expected,label);
   } finally {await stores.archive.end();await stores.derived.end();await stores.control.end();await rm(root,{recursive:true,force:true});}
 });
